@@ -1,0 +1,20 @@
+---
+description: Python + Poetry rules
+globs:
+  - "**/*.py"
+---
+
+# Python style guide
+
+## General
+
+- Use Poetry and `pyproject.toml`; add console scripts for CLIs.
+- typing: `from __future__ import annotations`, `mypy` clean where feasible.
+- Structure: src/ layout, no implicit namespace pkgs.
+- Tests: `pytest -q`; prefer small, focused unit tests
+
+## Functional Python
+
+- Always generate functional python when possible
+- Always separate data out into pure data classes
+- Use pure functions and follow Stratified Design and Simple Made Easy principles.

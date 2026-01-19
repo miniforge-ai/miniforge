@@ -1,0 +1,105 @@
+# Git Branch & PR Management (ALWAYS)
+
+## Branch Creation Rules
+
+**CRITICAL**: **ALWAYS create new branches from `main` or `master` (the primary branch) unless explicitly requested otherwise.**
+
+### Pre-Branch Checklist
+
+Before running `git checkout -b <new-branch>`:
+
+1. **ALWAYS** checkout the primary branch first: `git checkout main` (or `master`)
+2. **ALWAYS** pull latest changes: `git pull origin main` (or `master`)
+3. **VERIFY** you're on the primary branch: `git branch --show-current`
+4. **VERIFY** branch is clean: `git status` (should show "nothing to commit")
+5. **ONLY THEN** create the new branch: `git checkout -b <new-branch>`
+
+**Never assume you're on main - always explicitly checkout main first.**
+
+### Never Branch from Feature Branches
+
+❌ **BAD**: Creating a feature branch from another feature branch
+
+```bash
+# On migrate/feature-a
+git checkout -b migrate/feature-b  # ❌ Wrong - carries feature-a changes
+```
+
+✅ **GOOD**: Always branch from main
+
+```bash
+git checkout main           # ALWAYS do this first
+git pull origin main        # ALWAYS pull latest
+git checkout -b migrate/feature-b  # ✅ Correct - clean start
+```
+
+### Exception: Dependent PRs
+
+**Only branch from another feature branch when:**
+
+1. User **explicitly** requests: "create this branch from <branch-name>"
+2. User **explicitly** confirms: "yes, branch from that branch"
+3. There's a documented dependency chain that requires it
+4. The dependency is clearly stated in the PR description
+
+**Default behavior**: Always branch from main unless user explicitly says otherwise.
+
+## PR Scope Rules
+
+### Single Purpose PRs
+
+Each PR should have **one focused purpose**:
+- ✅ Migrate security groups batch 1
+- ✅ Migrate IAM policies for ElasticSearch
+- ❌ Migrate security groups + DynamoDB + IAM roles (mixed concerns)
+
+### Verify PR Contents Before Pushing
+
+Before pushing a branch, run:
+
+```bash
+git log origin/main..HEAD --oneline
+git diff origin/main..HEAD --stat
+```
+This shows what will be in the PR to catch unintended changes.
+
+## Agent Behavior (Cursor)
+
+### Before Creating Any Branch
+
+1. **ALWAYS** checkout main first: `git checkout main` (or `master`)
+2. **ALWAYS** pull latest: `git pull origin main` (or `master`)
+3. **VERIFY** you're on main: `git branch --show-current`
+4. **VERIFY** branch is clean: `git status`
+5. **ONLY THEN** create new branch: `git checkout -b <new-feature-branch>`
+
+**Never create a branch without first explicitly checking out main.**
+
+### Before Pushing a Branch
+
+1. Run `git log origin/main..HEAD --oneline` 
+2. Verify commits match the intended PR scope
+3. If unintended changes detected:
+   - Alert the user
+   - Offer to recreate the branch cleanly from main
+   - Do NOT push the contaminated branch
+
+### PR Documentation
+
+In PR docs, include:
+
+- **Base Branch**: State whether based on `main` or another feature branch
+- **Depends On**: List any prerequisite PRs that must merge first
+
+## Common Mistakes to Avoid
+
+1. **Branching from wrong branch** - Always verify with `git branch` first
+2. **Stale main** - Pull latest main before branching
+3. **Mixed PR scope** - If unrelated changes appear, recreate branch from main
+4. **Dependent branches without documentation** - Make dependencies explicit
+
+## When in Doubt
+
+- Check git state first
+- Branch from main
+- Keep PRs focused and single-purpose

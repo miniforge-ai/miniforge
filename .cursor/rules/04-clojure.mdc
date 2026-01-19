@@ -1,0 +1,49 @@
+---
+description: Clojure Polylith + per-file stratified design
+globs:
+  - "components/**/src/**/*.clj"
+  - "components/**/src/**/*.cljc"
+  - "bases/**/src/**/*.clj"
+  - "bases/**/src/**/*.cljc"
+  - "projects/**/src/**/*.clj"
+  - "projects/**/src/**/*.cljc"
+---
+# Clojure style guidelines
+
+## Polylith architecture (ALWAYS)
+
+- Workspace: `components/`, `bases/`, `projects/`.
+
+- **Cross-component deps** must target `...<component>.interface` (not `.core`).
+- `bases` can depend on component **interfaces**; `projects` can depend on bases and component interfaces.
+- `components` may depend on other components **only via** their `.interface` ns.
+- **Never** depend on `projects` from `bases` or `components`.
+
+## Per-file stratified design (ALWAYS)
+
+- Structure each ns with **labeled strata** as headings:
+
+  - `;------------------------------------------------------------------------------ Layer 0`
+  - `;------------------------------------------------------------------------------ Layer 1`
+  - …
+- **Reverse DAG**: Layer 0 at the top (pure/value-level); higher layers may call lower ones but not vice-versa.
+- **Max 3 strata** per file. If you need more, split the namespace.
+- Reserve the **very bottom** of the file for a `(comment …)` section (REPL testing). No `def/defn/defmacro` after it.
+
+## Component layout conventions
+
+- `components/<name>/src/.../<name>/interface.clj` — thin API; validates inputs (specs), forwards to `core`.
+- `components/<name>/src/.../<name>/core.clj` — implementation; organized in ≤ 3 layers.
+- `components/<name>/src/.../<name>/spec.clj` — specs only; no functions except inside `(comment ...)`.
+- **Global specs** live in their own component.
+
+## Agent behavior
+
+When creating/editing a namespace:
+
+1) Insert/maintain **Layer 0/1/2** headings and keep them **monotonic increasing** (0 → 1 → 2).
+2) Keep **pure helpers** and external calls that are side-effect free in **Layer 0**.
+3) Put orchestration that **only depends on Layer 0** in **Layer 1**, and so on.
+4) If you cross 3 layers, **propose a split** into another namespace.
+5) Ensure the last top-level form is a single `(comment …)` block with quick REPL samples.
+6) For cross-component calls, target `...<other>.interface` — and surface a fix if `.core` is used.

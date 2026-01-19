@@ -1,0 +1,58 @@
+---
+description: K8s/Kustomize/ArgoCD conventions
+globs:
+  - "k8s/**/*.yaml"
+  - "**/overlays/**/**/*.yaml"
+---
+
+# Kubernetes, Kustomize, ArgoCD conventions
+
+## Environment Context (ALWAYS)
+
+- **Always switch to the appropriate Kubernetes cluster context before running kubectl commands**
+- Use `kubectl config use-context <context-name>` to switch environments
+- Verify current context with `kubectl config current-context` before proceeding
+
+## General guidelines
+
+### ArgoCD
+
+- App-of-Apps per env; image tags tracked in overlay patches.
+- Avoid “going backwards”: pin to immutable tag in manifests, change via PR.
+
+### Kustomize
+
+- Kustomize layout: /k8s/base and /k8s/overlays/{local,nonprod,prod}
+
+#### Kustomize Patching
+
+- **Patch only differences**: Only patch fields that actually differ between environments
+- **Strategic merge over JSON patches**: Use strategic merge for multiple resources of same type
+- **Minimal patch scope**: Don't patch metadata labels unless used for selection/monitoring
+- **Base + patches pattern**: Move common structure to base, patch only environment-specific values
+- **Avoid duplication**: If 90%+ of a resource is identical across environments, use base + patches
+
+#### Patch Design Checklist
+
+- [ ] Does this patch only change what actually differs between environments?
+- [ ] Are we patching metadata that serves no functional purpose?
+- [ ] Could this be simplified by moving more to the base?
+- [ ] Does the patch clearly show the intent (what changes per environment)?
+
+### K8s Networking
+
+- For Services: internal traffic uses ClusterIP; public via ALB ingress; no NodePort.
+- Ingress (AWS ALB): set `alb.ingress.kubernetes.io/scheme: internal|internet-facing` appropriately; HTTPS only; redirect 80→443.
+
+### Health Checks
+
+- Health:
+  - readiness: dependency-aware endpoint (auth optional)
+  - liveness: cheap, local check; avoid remote deps
+
+### Resource constraints
+
+- Resources: set realistic `requests/limits`; don’t copy placeholders.
+- Secrets:
+  - Prefer Secrets Store CSI for runtime; SealedSecrets for K8s-native secrets.
+
