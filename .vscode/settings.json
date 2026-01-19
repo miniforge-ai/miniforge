@@ -8,5 +8,9 @@
                 "cljAliases": ["dev", "test", "+default"]
             }
         }
-    ]
+    ],
+
+    "files.associations": {
+  "*.spec": "markdown"
+    }
 }

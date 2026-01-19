@@ -1,8 +1,16 @@
-{:aliases  {:dev {:extra-paths ["development/src"]
+{:paths []
 
-                  :extra-deps {org.clojure/clojure {:mvn/version "1.11.1"}}}
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}}
 
-            :test {:extra-paths []}
+ :aliases
+ {:dev  {:extra-paths ["development/src"]}
 
-            :poly {:main-opts ["-m" "polylith.clj.core.poly-cli.core"]
-                   :extra-deps {polylith/clj-poly {:mvn/version "0.2.21"}}}}}
+  :test {:extra-paths []}
+
+  :poly {:main-opts  ["-m" "polylith.clj.core.poly-cli.core"]
+         :extra-deps {polylith/clj-poly {:mvn/version "0.2.21"}}}
+
+  :build {:deps       {io.github.clojure/tools.build {:mvn/version "0.10.6"}
+                       babashka/fs                   {:mvn/version "0.5.22"}
+                       babashka/process              {:mvn/version "0.5.22"}}
+          :ns-default build}}}

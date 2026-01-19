@@ -1,0 +1,76 @@
+---
+description: DateVer versioning convention
+globs:
+  - "build.clj"
+  - "**/version.edn"
+  - ".github/workflows/*.yml"
+---
+# DateVer Versioning (ALWAYS)
+
+Use **DateVer** instead of SemVer for all version numbers.
+
+## Format
+
+```
+YYYY.MM.DD.N
+```
+
+Where:
+- `YYYY` — four-digit year
+- `MM` — two-digit month (zero-padded)
+- `DD` — two-digit day (zero-padded)
+- `N` — build number for the day (1-indexed)
+
+## Examples
+
+| Version | Meaning |
+|---------|---------|
+| `2026.01.18.1` | First build on January 18, 2026 |
+| `2026.01.18.5` | Fifth build on January 18, 2026 |
+| `2026.03.01.1` | First build on March 1, 2026 |
+
+## Rationale
+
+- **Chronologically sortable**: Versions naturally sort by time
+- **No arbitrary major/minor**: Avoids bikeshedding about "breaking changes"
+- **Self-documenting**: Version tells you when it was built
+- **Simple**: One rule—today's date plus build count
+
+## Implementation
+
+```clojure
+;; In build.clj
+(defn version []
+  (let [now   (java.time.LocalDate/now)
+        year  (.getYear now)
+        month (.getMonthValue now)
+        day   (.getDayOfMonth now)
+        n     (today-commit-count)]
+    (format "%d.%02d.%02d.%d" year month day n)))
+```
+
+## Git Tags
+
+Tag releases as `v{version}`:
+
+```bash
+git tag v2026.01.18.1
+git push origin v2026.01.18.1
+```
+
+## Comparison to SemVer
+
+| SemVer | DateVer | Notes |
+|--------|---------|-------|
+| 1.0.0 | 2026.01.15.1 | Initial release |
+| 1.0.1 | 2026.01.15.2 | Bug fix same day |
+| 1.1.0 | 2026.01.20.1 | Feature add |
+| 2.0.0 | 2026.03.01.1 | "Breaking change" (no special handling) |
+
+Breaking changes are communicated via changelog and documentation, not version numbers.
+
+## Agent Behavior
+
+- When generating versions, use `(version)` from build.clj
+- Never use SemVer (X.Y.Z) format
+- In changelogs, use DateVer headings: `## 2026.01.18.1`

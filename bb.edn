@@ -88,6 +88,40 @@
    :task    (println "\n✅ ALL PRE-COMMIT CHECKS PASSED\n")}
 
   ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Building
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  clean
+  {:doc  "Clean all build artifacts"
+   :task (run! "clojure" "-T:build" "clean")}
+
+  build:script
+  {:doc  "Build BB dev script for a project (uses absolute paths)"
+   :task (let [[project] *command-line-args*]
+           (if project
+             (run! "clojure" "-T:build" "bb-script" (str ":project " project))
+             (println "Usage: bb build:script <project>")))}
+
+  build:cli
+  {:doc  "Build miniforge CLI as distributable uberscript"
+   :task (run! "clojure" "-T:build" "bb-uberscript" ":project miniforge")}
+
+  build:jar
+  {:doc  "Build JVM uberjar for a project"
+   :task (let [[project] *command-line-args*]
+           (if project
+             (run! "clojure" "-T:build" "uberjar" (str ":project " project))
+             (println "Usage: bb build:jar <project>")))}
+
+  build:all
+  {:doc  "Build all changed projects"
+   :task (run! "clojure" "-T:build" "build-all")}
+
+  compile
+  {:doc  "Compile all code (syntax check)"
+   :task (run! "clojure" "-T:build" "compile-all")}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
   ;; Hook Installation
   ;; ──────────────────────────────────────────────────────────────────────────
 
