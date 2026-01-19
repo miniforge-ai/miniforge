@@ -1,0 +1,89 @@
+# Cursor Rules Index (Zettelkasten-Style)
+
+Shared rules for all Kiddom repositories. Add as git submodule at `.cursor/rules`.
+
+## Categorization System
+
+Rules are organized in a hierarchical numbering system inspired by zettelkasten:
+
+### 00-09: Foundational Principles
+- `00-project-standards.mdc` - Project-wide standards
+- `01-stratified-design.mdc` - Design philosophy
+- `02-simple-made-easy.mdc` - Simplicity principles
+
+### 10-19: Version Control & Workflow
+- `10-arch-enforcement.mdc` - Architecture enforcement
+- `12-git-branch-management.mdc` - Git branching rules & PR hygiene
+
+### 20-29: Programming Languages
+- `21-python.mdc` - Python conventions
+- `22-clojure.mdc` - Clojure conventions
+- `25-python-langgraph.mdc` - Python + LangGraph specifics
+
+### 30-39: Infrastructure as Code (Terraform)
+- `30-terraform-stratified.mdc` - Terraform module design
+- `31-terraform-plan.mdc` - Terraform planning
+- `32-terraform-cli.mdc` - Terraform wrapper usage (ops)
+- `33-aws-credentials.mdc` - AWS credential refresh
+- `35-terragrunt-structure.mdc` - Terragrunt organization
+- `36-atlantis-project-entries.mdc` - Atlantis project entries
+
+### 40-49: Kubernetes & Container Orchestration
+- `40-k8s.mdc` - Kubernetes best practices
+
+### 50-59: Pull Requests & Dependencies
+- `50-pr-dependency-layering.mdc` - PR dependency management
+- `55-terragrunt-dependency-paths.mdc` - Terragrunt dependency patterns
+
+### 60-69: Documentation
+- `60-pull-request-docs.mdc` - PR documentation standards
+
+### 70-79: Docker & Local Development
+- `70-docker-cursor-rules.mdc` - Docker development rules
+- `71-kubernetes-tilt.mdc` - Kubernetes + Tilt workflow
+- `72-docker-conversion.mdc` - Docker Compose to K8s conversion
+- `73-md-docs.mdc` - Markdown documentation rules
+
+### 80-89: Testing & Quality
+- (Open for future expansion)
+
+### 90-99: Operations & Monitoring
+- (Open for future expansion)
+
+### util-*: Utility Scripts & Patterns
+- `util-argo-image-bump.mdc` - ArgoCD image bump utility
+- `util-k8s-ingress-alb.mdc` - K8s ALB Ingress utility
+- `util-terraform-new-feature.mdc` - Terraform feature scaffold
+
+## Installation
+
+Add to any repo as a git submodule:
+
+```bash
+git submodule add git@github.com:kiddom/cursor-rules.git .cursor/rules
+git commit -m "chore: add shared cursor rules as submodule"
+```
+
+Update rules in all repos:
+
+```bash
+git submodule update --remote
+git commit -m "chore: update cursor rules"
+```
+
+## Zettelkasten Principles Applied
+
+1. **Atomic Rules**: Each file focuses on one concept
+2. **Unique IDs**: Numeric prefixes ensure ordering and non-collision
+3. **Hierarchical**: Decades group related concepts
+4. **Expandable**: Gaps allow insertion without renumbering
+5. **Linked**: Rules reference each other by filename
+
+## Adding New Rules
+
+1. Determine the category (decade: 00s, 10s, 20s, etc.)
+2. Find the appropriate subcategory within that decade
+3. Use the next available number (or insert between existing)
+4. Update this INDEX
+5. Link from related rules using relative references
+6. Push to `cursor-rules` repo - all repos get it via submodule update

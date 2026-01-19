@@ -1,0 +1,32 @@
+{
+  // Miniforge Markdown lint configuration
+  // https://github.com/DavidAnson/markdownlint
+
+  "default": true,
+
+  // Allow longer lines (code examples, tables)
+  "MD013": {
+    "line_length": 120,
+    "code_blocks": false,
+    "tables": false
+  },
+
+  // Allow trailing punctuation in headings (e.g., "What's this?")
+  "MD026": {
+    "punctuation": ".,;:!"
+  },
+
+  // Allow inline HTML (useful for badges, complex layouts)
+  "MD033": false,
+
+  // Allow bare URLs (common in docs)
+  "MD034": false,
+
+  // Allow duplicate headings in different sections
+  "MD024": {
+    "siblings_only": true
+  },
+
+  // First line doesn't need to be a top-level heading
+  "MD041": false
+}

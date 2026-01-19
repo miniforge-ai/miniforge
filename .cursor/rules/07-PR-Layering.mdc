@@ -1,0 +1,100 @@
+---
+description: PR Layering — decompose work into stratified, incremental pull requests
+alwaysApply: true
+---
+
+# PR Layering (ALWAYS)
+Once you understand all work needed, organize PRs as a stratified DAG. Each PR is small, incremental, and layers on top of more foundational work. Merge from the bottom up.
+
+## Core principle
+**Build the foundation before the floors.** Just as code dependencies flow downward through strata, PR dependencies should flow upward—foundations merge first, then domain, then application, then adapters.
+
+## PR decomposition strategy
+
+### 1. Map the work to strata
+Before writing code, categorize all changes by stratum:
+- **Foundations PR(s)**: Types, schemas, constants, pure utilities
+- **Domain PR(s)**: Business rules, policies, invariants (pure functions)
+- **Application PR(s)**: Use-cases, orchestration, port definitions
+- **Adapter PR(s)**: Controllers, CLI handlers, event listeners
+- **Infrastructure PR(s)**: DB implementations, external service clients
+
+### 2. Order PRs bottom-up
+Create PRs in dependency order so each can merge independently:
+
+```
+PR 1: Foundations  ──┐
+PR 2: Domain       ──┼──► PR 4: Adapters
+PR 3: Application  ──┘         │
+                               ▼
+                        PR 5: Integration / wiring
+```
+
+### 3. Keep each PR atomic
+- **One stratum per PR** (preferred) or closely related strata
+- **< 400 lines** of meaningful change (tests don't count toward limit)
+- **Single reviewable concern**: a PR should answer one question—"Does this type work?", "Is this business rule correct?", "Does this adapter translate properly?"
+- **Independently mergeable**: each PR compiles, passes tests, and leaves main in a working state
+
+## PR description template
+When opening a layered PR, include:
+
+```markdown
+## Layer
+[Foundations | Domain | Application | Adapter | Infrastructure]
+
+## Depends on
+- #<PR-number> (title) — [merged | open]
+
+## What this adds
+Brief description of the incremental capability.
+
+## Strata affected
+- `namespace.or.module` — what changed and why
+```
+
+## Agent behavior (Cursor)
+When planning a feature or refactor:
+
+1. **Produce a PR plan first** — before writing code, output:
+   - The list of PRs by stratum
+   - The dependency DAG between PRs
+   - Estimated size (S/M/L) for each
+
+2. **Work bottom-up** — implement and propose changes for the lowest stratum first. Don't start on adapters until domain is solid.
+
+3. **Flag scope creep** — if a change in one stratum requires touching a higher stratum, split it out into a follow-up PR.
+
+4. **Suggest branch strategy** — for stacked PRs, recommend:
+   ```
+   main
+    └── feat/user-auth-types       (PR 1: Foundations)
+         └── feat/user-auth-domain (PR 2: Domain)
+              └── feat/user-auth-api (PR 3: Adapter)
+   ```
+
+## Anti-patterns to reject
+- **Monolith PRs**: 1000+ line PRs touching multiple strata—split them.
+- **Top-down PRs**: Starting with adapters, then "backfilling" domain—invert the order.
+- **Circular PR dependencies**: PR A needs PR B, and B needs A—refactor the design.
+- **Orphan PRs**: PRs that can't merge because a dependency is stuck—unblock or re-scope.
+- **Speculative foundations**: Adding types/utilities "just in case"—only add what the next stratum needs.
+
+## Benefits
+- **Faster reviews**: Reviewers focus on one layer at a time.
+- **Lower risk**: Small merges = small blast radius.
+- **Parallel work**: Multiple devs can work on different strata once interfaces are defined.
+- **Clear rollback**: If adapters break, domain and foundations remain intact.
+- **Documentation**: The PR chain itself documents the architecture.
+
+## Example: Adding user authentication
+
+| PR | Stratum | Contents | Depends on |
+|----|---------|----------|------------|
+| 1 | Foundations | `User`, `Credentials`, `AuthToken` types | — |
+| 2 | Domain | `validate-credentials`, `hash-password`, `verify-token` | PR 1 |
+| 3 | Application | `AuthService` port, `LoginUseCase`, `RefreshTokenUseCase` | PR 2 |
+| 4 | Infrastructure | `PostgresUserRepo`, `JWTTokenService` | PR 3 |
+| 5 | Adapter | `/login`, `/refresh` HTTP handlers | PR 3, PR 4 |
+
+Each PR is reviewable in isolation. Foundations can merge to main immediately; each subsequent layer merges once its dependencies land.
