@@ -1,11 +1,31 @@
+# Build artifacts
 **/classes
 **/target
 **/.artifacts
 **/.cpcache
+*.jar
+*.class
+/lib/
+/checkouts/
+
+# OS
 **/.DS_Store
+
+# Gradle
 **/.gradle
 
-# User-specific stuff
+# Leiningen
+.lein-deps-sum
+.lein-repl-history
+.lein-plugins/
+.lein-failures
+
+# Maven
+pom.xml
+pom.xml.asc
+projects/**/pom.xml
+
+# IntelliJ / Cursive
 .idea/**/workspace.xml
 .idea/**/tasks.xml
 .idea/**/usage.statistics.xml
@@ -13,20 +33,12 @@
 .idea/**/statistic.xml
 .idea/dictionaries/**
 .idea/libraries/**
-
-# File-based project format
+.idea/replstate.xml
 *.iws
 *.ipr
-
-# Cursive Clojure plugin
-.idea/replstate.xml
 *.iml
 
-/example/example/**
-artifacts
-projects/**/pom.xml
-
-# nrepl
+# nREPL
 .nrepl-port
 
 # clojure-lsp
@@ -37,3 +49,7 @@ projects/**/pom.xml
 
 # Calva VS Code Extension
 .calva/output-window/output.calva-repl
+
+# Misc
+/example/example/**
+artifacts
