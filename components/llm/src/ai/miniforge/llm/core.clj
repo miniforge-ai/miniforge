@@ -47,7 +47,8 @@
     {:success true
      :content (str/trim output)
      :usage {:input-tokens nil
-             :output-tokens nil}}
+             :output-tokens nil}
+     :exit-code exit-code}
     {:success false
      :error {:type "cli_error"
              :message output}
