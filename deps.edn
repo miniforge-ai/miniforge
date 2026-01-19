@@ -5,11 +5,16 @@
  :aliases
  {:dev  {:extra-paths ["development/src"
                        "components/schema/src"
-                       "components/schema/resources"]
-         :extra-deps {ai.miniforge/schema {:local/root "components/schema"}}}
+                       "components/schema/resources"
+                       "components/logging/src"
+                       "components/logging/resources"]
+         :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
+                      ai.miniforge/logging {:local/root "components/logging"}}}
 
-  :test {:extra-paths ["components/schema/test"]
-         :extra-deps {ai.miniforge/schema {:local/root "components/schema"}}}
+  :test {:extra-paths ["components/schema/test"
+                       "components/logging/test"]
+         :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
+                      ai.miniforge/logging {:local/root "components/logging"}}}
 
   :poly {:main-opts  ["-m" "polylith.clj.core.poly-cli.core"]
          :extra-deps {polylith/clj-poly {:mvn/version "0.2.21"}}}
