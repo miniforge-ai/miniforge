@@ -83,21 +83,9 @@
   ;; ──────────────────────────────────────────────────────────────────────────
 
   pre-commit
-  {:doc  "Run all pre-commit checks (lint, format, test)"
-   :task (do
-           (println "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-           (println "                    PRE-COMMIT CHECKS")
-           (println "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-
-           (run-task 'lint:clj)
-           (println)
-           (run-task 'fmt:md)
-           (println)
-           (run-task 'test)
-
-           (println "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-           (println "                  ✅ ALL CHECKS PASSED")
-           (println "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"))}
+  {:doc     "Run all pre-commit checks (lint, format, test)"
+   :depends [lint:clj fmt:md test]
+   :task    (println "\n✅ ALL PRE-COMMIT CHECKS PASSED\n")}
 
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Hook Installation
