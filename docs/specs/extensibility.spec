@@ -65,6 +65,8 @@ Plugins are the mechanism for customer-specific and domain-specific customizatio
 
 ## 3. Tool Protocol
 
+> **MCP Compatibility**: All miniforge tools are **MCP-compatible** by design. Tools can be exposed as MCP servers for native agent integration. See [Section 9: MCP Integration](#9-mcp-integration) for details.
+
 ### 3.1 Tool Definition Schema
 
 ```clojure
@@ -226,7 +228,12 @@ Plugins request capabilities; administrators grant them:
 
 ### 5.2 Agent Tool Discovery
 
-Agents receive tool descriptions in their context:
+Agents receive tool descriptions in their context. Tools can be exposed via:
+
+1. **Native miniforge tool registry** (for internal agents)
+2. **MCP (Model Context Protocol)** (for external agents and standard tool integration)
+
+#### Native Tool Format
 
 ```clojure
 ;; Injected into agent prompt context
@@ -246,6 +253,136 @@ Agents receive tool descriptions in their context:
    :returns {:pr-number "integer" :url "string"}}
   ...]}
 ```
+
+#### MCP Tool Format
+
+All miniforge tools are **MCP-compatible** and can be exposed as MCP servers:
+
+```json
+{
+  "name": "shipyard/create-env",
+  "description": "Create an ephemeral environment for testing",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "name": {"type": "string"},
+      "base-image": {"type": "string"},
+      "ttl-hours": {"type": "integer", "default": 4}
+    },
+    "required": ["name", "base-image"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "env-id": {"type": "string"},
+      "url": {"type": "string"},
+      "status": {"type": "string", "enum": ["creating", "ready", "failed"]}
+    }
+  },
+  "annotations": {
+    "idempotentHint": false,
+    "destructiveHint": false,
+    "readOnlyHint": false
+  }
+}
+```
+
+### 5.3 MCP Integration
+
+**All plugins can expose their tools as MCP servers**, enabling:
+
+- **Native agent integration**: Agents using MCP (Claude Desktop, Cursor, etc.) can discover and invoke miniforge tools directly
+- **Standard protocol**: No custom tool-calling logic needed
+- **Tool composition**: Multiple MCP servers can be combined
+
+#### MCP Server Implementation
+
+```clojure
+(defprotocol MCPServer
+  "MCP server interface for exposing tools"
+  (list-tools [this]
+    "Return list of tools in MCP format")
+  
+  (call-tool [this tool-name arguments]
+    "Invoke a tool with given arguments, return MCP-formatted result")
+  
+  (tool-schema [this tool-name]
+    "Return JSON Schema for a specific tool"))
+
+;; Tool Registry implements MCPServer
+(extend-type ToolRegistry
+  MCPServer
+  (list-tools [this]
+    (->> (list-tools this)
+         (map tool-spec->mcp-format)))
+  
+  (call-tool [this tool-name arguments]
+    (let [tool (get-tool this (keyword tool-name))
+          result (invoke tool arguments context)]
+      (result->mcp-format result)))
+  
+  (tool-schema [this tool-name]
+    (let [tool (get-tool this (keyword tool-name))]
+      (malli->json-schema (:tool/parameters (tool-spec tool))))))
+```
+
+#### Malli to JSON Schema Conversion
+
+```clojure
+(defn malli->json-schema
+  "Convert Malli schema to JSON Schema for MCP compatibility.
+   Can leverage existing libraries like malli/json-schema or implement directly."
+  [malli-schema]
+  ;; Implementation converts:
+  ;; - [:map ...] -> {"type": "object", "properties": {...}}
+  ;; - [:string] -> {"type": "string"}
+  ;; - [:int {:default 4}] -> {"type": "integer", "default": 4}
+  ;; - [:enum :a :b] -> {"type": "string", "enum": ["a", "b"]}
+  ;; - [:vector ...] -> {"type": "array", "items": {...}}
+  ;; - [:maybe ...] -> include in "required" array or not
+  ...)
+```
+
+#### Metadata Mapping
+
+| miniforge field | MCP field | Notes |
+|----------------|-----------|-------|
+| `:tool/id` | `name` | Converted to string |
+| `:tool/description` | `description` | Direct mapping |
+| `:tool/parameters` | `inputSchema` | Malli → JSON Schema |
+| `:tool/returns` | `outputSchema` | Malli → JSON Schema |
+| `:tool/idempotent?` | `annotations.idempotentHint` | Boolean |
+| `:tool/side-effects` | `annotations.destructiveHint` | If contains `:destructive` |
+| `:tool/risk-level` | `annotations` | `:critical` → `destructiveHint: true` |
+| `:tool/async?` | (not in MCP) | Handled by execution context |
+| `:tool/timeout-ms` | (not in MCP) | Handled by execution context |
+| `:tool/cost-model` | (not in MCP) | miniforge-specific metadata |
+| `:tool/requires` | (not in MCP) | Capability checks before invocation |
+
+#### Response Format Mapping
+
+miniforge tools return `{:success true :result ...}` or `{:success false :error {...}}`.
+MCP expects standard JSON-RPC responses:
+
+```clojure
+;; miniforge success -> MCP success
+{:success true :result {:env-id "abc" :url "https://..."}}
+->
+{"content": [{"type": "text", "text": "{\"env-id\":\"abc\",\"url\":\"https://...\"}"}]}
+
+;; miniforge error -> MCP error
+{:success false :error {:type "validation_error" :message "Missing param"}}
+->
+{"isError": true, "content": [{"type": "text", "text": "Missing param"}]}
+```
+
+#### Async Tool Execution
+
+Tools marked with `:tool/async? true` block the MCP server response until completion.
+For long-running operations, the implementation should:
+1. Return immediately with a task ID
+2. Provide a separate status-checking tool
+3. Or use MCP progress notifications (if supported by client)
 
 ---
 
@@ -467,24 +604,89 @@ Plugins run in isolated execution contexts:
 
 ---
 
-## 9. Deliverables
+## 9. MCP Integration
+
+### 9.1 Why MCP?
+
+**Model Context Protocol (MCP)** is a standard protocol for exposing tools to AI models. By making miniforge tools MCP-compatible:
+
+- **Native agent support**: Agents using MCP (Claude Desktop, Cursor, etc.) can discover and invoke tools without custom integration
+- **Standard interface**: No need to implement custom tool-calling logic
+- **Tool composition**: Multiple MCP servers can be combined
+- **Future-proof**: As MCP ecosystem grows, miniforge tools work everywhere
+
+### 9.2 MCP Server Mode
+
+miniforge can run as an **MCP server**, exposing all registered tools:
+
+```bash
+# Start miniforge as MCP server
+miniforge mcp-server --port 8080
+
+# Or via stdio (for MCP clients)
+miniforge mcp-server --stdio
+```
+
+### 9.3 MCP Client Mode
+
+miniforge agents can also **consume external MCP servers**:
+
+```clojure
+;; Configure external MCP servers
+{:mcp-servers
+ {:github {:transport :stdio
+           :command "gh-mcp-server"}
+  :aws {:transport :http
+        :url "http://localhost:8081"}}}
+
+;; Tools from external servers are automatically available to agents
+```
+
+### 9.4 Implementation Requirements
+
+1. **Malli → JSON Schema converter**: Convert tool parameter schemas to JSON Schema
+   - Can leverage `malli/json-schema` or implement custom converter
+   - Handle all Malli primitives: map, string, int, enum, vector, maybe, etc.
+
+2. **MCP server protocol**: Implement JSON-RPC 2.0 with MCP methods
+   - `tools/list` - Return all available tools
+   - `tools/call` - Execute a tool with given arguments
+   - `notifications/tools/list_changed` - Notify clients of tool changes
+
+3. **MCP client**: Connect to external MCP servers and register their tools
+   - Support stdio, HTTP, and WebSocket transports
+   - Handle tool name collisions with server prefixes
+   - Forward tool calls to appropriate MCP server
+
+4. **Tool name disambiguation**: Prefix tools with server ID to avoid collisions
+   - Internal tools: `shipyard/create-env`
+   - External GitHub MCP: `github-mcp/create-issue`
+   - External AWS MCP: `aws-mcp/s3-upload`
+
+---
+
+## 10. Deliverables
 
 ### Phase 0 (Foundations)
 
 - [ ] Tool protocol definition
 - [ ] Plugin manifest schema
 - [ ] Capability grant schema
+- [ ] **Malli → JSON Schema converter**
 
 ### Phase 1 (Domain)
 
 - [ ] Tool registry implementation
 - [ ] Tool invocation context
+- [ ] **MCP tool format conversion**
 
 ### Phase 2 (Application)
 
 - [ ] Plugin manager
 - [ ] Plugin lifecycle handling
 - [ ] Hot-reload mechanism
+- [ ] **MCP server implementation**
+- [ ] **MCP client implementation**
 
 ### Phase 3 (Infrastructure)
 
@@ -494,16 +696,30 @@ Plugins run in isolated execution contexts:
 
 ### Phase 4 (Plugins)
 
-- [ ] Shipyard plugin
-- [ ] GitHub plugin
-- [ ] AWS plugin (S3, Lambda, etc.)
+- [ ] Shipyard plugin (with MCP export)
+- [ ] GitHub plugin (with MCP export)
+- [ ] AWS plugin (S3, Lambda, etc., with MCP export)
 
 ---
 
-## 10. Open Questions
+## 11. Open Questions
 
 1. **Plugin distribution**: Registry/marketplace vs manual installation?
 2. **Plugin language**: Clojure-only or polyglot (via gRPC/HTTP)?
 3. **Plugin secrets**: Per-plugin credential namespacing?
 4. **Plugin updates**: Auto-update vs manual approval?
 5. **Plugin marketplace**: Curated vs open ecosystem?
+6. **MCP transport**:
+   - **Recommendation**: Support all three (stdio, HTTP, WebSocket)
+   - stdio: Best for CLI integration (e.g., Claude Desktop, Cursor)
+   - HTTP: Best for networked servers and containers
+   - WebSocket: Best for bidirectional streaming and progress updates
+7. **MCP tool versioning**:
+   - **Recommendation**: Include version in tool name (e.g., `shipyard/create-env/v1`)
+   - Breaking changes require new tool name/version
+   - Deprecation warnings in tool descriptions
+   - Registry tracks multiple versions, agents choose based on capability
+8. **MCP resources and prompts**:
+   - MCP supports "resources" (contextual data) and "prompts" (templates)
+   - Should miniforge expose these in addition to tools?
+   - **Recommendation**: Start with tools only, add resources/prompts in Phase 3
