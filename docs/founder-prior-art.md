@@ -9,7 +9,9 @@
 
 ## 1. Purpose
 
-This document records the existence, design, and conceptual structure of **miniforge.ai**, an autonomous software development lifecycle (SDLC) platform, prior to and independent of any specific employer, customer, or commercial deployment.
+This document records the existence, design, and conceptual structure of **miniforge.ai**,
+an autonomous software development lifecycle (SDLC) platform, prior to and independent of
+any specific employer, customer, or commercial deployment.
 
 miniforge.ai originates from Christopher Lester’s independent work across:
 
@@ -25,7 +27,8 @@ This document exists to establish prior art for the architectural concepts, syst
 
 ## 2. What miniforge.ai is
 
-**miniforge.ai is a self-directing software factory that converts human intent into production-grade software through coordinated teams of AI agents operating over a governed, continuously improving control plane.**
+**miniforge.ai is a self-directing software factory that converts human intent into production-grade software through
+ coordinated teams of AI agents operating over a governed, continuously improving control plane.**
 
 Given a prompt, specification, or business objective, miniforge.ai:
 
@@ -46,7 +49,8 @@ It is an **autonomous SDLC**.
 
 miniforge.ai is built on **multi-agent cognition**, not single-prompt generation.
 
-Each agent represents a specialized role analogous to those found in effective engineering organizations. Agents operate with explicit responsibilities, memory, and contracts with other agents.
+Each agent represents a specialized role analogous to those found in effective engineering organizations.
+Agents operate with explicit responsibilities, memory, and contracts with other agents.
 
 Canonical agent roles include:
 
@@ -61,6 +65,7 @@ Canonical agent roles include:
 | Security    | Threat modeling and policy enforcement               |
 | Release     | Controls promotion across environments               |
 | Historian   | Records decisions, outcomes, and learning            |
+| Operator    | Manages the self improvment loop and all subflows    |
 
 Agents communicate through **structured artifacts and shared state**, not ad-hoc conversation.
 
@@ -206,7 +211,7 @@ With it, miniforge.ai is an **evolving software factory**.
 
 ## 7. Safety and Governance
 
-miniforge.ai includes explicit governance mechanisms:
+miniforge.ai includes explicit congitive safety governance mechanisms:
 
 * Approval gates
 * Blast-radius limits
@@ -238,7 +243,9 @@ The deployment is an **instance** of miniforge.ai, not the platform itself.
 
 ## 9. Ownership and Prior Art
 
-The architectural concepts documented here — including agent teams, control-plane orchestration, artifact graphs, nested control loops, and SDLC self-improvement — originate from Christopher Lester’s independent work prior to and outside of any employer engagement.
+The architectural concepts documented here — including agent teams, control-plane orchestration, artifact graphs,
+nested control loops, and SDLC self-improvement — originate from Christopher Lester’s independent work prior to
+and outside of any employer engagement.
 
 Employer or customer implementations represent operational instantiations of these ideas, not their origin.
 

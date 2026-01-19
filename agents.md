@@ -1,6 +1,7 @@
 # Miniforge Agent Knowledge Base
 
-This document serves as the entry point for AI agents working in this repository. It provides quick access to all rules, conventions, and expert knowledge encoded in the system.
+This document serves as the entry point for AI agents working in this repository. 
+It provides quick access to all rules, conventions, and expert knowledge encoded in the system.
 
 ## Quick Reference
 
@@ -19,7 +20,7 @@ This document serves as the entry point for AI agents working in this repository
 
 Rules are organized in `.cursor/rules/` with Dewey-style folders and numeric prefixes.
 
-```
+```zsh
 .cursor/rules/
 ├── 000-index.mdc                    # Master catalog
 ├── 000-foundations/                 # Architecture & philosophy
@@ -90,16 +91,19 @@ Rules are organized in `.cursor/rules/` with Dewey-style folders and numeric pre
 ## Core Principles (Always Apply)
 
 ### Stratified Design
+
 - Dependencies flow **downward only**: Adapters → Application → Domain → Foundations
 - No cycles in the import graph
 - Pure core (Domain layer has no I/O)
 
 ### Simple Made Easy
+
 - Prefer **simple** (unbraided) over **easy** (familiar)
 - Values over state; data over syntax; functions over methods
 - Centralize policy as data, not scattered conditionals
 
 ### PR Discipline
+
 - Each PR = one stratum, <400 lines, independently mergeable
 - Branch from main (never from feature branches unless explicit)
 - Document PRs in `docs/pull-requests/`
