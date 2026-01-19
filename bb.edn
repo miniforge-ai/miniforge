@@ -20,7 +20,22 @@
           (defn run! [& args]
             (let [{:keys [exit]} (apply p/sh args)]
               (when-not (zero? exit)
-                (System/exit exit)))))
+                (System/exit exit))))
+
+          (defn installed? [cmd]
+            (zero? (:exit (p/sh "which" cmd))))
+
+          (defn brew-install [formula]
+            (let [cmd (last (str/split formula (re-pattern "/")))]
+              (if (installed? cmd)
+                (println "  ✓" formula "already installed")
+                (do
+                  (println "  ⬇️ Installing" formula "...")
+                  (p/shell "brew" "install" formula)))))
+
+          (defn brew-upgrade [formula]
+            (println "  ⬆️ Upgrading" formula "...")
+            (p/shell {:continue true} "brew" "upgrade" formula)))
 
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Linting & Formatting
@@ -122,27 +137,104 @@
    :task (run! "clojure" "-T:build" "compile-all")}
 
   ;; ──────────────────────────────────────────────────────────────────────────
-  ;; Hook Installation
+  ;; Installers (via Homebrew)
   ;; ──────────────────────────────────────────────────────────────────────────
 
-  hooks:install
-  {:doc  "Install git pre-commit hook"
-   :task (let [hooks-dir ".git/hooks"
-               hook-path (str hooks-dir "/pre-commit")
-               script    "#!/usr/bin/env bash\nset -e\nbb pre-commit\n"]
-           (if (fs/exists? ".git")
+  install:java
+  {:doc  "Install Java (Temurin 21)"
+   :task (if (installed? "java")
+           (println "  ✓ java already installed")
+           (p/shell "brew" "install" "--cask" "temurin@21"))}
+
+  install:clojure
+  {:doc  "Install Clojure CLI"
+   :task (brew-install "clojure/tools/clojure")}
+
+  install:clj-kondo
+  {:doc  "Install clj-kondo linter"
+   :task (brew-install "borkdude/brew/clj-kondo")}
+
+  install:markdownlint
+  {:doc  "Install markdownlint-cli"
+   :task (if (installed? "markdownlint")
+           (println "  ✓ markdownlint-cli already installed")
+           (p/shell "brew" "install" "markdownlint-cli"))}
+
+  install:poly
+  {:doc  "Install Polylith CLI"
+   :task (brew-install "polyfy/polylith/poly")}
+
+  install:deps
+  {:doc     "Install all required dependencies"
+   :depends [install:java install:clojure install:clj-kondo install:markdownlint install:poly]
+   :task    (println "\n✅ All dependencies installed")}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Upgraders
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  upgrade:clojure
+  {:doc  "Upgrade Clojure CLI"
+   :task (brew-upgrade "clojure/tools/clojure")}
+
+  upgrade:clj-kondo
+  {:doc  "Upgrade clj-kondo linter"
+   :task (brew-upgrade "borkdude/brew/clj-kondo")}
+
+  upgrade:markdownlint
+  {:doc  "Upgrade markdownlint-cli"
+   :task (brew-upgrade "markdownlint-cli")}
+
+  upgrade:poly
+  {:doc  "Upgrade Polylith CLI"
+   :task (brew-upgrade "polyfy/polylith/poly")}
+
+  upgrade:babashka
+  {:doc  "Upgrade Babashka"
+   :task (brew-upgrade "babashka")}
+
+  upgrade:deps
+  {:doc     "Upgrade all dependencies"
+   :depends [upgrade:babashka upgrade:clojure upgrade:clj-kondo upgrade:markdownlint upgrade:poly]
+   :task    (println "\n✅ All dependencies upgraded")}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Bootstrap & Setup
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  setup:hooks
+  {:doc  "Configure git hooks"
+   :task (let [{:keys [exit]} (p/sh "git" "config" "core.hooksPath" ".githooks")]
+           (if (zero? exit)
+             (println "✅ Git hooks configured (.githooks/)")
+             (println "❌ Failed to configure git hooks")))}
+
+  setup:email
+  {:doc  "Verify git email configuration"
+   :task (let [{:keys [out]} (p/sh "git" "config" "user.email")
+               email (str/trim out)]
+           (if (str/ends-with? email "@miniforge.ai")
+             (println "✅ Git email:" email)
              (do
-               (fs/create-dirs hooks-dir)
-               (spit hook-path script)
-               (fs/set-posix-file-permissions hook-path "rwxr-xr-x")
-               (println "✅ Installed pre-commit hook at" hook-path))
-             (println "❌ No .git directory found. Initialize git first with: git init")))}
+               (println "⚠️  Git email not set to @miniforge.ai")
+               (println "   Current:" (if (str/blank? email) "(not set)" email))
+               (println "   Fix with: git config user.email 'yourname@miniforge.ai'"))))}
+
+  bootstrap
+  {:doc     "Full project bootstrap: install deps + configure environment"
+   :depends [install:deps]
+   :task    (do
+              (println "\n🔧 Configuring development environment...\n")
+              (run 'setup:hooks)
+              (run 'setup:email)
+              (println "\n🎉 Bootstrap complete! Run 'bb' to see available tasks.\n"))}
+
+  setup
+  {:doc     "Configure development environment (alias for bootstrap)"
+   :depends [bootstrap]}
 
   hooks:uninstall
-  {:doc  "Remove git pre-commit hook"
-   :task (let [hook-path ".git/hooks/pre-commit"]
-           (if (fs/exists? hook-path)
-             (do
-               (fs/delete hook-path)
-               (println "✅ Removed pre-commit hook"))
-             (println "ℹ️  No pre-commit hook installed")))}}}
+  {:doc  "Reset git hooks to default location"
+   :task (do
+           (p/sh "git" "config" "--unset" "core.hooksPath")
+           (println "✅ Git hooks reset to default (.git/hooks/)"))}}}

@@ -1,0 +1,28 @@
+#!/bin/bash
+set -e
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Email validation
+# ─────────────────────────────────────────────────────────────────────────────
+
+EMAIL=$(git config user.email)
+ALLOWED_PATTERN="@miniforge\.ai$"
+
+if ! echo "$EMAIL" | grep -qE "$ALLOWED_PATTERN"; then
+  echo "ERROR: Commits must use a @miniforge.ai email"
+  echo "Current email: $EMAIL"
+  echo ""
+  echo "Fix with: git config user.email 'yourname@miniforge.ai'"
+  exit 1
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Run pre-commit checks (lint, format, test)
+# ─────────────────────────────────────────────────────────────────────────────
+
+if command -v bb &> /dev/null; then
+  bb pre-commit
+else
+  echo "WARNING: Babashka (bb) not found. Skipping pre-commit checks."
+  echo "Install from: https://github.com/babashka/babashka#installation"
+fi
