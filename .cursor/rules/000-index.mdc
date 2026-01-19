@@ -37,8 +37,9 @@ Uses Dewey Decimal principles: hierarchical, numeric, extensible.
 │   └── 320-kubernetes.mdc
 ├── 700-workflows/
 │   ├── 710-git-branch-management.mdc
-│   ├── 720-pr-layering.mdc
-│   └── 721-pr-documentation.mdc
+│   ├── 720-git-worktrees.mdc
+│   ├── 721-pr-documentation.mdc
+│   └── 730-datever.mdc
 └── 900-meta/
     └── 900-rule-format.mdc
 ```
@@ -66,8 +67,9 @@ Uses Dewey Decimal principles: hierarchical, numeric, extensible.
 | ID | File | Description |
 |----|------|-------------|
 | 710 | `710-git-branch-management` | Branch from main, single-purpose PRs |
-| 720 | `720-pr-layering` | Stratified PR decomposition |
+| 720 | `720-git-worktrees` | Parallel workflows with worktrees, operator multi-loop |
 | 721 | `721-pr-documentation` | Living PR docs in `docs/pull-requests/` |
+| 730 | `730-datever` | Date-based versioning strategy |
 
 ### 900-meta/
 | ID | File | Description |
