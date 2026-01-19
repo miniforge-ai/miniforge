@@ -330,13 +330,16 @@ All miniforge tools are **MCP-compatible** and can be exposed as MCP servers:
 
 ```clojure
 (defn malli->json-schema
-  "Convert Malli schema to JSON Schema for MCP compatibility"
+  "Convert Malli schema to JSON Schema for MCP compatibility.
+   Can leverage existing libraries like malli/json-schema or implement directly."
   [malli-schema]
   ;; Implementation converts:
   ;; - [:map ...] -> {"type": "object", "properties": {...}}
   ;; - [:string] -> {"type": "string"}
   ;; - [:int {:default 4}] -> {"type": "integer", "default": 4}
   ;; - [:enum :a :b] -> {"type": "string", "enum": ["a", "b"]}
+  ;; - [:vector ...] -> {"type": "array", "items": {...}}
+  ;; - [:maybe ...] -> include in "required" array or not
   ...)
 ```
 
@@ -355,6 +358,31 @@ All miniforge tools are **MCP-compatible** and can be exposed as MCP servers:
 | `:tool/timeout-ms` | (not in MCP) | Handled by execution context |
 | `:tool/cost-model` | (not in MCP) | miniforge-specific metadata |
 | `:tool/requires` | (not in MCP) | Capability checks before invocation |
+
+#### Response Format Mapping
+
+miniforge tools return `{:success true :result ...}` or `{:success false :error {...}}`.
+MCP expects standard JSON-RPC responses:
+
+```clojure
+;; miniforge success -> MCP success
+{:success true :result {:env-id "abc" :url "https://..."}}
+->
+{"content": [{"type": "text", "text": "{\"env-id\":\"abc\",\"url\":\"https://...\"}"}]}
+
+;; miniforge error -> MCP error
+{:success false :error {:type "validation_error" :message "Missing param"}}
+->
+{"isError": true, "content": [{"type": "text", "text": "Missing param"}]}
+```
+
+#### Async Tool Execution
+
+Tools marked with `:tool/async? true` block the MCP server response until completion.
+For long-running operations, the implementation should:
+1. Return immediately with a task ID
+2. Provide a separate status-checking tool
+3. Or use MCP progress notifications (if supported by client)
 
 ---
 
@@ -616,10 +644,24 @@ miniforge agents can also **consume external MCP servers**:
 
 ### 9.4 Implementation Requirements
 
-1. **Malli → JSON Schema converter**: Convert tool parameter schemas
-2. **MCP server protocol**: Implement `tools/list`, `tools/call`, `tools/list_changed`
+1. **Malli → JSON Schema converter**: Convert tool parameter schemas to JSON Schema
+   - Can leverage `malli/json-schema` or implement custom converter
+   - Handle all Malli primitives: map, string, int, enum, vector, maybe, etc.
+
+2. **MCP server protocol**: Implement JSON-RPC 2.0 with MCP methods
+   - `tools/list` - Return all available tools
+   - `tools/call` - Execute a tool with given arguments
+   - `notifications/tools/list_changed` - Notify clients of tool changes
+
 3. **MCP client**: Connect to external MCP servers and register their tools
+   - Support stdio, HTTP, and WebSocket transports
+   - Handle tool name collisions with server prefixes
+   - Forward tool calls to appropriate MCP server
+
 4. **Tool name disambiguation**: Prefix tools with server ID to avoid collisions
+   - Internal tools: `shipyard/create-env`
+   - External GitHub MCP: `github-mcp/create-issue`
+   - External AWS MCP: `aws-mcp/s3-upload`
 
 ---
 
@@ -667,5 +709,17 @@ miniforge agents can also **consume external MCP servers**:
 3. **Plugin secrets**: Per-plugin credential namespacing?
 4. **Plugin updates**: Auto-update vs manual approval?
 5. **Plugin marketplace**: Curated vs open ecosystem?
-6. **MCP transport**: stdio vs HTTP vs WebSocket? (Recommend: support all three)
-7. **MCP tool versioning**: How to handle tool schema changes in MCP format?
+6. **MCP transport**:
+   - **Recommendation**: Support all three (stdio, HTTP, WebSocket)
+   - stdio: Best for CLI integration (e.g., Claude Desktop, Cursor)
+   - HTTP: Best for networked servers and containers
+   - WebSocket: Best for bidirectional streaming and progress updates
+7. **MCP tool versioning**:
+   - **Recommendation**: Include version in tool name (e.g., `shipyard/create-env/v1`)
+   - Breaking changes require new tool name/version
+   - Deprecation warnings in tool descriptions
+   - Registry tracks multiple versions, agents choose based on capability
+8. **MCP resources and prompts**:
+   - MCP supports "resources" (contextual data) and "prompts" (templates)
+   - Should miniforge expose these in addition to tools?
+   - **Recommendation**: Start with tools only, add resources/prompts in Phase 3
