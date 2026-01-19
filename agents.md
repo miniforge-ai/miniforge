@@ -17,41 +17,60 @@ This document serves as the entry point for AI agents working in this repository
 
 ## Rules Catalog (Dewey Classification)
 
-All rules live in `.cursor/rules/` with numeric Dewey-style prefixes.
+Rules are organized in `.cursor/rules/` with Dewey-style folders and numeric prefixes.
 
-### 000–099 Foundations & Core Principles
+```
+.cursor/rules/
+├── 000-index.mdc                    # Master catalog
+├── 000-foundations/                 # Architecture & philosophy
+│   ├── 001-stratified-design.mdc
+│   └── 010-simple-made-easy.mdc
+├── 200-languages/                   # Language conventions
+│   ├── 210-clojure.mdc
+│   └── 220-python.mdc
+├── 300-frameworks/                  # Platform rules
+│   └── 320-kubernetes.mdc
+├── 700-workflows/                   # Process rules
+│   ├── 710-git-branch-management.mdc
+│   ├── 720-pr-layering.mdc
+│   └── 721-pr-documentation.mdc
+└── 900-meta/                        # Rule templates
+    └── 900-rule-format.mdc
+```
 
-| ID | File | Description |
-|----|------|-------------|
-| 001 | `001-stratified-design.mdc` | One-way DAG dependencies; Foundations → Domain → Application → Adapters → Infrastructure |
-| 010 | `010-simple-made-easy.mdc` | Choose simple (uncomplected) over easy (familiar); values over state; data over syntax |
-
-### 200–299 Languages
-
-| ID | File | Description |
-|----|------|-------------|
-| 210 | `210-clojure.mdc` | Polylith workspace; cross-component deps via `.interface`; per-file stratified layers (max 3) |
-| 220 | `220-python.mdc` | Poetry + pyproject.toml; functional style; type hints |
-
-### 300–399 Frameworks & Platforms
-
-| ID | File | Description |
-|----|------|-------------|
-| 320 | `320-kubernetes.mdc` | Kustomize base/overlays; ArgoCD app-of-apps; minimal patches; context switching |
-
-### 700–799 Workflows & Processes
-
-| ID | File | Description |
-|----|------|-------------|
-| 710 | `710-git-branch-management.mdc` | Always branch from main; verify before branching; single-purpose PRs |
-| 720 | `720-pr-layering.mdc` | Decompose PRs by stratum; merge bottom-up; <400 lines per PR |
-| 721 | `721-pr-documentation.mdc` | Create `docs/pull-requests/YYYY-MM-DD-branch.md` for each feature branch |
-
-### 900–999 Meta & Templates
+### 000-foundations/ — Core Principles
 
 | ID | File | Description |
 |----|------|-------------|
-| 900 | `900-rule-format.mdc` | Template for creating rules; Dewey classification reference |
+| 001 | `001-stratified-design` | One-way DAG dependencies; Foundations → Domain → Application → Adapters → Infrastructure |
+| 010 | `010-simple-made-easy` | Choose simple (uncomplected) over easy (familiar); values over state; data over syntax |
+
+### 200-languages/ — Language Rules
+
+| ID | File | Description |
+|----|------|-------------|
+| 210 | `210-clojure` | Polylith workspace; cross-component deps via `.interface`; per-file stratified layers (max 3) |
+| 220 | `220-python` | Poetry + pyproject.toml; functional style; type hints |
+
+### 300-frameworks/ — Platforms
+
+| ID | File | Description |
+|----|------|-------------|
+| 320 | `320-kubernetes` | Kustomize base/overlays; ArgoCD app-of-apps; minimal patches; context switching |
+
+### 700-workflows/ — Processes
+
+| ID | File | Description |
+|----|------|-------------|
+| 710 | `710-git-branch-management` | Always branch from main; verify before branching; single-purpose PRs |
+| 720 | `720-pr-layering` | Decompose PRs by stratum; merge bottom-up; <400 lines per PR |
+| 721 | `721-pr-documentation` | Create `docs/pull-requests/YYYY-MM-DD-branch.md` for each feature branch |
+
+### 900-meta/ — Templates
+
+| ID | File | Description |
+|----|------|-------------|
+| 900 | `900-rule-format` | Template for creating rules; Dewey classification reference |
 
 ## Dewey Classification Quick Reference
 
