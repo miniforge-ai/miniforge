@@ -1,6 +1,11 @@
 (ns ai.miniforge.tool.interface
   "Public API for the tool component.
-   Provides tool definition, registration, and execution."
+   Provides tool definition, registration, and execution.
+
+   Phase 0 (Current): Core tool protocol for agent use
+   Phase 1+: MCP compatibility, Malli schemas, plugin integration
+
+   See docs/specs/extensibility.spec for MCP integration details."
   (:require
    [ai.miniforge.tool.core :as core]))
 

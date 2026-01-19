@@ -11,13 +11,28 @@
 ;; Tool schema and validation
 
 (def tool-schema
-  "Schema for tool definitions."
+  "Schema for tool definitions (Phase 0 - minimal implementation).
+
+   Phase 0 provides core tool protocol for agent use.
+   Phase 1+ will add MCP compatibility fields:
+   - :tool/version (string) - semver
+   - :tool/parameters (Malli schema) - instead of simple map
+   - :tool/returns (Malli schema)
+   - :tool/async? (boolean)
+   - :tool/idempotent? (boolean)
+   - :tool/side-effects (set of keywords)
+   - :tool/cost-model (map)
+   - :tool/risk-level (keyword)
+   - :tool/timeout-ms (long)
+   - :tool/requires (set of capability keywords)
+
+   See docs/specs/extensibility.spec for full specification."
   {:tool/id          :keyword
    :tool/name        :string
    :tool/description :string
-   :tool/parameters  :map       ; parameter spec
+   :tool/parameters  :map       ; parameter spec {:param {:type :string :required true}}
    :tool/handler     :fn        ; (fn [params context] -> result)
-   :tool/metadata    :map})     ; optional metadata
+   :tool/metadata    :map})     ; optional metadata (can include future MCP fields)
 
 (defn valid-tool-id?
   "Check if tool ID is valid (namespaced keyword)."
