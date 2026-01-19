@@ -36,8 +36,24 @@ Invalid concise example with explanation
 
 ### Location
 
-- Path: `.cursor/rules/`
+- Root: `.cursor/rules/`
 - Extension: `.mdc`
+- Structure: `<category-folder>/<NNN-name>.mdc`
+
+```
+.cursor/rules/
+├── 000-index.mdc           # Master catalog (root level)
+├── 000-foundations/        # Core principles
+├── 100-tools/              # Dev environment
+├── 200-languages/          # Language rules
+├── 300-frameworks/         # Platform rules
+├── 400-testing/            # Quality standards
+├── 500-operations/         # CI/CD, monitoring
+├── 600-documentation/      # Doc standards
+├── 700-workflows/          # Process rules
+├── 800-project/            # Project-specific
+└── 900-meta/               # Templates
+```
 
 ### Naming Convention (Dewey-style)
 
