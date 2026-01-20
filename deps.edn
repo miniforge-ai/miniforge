@@ -15,26 +15,31 @@
                        "components/artifact/src"
                        "components/artifact/resources"
                        "components/agent/src"
-                       "components/agent/resources"]
+                       "components/agent/resources"
+                       "components/task/src"
+                       "components/task/resources"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
                       ai.miniforge/tool {:local/root "components/tool"}
                       ai.miniforge/artifact {:local/root "components/artifact"}
-                      ai.miniforge/agent {:local/root "components/agent"}}}
+                      ai.miniforge/agent {:local/root "components/agent"}
+                      ai.miniforge/task {:local/root "components/task"}}}
 
   :test {:extra-paths ["components/schema/test"
                        "components/logging/test"
                        "components/llm/test"
                        "components/tool/test"
                        "components/artifact/test"
-                       "components/agent/test"]
+                       "components/agent/test"
+                       "components/task/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
                       ai.miniforge/tool {:local/root "components/tool"}
                       ai.miniforge/artifact {:local/root "components/artifact"}
-                      ai.miniforge/agent {:local/root "components/agent"}}}
+                      ai.miniforge/agent {:local/root "components/agent"}
+                      ai.miniforge/task {:local/root "components/task"}}}
 
   :poly {:main-opts  ["-m" "polylith.clj.core.poly-cli.core"]
          :extra-deps {polylith/clj-poly {:mvn/version "0.2.21"}}}
