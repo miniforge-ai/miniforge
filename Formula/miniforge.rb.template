@@ -37,6 +37,7 @@ class Miniforge < Formula
   end
 
   depends_on "babashka"
+  depends_on "gum"
 
   def install
     bin.install "miniforge-macos-arm64" => "miniforge" if OS.mac? && Hardware::CPU.arm?
