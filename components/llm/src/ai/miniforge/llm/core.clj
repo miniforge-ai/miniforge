@@ -11,17 +11,24 @@
 ;; Backend configuration
 
 (def backends
-  "Available CLI backends."
+  "Available CLI backends.
+
+   Supported backends:
+   - :claude - Claude Code CLI (claude command)
+   - :echo   - Echo backend for testing (echoes the prompt)
+
+   Future backends (not yet implemented):
+   - :codex  - OpenAI Codex CLI (when available)
+   - :copilot - GitHub Copilot CLI (when available)"
   {:claude {:cmd "claude"
             :args-fn (fn [{:keys [prompt system max-tokens]}]
-                       (cond-> ["-p" prompt]
-                         system (into ["--system" system])
-                         max-tokens (into ["--max-tokens" (str max-tokens)])))}
-
-   :cursor {:cmd "cursor"
-            :args-fn (fn [{:keys [prompt system]}]
-                       (cond-> ["--prompt" prompt]
-                         system (into ["--system" system])))}
+                       ;; claude CLI: -p/--print for non-interactive mode
+                       ;; prompt is positional argument
+                       ;; --system-prompt for system context
+                       (cond-> ["-p"]
+                         system (into ["--system-prompt" system])
+                         max-tokens (into ["--max-budget-usd" "0.10"])
+                         true (conj prompt)))}
 
    :echo   {:cmd "echo"
             :args-fn (fn [{:keys [prompt]}]
