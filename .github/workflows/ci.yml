@@ -70,11 +70,6 @@ jobs:
           cli: latest
           bb: latest
 
-      - name: Install Polylith
-        run: |
-          clojure -Ttools install-latest :lib com.github.polyfy/polylith :as poly
-          poly version
-
       - name: Cache Clojure dependencies
         uses: actions/cache@v4
         with:
