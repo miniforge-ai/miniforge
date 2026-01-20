@@ -24,10 +24,10 @@ jobs:
         include:
           - os: macos
             arch: arm64
-            runner: macos-14
+            runner: macos-latest
           - os: macos
             arch: x86_64
-            runner: macos-13
+            runner: macos-15-large
           - os: linux
             arch: x86_64
             runner: ubuntu-latest
