@@ -209,6 +209,9 @@ jobs:
           MACOS_ARM64_SHA=$(cat artifacts/macos-arm64/miniforge-macos-arm64.sha256 | awk '{print $1}')
           LINUX_X86_SHA=$(cat artifacts/linux-x86_64/miniforge-linux-x86_64.sha256 | awk '{print $1}')
 
+          # Create Formula directory if it doesn't exist
+          mkdir -p homebrew-tap/Formula
+
           cat > homebrew-tap/Formula/miniforge.rb << EOF
           class Miniforge < Formula
             desc "Autonomous SDLC platform - convert intent to production software"
