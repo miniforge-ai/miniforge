@@ -79,10 +79,10 @@
                     {:signal/id (random-uuid)
                      :signal/type :workflow-failed
                      :signal/data {:phase :implement :error (str "Error " i)}
-                     :signal/timestamp (System/currentTimeMillis)})]
-      (let [patterns (op/detect-patterns detector signals)]
-        (is (seq patterns))
-        (is (some #(= :repeated-phase-failure (:pattern/type %)) patterns))))))
+                     :signal/timestamp (System/currentTimeMillis)})
+          patterns (op/detect-patterns detector signals)]
+      (is (seq patterns))
+      (is (some #(= :repeated-phase-failure (:pattern/type %)) patterns)))))
 
 (deftest analyze-patterns-test
   (testing "analyze-patterns returns patterns and recommendations"
@@ -132,10 +132,10 @@
           {:keys [proposal-id]} (op/propose-improvement operator
                                                          {:type :rule-addition
                                                           :target :test
-                                                          :rationale "Test"})]
-      (let [result (op/apply-improvement operator proposal-id)]
-        (is (:success? result))
-        (is (= :applied (get-in result [:applied :improvement/status])))))))
+                                                          :rationale "Test"})
+          result (op/apply-improvement operator proposal-id)]
+      (is (:success? result))
+      (is (= :applied (get-in result [:applied :improvement/status]))))))
 
 (deftest reject-improvement-test
   (testing "reject-improvement updates proposal with reason"
@@ -143,10 +143,10 @@
           {:keys [proposal-id]} (op/propose-improvement operator
                                                          {:type :rule-addition
                                                           :target :test
-                                                          :rationale "Test"})]
-      (let [rejected (op/reject-improvement operator proposal-id "Not applicable")]
-        (is (= :rejected (:improvement/status rejected)))
-        (is (= "Not applicable" (:improvement/rejection-reason rejected)))))))
+                                                          :rationale "Test"})
+          rejected (op/reject-improvement operator proposal-id "Not applicable")]
+      (is (= :rejected (:improvement/status rejected)))
+      (is (= "Not applicable" (:improvement/rejection-reason rejected))))))
 
 ;; ============================================================================
 ;; Governance tests

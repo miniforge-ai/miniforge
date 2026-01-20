@@ -124,7 +124,7 @@
 
   build:cli
   {:doc  "Build miniforge CLI as distributable uberscript"
-   :task (run! "clojure" "-T:build" "bb-uberscript" ":project miniforge")}
+   :task (run! "clojure" "-T:build" "bb-uberscript" ":project" "miniforge")}
 
   build:jar
   {:doc  "Build JVM uberjar for a project"

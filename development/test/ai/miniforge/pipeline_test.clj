@@ -156,18 +156,16 @@
 (deftest knowledge-injection-test
   (testing "knowledge coordinator injects relevant knowledge"
     (let [{:keys [knowledge-store]} (setup-test-orchestrator)
-          coord (orch/create-knowledge-coordinator knowledge-store)]
-
-      ;; Query for implementer knowledge
-      (let [task {:task/id (random-uuid)
-                  :task/type :implement
-                  :task/tags [:clojure]}
-            result (orch/inject-for-agent coord :implementer task {})]
-
-        ;; Should return knowledge structure
-        (is (some? result))
-        (is (map? result))
-        (is (number? (:count result)))))))
+          coord (orch/create-knowledge-coordinator knowledge-store)
+          ;; Query for implementer knowledge
+          task {:task/id (random-uuid)
+                :task/type :implement
+                :task/tags [:clojure]}
+          result (orch/inject-for-agent coord :implementer task {})]
+      ;; Should return knowledge structure
+      (is (some? result))
+      (is (map? result))
+      (is (number? (:count result))))))
 
 ;; ============================================================================
 ;; Task routing integration tests
@@ -222,10 +220,6 @@
 
 (comment
   ;; Manual end-to-end test (requires real or mock LLM)
-  (require '[ai.miniforge.orchestrator.interface :as orch]
-           '[ai.miniforge.knowledge.interface :as knowledge]
-           '[ai.miniforge.artifact.interface :as artifact]
-           '[ai.miniforge.llm.interface :as llm])
 
   ;; Setup
   (def llm-client (llm/mock-client {:outputs (create-mock-responses)}))

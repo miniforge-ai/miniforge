@@ -53,3 +53,4 @@ projects/**/pom.xml
 # Misc
 /example/example/**
 artifacts
+dist/

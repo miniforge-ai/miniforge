@@ -66,20 +66,18 @@
 (deftest workflow-complete-test
   (testing "complete marks workflow as done"
     (let [workflow (wf/create-workflow)
-          workflow-id (wf/start workflow {:title "Test"} {})]
-
-      (let [state (wf/complete workflow workflow-id)]
-        (is (= :done (:workflow/phase state)))
-        (is (= :completed (:workflow/status state)))))))
+          workflow-id (wf/start workflow {:title "Test"} {})
+          state (wf/complete workflow workflow-id)]
+      (is (= :done (:workflow/phase state)))
+      (is (= :completed (:workflow/status state))))))
 
 (deftest workflow-fail-test
   (testing "fail marks workflow as failed"
     (let [workflow (wf/create-workflow)
-          workflow-id (wf/start workflow {:title "Test"} {})]
-
-      (let [state (wf/fail workflow workflow-id {:type :test :message "Failed"})]
-        (is (= :failed (:workflow/status state)))
-        (is (= 1 (count (:workflow/errors state))))))))
+          workflow-id (wf/start workflow {:title "Test"} {})
+          state (wf/fail workflow workflow-id {:type :test :message "Failed"})]
+      (is (= :failed (:workflow/status state)))
+      (is (= 1 (count (:workflow/errors state)))))))
 
 ;; ============================================================================
 ;; Phase definitions tests
@@ -115,7 +113,7 @@
                        (swap! events conj {:event :error :workflow-id wf-id :phase phase}))
                      (on-workflow-complete [_ wf-id _state]
                        (swap! events conj {:event :workflow-complete :workflow-id wf-id}))
-                     (on-rollback [_ wf-id from to _reason]
+                     (on-rollback [_ _wf-id from to _reason]
                        (swap! events conj {:event :rollback :from from :to to})))]
 
       (wf/add-observer workflow observer)

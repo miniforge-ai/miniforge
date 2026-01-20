@@ -10,12 +10,9 @@
    Run with: clojure -M:dev:test -e \"(require 'ai.miniforge.dogfood-test) (clojure.test/run-tests 'ai.miniforge.dogfood-test)\""
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
+   [clojure.string]
    [ai.miniforge.test-harness :as harness]
-   [ai.miniforge.llm.interface :as llm]
-   [ai.miniforge.orchestrator.interface :as orch]
-   [ai.miniforge.knowledge.interface :as knowledge]
-   [ai.miniforge.artifact.interface :as artifact]
-   [ai.miniforge.agent.interface :as agent]))
+   [ai.miniforge.llm.interface :as llm]))
 
 ;; ============================================================================
 ;; Fixtures
@@ -86,10 +83,11 @@
 (defn valid-clojure?
   "Check if string is valid Clojure code."
   [code]
-  (try
-    (read-string code)
-    true
-    (catch Exception _ false)))
+  (when code
+    (try
+      (let [_parsed (read-string code)]
+        true)
+      (catch Exception _ false))))
 
 ;; ============================================================================
 ;; Mock Tests (Fast, deterministic)
