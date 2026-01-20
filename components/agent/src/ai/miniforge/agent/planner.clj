@@ -1,0 +1,374 @@
+(ns ai.miniforge.agent.planner
+  "Planner agent implementation.
+   Analyzes specifications and creates detailed implementation plans."
+  (:require
+   [ai.miniforge.agent.core :as core]
+   [ai.miniforge.schema.interface :as schema]
+   [ai.miniforge.logging.interface :as log]
+   [malli.core :as m]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Planner-specific schemas
+
+(def PlanTask
+  "Schema for a task in the plan."
+  [:map
+   [:task/id uuid?]
+   [:task/description [:string {:min 1}]]
+   [:task/type [:enum :implement :test :review :design :deploy :configure]]
+   [:task/dependencies {:optional true} [:vector uuid?]]
+   [:task/acceptance-criteria {:optional true} [:vector [:string {:min 1}]]]
+   [:task/estimated-effort {:optional true} [:enum :small :medium :large :xlarge]]])
+
+(def Plan
+  "Schema for the planner's output."
+  [:map
+   [:plan/id uuid?]
+   [:plan/name [:string {:min 1}]]
+   [:plan/tasks [:vector PlanTask]]
+   [:plan/estimated-complexity {:optional true} [:enum :low :medium :high]]
+   [:plan/risks {:optional true} [:vector [:string {:min 1}]]]
+   [:plan/assumptions {:optional true} [:vector [:string {:min 1}]]]
+   [:plan/created-at {:optional true} inst?]])
+
+;; System Prompt
+
+(def planner-system-prompt
+  "You are a Planning Agent for an autonomous software development team.
+
+Your role is to analyze requirements and create detailed implementation plans that can be
+executed by other specialized agents (Implementer, Tester, Reviewer).
+
+## Input Format
+
+You receive specifications in one of these formats:
+1. User story: \"As a <role>, I want <feature> so that <benefit>\"
+2. Technical requirement: A description of functionality needed
+3. Bug report: Description of an issue to fix
+4. Feature request: High-level description of desired capability
+
+You also receive context about:
+- Existing codebase structure
+- Technology stack and conventions
+- Constraints (time, budget, dependencies)
+
+## Output Format
+
+You must output a structured plan as a Clojure map with:
+
+```clojure
+{:plan/id <uuid>
+ :plan/name \"descriptive-name\"
+ :plan/tasks [{:task/id <uuid>
+               :task/description \"Clear description of what to do\"
+               :task/type :implement ; or :test, :review, :design, :deploy, :configure
+               :task/dependencies [<uuid>...] ; IDs of tasks that must complete first
+               :task/acceptance-criteria [\"Criterion 1\" \"Criterion 2\"...]
+               :task/estimated-effort :small} ; :small, :medium, :large, :xlarge
+              ...]
+ :plan/estimated-complexity :medium ; :low, :medium, :high
+ :plan/risks [\"Risk description\"...]
+ :plan/assumptions [\"Assumption made\"...]}
+```
+
+## Guidelines
+
+1. **Task Granularity**: Break down work into small, testable units. Each task should be
+   completable in a single focused session.
+
+2. **Dependencies**: Clearly identify which tasks depend on others. Build a DAG (directed
+   acyclic graph) - no circular dependencies.
+
+3. **Acceptance Criteria**: Every task must have clear, verifiable acceptance criteria.
+   Prefer criteria that can be automatically tested.
+
+4. **Task Types**:
+   - :implement - Write production code
+   - :test - Write or update tests
+   - :review - Code review checkpoint
+   - :design - Design decisions or documentation
+   - :deploy - Deployment-related tasks
+   - :configure - Configuration changes
+
+5. **Risk Assessment**: Identify potential blockers, unknowns, and dependencies on
+   external systems or decisions.
+
+6. **Assumptions**: Document any assumptions you're making about requirements,
+   technology choices, or constraints.
+
+7. **Effort Estimation**:
+   - :small - Less than 1 hour of work
+   - :medium - 1-4 hours of work
+   - :large - Half day to full day
+   - :xlarge - Multiple days, consider breaking down further
+
+8. **Testing Strategy**: Include appropriate test tasks. Every :implement task should
+   have a corresponding :test task or explicit justification for skipping.
+
+9. **Review Points**: Include :review tasks at natural checkpoints, especially after
+   significant implementation milestones.
+
+Remember: A good plan enables parallel execution where possible while respecting
+necessary dependencies. Optimize for clarity and testability.")
+
+;------------------------------------------------------------------------------ Layer 1
+;; Planner functions
+
+(defn validate-plan
+  "Validate a plan against the Plan schema and check for structural issues."
+  [plan]
+  (let [schema-valid? (m/validate Plan plan)]
+    (if-not schema-valid?
+      {:valid? false
+       :errors (schema/explain Plan plan)}
+      ;; Additional structural validations
+      (let [task-ids (set (map :task/id (:plan/tasks plan)))
+            ;; Check for invalid dependency references
+            invalid-deps (for [task (:plan/tasks plan)
+                               dep (:task/dependencies task)
+                               :when (not (contains? task-ids dep))]
+                           {:task (:task/id task)
+                            :invalid-dependency dep})
+            ;; Check for circular dependencies (simple check)
+            has-self-dep? (some (fn [task]
+                                  (some #{(:task/id task)} (:task/dependencies task)))
+                                (:plan/tasks plan))]
+        (cond
+          (seq invalid-deps)
+          {:valid? false
+           :errors {:dependencies (str "Invalid dependency references: " (pr-str invalid-deps))}}
+
+          has-self-dep?
+          {:valid? false
+           :errors {:dependencies "Task has circular self-dependency"}}
+
+          :else
+          {:valid? true :errors nil})))))
+
+(defn- make-task
+  "Helper to create a task with generated ID."
+  [{:keys [description type dependencies acceptance-criteria estimated-effort]
+    :or {dependencies []
+         acceptance-criteria []
+         estimated-effort :medium}}]
+  (cond-> {:task/id (random-uuid)
+           :task/description description
+           :task/type type}
+    (seq dependencies) (assoc :task/dependencies dependencies)
+    (seq acceptance-criteria) (assoc :task/acceptance-criteria acceptance-criteria)
+    estimated-effort (assoc :task/estimated-effort estimated-effort)))
+
+(defn- analyze-spec
+  "Analyze a specification and extract key information.
+   In a real implementation, this would use an LLM."
+  [spec context]
+  (let [spec-text (if (map? spec)
+                    (or (:spec/content spec) (:content spec) (pr-str spec))
+                    (str spec))
+        has-tests? (some-> context :codebase :has-tests?)
+        complexity (cond
+                     (> (count spec-text) 1000) :high
+                     (> (count spec-text) 300) :medium
+                     :else :low)]
+    {:spec-text spec-text
+     :has-tests? has-tests?
+     :estimated-complexity complexity}))
+
+(defn- generate-plan
+  "Generate a plan from analyzed specification.
+   In a real implementation, this would use an LLM with the system prompt."
+  [analysis context]
+  ;; Generate a basic plan structure
+  ;; In production, this would be LLM-generated based on the system prompt
+  (let [{:keys [spec-text estimated-complexity has-tests?]} analysis
+        plan-id (random-uuid)
+        base-name (or (:plan-name context)
+                      (str "plan-" (subs (str plan-id) 0 8)))
+        design-task (make-task
+                     {:description (str "Design solution for: " (subs spec-text 0 (min 100 (count spec-text))))
+                      :type :design
+                      :acceptance-criteria ["Design document created"
+                                            "Approach reviewed and approved"]
+                      :estimated-effort :medium})
+        impl-task (make-task
+                   {:description "Implement the designed solution"
+                    :type :implement
+                    :dependencies [(:task/id design-task)]
+                    :acceptance-criteria ["Code compiles without errors"
+                                          "Follows project conventions"
+                                          "No linter warnings"]
+                    :estimated-effort (case estimated-complexity
+                                        :low :small
+                                        :medium :medium
+                                        :high :large)})
+        test-task (make-task
+                   {:description "Write tests for the implementation"
+                    :type :test
+                    :dependencies [(:task/id impl-task)]
+                    :acceptance-criteria ["Unit tests pass"
+                                          "Edge cases covered"
+                                          "Test coverage meets threshold"]
+                    :estimated-effort :medium})
+        review-task (make-task
+                     {:description "Code review checkpoint"
+                      :type :review
+                      :dependencies [(:task/id test-task)]
+                      :acceptance-criteria ["Code reviewed"
+                                            "All comments addressed"]
+                      :estimated-effort :small})]
+    {:plan/id plan-id
+     :plan/name base-name
+     :plan/tasks [design-task impl-task test-task review-task]
+     :plan/estimated-complexity estimated-complexity
+     :plan/risks (cond-> []
+                   (= :high estimated-complexity)
+                   (conj "High complexity may require iteration")
+
+                   (not has-tests?)
+                   (conj "No existing test infrastructure"))
+     :plan/assumptions ["Requirements are complete and stable"
+                        "Dependencies are available"]
+     :plan/created-at (java.util.Date.)}))
+
+(defn- repair-plan
+  "Attempt to repair a plan based on validation errors."
+  [plan errors _context]
+  ;; Simple repair strategies based on common errors
+  (let [repaired (atom plan)]
+    ;; Fix missing required fields
+    (when-not (:plan/id @repaired)
+      (swap! repaired assoc :plan/id (random-uuid)))
+
+    (when-not (:plan/name @repaired)
+      (swap! repaired assoc :plan/name "unnamed-plan"))
+
+    (when-not (:plan/tasks @repaired)
+      (swap! repaired assoc :plan/tasks []))
+
+    ;; Fix tasks without IDs
+    (swap! repaired update :plan/tasks
+           (fn [tasks]
+             (mapv (fn [task]
+                     (cond-> task
+                       (not (:task/id task))
+                       (assoc :task/id (random-uuid))
+
+                       (not (:task/description task))
+                       (assoc :task/description "Task description needed")
+
+                       (not (:task/type task))
+                       (assoc :task/type :implement)))
+                   tasks)))
+
+    ;; Remove invalid dependencies
+    (let [valid-ids (set (map :task/id (:plan/tasks @repaired)))]
+      (swap! repaired update :plan/tasks
+             (fn [tasks]
+               (mapv (fn [task]
+                       (if-let [deps (:task/dependencies task)]
+                         (assoc task :task/dependencies
+                                (vec (filter valid-ids deps)))
+                         task))
+                     tasks))))
+
+    {:status :success
+     :output @repaired
+     :repairs-made (when (not= plan @repaired)
+                     {:original-errors errors})}))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Public API
+
+(defn create-planner
+  "Create a Planner agent with optional configuration overrides.
+
+   Options:
+   - :config - Agent configuration (model, temperature, etc.)
+   - :logger - Logger instance
+
+   Example:
+     (create-planner)
+     (create-planner {:config {:model \"claude-sonnet-4\"}})"
+  [& [opts]]
+  (let [logger (or (:logger opts)
+                   (log/create-logger {:min-level :info :output (fn [_])}))]
+    (core/create-base-agent
+     {:role :planner
+      :system-prompt planner-system-prompt
+      :config (merge {:model "claude-sonnet-4"
+                      :temperature 0.3
+                      :max-tokens 4000}
+                     (:config opts))
+      :logger logger
+
+      :invoke-fn
+      (fn [context input]
+        (let [analysis (analyze-spec input context)
+              plan (generate-plan analysis context)]
+          {:status :success
+           :output plan
+           :metrics {:tasks-created (count (:plan/tasks plan))
+                     :complexity (:plan/estimated-complexity plan)}}))
+
+      :validate-fn validate-plan
+
+      :repair-fn repair-plan})))
+
+(defn plan-summary
+  "Get a summary of a plan for logging/display."
+  [plan]
+  {:id (:plan/id plan)
+   :name (:plan/name plan)
+   :task-count (count (:plan/tasks plan))
+   :complexity (:plan/estimated-complexity plan)
+   :risk-count (count (:plan/risks plan))})
+
+(defn task-dependency-order
+  "Return tasks in dependency order (topological sort).
+   Tasks with no dependencies come first."
+  [plan]
+  (let [tasks (:plan/tasks plan)
+        task-map (into {} (map (juxt :task/id identity) tasks))
+        deps-map (into {} (map (fn [t] [(:task/id t) (set (:task/dependencies t []))]) tasks))]
+    ;; Simple topological sort using Kahn's algorithm
+    (loop [remaining (set (keys task-map))
+           satisfied #{}
+           result []]
+      (if (empty? remaining)
+        result
+        (let [ready (filter (fn [id]
+                              (every? satisfied (get deps-map id #{})))
+                            remaining)]
+          (if (empty? ready)
+            ;; Cycle detected, return what we have
+            (into result (map task-map remaining))
+            (recur (apply disj remaining ready)
+                   (into satisfied ready)
+                   (into result (map task-map ready)))))))))
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  ;; Create a planner
+  (def planner (create-planner))
+
+  ;; Invoke with a specification
+  (core/invoke planner
+               {:codebase {:has-tests? true}}
+               "As a user, I want to log in with my email so that I can access my account.")
+  ;; => {:status :success, :output {:plan/id ..., :plan/tasks [...], ...}}
+
+  ;; Validate a plan
+  (validate-plan {:plan/id (random-uuid)
+                  :plan/name "test-plan"
+                  :plan/tasks []})
+  ;; => {:valid? true, :errors nil}
+
+  ;; Get task order
+  (let [id-a (random-uuid)
+        id-b (random-uuid)]
+    (task-dependency-order
+     {:plan/tasks [{:task/id id-a :task/description "A" :task/type :implement}
+                   {:task/id id-b :task/description "B" :task/type :test
+                    :task/dependencies [id-a]}]}))
+
+  :leave-this-here)

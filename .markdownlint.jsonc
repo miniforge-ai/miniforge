@@ -28,5 +28,8 @@
   },
 
   // First line doesn't need to be a top-level heading
-  "MD041": false
+  "MD041": false,
+
+  // Allow table pipe style without surrounding spaces
+  "MD060": false
 }
