@@ -1,0 +1,7 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge/schema {:local/root "../schema"}
+        ai.miniforge/logging {:local/root "../logging"}
+        metosin/malli {:mvn/version "0.16.4"}
+        clj-commons/clj-yaml {:mvn/version "1.0.29"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {}}}}
