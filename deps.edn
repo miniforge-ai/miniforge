@@ -21,7 +21,13 @@
                        "components/loop/src"
                        "components/loop/resources"
                        "components/knowledge/src"
-                       "components/knowledge/resources"]
+                       "components/knowledge/resources"
+                       "components/workflow/src"
+                       "components/workflow/resources"
+                       "components/operator/src"
+                       "components/operator/resources"
+                       "components/orchestrator/src"
+                       "components/orchestrator/resources"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
@@ -30,9 +36,13 @@
                       ai.miniforge/agent {:local/root "components/agent"}
                       ai.miniforge/task {:local/root "components/task"}
                       ai.miniforge/loop {:local/root "components/loop"}
-                      ai.miniforge/knowledge {:local/root "components/knowledge"}}}
+                      ai.miniforge/knowledge {:local/root "components/knowledge"}
+                      ai.miniforge/workflow {:local/root "components/workflow"}
+                      ai.miniforge/operator {:local/root "components/operator"}
+                      ai.miniforge/orchestrator {:local/root "components/orchestrator"}}}
 
-  :test {:extra-paths ["components/schema/test"
+  :test {:extra-paths ["development/test"
+                       "components/schema/test"
                        "components/logging/test"
                        "components/llm/test"
                        "components/tool/test"
@@ -40,7 +50,10 @@
                        "components/agent/test"
                        "components/task/test"
                        "components/loop/test"
-                       "components/knowledge/test"]
+                       "components/knowledge/test"
+                       "components/workflow/test"
+                       "components/operator/test"
+                       "components/orchestrator/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
@@ -49,7 +62,10 @@
                       ai.miniforge/agent {:local/root "components/agent"}
                       ai.miniforge/task {:local/root "components/task"}
                       ai.miniforge/loop {:local/root "components/loop"}
-                      ai.miniforge/knowledge {:local/root "components/knowledge"}}}
+                      ai.miniforge/knowledge {:local/root "components/knowledge"}
+                      ai.miniforge/workflow {:local/root "components/workflow"}
+                      ai.miniforge/operator {:local/root "components/operator"}
+                      ai.miniforge/orchestrator {:local/root "components/orchestrator"}}}
 
   :poly {:main-opts  ["-m" "polylith.clj.core.poly-cli.core"]
          :extra-deps {polylith/clj-poly {:mvn/version "0.2.21"}}}
