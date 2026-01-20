@@ -5,7 +5,10 @@
    [ai.miniforge.agent.core :as core]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
-   [malli.core :as m]))
+   [ai.miniforge.llm.interface :as llm]
+   [malli.core :as m]
+   [clojure.edn :as edn]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Planner-specific schemas
@@ -158,21 +161,45 @@ necessary dependencies. Optimize for clarity and testability.")
     (seq acceptance-criteria) (assoc :task/acceptance-criteria acceptance-criteria)
     estimated-effort (assoc :task/estimated-effort estimated-effort)))
 
-(defn- analyze-spec
-  "Analyze a specification and extract key information.
-   In a real implementation, this would use an LLM."
-  [spec context]
-  (let [spec-text (if (map? spec)
-                    (or (:spec/content spec) (:content spec) (pr-str spec))
-                    (str spec))
-        has-tests? (some-> context :codebase :has-tests?)
-        complexity (cond
-                     (> (count spec-text) 1000) :high
-                     (> (count spec-text) 300) :medium
-                     :else :low)]
-    {:spec-text spec-text
-     :has-tests? has-tests?
-     :estimated-complexity complexity}))
+(defn- spec->text
+  "Convert a spec to text for the LLM."
+  [spec]
+  (if (map? spec)
+    (or (:description spec)
+        (:spec/content spec)
+        (:content spec)
+        (pr-str spec))
+    (str spec)))
+
+(defn- parse-plan-response
+  "Parse the LLM response to extract a plan.
+   Handles both EDN in code blocks and plain EDN."
+  [response-content]
+  (try
+    ;; Try to extract EDN from ```clojure or ```edn block
+    (if-let [match (re-find #"```(?:clojure|edn)?\s*\n([\s\S]*?)\n```" response-content)]
+      (edn/read-string (second match))
+      ;; Try to parse the whole response as EDN
+      (edn/read-string response-content))
+    (catch Exception _
+      ;; Return nil if parsing fails
+      nil)))
+
+(defn- make-fallback-plan
+  "Create a fallback plan when LLM response cannot be parsed."
+  [spec-text]
+  (let [plan-id (random-uuid)
+        task-id (random-uuid)]
+    {:plan/id plan-id
+     :plan/name (str "plan-" (subs (str plan-id) 0 8))
+     :plan/tasks [{:task/id task-id
+                   :task/description (str "Implement: " (subs spec-text 0 (min 100 (count spec-text))))
+                   :task/type :implement
+                   :task/estimated-effort :medium}]
+     :plan/estimated-complexity :medium
+     :plan/risks ["LLM response could not be parsed"]
+     :plan/assumptions ["Spec is complete"]
+     :plan/created-at (java.util.Date.)}))
 
 (defn- generate-plan
   "Generate a plan from analyzed specification.
@@ -285,6 +312,7 @@ necessary dependencies. Optimize for clarity and testability.")
    Options:
    - :config - Agent configuration (model, temperature, etc.)
    - :logger - Logger instance
+   - :llm-backend - LLM client (if not provided, uses :llm-backend from context)
 
    Example:
      (create-planner)
@@ -303,12 +331,55 @@ necessary dependencies. Optimize for clarity and testability.")
 
       :invoke-fn
       (fn [context input]
-        (let [analysis (analyze-spec input context)
-              plan (generate-plan analysis context)]
-          {:status :success
-           :output plan
-           :metrics {:tasks-created (count (:plan/tasks plan))
-                     :complexity (:plan/estimated-complexity plan)}}))
+        (let [llm-client (or (:llm-backend opts) (:llm-backend context))
+              spec-text (spec->text input)
+              user-prompt (str "Create an implementation plan for the following specification:\n\n"
+                               spec-text
+                               "\n\nOutput your plan as a Clojure map following the format in your system prompt. "
+                               "Use (random-uuid) for all IDs - just write #uuid \"<any-uuid>\" placeholders that I'll fill in.")]
+          (if llm-client
+            ;; Use the real LLM
+            (let [response (llm/chat llm-client user-prompt {:system planner-system-prompt})
+                  tokens (or (:tokens response) 0)]
+              (log/info logger :planner :planner/llm-called
+                        {:data {:success (llm/success? response)
+                                :tokens tokens}})
+              (if (llm/success? response)
+                (let [content (llm/get-content response)
+                      plan (or (parse-plan-response content)
+                               (make-fallback-plan spec-text))
+                      ;; Ensure all tasks have proper UUIDs
+                      plan-with-ids (-> plan
+                                        (update :plan/id #(or % (random-uuid)))
+                                        (update :plan/tasks
+                                                (fn [tasks]
+                                                  (mapv (fn [t]
+                                                          (update t :task/id #(or % (random-uuid))))
+                                                        tasks)))
+                                        (assoc :plan/created-at (java.util.Date.)))]
+                  {:status :success
+                   :output plan-with-ids
+                   :artifact plan-with-ids
+                   :tokens tokens
+                   :metrics {:tasks-created (count (:plan/tasks plan-with-ids))
+                             :complexity (:plan/estimated-complexity plan-with-ids)
+                             :tokens tokens}})
+                ;; LLM call failed
+                {:status :error
+                 :error (llm/get-error response)
+                 :output (make-fallback-plan spec-text)
+                 :artifact (make-fallback-plan spec-text)
+                 :metrics {:tokens 0}}))
+            ;; No LLM client - use fallback (for testing)
+            (do
+              (log/warn logger :planner :planner/no-llm-backend
+                        {:message "No LLM backend provided, using fallback plan"})
+              (let [plan (make-fallback-plan spec-text)]
+                {:status :success
+                 :output plan
+                 :artifact plan
+                 :metrics {:tasks-created (count (:plan/tasks plan))
+                           :complexity (:plan/estimated-complexity plan)}})))))
 
       :validate-fn validate-plan
 

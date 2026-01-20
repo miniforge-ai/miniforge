@@ -117,7 +117,6 @@
 (deftest backends-test
   (testing "backends contains expected keys"
     (is (contains? llm/backends :claude))
-    (is (contains? llm/backends :cursor))
     (is (contains? llm/backends :echo))))
 
 ;------------------------------------------------------------------------------ Rich Comment

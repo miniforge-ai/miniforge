@@ -462,13 +462,17 @@ Output execution logs and status reports."})
      Returns {:status :success/:error, :output <repaired-result>}"))
 
 (defrecord FunctionalAgent [role config system-prompt invoke-fn validate-fn repair-fn logger]
-  SpecializedAgent
-  (invoke [_this context input]
+  ;; Implement the main Agent protocol for compatibility with workflow/core.clj
+  ;; The Agent protocol signature is: (invoke [this task context])
+  ;; The invoke-fn expects: (invoke-fn context input)
+  ;; So we adapt by swapping the order
+  protocol/Agent
+  (invoke [_this task context]
     (let [start-time (System/currentTimeMillis)]
       (try
         (log/debug logger :agent :agent/invoke-started
-                   {:data {:role role :input-type (type input)}})
-        (let [result (invoke-fn context input)]
+                   {:data {:role role :task-type (:task/type task)}})
+        (let [result (invoke-fn context task)]
           (log/info logger :agent :agent/invoke-completed
                     {:data {:role role
                             :duration-ms (- (System/currentTimeMillis) start-time)
@@ -483,7 +487,7 @@ Output execution logs and status reports."})
            :error (.getMessage e)
            :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}}))))
 
-  (validate [_this output]
+  (validate [_this output _context]
     (validate-fn output))
 
   (repair [_this output errors context]

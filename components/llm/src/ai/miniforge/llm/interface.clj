@@ -107,11 +107,11 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; Create a client with claude CLI
+  ;; Create a client with claude CLI (default)
   (def client (create-client))
 
-  ;; Create a client with cursor CLI
-  (def client (create-client {:backend :cursor}))
+  ;; Create a client with echo backend (for testing)
+  (def client (create-client {:backend :echo}))
 
   ;; Simple chat
   (chat client "What is 2+2?")

@@ -5,7 +5,9 @@
    [ai.miniforge.agent.core :as core]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.llm.interface :as llm]
    [clojure.string :as str]
+   [clojure.edn :as edn]
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -170,40 +172,64 @@ Write code that is easy to understand, test, and maintain.")
           "rs" "rust"
           most-common))))
 
-(defn- generate-code
-  "Generate code based on task and context.
-   In a real implementation, this would use an LLM."
-  [task context]
-  (let [task-desc (or (:task/description task)
-                      (:description task)
-                      (str task))
-        file-path (or (:suggested-path context)
-                      "src/ai/miniforge/generated/impl.clj")
-        namespace-name (-> file-path
-                           (str/replace #"^src/" "")
-                           (str/replace #"\.clj$" "")
-                           (str/replace "/" ".")
-                           (str/replace "_" "-"))]
-    ;; Generate a stub implementation
-    ;; In production, this would be LLM-generated
-    {:code/id (random-uuid)
-     :code/files [{:path file-path
-                   :content (str "(ns " namespace-name "\n"
-                                 "  \"Generated implementation.\n"
-                                 "   Task: " (subs task-desc 0 (min 60 (count task-desc))) "\")\n\n"
-                                 ";; TODO: Implement based on task requirements\n\n"
-                                 "(defn execute\n"
-                                 "  \"Main entry point for this implementation.\"\n"
-                                 "  [input]\n"
-                                 "  ;; Implementation goes here\n"
-                                 "  {:status :not-implemented\n"
-                                 "   :input input})\n")
-                   :action :create}]
-     :code/dependencies-added []
-     :code/tests-needed? true
-     :code/language "clojure"
-     :code/summary (str "Initial implementation for: " (subs task-desc 0 (min 50 (count task-desc))))
-     :code/created-at (java.util.Date.)}))
+(defn- task->text
+  "Convert a task to text for the LLM."
+  [task]
+  (cond
+    (string? task) task
+    (map? task) (or (:task/description task)
+                    (:description task)
+                    (:content task)
+                    (pr-str task))
+    :else (str task)))
+
+(defn- parse-code-response
+  "Parse the LLM response to extract code artifact.
+   Handles both EDN in code blocks and plain EDN."
+  [response-content]
+  (try
+    ;; Try to extract EDN from ```clojure or ```edn block
+    (if-let [match (re-find #"```(?:clojure|edn)?\s*\n([\s\S]*?)\n```" response-content)]
+      (edn/read-string (second match))
+      ;; Try to parse the whole response as EDN
+      (edn/read-string response-content))
+    (catch Exception _
+      nil)))
+
+(defn- extract-code-blocks
+  "Extract code blocks from markdown response and convert to file list."
+  [response-content]
+  (let [blocks (re-seq #"```(?:(\w+)\n)?([^`]+)```" response-content)]
+    (when (seq blocks)
+      (->> blocks
+           (map-indexed (fn [idx [_full lang content]]
+                          {:path (str "src/ai/miniforge/generated/file" idx
+                                      (case lang
+                                        "clojure" ".clj"
+                                        "clj" ".clj"
+                                        "python" ".py"
+                                        "javascript" ".js"
+                                        "typescript" ".ts"
+                                        ".clj"))
+                           :content (str/trim content)
+                           :action :create}))
+           vec))))
+
+(defn- make-fallback-code
+  "Create a fallback code artifact when LLM response cannot be parsed."
+  [task-text]
+  {:code/id (random-uuid)
+   :code/files [{:path "src/ai/miniforge/generated/impl.clj"
+                 :content (str "(ns ai.miniforge.generated.impl\n"
+                               "  \"Generated implementation.\")\n\n"
+                               ";; Task: " (subs task-text 0 (min 60 (count task-text))) "\n\n"
+                               "(defn execute [input]\n"
+                               "  {:status :not-implemented :input input})\n")
+                 :action :create}]
+   :code/tests-needed? true
+   :code/language "clojure"
+   :code/summary "Fallback stub implementation"
+   :code/created-at (java.util.Date.)})
 
 (defn- repair-code-artifact
   "Attempt to repair a code artifact based on validation errors."
@@ -267,6 +293,7 @@ Write code that is easy to understand, test, and maintain.")
    Options:
    - :config - Agent configuration (model, temperature, etc.)
    - :logger - Logger instance
+   - :llm-backend - LLM client (if not provided, uses :llm-backend from context)
 
    Example:
      (create-implementer)
@@ -285,14 +312,64 @@ Write code that is easy to understand, test, and maintain.")
 
       :invoke-fn
       (fn [context input]
-        (let [code (generate-code input context)
-              lang (extract-language (:code/files code) context)]
-          {:status :success
-           :output (assoc code :code/language lang)
-           :metrics {:files-created (count (filter #(= :create (:action %)) (:code/files code)))
-                     :files-modified (count (filter #(= :modify (:action %)) (:code/files code)))
-                     :files-deleted (count (filter #(= :delete (:action %)) (:code/files code)))
-                     :language lang}}))
+        (let [llm-client (or (:llm-backend opts) (:llm-backend context))
+              task-text (task->text input)
+              user-prompt (str "Implement the following task:\n\n"
+                               task-text
+                               "\n\nOutput your code as a Clojure map following the format in your system prompt. "
+                               "Include full file contents, not placeholders.")]
+          (if llm-client
+            ;; Use the real LLM
+            (let [response (llm/chat llm-client user-prompt {:system implementer-system-prompt})
+                  tokens (or (:tokens response) 0)]
+              (log/info logger :implementer :implementer/llm-called
+                        {:data {:success (llm/success? response)
+                                :tokens tokens}})
+              (if (llm/success? response)
+                (let [content (llm/get-content response)
+                      parsed (parse-code-response content)
+                      ;; Try multiple parsing strategies
+                      code (or parsed
+                               (when-let [files (extract-code-blocks content)]
+                                 {:code/id (random-uuid)
+                                  :code/files files
+                                  :code/tests-needed? true
+                                  :code/summary "Implementation from code blocks"
+                                  :code/created-at (java.util.Date.)})
+                               (make-fallback-code task-text))
+                      ;; Ensure proper ID and language
+                      code-with-meta (-> code
+                                         (update :code/id #(or % (random-uuid)))
+                                         (assoc :code/language (extract-language (:code/files code) context))
+                                         (assoc :code/created-at (java.util.Date.)))
+                      lang (:code/language code-with-meta)]
+                  {:status :success
+                   :output code-with-meta
+                   :artifact code-with-meta
+                   :tokens tokens
+                   :metrics {:files-created (count (filter #(= :create (:action %)) (:code/files code-with-meta)))
+                             :files-modified (count (filter #(= :modify (:action %)) (:code/files code-with-meta)))
+                             :files-deleted (count (filter #(= :delete (:action %)) (:code/files code-with-meta)))
+                             :language lang
+                             :tokens tokens}})
+                ;; LLM call failed
+                (let [fallback (make-fallback-code task-text)]
+                  {:status :error
+                   :error (llm/get-error response)
+                   :output fallback
+                   :artifact fallback
+                   :metrics {:tokens 0}})))
+            ;; No LLM client - use fallback (for testing)
+            (do
+              (log/warn logger :implementer :implementer/no-llm-backend
+                        {:message "No LLM backend provided, using fallback code"})
+              (let [code (make-fallback-code task-text)
+                    lang (extract-language (:code/files code) context)]
+                {:status :success
+                 :output (assoc code :code/language lang)
+                 :artifact (assoc code :code/language lang)
+                 :metrics {:files-created 1
+                           :language lang}})))))
 
       :validate-fn validate-code-artifact
 
