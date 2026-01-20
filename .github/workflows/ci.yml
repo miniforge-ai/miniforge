@@ -69,7 +69,13 @@ jobs:
         with:
           cli: latest
           bb: latest
-          polylith: latest
+
+      - name: Install Polylith
+        run: |
+          curl -sLO https://github.com/polyfy/polylith/releases/latest/download/poly-linux-amd64.tgz
+          tar -xzf poly-linux-amd64.tgz
+          sudo mv poly /usr/local/bin/
+          poly version
 
       - name: Cache Clojure dependencies
         uses: actions/cache@v4
