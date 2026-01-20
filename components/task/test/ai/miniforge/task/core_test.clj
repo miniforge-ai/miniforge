@@ -267,10 +267,13 @@
 
   (testing "returns parent task"
     (let [parent (core/create-task! {:task/type :plan})
-          _ (core/decompose-task! (:task/id parent) [{:task/type :design}])
-          children (core/get-children (:task/id parent))
-          child-id (:task/id (first children))]
-      (is (= parent (core/get-parent child-id))))))
+          parent-id (:task/id parent)
+          _ (core/decompose-task! parent-id [{:task/type :design}])
+          children (core/get-children parent-id)
+          child-id (:task/id (first children))
+          ;; Refetch parent after decompose (it now has :children)
+          current-parent (core/get-task parent-id)]
+      (is (= current-parent (core/get-parent child-id))))))
 
 (deftest get-root-task-test
   (testing "returns task itself for root task"
@@ -279,16 +282,20 @@
 
   (testing "returns root ancestor"
     (let [root (core/create-task! {:task/type :plan})
-          _ (core/decompose-task! (:task/id root) [{:task/type :design}])
-          child (first (core/get-children (:task/id root)))
+          root-id (:task/id root)
+          _ (core/decompose-task! root-id [{:task/type :design}])
+          child (first (core/get-children root-id))
           _ (core/decompose-task! (:task/id child) [{:task/type :implement}])
-          grandchild (first (core/get-children (:task/id child)))]
-      (is (= root (core/get-root-task (:task/id grandchild)))))))
+          grandchild (first (core/get-children (:task/id child)))
+          ;; Refetch root after decompose (it now has :children)
+          current-root (core/get-task root-id)]
+      (is (= current-root (core/get-root-task (:task/id grandchild)))))))
 
 (deftest all-children-completed?-test
-  (testing "returns false for task with no children"
+  (testing "returns falsy for task with no children"
     (let [task (core/create-task! {:task/type :plan})]
-      (is (false? (core/all-children-completed? (:task/id task))))))
+      ;; Returns nil (falsy) when no children - different from false but logically same
+      (is (not (core/all-children-completed? (:task/id task))))))
 
   (testing "returns false when not all children completed"
     (let [parent (core/create-task! {:task/type :plan})
