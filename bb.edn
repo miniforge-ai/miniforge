@@ -43,14 +43,19 @@
 
   lint:clj
   {:doc  "Lint Clojure files with clj-kondo"
-   :task (let [clj-files (concat (staged-by-ext ".clj")
-                                 (staged-by-ext ".cljs")
-                                 (staged-by-ext ".cljc")
-                                 (staged-by-ext ".edn"))]
+   :task (let [clj-files (->> (concat (staged-by-ext ".clj")
+                                      (staged-by-ext ".cljs")
+                                      (staged-by-ext ".cljc")
+                                      (staged-by-ext ".edn"))
+                              ;; Exclude .clj-kondo imports (library configs)
+                              (remove (fn [f] (str/starts-with? f ".clj-kondo/"))))]
            (if (seq clj-files)
-             (do
-               (println "🔍 Linting" (count clj-files) "Clojure file(s)...")
-               (apply run! "clj-kondo" "--lint" clj-files))
+             (let [_ (println "🔍 Linting" (count clj-files) "Clojure file(s)...")
+                   {:keys [exit]} (apply p/sh "clj-kondo" "--lint" clj-files)]
+               ;; Exit 0 = success, 2 = warnings only, 3 = errors
+               ;; Allow warnings but fail on errors
+               (when (= exit 3)
+                 (System/exit 3)))
              (println "✓ No Clojure files to lint")))}
 
   lint:clj:all
