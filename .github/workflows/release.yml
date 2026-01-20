@@ -28,9 +28,6 @@ jobs:
           - os: linux
             arch: x86_64
             runner: ubuntu-latest
-          - os: linux
-            arch: arm64
-            runner: ubuntu-latest-arm64
 
     steps:
       - name: Checkout code
@@ -160,13 +157,6 @@ jobs:
             sudo mv miniforge /usr/local/bin/
             ```
 
-            **Linux ARM64**
-            ```bash
-            curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/miniforge-linux-arm64 -o miniforge
-            chmod +x miniforge
-            sudo mv miniforge /usr/local/bin/
-            ```
-
             ### Verification
             Verify the installation:
             ```bash
@@ -211,12 +201,6 @@ jobs:
           name: miniforge-linux-x86_64
           path: artifacts/linux-x86_64
 
-      - name: Download Linux ARM64 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: miniforge-linux-arm64
-          path: artifacts/linux-arm64
-
       - name: Generate formula
         run: |
           VERSION="${{ needs.release.outputs.version }}"
@@ -224,7 +208,6 @@ jobs:
           # Read SHA256 checksums
           MACOS_ARM64_SHA=$(cat artifacts/macos-arm64/miniforge-macos-arm64.sha256 | awk '{print $1}')
           LINUX_X86_SHA=$(cat artifacts/linux-x86_64/miniforge-linux-x86_64.sha256 | awk '{print $1}')
-          LINUX_ARM64_SHA=$(cat artifacts/linux-arm64/miniforge-linux-arm64.sha256 | awk '{print $1}')
 
           cat > homebrew-tap/Formula/miniforge.rb << EOF
           class Miniforge < Formula
@@ -239,13 +222,8 @@ jobs:
             end
 
             on_linux do
-              if Hardware::CPU.arm?
-                url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/miniforge-linux-arm64"
-                sha256 "${LINUX_ARM64_SHA}"
-              else
-                url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/miniforge-linux-x86_64"
-                sha256 "${LINUX_X86_SHA}"
-              end
+              url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/miniforge-linux-x86_64"
+              sha256 "${LINUX_X86_SHA}"
             end
 
             depends_on "babashka"
@@ -253,8 +231,7 @@ jobs:
 
             def install
               bin.install "miniforge-macos-arm64" => "miniforge" if OS.mac?
-              bin.install "miniforge-linux-arm64" => "miniforge" if OS.linux? && Hardware::CPU.arm?
-              bin.install "miniforge-linux-x86_64" => "miniforge" if OS.linux? && Hardware::CPU.intel?
+              bin.install "miniforge-linux-x86_64" => "miniforge" if OS.linux?
             end
 
             test do
