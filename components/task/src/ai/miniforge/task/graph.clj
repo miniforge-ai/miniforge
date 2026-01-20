@@ -85,9 +85,11 @@
   [reverse-deps completed]
   (->> (keys reverse-deps)
        (filter (fn [task-id]
-                 (let [deps (get reverse-deps task-id #{})]
-                   (or (empty? deps)
-                       (every? completed deps)))))
+                 ;; Task is ready if: not already completed AND dependencies are met
+                 (and (not (completed task-id))
+                      (let [deps (get reverse-deps task-id #{})]
+                        (or (empty? deps)
+                            (every? completed deps))))))
        set))
 
 (defn find-blocked-pure
@@ -123,9 +125,10 @@
   ([graph parent-id child-id] (add-dependency graph parent-id child-id nil))
   ([graph parent-id child-id logger]
    (let [state @graph]
-     ;; Check for cycle
+     ;; Check for cycle: if we add parent -> child edge,
+     ;; a cycle exists if parent is already reachable from child
      (if (or (= parent-id child-id)
-             (detect-cycle (:forward state) child-id parent-id))
+             (detect-cycle (:forward state) parent-id child-id))
        (do
          (when logger
            (log/warn logger :agent :task/cycle-detected

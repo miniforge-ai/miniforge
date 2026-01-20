@@ -17,7 +17,7 @@
   "Valid state transitions in the inner loop state machine."
   {:pending     #{:generating}
    :generating  #{:validating :failed}
-   :validating  #{:complete :repairing :failed}
+   :validating  #{:complete :repairing :failed :escalated}
    :repairing   #{:generating :escalated :failed}
    :complete    #{}  ; terminal state
    :failed      #{}  ; terminal state
@@ -184,9 +184,10 @@
                  :data {:iteration (:loop/iteration loop-state)
                         :task-id (get-in loop-state [:loop/task :task/id])}}))
 
-    ;; Transition to generating
+    ;; Transition to generating (skip if already in generating state from repair)
     (let [loop-state (-> loop-state
-                         (transition :generating)
+                         (cond-> (not= (:loop/state loop-state) :generating)
+                           (transition :generating))
                          (increment-iteration))]
       (try
         (let [result (generate-fn (:loop/task loop-state) context)

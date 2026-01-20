@@ -414,10 +414,11 @@ Output execution logs and status reports."})
 (defrecord MockLLMBackend [responses]
   protocol/LLMBackend
   (complete [_this _messages _opts]
-    (let [response (if (sequential? responses)
-                     (first @responses)
-                     @responses)]
-      (when (sequential? responses)
+    (let [current @responses
+          response (if (sequential? current)
+                     (first current)
+                     current)]
+      (when (sequential? current)
         (swap! responses rest))
       (or response
           {:content "Mock response"

@@ -78,16 +78,21 @@
       (is (= 1 (count (task/tasks-by-status :running))))))
 
   (testing "tasks-by-type returns correct tasks"
+    ;; Note: Previous testing block created _t1=:plan, t2=:implement
+    ;; Create more tasks for this test
     (task/create-task {:task/type :plan})
     (task/create-task {:task/type :implement})
     (task/create-task {:task/type :implement})
-    (is (= 1 (count (task/tasks-by-type :plan))))
-    (is (= 2 (count (task/tasks-by-type :implement)))))
+    ;; Total: 2 plan (1 from before + 1 now), 3 implement (1 from before + 2 now)
+    (is (= 2 (count (task/tasks-by-type :plan))))
+    (is (= 3 (count (task/tasks-by-type :implement)))))
 
   (testing "all-tasks returns all tasks"
+    ;; Creates 2 more tasks on top of existing ones
     (task/create-task {:task/type :plan})
     (task/create-task {:task/type :implement})
-    (is (= 2 (count (task/all-tasks))))))
+    ;; Total: 7 tasks (2 + 3 + 2)
+    (is (= 7 (count (task/all-tasks))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Decomposition tests
@@ -95,23 +100,29 @@
 (deftest decomposition-test
   (testing "parent-child relationships"
     (let [parent (task/create-task {:task/type :plan})
-          _ (task/decompose-task (:task/id parent)
+          parent-id (:task/id parent)
+          _ (task/decompose-task parent-id
                                  [{:task/type :design}
                                   {:task/type :implement}
                                   {:task/type :test}])
-          children (task/get-children (:task/id parent))]
+          children (task/get-children parent-id)
+          ;; Refetch parent after decompose (it now has :children)
+          current-parent (task/get-task parent-id)]
       (is (= 3 (count children)))
-      ;; Each child should reference parent
+      ;; Each child should reference the current parent state
       (doseq [child children]
-        (is (= parent (task/get-parent (:task/id child)))))))
+        (is (= current-parent (task/get-parent (:task/id child)))))))
 
   (testing "get-root-task traverses hierarchy"
     (let [root (task/create-task {:task/type :plan})
-          _ (task/decompose-task (:task/id root) [{:task/type :design}])
-          child (first (task/get-children (:task/id root)))
+          root-id (:task/id root)
+          _ (task/decompose-task root-id [{:task/type :design}])
+          child (first (task/get-children root-id))
           _ (task/decompose-task (:task/id child) [{:task/type :implement}])
-          grandchild (first (task/get-children (:task/id child)))]
-      (is (= root (task/get-root-task (:task/id grandchild)))))))
+          grandchild (first (task/get-children (:task/id child)))
+          ;; Refetch root after decompose (it now has :children)
+          current-root (task/get-task root-id)]
+      (is (= current-root (task/get-root-task (:task/id grandchild)))))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Priority queue integration tests

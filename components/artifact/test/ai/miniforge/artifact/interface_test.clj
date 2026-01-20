@@ -1,23 +1,31 @@
 (ns ai.miniforge.artifact.interface-test
   (:require [clojure.test :as test :refer [deftest testing is use-fixtures]]
-            [ai.miniforge.artifact.interface :as artifact]))
+            [ai.miniforge.artifact.interface :as artifact]
+            [babashka.fs :as fs]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures
 
-(def test-stores (atom #{}))
+(def test-dirs (atom #{}))
 
 (defn cleanup-stores [f]
   (f)
-  (doseq [store @test-stores]
-    (artifact/close-store store))
-  (reset! test-stores #{}))
+  ;; Clean up temp directories after tests
+  (doseq [dir @test-dirs]
+    (when (fs/exists? dir)
+      (fs/delete-tree dir)))
+  (reset! test-dirs #{}))
 
 (use-fixtures :each cleanup-stores)
 
-(defn create-test-store []
-  (let [store (artifact/create-store)]
-    (swap! test-stores conj store)
+(defn create-test-store
+  "Create an isolated test store using a unique temp directory.
+   Each call creates a fresh database, avoiding shared state issues
+   with Datalevin's in-memory connections."
+  []
+  (let [dir (str (fs/create-temp-dir {:prefix "artifact-test-"}))
+        store (artifact/create-store {:dir dir})]
+    (swap! test-dirs conj dir)
     store))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -30,8 +38,9 @@
       (is (satisfies? artifact/ArtifactStore store))))
 
   (testing "creates store with logger"
-    (let [store (artifact/create-store {:logger nil})]
-      (swap! test-stores conj store)
+    (let [dir (str (fs/create-temp-dir {:prefix "artifact-test-logger-"}))
+          store (artifact/create-store {:dir dir :logger nil})]
+      (swap! test-dirs conj dir)
       (is (some? store)))))
 
 ;; Artifact building tests
