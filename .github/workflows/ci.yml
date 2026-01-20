@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install Clojure
+        uses: DeLaGuardo/setup-clojure@12.5
+        with:
+          cli: latest
+          bb: latest
+          clj-kondo: latest
+
+      - name: Install markdownlint
+        run: |
+          npm install -g markdownlint-cli
+
+      - name: Cache Clojure dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+          key: clojure-${{ runner.os }}-${{ hashFiles('deps.edn', '**/deps.edn') }}
+          restore-keys: |
+            clojure-${{ runner.os }}-
+
+      - name: Lint Clojure
+        run: bb lint:clj:all
+
+      - name: Lint Markdown
+        run: bb fmt:md:all
+        continue-on-error: true
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install Clojure
+        uses: DeLaGuardo/setup-clojure@12.5
+        with:
+          cli: latest
+          bb: latest
+
+      - name: Cache Clojure dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+          key: clojure-${{ runner.os }}-${{ hashFiles('deps.edn', '**/deps.edn') }}
+          restore-keys: |
+            clojure-${{ runner.os }}-
+
+      - name: Run tests
+        run: bb test
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install Clojure
+        uses: DeLaGuardo/setup-clojure@12.5
+        with:
+          cli: latest
+          bb: latest
+
+      - name: Cache Clojure dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+          key: clojure-${{ runner.os }}-${{ hashFiles('deps.edn', '**/deps.edn') }}
+          restore-keys: |
+            clojure-${{ runner.os }}-
+
+      - name: Compile all code
+        run: bb compile
+
+      - name: Build CLI
+        run: bb build:cli
+
+      - name: Test CLI
+        run: |
+          ./dist/miniforge version
+          ./dist/miniforge help
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: miniforge-cli-${{ github.sha }}
+          path: dist/miniforge
+          retention-days: 7

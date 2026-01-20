@@ -4,7 +4,43 @@
 
 Autonomous SDLC platform — a self-directing software factory built on multi-agent cognition.
 
-## Quick Start
+## Installation
+
+### For End Users
+
+Install miniforge via Homebrew:
+
+```bash
+# Add the miniforge tap
+brew tap miniforge-ai/tap
+
+# Install miniforge
+brew install miniforge
+
+# Verify installation
+miniforge version
+```
+
+Or download directly from [GitHub Releases](https://github.com/miniforge-ai/miniforge/releases).
+
+### CLI Commands
+
+```bash
+miniforge status        # Show system status
+miniforge workflows     # List all workflows
+miniforge workflow <id> # Show workflow detail
+miniforge meta          # Show meta-loop status
+miniforge version       # Show version information
+miniforge help          # Show help message
+```
+
+Note: Full workflow and meta-loop features will be available as components are integrated.
+
+### For Contributors
+
+If you want to contribute to miniforge development, follow the Quick Start guide below.
+
+## Quick Start (Development)
 
 ### Prerequisites
 
@@ -120,4 +156,6 @@ See [docs/specs/architecture.spec](docs/specs/architecture.spec) for the full ar
 
 ## License
 
-See [LICENSE](LICENSE).
+miniforge is licensed under the [Apache License 2.0](LICENSE).
+
+Copyright 2025 miniforge.ai

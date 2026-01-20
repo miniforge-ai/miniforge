@@ -88,7 +88,7 @@
   (get-state [_this workflow-id]
     (get @workflows workflow-id))
 
-  (advance [this workflow-id phase-result]
+  (advance [_this workflow-id phase-result]
     (when-let [state (get @workflows workflow-id)]
       (let [current-phase (:workflow/phase state)
             success? (:success? phase-result)

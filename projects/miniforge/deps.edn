@@ -1,0 +1,7 @@
+{:paths []
+
+ :deps {ai.miniforge/cli {:local/root "../../bases/cli"}}
+
+ :aliases
+ {:uberjar
+  {:main ai.miniforge.cli.main}}}

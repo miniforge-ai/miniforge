@@ -17,7 +17,6 @@
    [ai.miniforge.operator.interface :as operator]
    [ai.miniforge.logging.interface :as log]
    [clojure.edn :as edn]
-   [clojure.java.io :as io]
    [babashka.fs :as fs]))
 
 ;; ============================================================================

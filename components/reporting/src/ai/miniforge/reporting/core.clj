@@ -3,7 +3,6 @@
   (:require
    [ai.miniforge.reporting.protocol :as proto]
    [ai.miniforge.workflow.interface :as wf]
-   [ai.miniforge.orchestrator.interface :as orch]
    [ai.miniforge.operator.interface :as op]
    [ai.miniforge.artifact.interface :as art]
    [ai.miniforge.logging.interface :as log]))
@@ -24,10 +23,11 @@
   [workflows status]
   (count (filter #(= status (:workflow/status %)) workflows)))
 
-(defn- count-by-phase
-  "Count workflows by phase."
-  [workflows phase]
-  (count (filter #(= phase (:workflow/phase %)) workflows)))
+;; Note: Keep for future phase-based filtering
+#_(defn- count-by-phase
+    "Count workflows by phase."
+    [workflows phase]
+    (count (filter #(= phase (:workflow/phase %)) workflows)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Subscription management (polling-based for BB compatibility)
@@ -42,12 +42,13 @@
    :subscription/last-poll 0
    :subscription/event-queue (atom [])})
 
-(defn- add-event-to-subscriptions
-  "Add event to relevant subscriptions."
-  [subscriptions event]
-  (doseq [[_id sub] @subscriptions]
-    (when (contains? (:subscription/topics sub) (:event/topic event))
-      (swap! (:subscription/event-queue sub) conj event))))
+;; Note: Keep for future event broadcasting support
+#_(defn- add-event-to-subscriptions
+    "Add event to relevant subscriptions."
+    [subscriptions event]
+    (doseq [[_id sub] @subscriptions]
+      (when (contains? (:subscription/topics sub) (:event/topic event))
+        (swap! (:subscription/event-queue sub) conj event))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; System status aggregation
@@ -130,7 +131,7 @@
 
 (defn- get-workflow-logs
   "Get logs for a workflow."
-  [logger workflow-id]
+  [logger _workflow-id]
   (if logger
     ;; In real implementation, would query logger with context filter
     ;; For now, return empty as logger doesn't expose query API

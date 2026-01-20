@@ -11,7 +11,7 @@
 
 (defn close-store [store] (core/close store))
 (defn save! [store artifact] (core/save store artifact))
-(defn load [store id] (core/load-artifact store id))
+(defn load-artifact [store id] (core/load-artifact store id))
 (defn query [store criteria] (core/query store criteria))
 (defn link! [store parent-id child-id] (core/link store parent-id child-id))
 
@@ -20,7 +20,7 @@
 (defn add-child [artifact child-id] (core/add-child artifact child-id))
 
 (defn get-provenance [store artifact-id]
-  (when-let [artifact (load store artifact-id)]
+  (when-let [artifact (load-artifact store artifact-id)]
     {:ancestors (:artifact/parents artifact [])
      :descendants (:artifact/children artifact [])}))
 

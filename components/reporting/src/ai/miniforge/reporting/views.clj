@@ -199,7 +199,7 @@
           timeline (:timeline detail)
           current-task (:current-task detail)
           artifacts (:artifacts detail)
-          logs (:logs detail)
+          _logs (:logs detail)
           
           ;; Header section
           header-section (str/join "\n"

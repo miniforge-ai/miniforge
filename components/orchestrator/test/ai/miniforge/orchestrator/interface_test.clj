@@ -171,10 +171,10 @@
 (deftest check-budget-test
   (testing "check-budget returns budget status"
     (let [budget-mgr (orch/create-budget-manager)
-          workflow-id (random-uuid)]
-      (let [result (orch/check-budget budget-mgr workflow-id)]
-        (is (map? result))
-        (is (contains? result :within-budget?))))))
+          workflow-id (random-uuid)
+          result (orch/check-budget budget-mgr workflow-id)]
+      (is (map? result))
+      (is (contains? result :within-budget?)))))
 
 (deftest track-usage-test
   (testing "track-usage updates budget"

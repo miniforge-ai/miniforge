@@ -7,8 +7,7 @@
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
    [malli.core :as m]
-   [clojure.edn :as edn]
-   [clojure.string :as str]))
+   [clojure.edn :as edn]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Planner-specific schemas
@@ -148,7 +147,8 @@ necessary dependencies. Optimize for clarity and testability.")
           :else
           {:valid? true :errors nil})))))
 
-(defn- make-task
+;; NOTE: Helper function for commented-out generate-plan function
+#_(defn- make-task
   "Helper to create a task with generated ID."
   [{:keys [description type dependencies acceptance-criteria estimated-effort]
     :or {dependencies []
@@ -201,7 +201,9 @@ necessary dependencies. Optimize for clarity and testability.")
      :plan/assumptions ["Spec is complete"]
      :plan/created-at (java.util.Date.)}))
 
-(defn- generate-plan
+;; NOTE: This function is currently unused but kept as reference for future implementation
+;; where plan generation may be delegated to a separate function rather than done inline.
+#_(defn- generate-plan
   "Generate a plan from analyzed specification.
    In a real implementation, this would use an LLM with the system prompt."
   [analysis context]

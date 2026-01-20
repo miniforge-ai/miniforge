@@ -293,12 +293,11 @@
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (require '[ai.miniforge.llm.interface :as llm]
-           '[ai.miniforge.knowledge.interface :as k]
            '[ai.miniforge.artifact.interface :as artifact])
 
   ;; Create components
   (def llm-client (llm/mock-client {:output "Test response"}))
-  (def k-store (k/create-store))
+  (def k-store (knowledge/create-store))
   (def a-store (artifact/create-store))
 
   ;; Create control plane
