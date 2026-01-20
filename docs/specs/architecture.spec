@@ -94,7 +94,7 @@ Examples:
 
 ### 3.1 Stratum Map
 
-```
+```zsh
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ BASES (Entry Points)                                                     │
 │  cli, server, fleet                                                      │
@@ -448,6 +448,7 @@ homebrew-miniforge/
 ```
 
 Installation:
+
 ```bash
 brew tap miniforge-ai/miniforge
 brew install miniforge
