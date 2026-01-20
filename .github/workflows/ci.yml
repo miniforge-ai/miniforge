@@ -69,7 +69,6 @@ jobs:
         with:
           cli: latest
           bb: latest
-          polylith: latest
 
       - name: Cache Clojure dependencies
         uses: actions/cache@v4
