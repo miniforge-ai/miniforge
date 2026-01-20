@@ -82,7 +82,7 @@
     "Get messages that fit within token limit, prioritizing recent.
      Returns {:messages [...] :total-tokens int :trimmed-count int}")
 
-  (clear [this]
+  (clear-messages [this]
     "Clear all messages. Returns empty memory.")
 
   (get-metadata [this]
@@ -106,7 +106,7 @@
        :total-tokens (total-tokens windowed)
        :trimmed-count trimmed-count}))
 
-  (clear [this]
+  (clear-messages [this]
     (assoc this :messages []))
 
   (get-metadata [_this]

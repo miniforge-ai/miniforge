@@ -6,7 +6,10 @@
   (:require
    [ai.miniforge.agent.core :as core]
    [ai.miniforge.agent.memory :as mem]
-   [ai.miniforge.agent.protocol :as proto]))
+   [ai.miniforge.agent.protocol :as proto]
+   [ai.miniforge.agent.planner :as planner]
+   [ai.miniforge.agent.implementer :as implementer]
+   [ai.miniforge.agent.tester :as tester]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol re-exports (allow other components to reference protocols)
@@ -200,7 +203,7 @@
 (defn clear-memory
   "Clear all messages from memory. Returns empty memory."
   [memory]
-  (mem/clear memory))
+  (mem/clear-messages memory))
 
 (defn memory-metadata
   "Get memory metadata (scope, created-at, etc.)."
@@ -265,6 +268,90 @@
      (create-mock-llm {:content \"Hello\" :usage {:input-tokens 10 :output-tokens 5}})"
   ([] (core/create-mock-llm))
   ([responses] (core/create-mock-llm responses)))
+
+;------------------------------------------------------------------------------ Layer 7
+;; Specialized agent creation
+
+(def create-planner
+  "Create a Planner agent with optional configuration overrides.
+   The Planner analyzes specifications and creates detailed implementation plans."
+  planner/create-planner)
+
+(def create-implementer
+  "Create an Implementer agent with optional configuration overrides.
+   The Implementer generates code from plans and task descriptions."
+  implementer/create-implementer)
+
+(def create-tester
+  "Create a Tester agent with optional configuration overrides.
+   The Tester generates tests for code artifacts and validates coverage."
+  tester/create-tester)
+
+;------------------------------------------------------------------------------ Layer 8
+;; Specialized agent schemas
+
+;; Planner schemas
+(def Plan planner/Plan)
+(def PlanTask planner/PlanTask)
+
+;; Implementer schemas
+(def CodeArtifact implementer/CodeArtifact)
+(def CodeFile implementer/CodeFile)
+
+;; Tester schemas
+(def TestArtifact tester/TestArtifact)
+(def TestFile tester/TestFile)
+(def Coverage tester/Coverage)
+
+;------------------------------------------------------------------------------ Layer 9
+;; Specialized agent utilities
+
+;; Planner utilities
+(def plan-summary
+  "Get a summary of a plan for logging/display."
+  planner/plan-summary)
+
+(def task-dependency-order
+  "Return tasks in dependency order (topological sort)."
+  planner/task-dependency-order)
+
+(def validate-plan
+  "Validate a plan against the Plan schema and check for structural issues."
+  planner/validate-plan)
+
+;; Implementer utilities
+(def code-summary
+  "Get a summary of a code artifact for logging/display."
+  implementer/code-summary)
+
+(def files-by-action
+  "Group files by their action type (:create, :modify, :delete)."
+  implementer/files-by-action)
+
+(def total-lines
+  "Count total lines of code in the artifact."
+  implementer/total-lines)
+
+(def validate-code-artifact
+  "Validate a code artifact against the schema and check for issues."
+  implementer/validate-code-artifact)
+
+;; Tester utilities
+(def test-summary
+  "Get a summary of a test artifact for logging/display."
+  tester/test-summary)
+
+(def coverage-meets-threshold?
+  "Check if coverage meets the specified thresholds."
+  tester/coverage-meets-threshold?)
+
+(def tests-by-path
+  "Get a map of test file paths to their content."
+  tester/tests-by-path)
+
+(def validate-test-artifact
+  "Validate a test artifact against the schema and check for issues."
+  tester/validate-test-artifact)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
