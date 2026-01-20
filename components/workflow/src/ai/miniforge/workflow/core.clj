@@ -320,16 +320,23 @@
 
       ;; Generate and run tests for each code artifact
       (doseq [code-artifact code-artifacts]
-        (let [task (task/create-task
+        (let [;; Extract artifact ID if available, or generate one
+              artifact-id (or (get-in code-artifact [:content :code/id]) (random-uuid))
+              task (task/create-task
                     {:task/id (random-uuid)
                      :task/type :test
                      :task/title "Generate tests"
-                     :task/description (str "Test: " (-> code-artifact :content first))
+                     :task/description (str "Generate tests for code artifact " artifact-id)
                      :task/status :pending
-                     :task/inputs [{:type :code :content (:content code-artifact)}]})
+                     ;; Note: :task/inputs should be vector of UUIDs per schema
+                     ;; We'll pass the actual artifact content via context instead
+                     :task/inputs [artifact-id]})
               tester (agent/create-tester {:llm-backend llm-backend})
+              ;; Pass code content to tester via the task input (code artifact content)
+              test-context (assoc context :code-artifact (:content code-artifact))
               generate-fn (fn [_task _ctx]
-                            (let [result (agent/invoke tester task context)]
+                            ;; The tester expects code artifact as input
+                            (let [result (agent/invoke tester {:code (:content code-artifact)} test-context)]
                               {:artifact (:artifact result)
                                :tokens (or (:tokens result) 0)}))
               result (loop/run-simple task generate-fn
