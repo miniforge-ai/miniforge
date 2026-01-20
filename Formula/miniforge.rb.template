@@ -30,11 +30,11 @@ class Miniforge < Formula
   depends_on "gum"
 
   def install
-    bin.install "miniforge-macos-arm64" => "miniforge" if OS.mac?
-    bin.install "miniforge-linux-x86_64" => "miniforge" if OS.linux?
+    bin.install "miniforge-macos-arm64" => "mf" if OS.mac?
+    bin.install "miniforge-linux-x86_64" => "mf" if OS.linux?
   end
 
   test do
-    assert_match "miniforge", shell_output("#{bin}/miniforge version")
+    assert_match "miniforge", shell_output("#{bin}/mf version")
   end
 end
