@@ -27,7 +27,9 @@
                        "components/operator/src"
                        "components/operator/resources"
                        "components/orchestrator/src"
-                       "components/orchestrator/resources"]
+                       "components/orchestrator/resources"
+                       "components/reporting/src"
+                       "components/reporting/resources"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
@@ -39,7 +41,8 @@
                       ai.miniforge/knowledge {:local/root "components/knowledge"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
                       ai.miniforge/operator {:local/root "components/operator"}
-                      ai.miniforge/orchestrator {:local/root "components/orchestrator"}}}
+                      ai.miniforge/orchestrator {:local/root "components/orchestrator"}
+                      ai.miniforge/reporting {:local/root "components/reporting"}}}
 
   :test {:extra-paths ["development/test"
                        "components/schema/test"
@@ -53,7 +56,8 @@
                        "components/knowledge/test"
                        "components/workflow/test"
                        "components/operator/test"
-                       "components/orchestrator/test"]
+                       "components/orchestrator/test"
+                       "components/reporting/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
@@ -65,7 +69,8 @@
                       ai.miniforge/knowledge {:local/root "components/knowledge"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
                       ai.miniforge/operator {:local/root "components/operator"}
-                      ai.miniforge/orchestrator {:local/root "components/orchestrator"}}}
+                      ai.miniforge/orchestrator {:local/root "components/orchestrator"}
+                      ai.miniforge/reporting {:local/root "components/reporting"}}}
 
   :poly {:main-opts  ["-m" "polylith.clj.core.poly-cli.core"]
          :extra-deps {polylith/clj-poly {:mvn/version "0.2.21"}}}
