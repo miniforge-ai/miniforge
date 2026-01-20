@@ -10,14 +10,11 @@
    miniforge cannot self-correct through its operator/meta-loop."
   (:require
    [clojure.java.shell :as shell]
-   [clojure.test :refer [deftest is testing]]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.orchestrator.interface :as orch]
    [ai.miniforge.knowledge.interface :as knowledge]
    [ai.miniforge.artifact.interface :as artifact]
-   [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.operator.interface :as operator]
-   [ai.miniforge.logging.interface :as log]
    [babashka.fs :as fs]))
 
 ;; ============================================================================
@@ -182,11 +179,11 @@
          {:valid? true}
          (try
            (doseq [art code-artifacts]
-             (read-string (:artifact/content art)))
+             (let [_parsed (read-string (:artifact/content art))]))
            {:valid? true}
-           (catch Exception e
+           (catch Exception _e
              {:valid? false
-              :error (str "Invalid Clojure code: " (.getMessage e))})))))})
+              :error "Invalid Clojure code"})))))})
 
 ;; ============================================================================
 ;; Test Specs
@@ -260,9 +257,9 @@
    Options:
    - :max-retries - Maximum self-healing attempts (default 3)
    - :auto-approve? - Auto-approve operator improvements (default true for tests)"
-  [{:keys [orchestrator operator] :as env} spec {:keys [max-retries auto-approve?]
-                                                  :or {max-retries 3
-                                                       auto-approve? true}}]
+  [{:keys [_orchestrator operator] :as env} spec {:keys [max-retries auto-approve?]
+                                                   :or {max-retries 3
+                                                        auto-approve? true}}]
   (loop [attempt 1
          results []]
     (let [result (execute-workflow env spec)]
@@ -284,11 +281,11 @@
 
         ;; Try self-healing via operator
         operator
-        (let [_ (operator/observe-signal operator
-                                          {:type :workflow-failed
-                                           :data {:result result
-                                                  :attempt attempt}})
-              improvements (operator/analyze-patterns operator 0)
+        (let [_signal (operator/observe-signal operator
+                                                {:type :workflow-failed
+                                                 :data {:result result
+                                                        :attempt attempt}})
+              _improvements (operator/analyze-patterns operator 0)
               proposals (operator/get-proposals operator {:status :proposed})]
           ;; Auto-approve improvements in test mode
           (when auto-approve?

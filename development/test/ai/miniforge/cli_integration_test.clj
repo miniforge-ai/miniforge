@@ -84,9 +84,9 @@
                        content)]
             ;; Verify it's readable Clojure
             (is (try
-                  (read-string code)
-                  true
-                  (catch Exception e
+                  (let [_parsed (read-string code)]
+                    true)
+                  (catch Exception _e
                     (println "Failed to parse:" code)
                     false))
                 "Generated code should be valid Clojure")))))))

@@ -414,7 +414,6 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  (require '[ai.miniforge.workflow.interface :as wf])
 
   ;; Create operator
   (def op (create-operator))

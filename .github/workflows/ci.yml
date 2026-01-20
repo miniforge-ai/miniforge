@@ -45,22 +45,7 @@ jobs:
             clojure-${{ runner.os }}-
 
       - name: Lint Clojure
-        run: |
-          # For PRs, only lint changed files
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            # Get list of changed .clj/.cljs/.cljc files
-            CHANGED_FILES=$(git diff --name-only --diff-filter=ACM origin/${{ github.base_ref }}...HEAD | grep -E '\.(clj|cljs|cljc)$' || true)
-            if [ -n "$CHANGED_FILES" ]; then
-              echo "Linting changed files:"
-              echo "$CHANGED_FILES"
-              clj-kondo --lint $CHANGED_FILES
-            else
-              echo "No Clojure files changed"
-            fi
-          else
-            # For pushes to main, lint everything
-            bb lint:clj:all
-          fi
+        run: bb lint:clj:all
 
       - name: Lint Markdown
         run: bb fmt:md:all

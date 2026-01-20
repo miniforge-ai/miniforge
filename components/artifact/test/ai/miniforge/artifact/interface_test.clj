@@ -86,7 +86,7 @@
                 :version "1.0.0"
                 :content {:file "foo.clj" :code "(defn hello [] \"world\")"}})]
       (is (= art-id (artifact/save! store art)))
-      (let [loaded (artifact/load store art-id)]
+      (let [loaded (artifact/load-artifact store art-id)]
         (is (some? loaded))
         (is (= art-id (:artifact/id loaded)))
         (is (= :code (:artifact/type loaded)))
@@ -94,7 +94,7 @@
 
   (testing "returns nil for non-existent artifact"
     (let [store (create-test-store)]
-      (is (nil? (artifact/load store (random-uuid)))))))
+      (is (nil? (artifact/load-artifact store (random-uuid)))))))
 
 ;; Query tests
 
@@ -147,8 +147,8 @@
       (artifact/save! store (artifact/build-artifact
                              {:id child-id :type :code :version "1.0.0" :content "child"}))
       (is (true? (artifact/link! store parent-id child-id)))
-      (let [parent (artifact/load store parent-id)
-            child (artifact/load store child-id)]
+      (let [parent (artifact/load-artifact store parent-id)
+            child (artifact/load-artifact store child-id)]
         (is (some #(= child-id %) (:artifact/children parent)))
         (is (some #(= parent-id %) (:artifact/parents child)))))))
 
