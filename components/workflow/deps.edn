@@ -4,6 +4,8 @@
         ai.miniforge/agent {:local/root "../agent"}
         ai.miniforge/task {:local/root "../task"}
         ai.miniforge/loop {:local/root "../loop"}
-        ai.miniforge/artifact {:local/root "../artifact"}}
+        ai.miniforge/artifact {:local/root "../artifact"}
+        babashka/fs {:mvn/version "0.5.22"}
+        babashka/process {:mvn/version "0.5.22"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

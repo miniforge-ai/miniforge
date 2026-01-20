@@ -1,0 +1,90 @@
+{:spec/id "release-phase-executor-v1"
+ :spec/version "0.1.0"
+ :spec/created "2026-01-20"
+
+ :title "Release Phase Executor - Write Artifacts to Worktree"
+
+ :description
+ "Implement a ReleasePhaseExecutor that takes code artifacts from the workflow
+  and writes them to disk in a git worktree, preparing them for PR creation.
+
+  The release phase is responsible for:
+  1. Taking code artifacts from the verify phase
+  2. Writing the code files to the appropriate paths in the worktree
+  3. Staging the files for commit
+  4. The actual PR creation will be handled externally (by the human or CLI)
+
+  This enables miniforge workflows to produce real, committable code changes."
+
+ :objectives
+ ["Write code artifact files to disk at their specified paths"
+  "Handle file creation, modification, and deletion actions"
+  "Create parent directories as needed"
+  "Stage files using git add"
+  "Return release metadata for PR creation"]
+
+ :deliverables
+ [{:id :release-executor
+   :description "ReleasePhaseExecutor implementation"
+   :files ["components/workflow/src/ai/miniforge/workflow/release.clj"]}
+
+  {:id :workflow-integration
+   :description "Register release executor in workflow core"
+   :files ["components/workflow/src/ai/miniforge/workflow/core.clj"]}
+
+  {:id :tests
+   :description "Tests for release phase executor"
+   :files ["components/workflow/test/ai/miniforge/workflow/release_test.clj"]}]
+
+ :context
+ {:code-artifact-structure
+  "{:code/id uuid
+    :code/files [{:path \"src/foo/bar.clj\"
+                  :content \"(ns foo.bar)...\"
+                  :action :create}  ; or :modify, :delete
+                 ...]
+    :code/language \"clojure\"
+    :code/summary \"...\"}"
+
+  :standard-artifact-structure
+  "{:artifact/id uuid
+    :artifact/type :code
+    :artifact/version \"1.0.0\"
+    :artifact/content <code-artifact>
+    :artifact/metadata {...}}"
+
+  :workflow-context
+  "The executor receives context with:
+   - :worktree-path - Path to git worktree (required for release)
+   - :artifact-store - For loading artifacts if needed
+   - :logger - For logging"}
+
+ :implementation-notes
+ ["Use babashka.fs for file operations (mkdir, write, delete)"
+  "Use babashka.process for git commands"
+  "Handle all three file actions: :create, :modify, :delete"
+  "Create parent directories automatically for new files"
+  "Log each file operation"
+  "Return release artifact with summary of changes"]
+
+ :example-usage
+ "(let [executor (->ReleasePhaseExecutor)
+        workflow-state {:workflow/artifacts [{:artifact/type :code
+                                               :artifact/content {...}}]}
+        context {:worktree-path \"/path/to/worktree\"
+                 :logger logger}]
+    (proto/execute-phase executor workflow-state context))
+  ;; => {:success? true
+  ;;     :artifacts [{:artifact/type :release
+  ;;                  :artifact/content {:files-written 3
+  ;;                                     :files-deleted 0
+  ;;                                     :git-staged? true}}]}"
+
+ :acceptance-criteria
+ ["Files are written to correct paths under worktree-path"
+  "Parent directories created as needed"
+  "Files are staged with git add"
+  "Handles :create, :modify, :delete actions"
+  "Returns success with release summary"
+  "Fails gracefully if worktree-path not provided"
+  "Logs file operations for visibility"]}
