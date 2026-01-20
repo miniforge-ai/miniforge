@@ -11,20 +11,25 @@
                        "components/llm/src"
                        "components/llm/resources"
                        "components/tool/src"
-                       "components/tool/resources"]
+                       "components/tool/resources"
+                       "components/artifact/src"
+                       "components/artifact/resources"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
-                      ai.miniforge/tool {:local/root "components/tool"}}}
+                      ai.miniforge/tool {:local/root "components/tool"}
+                      ai.miniforge/artifact {:local/root "components/artifact"}}}
 
   :test {:extra-paths ["components/schema/test"
                        "components/logging/test"
                        "components/llm/test"
-                       "components/tool/test"]
+                       "components/tool/test"
+                       "components/artifact/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
-                      ai.miniforge/tool {:local/root "components/tool"}}}
+                      ai.miniforge/tool {:local/root "components/tool"}
+                      ai.miniforge/artifact {:local/root "components/artifact"}}}
 
   :poly {:main-opts  ["-m" "polylith.clj.core.poly-cli.core"]
          :extra-deps {polylith/clj-poly {:mvn/version "0.2.21"}}}

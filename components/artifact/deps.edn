@@ -1,0 +1,6 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge/schema {:local/root "../schema"}
+        ai.miniforge/logging {:local/root "../logging"}
+        datalevin/datalevin {:mvn/version "0.9.16"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {}}}}
