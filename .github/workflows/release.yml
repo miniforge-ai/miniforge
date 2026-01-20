@@ -25,9 +25,6 @@ jobs:
           - os: macos
             arch: arm64
             runner: macos-latest
-          - os: macos
-            arch: x86_64
-            runner: macos-15-large
           - os: linux
             arch: x86_64
             runner: ubuntu-latest
@@ -156,13 +153,6 @@ jobs:
             sudo mv miniforge /usr/local/bin/
             ```
 
-            **macOS x86_64 (Intel)**
-            ```bash
-            curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/miniforge-macos-x86_64 -o miniforge
-            chmod +x miniforge
-            sudo mv miniforge /usr/local/bin/
-            ```
-
             **Linux x86_64**
             ```bash
             curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/miniforge-linux-x86_64 -o miniforge
@@ -215,12 +205,6 @@ jobs:
           name: miniforge-macos-arm64
           path: artifacts/macos-arm64
 
-      - name: Download macOS x86_64 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: miniforge-macos-x86_64
-          path: artifacts/macos-x86_64
-
       - name: Download Linux x86_64 artifact
         uses: actions/download-artifact@v4
         with:
@@ -239,7 +223,6 @@ jobs:
 
           # Read SHA256 checksums
           MACOS_ARM64_SHA=$(cat artifacts/macos-arm64/miniforge-macos-arm64.sha256 | awk '{print $1}')
-          MACOS_X86_SHA=$(cat artifacts/macos-x86_64/miniforge-macos-x86_64.sha256 | awk '{print $1}')
           LINUX_X86_SHA=$(cat artifacts/linux-x86_64/miniforge-linux-x86_64.sha256 | awk '{print $1}')
           LINUX_ARM64_SHA=$(cat artifacts/linux-arm64/miniforge-linux-arm64.sha256 | awk '{print $1}')
 
@@ -251,13 +234,8 @@ jobs:
             license "Apache-2.0"
 
             on_macos do
-              if Hardware::CPU.arm?
-                url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/miniforge-macos-arm64"
-                sha256 "${MACOS_ARM64_SHA}"
-              else
-                url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/miniforge-macos-x86_64"
-                sha256 "${MACOS_X86_SHA}"
-              end
+              url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/miniforge-macos-arm64"
+              sha256 "${MACOS_ARM64_SHA}"
             end
 
             on_linux do
@@ -274,8 +252,7 @@ jobs:
             depends_on "gum"
 
             def install
-              bin.install "miniforge-macos-arm64" => "miniforge" if OS.mac? && Hardware::CPU.arm?
-              bin.install "miniforge-macos-x86_64" => "miniforge" if OS.mac? && Hardware::CPU.intel?
+              bin.install "miniforge-macos-arm64" => "miniforge" if OS.mac?
               bin.install "miniforge-linux-arm64" => "miniforge" if OS.linux? && Hardware::CPU.arm?
               bin.install "miniforge-linux-x86_64" => "miniforge" if OS.linux? && Hardware::CPU.intel?
             end

@@ -17,13 +17,8 @@ class Miniforge < Formula
   license "Apache-2.0"
 
   on_macos do
-    if Hardware::CPU.arm?
-      url "https://github.com/miniforge-ai/miniforge/releases/download/vVERSION/miniforge-macos-arm64"
-      sha256 "MACOS_ARM64_SHA256"
-    else
-      url "https://github.com/miniforge-ai/miniforge/releases/download/vVERSION/miniforge-macos-x86_64"
-      sha256 "MACOS_X86_SHA256"
-    end
+    url "https://github.com/miniforge-ai/miniforge/releases/download/vVERSION/miniforge-macos-arm64"
+    sha256 "MACOS_ARM64_SHA256"
   end
 
   on_linux do
@@ -40,8 +35,7 @@ class Miniforge < Formula
   depends_on "gum"
 
   def install
-    bin.install "miniforge-macos-arm64" => "miniforge" if OS.mac? && Hardware::CPU.arm?
-    bin.install "miniforge-macos-x86_64" => "miniforge" if OS.mac? && Hardware::CPU.intel?
+    bin.install "miniforge-macos-arm64" => "miniforge" if OS.mac?
     bin.install "miniforge-linux-arm64" => "miniforge" if OS.linux? && Hardware::CPU.arm?
     bin.install "miniforge-linux-x86_64" => "miniforge" if OS.linux? && Hardware::CPU.intel?
   end
