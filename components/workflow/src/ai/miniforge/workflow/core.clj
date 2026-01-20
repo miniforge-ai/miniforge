@@ -3,9 +3,11 @@
    Manages SDLC phase execution: Plan → Design → Implement → Verify → Review → Release → Observe"
   (:require
    [ai.miniforge.workflow.protocol :as proto]
+   [ai.miniforge.workflow.release :as release]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.task.interface :as task]
    [ai.miniforge.loop.interface :as loop]
+   [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -232,6 +234,7 @@
 
   (execute-phase [_this workflow-state context]
     (let [spec (:workflow/spec workflow-state)
+          artifact-store (:artifact-store context)
           task (task/create-task
                 {:task/id (random-uuid)
                  :task/type :plan
@@ -245,15 +248,32 @@
                            :tokens (or (:tokens result) 0)}))
           result (loop/run-simple task generate-fn
                                   (merge context {:max-iterations 3}))]
-      {:success? (:success result)
-       :artifacts (when (:success result)
-                    [{:type :plan
-                      :content (:artifact result)
-                      :phase :plan}])
-       :errors (when-not (:success result)
-                 [{:type :plan-failed
-                   :message (or (:error result) "Planning failed")}])
-       :metrics (:metrics result)}))
+      (if (:success result)
+        ;; Build standard artifact format for plan
+        (let [plan-artifact (:artifact result)
+              plan-id (or (:plan/id plan-artifact) (random-uuid))
+              standard-artifact (artifact/build-artifact
+                                 {:id plan-id
+                                  :type :plan
+                                  :version "1.0.0"
+                                  :content plan-artifact
+                                  :metadata {:phase :plan
+                                             :spec-title (:title spec)}})]
+          ;; Persist to store if available
+          (when artifact-store
+            (try
+              (artifact/save! artifact-store standard-artifact)
+              (catch Exception _e nil)))
+          {:success? true
+           :artifacts [standard-artifact]
+           :errors []
+           :metrics (:metrics result)})
+        ;; Planning failed
+        {:success? false
+         :artifacts []
+         :errors [{:type :plan-failed
+                   :message (or (:error result) "Planning failed")}]
+         :metrics (:metrics result)})))
 
   (can-execute? [_this phase]
     (= phase :plan))
@@ -262,21 +282,46 @@
     {:required-artifacts [:spec]
      :optional-artifacts []}))
 
+(defn- code-artifact->standard-artifact
+  "Convert a CodeArtifact to standard artifact format and persist to store."
+  [code-artifact artifact-store phase]
+  (let [artifact-id (or (:code/id code-artifact) (random-uuid))
+        standard-artifact (artifact/build-artifact
+                           {:id artifact-id
+                            :type :code
+                            :version "1.0.0"
+                            :content code-artifact
+                            :metadata {:phase phase
+                                       :language (:code/language code-artifact)
+                                       :file-count (count (:code/files code-artifact))}})]
+    ;; Persist to store if available
+    (when artifact-store
+      (try
+        (artifact/save! artifact-store standard-artifact)
+        (catch Exception _e
+          ;; Log but don't fail - persistence is optional
+          nil)))
+    standard-artifact))
+
 (defrecord ImplementPhaseExecutor [llm-backend]
   proto/PhaseExecutor
 
   (execute-phase [_this workflow-state context]
     (let [plan-artifacts (->> (:workflow/artifacts workflow-state)
-                              (filter #(= :plan (:type %))))
+                              (filter #(or (= :plan (:type %))
+                                           (= :plan (:artifact/type %)))))
+          artifact-store (:artifact-store context)
           results (atom {:artifacts [] :errors [] :metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}})]
 
       ;; Execute each implementation task from the plan
       (doseq [plan-artifact plan-artifacts]
-        (let [task (task/create-task
+        (let [plan-content (or (:content plan-artifact)
+                               (:artifact/content plan-artifact))
+              task (task/create-task
                     {:task/id (random-uuid)
                      :task/type :implement
                      :task/title "Implement from plan"
-                     :task/description (str (:content plan-artifact))
+                     :task/description (str plan-content)
                      :task/status :pending})
               implementer (agent/create-implementer {:llm-backend llm-backend})
               generate-fn (fn [_task _ctx]
@@ -286,11 +331,13 @@
               result (loop/run-simple task generate-fn
                                       (merge context {:max-iterations 5}))]
 
-          (swap! results update :artifacts conj
-                 {:type :code
-                  :content (:artifact result)
-                  :phase :implement})
-          (when-not (:success result)
+          (if (:success result)
+            ;; Convert CodeArtifact to standard format and persist
+            (let [code-artifact (:artifact result)
+                  standard-artifact (code-artifact->standard-artifact
+                                     code-artifact artifact-store :implement)]
+              (swap! results update :artifacts conj standard-artifact))
+            ;; Record error
             (swap! results update :errors conj
                    {:type :implement-failed
                     :message (or (:error result) "Implementation failed")}))
@@ -310,43 +357,77 @@
     {:required-artifacts [:plan]
      :optional-artifacts [:design]}))
 
+(defn- extract-code-content
+  "Extract code content from either old or new artifact format."
+  [artifact]
+  (or
+   ;; New standard format: {:artifact/type :code :artifact/content {...}}
+   (:artifact/content artifact)
+   ;; Old format: {:type :code :content {...}}
+   (:content artifact)))
+
+(defn- extract-artifact-id
+  "Extract artifact ID from either old or new format."
+  [artifact]
+  (or
+   ;; New standard format
+   (:artifact/id artifact)
+   ;; Old format - try to get from content
+   (get-in artifact [:artifact/content :code/id])
+   (get-in artifact [:content :code/id])
+   ;; Fallback
+   (random-uuid)))
+
 (defrecord VerifyPhaseExecutor [llm-backend]
   proto/PhaseExecutor
 
   (execute-phase [_this workflow-state context]
-    (let [code-artifacts (->> (:workflow/artifacts workflow-state)
-                              (filter #(= :code (:type %))))
+    (let [;; Handle both old and new artifact format
+          code-artifacts (->> (:workflow/artifacts workflow-state)
+                              (filter #(or (= :code (:type %))
+                                           (= :code (:artifact/type %)))))
+          artifact-store (:artifact-store context)
           results (atom {:artifacts [] :errors [] :metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}})]
 
       ;; Generate and run tests for each code artifact
       (doseq [code-artifact code-artifacts]
-        (let [;; Extract artifact ID if available, or generate one
-              artifact-id (or (get-in code-artifact [:content :code/id]) (random-uuid))
+        (let [artifact-id (extract-artifact-id code-artifact)
+              code-content (extract-code-content code-artifact)
               task (task/create-task
                     {:task/id (random-uuid)
                      :task/type :test
                      :task/title "Generate tests"
                      :task/description (str "Generate tests for code artifact " artifact-id)
                      :task/status :pending
-                     ;; Note: :task/inputs should be vector of UUIDs per schema
-                     ;; We'll pass the actual artifact content via context instead
                      :task/inputs [artifact-id]})
               tester (agent/create-tester {:llm-backend llm-backend})
-              ;; Pass code content to tester via the task input (code artifact content)
-              test-context (assoc context :code-artifact (:content code-artifact))
+              test-context (assoc context :code-artifact code-content)
               generate-fn (fn [_task _ctx]
-                            ;; The tester expects code artifact as input
-                            (let [result (agent/invoke tester {:code (:content code-artifact)} test-context)]
+                            (let [result (agent/invoke tester {:code code-content} test-context)]
                               {:artifact (:artifact result)
                                :tokens (or (:tokens result) 0)}))
               result (loop/run-simple task generate-fn
                                       (merge context {:max-iterations 3}))]
 
-          (swap! results update :artifacts conj
-                 {:type :test
-                  :content (:artifact result)
-                  :phase :verify})
-          (when-not (:success result)
+          (if (:success result)
+            ;; Build standard artifact format for test
+            (let [test-artifact (:artifact result)
+                  test-id (or (:test/id test-artifact) (random-uuid))
+                  standard-artifact (artifact/build-artifact
+                                     {:id test-id
+                                      :type :test
+                                      :version "1.0.0"
+                                      :content test-artifact
+                                      :parents [artifact-id]
+                                      :metadata {:phase :verify}})]
+              ;; Persist and link
+              (when artifact-store
+                (try
+                  (artifact/save! artifact-store standard-artifact)
+                  (artifact/link! artifact-store artifact-id test-id)
+                  (catch Exception _e nil)))
+              (swap! results update :artifacts conj standard-artifact))
+            ;; Record error
             (swap! results update :errors conj
                    {:type :verify-failed
                     :message (or (:error result) "Verification failed")}))
@@ -373,6 +454,7 @@
     :plan (->PlanPhaseExecutor llm-backend)
     :implement (->ImplementPhaseExecutor llm-backend)
     :verify (->VerifyPhaseExecutor llm-backend)
+    :release (release/->ReleasePhaseExecutor)
     ;; Other phases return nil - they may need different executors
     nil))
 
