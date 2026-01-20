@@ -22,13 +22,8 @@ class Miniforge < Formula
   end
 
   on_linux do
-    if Hardware::CPU.arm?
-      url "https://github.com/miniforge-ai/miniforge/releases/download/vVERSION/miniforge-linux-arm64"
-      sha256 "LINUX_ARM64_SHA256"
-    else
-      url "https://github.com/miniforge-ai/miniforge/releases/download/vVERSION/miniforge-linux-x86_64"
-      sha256 "LINUX_X86_SHA256"
-    end
+    url "https://github.com/miniforge-ai/miniforge/releases/download/vVERSION/miniforge-linux-x86_64"
+    sha256 "LINUX_X86_SHA256"
   end
 
   depends_on "babashka"
@@ -36,8 +31,7 @@ class Miniforge < Formula
 
   def install
     bin.install "miniforge-macos-arm64" => "miniforge" if OS.mac?
-    bin.install "miniforge-linux-arm64" => "miniforge" if OS.linux? && Hardware::CPU.arm?
-    bin.install "miniforge-linux-x86_64" => "miniforge" if OS.linux? && Hardware::CPU.intel?
+    bin.install "miniforge-linux-x86_64" => "miniforge" if OS.linux?
   end
 
   test do
