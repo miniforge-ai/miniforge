@@ -1,0 +1,194 @@
+;; Canonical SDLC Workflow v1.0.0
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; This is the foundational workflow configuration for miniforge.
+;; It represents the standard SDLC flow with inner loops, gates, and TDD.
+;;
+;; The Meta loop will use this as the baseline for comparison when
+;; experimenting with alternative workflow configurations.
+
+{:workflow/id :canonical-sdlc-v1
+ :workflow/version "1.0.0"
+ :workflow/name "Canonical SDLC Flow"
+ :workflow/description
+ "Traditional SDLC with planning, design, test-driven development, review,
+  and release phases. Each phase has inner loops for repair and gates for
+  validation. This is the starting point for Meta loop optimization."
+
+ :workflow/created-at #inst "2026-01-21T00:00:00.000-00:00"
+ :workflow/task-types [:feature :component :refactor :bugfix]
+
+ ;; ──────────────────────────────────────────────────────────────────────────
+ ;; Phases: The DAG nodes
+ ;; ──────────────────────────────────────────────────────────────────────────
+
+ :workflow/phases
+ [{:phase/id :input
+   :phase/name "Input Validation"
+   :phase/agent :validator
+   :phase/actions [:validate-spec :extract-requirements]
+   :phase/inner-loop
+   {:max-iterations 3
+    :validation-steps [:spec-schema-valid :requirements-complete]
+    :repair-strategy :clarify-requirements}
+   :phase/gates [:spec-schema-valid :requirements-clear]
+   :phase/budget {:tokens 5000 :time-seconds 60 :iterations 3}
+   :phase/next [{:target :plan}]
+   :phase/metrics [:validation-time :spec-quality-score]}
+
+  {:phase/id :plan
+   :phase/name "Implementation Planning"
+   :phase/agent :planner
+   :phase/actions [:analyze-requirements :create-task-breakdown :estimate-effort]
+   :phase/inner-loop
+   {:max-iterations 5
+    :validation-steps [:plan-complete :tasks-well-defined]
+    :repair-strategy :refine-plan}
+   :phase/review-loop
+   {:reviewers [:pm-reviewer]
+    :required-approvals 1
+    :max-rounds 3}
+   :phase/gates [:plan-complete :plan-approved :tasks-well-defined]
+   :phase/budget {:tokens 10000 :time-seconds 120 :iterations 5}
+   :phase/next [{:target :design}]
+   :phase/metrics [:plan-clarity-score :tasks-count :review-rounds]}
+
+  {:phase/id :design
+   :phase/name "Architecture Design"
+   :phase/agent :designer
+   :phase/actions [:design-architecture :define-interfaces :plan-dependencies]
+   :phase/inner-loop
+   {:max-iterations 5
+    :validation-steps [:design-complete :no-circular-deps]
+    :repair-strategy :adjust-design}
+   :phase/review-loop
+   {:reviewers [:dev-reviewer]
+    :required-approvals 1
+    :max-rounds 3}
+   :phase/gates [:design-complete :architecture-sound :no-circular-dependencies]
+   :phase/budget {:tokens 15000 :time-seconds 180 :iterations 5}
+   :phase/next [{:target :test-planning}]
+   :phase/metrics [:design-quality-score :complexity-score :review-rounds]}
+
+  {:phase/id :test-planning
+   :phase/name "Test Plan Creation"
+   :phase/agent :test-planner
+   :phase/actions [:identify-test-cases :define-coverage-targets :plan-assertions]
+   :phase/inner-loop
+   {:max-iterations 5
+    :validation-steps [:test-plan-complete :coverage-defined]
+    :repair-strategy :add-test-cases}
+   :phase/review-loop
+   {:reviewers [:pm-reviewer :dev-reviewer :test-reviewer]
+    :required-approvals 3
+    :max-rounds 3}
+   :phase/gates [:test-plan-complete :coverage-targets-defined :approved-by-reviewers]
+   :phase/budget {:tokens 12000 :time-seconds 150 :iterations 5}
+   :phase/next [{:target :implement-tests}]
+   :phase/metrics [:test-case-count :coverage-target :review-rounds]}
+
+  {:phase/id :implement-tests
+   :phase/name "Test Implementation"
+   :phase/agent :tester
+   :phase/actions [:generate-test-code :validate-syntax :validate-lint]
+   :phase/inner-loop
+   {:max-iterations 10
+    :validation-steps [:syntax-valid :lint-clean :tests-compile]
+    :repair-strategy :fix-test-errors}
+   :phase/gates [:syntax-valid :lint-clean :tests-compile]
+   :phase/budget {:tokens 20000 :time-seconds 300 :iterations 10}
+   :phase/next [{:target :implement-code}]
+   :phase/metrics [:test-files-created :test-assertions-count :repair-cycles]}
+
+  {:phase/id :implement-code
+   :phase/name "Code Implementation (TDD)"
+   :phase/agent :implementer
+   :phase/actions [:generate-code :run-tests :validate-lint]
+   :phase/inner-loop
+   {:max-iterations 15
+    :validation-steps [:tests-pass :syntax-valid :lint-clean]
+    :repair-strategy :fix-code-errors}
+   :phase/gates [:syntax-valid :lint-clean :tests-pass :no-debug-statements]
+   :phase/budget {:tokens 30000 :time-seconds 600 :iterations 15}
+   :phase/next [{:target :verify}]
+   :phase/metrics [:code-files-created :lines-of-code :test-pass-rate :repair-cycles]}
+
+  {:phase/id :verify
+   :phase/name "Comprehensive Verification"
+   :phase/agent :tester
+   :phase/actions [:run-full-test-suite :generate-coverage-report :check-thresholds]
+   :phase/inner-loop
+   {:max-iterations 5
+    :validation-steps [:all-tests-pass :coverage-threshold-met]
+    :repair-strategy :add-missing-tests}
+   :phase/gates [:all-tests-pass :coverage-threshold-met :no-flaky-tests]
+   :phase/budget {:tokens 10000 :time-seconds 300 :iterations 5}
+   :phase/next [{:target :review}]
+   :phase/metrics [:test-count :coverage-achieved :test-duration]}
+
+  {:phase/id :review
+   :phase/name "Code Review"
+   :phase/agent :reviewer
+   :phase/actions [:validate-lint :check-stratification :verify-docs :check-coverage]
+   :phase/inner-loop
+   {:max-iterations 10
+    :validation-steps [:lint-clean :stratification-valid :docs-complete]
+    :repair-strategy :fix-review-issues}
+   :phase/gates [:lint-clean :coverage-threshold-met :stratification-valid
+                 :docs-complete :reviewer-approved]
+   :phase/budget {:tokens 15000 :time-seconds 400 :iterations 10}
+   :phase/next [{:target :release}]
+   :phase/metrics [:review-issues-found :repair-cycles :approval-time]}
+
+  {:phase/id :release
+   :phase/name "Pull Request Release"
+   :phase/agent :release-manager
+   :phase/actions [:create-branch :commit-changes :push-remote :create-pr :monitor-ci]
+   :phase/inner-loop
+   {:max-iterations 5
+    :validation-steps [:ci-pass :no-conflicts]
+    :repair-strategy :fix-ci-failures}
+   :phase/gates [:ci-lint-pass :ci-test-pass :ci-build-pass
+                 :no-merge-conflicts :pr-approved]
+   :phase/budget {:tokens 5000 :time-seconds 1800 :iterations 5}
+   :phase/next [{:target :observe}]
+   :phase/metrics [:ci-runs :ci-failures :pr-comments :time-to-merge]}
+
+  {:phase/id :observe
+   :phase/name "Post-Merge Observation"
+   :phase/agent :observer
+   :phase/actions [:collect-metrics :analyze-outcomes :generate-learnings]
+   :phase/inner-loop
+   {:max-iterations 1
+    :validation-steps [:metrics-collected]
+    :repair-strategy :none}
+   :phase/gates [:metrics-collected]
+   :phase/budget {:tokens 5000 :time-seconds 120 :iterations 1}
+   :phase/next [{:target :meta-loop}]
+   :phase/metrics [:total-iterations :total-tokens :total-time :success-outcome]}]
+
+ ;; ──────────────────────────────────────────────────────────────────────────
+ ;; Global Configuration
+ ;; ──────────────────────────────────────────────────────────────────────────
+
+ :workflow/config
+ {:parallel-phases []  ; Sequential for v1.0.0
+  :failure-strategy :retry
+  :max-total-iterations 100
+  :max-total-time-seconds 7200  ; 2 hours max per task
+  :max-total-tokens 200000}
+
+ ;; ──────────────────────────────────────────────────────────────────────────
+ ;; Metrics (populated after execution runs)
+ ;; ──────────────────────────────────────────────────────────────────────────
+
+ :workflow/metrics
+ {:success-rate nil
+  :avg-iterations nil
+  :avg-time-seconds nil
+  :avg-tokens-used nil
+  :avg-repair-cycles nil
+  :test-coverage-achieved nil
+  :bugs-caught-in-review nil
+  :bugs-caught-in-ci nil
+  :bugs-in-production nil}}
