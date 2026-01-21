@@ -3,7 +3,11 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
-   [ai.miniforge.reporting.views :as views]))
+   [ai.miniforge.reporting.views.formatting :as fmt]
+   [ai.miniforge.reporting.views.system :as sys]
+   [ai.miniforge.reporting.views.workflow :as wf]
+   [ai.miniforge.reporting.views.meta :as meta]
+   [ai.miniforge.reporting.views.edn :as edn]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test data
@@ -58,21 +62,21 @@
 
 (deftest test-ansi
   (testing "ansi wraps text with color codes"
-    (let [colored (views/ansi :green "test")]
+    (let [colored (fmt/ansi :green "test")]
       (is (str/includes? colored "test"))
       (is (str/includes? colored "\033["))))
   
   (testing "status-color returns appropriate color"
-    (is (= :green (views/status-color :completed)))
-    (is (= :yellow (views/status-color :pending)))
-    (is (= :red (views/status-color :failed)))))
+    (is (= :green (fmt/status-color :completed)))
+    (is (= :yellow (fmt/status-color :pending)))
+    (is (= :red (fmt/status-color :failed)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Box drawing tests
 
 (deftest test-draw-box
   (testing "draw-box creates box around content"
-    (let [box (views/draw-box "Title" "Content line 1\nContent line 2" 40)]
+    (let [box (fmt/draw-box "Title" "Content line 1\nContent line 2" 40)]
       (is (str/includes? box "Title"))
       (is (str/includes? box "Content line 1"))
       (is (str/includes? box "Content line 2"))
@@ -82,7 +86,7 @@
 
 (deftest test-draw-separator
   (testing "draw-separator creates horizontal line"
-    (let [sep (views/draw-separator 20)]
+    (let [sep (fmt/draw-separator 20)]
       (is (= 20 (count sep)))
       (is (every? #(= % \─) sep)))))
 
@@ -94,7 +98,7 @@
     (let [headers ["Col1" "Col2" "Col3"]
           rows [["A" "B" "C"]
                 ["Long" "Longer" "Longest"]]
-          table (views/format-table headers rows)]
+          table (fmt/format-table headers rows)]
       
       (is (str/includes? table "Col1"))
       (is (str/includes? table "Col2"))
@@ -108,7 +112,7 @@
 
 (deftest test-render-system-overview
   (testing "render-system-overview creates formatted output"
-    (let [output (views/render-system-overview sample-system-status)]
+    (let [output (sys/render-system-overview sample-system-status)]
       
       (is (str/includes? output "WORKFLOWS"))
       (is (str/includes? output "RESOURCES"))
@@ -124,7 +128,7 @@
 (deftest test-render-system-overview-no-alerts
   (testing "render-system-overview handles empty alerts"
     (let [status (assoc sample-system-status :alerts [])
-          output (views/render-system-overview status)]
+          output (sys/render-system-overview status)]
       
       (is (str/includes? output "No alerts")))))
 
@@ -133,7 +137,7 @@
 
 (deftest test-render-workflow-list
   (testing "render-workflow-list creates table"
-    (let [output (views/render-workflow-list sample-workflows)]
+    (let [output (wf/render-workflow-list sample-workflows)]
       
       (is (str/includes? output "ID"))
       (is (str/includes? output "Status"))
@@ -146,7 +150,7 @@
 
 (deftest test-render-workflow-list-empty
   (testing "render-workflow-list handles empty list"
-    (let [output (views/render-workflow-list [])]
+    (let [output (wf/render-workflow-list [])]
       
       (is (str/includes? output "No workflows found")))))
 
@@ -155,7 +159,7 @@
 
 (deftest test-render-workflow-detail
   (testing "render-workflow-detail creates detailed view"
-    (let [output (views/render-workflow-detail sample-workflow-detail)]
+    (let [output (wf/render-workflow-detail sample-workflow-detail)]
       
       (is (str/includes? output "WORKFLOW HEADER"))
       (is (str/includes? output "TIMELINE"))
@@ -169,7 +173,7 @@
 
 (deftest test-render-workflow-detail-not-found
   (testing "render-workflow-detail handles nil"
-    (let [output (views/render-workflow-detail nil)]
+    (let [output (wf/render-workflow-detail nil)]
       
       (is (str/includes? output "Workflow not found")))))
 
@@ -178,7 +182,7 @@
 
 (deftest test-render-meta-loop
   (testing "render-meta-loop creates dashboard"
-    (let [output (views/render-meta-loop sample-meta-loop)]
+    (let [output (meta/render-meta-loop sample-meta-loop)]
       
       (is (str/includes? output "RECENT SIGNALS"))
       (is (str/includes? output "PENDING IMPROVEMENTS"))
@@ -193,7 +197,7 @@
     (let [status {:signals []
                   :pending-improvements []
                   :recent-improvements []}
-          output (views/render-meta-loop status)]
+          output (meta/render-meta-loop status)]
       
       (is (str/includes? output "No recent signals"))
       (is (str/includes? output "No pending improvements"))
@@ -205,7 +209,7 @@
 (deftest test-render-edn
   (testing "render-edn outputs valid EDN"
     (let [data {:foo "bar" :baz 42}
-          output (views/render-edn data)]
+          output (edn/render-edn data)]
       
       (is (str/includes? output ":foo"))
       (is (str/includes? output "bar"))

@@ -3,7 +3,11 @@
    Provides system status monitoring and workflow reporting."
   (:require
    [ai.miniforge.reporting.core :as core]
-   [ai.miniforge.reporting.protocol :as proto]))
+   [ai.miniforge.reporting.protocol :as proto]
+   [ai.miniforge.reporting.views.system :as view-system]
+   [ai.miniforge.reporting.views.workflow :as view-workflow]
+   [ai.miniforge.reporting.views.meta :as view-meta]
+   [ai.miniforge.reporting.views.edn :as view-edn]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol re-exports
@@ -143,6 +147,59 @@
      (poll-events reporting sub-id)"
   [reporting-service subscription-id]
   (proto/poll-events reporting-service subscription-id))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Rendering functions
+
+(defn render-system-overview
+  "Render system overview with status information.
+
+   See ai.miniforge.reporting.views.system for full documentation.
+
+   Example:
+     (render-system-overview {:status :running :version \"dev\"})"
+  [system-data]
+  (view-system/render-system-overview system-data))
+
+(defn render-workflow-list
+  "Render a list of workflows as a table.
+
+   See ai.miniforge.reporting.views.workflow for full documentation.
+
+   Example:
+     (render-workflow-list [{:id 1 :name \"Pipeline\" :status :running}])"
+  [workflows]
+  (view-workflow/render-workflow-list workflows))
+
+(defn render-workflow-detail
+  "Render detailed workflow information.
+
+   See ai.miniforge.reporting.views.workflow for full documentation.
+
+   Example:
+     (render-workflow-detail {:id 1 :name \"Pipeline\" :status :running})"
+  [workflow]
+  (view-workflow/render-workflow-detail workflow))
+
+(defn render-meta-loop
+  "Render meta-loop status and optimization information.
+
+   See ai.miniforge.reporting.views.meta for full documentation.
+
+   Example:
+     (render-meta-loop {:status :running :cycle 42})"
+  [meta-data]
+  (view-meta/render-meta-loop meta-data))
+
+(defn render-edn
+  "Render arbitrary data as pretty-printed EDN.
+
+   See ai.miniforge.reporting.views.edn for full documentation.
+
+   Example:
+     (render-edn {:status :running})"
+  [data]
+  (view-edn/render-edn data))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
