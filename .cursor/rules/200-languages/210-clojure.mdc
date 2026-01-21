@@ -32,10 +32,56 @@ globs:
 
 ## Component layout conventions
 
-- `components/<name>/src/.../<name>/interface.clj` — thin API; validates inputs (specs), forwards to `core`.
-- `components/<name>/src/.../<name>/core.clj` — implementation; organized in ≤ 3 layers.
-- `components/<name>/src/.../<name>/spec.clj` — specs only; no functions except inside `(comment ...)`.
-- **Global specs** live in their own component.
+### Required structure
+
+- `components/<name>/src/.../<name>/interface.clj` — **Complete public API surface**
+- `components/<name>/src/.../<name>/core.clj` — Main implementation (≤ 3 layers)
+- `components/<name>/src/.../<name>/spec.clj` — Malli schemas only; no functions except inside `(comment ...)`
+
+### Interface.clj pattern (CRITICAL)
+
+- **interface.clj must contain ALL public functions** for the component
+- **interface.clj should contain NO implementations** — only thin pass-throughs
+- Pass-through functions forward to implementation functions in `core.clj` or other namespaces within the component
+- Input validation (specs) should happen in interface before forwarding
+- Example:
+  ```clojure
+  ;; CORRECT: interface.clj
+  (defn create-task
+    "Create a new task (public API)."
+    [task-data]
+    (s/validate ::task-spec task-data)
+    (core/create-task-impl task-data))
+
+  ;; WRONG: implementation in interface
+  (defn create-task [task-data]
+    (let [id (uuid/v4)
+          task (assoc task-data :id id)]
+      (store/save! task)))
+  ```
+
+### Implementation organization
+
+- **core.clj** — Main implementation logic; organized in ≤ 3 layers
+- **Additional namespaces** — When core.clj exceeds 3 layers or becomes too large:
+  - **Related functions** → subnamespaces (e.g., `views/table.clj`, `views/chart.clj`, `views/panel.clj`)
+  - **Unrelated functions** → separate namespaces (e.g., `executor.clj`, `factory.clj`, `validator.clj`)
+- **Protocol files** — `protocol.clj` for defining protocols/interfaces
+- All implementation namespaces are internal to the component; only `interface.clj` is public
+
+### Namespace splitting strategy
+
+When a file exceeds 3 layers:
+
+1. **Identify coherent groups** of functions
+2. **For related functions** (e.g., different views, different formatters):
+   - Create subnamespace: `components/<name>/src/.../<name>/<group>/<subname>.clj`
+   - Example: `reporting/views/table.clj`, `reporting/views/chart.clj`
+3. **For unrelated functions** (e.g., executor + factory + validator):
+   - Create separate namespaces: `components/<name>/src/.../<name>/<concern>.clj`
+   - Example: `agent/executor.clj`, `agent/factory.clj`, `agent/memory.clj`
+4. **Update interface.clj** to import and forward to new namespaces
+5. **Keep each new file** to ≤ 3 layers
 
 ## Agent behavior
 
@@ -44,6 +90,67 @@ When creating/editing a namespace:
 1) Insert/maintain **Layer 0/1/2** headings and keep them **monotonic increasing** (0 → 1 → 2).
 2) Keep **pure helpers** and external calls that are side-effect free in **Layer 0**.
 3) Put orchestration that **only depends on Layer 0** in **Layer 1**, and so on.
-4) If you cross 3 layers, **propose a split** into another namespace.
+4) If you cross 3 layers, **propose a split** using the namespace splitting strategy above.
 5) Ensure the last top-level form is a single `(comment …)` block with quick REPL samples.
 6) For cross-component calls, target `...<other>.interface` — and surface a fix if `.core` is used.
+
+## Examples
+
+### Good: Thin interface with pass-through
+
+```clojure
+;; components/task/src/ai/miniforge/task/interface.clj
+(ns ai.miniforge.task.interface
+  (:require [ai.miniforge.task.core :as core]
+            [ai.miniforge.task.validator :as validator]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Public API - validation + forwarding only
+
+(defn create-task
+  "Create a new task."
+  [task-data]
+  (validator/validate-task-data task-data)
+  (core/create-task-impl task-data))
+
+(defn get-task
+  "Retrieve task by ID."
+  [task-id]
+  (core/get-task-impl task-id))
+```
+
+### Good: Split oversized file by related functions
+
+```clojure
+;; Before: reporting/views.clj with 8 layers
+;; After:
+;; - reporting/views/table.clj (≤3 layers)
+;; - reporting/views/chart.clj (≤3 layers)
+;; - reporting/views/panel.clj (≤3 layers)
+
+;; components/reporting/src/ai/miniforge/reporting/interface.clj
+(ns ai.miniforge.reporting.interface
+  (:require [ai.miniforge.reporting.views.table :as table]
+            [ai.miniforge.reporting.views.chart :as chart]
+            [ai.miniforge.reporting.views.panel :as panel]))
+
+(defn render-table [data] (table/render data))
+(defn render-chart [data] (chart/render data))
+(defn render-panel [data] (panel/render data))
+```
+
+### Bad: Implementation in interface
+
+```clojure
+;; components/task/src/ai/miniforge/task/interface.clj
+(ns ai.miniforge.task.interface
+  (:require [datalevin.core :as d]))
+
+;; WRONG: Implementation details in interface
+(defn create-task [task-data]
+  (let [conn (d/get-conn)
+        id (java.util.UUID/randomUUID)
+        task (assoc task-data :id id :created-at (java.time.Instant/now))]
+    (d/transact! conn [task])
+    task))
+```
