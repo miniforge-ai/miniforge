@@ -1,5 +1,9 @@
 name: CI
 
+# This workflow runs linting, tests, and builds on every push and PR.
+# All output is captured in log files and uploaded as artifacts for debugging.
+# Logs are retained for 7 days and can be downloaded from the Actions UI.
+
 on:
   push:
     branches: [main]
@@ -45,11 +49,27 @@ jobs:
             clojure-${{ runner.os }}-
 
       - name: Lint Clojure
-        run: bb lint:clj:all
+        run: |
+          echo "::group::Clojure Linting"
+          bb lint:clj:all 2>&1 | tee clj-kondo.log
+          echo "::endgroup::"
 
       - name: Lint Markdown
-        run: bb fmt:md:all
+        run: |
+          echo "::group::Markdown Linting"
+          bb fmt:md:all 2>&1 | tee markdownlint.log || true
+          echo "::endgroup::"
         continue-on-error: true
+
+      - name: Upload lint logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-logs-${{ github.sha }}
+          path: |
+            clj-kondo.log
+            markdownlint.log
+          retention-days: 7
 
   test:
     name: Test
@@ -81,7 +101,18 @@ jobs:
             clojure-${{ runner.os }}-
 
       - name: Run tests
-        run: bb test
+        run: |
+          echo "::group::Running Tests"
+          bb test 2>&1 | tee test-output.log
+          echo "::endgroup::"
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ github.sha }}
+          path: test-output.log
+          retention-days: 7
 
   build:
     name: Build
@@ -114,15 +145,34 @@ jobs:
             clojure-${{ runner.os }}-
 
       - name: Compile all code
-        run: bb compile
+        run: |
+          echo "::group::Compiling Code"
+          bb compile 2>&1 | tee compile.log
+          echo "::endgroup::"
 
       - name: Build CLI
-        run: bb build:cli
+        run: |
+          echo "::group::Building CLI"
+          bb build:cli 2>&1 | tee build-cli.log
+          echo "::endgroup::"
 
       - name: Test CLI
         run: |
-          ./dist/miniforge version
-          ./dist/miniforge help
+          echo "::group::Testing CLI"
+          ./dist/miniforge version 2>&1 | tee -a cli-test.log
+          ./dist/miniforge help 2>&1 | tee -a cli-test.log
+          echo "::endgroup::"
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ github.sha }}
+          path: |
+            compile.log
+            build-cli.log
+            cli-test.log
+          retention-days: 7
 
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
