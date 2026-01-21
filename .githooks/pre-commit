@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+echo "🔒 Running pre-commit validation..."
+echo ""
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Email validation
 # ─────────────────────────────────────────────────────────────────────────────
@@ -9,7 +12,7 @@ EMAIL=$(git config user.email)
 ALLOWED_PATTERN="@miniforge\.ai$"
 
 if ! echo "$EMAIL" | grep -qE "$ALLOWED_PATTERN"; then
-  echo "ERROR: Commits must use a @miniforge.ai email"
+  echo "❌ ERROR: Commits must use a @miniforge.ai email"
   echo "Current email: $EMAIL"
   echo ""
   echo "Fix with: git config user.email 'yourname@miniforge.ai'"
@@ -21,8 +24,36 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 
 if command -v bb &> /dev/null; then
-  bb pre-commit
+  bb pre-commit || {
+    echo ""
+    echo "════════════════════════════════════════════════════════════════"
+    echo "❌ PRE-COMMIT CHECKS FAILED"
+    echo "════════════════════════════════════════════════════════════════"
+    echo ""
+    echo "Your commit has validation errors that must be fixed."
+    echo ""
+    echo "⚠️  You can bypass with: git commit --no-verify"
+    echo ""
+    echo "BUT YOU REALLY SHOULDN'T!"
+    echo ""
+    echo "Bypassing validation:"
+    echo "  • Violates miniforge's self-validation principle"
+    echo "  • Will be caught by CI anyway (can't bypass that)"
+    echo "  • Defeats the purpose of the Policy component we built"
+    echo ""
+    echo "Fix the issues instead. If this is an emergency, document why"
+    echo "in the commit message with: [BYPASS-HOOKS: reason]"
+    echo ""
+    echo "════════════════════════════════════════════════════════════════"
+    exit 1
+  }
 else
-  echo "WARNING: Babashka (bb) not found. Skipping pre-commit checks."
+  echo "⚠️  WARNING: Babashka (bb) not found. Skipping pre-commit checks."
   echo "Install from: https://github.com/babashka/babashka#installation"
+  echo ""
+  echo "Note: CI will still enforce these checks."
 fi
+
+echo ""
+echo "✅ Pre-commit validation passed!"
+echo ""
