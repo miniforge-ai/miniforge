@@ -51,10 +51,15 @@
                               (remove (fn [f] (str/starts-with? f ".clj-kondo/"))))]
            (if (seq clj-files)
              (let [_ (println "🔍 Linting" (count clj-files) "Clojure file(s)...")
-                   {:keys [exit]} (apply p/sh "clj-kondo" "--lint" clj-files)]
+                   _ (println "Files:" (str/join ", " clj-files))
+                   {:keys [exit out err]} (apply p/sh {:out :string :err :string}
+                                                "clj-kondo" "--lint" clj-files)]
+               (when-not (str/blank? out) (println out))
+               (when-not (str/blank? err) (binding [*out* *err*] (println err)))
                ;; Exit 0 = success, 2 = warnings only, 3 = errors
                ;; Allow warnings but fail on errors
                (when (= exit 3)
+                 (println "❌ Linting failed with errors (exit code 3)")
                  (System/exit 3)))
              (println "✓ No Clojure files to lint")))}
 
@@ -62,7 +67,14 @@
   {:doc  "Lint all Clojure files in the project"
    :task (do
            (println "🔍 Linting all Clojure files...")
-           (run! "clj-kondo" "--lint" "bases" "components" "development/src"))}
+           (println "Directories: bases components development/src")
+           (let [{:keys [exit out err]} (p/sh {:out :string :err :string}
+                                              "clj-kondo" "--lint" "bases" "components" "development/src")]
+             (when-not (str/blank? out) (println out))
+             (when-not (str/blank? err) (binding [*out* *err*] (println err)))
+             (when-not (zero? exit)
+               (println "❌ Linting failed with exit code:" exit)
+               (System/exit exit))))}
 
   fmt:md
   {:doc  "Format staged Markdown files (lint --fix)"
@@ -90,13 +102,27 @@
   {:doc  "Run unit tests via Polylith"
    :task (do
            (println "🧪 Running tests via poly test...")
-           (run! "clojure" "-M:poly" "test"))}
+           (println "Command: clojure -M:poly test")
+           (let [{:keys [exit out err]} (p/sh {:out :string :err :string}
+                                              "clojure" "-M:poly" "test")]
+             (when-not (str/blank? out) (println out))
+             (when-not (str/blank? err) (binding [*out* *err*] (println err)))
+             (when-not (zero? exit)
+               (println "❌ Tests failed with exit code:" exit)
+               (System/exit exit))))}
 
   test:all
   {:doc  "Run all tests including integration via Polylith"
    :task (do
            (println "🧪 Running all tests via poly test :all...")
-           (run! "clojure" "-M:poly" "test" ":all"))}
+           (println "Command: clojure -M:poly test :all")
+           (let [{:keys [exit out err]} (p/sh {:out :string :err :string}
+                                              "clojure" "-M:poly" "test" ":all")]
+             (when-not (str/blank? out) (println out))
+             (when-not (str/blank? err) (binding [*out* *err*] (println err)))
+             (when-not (zero? exit)
+               (println "❌ Tests failed with exit code:" exit)
+               (System/exit exit))))}
 
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Pre-commit
@@ -113,33 +139,59 @@
 
   clean
   {:doc  "Clean all build artifacts"
-   :task (run! "clojure" "-T:build" "clean")}
+   :task (do
+           (println "🧹 Cleaning build artifacts...")
+           (run! "clojure" "-T:build" "clean"))}
 
   build:script
   {:doc  "Build BB dev script for a project (uses absolute paths)"
    :task (let [[project] *command-line-args*]
            (if project
-             (run! "clojure" "-T:build" "bb-script" (str ":project " project))
+             (do
+               (println "🔨 Building BB script for project:" project)
+               (run! "clojure" "-T:build" "bb-script" (str ":project " project)))
              (println "Usage: bb build:script <project>")))}
 
   build:cli
   {:doc  "Build miniforge CLI as distributable uberscript"
-   :task (run! "clojure" "-T:build" "bb-uberscript" ":project" "miniforge")}
+   :task (do
+           (println "🔨 Building miniforge CLI uberscript...")
+           (println "Command: clojure -T:build bb-uberscript :project miniforge")
+           (let [{:keys [exit out err]} (p/sh {:out :string :err :string}
+                                              "clojure" "-T:build" "bb-uberscript" ":project" "miniforge")]
+             (when-not (str/blank? out) (println out))
+             (when-not (str/blank? err) (binding [*out* *err*] (println err)))
+             (when-not (zero? exit)
+               (println "❌ Build failed with exit code:" exit)
+               (System/exit exit))))}
 
   build:jar
   {:doc  "Build JVM uberjar for a project"
    :task (let [[project] *command-line-args*]
            (if project
-             (run! "clojure" "-T:build" "uberjar" (str ":project " project))
+             (do
+               (println "🔨 Building uberjar for project:" project)
+               (run! "clojure" "-T:build" "uberjar" (str ":project " project)))
              (println "Usage: bb build:jar <project>")))}
 
   build:all
   {:doc  "Build all changed projects"
-   :task (run! "clojure" "-T:build" "build-all")}
+   :task (do
+           (println "🔨 Building all changed projects...")
+           (run! "clojure" "-T:build" "build-all"))}
 
   compile
   {:doc  "Compile all code (syntax check)"
-   :task (run! "clojure" "-T:build" "compile-all")}
+   :task (do
+           (println "⚙️  Compiling all code for syntax check...")
+           (println "Command: clojure -T:build compile-all")
+           (let [{:keys [exit out err]} (p/sh {:out :string :err :string}
+                                              "clojure" "-T:build" "compile-all")]
+             (when-not (str/blank? out) (println out))
+             (when-not (str/blank? err) (binding [*out* *err*] (println err)))
+             (when-not (zero? exit)
+               (println "❌ Compilation failed with exit code:" exit)
+               (System/exit exit))))}
 
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Local Installation (for testing)
