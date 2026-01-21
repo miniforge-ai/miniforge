@@ -142,6 +142,45 @@
    :task (run! "clojure" "-T:build" "compile-all")}
 
   ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Local Installation (for testing)
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  install:local
+  {:doc  "Install built CLI to ~/.local/bin/mf"
+   :task (let [source "dist/miniforge"
+               bin-dir (str (System/getProperty "user.home") "/.local/bin")
+               target (str bin-dir "/mf")]
+           (if (fs/exists? source)
+             (do
+               (println "📦 Installing miniforge CLI to" target)
+               (fs/create-dirs bin-dir)
+               (fs/copy source target {:replace-existing true})
+               (p/shell "chmod" "+x" target)
+               (println "✅ Installed successfully")
+               (println "   Ensure ~/.local/bin is in your PATH")
+               (println "   Run 'mf version' to verify"))
+             (println "❌ dist/miniforge not found. Run 'bb build:cli' first")))}
+
+  uninstall:local
+  {:doc  "Remove local installation from ~/.local/bin/mf"
+   :task (let [target (str (System/getProperty "user.home") "/.local/bin/mf")]
+           (if (fs/exists? target)
+             (do
+               (println "🗑️  Removing" target)
+               (fs/delete target)
+               (println "✅ Uninstalled successfully"))
+             (println "✓ Not installed at" target)))}
+
+  test:local
+  {:doc     "Build CLI, install locally, and test"
+   :depends [build:cli install:local]
+   :task    (do
+              (println "\n🧪 Testing local installation...\n")
+              (p/shell "mf" "version")
+              (p/shell "mf" "help")
+              (println "\n✅ Local installation test complete\n"))}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
   ;; Installers (via Homebrew)
   ;; ──────────────────────────────────────────────────────────────────────────
 
