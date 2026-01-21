@@ -50,21 +50,21 @@
     (let [opts {:store @test-store}
           data {:system "You are an implementer"
                 :task-template "Implement {{task}}"}]
-      (heuristic/save-heuristic :prompt :implementer "1.0.0" data opts)
-      (let [retrieved (heuristic/get-heuristic :prompt :implementer "1.0.0" opts)]
+      (heuristic/save-heuristic :implementer-prompt "1.0.0" data opts)
+      (let [retrieved (heuristic/get-heuristic :implementer-prompt "1.0.0" opts)]
         (is (= "You are an implementer" (:system retrieved)))
         (is (= "Implement {{task}}" (:task-template retrieved)))
-        (is (= :prompt (:heuristic/type retrieved)))
+        (is (= :implementer-prompt (:heuristic/type retrieved)))
         (is (= "1.0.0" (:heuristic/version retrieved)))
         (is (:heuristic/saved-at retrieved))))))
 
 (deftest list-versions-test
   (testing "List versions of a heuristic"
     (let [opts {:store @test-store}]
-      (heuristic/save-heuristic :prompt :implementer "1.0.0" {:data "v1"} opts)
-      (heuristic/save-heuristic :prompt :implementer "1.1.0" {:data "v1.1"} opts)
-      (heuristic/save-heuristic :prompt :implementer "2.0.0" {:data "v2"} opts)
-      (let [versions (heuristic/list-versions :prompt :implementer opts)]
+      (heuristic/save-heuristic :implementer-prompt "1.0.0" {:data "v1"} opts)
+      (heuristic/save-heuristic :implementer-prompt "1.1.0" {:data "v1.1"} opts)
+      (heuristic/save-heuristic :implementer-prompt "2.0.0" {:data "v2"} opts)
+      (let [versions (heuristic/list-versions :implementer-prompt opts)]
         (is (= ["2.0.0" "1.1.0" "1.0.0"] versions))))))
 
 (deftest active-version-test
@@ -72,15 +72,15 @@
     (let [opts {:store @test-store}
           data-v1 {:system "Version 1"}
           data-v2 {:system "Version 2"}]
-      (heuristic/save-heuristic :prompt :implementer "1.0.0" data-v1 opts)
-      (heuristic/save-heuristic :prompt :implementer "2.0.0" data-v2 opts)
+      (heuristic/save-heuristic :implementer-prompt "1.0.0" data-v1 opts)
+      (heuristic/save-heuristic :implementer-prompt "2.0.0" data-v2 opts)
 
       ;; Set active to 1.0.0
-      (heuristic/set-active-version :prompt :implementer "1.0.0" opts)
-      (let [active (heuristic/get-active-heuristic :prompt :implementer opts)]
+      (heuristic/set-active-version :implementer-prompt "1.0.0" opts)
+      (let [active (heuristic/get-active-heuristic :implementer-prompt opts)]
         (is (= "Version 1" (:system active))))
 
       ;; Change active to 2.0.0
-      (heuristic/set-active-version :prompt :implementer "2.0.0" opts)
-      (let [active (heuristic/get-active-heuristic :prompt :implementer opts)]
+      (heuristic/set-active-version :implementer-prompt "2.0.0" opts)
+      (let [active (heuristic/get-active-heuristic :implementer-prompt opts)]
         (is (= "Version 2" (:system active)))))))
