@@ -16,7 +16,7 @@
  ;; ──────────────────────────────────────────────────────────────────────────
  ;; Overview
  ;; ──────────────────────────────────────────────────────────────────────────
-
+ 
  :overview
  "The Workflow component is the execution engine for configurable SDLC flows.
 
@@ -34,7 +34,7 @@
  ;; ──────────────────────────────────────────────────────────────────────────
  ;; Component Structure (Polylith)
  ;; ──────────────────────────────────────────────────────────────────────────
-
+ 
  :structure
  {:component "components/workflow"
 
@@ -56,11 +56,11 @@
    :heuristic   ; Workflow storage/versioning
    :schema      ; Malli validation
    :llm]}       ; Agent invocation
-
+ 
  ;; ──────────────────────────────────────────────────────────────────────────
  ;; Public API (interface.clj)
  ;; ──────────────────────────────────────────────────────────────────────────
-
+ 
  :api
  {:load-workflow
   {:doc "Load workflow config from file or heuristic store"
@@ -134,7 +134,7 @@
  ;; ──────────────────────────────────────────────────────────────────────────
  ;; Core Implementation
  ;; ──────────────────────────────────────────────────────────────────────────
-
+ 
  :implementation
  {:loader
   {:doc "Load and validate workflow configs"
@@ -280,12 +280,12 @@
     "(defn invoke-agent [agent action artifact context]
        (llm/chat agent
                  (build-prompt action artifact)
-                 {:context context}))"}}}}
+                 {:context context}))"}}}
 
  ;; ──────────────────────────────────────────────────────────────────────────
  ;; Live Configuration
  ;; ──────────────────────────────────────────────────────────────────────────
-
+ 
  :live-configuration
  {:active-workflow-file
   {:location "~/.miniforge/workflows/active.edn"
@@ -336,7 +336,7 @@
  ;; ──────────────────────────────────────────────────────────────────────────
  ;; Integration with Existing System
  ;; ──────────────────────────────────────────────────────────────────────────
-
+ 
  :integration-points
  {:current-release-executor
   {:file "components/release/src/ai/miniforge/release/executor.clj"
@@ -370,7 +370,7 @@
  ;; ──────────────────────────────────────────────────────────────────────────
  ;; Testing Strategy
  ;; ──────────────────────────────────────────────────────────────────────────
-
+ 
  :testing
  {:unit-tests
   ["Test workflow loading from EDN"
@@ -396,7 +396,7 @@
  ;; ──────────────────────────────────────────────────────────────────────────
  ;; Implementation Plan
  ;; ──────────────────────────────────────────────────────────────────────────
-
+ 
  :implementation-plan
  {:phase-1 "Loader and Validator"
   :tasks-1
@@ -433,7 +433,7 @@
  ;; ──────────────────────────────────────────────────────────────────────────
  ;; Success Criteria
  ;; ──────────────────────────────────────────────────────────────────────────
-
+ 
  :success-criteria
  ["✓ Can load workflow configs from EDN files"
   "✓ Validates configs against Malli schema"
