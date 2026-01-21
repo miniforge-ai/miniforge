@@ -15,133 +15,902 @@
 (ns ai.miniforge.cli.main
   "Miniforge CLI entry point.
 
-   Provides commands for interacting with miniforge workflows, agents,
-   and the meta-loop.
+   Provides commands for:
+   - run      : Execute workflows from spec files
+   - status   : Show workflow status
+   - fleet    : Multi-repo management daemon
+   - pr       : PR operations (list, review, respond, merge)
+   - config   : Configuration management
+   - doctor   : System health check
+   - version  : Version information
 
-   Usage:
-     miniforge <command> [options]
-
-   Commands:
-     status       Show system status
-     workflows    List workflows
-     workflow     Show workflow detail
-     meta         Show meta-loop status
-     version      Show version information
-     help         Show this help message"
+   Note: This is designed to run in Babashka. Components that require
+   JVM-only libraries (malli, etc.) are not directly required here.
+   Instead, we use lightweight implementations suitable for CLI."
   (:require
-   [clojure.string :as str]))
+   [babashka.cli :as cli]
+   [babashka.fs :as fs]
+   [babashka.process :as process]
+   [clojure.string :as str]
+   [clojure.edn :as edn]
+   [cheshire.core :as json]
+   [bblgum.core :as gum]
+   [ai.miniforge.cli.tui :as tui]))
 
-;; ============================================================================
-;; Version Information
-;; ============================================================================
+;------------------------------------------------------------------------------ Layer 0
+;; Constants and pure helpers
 
-(defn version-info
-  "Get version information from build metadata or default."
-  []
-  {:version "dev"
-   :build   "development"
-   :date    (str (java.time.LocalDate/now))})
+(def version-info
+  {:name "miniforge"
+   :version "2026.01.20.1"
+   :description "AI-powered software development workflows"})
 
-;; ============================================================================
-;; Command Handlers
-;; ============================================================================
+(def default-config-path
+  (str (fs/home) "/.miniforge/config.edn"))
 
-(defn show-version
-  "Display version information."
-  []
-  (let [{:keys [version build date]} (version-info)]
-    (println "miniforge" version)
-    (println "Build:" build)
-    (println "Date:" date)))
+(def default-config
+  {:llm {:backend :claude-cli
+         :model "claude-sonnet-4-20250514"}
+   :fleet {:repos []
+           :poll-interval-ms 60000
+           :auto-review? false
+           :auto-merge? false}
+   :worktree {:base-path (str (fs/home) "/.miniforge/worktrees")}
+   :logging {:level :info
+             :output :human}})
 
-(defn show-help
-  "Display help message."
-  []
-  (println "miniforge - Autonomous SDLC Platform")
-  (println)
-  (println "Usage:")
-  (println "  miniforge <command> [options]")
-  (println)
-  (println "Commands:")
-  (println "  status       Show system status")
-  (println "  workflows    List all workflows")
-  (println "  workflow     Show workflow detail")
-  (println "  meta         Show meta-loop status")
-  (println "  version      Show version information")
-  (println "  help         Show this help message")
-  (println)
-  (println "For more information, visit: https://miniforge.ai"))
+(def ^:private ansi-colors
+  {:red     "31"
+   :green   "32"
+   :yellow  "33"
+   :blue    "34"
+   :magenta "35"
+   :cyan    "36"
+   :white   "37"})
 
-(defn show-status
-  "Display system status."
-  []
-  (println "┌─────────────────────────────────────────────────────────────────┐")
-  (println "│ MINIFORGE STATUS                                                │")
-  (println "├─────────────────────────────────────────────────────────────────┤")
-  (println "│ Status: Development                                             │")
-  (println "│ Version:" (str/join (repeat (- 53 (count (:version (version-info)))) " ")) (:version (version-info)) "│")
-  (println "└─────────────────────────────────────────────────────────────────┘")
-  (println)
-  (println "Note: Full status reporting will be available when the reporting")
-  (println "      component is integrated."))
+(defn- style
+  "Apply terminal styling using ANSI escape codes."
+  [text & {:keys [foreground bold]}]
+  (let [codes (cond-> []
+                bold (conj "1")
+                foreground (conj (get ansi-colors foreground "37")))]
+    (if (seq codes)
+      (str "\033[" (str/join ";" codes) "m" text "\033[0m")
+      text)))
 
-(defn show-workflows
-  "Display workflow list."
-  []
-  (println "Workflows:")
-  (println)
-  (println "No workflows running (orchestrator not started)")
-  (println)
-  (println "Use 'miniforge help' for more information."))
+(defn- print-error [msg]
+  (println (style (str "Error: " msg) :foreground :red)))
 
-(defn show-meta
-  "Display meta-loop status."
-  []
-  (println "Meta-Loop Status:")
-  (println)
-  (println "Status: Not initialized")
-  (println)
-  (println "The meta-loop will be available when the operator component")
-  (println "is integrated with the orchestrator."))
+(defn- print-success [msg]
+  (println (style msg :foreground :green)))
 
-(defn unknown-command
-  "Handle unknown commands."
+(defn- print-info [msg]
+  (println (style msg :foreground :cyan)))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Configuration management
+
+(defn- load-config
+  "Load configuration from file, merging with defaults."
+  [path]
+  (let [config-path (or path default-config-path)]
+    (if (fs/exists? config-path)
+      (merge-with merge default-config (edn/read-string (slurp config-path)))
+      default-config)))
+
+(defn- save-config
+  "Save configuration to file."
+  [config path]
+  (let [config-path (or path default-config-path)]
+    (fs/create-dirs (fs/parent config-path))
+    (spit config-path (pr-str config))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Command implementations
+
+;; babashka.cli dispatch passes {:dispatch [...] :opts {...} :args [...]}
+;; This helper extracts just the opts map for simpler command signatures.
+(defn- get-opts
+  "Extract opts from dispatch result."
+  [m]
+  (if (contains? m :opts)
+    (:opts m)
+    m))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Version command
+
+(defn version-cmd
+  "Show version information."
+  [_m]
+  (println (str (:name version-info) " " (:version version-info)))
+  (println (:description version-info)))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Doctor command
+
+(defn- check-command
+  "Check if a command is available."
   [cmd]
-  (println "Unknown command:" cmd)
-  (println)
-  (show-help)
-  (System/exit 1))
+  (let [{:keys [exit]} (process/sh "which" cmd)]
+    (zero? exit)))
 
-;; ============================================================================
-;; Main Entry Point
-;; ============================================================================
+(defn doctor-cmd
+  "Check system health and dependencies."
+  [_m]
+  (println "\n" (style "Miniforge System Check" :foreground :cyan :bold true) "\n")
+
+  (let [checks [["bb" "Babashka" "Required for CLI"]
+                ["gum" "Charm Gum" "Required for TUI"]
+                ["git" "Git" "Required for version control"]
+                ["gh" "GitHub CLI" "Required for PR operations"]
+                ["claude" "Claude CLI" "Required for LLM backend"]]]
+
+    (doseq [[cmd name desc] checks]
+      (let [available? (check-command cmd)
+            status (if available?
+                     (style "✓" :foreground :green)
+                     (style "✗" :foreground :red))
+            name-styled (if available? name (style name :foreground :red))]
+        (println (format "  %s %-12s %s" status name-styled desc))))
+
+    (println)
+
+    ;; Check config
+    (if (fs/exists? default-config-path)
+      (println (style "✓" :foreground :green) "Config file exists at" default-config-path)
+      (println (style "!" :foreground :yellow) "No config file. Run 'miniforge config init'"))
+
+    (println)))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Config commands
+
+(defn config-init-cmd
+  "Initialize configuration file."
+  [m]
+  (let [opts (get-opts m)
+        config-path (or (:config opts) default-config-path)]
+    (if (fs/exists? config-path)
+      (do
+        (print-info (str "Config already exists at " config-path))
+        (println "Use 'miniforge config set <key> <value>' to modify"))
+      (do
+        (save-config default-config config-path)
+        (print-success (str "Created config at " config-path))))))
+
+(defn config-list-cmd
+  "List all configuration values."
+  [m]
+  (let [opts (get-opts m)
+        config (load-config (:config opts))]
+    (println (pr-str config))))
+
+(defn config-get-cmd
+  "Get a configuration value."
+  [m]
+  (let [{:keys [key config]} (get-opts m)]
+    (if-not key
+      (print-error "Usage: miniforge config get <key>")
+      (let [cfg (load-config config)
+            path (map keyword (str/split key #"\."))
+            value (get-in cfg path)]
+        (if value
+          (println (pr-str value))
+          (print-error (str "Key not found: " key)))))))
+
+(defn config-set-cmd
+  "Set a configuration value."
+  [m]
+  (let [{:keys [key value config]} (get-opts m)]
+    (if (or (not key) (not value))
+      (print-error "Usage: miniforge config set <key> <value>")
+      (let [cfg (load-config config)
+            path (map keyword (str/split key #"\."))
+            new-value (try (edn/read-string value) (catch Exception _ value))
+            new-cfg (assoc-in cfg path new-value)]
+        (save-config new-cfg config)
+        (print-success (str "Set " key " = " (pr-str new-value)))))))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Run command (stub - will integrate with orchestrator)
+
+(defn run-cmd
+  "Execute a workflow from a spec file."
+  [m]
+  (let [{:keys [spec interactive]} (get-opts m)]
+    (cond
+      interactive
+      (do
+        (print-info "Interactive mode not yet implemented")
+        (println "Coming soon: conversational workflow execution"))
+
+      (not spec)
+      (print-error "Usage: miniforge run <spec-file> [--interactive]")
+
+      (not (fs/exists? spec))
+      (print-error (str "Spec file not found: " spec))
+
+      :else
+      (do
+        (print-info (str "Running workflow from: " spec))
+        (println "TODO: Integrate with orchestrator component")))))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Status command (stub)
+
+(defn status-cmd
+  "Show workflow status."
+  [m]
+  (let [{:keys [workflow-id]} (get-opts m)]
+    (if workflow-id
+      (do
+        (print-info (str "Status for workflow: " workflow-id))
+        (println "TODO: Query workflow component"))
+      (do
+        (print-info "All workflows:")
+        (println "TODO: List active workflows")))))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Fleet commands
+
+(defn fleet-start-cmd
+  "Start the fleet daemon."
+  [_m]
+  (print-info "Starting fleet daemon...")
+  (println "TODO: Implement fleet daemon"))
+
+(defn fleet-stop-cmd
+  "Stop the fleet daemon."
+  [_m]
+  (print-info "Stopping fleet daemon...")
+  (println "TODO: Implement fleet daemon"))
+
+(defn fleet-status-cmd
+  "Show fleet status summary."
+  [m]
+  (let [opts (get-opts m)
+        config (load-config (:config opts))
+        repos (get-in config [:fleet :repos] [])
+        state-file (str (fs/home) "/.miniforge/state.edn")
+        state (if (fs/exists? state-file)
+                (edn/read-string (slurp state-file))
+                {:workflows {:active 0 :pending 0 :completed 0 :failed 0}})]
+
+    (println)
+    (println (style "Fleet Status" :foreground :cyan :bold true))
+    (println)
+    (println (str "  Repositories: " (count repos)))
+    (println (str "  Active Workflows: " (get-in state [:workflows :active] 0)))
+    (println (str "  Pending Workflows: " (get-in state [:workflows :pending] 0)))
+    (println (str "  Completed: " (get-in state [:workflows :completed] 0)))
+    (println (str "  Failed: " (get-in state [:workflows :failed] 0)))
+    (println)))
+
+(defn- draw-box
+  "Draw a styled box using gum."
+  [title content]
+  (let [full-content (str title "\n\n" content)
+        result (gum/gum :style [full-content]
+                        :border "rounded"
+                        :border-foreground "cyan"
+                        :padding "0 1")]
+    (str/join "\n" (:result result))))
+
+(defn- clear-screen
+  "Clear terminal screen."
+  []
+  (print "\033[2J\033[H")
+  (flush))
+
+(defn- gum-choose
+  "Present a choice menu and return selected item."
+  [items & {:keys [header cursor]}]
+  (let [result (gum/gum :choose items
+                        :header (or header "Select an option:")
+                        :cursor (or cursor "▸ ")
+                        :cursor-prefix "● "
+                        :selected-prefix "● "
+                        :unselected-prefix "○ ")]
+    (first (:result result))))
+
+(defn- gum-confirm
+  "Ask for confirmation."
+  [prompt]
+  (let [result (gum/gum :confirm [prompt])]
+    (zero? (:status result))))
+
+(defn- gum-input
+  "Get text input from user."
+  [& {:keys [placeholder header]}]
+  (let [result (gum/gum :input []
+                        :placeholder (or placeholder "")
+                        :header (or header ""))]
+    (first (:result result))))
+
+(defn- fetch-prs-for-repo
+  "Fetch open PRs for a repository."
+  [repo]
+  (let [result (process/sh "gh" "pr" "list" "--repo" repo
+                           "--json" "number,title,state,author,createdAt,url"
+                           "--limit" "20")]
+    (if (zero? (:exit result))
+      (try
+        (json/parse-string (:out result) true)
+        (catch Exception _ []))
+      [])))
+
+(defn- display-status-panel
+  "Display the status panel with workflow counts."
+  [state repos]
+  (let [wf-content (str "Active:    " (style (str (get-in state [:workflows :active] 0)) :foreground :green) "\n"
+                        "Pending:   " (style (str (get-in state [:workflows :pending] 0)) :foreground :yellow) "\n"
+                        "Completed: " (style (str (get-in state [:workflows :completed] 0)) :foreground :green) "\n"
+                        "Failed:    " (style (str (get-in state [:workflows :failed] 0)) :foreground :red) "\n"
+                        "\nRepositories: " (count repos))]
+    (println (draw-box "FLEET STATUS" wf-content))
+    (println)))
+
+(defn- dashboard-view-repos
+  "View and manage fleet repositories."
+  [config config-path]
+  (let [repos (get-in config [:fleet :repos] [])]
+    (if (empty? repos)
+      (do
+        (println (style "\nNo repositories configured." :foreground :yellow))
+        (when (gum-confirm "Add a repository now?")
+          (let [repo (gum-input :placeholder "owner/repo" :header "Enter repository:")]
+            (when (and repo (not (str/blank? repo)))
+              (let [new-cfg (update-in config [:fleet :repos] (fnil conj []) repo)]
+                (save-config new-cfg config-path)
+                (print-success (str "Added " repo))))))
+        config)
+      (let [choices (concat (map #(str "📦 " %) repos)
+                            ["" "➕ Add repository" "➖ Remove repository" "← Back"])
+            selection (gum-choose choices :header "Fleet Repositories")]
+        (cond
+          (or (nil? selection) (= selection "← Back"))
+          config
+
+          (= selection "➕ Add repository")
+          (let [repo (gum-input :placeholder "owner/repo" :header "Enter repository:")]
+            (if (and repo (not (str/blank? repo)))
+              (let [new-cfg (update-in config [:fleet :repos] (fnil conj []) repo)]
+                (save-config new-cfg config-path)
+                (print-success (str "Added " repo))
+                new-cfg)
+              config))
+
+          (= selection "➖ Remove repository")
+          (let [repo-choice (gum-choose repos :header "Select repository to remove:")]
+            (if repo-choice
+              (let [new-cfg (update-in config [:fleet :repos] #(vec (remove #{repo-choice} %)))]
+                (save-config new-cfg config-path)
+                (print-success (str "Removed " repo-choice))
+                new-cfg)
+              config))
+
+          (str/starts-with? selection "📦 ")
+          (let [repo (subs selection 3)]
+            (println (style (str "\nRepository: " repo) :foreground :cyan :bold true))
+            (println "Fetching PRs...")
+            (let [prs (fetch-prs-for-repo repo)]
+              (if (empty? prs)
+                (println "  No open PRs")
+                (do
+                  (println (str "  " (count prs) " open PR(s):"))
+                  (doseq [{:keys [number title author]} prs]
+                    (println (str "  #" number " " title " (" (:login author) ")"))))))
+            (println)
+            (gum-input :placeholder "Press Enter to continue...")
+            config)
+
+          :else config)))))
+
+(defn- dashboard-view-prs
+  "View all PRs across fleet repositories."
+  [config]
+  (let [repos (get-in config [:fleet :repos] [])]
+    (if (empty? repos)
+      (println (style "\nNo repositories configured. Add some first." :foreground :yellow))
+      (do
+        (println (style "\nFetching PRs across fleet..." :foreground :cyan))
+        (let [all-prs (mapcat (fn [repo]
+                                (map #(assoc % :repo repo) (fetch-prs-for-repo repo)))
+                              repos)]
+          (if (empty? all-prs)
+            (println "  No open PRs across fleet")
+            (let [pr-choices (concat
+                               (map (fn [{:keys [repo number title]}]
+                                      (str "#" number " [" repo "] " (subs title 0 (min 50 (count title)))))
+                                    all-prs)
+                               ["" "← Back"])
+                  selection (gum-choose pr-choices :header (str (count all-prs) " Open PRs"))]
+              (when (and selection (not= selection "← Back") (not (str/blank? selection)))
+                (let [pr-num (-> selection (str/split #" ") first (subs 1) Integer/parseInt)
+                      pr-data (first (filter #(= (:number %) pr-num) all-prs))]
+                  (when pr-data
+                    (println)
+                    (println (draw-box (str "PR #" (:number pr-data))
+                                       (str "Repository: " (:repo pr-data) "\n"
+                                            "Title: " (:title pr-data) "\n"
+                                            "Author: " (get-in pr-data [:author :login]) "\n"
+                                            "State: " (:state pr-data) "\n"
+                                            "URL: " (:url pr-data))))
+                    (let [action (gum-choose ["Review PR" "Open in browser" "← Back"]
+                                             :header "Action:")]
+                      (case action
+                        "Review PR" (do
+                                      (print-info "Starting PR review...")
+                                      (println "TODO: Implement agent-based PR review"))
+                        "Open in browser" (process/sh "open" (:url pr-data))
+                        nil))))))))))))
+
+(defn- dashboard-quick-actions
+  "Show quick actions menu."
+  [config]
+  (let [action (gum-choose ["🔍 Review next PR"
+                            "🚀 Start new workflow"
+                            "📊 Refresh status"
+                            "⚙️  Configure settings"
+                            "← Back"]
+                           :header "Quick Actions")]
+    (case action
+      "🔍 Review next PR"
+      (let [repos (get-in config [:fleet :repos] [])
+            all-prs (mapcat (fn [repo]
+                              (map #(assoc % :repo repo) (fetch-prs-for-repo repo)))
+                            repos)]
+        (if (empty? all-prs)
+          (println (style "\nNo PRs to review." :foreground :yellow))
+          (let [pr (first all-prs)]
+            (println)
+            (println (style (str "Next PR: #" (:number pr) " in " (:repo pr)) :foreground :cyan))
+            (println (:title pr))
+            (when (gum-confirm "Start review?")
+              (print-info "Starting PR review...")
+              (println "TODO: Implement agent-based PR review")))))
+
+      "🚀 Start new workflow"
+      (let [spec-file (gum-input :placeholder "path/to/spec.edn" :header "Workflow spec file:")]
+        (when (and spec-file (not (str/blank? spec-file)))
+          (if (fs/exists? spec-file)
+            (do
+              (print-info (str "Starting workflow from: " spec-file))
+              (println "TODO: Integrate with orchestrator"))
+            (print-error (str "File not found: " spec-file)))))
+
+      "📊 Refresh status"
+      (println (style "\nStatus refreshed." :foreground :green))
+
+      "⚙️  Configure settings"
+      (let [setting (gum-choose ["Auto-review PRs"
+                                 "Auto-merge approved PRs"
+                                 "Poll interval"
+                                 "← Back"]
+                                :header "Settings")]
+        (case setting
+          "Auto-review PRs"
+          (let [current (get-in config [:fleet :auto-review?] false)]
+            (println (str "Current: " (if current "enabled" "disabled")))
+            (when (gum-confirm (str (if current "Disable" "Enable") " auto-review?"))
+              (println "TODO: Update config")))
+
+          "Auto-merge approved PRs"
+          (let [current (get-in config [:fleet :auto-merge?] false)]
+            (println (str "Current: " (if current "enabled" "disabled")))
+            (when (gum-confirm (str (if current "Disable" "Enable") " auto-merge?"))
+              (println "TODO: Update config")))
+
+          "Poll interval"
+          (println (str "Current: " (get-in config [:fleet :poll-interval-ms] 60000) "ms"))
+
+          nil))
+
+      nil)))
+
+(defn- build-tree-items
+  "Build tree items for the left pane from nav state."
+  [nav-state]
+  (let [{:keys [flat-items selected-index]} nav-state]
+    (vec (map-indexed
+          (fn [idx item]
+            (let [selected? (= idx selected-index)]
+              (case (:type item)
+                :repo (tui/render-repo-item (:repo item)
+                                            (count (:prs item))
+                                            (:expanded? item)
+                                            selected?)
+                :pr (tui/render-pr-list-item item (:analysis item) selected?))))
+          flat-items))))
+
+(defn- build-right-pane
+  "Build right pane content based on selected item."
+  [nav-state]
+  (let [item (tui/get-selected-item nav-state)]
+    (case (:type item)
+      :repo {:title (str "Repository: " (:repo item))
+             :sections [{:title "OVERVIEW"
+                         :content [(str "Repository: " (:repo item))
+                                   (str "Open PRs: " (count (:prs item)))
+                                   ""
+                                   "Press ENTER to expand/collapse"
+                                   "Press 'n' to jump to next risky PR"]}
+                        {:title "PR SUMMARY"
+                         :content (let [prs (:prs item)
+                                        by-risk (group-by #(get-in % [:analysis :risk]) prs)]
+                                    [(str "Low risk:    " (count (:low by-risk)))
+                                     (str "Medium risk: " (count (:medium by-risk)))
+                                     (str "High risk:   " (count (:high by-risk)))])}]}
+      :pr (tui/render-pr-detail item (:analysis item))
+      ;; Default empty
+      {:title "FLEET DASHBOARD"
+       :sections [{:title "WELCOME"
+                   :content ["Select a repository or PR to view details."
+                             ""
+                             "Navigation:"
+                             "  j/k  - Move up/down"
+                             "  Enter - Expand/collapse"
+                             "  q    - Quit"]}]})))
+
+(defn- count-prs-by-risk
+  "Count PRs by risk level across all repos."
+  [repos-with-prs]
+  (let [all-prs (mapcat :prs repos-with-prs)]
+    {:total (count all-prs)
+     :low (count (filter #(= :low (get-in % [:analysis :risk])) all-prs))
+     :medium (count (filter #(= :medium (get-in % [:analysis :risk])) all-prs))
+     :high (count (filter #(= :high (get-in % [:analysis :risk])) all-prs))}))
+
+(defn- find-next-risky
+  "Find index of next medium/high risk PR after current position."
+  [nav-state]
+  (let [{:keys [flat-items selected-index]} nav-state
+        items-after (drop (inc selected-index) flat-items)
+        risky-idx (first (keep-indexed
+                          (fn [idx item]
+                            (when (and (= :pr (:type item))
+                                       (#{:medium :high} (get-in item [:analysis :risk])))
+                              (+ selected-index 1 idx)))
+                          items-after))]
+    (or risky-idx
+        ;; Wrap around to beginning
+        (first (keep-indexed
+                (fn [idx item]
+                  (when (and (= :pr (:type item))
+                             (#{:medium :high} (get-in item [:analysis :risk])))
+                    idx))
+                flat-items)))))
+
+(defn- handle-pr-action
+  "Handle an action on the selected PR."
+  [action item]
+  (case action
+    :approve (do
+               (print-info (str "Approving PR #" (:number item) "..."))
+               (let [result (process/sh "gh" "pr" "review" (str (:number item))
+                                        "--repo" (:repo item) "--approve")]
+                 (if (zero? (:exit result))
+                   (print-success "PR approved!")
+                   (print-error (str "Failed: " (:err result)))))
+               (gum-input :placeholder "Press Enter to continue..."))
+    :reject (do
+              (print-info (str "Requesting changes on PR #" (:number item) "..."))
+              (let [reason (gum-input :header "Reason for rejection:" :placeholder "Enter reason...")]
+                (when (and reason (not (str/blank? reason)))
+                  (let [result (process/sh "gh" "pr" "review" (str (:number item))
+                                           "--repo" (:repo item)
+                                           "--request-changes"
+                                           "--body" reason)]
+                    (if (zero? (:exit result))
+                      (print-success "Changes requested!")
+                      (print-error (str "Failed: " (:err result)))))))
+              (gum-input :placeholder "Press Enter to continue..."))
+    :open (process/sh "open" (:url item))
+    :diff (do
+            (tui/clear-screen)
+            (println (tui/style (str "Diff for PR #" (:number item)) :fg :cyan :bold true))
+            (println)
+            (let [result (process/sh "gh" "pr" "diff" (str (:number item))
+                                     "--repo" (:repo item))]
+              (println (:out result)))
+            (gum-input :placeholder "Press Enter to continue..."))
+    :chat (do
+            (println)
+            (println (tui/style "Chat about this PR" :fg :cyan :bold true))
+            (println "Coming soon: Ask AI questions about this PR")
+            (println "  - 'What could break?'")
+            (println "  - 'Summarize the auth changes'")
+            (println "  - 'Are there security concerns?'")
+            (gum-input :placeholder "Press Enter to continue..."))
+    nil))
+
+(defn- batch-approve-safe
+  "Approve all low-risk PRs."
+  [repos-with-prs]
+  (let [safe-prs (filter #(= :low (get-in % [:analysis :risk]))
+                         (mapcat :prs repos-with-prs))]
+    (if (empty? safe-prs)
+      (do (print-info "No safe PRs to approve.")
+          (gum-input :placeholder "Press Enter to continue..."))
+      (when (gum-confirm (str "Approve " (count safe-prs) " low-risk PRs?"))
+        (doseq [pr safe-prs]
+          (print-info (str "Approving #" (:number pr) " in " (:repo pr) "..."))
+          (let [result (process/sh "gh" "pr" "review" (str (:number pr))
+                                   "--repo" (:repo pr) "--approve")]
+            (if (zero? (:exit result))
+              (println (tui/style "  ✓" :fg :green))
+              (println (tui/style (str "  ✗ " (:err result)) :fg :red)))))
+        (print-success "Batch approval complete!")
+        (gum-input :placeholder "Press Enter to continue...")))))
+
+(defn fleet-dashboard-cmd
+  "Open interactive two-pane TUI dashboard."
+  [m]
+  (let [opts (get-opts m)
+        config-path (or (:config opts) default-config-path)
+        config (load-config config-path)
+        repos (get-in config [:fleet :repos] [])]
+
+    (if (empty? repos)
+      (do
+        (print-error "No repositories configured.")
+        (println "Add repositories with: miniforge fleet add <owner/repo>"))
+
+      ;; Main dashboard loop
+      (do
+        (println (tui/style "Loading PRs..." :fg :cyan))
+        (let [repos-with-prs (tui/fetch-prs-for-repos repos)]
+          (loop [nav-state (-> (tui/create-nav-state repos-with-prs)
+                               (update :expanded-repos into (map :repo repos-with-prs))
+                               tui/update-flat-items)]
+            (tui/clear-screen)
+
+            ;; Render the two-pane view
+            (let [pr-counts (count-prs-by-risk repos-with-prs)
+                  tree-items (build-tree-items nav-state)
+                  right-pane (build-right-pane nav-state)]
+              (println (tui/render-two-pane
+                        {:left-pane {:title "FLEET PRs"
+                                     :items tree-items}
+                         :right-pane right-pane
+                         :status-bar (str (:total pr-counts) " PRs │ "
+                                          (tui/style (str (:low pr-counts) " safe") :fg :green) " │ "
+                                          (tui/style (str (:medium pr-counts) " review") :fg :yellow) " │ "
+                                          (tui/style (str (:high pr-counts) " risky") :fg :red))
+                         :key-hints "j/k:nav  Enter:expand  a:approve  r:reject  d:diff  c:chat  b:batch  n:next-risky  q/Esc:quit"})))
+
+            ;; Handle input - single keypress, no Enter required
+            (let [key (tui/read-key)
+                  selected (tui/get-selected-item nav-state)]
+              (case key
+                ;; Exit commands
+                (:quit :escape) (do (tui/show-cursor)
+                                    (tui/clear-screen)
+                                    (println (tui/style "Goodbye!" :fg :bright-cyan)))
+                ;; Navigation
+                :up (recur (tui/nav-up nav-state))
+                :down (recur (tui/nav-down nav-state))
+                ;; Expand/collapse
+                (:toggle :enter) (recur (tui/toggle-expand nav-state))
+                ;; Jump to risky
+                :next-risky (if-let [idx (find-next-risky nav-state)]
+                              (recur (assoc nav-state :selected-index idx))
+                              (recur nav-state))
+                ;; Batch operations
+                :batch-approve (do (batch-approve-safe repos-with-prs)
+                                   (recur nav-state))
+                ;; PR-specific actions
+                (:approve :reject :diff :chat :open)
+                (if (= :pr (:type selected))
+                  (do (handle-pr-action key selected)
+                      (recur nav-state))
+                  (recur nav-state))
+                ;; Error recovery
+                :error (recur nav-state)
+                ;; Unknown key, continue
+                (recur nav-state)))))))))
+
+(defn fleet-add-cmd
+  "Add a repository to the fleet."
+  [m]
+  (let [{:keys [repo config]} (get-opts m)]
+    (if-not repo
+      (print-error "Usage: miniforge fleet add <repo>")
+      (let [cfg (load-config config)
+            repos (get-in cfg [:fleet :repos] [])
+            new-cfg (assoc-in cfg [:fleet :repos] (conj repos repo))]
+        (save-config new-cfg config)
+        (print-success (str "Added " repo " to fleet"))))))
+
+(defn fleet-remove-cmd
+  "Remove a repository from the fleet."
+  [m]
+  (let [{:keys [repo config]} (get-opts m)]
+    (if-not repo
+      (print-error "Usage: miniforge fleet remove <repo>")
+      (let [cfg (load-config config)
+            repos (get-in cfg [:fleet :repos] [])
+            new-cfg (assoc-in cfg [:fleet :repos] (vec (remove #{repo} repos)))]
+        (save-config new-cfg config)
+        (print-success (str "Removed " repo " from fleet"))))))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; PR commands
+
+(defn pr-list-cmd
+  "List PRs using GitHub CLI."
+  [m]
+  (let [{:keys [repo config]} (get-opts m)
+        cfg (load-config config)
+        repos (if repo [repo] (get-in cfg [:fleet :repos] []))]
+
+    (if (empty? repos)
+      (do
+        (print-error "No repositories specified.")
+        (println "Use --repo <owner/repo> or add repos with 'miniforge fleet add'"))
+      (doseq [r repos]
+        (println)
+        (println (style (str "PRs for " r) :foreground :cyan :bold true))
+        (let [result (process/sh "gh" "pr" "list" "--repo" r "--json" "number,title,state,author,createdAt" "--limit" "10")]
+          (if (zero? (:exit result))
+            (try
+              (let [prs (json/parse-string (:out result) true)]
+                (if (empty? prs)
+                  (println "  No open PRs")
+                  (doseq [{:keys [number title state author]} prs]
+                    (let [status-style (case state
+                                         "OPEN" :green
+                                         "MERGED" :magenta
+                                         "CLOSED" :red
+                                         :white)]
+                      (println (str "  #" number " "
+                                    (style (str "[" state "]") :foreground status-style)
+                                    " " title
+                                    " (" (:login author "unknown") ")"))))))
+              (catch Exception _
+                ;; Fallback to simple text output if JSON parsing fails
+                (let [result2 (process/sh "gh" "pr" "list" "--repo" r "--limit" "10")]
+                  (if (zero? (:exit result2))
+                    (println (:out result2))
+                    (print-error (str "Failed to list PRs: " (:err result2)))))))
+            (print-error (str "Failed to query GitHub: " (:err result)))))))))
+
+(defn pr-review-cmd
+  "Review a PR."
+  [m]
+  (let [{:keys [url]} (get-opts m)]
+    (if-not url
+      (print-error "Usage: miniforge pr review <pr-url>")
+      (do
+        (print-info (str "Reviewing: " url))
+        (println "TODO: Implement PR review with agent")))))
+
+(defn pr-respond-cmd
+  "Respond to PR comments."
+  [m]
+  (let [{:keys [url]} (get-opts m)]
+    (if-not url
+      (print-error "Usage: miniforge pr respond <pr-url>")
+      (do
+        (print-info (str "Responding to comments on: " url))
+        (println "TODO: Implement PR comment response")))))
+
+(defn pr-merge-cmd
+  "Merge a PR."
+  [m]
+  (let [{:keys [url]} (get-opts m)]
+    (if-not url
+      (print-error "Usage: miniforge pr merge <pr-url>")
+      (do
+        (print-info (str "Merging: " url))
+        (println "TODO: Use gh pr merge")))))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Help command
+
+(defn help-cmd
+  "Show help."
+  [_m]
+  (println "
+miniforge - AI-powered software development workflows
+
+Usage: miniforge <command> [options]
+
+Commands:
+  run <spec-file>     Execute a workflow from a spec file
+    --interactive     Interactive mode (chat-based)
+    --worktree <path> Custom worktree path
+
+  status [id]         Show workflow status
+
+  fleet <subcommand>  Multi-repo management
+    start             Start fleet daemon
+    stop              Stop fleet daemon
+    status            Show fleet status
+    dashboard         Open TUI dashboard
+    add <repo>        Add repo to fleet
+    remove <repo>     Remove repo from fleet
+
+  pr <subcommand>     PR operations
+    list              List PRs
+    review <url>      Review a PR
+    respond <url>     Respond to comments
+    merge <url>       Merge a PR
+
+  config <subcommand> Configuration
+    init              Initialize config file
+    list              List all config
+    get <key>         Get config value
+    set <key> <val>   Set config value
+
+  doctor              Check system health
+  version             Show version info
+  help                Show this help
+
+Examples:
+  miniforge doctor
+  miniforge run feature.spec.edn
+  miniforge fleet add myorg/myrepo
+  miniforge fleet dashboard
+  miniforge pr review https://github.com/org/repo/pull/123
+"))
+
+;------------------------------------------------------------------------------ Layer 3
+;; CLI dispatch
+
+(def dispatch-table
+  [{:cmds ["version"] :fn version-cmd}
+   {:cmds ["doctor"]  :fn doctor-cmd}
+   {:cmds ["help"]    :fn help-cmd}
+   {:cmds []          :fn help-cmd}  ; default
+
+   ;; Run command
+   {:cmds ["run"]
+    :fn run-cmd
+    :args->opts [:spec]
+    :spec {:interactive {:coerce :boolean :alias :i}
+           :worktree    {:alias :w}}}
+
+   ;; Status command
+   {:cmds ["status"]
+    :fn status-cmd
+    :args->opts [:workflow-id]}
+
+   ;; Config subcommands
+   {:cmds ["config" "init"] :fn config-init-cmd}
+   {:cmds ["config" "list"] :fn config-list-cmd}
+   {:cmds ["config" "get"]  :fn config-get-cmd  :args->opts [:key]}
+   {:cmds ["config" "set"]  :fn config-set-cmd  :args->opts [:key :value]}
+
+   ;; Fleet subcommands
+   {:cmds ["fleet" "start"]     :fn fleet-start-cmd}
+   {:cmds ["fleet" "stop"]      :fn fleet-stop-cmd}
+   {:cmds ["fleet" "status"]    :fn fleet-status-cmd}
+   {:cmds ["fleet" "dashboard"] :fn fleet-dashboard-cmd}
+   {:cmds ["fleet" "add"]       :fn fleet-add-cmd    :args->opts [:repo]}
+   {:cmds ["fleet" "remove"]    :fn fleet-remove-cmd :args->opts [:repo]}
+
+   ;; PR subcommands
+   {:cmds ["pr" "list"]    :fn pr-list-cmd    :spec {:repo {:alias :r}}}
+   {:cmds ["pr" "review"]  :fn pr-review-cmd  :args->opts [:url]}
+   {:cmds ["pr" "respond"] :fn pr-respond-cmd :args->opts [:url]}
+   {:cmds ["pr" "merge"]   :fn pr-merge-cmd   :args->opts [:url]}])
 
 (defn -main
-  "Main entry point for miniforge CLI."
+  "CLI entry point."
   [& args]
-  (let [command (first args)]
-    (case command
-      "version"   (show-version)
-      "help"      (show-help)
-      nil         (show-help)
-      "status"    (show-status)
-      "workflows" (show-workflows)
-      "workflow"  (show-workflows) ;; TODO: implement workflow detail
-      "meta"      (show-meta)
-      (unknown-command command)))
-  (System/exit 0))
+  (cli/dispatch dispatch-table args))
 
-;; ============================================================================
-;; Rich Comment
-;; ============================================================================
-
+;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; Test commands
+  ;; Test CLI dispatch
   (-main "help")
   (-main "version")
-  (-main "status")
-  (-main "workflows")
-  (-main "meta")
-  (-main "unknown")
+  (-main "doctor")
+  (-main "config" "init")
+  (-main "config" "list")
+  (-main "run" "test.spec.edn")
+  (-main "fleet" "dashboard")
 
   :end)

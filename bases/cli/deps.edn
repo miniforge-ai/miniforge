@@ -1,3 +1,9 @@
 {:paths ["src"]
 
- :deps {org.clojure/clojure {:mvn/version "1.12.0"}}}
+ :deps {;; CLI dependencies (BB-compatible, all bundled with Babashka)
+        ;; babashka.cli, babashka.fs, babashka.process, cheshire.core
+        ;; are all bundled with Babashka - no external deps needed for BB runtime
+        ;; These are listed for JVM REPL/test compatibility
+        org.babashka/cli {:mvn/version "0.8.60"}
+        babashka/fs      {:mvn/version "0.5.22"}
+        babashka/process {:mvn/version "0.5.22"}}}

@@ -1,5 +1,7 @@
 {:min-bb-version "1.3.0"
 
+ :deps {io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}}
+
  :tasks
  {:requires ([babashka.fs :as fs]
              [babashka.process :as p]
@@ -333,4 +335,14 @@
   {:doc  "Reset git hooks to default location"
    :task (do
            (p/sh "git" "config" "--unset" "core.hooksPath")
-           (println "✅ Git hooks reset to default (.git/hooks/)"))}}}
+           (println "✅ Git hooks reset to default (.git/hooks/)"))}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
+  ;; CLI Development
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  miniforge
+  {:doc     "Run miniforge CLI in development mode"
+   :extra-paths ["bases/cli/src"]
+   :requires ([ai.miniforge.cli.main :as cli])
+   :task    (apply cli/-main *command-line-args*)}}}
