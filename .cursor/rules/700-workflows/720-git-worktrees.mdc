@@ -10,11 +10,16 @@ impact: high
 
 ## Context
 
-Git worktrees enable multiple branches to be checked out simultaneously in separate directories from a single repository. This is critical for:
+Git worktrees enable multiple branches to be checked out simultaneously in separate directories from a single repository.
 
-1. **Development workflow**: Working on multiple features without branch switching overhead
-2. **miniforge architecture**: The Operator agent managing multiple concurrent workflows with isolated contexts
-3. **IDE integration**: Dedicated worktrees for different editors (e.g., Cursor on `main` for stable reference)
+**Core Principle: AI agents always work in their own dedicated worktree.** This ensures isolation, prevents conflicts, and enables concurrent operations.
+
+The following types of worktrees support different use cases:
+
+1. **AI session isolation**: Each AI agent session operates in its own worktree to prevent conflicts
+2. **Development workflow**: Working on multiple features without branch switching overhead
+3. **miniforge architecture**: The Operator agent managing multiple concurrent workflows with isolated contexts
+4. **IDE integration**: Dedicated worktrees for different editors (e.g., Cursor on `main` for stable reference)
 
 ## Development Usage
 
@@ -41,10 +46,12 @@ git worktree add /Users/chris/Local/miniforge.ai/miniforge-cursor main
 
 ```
 miniforge.ai/
-├── miniforge/              # Main worktree (for active feature work)
-├── miniforge-cursor/       # Permanent: Cursor IDE on main branch
-├── miniforge-{feature}/    # Temporary: One per active feature PR
-└── miniforge-{context}/    # Optional: For operator spawned workflows
+├── miniforge/                  # Main worktree (for active feature work)
+├── miniforge-cursor/           # Permanent: Cursor IDE on main branch
+├── miniforge-claude-*/         # AI Session: Claude Code session worktrees (clean up before new session)
+├── miniforge-cursor-ai-*/      # AI Session: Cursor AI session worktrees (clean up before new session)
+├── miniforge-{feature}/        # Temporary: One per active feature PR
+└── miniforge-{context}/        # Optional: For operator spawned workflows
 ```
 
 ### Worktree Lifecycle
@@ -76,14 +83,27 @@ git fetch --prune
 
 ### Cleanup Checklist
 
-After **every PR merge**, clean up:
+**After every PR merge**, clean up:
 
 - [ ] `git worktree remove /path/to/feature-worktree`
 - [ ] `git push origin --delete feat/branch-name` (if needed)
 - [ ] `git fetch --prune` (update local refs)
 - [ ] Verify: `git worktree list` shows only active worktrees
 
-### Permanent vs Temporary Worktrees
+**Before starting each new AI session**, clean up:
+
+- [ ] Remove old AI session worktrees (see "AI Session Lifecycle Management" below)
+- [ ] `git worktree prune` - Clean up stale references
+- [ ] Verify: No stale `miniforge-claude-*` or `miniforge-cursor-ai-*` worktrees remain
+
+### Worktree Types and Lifecycle
+
+**AI Session Worktrees** (delete when starting new session):
+- `miniforge-claude-*` - Claude Code AI session worktrees
+- `miniforge-cursor-ai-*` - Cursor AI session worktrees
+- Created automatically or manually for each AI agent session
+- **MUST be cleaned up** when starting a new AI session to prevent stale state
+- Naming convention: `miniforge-{ai-tool}-{date}` or `miniforge-{ai-tool}-{session-id}`
 
 **Permanent** (keep indefinitely):
 - `miniforge-cursor` - Dedicated IDE worktree on `main`
@@ -92,6 +112,80 @@ After **every PR merge**, clean up:
 **Temporary** (delete after merge):
 - `miniforge-{feature}` - Created per feature, removed after PR merge
 - `miniforge-{fix}` - Created for urgent fixes, removed after merge
+
+### AI Session Lifecycle Management
+
+**CRITICAL: Always clean up old AI session worktrees before starting a new session.**
+
+#### Starting a New AI Session
+
+**1. Check for existing AI session worktrees:**
+```bash
+git worktree list | grep -E 'miniforge-(claude|cursor-ai)'
+```
+
+**2. Remove old AI session worktrees:**
+```bash
+# Remove each old session worktree
+git worktree remove /path/to/miniforge-claude-old-session
+
+# If worktree was manually deleted, prune stale references
+git worktree prune
+```
+
+**3. Clean up associated branches (if any):**
+```bash
+# List AI session branches
+git branch | grep -E 'claude-session|ai-session'
+
+# Delete local branches that are no longer needed
+git branch -D branch-name
+
+# Delete remote branches if pushed
+git push origin --delete branch-name
+```
+
+**4. Create new session worktree:**
+```bash
+# Option A: Work on existing branch
+git worktree add -b feat/my-feature \
+  /Users/chris/Local/miniforge.ai/miniforge-claude-$(date +%Y%m%d) \
+  origin/main
+
+# Option B: Continue work on existing feature branch
+git worktree add \
+  /Users/chris/Local/miniforge.ai/miniforge-claude-$(date +%Y%m%d) \
+  feat/existing-feature
+```
+
+#### Session Cleanup Checklist
+
+Before starting each new AI session:
+
+- [ ] `git worktree list` - List all worktrees
+- [ ] Identify old AI session worktrees (`miniforge-claude-*`, `miniforge-cursor-ai-*`)
+- [ ] `git worktree remove /path/to/old-session` - Remove each old session
+- [ ] `git worktree prune` - Clean up stale references
+- [ ] `git branch -D` - Delete local session branches if no longer needed
+- [ ] `git push origin --delete` - Delete remote session branches if pushed
+- [ ] Verify: Only current/active worktrees remain
+
+#### Why Session Cleanup Matters
+
+**Prevents stale state:**
+- Old session worktrees may have uncommitted changes or conflicts
+- Branch state diverges from remote over time
+- Disk space accumulates with multiple abandoned sessions
+
+**Ensures clean context:**
+- Each AI session starts from a known state
+- No confusion about which worktree is active
+- Clear separation between different work streams
+
+**Best practice:**
+- **Always create a fresh worktree** for each new AI session
+- **Never reuse** old session worktrees across different sessions
+- **Commit or stash** work before ending a session if you want to preserve it
 
 ## miniforge Operator Usage
 
@@ -222,6 +316,49 @@ git worktree add -b fix/workflow-123 /tmp/miniforge-self-fix origin/main
 git worktree remove /tmp/miniforge-self-fix
 ```
 
+### Pattern: AI Session Workflow
+```bash
+# Before starting new AI session - clean up old sessions
+git worktree list | grep miniforge-claude
+# Remove any old session worktrees found
+git worktree remove /path/to/old/miniforge-claude-20260115
+git worktree prune
+
+# Start new AI session with fresh worktree
+git worktree add -b feat/new-feature \
+  /Users/chris/Local/miniforge.ai/miniforge-claude-$(date +%Y%m%d) \
+  origin/main
+
+# AI agent works in isolated session worktree
+cd /Users/chris/Local/miniforge.ai/miniforge-claude-20260120
+# ... AI agent makes changes, commits, creates PR ...
+
+# After PR merged OR before next session
+git worktree remove /Users/chris/Local/miniforge.ai/miniforge-claude-20260120
+git push origin --delete feat/new-feature  # if needed
+```
+
+### Pattern: Resuming Work Across AI Sessions
+```bash
+# Session 1: Start work on feature
+git worktree add -b feat/my-feature \
+  miniforge-claude-session1 \
+  origin/main
+# ... work in progress, committed to branch ...
+
+# End Session 1 (commit/push work first!)
+git -C miniforge-claude-session1 push -u origin feat/my-feature
+git worktree remove miniforge-claude-session1
+
+# Session 2: Resume work on same feature in NEW worktree
+git worktree add \
+  miniforge-claude-session2 \
+  feat/my-feature  # checkout existing branch
+# ... continue work ...
+
+# Always use fresh worktree, never reuse old session directory
+```
+
 ## Anti-Patterns
 
 ❌ **Don't**: Check out `main` in multiple worktrees
@@ -262,6 +399,36 @@ git worktree add miniforge-production production
 ```bash
 # GOOD: Short-lived feature branches
 git worktree add -b feat/component miniforge-component origin/main
+```
+
+❌ **Don't**: Reuse old AI session worktrees across sessions
+```bash
+# BAD: Reusing old session worktree leads to stale state
+# Session 1 ended, but worktree still exists
+cd miniforge-claude-20260115  # From yesterday
+# Start new work here - BAD! May have uncommitted changes, stale branch state
+```
+
+✅ **Do**: Create fresh worktree for each AI session
+```bash
+# GOOD: Clean slate for each session
+git worktree remove miniforge-claude-20260115  # Clean up old session
+git worktree add -b feat/new miniforge-claude-$(date +%Y%m%d) origin/main
+```
+
+❌ **Don't**: Skip cleanup when starting new AI session
+```bash
+# BAD: Start new session without cleanup
+git worktree add -b feat/new miniforge-claude-20260120 origin/main
+# Now you have multiple stale session worktrees cluttering your workspace
+```
+
+✅ **Do**: Always clean up before starting new session
+```bash
+# GOOD: Clean up first
+git worktree list | grep miniforge-claude  # Check for old sessions
+git worktree remove miniforge-claude-old   # Remove them
+git worktree add -b feat/new miniforge-claude-$(date +%Y%m%d) origin/main
 ```
 
 ## Troubleshooting
@@ -327,4 +494,4 @@ Worktrees enable **local multi-loop** execution. For distributed:
 
 ---
 
-**Rule**: Use git worktrees for parallel development and operator multi-loop execution. Create per feature, cleanup after merge. Leverage for miniforge's concurrent workflow architecture.
+**Rule**: AI agents always work in their own dedicated worktree. Use git worktrees for AI session isolation, parallel development, and operator multi-loop execution. Always clean up old AI session worktrees before starting a new session. Create worktrees per feature, cleanup after merge. Leverage for miniforge's concurrent workflow architecture.
