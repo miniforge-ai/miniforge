@@ -40,6 +40,13 @@ globs:
 
 ### Interface.clj pattern (CRITICAL)
 
+**Layer guidance for interfaces:**
+- The 3-layer maximum is **not a hard rule** for pure interface files that only contain pass-through functions
+- However, if an interface has many layers (>5), it may indicate the component is doing too much
+- Consider splitting large components into smaller, focused components to maintain simplicity and clear boundaries
+- Example: An agent component with 10 layers of pass-throughs might be better as separate planner, implementer, and tester components
+
+**Interface requirements:**
 - **interface.clj must contain ALL public functions** for the component
 - **interface.clj should contain NO implementations** — only thin pass-throughs
 - Pass-through functions forward to implementation functions in `core.clj` or other namespaces within the component
@@ -91,6 +98,8 @@ When creating/editing a namespace:
 2) Keep **pure helpers** and external calls that are side-effect free in **Layer 0**.
 3) Put orchestration that **only depends on Layer 0** in **Layer 1**, and so on.
 4) If you cross 3 layers, **propose a split** using the namespace splitting strategy above.
+   - **Exception**: Pure interface files (pass-throughs only) are not bound by the 3-layer maximum
+   - However, if an interface has >5 layers, consider if the component should be split into smaller components
 5) Ensure the last top-level form is a single `(comment …)` block with quick REPL samples.
 6) For cross-component calls, target `...<other>.interface` — and surface a fix if `.core` is used.
 
