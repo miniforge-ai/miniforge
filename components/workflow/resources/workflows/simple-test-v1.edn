@@ -1,0 +1,57 @@
+;; Copyright 2025 miniforge.ai
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+;; Simple test workflow v1.0.0
+;; Minimal workflow for testing: Plan → Implement → Done
+
+{:workflow/id :simple-test-v1
+ :workflow/version "1.0.0"
+ :workflow/type :test
+ :workflow/description "Simple 3-phase workflow for testing"
+ :workflow/metadata {:author "miniforge.ai"
+                     :created-at "2025-01-21"
+                     :tags [:test :simple]}
+
+ :workflow/phases
+ [{:phase/id :plan
+   :phase/name "Planning"
+   :phase/description "Create simple plan"
+   :phase/agent-type :planner
+   :phase/max-iterations 2
+   :phase/timeout-ms 60000
+   :phase/on-success {:transition/target :implement}
+   :phase/on-failure {:transition/target :plan}}
+
+  {:phase/id :implement
+   :phase/name "Implementation"
+   :phase/description "Implement plan"
+   :phase/agent-type :implementer
+   :phase/max-iterations 3
+   :phase/timeout-ms 120000
+   :phase/on-success {:transition/target :done}
+   :phase/on-failure {:transition/target :implement}}
+
+  {:phase/id :done
+   :phase/name "Complete"
+   :phase/description "Workflow completed"
+   :phase/agent-type :none
+   :phase/max-iterations 1
+   :phase/timeout-ms 1000}]
+
+ :workflow/budgets {:budget/tokens 10000
+                    :budget/cost-usd 1.0
+                    :budget/duration-ms 300000}
+
+ :workflow/entry-phase :plan
+ :workflow/exit-phases [:done]}

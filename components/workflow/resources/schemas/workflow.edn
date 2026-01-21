@@ -1,0 +1,63 @@
+;; Copyright 2025 miniforge.ai
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+;; Malli schema for workflow configuration
+;; Validates the structure of EDN workflow configs that define
+;; phase sequences, transitions, and execution parameters.
+
+{:workflow
+ [:map
+  [:workflow/id keyword?]
+  [:workflow/version string?]
+  [:workflow/type keyword?]
+  [:workflow/description {:optional true} string?]
+  [:workflow/metadata {:optional true} map?]
+
+  ;; Phases configuration
+  [:workflow/phases
+   [:sequential
+    [:map
+     [:phase/id keyword?]
+     [:phase/name string?]
+     [:phase/description {:optional true} string?]
+     [:phase/agent-type keyword?]
+     [:phase/prompt {:optional true} string?]
+     [:phase/max-iterations {:optional true} pos-int?]
+     [:phase/timeout-ms {:optional true} pos-int?]
+     [:phase/gates {:optional true}
+      [:sequential
+       [:map
+        [:gate/type keyword?]
+        [:gate/config {:optional true} map?]]]]
+     [:phase/on-success {:optional true}
+      [:map
+       [:transition/target keyword?]
+       [:transition/condition {:optional true} map?]]]
+     [:phase/on-failure {:optional true}
+      [:map
+       [:transition/target keyword?]
+       [:transition/condition {:optional true} map?]]]
+     [:phase/metadata {:optional true} map?]]]]
+
+  ;; Budget constraints
+  [:workflow/budgets {:optional true}
+   [:map
+    [:budget/tokens {:optional true} pos-int?]
+    [:budget/cost-usd {:optional true} number?]
+    [:budget/duration-ms {:optional true} pos-int?]]]
+
+  ;; Entry and exit phases
+  [:workflow/entry-phase keyword?]
+  [:workflow/exit-phases
+   [:sequential keyword?]]]}
