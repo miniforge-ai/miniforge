@@ -136,15 +136,16 @@
   ;; => ("2.0.0" "1.2.0" "1.1.0" "1.0.0")
 
   ;; Test heuristic operations
-  (save-heuristic :prompt :implementer "1.0.0"
+  (save-heuristic :implementer-prompt "1.0.0"
                   {:system "You are an implementer"
-                   :task-template "Implement {{task}}"} {})
+                   :task-template "Implement {{task}}"}
+                  {})
 
-  (get-heuristic :prompt :implementer "1.0.0" {})
+  (get-heuristic :implementer-prompt "1.0.0" {})
 
-  (list-versions :prompt :implementer {})
+  (list-versions :implementer-prompt {})
 
-  (set-active-version :prompt :implementer "1.0.0" {})
-  (get-active-heuristic :prompt :implementer {})
+  (set-active-version :implementer-prompt "1.0.0" {})
+  (get-active-heuristic :implementer-prompt {})
 
   :end)

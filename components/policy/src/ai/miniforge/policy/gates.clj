@@ -71,7 +71,7 @@
   "Evaluate test pass/fail status.
 
    Returns nil if tests pass, failure map if tests fail."
-  [artifact config]
+  [artifact _config]
   (let [test-results (get-in artifact [:artifact/metadata :test-results])]
     (when (and test-results (not (:passed? test-results)))
       {:gate :test

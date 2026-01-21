@@ -41,8 +41,8 @@
    Heuristic data map or nil if not found
 
    Example:
-   (get-heuristic :prompt :implementer \"1.0.0\")
-   (get-heuristic :threshold :inner-loop-max-iterations :latest)"
+   (get-heuristic :implementer-prompt \"1.0.0\")
+   (get-heuristic :inner-loop-max-iterations :latest)"
   ([heuristic-type version]
    (get-heuristic heuristic-type version {}))
   ([heuristic-type version opts]
@@ -61,7 +61,7 @@
    UUID of saved heuristic
 
    Example:
-   (save-heuristic :prompt :implementer \"1.1.0\"
+   (save-heuristic :implementer-prompt \"1.1.0\"
      {:system \"You are an implementer agent...\"
       :task-template \"Implement: {{task}}\"})'"
   ([heuristic-type version data]
@@ -80,7 +80,7 @@
    Vector of version strings sorted newest first
 
    Example:
-   (list-versions :prompt :implementer)"
+   (list-versions :implementer-prompt)"
   ([heuristic-type]
    (list-versions heuristic-type {}))
   ([heuristic-type opts]
@@ -99,7 +99,7 @@
    Heuristic data map
 
    Example:
-   (get-active-heuristic :prompt :implementer)"
+   (get-active-heuristic :implementer-prompt)"
   ([heuristic-type]
    (get-active-heuristic heuristic-type {}))
   ([heuristic-type opts]
@@ -117,7 +117,7 @@
    true if successful
 
    Example:
-   (set-active-version :prompt :implementer \"1.1.0\")"
+   (set-active-version :implementer-prompt \"1.1.0\")"
   ([heuristic-type version]
    (set-active-version heuristic-type version {}))
   ([heuristic-type version opts]
@@ -147,20 +147,20 @@
   (def my-store (create-store :local {:path "~/.miniforge/heuristics"}))
 
   ;; Save a prompt heuristic
-  (save-heuristic :prompt :implementer "1.0.0"
+  (save-heuristic :implementer-prompt "1.0.0"
                   {:system "You are an implementer agent..."
                    :task-template "Implement: {{task}}"})
 
   ;; Get a specific version
-  (get-heuristic :prompt :implementer "1.0.0")
+  (get-heuristic :implementer-prompt "1.0.0")
 
   ;; List all versions
-  (list-versions :prompt :implementer)
+  (list-versions :implementer-prompt)
 
   ;; Get active version
-  (get-active-heuristic :prompt :implementer)
+  (get-active-heuristic :implementer-prompt)
 
   ;; Set active version
-  (set-active-version :prompt :implementer "1.1.0")
+  (set-active-version :implementer-prompt "1.1.0")
 
   :end)
