@@ -2,7 +2,7 @@
   "Implementer agent implementation.
    Generates code from plans and task descriptions."
   (:require
-   [ai.miniforge.agent.core :as core]
+   [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
@@ -301,7 +301,7 @@ Write code that is easy to understand, test, and maintain.")
   [& [opts]]
   (let [logger (or (:logger opts)
                    (log/create-logger {:min-level :info :output (fn [_])}))]
-    (core/create-base-agent
+    (specialized/create-base-agent
      {:role :implementer
       :system-prompt implementer-system-prompt
       :config (merge {:model "claude-sonnet-4"
@@ -405,7 +405,7 @@ Write code that is easy to understand, test, and maintain.")
   (def impl (create-implementer))
 
   ;; Invoke with a task
-  (core/invoke impl
+  (specialized/invoke impl
                {:language "clojure"
                 :suggested-path "src/ai/miniforge/auth/login.clj"}
                {:task/description "Implement user login with email verification"
