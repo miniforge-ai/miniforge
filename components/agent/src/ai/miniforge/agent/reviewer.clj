@@ -7,6 +7,7 @@
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.loop.interface :as loop]
+   [ai.miniforge.loop.gates :as gates]  ; TODO: Should be exported by loop.interface
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -46,87 +47,109 @@
   [gate result]
   (let [gate-id (:gate/id gate :unknown)
         gate-type (:gate/type gate :unknown)
-        passed? (:passed? result true)
-        errors (:errors result [])
-        warnings (:warnings result [])]
+        passed? (:gate/passed? result true)
+        errors (:gate/errors result [])
+        warnings (:gate/warnings result [])]
     {:gate-id gate-id
      :gate-type gate-type
      :passed? passed?
      :errors errors
      :warnings warnings
-     :duration-ms (or (:duration-ms result) 0)}))
+     :duration-ms (or (:gate/duration-ms result) 0)}))
+
+(defn- create-exception-feedback
+  "Create error feedback when gate throws exception."
+  [gate idx exception duration]
+  {:gate-id (or (:gate/id gate) (keyword (str "gate-" idx)))
+   :gate-type :unknown
+   :passed? false
+   :errors [{:type :gate-exception
+             :message (str "Gate execution failed: " (.getMessage exception))}]
+   :duration-ms duration})
+
+(defn- run-single-gate
+  "Run a single gate and return feedback with timing.
+   Handles exceptions gracefully."
+  [gate idx artifact context logger]
+  (let [gate-start (System/currentTimeMillis)
+        gate-id (:gate/id gate :unknown)]
+    (log/debug logger :reviewer :reviewer/gate-start
+               {:data {:gate-idx idx :gate-id gate-id}})
+    (try
+      (let [result (gates/check gate artifact context)
+            duration (- (System/currentTimeMillis) gate-start)
+            feedback (gate-result->feedback gate result)]
+        (log/info logger :reviewer :reviewer/gate-complete
+                  {:data {:gate-id (:gate-id feedback)
+                          :passed? (:passed? feedback)
+                          :duration-ms duration}})
+        (assoc feedback :duration-ms duration))
+      (catch Exception e
+        (let [duration (- (System/currentTimeMillis) gate-start)]
+          (log/error logger :reviewer :reviewer/gate-error
+                     {:data {:gate-idx idx
+                             :error (.getMessage e)}})
+          (create-exception-feedback gate idx e duration))))))
 
 (defn- run-gates-on-artifact
   "Run all gates on the artifact and collect results.
    Returns vector of GateFeedback maps."
   [gates artifact context logger]
-  (let [start-time (System/currentTimeMillis)]
-    (log/info logger :reviewer :reviewer/running-gates
-              {:data {:gate-count (count gates)}})
+  (log/info logger :reviewer :reviewer/running-gates
+            {:data {:gate-count (count gates)}})
+  (->> gates
+       (map-indexed (fn [idx gate]
+                      (run-single-gate gate idx artifact context logger)))
+       vec))
 
-    (->> gates
-         (map-indexed
-          (fn [idx gate]
-            (let [gate-start (System/currentTimeMillis)]
-              (log/debug logger :reviewer :reviewer/gate-start
-                         {:data {:gate-idx idx
-                                 :gate-id (:gate/id gate :unknown)}})
-              (try
-                (let [result (loop/check gate artifact context)
-                      duration (- (System/currentTimeMillis) gate-start)
-                      feedback (gate-result->feedback gate result)]
-                  (log/info logger :reviewer :reviewer/gate-complete
-                            {:data {:gate-id (:gate-id feedback)
-                                    :passed? (:passed? feedback)
-                                    :duration-ms duration}})
-                  (assoc feedback :duration-ms duration))
-                (catch Exception e
-                  (log/error logger :reviewer :reviewer/gate-error
-                             {:data {:gate-idx idx
-                                     :error (.getMessage e)}})
-                  {:gate-id (or (:gate/id gate) (keyword (str "gate-" idx)))
-                   :gate-type :unknown
-                   :passed? false
-                   :errors [{:type :gate-exception
-                             :message (str "Gate execution failed: " (.getMessage e))}]
-                   :duration-ms (- (System/currentTimeMillis) gate-start)})))))
-         vec)))
+(defn- extract-blocking-issues
+  "Extract blocking errors from failed gates."
+  [failed-gates]
+  (->> failed-gates
+       (mapcat :errors)
+       (filter #(= :blocking (:severity % :blocking)))
+       vec))
+
+(defn- extract-warning-messages
+  "Extract warning messages from all gates."
+  [gate-feedbacks]
+  (->> gate-feedbacks
+       (mapcat :warnings)
+       (map :message)
+       vec))
+
+(defn- extract-error-messages
+  "Extract error messages from failed gates."
+  [failed-gates]
+  (->> failed-gates
+       (mapcat :errors)
+       (map :message)
+       vec))
+
+(defn- decide-on-failures
+  "Determine decision when there are gate failures."
+  [failed-gates blocking-issues config]
+  (if (seq blocking-issues)
+    {:decision :rejected
+     :blocking-issues (mapv :message blocking-issues)
+     :warnings []}
+    {:decision (if (:strict config false) :rejected :conditionally-approved)
+     :blocking-issues (if (:strict config)
+                        (extract-error-messages failed-gates)
+                        [])
+     :warnings (extract-error-messages failed-gates)}))
 
 (defn- make-review-decision
   "Determine review decision based on gate results."
   [gate-feedbacks config]
   (let [failed (filter (complement :passed?) gate-feedbacks)
-        failed-count (count failed)
-        warnings-count (->> gate-feedbacks
-                            (mapcat :warnings)
-                            count)
-        blocking-issues (->> failed
-                             (mapcat :errors)
-                             (filter #(= :blocking (:severity % :blocking)))
-                             vec)]
-    (cond
-      ;; All gates passed - approved
-      (zero? failed-count)
+        failed-count (count failed)]
+    (if (zero? failed-count)
       {:decision :approved
        :blocking-issues []
-       :warnings (->> gate-feedbacks (mapcat :warnings) (map :message) vec)}
-
-      ;; Has blocking issues - rejected
-      (seq blocking-issues)
-      {:decision :rejected
-       :blocking-issues (mapv :message blocking-issues)
-       :warnings []}
-
-      ;; Failures but no blocking issues - conditionally approved
-      ;; (may require fixes depending on policy)
-      :else
-      {:decision (if (:strict config false)
-                   :rejected
-                   :conditionally-approved)
-       :blocking-issues (if (:strict config)
-                          (->> failed (mapcat :errors) (map :message) vec)
-                          [])
-       :warnings (->> failed (mapcat :errors) (map :message) vec)})))
+       :warnings (extract-warning-messages gate-feedbacks)}
+      (let [blocking-issues (extract-blocking-issues failed)]
+        (decide-on-failures failed blocking-issues config)))))
 
 (defn- generate-summary
   "Generate human-readable summary of review."
@@ -215,7 +238,53 @@
      :output @repaired}))
 
 ;------------------------------------------------------------------------------ Layer 3
-;; Public API
+;; Public API - Helper functions
+
+(defn- extract-artifact-and-id
+  "Extract artifact and its ID from input."
+  [input]
+  (let [artifact (or (:artifact input) input)
+        artifact-id (or (:artifact/id artifact)
+                        (:code/id artifact)
+                        (random-uuid))]
+    [artifact artifact-id]))
+
+(defn- calculate-gate-counts
+  "Calculate passed, failed, and total gate counts."
+  [gate-feedbacks]
+  (let [passed (count (filter :passed? gate-feedbacks))
+        failed (count (filter (complement :passed?) gate-feedbacks))
+        total (count gate-feedbacks)]
+    {:passed passed :failed failed :total total}))
+
+(defn- build-review-artifact
+  "Build the review artifact from gate results and decision."
+  [gate-feedbacks decision blocking-issues warnings artifact-id counts]
+  {:review/id (random-uuid)
+   :review/decision decision
+   :review/gate-results gate-feedbacks
+   :review/summary (generate-summary decision gate-feedbacks)
+   :review/artifact-id artifact-id
+   :review/gates-passed (:passed counts)
+   :review/gates-failed (:failed counts)
+   :review/gates-total (:total counts)
+   :review/blocking-issues blocking-issues
+   :review/warnings warnings
+   :review/recommendations (generate-recommendations gate-feedbacks)
+   :review/created-at (java.util.Date.)})
+
+(defn- build-review-result
+  "Build the final result map with metrics."
+  [review counts duration]
+  {:status :success
+   :output review
+   :artifact review
+   :metrics {:decision (:review/decision review)
+             :gates-passed (:passed counts)
+             :gates-failed (:failed counts)
+             :gates-total (:total counts)
+             :duration-ms duration
+             :tokens 0}})
 
 (defn create-reviewer
   "Create a Reviewer agent with optional configuration overrides.
@@ -243,57 +312,31 @@
         config {:strict (or (:strict opts) false)}]
     (core/create-base-agent
      {:role :reviewer
-      :system-prompt nil  ; No LLM used
+      :system-prompt ""  ; No LLM used - empty prompt
       :config config
       :logger logger
 
       :invoke-fn
       (fn [context input]
-        (let [artifact (or (:artifact input) input)
-              artifact-id (or (:artifact/id artifact)
-                              (:code/id artifact)
-                              (random-uuid))
+        (let [[artifact artifact-id] (extract-artifact-and-id input)
               start-time (System/currentTimeMillis)]
           (log/info logger :reviewer :reviewer/review-start
                     {:data {:artifact-id artifact-id
                             :gate-count (count gates)}})
 
-          ;; Run all gates
           (let [gate-feedbacks (run-gates-on-artifact gates artifact context logger)
                 {:keys [decision blocking-issues warnings]} (make-review-decision gate-feedbacks config)
-                passed (count (filter :passed? gate-feedbacks))
-                failed (count (filter (complement :passed?) gate-feedbacks))
-                total (count gate-feedbacks)
-                recommendations (generate-recommendations gate-feedbacks)
-                duration (- (System/currentTimeMillis) start-time)
-                review {:review/id (random-uuid)
-                        :review/decision decision
-                        :review/gate-results gate-feedbacks
-                        :review/summary (generate-summary decision gate-feedbacks)
-                        :review/artifact-id artifact-id
-                        :review/gates-passed passed
-                        :review/gates-failed failed
-                        :review/gates-total total
-                        :review/blocking-issues blocking-issues
-                        :review/warnings warnings
-                        :review/recommendations recommendations
-                        :review/created-at (java.util.Date.)}]
+                counts (calculate-gate-counts gate-feedbacks)
+                review (build-review-artifact gate-feedbacks decision blocking-issues warnings artifact-id counts)
+                duration (- (System/currentTimeMillis) start-time)]
 
             (log/info logger :reviewer :reviewer/review-complete
                       {:data {:decision decision
-                              :gates-passed passed
-                              :gates-failed failed
+                              :gates-passed (:passed counts)
+                              :gates-failed (:failed counts)
                               :duration-ms duration}})
 
-            {:status :success
-             :output review
-             :artifact review
-             :metrics {:decision decision
-                       :gates-passed passed
-                       :gates-failed failed
-                       :gates-total total
-                       :duration-ms duration
-                       :tokens 0}})))  ; No tokens - no LLM used
+            (build-review-result review counts duration))))
 
       :validate-fn validate-review-artifact
 
