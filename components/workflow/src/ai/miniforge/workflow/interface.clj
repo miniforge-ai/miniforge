@@ -290,6 +290,31 @@
   []
   ((requiring-resolve 'ai.miniforge.workflow.loader/list-available-workflows)))
 
+(defn- execution-summary
+  "Create a summary map from an execution state."
+  [{:execution/keys [id workflow-id status metrics artifacts errors] :as exec-state}]
+  {:execution/id id
+   :execution/workflow-id workflow-id
+   :execution/status status
+   :execution/metrics metrics
+   :execution/duration-ms ((requiring-resolve 'ai.miniforge.workflow.state/get-duration-ms)
+                           exec-state)
+   :artifact-count (count artifacts)
+   :error-count (count errors)})
+
+(defn- count-by-status
+  "Count execution states with a given status."
+  [status execution-states]
+  (count (filter #(= status (:execution/status %)) execution-states)))
+
+(defn- avg-metric
+  "Calculate average of a metric across summaries."
+  [summaries metric-path]
+  (if (seq summaries)
+    (/ (reduce + (map #(get-in % metric-path) summaries))
+       (count summaries))
+    0))
+
 (defn compare-workflows
   "Compare execution results from multiple workflow runs.
 
@@ -305,34 +330,14 @@
      (def exec2 (execute-workflow workflow2 input {}))
      (compare-workflows [exec1 exec2])"
   [execution-states]
-  (let [summaries (mapv (fn [exec-state]
-                          {:execution/id (:execution/id exec-state)
-                           :execution/workflow-id (:execution/workflow-id exec-state)
-                           :execution/status (:execution/status exec-state)
-                           :execution/metrics (:execution/metrics exec-state)
-                           :execution/duration-ms ((requiring-resolve 'ai.miniforge.workflow.state/get-duration-ms)
-                                                   exec-state)
-                           :artifact-count (count (:execution/artifacts exec-state))
-                           :error-count (count (:execution/errors exec-state))})
-                        execution-states)]
+  (let [summaries (mapv execution-summary execution-states)]
     {:executions summaries
      :comparison {:total-executions (count execution-states)
-                  :completed-count (count (filter #(= :completed (:execution/status %))
-                                                  execution-states))
-                  :failed-count (count (filter #(= :failed (:execution/status %))
-                                               execution-states))
-                  :avg-tokens (if (seq summaries)
-                                (/ (reduce + (map #(get-in % [:execution/metrics :tokens]) summaries))
-                                   (count summaries))
-                                0)
-                  :avg-cost (if (seq summaries)
-                              (/ (reduce + (map #(get-in % [:execution/metrics :cost-usd]) summaries))
-                                 (count summaries))
-                              0.0)
-                  :avg-duration (if (seq summaries)
-                                  (/ (reduce + (map :execution/duration-ms summaries))
-                                     (count summaries))
-                                  0)}}))
+                  :completed-count (count-by-status :completed execution-states)
+                  :failed-count (count-by-status :failed execution-states)
+                  :avg-tokens (avg-metric summaries [:execution/metrics :tokens])
+                  :avg-cost (avg-metric summaries [:execution/metrics :cost-usd])
+                  :avg-duration (avg-metric summaries [:execution/duration-ms])}}))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
