@@ -3,6 +3,7 @@
    Handles SDLC phase execution: Plan → Design → Implement → Verify → Review → Release → Observe"
   (:require
    [ai.miniforge.workflow.core :as core]
+   [ai.miniforge.workflow.persistence :as persist]
    [ai.miniforge.workflow.protocol :as proto]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -232,8 +233,7 @@
      (get-active-workflow :feature)
      ;; => {:workflow-id :canonical-sdlc-v1 :version \"1.0.0\"}"
   [task-type]
-  ((requiring-resolve 'ai.miniforge.workflow.core/get-active-workflow-id)
-   task-type))
+  (persist/get-active-workflow-id task-type))
 
 (defn set-active-workflow
   "Set the active workflow for a task type.
@@ -249,8 +249,7 @@
      (set-active-workflow :feature :canonical-sdlc-v1 \"1.0.0\")
      (set-active-workflow :bugfix :simple-test-v1 \"1.0.0\")"
   [task-type workflow-id version]
-  ((requiring-resolve 'ai.miniforge.workflow.core/set-active-workflow)
-   task-type workflow-id version))
+  (persist/set-active-workflow task-type workflow-id version))
 
 (defn save-workflow
   "Save a workflow configuration to the heuristic store.
