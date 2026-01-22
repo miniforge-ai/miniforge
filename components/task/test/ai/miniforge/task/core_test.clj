@@ -185,7 +185,7 @@
                             #"Invalid state transition"
                             (core/unblock-task! (:task/id task)))))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 2
 ;; Query tests
 
 (deftest tasks-by-status-test
@@ -225,7 +225,7 @@
     (is (= 1 (count (core/tasks-by-type :plan))))
     (is (= 2 (count (core/tasks-by-type :implement))))))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 2
 ;; Decomposition tests
 
 (deftest decompose-task!-test
