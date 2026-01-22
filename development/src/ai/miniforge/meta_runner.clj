@@ -17,6 +17,7 @@
    [ai.miniforge.operator.interface :as operator]
    [ai.miniforge.logging.interface :as log]
    [clojure.edn :as edn]
+   [clojure.string :as str]
    [babashka.fs :as fs]))
 
 ;; ============================================================================
@@ -60,7 +61,27 @@
         k-store (knowledge/create-store)
 
         ;; Initialize knowledge store with rules and documentation
-        _ (knowledge/initialize-knowledge-store! k-store)
+        _ (knowledge/initialize-knowledge-store!
+           k-store
+           {:on-progress (fn [info]
+                          (case (:phase info)
+                            :rules (case (:event info)
+                                    :start (println "📚 Loading rules from" (:dir info) "...")
+                                    :complete (do
+                                               (println "  ✅ Loaded" (:loaded info) "rules")
+                                               (when (pos? (:failed info))
+                                                 (println "  ⚠️  Failed to load" (:failed info) "rules")))
+                                    nil)
+                            :docs (case (:event info)
+                                   :start (println "📖 Loading project documentation from" (:dir info) "...")
+                                   :complete (do
+                                              (when (pos? (:loaded info))
+                                                (println "  ✅ Loaded" (:loaded info) "documentation files:" (str/join ", " (:files info))))
+                                              (when (zero? (:loaded info))
+                                                (println "  ℹ️  No documentation files found")))
+                                   nil)
+                            :complete (println "🎉 Knowledge store initialized with" (:total info) "zettels")
+                            nil))})
 
         a-store-dir (str artifact-dir "/datalevin-" (System/currentTimeMillis))
         _ (fs/create-dirs a-store-dir)
