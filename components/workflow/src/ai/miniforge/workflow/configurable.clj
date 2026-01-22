@@ -124,6 +124,40 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Workflow execution
 
+(defn- execute-phase-step
+  "Execute a single phase step in the workflow.
+   Returns updated execution state or [:continue new-state] to continue loop."
+  [workflow exec-state phase context callbacks exit-phases]
+  (let [{:keys [on-phase-start on-phase-complete]} callbacks
+        current-phase-id (:execution/current-phase exec-state)]
+
+    ;; Invoke phase start callback
+    (when on-phase-start
+      (on-phase-start exec-state phase))
+
+    ;; Execute phase and record result
+    (let [phase-result (execute-configurable-phase phase exec-state context)
+          exec-state' (state/record-phase-result exec-state current-phase-id phase-result)]
+
+      ;; Invoke phase complete callback
+      (when on-phase-complete
+        (on-phase-complete exec-state' phase phase-result))
+
+      ;; Determine next action based on exit phase or transitions
+      (cond
+        ;; At exit phase - complete workflow
+        (contains? exit-phases current-phase-id)
+        (state/mark-completed exec-state')
+
+        ;; Determine next phase
+        :else
+        (let [next-phase-id (select-next-phase workflow exec-state' phase-result)]
+          (if next-phase-id
+            [:continue (state/transition-to-phase exec-state' next-phase-id :advance)]
+            (state/mark-failed exec-state'
+                               {:type :no-valid-transition
+                                :message (str "No valid transition from phase: " current-phase-id)})))))))
+
 (defn run-configurable-workflow
   "Execute a complete configurable workflow.
 
@@ -148,21 +182,23 @@
    3. Mark as completed or failed"
   [workflow input context]
   (let [max-phases (or (:max-phases context) 50)
-        on-phase-start (:on-phase-start context)
-        on-phase-complete (:on-phase-complete context)]
+        callbacks {:on-phase-start (:on-phase-start context)
+                   :on-phase-complete (:on-phase-complete context)}
+        exit-phases (set (:workflow/exit-phases workflow))]
 
-    ;; Create initial execution state
     (loop [exec-state (state/create-execution-state workflow input)
            phase-count 0]
 
-      ;; Safety check: prevent infinite loops
-      (if (>= phase-count max-phases)
+      ;; Early exit: max phases exceeded
+      (cond
+        (>= phase-count max-phases)
         (state/mark-failed exec-state
                            {:type :max-phases-exceeded
                             :message (str "Exceeded maximum phase count: " max-phases)})
 
+        ;; Execute phase step
+        :else
         (let [current-phase-id (:execution/current-phase exec-state)
-              exit-phases (set (:workflow/exit-phases workflow))
               phase (find-phase workflow current-phase-id)]
 
           (if-not phase
@@ -171,37 +207,13 @@
                                {:type :phase-not-found
                                 :message (str "Phase not found: " current-phase-id)})
 
-            ;; Execute phase
-            (do
-              ;; Callback: phase start
-              (when on-phase-start
-                (on-phase-start exec-state phase))
-
-              ;; Execute phase (stub for now)
-              (let [phase-result (execute-configurable-phase phase exec-state context)
-                    exec-state' (state/record-phase-result exec-state current-phase-id phase-result)]
-
-                ;; Callback: phase complete
-                (when on-phase-complete
-                  (on-phase-complete exec-state' phase phase-result))
-
-                ;; Check if this is an exit phase
-                (if (contains? exit-phases current-phase-id)
-                  ;; Complete workflow
-                  (state/mark-completed exec-state')
-
-                  ;; Determine next phase
-                  (let [next-phase-id (select-next-phase workflow exec-state' phase-result)]
-
-                    (if-not next-phase-id
-                      ;; No valid transition - fail workflow
-                      (state/mark-failed exec-state'
-                                         {:type :no-valid-transition
-                                          :message (str "No valid transition from phase: " current-phase-id)})
-
-                      ;; Transition to next phase
-                      (let [exec-state'' (state/transition-to-phase exec-state' next-phase-id :advance)]
-                        (recur exec-state'' (inc phase-count))))))))))))))
+            ;; Execute phase step
+            (let [result (execute-phase-step workflow exec-state phase context callbacks exit-phases)]
+              (if (vector? result)
+                ;; [:continue new-state] - continue to next phase
+                (recur (second result) (inc phase-count))
+                ;; Terminal state (completed or failed) - return it
+                result))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
