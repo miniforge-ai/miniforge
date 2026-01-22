@@ -1,5 +1,7 @@
 {:min-bb-version "1.3.0"
 
+ :deps {io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}}
+
  :tasks
  {:requires ([babashka.fs :as fs]
              [babashka.process :as p]
@@ -153,12 +155,12 @@
              (println "Usage: bb build:script <project>")))}
 
   build:cli
-  {:doc  "Build miniforge CLI as distributable uberscript"
+  {:doc  "Build miniforge CLI as distributable uberjar"
    :task (do
-           (println "🔨 Building miniforge CLI uberscript...")
-           (println "Command: clojure -T:build bb-uberscript :project miniforge")
+           (println "🔨 Building miniforge CLI uberjar...")
+           (println "Command: clojure -T:build bb-uberjar :project miniforge")
            (let [{:keys [exit out err]} (p/sh {:out :string :err :string}
-                                              "clojure" "-T:build" "bb-uberscript" ":project" "miniforge")]
+                                              "clojure" "-T:build" "bb-uberjar" ":project" "miniforge")]
              (when-not (str/blank? out) (println out))
              (when-not (str/blank? err) (binding [*out* *err*] (println err)))
              (when-not (zero? exit)
@@ -199,19 +201,25 @@
 
   install:local
   {:doc  "Install built CLI to ~/.local/bin/mf"
-   :task (let [source "dist/miniforge"
+   :task (let [jar-source "dist/miniforge.jar"
                bin-dir (str (System/getProperty "user.home") "/.local/bin")
-               target (str bin-dir "/mf")]
-           (if (fs/exists? source)
+               jar-target (str bin-dir "/miniforge.jar")
+               script-target (str bin-dir "/mf")]
+           (if (fs/exists? jar-source)
              (do
-               (println "📦 Installing miniforge CLI to" target)
+               (println "📦 Installing miniforge CLI to" bin-dir)
                (fs/create-dirs bin-dir)
-               (fs/copy source target {:replace-existing true})
-               (p/shell "chmod" "+x" target)
+               ;; Copy the jar
+               (fs/copy jar-source jar-target {:replace-existing true})
+               ;; Create wrapper script
+               (spit script-target
+                     (str "#!/usr/bin/env bash\n"
+                          "exec bb -jar \"" jar-target "\" \"$@\"\n"))
+               (p/shell "chmod" "+x" script-target)
                (println "✅ Installed successfully")
                (println "   Ensure ~/.local/bin is in your PATH")
                (println "   Run 'mf version' to verify"))
-             (println "❌ dist/miniforge not found. Run 'bb build:cli' first")))}
+             (println "❌ dist/miniforge.jar not found. Run 'bb build:cli' first")))}
 
   uninstall:local
   {:doc  "Remove local installation from ~/.local/bin/mf"
@@ -333,4 +341,14 @@
   {:doc  "Reset git hooks to default location"
    :task (do
            (p/sh "git" "config" "--unset" "core.hooksPath")
-           (println "✅ Git hooks reset to default (.git/hooks/)"))}}}
+           (println "✅ Git hooks reset to default (.git/hooks/)"))}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
+  ;; CLI Development
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  miniforge
+  {:doc     "Run miniforge CLI in development mode"
+   :extra-paths ["bases/cli/src"]
+   :requires ([ai.miniforge.cli.main :as cli])
+   :task    (apply cli/-main *command-line-args*)}}}
