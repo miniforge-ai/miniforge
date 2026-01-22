@@ -30,6 +30,8 @@
                        "components/workflow/resources"
                        "components/operator/src"
                        "components/operator/resources"
+                       "components/observer/src"
+                       "components/observer/resources"
                        "components/orchestrator/src"
                        "components/orchestrator/resources"
                        "components/reporting/src"
@@ -47,6 +49,7 @@
                       ai.miniforge/heuristic {:local/root "components/heuristic"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
                       ai.miniforge/operator {:local/root "components/operator"}
+                      ai.miniforge/observer {:local/root "components/observer"}
                       ai.miniforge/orchestrator {:local/root "components/orchestrator"}
                       ai.miniforge/reporting {:local/root "components/reporting"}}}
 
@@ -64,6 +67,7 @@
                        "components/heuristic/test"
                        "components/workflow/test"
                        "components/operator/test"
+                       "components/observer/test"
                        "components/orchestrator/test"
                        "components/reporting/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
@@ -79,6 +83,7 @@
                       ai.miniforge/heuristic {:local/root "components/heuristic"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
                       ai.miniforge/operator {:local/root "components/operator"}
+                      ai.miniforge/observer {:local/root "components/observer"}
                       ai.miniforge/orchestrator {:local/root "components/orchestrator"}
                       ai.miniforge/reporting {:local/root "components/reporting"}}}
 
