@@ -1,0 +1,45 @@
+;; Minimal Test Workflow v1.0.0
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; Absolute minimal workflow for unit testing.
+;; Single phase: plan -> done.
+;;
+;; Purpose: Fastest possible workflow execution for basic validation.
+
+{:workflow/id :minimal-test-v1
+ :workflow/version "1.0.0"
+ :workflow/name "Minimal Test Workflow"
+ :workflow/description
+ "Single-phase workflow (plan only) for unit testing workflow basics."
+
+ :workflow/created-at #inst "2026-01-21T00:00:00.000-00:00"
+ :workflow/task-types [:test :unit-test]
+ :workflow/entry :plan
+
+ :workflow/phases
+ [{:phase/id :plan
+   :phase/name "Planning Only"
+   :phase/description "Single phase workflow for testing"
+   :phase/agent :planner
+   :phase/actions [:create-plan]
+   :phase/inner-loop
+   {:max-iterations 2
+    :validation-steps []
+    :repair-strategy :none}
+   :phase/gates []  ; No gates
+   :phase/budget {:tokens 3000 :time-seconds 30 :iterations 2}
+   :phase/next []  ; No next - plan is terminal
+   :phase/metrics [:plan-created]}]
+
+ :workflow/config
+ {:parallel-phases []
+  :failure-strategy :fail-fast
+  :max-total-iterations 5
+  :max-total-time-seconds 60  ; 1 minute max
+  :max-total-tokens 5000}
+
+ :workflow/metrics
+ {:success-rate nil
+  :avg-iterations nil
+  :avg-time-seconds nil
+  :avg-tokens-used nil}}
