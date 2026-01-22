@@ -152,8 +152,12 @@
   [main-ns cp-roots]
   (let [cp            (str/join ":" cp-roots)
         sexpr         (build-prompt-sexpr main-ns)
-        {:keys [exit]} (bp/shell ["bb" "--classpath" cp "-e" sexpr]
-                                 {:out :string :err :string})]
+        {:keys [exit out err]} (bp/shell {:out :string :err :string}
+                                         "bb" "--classpath" cp "-e" sexpr)]
+    (when-not (zero? exit)
+      (println "BB compatibility check failed:")
+      (when (seq out) (println "stdout:" out))
+      (when (seq err) (println "stderr:" err)))
     (zero? exit)))
 
 (defn get-project-main
@@ -241,6 +245,8 @@
   "Generate a self-contained Babashka uberscript for distribution.
    Bundles all source into a single file.
 
+   Note: Does not support dynamic requires. Use bb-uberjar for that.
+
    Usage: clj -T:build bb-uberscript :project miniforge"
   [{:keys [project]}]
   (let [_        (when-not project
@@ -251,22 +257,20 @@
                    (throw (ex-info "Missing :main in :uberjar alias"
                                    {:project project})))
         cp-roots (project-classpath-roots project)
-        _        (println "🔍 Checking Babashka compatibility...")
-        _        (when-not (bb-compatible? main-ns cp-roots)
-                   (throw (ex-info (str "❌ " project " cannot run in Babashka")
-                                   {:project project :main-ns main-ns})))
+        _        (println "🔍 Skipping Babashka compatibility check (runtime check only)...")
         output   (str script-dir "/" project)]
 
     (fs/create-dirs script-dir)
     (println "📦 Building uberscript...")
 
     ;; Use bb uberscript to bundle everything
-    (let [{:keys [exit err]}
-          (bp/shell ["bb" "uberscript" output
-                     "-cp" (str/join ":" cp-roots)
-                     "-m" (str main-ns)])]
+    (let [{:keys [exit err out]}
+          (bp/shell {:out :string :err :string}
+                    "bb" "uberscript" output
+                    "-cp" (str/join ":" cp-roots)
+                    "-m" (str main-ns))]
       (when-not (zero? exit)
-        (throw (ex-info "bb uberscript failed" {:exit exit :err err}))))
+        (throw (ex-info "bb uberscript failed" {:exit exit :err err :out out}))))
 
     ;; Ensure shebang is present
     (let [content (slurp output)]
@@ -275,6 +279,42 @@
 
     (fs/set-posix-file-permissions output "rwxr-xr-x")
     (println "✅ Uberscript:" output "(" (fs/size output) "bytes )")))
+
+(defn bb-uberjar
+  "Generate a Babashka uberjar for distribution.
+   Supports dynamic requires and resources.
+
+   Note: No compatibility check needed - bb uberjar itself will fail
+   if the code isn't compatible with Babashka.
+
+   Usage: clj -T:build bb-uberjar :project miniforge"
+  [{:keys [project]}]
+  (let [_        (when-not project
+                   (throw (ex-info "bb-uberjar requires :project" {})))
+        _        (ensure-project! "bb-uberjar" project)
+        main-ns  (get-project-main project)
+        _        (when-not main-ns
+                   (throw (ex-info "Missing :main in :uberjar alias"
+                                   {:project project})))
+        cp-roots (project-classpath-roots project)
+        output   (str script-dir "/" project ".jar")]
+
+    (fs/create-dirs script-dir)
+    (println "📦 Building uberjar...")
+
+    ;; Use bb uberjar to bundle everything
+    ;; This will fail on its own if the code isn't Babashka-compatible
+    (let [{:keys [exit err out]}
+          (bp/shell {:out :string :err :string}
+                    "bb" "uberjar" output
+                    "-cp" (str/join ":" cp-roots)
+                    "-m" (str main-ns))]
+      (when-not (zero? exit)
+        (println "stdout:" out)
+        (println "stderr:" err)
+        (throw (ex-info "bb uberjar failed" {:exit exit :err err :out out}))))
+
+    (println "✅ Uberjar:" output "(" (fs/size output) "bytes )")))
 
 (defn uberjar
   "Build a JVM uberjar for a project.

@@ -35,7 +35,7 @@
    [clojure.edn :as edn]
    [cheshire.core :as json]
    [bblgum.core :as gum]
-   [ai.miniforge.cli.tui :as tui]))
+   [ai.miniforge.cli.web :as web]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants and pure helpers
@@ -509,207 +509,30 @@
 
       nil)))
 
-(defn- build-tree-items
-  "Build tree items for the left pane from nav state."
-  [nav-state]
-  (let [{:keys [flat-items selected-index]} nav-state]
-    (vec (map-indexed
-          (fn [idx item]
-            (let [selected? (= idx selected-index)]
-              (case (:type item)
-                :repo (tui/render-repo-item (:repo item)
-                                            (count (:prs item))
-                                            (:expanded? item)
-                                            selected?)
-                :pr (tui/render-pr-list-item item (:analysis item) selected?))))
-          flat-items))))
-
-(defn- build-right-pane
-  "Build right pane content based on selected item."
-  [nav-state]
-  (let [item (tui/get-selected-item nav-state)]
-    (case (:type item)
-      :repo {:title (str "Repository: " (:repo item))
-             :sections [{:title "OVERVIEW"
-                         :content [(str "Repository: " (:repo item))
-                                   (str "Open PRs: " (count (:prs item)))
-                                   ""
-                                   "Press ENTER to expand/collapse"
-                                   "Press 'n' to jump to next risky PR"]}
-                        {:title "PR SUMMARY"
-                         :content (let [prs (:prs item)
-                                        by-risk (group-by #(get-in % [:analysis :risk]) prs)]
-                                    [(str "Low risk:    " (count (:low by-risk)))
-                                     (str "Medium risk: " (count (:medium by-risk)))
-                                     (str "High risk:   " (count (:high by-risk)))])}]}
-      :pr (tui/render-pr-detail item (:analysis item))
-      ;; Default empty
-      {:title "FLEET DASHBOARD"
-       :sections [{:title "WELCOME"
-                   :content ["Select a repository or PR to view details."
-                             ""
-                             "Navigation:"
-                             "  j/k  - Move up/down"
-                             "  Enter - Expand/collapse"
-                             "  q    - Quit"]}]})))
-
-(defn- count-prs-by-risk
-  "Count PRs by risk level across all repos."
-  [repos-with-prs]
-  (let [all-prs (mapcat :prs repos-with-prs)]
-    {:total (count all-prs)
-     :low (count (filter #(= :low (get-in % [:analysis :risk])) all-prs))
-     :medium (count (filter #(= :medium (get-in % [:analysis :risk])) all-prs))
-     :high (count (filter #(= :high (get-in % [:analysis :risk])) all-prs))}))
-
-(defn- find-next-risky
-  "Find index of next medium/high risk PR after current position."
-  [nav-state]
-  (let [{:keys [flat-items selected-index]} nav-state
-        items-after (drop (inc selected-index) flat-items)
-        risky-idx (first (keep-indexed
-                          (fn [idx item]
-                            (when (and (= :pr (:type item))
-                                       (#{:medium :high} (get-in item [:analysis :risk])))
-                              (+ selected-index 1 idx)))
-                          items-after))]
-    (or risky-idx
-        ;; Wrap around to beginning
-        (first (keep-indexed
-                (fn [idx item]
-                  (when (and (= :pr (:type item))
-                             (#{:medium :high} (get-in item [:analysis :risk])))
-                    idx))
-                flat-items)))))
-
-(defn- handle-pr-action
-  "Handle an action on the selected PR."
-  [action item]
-  (case action
-    :approve (do
-               (print-info (str "Approving PR #" (:number item) "..."))
-               (let [result (process/sh "gh" "pr" "review" (str (:number item))
-                                        "--repo" (:repo item) "--approve")]
-                 (if (zero? (:exit result))
-                   (print-success "PR approved!")
-                   (print-error (str "Failed: " (:err result)))))
-               (gum-input :placeholder "Press Enter to continue..."))
-    :reject (do
-              (print-info (str "Requesting changes on PR #" (:number item) "..."))
-              (let [reason (gum-input :header "Reason for rejection:" :placeholder "Enter reason...")]
-                (when (and reason (not (str/blank? reason)))
-                  (let [result (process/sh "gh" "pr" "review" (str (:number item))
-                                           "--repo" (:repo item)
-                                           "--request-changes"
-                                           "--body" reason)]
-                    (if (zero? (:exit result))
-                      (print-success "Changes requested!")
-                      (print-error (str "Failed: " (:err result)))))))
-              (gum-input :placeholder "Press Enter to continue..."))
-    :open (process/sh "open" (:url item))
-    :diff (do
-            (tui/clear-screen)
-            (println (tui/style (str "Diff for PR #" (:number item)) :fg :cyan :bold true))
-            (println)
-            (let [result (process/sh "gh" "pr" "diff" (str (:number item))
-                                     "--repo" (:repo item))]
-              (println (:out result)))
-            (gum-input :placeholder "Press Enter to continue..."))
-    :chat (do
-            (println)
-            (println (tui/style "Chat about this PR" :fg :cyan :bold true))
-            (println "Coming soon: Ask AI questions about this PR")
-            (println "  - 'What could break?'")
-            (println "  - 'Summarize the auth changes'")
-            (println "  - 'Are there security concerns?'")
-            (gum-input :placeholder "Press Enter to continue..."))
-    nil))
-
-(defn- batch-approve-safe
-  "Approve all low-risk PRs."
-  [repos-with-prs]
-  (let [safe-prs (filter #(= :low (get-in % [:analysis :risk]))
-                         (mapcat :prs repos-with-prs))]
-    (if (empty? safe-prs)
-      (do (print-info "No safe PRs to approve.")
-          (gum-input :placeholder "Press Enter to continue..."))
-      (when (gum-confirm (str "Approve " (count safe-prs) " low-risk PRs?"))
-        (doseq [pr safe-prs]
-          (print-info (str "Approving #" (:number pr) " in " (:repo pr) "..."))
-          (let [result (process/sh "gh" "pr" "review" (str (:number pr))
-                                   "--repo" (:repo pr) "--approve")]
-            (if (zero? (:exit result))
-              (println (tui/style "  ✓" :fg :green))
-              (println (tui/style (str "  ✗ " (:err result)) :fg :red)))))
-        (print-success "Batch approval complete!")
-        (gum-input :placeholder "Press Enter to continue...")))))
+;
 
 (defn fleet-dashboard-cmd
   "Open interactive two-pane TUI dashboard."
   [m]
-  (let [opts (get-opts m)
-        config-path (or (:config opts) default-config-path)
-        config (load-config config-path)
-        repos (get-in config [:fleet :repos] [])]
+  (print-info "TUI dashboard is deprecated. Use the web dashboard instead:")
+  (println "  bb miniforge fleet web")
+  (println)
+  (println "The web dashboard offers:")
+  (println "  - Better UX with htmx-powered interactions")
+  (println "  - AI chat integration")
+  (println "  - PR risk analysis and batch operations")
+  (println "  - Accessible from any browser")
+  nil)
 
-    (if (empty? repos)
-      (do
-        (print-error "No repositories configured.")
-        (println "Add repositories with: miniforge fleet add <owner/repo>"))
-
-      ;; Main dashboard loop
-      (do
-        (println (tui/style "Loading PRs..." :fg :cyan))
-        (let [repos-with-prs (tui/fetch-prs-for-repos repos)]
-          (loop [nav-state (-> (tui/create-nav-state repos-with-prs)
-                               (update :expanded-repos into (map :repo repos-with-prs))
-                               tui/update-flat-items)]
-            (tui/clear-screen)
-
-            ;; Render the two-pane view
-            (let [pr-counts (count-prs-by-risk repos-with-prs)
-                  tree-items (build-tree-items nav-state)
-                  right-pane (build-right-pane nav-state)]
-              (println (tui/render-two-pane
-                        {:left-pane {:title "FLEET PRs"
-                                     :items tree-items}
-                         :right-pane right-pane
-                         :status-bar (str (:total pr-counts) " PRs │ "
-                                          (tui/style (str (:low pr-counts) " safe") :fg :green) " │ "
-                                          (tui/style (str (:medium pr-counts) " review") :fg :yellow) " │ "
-                                          (tui/style (str (:high pr-counts) " risky") :fg :red))
-                         :key-hints "j/k:nav  Enter:expand  a:approve  r:reject  d:diff  c:chat  b:batch  n:next-risky  q/Esc:quit"})))
-
-            ;; Handle input - single keypress, no Enter required
-            (let [key (tui/read-key)
-                  selected (tui/get-selected-item nav-state)]
-              (case key
-                ;; Exit commands
-                (:quit :escape) (do (tui/show-cursor)
-                                    (tui/clear-screen)
-                                    (println (tui/style "Goodbye!" :fg :bright-cyan)))
-                ;; Navigation
-                :up (recur (tui/nav-up nav-state))
-                :down (recur (tui/nav-down nav-state))
-                ;; Expand/collapse
-                (:toggle :enter) (recur (tui/toggle-expand nav-state))
-                ;; Jump to risky
-                :next-risky (if-let [idx (find-next-risky nav-state)]
-                              (recur (assoc nav-state :selected-index idx))
-                              (recur nav-state))
-                ;; Batch operations
-                :batch-approve (do (batch-approve-safe repos-with-prs)
-                                   (recur nav-state))
-                ;; PR-specific actions
-                (:approve :reject :diff :chat :open)
-                (if (= :pr (:type selected))
-                  (do (handle-pr-action key selected)
-                      (recur nav-state))
-                  (recur nav-state))
-                ;; Error recovery
-                :error (recur nav-state)
-                ;; Unknown key, continue
-                (recur nav-state)))))))))
+(defn fleet-web-cmd
+  "Start web-based fleet dashboard."
+  [m]
+  (let [{:keys [port]} (get-opts m)
+        port (or port 8787)]
+    (print-info (str "Starting web dashboard on port " port "..."))
+    (web/start-server! :port port)
+    ;; Keep running until interrupted
+    @(promise)))
 
 (defn fleet-add-cmd
   "Add a repository to the fleet."
@@ -828,7 +651,8 @@ Commands:
     start             Start fleet daemon
     stop              Stop fleet daemon
     status            Show fleet status
-    dashboard         Open TUI dashboard
+    dashboard         Open TUI dashboard (deprecated - use web)
+    web [--port N]    Start web dashboard (default port: 8787)
     add <repo>        Add repo to fleet
     remove <repo>     Remove repo from fleet
 
@@ -852,7 +676,7 @@ Examples:
   miniforge doctor
   miniforge run feature.spec.edn
   miniforge fleet add myorg/myrepo
-  miniforge fleet dashboard
+  miniforge fleet web                  # Start web dashboard
   miniforge pr review https://github.com/org/repo/pull/123
 "))
 
@@ -888,6 +712,8 @@ Examples:
    {:cmds ["fleet" "stop"]      :fn fleet-stop-cmd}
    {:cmds ["fleet" "status"]    :fn fleet-status-cmd}
    {:cmds ["fleet" "dashboard"] :fn fleet-dashboard-cmd}
+   {:cmds ["fleet" "web"]       :fn fleet-web-cmd
+    :spec {:port {:coerce :int :alias :p :default 8787}}}
    {:cmds ["fleet" "add"]       :fn fleet-add-cmd    :args->opts [:repo]}
    {:cmds ["fleet" "remove"]    :fn fleet-remove-cmd :args->opts [:repo]}
 
