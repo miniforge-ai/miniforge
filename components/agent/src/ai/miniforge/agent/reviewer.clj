@@ -7,7 +7,6 @@
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.loop.interface :as loop]
-   [ai.miniforge.loop.gates :as gates]  ; TODO: Should be exported by loop.interface
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -76,7 +75,7 @@
     (log/debug logger :reviewer :reviewer/gate-start
                {:data {:gate-idx idx :gate-id gate-id}})
     (try
-      (let [result (gates/check gate artifact context)
+      (let [result (loop/check-gate gate artifact context)
             duration (- (System/currentTimeMillis) gate-start)
             feedback (gate-result->feedback gate result)]
         (log/info logger :reviewer :reviewer/gate-complete
