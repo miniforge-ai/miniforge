@@ -27,6 +27,7 @@
    - Dark theme optimized for developers"
   (:require
    [babashka.process :as process]
+   [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.edn :as edn]
    [cheshire.core :as json]
@@ -146,8 +147,8 @@
                            "--repo" repo "--approve")]
     {:success (zero? (:exit result))
      :message (if (zero? (:exit result))
-                "PR approved successfully"
-                (str "Failed: " (:err result)))}))
+                (str "✓ PR #" number " approved successfully")
+                (str "❌ Failed to approve PR #" number ": " (str/trim (or (:err result) (:out result) "Unknown error. Check gh CLI authentication."))))}))
 
 (defn request-changes!
   "Request changes on a PR."
@@ -158,8 +159,8 @@
                            "--body" reason)]
     {:success (zero? (:exit result))
      :message (if (zero? (:exit result))
-                "Changes requested"
-                (str "Failed: " (:err result)))}))
+                (str "✓ Changes requested on PR #" number)
+                (str "❌ Failed to request changes: " (str/trim (or (:err result) (:out result) "Unknown error. Check gh CLI authentication."))))}))
 
 (defn fetch-pr-diff
   "Fetch the diff for a PR."
@@ -177,38 +178,55 @@
         (json/parse-string (:out result) true)
         (catch Exception _ nil)))))
 
+(defn check-claude-cli
+  "Check if Claude CLI is available."
+  []
+  (let [result (process/sh "which" "claude")]
+    (zero? (:exit result))))
+
 (defn generate-pr-summary
   "Generate an AI summary of a PR for quick decision making."
   [repo number]
-  (let [diff (fetch-pr-diff repo number)
-        pr-info (fetch-pr-body repo number)
-        diff-preview (when diff (subs diff 0 (min 6000 (count diff))))
-        prompt (str "You are a senior code reviewer. Analyze this PR and provide a brief summary for quick decision-making.\n\n"
-                    "PR Title: " (:title pr-info) "\n"
-                    "PR Description: " (or (:body pr-info) "(none)") "\n\n"
-                    "Diff preview:\n```\n" diff-preview "\n```\n\n"
-                    "Provide a 2-3 sentence summary covering:\n"
-                    "1. What this PR does\n"
-                    "2. Any concerns or things to watch for\n"
-                    "3. Your recommendation (approve/review closely/needs discussion)\n\n"
-                    "Be concise and direct.")
-        result (process/sh "claude" "-p" prompt)]
-    (if (zero? (:exit result))
-      {:success true :summary (str/trim (:out result))}
-      {:success false :summary "Could not generate summary"})))
+  (if-not (check-claude-cli)
+    {:success false
+     :summary "Claude CLI not available. Install from https://claude.ai/download or run: brew install anthropics/claude/claude"}
+    (let [diff (fetch-pr-diff repo number)
+          pr-info (fetch-pr-body repo number)]
+      (if-not diff
+        {:success false
+         :summary "Could not fetch PR diff. Ensure you have access to the repository."}
+        (let [diff-preview (subs diff 0 (min 6000 (count diff)))
+              prompt (str "You are a senior code reviewer. Analyze this PR and provide a brief summary for quick decision-making.\n\n"
+                          "PR Title: " (:title pr-info) "\n"
+                          "PR Description: " (or (:body pr-info) "(none)") "\n\n"
+                          "Diff preview:\n```\n" diff-preview "\n```\n\n"
+                          "Provide a 2-3 sentence summary covering:\n"
+                          "1. What this PR does\n"
+                          "2. Any concerns or things to watch for\n"
+                          "3. Your recommendation (approve/review closely/needs discussion)\n\n"
+                          "Be concise and direct.")
+              result (process/sh "claude" "-p" prompt)]
+          (if (zero? (:exit result))
+            {:success true :summary (str/trim (:out result))}
+            {:success false
+             :summary (str "Claude CLI error: " (str/trim (or (:err result) (:out result) "Unknown error")))}))))))
 
 (defn chat-with-claude
   "Send a chat message to Claude about a PR."
   [repo number question diff-context]
-  (let [prompt (str "You are reviewing PR #" number " in " repo ".\n\n"
-                    "Here is the diff:\n```\n" (subs diff-context 0 (min 8000 (count diff-context))) "\n```\n\n"
-                    "User question: " question "\n\n"
-                    "Please provide a concise, helpful answer focused on the code changes. "
-                    "Be specific and reference actual code when relevant.")
-        result (process/sh "claude" "-p" prompt)]
-    (if (zero? (:exit result))
-      {:success true :response (str/trim (:out result))}
-      {:success false :response (str "AI analysis unavailable. Error: " (:err result))})))
+  (if-not (check-claude-cli)
+    {:success false
+     :response "❌ Claude CLI not available. Install from https://claude.ai/download or run: brew install anthropics/claude/claude"}
+    (let [prompt (str "You are reviewing PR #" number " in " repo ".\n\n"
+                      "Here is the diff:\n```\n" (subs diff-context 0 (min 8000 (count diff-context))) "\n```\n\n"
+                      "User question: " question "\n\n"
+                      "Please provide a concise, helpful answer focused on the code changes. "
+                      "Be specific and reference actual code when relevant.")
+          result (process/sh "claude" "-p" prompt)]
+      (if (zero? (:exit result))
+        {:success true :response (str/trim (:out result))}
+        {:success false
+         :response (str "❌ Claude CLI error: " (str/trim (or (:err result) (:out result) "Unknown error. Ensure Claude CLI is properly configured.")))}))))
 
 ;------------------------------------------------------------------------------ Layer 2.5
 ;; Fleet Health/Status
@@ -221,6 +239,56 @@
      :message (if (zero? (:exit result))
                 "Authenticated"
                 "Not authenticated")}))
+
+(defn fetch-workflow-runs
+  "Fetch recent workflow runs for a repo."
+  [repo]
+  (let [result (process/sh "gh" "run" "list" "--repo" repo
+                           "--json" "workflowName,status,conclusion,createdAt,databaseId"
+                           "--limit" "10")]
+    (if (zero? (:exit result))
+      (try
+        (json/parse-string (:out result) true)
+        (catch Exception _ []))
+      [])))
+
+(defn get-workflow-status
+  "Get aggregated workflow status across repos."
+  [repos]
+  (let [all-runs (mapcat #(map (fn [run] (assoc run :repo %))
+                               (fetch-workflow-runs %)) repos)
+        running (filter #(= "in_progress" (:status %)) all-runs)
+        completed (filter #(= "completed" (:status %)) all-runs)
+        failed (filter #(and (= "completed" (:status %))
+                            (#{"failure" "timed_out" "startup_failure"} (:conclusion %))) completed)
+        succeeded (filter #(and (= "completed" (:status %))
+                               (= "success" (:conclusion %))) completed)
+        recent-runs (->> all-runs
+                        (sort-by :createdAt)
+                        reverse
+                        (take 5))]
+    {:total (count all-runs)
+     :running (count running)
+     :failed (count failed)
+     :succeeded (count succeeded)
+     :runs recent-runs}))
+
+(defn format-time-ago
+  "Convert ISO timestamp to human-readable relative time."
+  [iso-timestamp]
+  (try
+    (let [then (java.time.Instant/parse iso-timestamp)
+          now (java.time.Instant/now)
+          seconds (.getSeconds (java.time.Duration/between then now))
+          minutes (quot seconds 60)
+          hours (quot minutes 60)
+          days (quot hours 24)]
+      (cond
+        (< seconds 60) (str seconds "s ago")
+        (< minutes 60) (str minutes "m ago")
+        (< hours 24) (str hours "h ago")
+        :else (str days "d ago")))
+    (catch Exception _ "unknown")))
 
 (defn check-repo-status
   "Check if a repo is accessible."
@@ -282,651 +350,7 @@
 ;; HTML Components
 
 (def css-styles
-  "
-  :root {
-    --bg-primary: #0f172a;
-    --bg-secondary: #1e293b;
-    --bg-tertiary: #334155;
-    --text-primary: #f1f5f9;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
-    --border-color: #475569;
-    --accent-blue: #3b82f6;
-    --accent-cyan: #06b6d4;
-    --risk-low: #22c55e;
-    --risk-medium: #eab308;
-    --risk-high: #ef4444;
-  }
-
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', monospace;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    line-height: 1.5;
-    min-height: 100vh;
-  }
-
-  .container {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-  }
-
-  .header {
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border-color);
-    padding: 12px 20px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .header h1 {
-    font-size: 18px;
-    font-weight: 600;
-    color: var(--accent-cyan);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .header-stats {
-    display: flex;
-    gap: 20px;
-    font-size: 13px;
-  }
-
-  .stat { display: flex; align-items: center; gap: 6px; }
-  .stat-low { color: var(--risk-low); }
-  .stat-medium { color: var(--risk-medium); }
-  .stat-high { color: var(--risk-high); }
-
-  .main-content {
-    display: flex;
-    flex: 1;
-    overflow: hidden;
-    min-height: 0;
-  }
-
-  .sidebar {
-    width: 350px;
-    background: var(--bg-secondary);
-    border-right: 1px solid var(--border-color);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    min-height: 0;
-  }
-
-  .sidebar-header {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border-color);
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--text-secondary);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .sidebar-content {
-    flex: 1;
-    overflow-y: auto;
-  }
-
-  .repo-group {
-    border-bottom: 1px solid var(--border-color);
-  }
-
-  .repo-header {
-    padding: 12px 16px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    transition: background 0.15s;
-    font-size: 14px;
-    font-weight: 500;
-  }
-
-  .repo-header:hover {
-    background: var(--bg-tertiary);
-  }
-
-  .repo-header.expanded {
-    background: rgba(59, 130, 246, 0.1);
-    border-left: 3px solid var(--accent-blue);
-  }
-
-  .repo-icon { color: var(--text-muted); }
-  .repo-name { flex: 1; }
-  .repo-count {
-    background: var(--bg-tertiary);
-    padding: 2px 8px;
-    border-radius: 12px;
-    font-size: 12px;
-    color: var(--text-secondary);
-  }
-
-  .pr-list {
-    background: var(--bg-primary);
-  }
-
-  .pr-item {
-    padding: 10px 16px 10px 32px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    cursor: pointer;
-    transition: background 0.15s;
-    border-bottom: 1px solid rgba(71, 85, 105, 0.3);
-  }
-
-  .pr-item:hover {
-    background: var(--bg-tertiary);
-  }
-
-  .pr-item.selected {
-    background: rgba(59, 130, 246, 0.15);
-    border-left: 3px solid var(--accent-blue);
-    padding-left: 29px;
-  }
-
-  .pr-risk-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .pr-risk-low { background: var(--risk-low); }
-  .pr-risk-medium { background: var(--risk-medium); }
-  .pr-risk-high { background: var(--risk-high); }
-
-  .pr-number {
-    color: var(--text-muted);
-    font-size: 13px;
-    width: 45px;
-  }
-
-  .pr-title {
-    flex: 1;
-    font-size: 13px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .detail-panel {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    min-height: 0;
-  }
-
-  .detail-header {
-    padding: 20px 24px;
-    border-bottom: 1px solid var(--border-color);
-    background: var(--bg-secondary);
-  }
-
-  .detail-title {
-    font-size: 20px;
-    font-weight: 600;
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .detail-meta {
-    display: flex;
-    gap: 20px;
-    font-size: 13px;
-    color: var(--text-secondary);
-  }
-
-  .detail-content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 24px;
-  }
-
-  .section {
-    margin-bottom: 24px;
-  }
-
-  .section-title {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: var(--accent-cyan);
-    margin-bottom: 12px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border-color);
-  }
-
-  .risk-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 500;
-  }
-
-  .risk-badge.low {
-    background: rgba(34, 197, 94, 0.15);
-    color: var(--risk-low);
-  }
-
-  .risk-badge.medium {
-    background: rgba(234, 179, 8, 0.15);
-    color: var(--risk-medium);
-  }
-
-  .risk-badge.high {
-    background: rgba(239, 68, 68, 0.15);
-    color: var(--risk-high);
-  }
-
-  .stats-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 16px;
-    margin-bottom: 16px;
-  }
-
-  .stat-card {
-    background: var(--bg-secondary);
-    padding: 16px;
-    border-radius: 8px;
-    border: 1px solid var(--border-color);
-  }
-
-  .stat-card-value {
-    font-size: 24px;
-    font-weight: 600;
-    margin-bottom: 4px;
-  }
-
-  .stat-card-label {
-    font-size: 12px;
-    color: var(--text-secondary);
-  }
-
-  .actions {
-    display: flex;
-    gap: 12px;
-    margin-top: 20px;
-  }
-
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 16px;
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    border: none;
-    transition: all 0.15s;
-    font-family: inherit;
-  }
-
-  .btn-primary {
-    background: var(--accent-blue);
-    color: white;
-  }
-
-  .btn-primary:hover {
-    background: #2563eb;
-  }
-
-  .btn-success {
-    background: var(--risk-low);
-    color: white;
-  }
-
-  .btn-success:hover {
-    background: #16a34a;
-  }
-
-  .btn-danger {
-    background: var(--risk-high);
-    color: white;
-  }
-
-  .btn-danger:hover {
-    background: #dc2626;
-  }
-
-  .btn-secondary {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border: 1px solid var(--border-color);
-  }
-
-  .btn-secondary:hover {
-    background: var(--border-color);
-  }
-
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    color: var(--text-muted);
-    text-align: center;
-    padding: 40px;
-  }
-
-  .empty-state-icon {
-    font-size: 48px;
-    margin-bottom: 16px;
-    opacity: 0.5;
-  }
-
-  .toast {
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    padding: 12px 20px;
-    border-radius: 8px;
-    font-size: 14px;
-    animation: slideIn 0.3s ease;
-    z-index: 1000;
-  }
-
-  .toast-success {
-    background: var(--risk-low);
-    color: white;
-  }
-
-  .toast-error {
-    background: var(--risk-high);
-    color: white;
-  }
-
-  @keyframes slideIn {
-    from { transform: translateX(100%); opacity: 0; }
-    to { transform: translateX(0); opacity: 1; }
-  }
-
-  .loading {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text-muted);
-  }
-
-  .spinner {
-    width: 16px;
-    height: 16px;
-    border: 2px solid var(--border-color);
-    border-top-color: var(--accent-blue);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-
-  .htmx-request .loading { display: flex; }
-  .htmx-request .loaded { display: none; }
-
-  .keyboard-hints {
-    padding: 8px 20px;
-    background: var(--bg-secondary);
-    border-top: 1px solid var(--border-color);
-    font-size: 12px;
-    color: var(--text-muted);
-    display: flex;
-    gap: 20px;
-  }
-
-  .keyboard-hints kbd {
-    background: var(--bg-tertiary);
-    padding: 2px 6px;
-    border-radius: 4px;
-    margin-right: 4px;
-  }
-
-  /* Status indicator */
-  .status-indicator {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 12px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 500;
-  }
-
-  .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    animation: pulse 2s infinite;
-  }
-
-  .status-healthy { background: rgba(34, 197, 94, 0.15); color: var(--risk-low); }
-  .status-healthy .status-dot { background: var(--risk-low); }
-
-  .status-degraded { background: rgba(234, 179, 8, 0.15); color: var(--risk-medium); }
-  .status-degraded .status-dot { background: var(--risk-medium); }
-
-  .status-error { background: rgba(239, 68, 68, 0.15); color: var(--risk-high); }
-  .status-error .status-dot { background: var(--risk-high); }
-
-  .status-warning { background: rgba(234, 179, 8, 0.15); color: var(--risk-medium); }
-  .status-warning .status-dot { background: var(--risk-medium); }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
-
-  /* Chat panel */
-  .chat-section {
-    margin-top: 24px;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  .chat-header {
-    background: var(--bg-tertiary);
-    padding: 12px 16px;
-    font-size: 13px;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border-bottom: 1px solid var(--border-color);
-  }
-
-  .chat-messages {
-    max-height: 300px;
-    overflow-y: auto;
-    padding: 16px;
-    background: var(--bg-primary);
-  }
-
-  .chat-message {
-    margin-bottom: 16px;
-    padding: 12px;
-    border-radius: 8px;
-  }
-
-  .chat-message.user {
-    background: var(--accent-blue);
-    color: white;
-    margin-left: 40px;
-  }
-
-  .chat-message.assistant {
-    background: var(--bg-secondary);
-    margin-right: 40px;
-    border: 1px solid var(--border-color);
-  }
-
-  .chat-message pre {
-    background: var(--bg-primary);
-    padding: 8px;
-    border-radius: 4px;
-    overflow-x: auto;
-    margin-top: 8px;
-    font-size: 12px;
-  }
-
-  .chat-input-container {
-    display: flex;
-    gap: 8px;
-    padding: 12px;
-    background: var(--bg-secondary);
-    border-top: 1px solid var(--border-color);
-  }
-
-  .chat-input {
-    flex: 1;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    padding: 10px 14px;
-    color: var(--text-primary);
-    font-family: inherit;
-    font-size: 13px;
-  }
-
-  .chat-input:focus {
-    outline: none;
-    border-color: var(--accent-blue);
-  }
-
-  .chat-input::placeholder {
-    color: var(--text-muted);
-  }
-
-  .quick-questions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 16px;
-    background: var(--bg-secondary);
-    border-top: 1px solid var(--border-color);
-  }
-
-  .quick-question {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
-    border-radius: 16px;
-    padding: 6px 12px;
-    font-size: 12px;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .quick-question:hover {
-    background: var(--accent-blue);
-    color: white;
-    border-color: var(--accent-blue);
-  }
-
-  /* Fleet summary banner */
-  .fleet-summary {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 16px 20px;
-    margin: 16px 20px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
-
-  .fleet-summary-icon {
-    font-size: 24px;
-  }
-
-  .fleet-summary-content {
-    flex: 1;
-  }
-
-  .fleet-summary-title {
-    font-weight: 600;
-    margin-bottom: 4px;
-  }
-
-  .fleet-summary-recommendation {
-    color: var(--text-secondary);
-    font-size: 14px;
-  }
-
-  .fleet-summary-actions {
-    display: flex;
-    gap: 8px;
-  }
-
-  /* AI Summary in PR detail */
-  .ai-summary {
-    background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(59, 130, 246, 0.1));
-    border: 1px solid rgba(6, 182, 212, 0.3);
-    border-radius: 8px;
-    padding: 16px;
-    margin-top: 16px;
-  }
-
-  .ai-summary-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-weight: 600;
-    color: var(--accent-cyan);
-    margin-bottom: 8px;
-  }
-
-  .ai-summary-content {
-    color: var(--text-primary);
-    line-height: 1.6;
-    white-space: pre-wrap;
-  }
-
-  .ai-summary-loading {
-    color: var(--text-muted);
-    font-style: italic;
-  }
-
-  .generate-summary-btn {
-    background: transparent;
-    border: 1px dashed var(--border-color);
-    color: var(--text-secondary);
-    padding: 12px 16px;
-    border-radius: 8px;
-    cursor: pointer;
-    width: 100%;
-    text-align: center;
-    margin-top: 16px;
-    transition: all 0.15s;
-  }
-
-  .generate-summary-btn:hover {
-    border-color: var(--accent-cyan);
-    color: var(--accent-cyan);
-    background: rgba(6, 182, 212, 0.05);
-  }
-  ")
+  (slurp (io/file "bases/cli/resources/dashboard.css")))
 
 (defn render-page
   "Render the main HTML page."
@@ -966,6 +390,43 @@
         });
       ")]]])))
 
+(defn render-workflow-status
+  "Render the workflow status widget."
+  [repos]
+  (let [status (get-workflow-status repos)
+        {:keys [running failed succeeded runs]} status
+        status-icon (fn [run]
+                      (let [s (:status run)
+                            c (:conclusion run)]
+                        (cond
+                          (= s "in_progress") "⏳"
+                          (= c "success") "✓"
+                          (#{"failure" "timed_out" "startup_failure"} c) "✗"
+                          :else "○")))]
+    (h/html
+     [:div.workflow-status
+      {:hx-get "/api/workflows"
+       :hx-trigger "every 60s"
+       :hx-swap "outerHTML"}
+      [:div.workflow-status-header
+       [:span "⚙️ Workflow Status"]]
+      [:div.workflow-stats
+       [:span.workflow-stat.workflow-stat-running
+        [:span (str running " ⏳")]]
+       [:span.workflow-stat.workflow-stat-failed
+        [:span (str failed " ✗")]]
+       [:span.workflow-stat.workflow-stat-passed
+        [:span (str succeeded " ✓")]]]
+      [:div.workflow-runs
+       (if (seq runs)
+         (for [run runs]
+           [:div.workflow-run
+            [:span.workflow-run-status (status-icon run)]
+            [:span.workflow-run-name (:workflowName run)]
+            [:span.workflow-run-time (format-time-ago (:createdAt run))]])
+         [:div {:style "color: var(--text-muted); font-size: 12px; text-align: center;"}
+          "No recent workflows"])]])))
+
 (defn render-repo-tree
   "Render the repository tree sidebar."
   [repos-with-prs selected-pr]
@@ -998,7 +459,9 @@
              :hx-swap "innerHTML"}
             [:span.pr-risk-dot {:class (str "pr-risk-" (name (:risk analysis)))}]
             [:span.pr-number (str "#" number)]
-            [:span.pr-title title]])]])]]))
+            [:span.pr-title title]])]])
+     ;; Workflow status widget
+     (render-workflow-status (map :repo repos-with-prs))]]))
 
 (defn render-ai-summary
   "Render the AI-generated summary section."
@@ -1389,6 +852,12 @@
                                [:div.ai-summary-header [:span "⚠️"] [:span "Summary Unavailable"]]
                                [:div.ai-summary-content {:style "color: var(--text-muted)"}
                                 (:summary result)]])))})
+
+      ;; Get workflow status
+      (and (= uri "/api/workflows") (= request-method :get))
+      {:status 200
+       :headers {"Content-Type" "text/html; charset=utf-8"}
+       :body (str (render-workflow-status repos))}
 
       ;; 404
       :else
