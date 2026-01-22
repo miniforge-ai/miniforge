@@ -9,7 +9,8 @@
    [ai.miniforge.agent.protocol :as proto]
    [ai.miniforge.agent.planner :as planner]
    [ai.miniforge.agent.implementer :as implementer]
-   [ai.miniforge.agent.tester :as tester]))
+   [ai.miniforge.agent.tester :as tester]
+   [ai.miniforge.agent.reviewer :as reviewer]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol re-exports (allow other components to reference protocols)
@@ -287,6 +288,11 @@
    The Tester generates tests for code artifacts and validates coverage."
   tester/create-tester)
 
+(def create-reviewer
+  "Create a Reviewer agent with optional configuration overrides.
+   The Reviewer runs static analysis gates without using an LLM."
+  reviewer/create-reviewer)
+
 ;------------------------------------------------------------------------------ Layer 8
 ;; Specialized agent schemas
 
@@ -302,6 +308,10 @@
 (def TestArtifact tester/TestArtifact)
 (def TestFile tester/TestFile)
 (def Coverage tester/Coverage)
+
+;; Reviewer schemas
+(def ReviewArtifact reviewer/ReviewArtifact)
+(def GateFeedback reviewer/GateFeedback)
 
 ;------------------------------------------------------------------------------ Layer 9
 ;; Specialized agent utilities
@@ -352,6 +362,39 @@
 (def validate-test-artifact
   "Validate a test artifact against the schema and check for issues."
   tester/validate-test-artifact)
+
+;; Reviewer utilities
+(def review-summary
+  "Get a summary of a review artifact for logging/display."
+  reviewer/review-summary)
+
+(def approved?
+  "Check if a review artifact represents approval."
+  reviewer/approved?)
+
+(def rejected?
+  "Check if a review artifact represents rejection."
+  reviewer/rejected?)
+
+(def conditionally-approved?
+  "Check if a review artifact is conditionally approved."
+  reviewer/conditionally-approved?)
+
+(def get-blocking-issues
+  "Extract blocking issues from review artifact."
+  reviewer/get-blocking-issues)
+
+(def get-review-warnings
+  "Extract warnings from review artifact."
+  reviewer/get-warnings)
+
+(def get-recommendations
+  "Extract recommendations from review artifact."
+  reviewer/get-recommendations)
+
+(def validate-review-artifact
+  "Validate a review artifact against the schema."
+  reviewer/validate-review-artifact)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
