@@ -17,7 +17,8 @@
    [ai.miniforge.knowledge.schema :as schema]
    [ai.miniforge.knowledge.zettel :as zettel]
    [ai.miniforge.knowledge.store :as store]
-   [ai.miniforge.knowledge.learning :as learning]))
+   [ai.miniforge.knowledge.learning :as learning]
+   [ai.miniforge.knowledge.loader :as loader]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
@@ -253,6 +254,60 @@
 (def markdown->zettel
   "Parse a Markdown file with YAML frontmatter into a zettel."
   zettel/markdown->zettel)
+
+;------------------------------------------------------------------------------ Layer 8
+;; Rule and documentation loading
+
+(def load-rules-from-directory
+  "Load all .mdc rule files from a directory into the knowledge store.
+
+   Arguments:
+   - knowledge-store - KnowledgeStore instance
+   - rules-dir       - Path to .cursor/rules directory (string or File)
+
+   Returns:
+   - {:loaded int :failed int :zettels [zettel...]}
+
+   Example:
+     (load-rules-from-directory store \".cursor/rules\")"
+  loader/load-rules-from-directory)
+
+(def load-project-docs
+  "Load project documentation files (agents.md, claude.md, etc.) into knowledge store.
+
+   Arguments:
+   - knowledge-store - KnowledgeStore instance
+   - project-root    - Path to project root directory (string or File)
+
+   Returns:
+   - {:loaded int :failed int :files [string...]}
+
+   Example:
+     (load-project-docs store \".\")"
+  loader/load-project-docs)
+
+(def initialize-knowledge-store!
+  "Initialize a knowledge store with rules and documentation.
+
+   This is the main entry point for loading knowledge at system startup.
+
+   Arguments:
+   - knowledge-store - KnowledgeStore instance
+   - options         - Optional configuration map with:
+     :rules-dir       - Path to rules directory (default: \".cursor/rules\")
+     :project-root    - Path to project root (default: \".\")
+     :skip-rules?     - Skip loading rules (default: false)
+     :skip-docs?      - Skip loading docs (default: false)
+
+   Returns:
+   - {:rules {:loaded int :failed int}
+      :docs {:loaded int :failed int}
+      :total int}
+
+   Example:
+     (initialize-knowledge-store! store)
+     (initialize-knowledge-store! store {:rules-dir \"custom/rules\"})"
+  loader/initialize-knowledge-store!)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -58,6 +58,10 @@
 
         ;; Create stores
         k-store (knowledge/create-store)
+
+        ;; Initialize knowledge store with rules and documentation
+        _ (knowledge/initialize-knowledge-store! k-store)
+
         a-store-dir (str artifact-dir "/datalevin-" (System/currentTimeMillis))
         _ (fs/create-dirs a-store-dir)
         a-store (artifact/create-store {:dir a-store-dir})

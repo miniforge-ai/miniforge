@@ -22,10 +22,16 @@
                        "components/loop/resources"
                        "components/knowledge/src"
                        "components/knowledge/resources"
+                       "components/policy/src"
+                       "components/policy/resources"
+                       "components/heuristic/src"
+                       "components/heuristic/resources"
                        "components/workflow/src"
                        "components/workflow/resources"
                        "components/operator/src"
                        "components/operator/resources"
+                       "components/observer/src"
+                       "components/observer/resources"
                        "components/orchestrator/src"
                        "components/orchestrator/resources"
                        "components/reporting/src"
@@ -39,8 +45,11 @@
                       ai.miniforge/task {:local/root "components/task"}
                       ai.miniforge/loop {:local/root "components/loop"}
                       ai.miniforge/knowledge {:local/root "components/knowledge"}
+                      ai.miniforge/policy {:local/root "components/policy"}
+                      ai.miniforge/heuristic {:local/root "components/heuristic"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
                       ai.miniforge/operator {:local/root "components/operator"}
+                      ai.miniforge/observer {:local/root "components/observer"}
                       ai.miniforge/orchestrator {:local/root "components/orchestrator"}
                       ai.miniforge/reporting {:local/root "components/reporting"}}}
 
@@ -54,8 +63,11 @@
                        "components/task/test"
                        "components/loop/test"
                        "components/knowledge/test"
+                       "components/policy/test"
+                       "components/heuristic/test"
                        "components/workflow/test"
                        "components/operator/test"
+                       "components/observer/test"
                        "components/orchestrator/test"
                        "components/reporting/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
@@ -67,8 +79,11 @@
                       ai.miniforge/task {:local/root "components/task"}
                       ai.miniforge/loop {:local/root "components/loop"}
                       ai.miniforge/knowledge {:local/root "components/knowledge"}
+                      ai.miniforge/policy {:local/root "components/policy"}
+                      ai.miniforge/heuristic {:local/root "components/heuristic"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
                       ai.miniforge/operator {:local/root "components/operator"}
+                      ai.miniforge/observer {:local/root "components/observer"}
                       ai.miniforge/orchestrator {:local/root "components/orchestrator"}
                       ai.miniforge/reporting {:local/root "components/reporting"}}}
 

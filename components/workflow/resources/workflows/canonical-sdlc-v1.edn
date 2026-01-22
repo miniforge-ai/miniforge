@@ -1,0 +1,145 @@
+;; Copyright 2025 miniforge.ai
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+;; Canonical SDLC workflow v1.0.0
+;; Standard software development lifecycle with phases:
+;; Spec → Plan → Implement → Verify → Review → Release → Observe → Done
+
+{:workflow/id :canonical-sdlc-v1
+ :workflow/version "1.0.0"
+ :workflow/name "Canonical SDLC"
+ :workflow/description "Canonical SDLC workflow for feature development"
+ :workflow/created-at #inst "2026-01-21T00:00:00.000-00:00"
+ :workflow/task-types [:feature :enhancement]
+
+ :workflow/phases
+ [{:phase/id :spec
+   :phase/name "Specification"
+   :phase/agent :spec-analyzer
+   :phase/actions [:analyze-requirements :validate-spec]
+   :phase/inner-loop
+   {:max-iterations 2
+    :validation-steps [:spec-valid]
+    :repair-strategy :clarify-requirements}
+   :phase/budget {:tokens 5000 :time-seconds 120 :iterations 2}
+   :phase/next [{:target :plan}]
+   :phase/metrics [:spec-time]}
+
+  {:phase/id :plan
+   :phase/name "Planning"
+   :phase/agent :planner
+   :phase/actions [:create-plan]
+   :phase/inner-loop
+   {:max-iterations 3
+    :validation-steps [:plan-complete]
+    :repair-strategy :adjust-plan}
+   :phase/gates [:plan-completeness]
+   :phase/budget {:tokens 10000 :time-seconds 300 :iterations 3}
+   :phase/next [{:target :implement}]
+   :phase/metrics [:planning-time :plan-quality]}
+
+  {:phase/id :implement
+   :phase/name "Implementation"
+   :phase/agent :implementer
+   :phase/actions [:write-code :run-lint]
+   :phase/inner-loop
+   {:max-iterations 5
+    :validation-steps [:syntax-valid :lint-clean]
+    :repair-strategy :fix-code-errors}
+   :phase/gates [:syntax-valid :lint-clean]
+   :phase/budget {:tokens 30000 :time-seconds 600 :iterations 5}
+   :phase/next [{:target :verify}]
+   :phase/metrics [:implementation-time :repair-cycles]}
+
+  {:phase/id :verify
+   :phase/name "Verification"
+   :phase/agent :tester
+   :phase/actions [:generate-tests :run-tests]
+   :phase/inner-loop
+   {:max-iterations 3
+    :validation-steps [:tests-pass :coverage-adequate]
+    :repair-strategy :fix-tests}
+   :phase/gates [:tests-pass :coverage-adequate]
+   :phase/budget {:tokens 15000 :time-seconds 300 :iterations 3}
+   :phase/next [{:target :review}
+                {:target :implement :condition :tests-fail}]
+   :phase/metrics [:test-count :coverage :test-time]}
+
+  {:phase/id :review
+   :phase/name "Review"
+   :phase/agent :reviewer
+   :phase/actions [:code-review :quality-check]
+   :phase/inner-loop
+   {:max-iterations 2
+    :validation-steps [:review-approved :quality-check-pass]
+    :repair-strategy :fix-review-issues}
+   :phase/gates [:review-approved :quality-check-pass]
+   :phase/budget {:tokens 10000 :time-seconds 180 :iterations 2}
+   :phase/next [{:target :release}
+                {:target :implement :condition :review-rejected}]
+   :phase/metrics [:review-time :issues-found]}
+
+  {:phase/id :release
+   :phase/name "Release"
+   :phase/agent :releaser
+   :phase/actions [:prepare-release :create-pr]
+   :phase/inner-loop
+   {:max-iterations 2
+    :validation-steps [:release-ready]
+    :repair-strategy :fix-release-issues}
+   :phase/budget {:tokens 5000 :time-seconds 180 :iterations 2}
+   :phase/next [{:target :observe}]
+   :phase/metrics [:release-time]}
+
+  {:phase/id :observe
+   :phase/name "Observation"
+   :phase/agent :observer
+   :phase/actions [:collect-metrics]
+   :phase/inner-loop
+   {:max-iterations 1
+    :validation-steps [:metrics-collected]
+    :repair-strategy :none}
+   :phase/budget {:tokens 2000 :time-seconds 60 :iterations 1}
+   :phase/next [{:target :done}]
+   :phase/metrics [:total-time :total-tokens]}
+
+  {:phase/id :done
+   :phase/name "Complete"
+   :phase/agent :none
+   :phase/actions [:finalize]
+   :phase/inner-loop
+   {:max-iterations 1
+    :validation-steps [:complete]
+    :repair-strategy :none}
+   :phase/budget {:tokens 100 :time-seconds 1 :iterations 1}
+   :phase/next []
+   :phase/metrics [:workflow-duration]}]
+
+ :workflow/config
+ {:parallel-phases []
+  :failure-strategy :retry
+  :max-total-iterations 50
+  :max-total-time-seconds 3600
+  :max-total-tokens 100000}
+
+ :workflow/metrics
+ {:success-rate nil
+  :avg-iterations nil
+  :avg-time-seconds nil
+  :avg-tokens-used nil
+  :avg-repair-cycles nil
+  :test-coverage-achieved nil
+  :bugs-caught-in-review nil
+  :bugs-caught-in-ci nil
+  :bugs-in-production nil}}
