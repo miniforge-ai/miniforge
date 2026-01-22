@@ -173,6 +173,67 @@
   [strategies errors context]
   (first (filter #(can-repair? % errors context) strategies)))
 
+(defn- make-max-attempts-result
+  "Create a result map for max attempts exceeded."
+  [attempt results errors]
+  {:success? false
+   :attempts attempt
+   :results results
+   :errors errors
+   :message "Maximum repair attempts exceeded"})
+
+(defn- make-exhausted-strategies-result
+  "Create a result map for exhausted strategies."
+  [attempt results errors]
+  {:success? false
+   :attempts attempt
+   :results results
+   :errors errors
+   :message "All repair strategies exhausted"})
+
+(defn- make-success-result
+  "Create a result map for successful repair."
+  [result attempt results]
+  {:success? true
+   :artifact (:artifact result)
+   :attempts (inc attempt)
+   :results (conj results result)
+   :strategy (:strategy result)})
+
+(defn- make-escalation-result
+  "Create a result map for escalation."
+  [result attempt results errors]
+  {:success? false
+   :escalate? true
+   :attempts (inc attempt)
+   :results (conj results result)
+   :errors errors
+   :message "Repair escalated to outer loop"})
+
+(defn- try-repair-with-strategy
+  "Try to repair using a single strategy.
+   Returns result map or nil if strategy can't handle errors."
+  [strategy artifact errors context]
+  (when (can-repair? strategy errors context)
+    (repair strategy artifact errors context)))
+
+(defn- process-repair-result
+  "Process the result of a repair attempt.
+   Returns a map with :action (:success, :escalate, or :continue) and :result."
+  [result attempt results errors]
+  (cond
+    (:success? result)
+    {:action :success
+     :result (make-success-result result attempt results)}
+
+    (:escalate? result)
+    {:action :escalate
+     :result (make-escalation-result result attempt results errors)}
+
+    :else
+    {:action :continue
+     :result result}))
+
 (defn attempt-repair
   "Attempt to repair an artifact using available strategies.
    Tries strategies in order until one succeeds or all fail.
@@ -195,46 +256,25 @@
       (cond
         ;; Max attempts reached
         (>= attempt max-attempts)
-        {:success? false
-         :attempts attempt
-         :results results
-         :errors errors
-         :message "Maximum repair attempts exceeded"}
+        (make-max-attempts-result attempt results errors)
 
         ;; No more strategies
         (empty? remaining-strategies)
-        {:success? false
-         :attempts attempt
-         :results results
-         :errors errors
-         :message "All repair strategies exhausted"}
+        (make-exhausted-strategies-result attempt results errors)
 
         :else
-        (let [strategy (first remaining-strategies)]
-          (if (can-repair? strategy errors context)
-            ;; Try this strategy
-            (let [result (repair strategy artifact errors context)]
-              (if (:success? result)
-                ;; Success!
-                {:success? true
-                 :artifact (:artifact result)
-                 :attempts (inc attempt)
-                 :results (conj results result)
-                 :strategy (:strategy result)}
-                ;; Failed or escalating
-                (if (:escalate? result)
-                  ;; Explicit escalation
-                  {:success? false
-                   :escalate? true
-                   :attempts (inc attempt)
-                   :results (conj results result)
-                   :errors errors
-                   :message "Repair escalated to outer loop"}
-                  ;; Try next strategy
-                  (recur (rest remaining-strategies)
-                         (inc attempt)
-                         (conj results result)))))
-            ;; Strategy can't handle these errors, try next
+        (let [strategy (first remaining-strategies)
+              repair-result (try-repair-with-strategy strategy artifact errors context)]
+          (if repair-result
+            ;; Strategy attempted repair
+            (let [processed (process-repair-result repair-result attempt results errors)]
+              (case (:action processed)
+                :success (:result processed)
+                :escalate (:result processed)
+                :continue (recur (rest remaining-strategies)
+                                (inc attempt)
+                                (conj results repair-result))))
+            ;; Strategy can't handle these errors, skip to next
             (recur (rest remaining-strategies)
                    attempt
                    results)))))))
