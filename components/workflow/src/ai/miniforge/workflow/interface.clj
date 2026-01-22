@@ -267,10 +267,8 @@
   ([workflow]
    (save-workflow workflow {}))
   ([workflow opts]
-   (let [heuristic-type (keyword "workflow" (name (:workflow/id workflow)))
-         version (:workflow/version workflow)
-         heuristic (requiring-resolve 'ai.miniforge.heuristic.interface/save-heuristic)]
-     (heuristic heuristic-type version {:data workflow} opts))))
+   ((requiring-resolve 'ai.miniforge.workflow.comparison/save-workflow)
+    workflow opts)))
 
 (defn list-workflows
   "List available workflow configurations.
@@ -290,31 +288,6 @@
   []
   ((requiring-resolve 'ai.miniforge.workflow.loader/list-available-workflows)))
 
-(defn- execution-summary
-  "Create a summary map from an execution state."
-  [{:execution/keys [id workflow-id status metrics artifacts errors] :as exec-state}]
-  {:execution/id id
-   :execution/workflow-id workflow-id
-   :execution/status status
-   :execution/metrics metrics
-   :execution/duration-ms ((requiring-resolve 'ai.miniforge.workflow.state/get-duration-ms)
-                           exec-state)
-   :artifact-count (count artifacts)
-   :error-count (count errors)})
-
-(defn- count-by-status
-  "Count execution states with a given status."
-  [status execution-states]
-  (count (filter #(= status (:execution/status %)) execution-states)))
-
-(defn- avg-metric
-  "Calculate average of a metric across summaries."
-  [summaries metric-path]
-  (if (seq summaries)
-    (/ (reduce + (map #(get-in % metric-path) summaries))
-       (count summaries))
-    0))
-
 (defn compare-workflows
   "Compare execution results from multiple workflow runs.
 
@@ -330,14 +303,8 @@
      (def exec2 (execute-workflow workflow2 input {}))
      (compare-workflows [exec1 exec2])"
   [execution-states]
-  (let [summaries (mapv execution-summary execution-states)]
-    {:executions summaries
-     :comparison {:total-executions (count execution-states)
-                  :completed-count (count-by-status :completed execution-states)
-                  :failed-count (count-by-status :failed execution-states)
-                  :avg-tokens (avg-metric summaries [:execution/metrics :tokens])
-                  :avg-cost (avg-metric summaries [:execution/metrics :cost-usd])
-                  :avg-duration (avg-metric summaries [:execution/duration-ms])}}))
+  ((requiring-resolve 'ai.miniforge.workflow.comparison/compare-workflows)
+   execution-states))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
