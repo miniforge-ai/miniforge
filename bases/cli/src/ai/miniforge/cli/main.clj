@@ -351,61 +351,93 @@
     (println (draw-box "FLEET STATUS" wf-content))
     (println)))
 
+(defn- handle-empty-repos
+  "Handle case when no repositories are configured."
+  [config config-path]
+  (println (style "\nNo repositories configured." :foreground :yellow))
+  (if (gum-confirm "Add a repository now?")
+    (if-let [repo (gum-input :placeholder "owner/repo" :header "Enter repository:")]
+      (when-not (str/blank? repo)
+        (let [new-cfg (update-in config [:fleet :repos] (fnil conj []) repo)]
+          (save-config new-cfg config-path)
+          (print-success (str "Added " repo))
+          new-cfg))
+      config)
+    config))
+
+(defn- add-repository
+  "Add a new repository to config."
+  [config config-path]
+  (if-let [repo (gum-input :placeholder "owner/repo" :header "Enter repository:")]
+    (if-not (str/blank? repo)
+      (let [new-cfg (update-in config [:fleet :repos] (fnil conj []) repo)]
+        (save-config new-cfg config-path)
+        (print-success (str "Added " repo))
+        new-cfg)
+      config)
+    config))
+
+(defn- remove-repository
+  "Remove a repository from config."
+  [config config-path repos]
+  (if-let [repo-choice (gum-choose repos :header "Select repository to remove:")]
+    (let [new-cfg (update-in config [:fleet :repos] #(vec (remove #{repo-choice} %)))]
+      (save-config new-cfg config-path)
+      (print-success (str "Removed " repo-choice))
+      new-cfg)
+    config))
+
+(defn- display-repository-prs
+  "Display PRs for a selected repository."
+  [repo]
+  (println (style (str "\nRepository: " repo) :foreground :cyan :bold true))
+  (println "Fetching PRs...")
+  (let [prs (fetch-prs-for-repo repo)]
+    (if (empty? prs)
+      (println "  No open PRs")
+      (do
+        (println (str "  " (count prs) " open PR(s):"))
+        (doseq [{:keys [number title author]} prs]
+          (println (str "  #" number " " title " (" (:login author) ")")))))))
+
+(defn- handle-repository-selection
+  "Handle selection of a specific repository."
+  [config selection]
+  (let [repo (subs selection 3)]
+    (display-repository-prs repo)
+    (println)
+    (gum-input :placeholder "Press Enter to continue...")
+    config))
+
+(defn- handle-repos-menu
+  "Handle repository management menu with existing repos."
+  [config config-path repos selection]
+  (cond
+    (or (nil? selection) (= selection "← Back"))
+    config
+
+    (= selection "➕ Add repository")
+    (add-repository config config-path)
+
+    (= selection "➖ Remove repository")
+    (remove-repository config config-path repos)
+
+    (str/starts-with? selection "📦 ")
+    (handle-repository-selection config selection)
+
+    :else
+    config))
+
 (defn- dashboard-view-repos
   "View and manage fleet repositories."
   [config config-path]
   (let [repos (get-in config [:fleet :repos] [])]
     (if (empty? repos)
-      (do
-        (println (style "\nNo repositories configured." :foreground :yellow))
-        (when (gum-confirm "Add a repository now?")
-          (let [repo (gum-input :placeholder "owner/repo" :header "Enter repository:")]
-            (when (and repo (not (str/blank? repo)))
-              (let [new-cfg (update-in config [:fleet :repos] (fnil conj []) repo)]
-                (save-config new-cfg config-path)
-                (print-success (str "Added " repo))))))
-        config)
+      (handle-empty-repos config config-path)
       (let [choices (concat (map #(str "📦 " %) repos)
                             ["" "➕ Add repository" "➖ Remove repository" "← Back"])
             selection (gum-choose choices :header "Fleet Repositories")]
-        (cond
-          (or (nil? selection) (= selection "← Back"))
-          config
-
-          (= selection "➕ Add repository")
-          (let [repo (gum-input :placeholder "owner/repo" :header "Enter repository:")]
-            (if (and repo (not (str/blank? repo)))
-              (let [new-cfg (update-in config [:fleet :repos] (fnil conj []) repo)]
-                (save-config new-cfg config-path)
-                (print-success (str "Added " repo))
-                new-cfg)
-              config))
-
-          (= selection "➖ Remove repository")
-          (let [repo-choice (gum-choose repos :header "Select repository to remove:")]
-            (if repo-choice
-              (let [new-cfg (update-in config [:fleet :repos] #(vec (remove #{repo-choice} %)))]
-                (save-config new-cfg config-path)
-                (print-success (str "Removed " repo-choice))
-                new-cfg)
-              config))
-
-          (str/starts-with? selection "📦 ")
-          (let [repo (subs selection 3)]
-            (println (style (str "\nRepository: " repo) :foreground :cyan :bold true))
-            (println "Fetching PRs...")
-            (let [prs (fetch-prs-for-repo repo)]
-              (if (empty? prs)
-                (println "  No open PRs")
-                (do
-                  (println (str "  " (count prs) " open PR(s):"))
-                  (doseq [{:keys [number title author]} prs]
-                    (println (str "  #" number " " title " (" (:login author) ")"))))))
-            (println)
-            (gum-input :placeholder "Press Enter to continue...")
-            config)
-
-          :else config)))))
+        (handle-repos-menu config config-path repos selection)))))
 
 (defn- dashboard-view-prs
   "View all PRs across fleet repositories."

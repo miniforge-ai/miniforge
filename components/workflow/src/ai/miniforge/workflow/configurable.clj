@@ -16,7 +16,9 @@
   "DAG-based workflow execution using configurable workflows.
    Executes workflows based on EDN configurations."
   (:require
-   [ai.miniforge.workflow.state :as state]))
+   [ai.miniforge.workflow.state :as state]
+   [ai.miniforge.workflow.agent-factory :as factory]
+   [ai.miniforge.loop.interface :as loop]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Phase lookup
@@ -66,58 +68,76 @@
         (or target :done)))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Phase execution (stub implementation)
+;; Phase execution (real implementation)
 
 (defn execute-configurable-phase
   "Execute a single phase of a configurable workflow.
 
-   For now, this is a stub implementation that returns success.
-   In the future, this will:
-   - Invoke the appropriate agent based on phase/agent-type
-   - Use loop/run-simple for inner loop execution
-   - Evaluate gates using policy/evaluate-gates
+   This implementation:
+   - Invokes the appropriate agent based on phase/agent-type
+   - Uses loop/run-simple for inner loop execution
+   - Evaluates gates for validation
 
    Arguments:
    - phase: Phase configuration
    - exec-state: Current execution state
-   - context: Execution context
+   - context: Execution context with :llm-backend
 
    Returns phase result map:
    {:success? boolean
     :artifacts []
     :errors []
     :metrics {}}"
-  [phase _exec-state _context]
-  (let [phase-id (:phase/id phase)
-        phase-name (:phase/name phase)
-        agent (:phase/agent phase)
-        gates (:phase/gates phase [])]
+  [phase exec-state context]
+  (let [phase-agent (:phase/agent phase)
+        inner-loop (:phase/inner-loop phase {})
+        max-iterations (or (:max-iterations inner-loop) 5)]
 
-    ;; Stub implementation - always succeeds for now
-    ;; In future: invoke agent, run loop, evaluate gates
     (cond
-      ;; Special case: done phase
-      (= :none agent)
+      ;; Skip :none agent
+      (= :none phase-agent)
       {:success? true
        :artifacts []
        :errors []
        :metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}}
 
-      ;; Normal phases - stub success
+      ;; Real execution
       :else
-      {:success? true
-       :artifacts [{:artifact/id (random-uuid)
-                    :artifact/type (keyword (name phase-id))
-                    :artifact/content {:phase phase-id
-                                       :name phase-name
-                                       :stub true}
-                    :artifact/metadata {:phase phase-id
-                                        :agent agent
-                                        :gates-count (count gates)}}]
-       :errors []
-       :metrics {:tokens 100  ; Stub token count
-                 :cost-usd 0.01  ; Stub cost
-                 :duration-ms 1000}})))  ; Stub duration
+      (let [phase-agent-instance (factory/create-agent-for-phase phase context)
+            _gates (factory/create-gates-for-phase phase context)
+            task (factory/create-task-for-phase phase exec-state context)
+            generate-fn (factory/create-generate-fn phase-agent-instance context)
+            repair-fn (factory/create-repair-fn phase-agent-instance context)
+
+            loop-context (merge context
+                                {:max-iterations max-iterations
+                                 :repair-fn repair-fn})
+
+            ;; Run inner loop with generate/validate/repair
+            result (try
+                     (loop/run-simple task generate-fn loop-context)
+                     (catch Exception e
+                       {:success false
+                        :error (str "Phase execution failed: " (.getMessage e))
+                        :metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}}))]
+
+        (if (:success result)
+          ;; Success - build standard artifact
+          (let [raw-artifact (:artifact result)
+                metrics (:metrics result {})
+                standard-artifact (factory/build-artifact-for-phase raw-artifact phase metrics)]
+            {:success? true
+             :artifacts [standard-artifact]
+             :errors []
+             :metrics metrics})
+
+          ;; Failure - return error
+          {:success? false
+           :artifacts []
+           :errors [{:type :phase-failed
+                     :phase (:phase/id phase)
+                     :message (or (:error result) "Phase execution failed")}]
+           :metrics (:metrics result {})})))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Workflow execution
@@ -165,6 +185,7 @@
    - workflow: Workflow configuration
    - input: Input data for the workflow
    - context: Execution context
+     - :llm-backend - LLM backend for agent execution (required)
      - :max-phases - Max phases to execute (default 50, safety limit)
      - :on-phase-start - Callback fn [exec-state phase]
      - :on-phase-complete - Callback fn [exec-state phase result]
@@ -175,7 +196,7 @@
    1. Create initial execution state
    2. Loop through phases:
       a. Get current phase config
-      b. Execute phase
+      b. Execute phase (invoke agent + inner loop)
       c. Record result
       d. Determine next phase
       e. Transition to next phase
@@ -217,6 +238,7 @@
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (require '[ai.miniforge.workflow.loader :as loader])
+  (require '[ai.miniforge.agent.interface :as agent])
 
   ;; Load workflow
   (def workflow-result (loader/load-workflow :simple-test-v1 "1.0.0" {}))
@@ -225,9 +247,12 @@
   ;; Find phase
   (find-phase workflow :plan)
 
-  ;; Execute workflow
+  ;; Execute workflow with mock LLM
+  (def mock-llm (agent/create-mock-llm {:content "(defn hello [] \"world\")"}))
   (def exec-state
-    (run-configurable-workflow workflow {:task "Test task"} {}))
+    (run-configurable-workflow workflow
+                               {:task "Test task"}
+                               {:llm-backend mock-llm}))
 
   ;; Check state
   (:execution/status exec-state)
@@ -241,7 +266,8 @@
     (run-configurable-workflow
      workflow
      {:task "Test task"}
-     {:on-phase-start (fn [_state phase]
+     {:llm-backend mock-llm
+      :on-phase-start (fn [_state phase]
                         (println "Starting phase:" (:phase/id phase)))
       :on-phase-complete (fn [_state phase result]
                            (println "Completed phase:" (:phase/id phase)

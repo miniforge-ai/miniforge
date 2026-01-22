@@ -83,6 +83,44 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Combined loading with caching
 
+(defn- try-load-from-cache
+  "Try loading workflow from cache.
+
+   Returns workflow or nil if not cached or skip-cache requested."
+  [cache-key skip-cache?]
+  (when-not skip-cache?
+    (get @workflow-cache cache-key)))
+
+(defn- try-load-from-sources
+  "Try loading workflow from resource or store.
+
+   Returns workflow or nil if not found."
+  [workflow-id version opts]
+  (or (load-from-resource workflow-id version)
+      (load-from-store workflow-id version opts)))
+
+(defn- validate-and-cache-workflow
+  "Validate workflow and add to cache.
+
+   Throws ex-info if validation fails.
+   Returns result map with workflow, source, and validation."
+  [workflow workflow-id version skip-validation?]
+  (let [validation (if skip-validation?
+                    {:valid? true :errors []}
+                    (validator/validate-workflow workflow))]
+    (when-not (:valid? validation)
+      (throw (ex-info "Workflow validation failed"
+                      {:workflow-id workflow-id
+                       :version version
+                       :errors (:errors validation)})))
+
+    ;; Cache the validated workflow
+    (swap! workflow-cache assoc [workflow-id version] workflow)
+
+    {:workflow workflow
+     :source (if (load-from-resource workflow-id version) :resource :store)
+     :validation validation}))
+
 (defn load-workflow
   "Load workflow config with caching.
    Tries resource first, then heuristic store.
@@ -106,35 +144,17 @@
         skip-cache? (:skip-cache? opts false)
         skip-validation? (:skip-validation? opts false)]
 
-    ;; Check cache first (unless skip-cache?)
-    (if-let [cached-workflow (and (not skip-cache?)
-                                  (get @workflow-cache cache-key))]
-      {:workflow cached-workflow
+    ;; Try cache first
+    (if-let [cached (try-load-from-cache cache-key skip-cache?)]
+      {:workflow cached
        :source :cache
        :validation {:valid? true :errors []}}
 
-      ;; Try loading from resource or store
-      (if-let [workflow (or (load-from-resource workflow-id version)
-                            (load-from-store workflow-id version opts))]
-        (let [;; Validate workflow
-              validation (if skip-validation?
-                           {:valid? true :errors []}
-                           (validator/validate-workflow workflow))]
+      ;; Try loading from sources
+      (if-let [workflow (try-load-from-sources workflow-id version opts)]
+        (validate-and-cache-workflow workflow workflow-id version skip-validation?)
 
-          ;; Check validation result
-          (when-not (:valid? validation)
-            (throw (ex-info "Workflow validation failed"
-                            {:workflow-id workflow-id
-                             :version version
-                             :errors (:errors validation)})))
-
-          ;; Cache and return
-          (swap! workflow-cache assoc cache-key workflow)
-          {:workflow workflow
-           :source (if (load-from-resource workflow-id version) :resource :store)
-           :validation validation})
-
-        ;; Not found
+        ;; Not found anywhere
         (throw (ex-info "Workflow not found"
                         {:workflow-id workflow-id
                          :version version}))))))
