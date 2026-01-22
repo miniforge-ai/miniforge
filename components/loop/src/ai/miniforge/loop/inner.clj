@@ -338,7 +338,64 @@
               (transition loop-state :generating))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Loop runner
+;; Loop runner helpers
+
+(defn- handle-terminal-state
+  "Handle terminal states (complete, failed, escalated).
+   Returns the final result map."
+  [state logger]
+  (let [current-state (:loop/state state)
+        success? (= current-state :complete)]
+    (when logger
+      (if success?
+        (log/info logger :loop :inner/validation-passed
+                  {:message "Inner loop completed successfully"
+                   :data {:iterations (:loop/iteration state)}})
+        (log/warn logger :loop :inner/escalated
+                  {:message "Inner loop terminated"
+                   :data {:state current-state
+                          :reason (get-in state [:loop/termination :reason])}})))
+    {:success success?
+     :artifact (when success? (:loop/artifact state))
+     :iterations (:loop/iteration state)
+     :metrics (:loop/metrics state)
+     :termination (:loop/termination state)
+     :final-state state}))
+
+(defn- handle-pre-termination
+  "Handle pre-termination conditions (budget exhausted, max iterations).
+   Returns updated state transitioned to appropriate terminal state."
+  [state termination-result]
+  (let [{:keys [reason]} termination-result]
+    (-> state
+        (set-termination reason)
+        (transition (if (= reason :gates-passed)
+                      :complete
+                      :escalated)))))
+
+(defn- handle-pending-state
+  "Handle pending state - initiate generation.
+   Returns updated state."
+  [state generate-fn context]
+  (generate-step state generate-fn context))
+
+(defn- handle-generating-state
+  "Handle generating state - continue generation.
+   Returns updated state."
+  [state generate-fn context]
+  (generate-step state generate-fn context))
+
+(defn- handle-validating-state
+  "Handle validating state - run validation.
+   Returns updated state."
+  [state gates context]
+  (validate-step state gates context))
+
+(defn- handle-repairing-state
+  "Handle repairing state - attempt repair.
+   Returns updated state."
+  [state strategies context]
+  (repair-step state strategies context))
 
 (defn run-inner-loop
   "Run the inner loop to completion.
@@ -365,52 +422,29 @@
                         :max-iterations (get-in loop-state [:loop/config :max-iterations])}}))
 
     (loop [state loop-state]
-      (let [current-state (:loop/state state)]
+      (let [current-state (:loop/state state)
+            termination-check (should-terminate? state)]
         (cond
-          ;; Terminal states
+          ;; Terminal states - return result
           (terminal-state? current-state)
-          (let [success? (= current-state :complete)]
-            (when logger
-              (if success?
-                (log/info logger :loop :inner/validation-passed
-                          {:message "Inner loop completed successfully"
-                           :data {:iterations (:loop/iteration state)}})
-                (log/warn logger :loop :inner/escalated
-                          {:message "Inner loop terminated"
-                           :data {:state current-state
-                                  :reason (get-in state [:loop/termination :reason])}})))
-            {:success success?
-             :artifact (when success? (:loop/artifact state))
-             :iterations (:loop/iteration state)
-             :metrics (:loop/metrics state)
-             :termination (:loop/termination state)
-             :final-state state})
+          (handle-terminal-state state logger)
 
-          ;; Pre-termination check
-          (should-terminate? state)
-          (let [{:keys [reason]} (should-terminate? state)]
-            (recur (-> state
-                       (set-termination reason)
-                       (transition (if (= reason :gates-passed)
-                                     :complete
-                                     :escalated)))))
+          ;; Pre-termination check - cache result to avoid calling twice
+          termination-check
+          (recur (handle-pre-termination state termination-check))
 
-          ;; Pending -> Generate
+          ;; State-based dispatch
           (= current-state :pending)
-          (recur (generate-step state generate-fn context))
+          (recur (handle-pending-state state generate-fn context))
 
-          ;; Generating -> already handled in generate-step
-          ;; This state is transient, shouldn't be observed here
           (= current-state :generating)
-          (recur (generate-step state generate-fn context))
+          (recur (handle-generating-state state generate-fn context))
 
-          ;; Validating
           (= current-state :validating)
-          (recur (validate-step state gates context))
+          (recur (handle-validating-state state gates context))
 
-          ;; Repairing
           (= current-state :repairing)
-          (recur (repair-step state strategies context))
+          (recur (handle-repairing-state state strategies context))
 
           ;; Unknown state (shouldn't happen)
           :else
