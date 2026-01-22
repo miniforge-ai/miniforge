@@ -48,23 +48,21 @@
    - Next phase ID
    - :done if workflow should complete
    - nil if no valid transition"
-  [workflow exec-state phase-result]
+  [workflow exec-state _phase-result]
   (let [current-phase-id (:execution/current-phase exec-state)
         current-phase (find-phase workflow current-phase-id)
-        success? (:success? phase-result)
-        exit-phases (set (:workflow/exit-phases workflow))]
+        next-transitions (:phase/next current-phase [])]
 
-    ;; Check if current phase is an exit phase
-    (if (contains? exit-phases current-phase-id)
+    ;; Check if no transitions defined (exit phase)
+    (if (empty? next-transitions)
       :done
 
-      ;; Determine next phase based on success/failure
-      (let [transition (if success?
-                         (:phase/on-success current-phase)
-                         (:phase/on-failure current-phase))
-            target (:transition/target transition)]
+      ;; For now, use first transition
+      ;; Future: evaluate conditions and probabilities
+      (let [transition (first next-transitions)
+            target (:target transition)]
 
-        ;; Return target or :done if no transition defined
+        ;; Return target or :done if no target defined
         (or target :done)))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -92,14 +90,14 @@
   [phase _exec-state _context]
   (let [phase-id (:phase/id phase)
         phase-name (:phase/name phase)
-        agent-type (:phase/agent-type phase)
+        agent (:phase/agent phase)
         gates (:phase/gates phase [])]
 
     ;; Stub implementation - always succeeds for now
     ;; In future: invoke agent, run loop, evaluate gates
     (cond
       ;; Special case: done phase
-      (= :none agent-type)
+      (= :none agent)
       {:success? true
        :artifacts []
        :errors []
@@ -114,7 +112,7 @@
                                        :name phase-name
                                        :stub true}
                     :artifact/metadata {:phase phase-id
-                                        :agent-type agent-type
+                                        :agent agent
                                         :gates-count (count gates)}}]
        :errors []
        :metrics {:tokens 100  ; Stub token count
@@ -127,7 +125,7 @@
 (defn- execute-phase-step
   "Execute a single phase step in the workflow.
    Returns updated execution state or [:continue new-state] to continue loop."
-  [workflow exec-state phase context callbacks exit-phases]
+  [workflow exec-state phase context callbacks]
   (let [{:keys [on-phase-start on-phase-complete]} callbacks
         current-phase-id (:execution/current-phase exec-state)]
 
@@ -143,20 +141,22 @@
       (when on-phase-complete
         (on-phase-complete exec-state' phase phase-result))
 
-      ;; Determine next action based on exit phase or transitions
-      (cond
-        ;; At exit phase - complete workflow
-        (contains? exit-phases current-phase-id)
-        (state/mark-completed exec-state')
+      ;; Determine next phase
+      (let [next-phase-id (select-next-phase workflow exec-state' phase-result)]
+        (cond
+          ;; :done means workflow should complete
+          (= :done next-phase-id)
+          (state/mark-completed exec-state')
 
-        ;; Determine next phase
-        :else
-        (let [next-phase-id (select-next-phase workflow exec-state' phase-result)]
-          (if next-phase-id
-            [:continue (state/transition-to-phase exec-state' next-phase-id :advance)]
-            (state/mark-failed exec-state'
-                               {:type :no-valid-transition
-                                :message (str "No valid transition from phase: " current-phase-id)})))))))
+          ;; Valid next phase - continue
+          next-phase-id
+          [:continue (state/transition-to-phase exec-state' next-phase-id :advance)]
+
+          ;; No valid transition
+          :else
+          (state/mark-failed exec-state'
+                             {:type :no-valid-transition
+                              :message (str "No valid transition from phase: " current-phase-id)}))))))
 
 (defn run-configurable-workflow
   "Execute a complete configurable workflow.
@@ -183,8 +183,7 @@
   [workflow input context]
   (let [max-phases (or (:max-phases context) 50)
         callbacks {:on-phase-start (:on-phase-start context)
-                   :on-phase-complete (:on-phase-complete context)}
-        exit-phases (set (:workflow/exit-phases workflow))]
+                   :on-phase-complete (:on-phase-complete context)}]
 
     (loop [exec-state (state/create-execution-state workflow input)
            phase-count 0]
@@ -208,7 +207,7 @@
                                 :message (str "Phase not found: " current-phase-id)})
 
             ;; Execute phase step
-            (let [result (execute-phase-step workflow exec-state phase context callbacks exit-phases)]
+            (let [result (execute-phase-step workflow exec-state phase context callbacks)]
               (if (vector? result)
                 ;; [:continue new-state] - continue to next phase
                 (recur (second result) (inc phase-count))

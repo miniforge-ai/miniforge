@@ -41,19 +41,20 @@
    - :execution/created-at - Timestamp
    - :execution/updated-at - Timestamp"
   [workflow input]
-  {:execution/id (random-uuid)
-   :execution/workflow-id (:workflow/id workflow)
-   :execution/workflow-version (:workflow/version workflow)
-   :execution/status :pending
-   :execution/current-phase (:workflow/entry-phase workflow)
-   :execution/phase-results {}
-   :execution/artifacts []
-   :execution/errors []
-   :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
-   :execution/history []
-   :execution/input input
-   :execution/created-at (System/currentTimeMillis)
-   :execution/updated-at (System/currentTimeMillis)})
+  (let [entry-phase (-> workflow :workflow/phases first :phase/id)]
+    {:execution/id (random-uuid)
+     :execution/workflow-id (:workflow/id workflow)
+     :execution/workflow-version (:workflow/version workflow)
+     :execution/status :pending
+     :execution/current-phase entry-phase
+     :execution/phase-results {}
+     :execution/artifacts []
+     :execution/errors []
+     :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
+     :execution/history []
+     :execution/input input
+     :execution/created-at (System/currentTimeMillis)
+     :execution/updated-at (System/currentTimeMillis)}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; State transitions

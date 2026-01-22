@@ -156,7 +156,8 @@
                        (str/replace #"-" " ")
                        str/capitalize))]
 
-      {:zettel/uid uid
+      {:zettel/id (random-uuid)
+       :zettel/uid uid
        :zettel/title title
        :zettel/content body
        :zettel/type :rule
@@ -167,6 +168,7 @@
                       :origin relative-path
                       :confidence 1.0}
        :zettel/author "system"
+       :zettel/created (java.util.Date.)
        :zettel/metadata (or frontmatter {})})
 
     (catch Exception e
@@ -220,7 +222,8 @@
                       (str/replace #"-" " ")
                       str/capitalize))]
 
-      {:zettel/uid uid
+      {:zettel/id (random-uuid)
+       :zettel/uid uid
        :zettel/title title
        :zettel/content content
        :zettel/type zettel-type
@@ -231,6 +234,7 @@
                       :origin filename
                       :confidence 1.0}
        :zettel/author "system"
+       :zettel/created (java.util.Date.)
        :zettel/metadata {}})
 
     (catch Exception e

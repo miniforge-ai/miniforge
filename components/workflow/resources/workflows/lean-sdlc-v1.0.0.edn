@@ -1,0 +1,122 @@
+;; Lean SDLC Workflow v1.0.0
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; Alternative workflow: Lean flow with fewer phases and review loops.
+;; Optimized for speed and rapid iteration on small, isolated changes.
+;;
+;; Hypothesis: Works better for small changes where context is clear and
+;; risk is low. Trades some safety for speed.
+
+{:workflow/id :lean-sdlc-v1
+ :workflow/version "1.0.0"
+ :workflow/name "Lean SDLC Flow"
+ :workflow/description
+ "Minimalist workflow that combines phases and reduces review loops.
+  Optimized for rapid iteration on small, low-risk changes."
+
+ :workflow/created-at #inst "2026-01-21T00:00:00.000-00:00"
+ :workflow/task-types [:small-feature :bugfix :docs]
+
+ :workflow/phases
+ [{:phase/id :input
+   :phase/name "Input Validation"
+   :phase/agent :validator
+   :phase/actions [:validate-spec]
+   :phase/inner-loop
+   {:max-iterations 2
+    :validation-steps [:spec-schema-valid]
+    :repair-strategy :clarify-requirements}
+   :phase/gates [:spec-schema-valid]
+   :phase/budget {:tokens 3000 :time-seconds 30 :iterations 2}
+   :phase/next [{:target :plan-design}]
+   :phase/metrics [:validation-time]}
+
+  ;; COMBINED: Plan + Design in single phase
+  {:phase/id :plan-design
+   :phase/name "Planning & Design"
+   :phase/agent :designer
+   :phase/actions [:analyze-requirements :design-architecture]
+   :phase/inner-loop
+   {:max-iterations 3
+    :validation-steps [:design-complete]
+    :repair-strategy :adjust-design}
+   :phase/review-loop
+   {:reviewers [:dev-reviewer]  ; Single reviewer instead of PM + Dev
+    :required-approvals 1
+    :max-rounds 2}  ; Fewer rounds
+   :phase/gates [:design-complete :plan-approved]
+   :phase/budget {:tokens 10000 :time-seconds 120 :iterations 3}
+   :phase/next [{:target :implement-tdd}]
+   :phase/metrics [:design-quality-score :review-rounds]}
+
+  ;; COMBINED: Tests + Code in single TDD phase
+  {:phase/id :implement-tdd
+   :phase/name "TDD Implementation"
+   :phase/agent :implementer  ; Single agent does both tests and code
+   :phase/actions [:write-tests :write-code :run-tests]
+   :phase/inner-loop
+   {:max-iterations 10
+    :validation-steps [:tests-pass :lint-clean]
+    :repair-strategy :fix-code-errors}
+   :phase/gates [:syntax-valid :lint-clean :tests-pass]
+   :phase/budget {:tokens 25000 :time-seconds 400 :iterations 10}
+   :phase/next [{:target :review}]
+   :phase/metrics [:test-count :coverage-achieved :repair-cycles]}
+
+  ;; SIMPLIFIED: Single review phase (no separate verify)
+  {:phase/id :review
+   :phase/name "Quick Review"
+   :phase/agent :reviewer
+   :phase/actions [:validate-lint :check-coverage]
+   :phase/inner-loop
+   {:max-iterations 5
+    :validation-steps [:lint-clean]
+    :repair-strategy :fix-review-issues}
+   :phase/gates [:lint-clean :reviewer-approved]
+   :phase/budget {:tokens 8000 :time-seconds 200 :iterations 5}
+   :phase/next [{:target :release}]
+   :phase/metrics [:review-issues-found :repair-cycles]}
+
+  {:phase/id :release
+   :phase/name "Release"
+   :phase/agent :release-manager
+   :phase/actions [:commit-changes :push-remote :create-pr]
+   :phase/inner-loop
+   {:max-iterations 3
+    :validation-steps [:ci-pass]
+    :repair-strategy :fix-ci-failures}
+   :phase/gates [:ci-pass]
+   :phase/budget {:tokens 3000 :time-seconds 900 :iterations 3}
+   :phase/next [{:target :observe}]
+   :phase/metrics [:ci-runs :time-to-merge]}
+
+  {:phase/id :observe
+   :phase/name "Observe"
+   :phase/agent :observer
+   :phase/actions [:collect-metrics]
+   :phase/inner-loop
+   {:max-iterations 1
+    :validation-steps [:metrics-collected]
+    :repair-strategy :none}
+   :phase/gates [:metrics-collected]
+   :phase/budget {:tokens 2000 :time-seconds 60 :iterations 1}
+   :phase/next [{:target :meta-loop}]
+   :phase/metrics [:total-time :total-tokens]}]
+
+ :workflow/config
+ {:parallel-phases []
+  :failure-strategy :retry
+  :max-total-iterations 50  ; Lower than canonical
+  :max-total-time-seconds 3600  ; 1 hour max (vs 2 hours canonical)
+  :max-total-tokens 100000}  ; Lower token budget
+
+ :workflow/metrics
+ {:success-rate nil
+  :avg-iterations nil
+  :avg-time-seconds nil
+  :avg-tokens-used nil
+  :avg-repair-cycles nil
+  :test-coverage-achieved nil
+  :bugs-caught-in-review nil
+  :bugs-caught-in-ci nil
+  :bugs-in-production nil}}

@@ -50,14 +50,16 @@
       (swap! errors conj "Missing required key: :workflow/id"))
     (when-not (:workflow/version config)
       (swap! errors conj "Missing required key: :workflow/version"))
-    (when-not (:workflow/type config)
-      (swap! errors conj "Missing required key: :workflow/type"))
+    (when-not (:workflow/name config)
+      (swap! errors conj "Missing required key: :workflow/name"))
+    (when-not (:workflow/description config)
+      (swap! errors conj "Missing required key: :workflow/description"))
+    (when-not (:workflow/created-at config)
+      (swap! errors conj "Missing required key: :workflow/created-at"))
+    (when-not (:workflow/task-types config)
+      (swap! errors conj "Missing required key: :workflow/task-types"))
     (when-not (:workflow/phases config)
       (swap! errors conj "Missing required key: :workflow/phases"))
-    (when-not (:workflow/entry-phase config)
-      (swap! errors conj "Missing required key: :workflow/entry-phase"))
-    (when-not (:workflow/exit-phases config)
-      (swap! errors conj "Missing required key: :workflow/exit-phases"))
 
     ;; Check phases is a vector
     (when-let [phases (:workflow/phases config)]
@@ -70,13 +72,15 @@
           (swap! errors conj (str "Phase " idx " missing :phase/id")))
         (when-not (:phase/name phase)
           (swap! errors conj (str "Phase " idx " missing :phase/name")))
-        (when-not (:phase/agent-type phase)
-          (swap! errors conj (str "Phase " idx " missing :phase/agent-type")))))
+        (when-not (:phase/agent phase)
+          (swap! errors conj (str "Phase " idx " missing :phase/agent")))
+        (when-not (:phase/next phase)
+          (swap! errors conj (str "Phase " idx " missing :phase/next")))))
 
-    ;; Check exit-phases is a vector
-    (when-let [exit-phases (:workflow/exit-phases config)]
-      (when-not (vector? exit-phases)
-        (swap! errors conj ":workflow/exit-phases must be a vector")))
+    ;; Check task-types is a vector
+    (when-let [task-types (:workflow/task-types config)]
+      (when-not (vector? task-types)
+        (swap! errors conj ":workflow/task-types must be a vector")))
 
     {:valid? (empty? @errors)
      :errors @errors}))
@@ -91,12 +95,8 @@
   (reduce
    (fn [graph phase]
      (let [phase-id (:phase/id phase)
-           targets (cond-> #{}
-                     (:phase/on-success phase)
-                     (conj (get-in phase [:phase/on-success :transition/target]))
-
-                     (:phase/on-failure phase)
-                     (conj (get-in phase [:phase/on-failure :transition/target])))]
+           next-transitions (:phase/next phase [])
+           targets (set (map :target next-transitions))]
        (assoc graph phase-id targets)))
    {}
    phases))
@@ -120,9 +120,11 @@
 (defn validate-dag
   "Validate workflow DAG structure.
    Checks:
-   - No cycles
+   - At least one phase exists
    - All phases referenced in transitions exist
-   - Exit phases are reachable from entry phase
+   - All phases are reachable from entry phase (first phase)
+
+   Note: Cycles are allowed (for retry/rollback patterns)
 
    Returns:
    {:valid? boolean
@@ -131,36 +133,28 @@
   (let [errors (atom [])
         phases (:workflow/phases config)
         phase-ids (set (map :phase/id phases))
-        entry-phase (:workflow/entry-phase config)
-        exit-phases (set (:workflow/exit-phases config))
+        entry-phase (when (seq phases) (:phase/id (first phases)))
         graph (build-phase-graph phases)]
 
-    ;; Check entry phase exists
-    (when-not (contains? phase-ids entry-phase)
-      (swap! errors conj (str "Entry phase not found: " entry-phase)))
-
-    ;; Check exit phases exist
-    (doseq [exit-phase exit-phases]
-      (when-not (contains? phase-ids exit-phase)
-        (swap! errors conj (str "Exit phase not found: " exit-phase))))
+    ;; Check we have at least one phase
+    (when (empty? phases)
+      (swap! errors conj "Workflow must have at least one phase"))
 
     ;; Check all transition targets exist
     (doseq [phase phases]
-      (let [phase-id (:phase/id phase)]
-        (when-let [success-target (get-in phase [:phase/on-success :transition/target])]
-          (when-not (contains? phase-ids success-target)
-            (swap! errors conj (str "Phase " phase-id " references non-existent phase: " success-target))))
-
-        (when-let [failure-target (get-in phase [:phase/on-failure :transition/target])]
-          (when-not (contains? phase-ids failure-target)
-            (swap! errors conj (str "Phase " phase-id " references non-existent phase: " failure-target))))))
+      (let [phase-id (:phase/id phase)
+            next-transitions (:phase/next phase [])]
+        (doseq [transition next-transitions]
+          (when-let [target (:target transition)]
+            (when-not (contains? phase-ids target)
+              (swap! errors conj (str "Phase " phase-id " references non-existent phase: " target)))))))
 
     ;; Note: We don't check for cycles because workflows commonly have
     ;; intentional cycles for retry/rollback logic (e.g., verify -> implement on failure)
     ;; Cycles are a valid workflow pattern
 
     ;; Check reachability (only if no errors so far)
-    (when (empty? @errors)
+    (when (and entry-phase (empty? @errors))
       (let [reachable (reachable-phases graph entry-phase)
             unreachable (set/difference phase-ids reachable)]
         (when (seq unreachable)
