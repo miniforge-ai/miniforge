@@ -7,6 +7,7 @@
    [ai.miniforge.agent.core :as core]
    [ai.miniforge.agent.memory :as mem]
    [ai.miniforge.agent.protocol :as proto]
+   [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.agent.planner :as planner]
    [ai.miniforge.agent.implementer :as implementer]
    [ai.miniforge.agent.tester :as tester]))
@@ -270,6 +271,40 @@
   ([responses] (core/create-mock-llm responses)))
 
 ;------------------------------------------------------------------------------ Layer 7
+;; Specialized agent support
+
+(defn create-base-agent
+  "Create a base agent with the given configuration.
+   Used by specialized agents (planner, implementer, tester).
+
+   Required options:
+   - :role          - Agent role keyword (:planner, :implementer, :tester, etc.)
+   - :system-prompt - System prompt for the agent
+   - :invoke-fn     - Function (fn [context input] -> result)
+   - :validate-fn   - Function (fn [output] -> {:valid? bool, :errors [...]})
+   - :repair-fn     - Function (fn [output errors context] -> repaired-result)
+
+   Optional:
+   - :config - Agent configuration map (model, temperature, etc.)
+   - :logger - Logger instance (defaults to silent logger)"
+  [opts]
+  (specialized/create-base-agent opts))
+
+(defn make-validator
+  "Create a validation function from a Malli schema."
+  [malli-schema]
+  (specialized/make-validator malli-schema))
+
+(defn cycle-agent
+  "Execute a full invoke-validate-repair cycle on a specialized agent.
+   Returns the final result after up to max-iterations of repair attempts.
+
+   Options:
+   - :max-iterations - Maximum repair attempts (default 3)"
+  [agent context input & {:keys [max-iterations] :or {max-iterations 3}}]
+  (specialized/cycle-agent agent context input :max-iterations max-iterations))
+
+;------------------------------------------------------------------------------ Layer 8
 ;; Specialized agent creation
 
 (def create-planner
