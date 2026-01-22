@@ -228,6 +228,12 @@
   []
   (gates/strict-gates))
 
+(defn check-gate
+  "Run a single gate check on an artifact.
+   Returns gate result map with :gate/id, :gate/type, :gate/passed?, etc."
+  [gate artifact context]
+  (gates/check gate artifact context))
+
 (defn run-gates
   "Run multiple gates against an artifact.
    Options:
