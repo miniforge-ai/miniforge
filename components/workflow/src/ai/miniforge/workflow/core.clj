@@ -8,7 +8,9 @@
    [ai.miniforge.task.interface :as task]
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.artifact.interface :as artifact]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [clojure.edn]
+   [clojure.java.io]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration
@@ -502,6 +504,78 @@
                                             :errors []})]
               (recur new-state))))))))
 
+;------------------------------------------------------------------------------ Layer 5
+;; Active workflow management
+
+(defn- active-config-path
+  "Get path to active workflow config file.
+   Defaults to ~/.miniforge/workflows/active.edn"
+  []
+  (let [home (System/getProperty "user.home")
+        config-dir (str home "/.miniforge/workflows")]
+    ;; Ensure directory exists
+    (.mkdirs (java.io.File. config-dir))
+    (str config-dir "/active.edn")))
+
+(defn load-active-config
+  "Load active workflow configuration from ~/.miniforge/workflows/active.edn
+
+   Returns map of task-type -> {:workflow-id :version}
+   Returns empty map if file doesn't exist or on error."
+  []
+  (let [path (active-config-path)]
+    (try
+      (when (.exists (java.io.File. path))
+        (with-open [rdr (java.io.PushbackReader. (clojure.java.io/reader path))]
+          (clojure.edn/read rdr)))
+      (catch Exception _e
+        ;; Return empty config on error
+        {}))))
+
+(defn save-active-config
+  "Save active workflow configuration to ~/.miniforge/workflows/active.edn
+
+   Arguments:
+   - config: Map of task-type -> {:workflow-id :version}
+
+   Returns true on success, false on error."
+  [config]
+  (let [path (active-config-path)]
+    (try
+      (with-open [wtr (clojure.java.io/writer path)]
+        (binding [*print-length* nil
+                  *print-level* nil]
+          (.write wtr (pr-str config))))
+      true
+      (catch Exception _e
+        false))))
+
+(defn get-active-workflow-id
+  "Get the active workflow ID for a task type.
+
+   Arguments:
+   - task-type: Task type keyword (e.g., :feature, :bugfix)
+
+   Returns map {:workflow-id :version} or nil if not set."
+  [task-type]
+  (let [config (load-active-config)]
+    (get config task-type)))
+
+(defn set-active-workflow
+  "Set the active workflow for a task type.
+
+   Arguments:
+   - task-type: Task type keyword (e.g., :feature, :bugfix)
+   - workflow-id: Workflow identifier
+   - version: Workflow version
+
+   Returns true on success, false on error."
+  [task-type workflow-id version]
+  (let [config (load-active-config)
+        new-config (assoc config task-type {:workflow-id workflow-id
+                                            :version version})]
+    (save-active-config new-config)))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (require '[ai.miniforge.llm.interface :as llm])
@@ -523,5 +597,10 @@
   (:workflow/status result)
   (:workflow/phase result)
   (:workflow/artifacts result)
+
+  ;; Test active workflow management
+  (set-active-workflow :feature :canonical-sdlc-v1 "1.0.0")
+  (get-active-workflow-id :feature)
+  (load-active-config)
 
   :end)

@@ -347,6 +347,7 @@ Meta loop can gradually roll out new workflows:
 ## Summary
 
 **Live Configuration Enabled:**
+
 - ✅ Workflows load from EDN at runtime
 - ✅ Validated before activation
 - ✅ Stored as versioned heuristics
@@ -357,6 +358,7 @@ Meta loop can gradually roll out new workflows:
 - ✅ Audit logging
 
 **Integration:**
+
 - ✅ Policy component (gates) - Phase 1
 - ✅ Heuristic component (storage) - Phase 1
 - ⏳ Loop component (inner loops) - Phase 2
