@@ -72,6 +72,7 @@
   [{:keys [outputs output] :or {output "Mock response"}}]
   (let [llm-client (llm/mock-client (if outputs {:outputs outputs} {:output output}))
         k-store (knowledge/create-store)
+        _ (knowledge/initialize-knowledge-store! k-store)
         a-store (artifact/create-store)]
     (register-store! k-store a-store)
     {:orchestrator (orch/create-orchestrator llm-client k-store a-store)
@@ -94,6 +95,7 @@
   (let [budget-config (if (keyword? budget) (get budgets budget) budget)
         llm-client (llm/create-client {:backend backend :logger logger})
         k-store (knowledge/create-store)
+        _ (knowledge/initialize-knowledge-store! k-store)
         ;; Use temp dir for artifact store to ensure isolation
         temp-dir (str (fs/create-temp-dir {:prefix "miniforge-test-"}))
         _ (register-temp-dir! temp-dir)
