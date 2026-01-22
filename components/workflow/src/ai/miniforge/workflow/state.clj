@@ -14,7 +14,11 @@
 
 (ns ai.miniforge.workflow.state
   "Execution state management for workflow runs.
-   Tracks runtime state separately from workflow configuration.")
+
+   Uses a formal FSM (see fsm.clj) for state transitions.
+   Tracks runtime state separately from workflow configuration."
+  (:require
+   [ai.miniforge.workflow.fsm :as fsm]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; State creation
@@ -57,18 +61,52 @@
      :execution/updated-at (System/currentTimeMillis)}))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; State transitions
+;; FSM-based state transitions
 
-(defn- record-transition
-  "Record a state transition in history."
+(defn- record-fsm-transition
+  "Record an FSM state transition in history."
+  [state from-status to-status event]
+  (let [transition {:from-status from-status
+                    :to-status to-status
+                    :event event
+                    :timestamp (System/currentTimeMillis)}]
+    (-> state
+        (update :execution/history conj transition)
+        (assoc :execution/updated-at (System/currentTimeMillis)))))
+
+(defn- record-phase-transition
+  "Record a phase transition in history."
   [state from-phase to-phase reason]
-  (let [transition {:from from-phase
-                    :to to-phase
+  (let [transition {:from-phase from-phase
+                    :to-phase to-phase
                     :reason reason
                     :timestamp (System/currentTimeMillis)}]
     (-> state
         (update :execution/history conj transition)
         (assoc :execution/updated-at (System/currentTimeMillis)))))
+
+(defn transition-status
+  "Transition workflow status using FSM.
+
+   Arguments:
+   - state: Current execution state
+   - event: Event keyword (:start, :complete, :fail, :pause, :resume, :cancel)
+
+   Returns:
+   - Updated state if transition valid
+   - Throws ex-info if transition invalid"
+  [state event]
+  (let [current-status (:execution/status state)
+        result (fsm/transition current-status event)]
+    (if (:success? result)
+      (-> state
+          (assoc :execution/status (:state result))
+          (record-fsm-transition current-status (:state result) event))
+      (throw (ex-info "Invalid state transition"
+                     {:current-status current-status
+                      :event event
+                      :error (:error result)
+                      :message (:message result)})))))
 
 (defn transition-to-phase
   "Transition execution to a new phase.
@@ -82,11 +120,14 @@
   ([state phase-id]
    (transition-to-phase state phase-id :advance))
   ([state phase-id reason]
-   (let [current-phase (:execution/current-phase state)]
-     (-> state
+   (let [current-phase (:execution/current-phase state)
+         ;; Ensure workflow is running when transitioning phases
+         state-with-status (if (= :pending (:execution/status state))
+                            (transition-status state :start)
+                            state)]
+     (-> state-with-status
          (assoc :execution/current-phase phase-id)
-         (assoc :execution/status :running)
-         (record-transition current-phase phase-id reason)))))
+         (record-phase-transition current-phase phase-id reason)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Phase result recording
@@ -118,26 +159,25 @@
 ;; Completion and failure
 
 (defn mark-completed
-  "Mark execution as completed.
+  "Mark execution as completed using FSM transition.
 
    Returns updated state with:
-   - Status set to :completed
+   - Status transitioned to :completed via FSM
    - Completed timestamp added"
   [state]
   (-> state
-      (assoc :execution/status :completed)
-      (assoc :execution/completed-at (System/currentTimeMillis))
-      (assoc :execution/updated-at (System/currentTimeMillis))))
+      (transition-status :complete)
+      (assoc :execution/completed-at (System/currentTimeMillis))))
 
 (defn mark-failed
-  "Mark execution as failed.
+  "Mark execution as failed using FSM transition.
 
    Arguments:
    - state: Current execution state
    - error: Error map or string
 
    Returns updated state with:
-   - Status set to :failed
+   - Status transitioned to :failed via FSM
    - Error added to errors list
    - Failed timestamp added"
   [state error]
@@ -146,10 +186,9 @@
                      :message error}
                     error)]
     (-> state
-        (assoc :execution/status :failed)
+        (transition-status :fail)
         (update :execution/errors conj error-map)
-        (assoc :execution/failed-at (System/currentTimeMillis))
-        (assoc :execution/updated-at (System/currentTimeMillis)))))
+        (assoc :execution/failed-at (System/currentTimeMillis)))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; State queries
@@ -168,6 +207,24 @@
   "Check if execution is running."
   [state]
   (= :running (:execution/status state)))
+
+(defn terminal?
+  "Check if execution is in a terminal state (no further transitions).
+
+   Returns true for :completed, :failed, or :cancelled states."
+  [state]
+  (fsm/terminal-state? (:execution/status state)))
+
+(defn can-transition?
+  "Check if a status transition is valid from current state.
+
+   Arguments:
+   - state: Current execution state
+   - event: Event keyword to attempt
+
+   Returns: boolean"
+  [state event]
+  (fsm/valid-transition? (:execution/status state) event))
 
 (defn get-phase-result
   "Get the result of a specific phase."
