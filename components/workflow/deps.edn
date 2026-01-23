@@ -1,6 +1,7 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/schema {:local/root "../schema"}
         ai.miniforge/logging {:local/root "../logging"}
+        ai.miniforge/response {:local/root "../response"}  ; Response chains
         ai.miniforge/agent {:local/root "../agent"}
         ai.miniforge/task {:local/root "../task"}
         ai.miniforge/loop {:local/root "../loop"}

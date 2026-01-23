@@ -1,5 +1,5 @@
 {:paths ["src" "resources"]
- :deps {}
+ :deps {ai.miniforge/response {:local/root "../response"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {}}}}

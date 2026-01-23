@@ -3,6 +3,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.gate.interface :as gate]
+   [ai.miniforge.response.interface :as response]
    ;; Require implementations to register methods
    [ai.miniforge.gate.syntax]
    [ai.miniforge.gate.lint]
@@ -143,3 +144,32 @@
     (let [result (gate/repair-gate :no-secrets {:content "bad"} [] {})]
       (is (not (:success? result)))
       (is (= :no-secrets (:gate result))))))
+
+;; ============================================================================
+;; Response chain tests
+;; ============================================================================
+
+(deftest check-gates-chain-all-pass-test
+  (testing "check-gates-chain succeeds when all gates pass"
+    (let [chain (gate/check-gates-chain [:syntax]
+                                         {:content "(+ 1 2)"}
+                                         {})]
+      (is (response/succeeded? chain))
+      (is (= [:syntax] (response/operations chain))))))
+
+(deftest check-gates-chain-one-fails-test
+  (testing "check-gates-chain fails when any gate fails"
+    (let [chain (gate/check-gates-chain [:syntax :no-secrets]
+                                         {:content "password = \"secretpassword123\""}
+                                         {})]
+      ;; Syntax passes but secrets fails
+      (is (response/failed? chain))
+      (is (= :no-secrets (:operation (response/first-failure chain))))
+      (is (= :anomalies.gate/validation-failed
+             (:anomaly (response/first-failure chain)))))))
+
+(deftest check-gates-chain-empty-test
+  (testing "check-gates-chain succeeds for empty gate list"
+    (let [chain (gate/check-gates-chain [] {} {})]
+      (is (response/succeeded? chain))
+      (is (empty? (response/operations chain))))))

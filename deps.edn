@@ -26,6 +26,7 @@
                        "components/policy/resources"
                        "components/heuristic/src"
                        "components/heuristic/resources"
+                       "components/response/src"
                        "components/phase/src"
                        "components/phase/resources"
                        "components/gate/src"
@@ -51,6 +52,7 @@
                       ai.miniforge/knowledge {:local/root "components/knowledge"}
                       ai.miniforge/policy {:local/root "components/policy"}
                       ai.miniforge/heuristic {:local/root "components/heuristic"}
+                      ai.miniforge/response {:local/root "components/response"}
                       ai.miniforge/phase {:local/root "components/phase"}
                       ai.miniforge/gate {:local/root "components/gate"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
@@ -61,6 +63,7 @@
 
   :test {:extra-paths ["development/test"
                        "components/schema/test"
+                       "components/response/test"
                        "components/logging/test"
                        "components/llm/test"
                        "components/tool/test"
@@ -89,6 +92,7 @@
                       ai.miniforge/knowledge {:local/root "components/knowledge"}
                       ai.miniforge/policy {:local/root "components/policy"}
                       ai.miniforge/heuristic {:local/root "components/heuristic"}
+                      ai.miniforge/response {:local/root "components/response"}
                       ai.miniforge/phase {:local/root "components/phase"}
                       ai.miniforge/gate {:local/root "components/gate"}
                       ai.miniforge/workflow {:local/root "components/workflow"}

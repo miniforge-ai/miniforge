@@ -22,7 +22,8 @@
    - :leave - Post-processing and metrics
    - :error - Handle failures and transitions"
   (:require [ai.miniforge.phase.interface :as phase]
-            [ai.miniforge.gate.interface :as gate]))
+            [ai.miniforge.gate.interface :as gate]
+            [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Execution context
@@ -43,7 +44,8 @@
    :execution/status :running
    :execution/input input
    :execution/artifacts []
-   :execution/errors []
+   :execution/errors []  ; Kept for backward compatibility
+   :execution/response-chain (response/create (:workflow/id workflow))
    :execution/phase-results {}
    :execution/current-phase nil
    :execution/phase-index 0
@@ -71,7 +73,8 @@
 
    Returns next index or :done."
   [pipeline current-index phase-config phase-result]
-  (let [status (:phase/status phase-result)
+  ;; Check both :status and :phase/status for compatibility
+  (let [status (or (:status phase-result) (:phase/status phase-result))
         on-fail (:on-fail phase-config)
         on-success (:on-success phase-config)]
     (cond
@@ -116,36 +119,47 @@
 
    Returns updated context."
   [interceptor ctx]
-  (if-let [enter-fn (:enter interceptor)]
-    (try
-      (enter-fn ctx)
-      (catch Exception ex
-        (if-let [error-fn (:error interceptor)]
-          (error-fn ctx ex)
-          (-> ctx
-              (assoc :execution/status :failed)
-              (update :execution/errors conj
-                      {:type :phase-error
-                       :phase (get-in interceptor [:config :phase])
-                       :message (ex-message ex)
-                       :data (ex-data ex)})))))
-    ctx))
+  (let [phase-name (get-in interceptor [:config :phase])]
+    (if-let [enter-fn (:enter interceptor)]
+      (try
+        (enter-fn ctx)
+        (catch Exception ex
+          (if-let [error-fn (:error interceptor)]
+            (error-fn ctx ex)
+            (-> ctx
+                (assoc :execution/status :failed)
+                (update :execution/errors conj
+                        {:type :phase-error
+                         :phase phase-name
+                         :message (ex-message ex)
+                         :data (ex-data ex)})
+                (update :execution/response-chain
+                        response/add-failure phase-name
+                        :anomalies.phase/enter-failed
+                        {:error (ex-message ex)
+                         :data (ex-data ex)})))))
+      ctx)))
 
 (defn- execute-leave
   "Execute the :leave function of an interceptor.
 
    Returns updated context."
   [interceptor ctx]
-  (if-let [leave-fn (:leave interceptor)]
-    (try
-      (leave-fn ctx)
-      (catch Exception ex
-        (-> ctx
-            (update :execution/errors conj
-                    {:type :leave-error
-                     :phase (get-in interceptor [:config :phase])
-                     :message (ex-message ex)}))))
-    ctx))
+  (let [phase-name (get-in interceptor [:config :phase])]
+    (if-let [leave-fn (:leave interceptor)]
+      (try
+        (leave-fn ctx)
+        (catch Exception ex
+          (-> ctx
+              (update :execution/errors conj
+                      {:type :leave-error
+                       :phase phase-name
+                       :message (ex-message ex)})
+              (update :execution/response-chain
+                      response/add-failure phase-name
+                      :anomalies.phase/leave-failed
+                      {:error (ex-message ex)}))))
+      ctx)))
 
 (defn- run-gates
   "Run gates for a phase and return result.
@@ -229,23 +243,40 @@
             ctx-left (execute-leave interceptor
                                     (assoc ctx-entered :phase phase-result'))
 
-            ;; Record phase result
-            ctx-recorded (-> ctx-left
-                             (assoc-in [:execution/phase-results phase-name] phase-result')
+            ;; Get final phase result after :leave (may have updated status)
+            final-phase-result (get-in ctx-left [:phase])
+
+            ;; Record phase result in response chain
+            ;; Check both :status and :phase/status for compatibility
+            phase-succeeded? (or (= :completed (:status final-phase-result))
+                                 (= :completed (:phase/status final-phase-result)))
+            ctx-with-response (if phase-succeeded?
+                                (update ctx-left :execution/response-chain
+                                        response/add-success phase-name final-phase-result)
+                                (update ctx-left :execution/response-chain
+                                        response/add-failure phase-name
+                                        (if (:phase/gate-errors final-phase-result)
+                                          :anomalies.gate/validation-failed
+                                          :anomalies.phase/agent-failed)
+                                        final-phase-result))
+
+            ;; Record phase result (legacy format)
+            ctx-recorded (-> ctx-with-response
+                             (assoc-in [:execution/phase-results phase-name] final-phase-result)
                              (update :execution/metrics merge-metrics
-                                     (or (:metrics phase-result') {}))
+                                     (or (:metrics final-phase-result) {}))
                              (update :execution/artifacts into
-                                     (or (:artifacts phase-result') [])))]
+                                     (or (:artifacts final-phase-result) [])))]
 
         ;; Callback: phase complete
         (when on-phase-complete
-          (on-phase-complete ctx-recorded interceptor phase-result'))
+          (on-phase-complete ctx-recorded interceptor final-phase-result))
 
         ;; Determine next phase
         (let [next-index (determine-next-index
                           pipeline phase-index
                           (:config interceptor)
-                          phase-result')]
+                          final-phase-result)]
           (cond
             ;; Workflow complete
             (= :done next-index)
@@ -273,7 +304,12 @@
                 (assoc :execution/status :failed)
                 (update :execution/errors conj
                         {:type :invalid-transition
-                         :message (str "Invalid next index: " next-index)}))))))))
+                         :message (str "Invalid next index: " next-index)})
+                (update :execution/response-chain
+                        response/add-failure :pipeline
+                        :anomalies.workflow/invalid-transition
+                        {:error (str "Invalid next index: " next-index)
+                         :next-index next-index}))))))))
 
 (defn run-pipeline
   "Execute a workflow pipeline.
@@ -301,7 +337,11 @@
            (assoc :execution/status :failed)
            (update :execution/errors conj
                    {:type :empty-pipeline
-                    :message "Workflow has no phases"}))
+                    :message "Workflow has no phases"})
+           (update :execution/response-chain
+                   response/add-failure :pipeline
+                   :anomalies.workflow/empty-pipeline
+                   {:error "Workflow has no phases"}))
 
        ;; Execute pipeline loop
        (loop [ctx initial-ctx
@@ -318,6 +358,11 @@
                (update :execution/errors conj
                        {:type :max-phases-exceeded
                         :message (str "Exceeded maximum phase count: " max-phases)})
+               (update :execution/response-chain
+                       response/add-failure :pipeline
+                       :anomalies.workflow/max-phases
+                       {:error (str "Exceeded maximum phase count: " max-phases)
+                        :max-phases max-phases})
                (assoc :execution/ended-at (System/currentTimeMillis)))
 
            ;; Execute next phase

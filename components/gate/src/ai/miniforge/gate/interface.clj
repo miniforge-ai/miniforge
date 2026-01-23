@@ -30,7 +30,8 @@
    [ai.miniforge.gate.lint]
    [ai.miniforge.gate.test]
    [ai.miniforge.gate.policy]
-   [ai.miniforge.gate.registry :as registry]))
+   [ai.miniforge.gate.registry :as registry]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Re-export registry functions
@@ -122,6 +123,47 @@
      :results results
      :failed-gates (filterv (complement :passed?) results)}))
 
+;------------------------------------------------------------------------------ Layer 2
+;; Response chain support
+
+(defn check-gates-chain
+  "Run multiple gates on an artifact, returning a response chain.
+
+   Arguments:
+     gate-kws - Vector of gate keywords
+     artifact - Artifact to validate
+     ctx      - Execution context
+
+   Returns:
+     Response chain with each gate as an operation.
+
+   Example:
+     (check-gates-chain [:syntax :lint] artifact ctx)
+     ;; => {:operation :gates
+     ;;     :succeeded? true
+     ;;     :response-chain [{:operation :syntax :succeeded? true ...}
+     ;;                      {:operation :lint :succeeded? true ...}]}"
+  [gate-kws artifact ctx]
+  (reduce
+   (fn [chain gate-kw]
+     (let [{:keys [check]} (get-gate gate-kw)]
+       (response/execute-with-handling
+        chain
+        gate-kw
+        (fn [ex]
+          ;; Extract anomaly from exception data, or default to check-failed
+          (or (:anomaly (ex-data ex))
+              :anomalies.gate/check-failed))
+        (fn []
+          (let [result (check artifact ctx)]
+            (if (:passed? result)
+              result
+              (throw (ex-info "Gate validation failed"
+                              {:anomaly :anomalies.gate/validation-failed
+                               :errors (:errors result)}))))))))
+   (response/create :gates)
+   gate-kws))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; List available gates
@@ -136,5 +178,11 @@
 
   ;; Check multiple gates
   (check-gates [:syntax :lint] {:content "(defn foo [])"} {})
+
+  ;; Check gates with response chain
+  (def chain (check-gates-chain [:syntax :lint] {:content "(defn foo [])"} {}))
+  (response/succeeded? chain)
+  (response/operations chain)
+  (response/first-failure chain)
 
   :leave-this-here)

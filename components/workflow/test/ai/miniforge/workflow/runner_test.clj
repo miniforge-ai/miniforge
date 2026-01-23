@@ -161,3 +161,28 @@
           result (runner/run-pipeline workflow {:task "Test"} {})]
       (is (map? (:execution/metrics result)))
       (is (contains? (:execution/metrics result) :tokens)))))
+
+;; ============================================================================
+;; Response chain tests
+;; ============================================================================
+
+(deftest response-chain-created-test
+  (testing "response chain is initialized in context"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"}
+          ctx (runner/create-context workflow {:task "Test"} {})]
+      (is (contains? ctx :execution/response-chain))
+      (is (= :test (:operation (:execution/response-chain ctx))))
+      (is (true? (:succeeded? (:execution/response-chain ctx)))))))
+
+(deftest response-chain-records-phases-test
+  (testing "response chain records phase results"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase :plan}
+                                        {:phase :done}]}
+          result (runner/run-pipeline workflow {:task "Test"} {})
+          chain (:execution/response-chain result)]
+      (is (= :completed (:execution/status result)))
+      (is (>= (count (:response-chain chain)) 2))
+      (is (true? (:succeeded? chain))))))
