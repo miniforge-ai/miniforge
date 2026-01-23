@@ -15,20 +15,59 @@
 (ns ai.miniforge.workflow.fsm
   "Finite State Machine for workflow execution.
 
-   Defines explicit states, valid transitions, and guards for workflow execution.")
+   Uses the fsm component (clj-statecharts wrapper) for state machine implementation.
+   Defines explicit states, valid transitions, and guards for workflow execution.
+
+   States:
+   - :pending   - Initial state, workflow not started
+   - :running   - Workflow is executing
+   - :completed - Workflow completed successfully
+   - :failed    - Workflow failed
+   - :paused    - Workflow execution paused
+   - :cancelled - Workflow cancelled by user
+
+   Events:
+   - :start   - Begin workflow execution
+   - :complete - Mark workflow as completed
+   - :fail    - Mark workflow as failed
+   - :pause   - Pause execution
+   - :resume  - Resume paused execution
+   - :cancel  - Cancel workflow"
+  (:require
+   [ai.miniforge.fsm.interface :as fsm]))
 
 ;; ============================================================================
-;; FSM Definition
+;; FSM Definition using clj-statecharts
+;; ============================================================================
+
+(def workflow-machine-config
+  "Workflow execution state machine configuration."
+  {:fsm/id :workflow-execution
+   :fsm/initial :pending
+   :fsm/context {}
+   :fsm/states
+   {:pending   {:on {:start :running}}
+    :running   {:on {:complete :completed
+                     :fail :failed
+                     :pause :paused
+                     :cancel :cancelled}}
+    :paused    {:on {:resume :running
+                     :cancel :cancelled}}
+    :completed {:type :final}
+    :failed    {:type :final}
+    :cancelled {:type :final}}})
+
+(def ^:private workflow-machine
+  "Compiled workflow state machine."
+  (fsm/define-machine workflow-machine-config))
+
+;; ============================================================================
+;; Legacy API - for backward compatibility with state.clj
 ;; ============================================================================
 
 (def workflow-states
   "Valid states for workflow execution."
-  #{:pending     ; Initial state, workflow not started
-    :running     ; Workflow is executing
-    :completed   ; Workflow completed successfully
-    :failed      ; Workflow failed
-    :paused      ; Workflow execution paused
-    :cancelled}) ; Workflow cancelled by user
+  #{:pending :running :completed :failed :paused :cancelled})
 
 (def workflow-transitions
   "Valid state transitions. Map of [from-state event] -> to-state."
@@ -45,7 +84,7 @@
   #{:completed :failed :cancelled})
 
 ;; ============================================================================
-;; FSM Operations
+;; FSM Operations (legacy API backed by clj-statecharts)
 ;; ============================================================================
 
 (defn valid-transition?
@@ -82,6 +121,8 @@
 
 (defn transition
   "Attempt state transition with guard checking.
+
+   Uses clj-statecharts internally for proper FSM semantics.
 
    Arguments:
    - current-state: Current FSM state keyword
@@ -120,10 +161,14 @@
       :error :invalid-transition
       :message (str "No transition defined for [" current-state " " event "]")}
 
-     ;; Valid transition
+     ;; Valid transition - use clj-statecharts for actual transition
      :else
-     {:success? true
-      :state (next-state current-state event)})))
+     (let [;; Create a temporary state with the current state value
+           state-map {:_state current-state}
+           new-state-map (fsm/transition workflow-machine state-map event)
+           new-state (fsm/current-state new-state-map)]
+       {:success? true
+        :state new-state}))))
 
 (defn valid-state?
   "Check if a state keyword is valid.
@@ -162,3 +207,80 @@
                            {:from from :event event :to to})
                          workflow-transitions))
    :terminal-states terminal-states})
+
+;; ============================================================================
+;; New clj-statecharts API
+;; ============================================================================
+
+(defn get-machine
+  "Get the compiled workflow state machine for direct clj-statecharts usage.
+
+   Returns: Compiled state machine definition"
+  []
+  workflow-machine)
+
+(defn initialize
+  "Initialize workflow FSM state.
+
+   Returns: Initial FSM state map with :_state = :pending"
+  []
+  (fsm/initialize workflow-machine))
+
+(defn transition-fsm
+  "Transition the workflow FSM using full statecharts semantics.
+
+   Arguments:
+   - state: Current FSM state map (from initialize or previous transition)
+   - event: Event keyword or map {:type :event-type :data ...}
+
+   Returns: New FSM state map"
+  [state event]
+  (fsm/transition workflow-machine state event))
+
+(defn current-state
+  "Get the current state keyword from FSM state map.
+
+   Arguments:
+   - state: FSM state map
+
+   Returns: State keyword"
+  [state]
+  (fsm/current-state state))
+
+(defn is-final?
+  "Check if the FSM is in a final (terminal) state.
+
+   Arguments:
+   - state: FSM state map
+
+   Returns: boolean"
+  [state]
+  (fsm/final? workflow-machine state))
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  ;; Using the legacy API (for backward compatibility)
+  (valid-transition? :pending :start)  ;; => true
+  (valid-transition? :pending :fail)   ;; => false
+
+  (transition :pending :start)
+  ;; => {:success? true :state :running}
+
+  (transition :completed :start)
+  ;; => {:success? false :error :terminal-state ...}
+
+  (get-available-events :running)
+  ;; => [:complete :fail :pause :cancel]
+
+  ;; Using the new clj-statecharts API
+  (def s0 (initialize))
+  (current-state s0)  ;; => :pending
+
+  (def s1 (transition-fsm s0 :start))
+  (current-state s1)  ;; => :running
+
+  (def s2 (transition-fsm s1 :complete))
+  (current-state s2)  ;; => :completed
+  (is-final? s2)      ;; => true
+
+  :leave-this-here)

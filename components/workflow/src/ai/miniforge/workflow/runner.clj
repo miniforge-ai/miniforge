@@ -20,10 +20,17 @@
 
    - :enter - Execute the phase
    - :leave - Post-processing and metrics
-   - :error - Handle failures and transitions"
+   - :error - Handle failures and transitions
+
+   Uses the workflow FSM for explicit state transitions:
+   - pending -> running (on start)
+   - running -> completed (all phases done)
+   - running -> failed (phase failure with no recovery)
+   - running -> paused (human intervention needed)"
   (:require [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.gate.interface :as gate]
-            [ai.miniforge.response.interface :as response]))
+            [ai.miniforge.response.interface :as response]
+            [ai.miniforge.workflow.fsm :as fsm]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Execution context
@@ -36,28 +43,52 @@
    - input: Input data for the workflow
    - opts: Execution options
 
-   Returns execution context map."
+   Returns execution context map with FSM state initialized."
   [workflow input opts]
-  {:execution/id (random-uuid)
-   :execution/workflow-id (:workflow/id workflow)
-   :execution/workflow-version (:workflow/version workflow)
-   :execution/status :running
-   :execution/input input
-   :execution/artifacts []
-   :execution/errors []  ; Kept for backward compatibility
-   :execution/response-chain (response/create (:workflow/id workflow))
-   :execution/phase-results {}
-   :execution/current-phase nil
-   :execution/phase-index 0
-   :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
-   :execution/started-at (System/currentTimeMillis)
-   :execution/opts opts})
+  (let [;; Initialize FSM and transition to running state
+        fsm-state (-> (fsm/initialize)
+                      (fsm/transition-fsm :start))]
+    {:execution/id (random-uuid)
+     :execution/workflow-id (:workflow/id workflow)
+     :execution/workflow-version (:workflow/version workflow)
+     :execution/status (fsm/current-state fsm-state)  ; Use FSM state
+     :execution/fsm-state fsm-state                   ; Track FSM state
+     :execution/input input
+     :execution/artifacts []
+     :execution/errors []  ; DEPRECATED: Use :execution/response-chain instead
+     :execution/response-chain (response/create (:workflow/id workflow))
+     :execution/phase-results {}
+     :execution/current-phase nil
+     :execution/phase-index 0
+     :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
+     :execution/started-at (System/currentTimeMillis)
+     :execution/opts opts}))
 
 (defn- merge-metrics
   "Merge phase metrics into execution metrics."
   [exec-metrics phase-metrics]
   (merge-with + exec-metrics
               (select-keys phase-metrics [:tokens :cost-usd :duration-ms])))
+
+(defn- transition-to-completed
+  "Transition workflow to completed state using FSM."
+  [ctx]
+  (let [fsm-state (:execution/fsm-state ctx)
+        new-fsm-state (fsm/transition-fsm fsm-state :complete)]
+    (-> ctx
+        (assoc :execution/fsm-state new-fsm-state)
+        (assoc :execution/status (fsm/current-state new-fsm-state))
+        (assoc :execution/ended-at (System/currentTimeMillis)))))
+
+(defn- transition-to-failed
+  "Transition workflow to failed state using FSM."
+  [ctx]
+  (let [fsm-state (:execution/fsm-state ctx)
+        new-fsm-state (fsm/transition-fsm fsm-state :fail)]
+    (-> ctx
+        (assoc :execution/fsm-state new-fsm-state)
+        (assoc :execution/status (fsm/current-state new-fsm-state))
+        (assoc :execution/ended-at (System/currentTimeMillis)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Phase transition logic
@@ -278,30 +309,24 @@
                           (:config interceptor)
                           final-phase-result)]
           (cond
-            ;; Workflow complete
+            ;; Workflow complete - use FSM transition
             (= :done next-index)
-            (-> ctx-recorded
-                (assoc :execution/status :completed)
-                (assoc :execution/ended-at (System/currentTimeMillis)))
+            (transition-to-completed ctx-recorded)
 
-            ;; Error - workflow failed
+            ;; Error - workflow failed - use FSM transition
             (= :error next-index)
-            (-> ctx-recorded
-                (assoc :execution/status :failed)
-                (assoc :execution/ended-at (System/currentTimeMillis)))
+            (transition-to-failed ctx-recorded)
 
             ;; Continue to next phase
             (number? next-index)
             (if (< next-index (count pipeline))
               (assoc ctx-recorded :execution/phase-index next-index)
-              (-> ctx-recorded
-                  (assoc :execution/status :completed)
-                  (assoc :execution/ended-at (System/currentTimeMillis))))
+              ;; Past end of pipeline - complete via FSM
+              (transition-to-completed ctx-recorded))
 
-            ;; Unknown - shouldn't happen
+            ;; Unknown - shouldn't happen - fail via FSM
             :else
             (-> ctx-recorded
-                (assoc :execution/status :failed)
                 (update :execution/errors conj
                         {:type :invalid-transition
                          :message (str "Invalid next index: " next-index)})
@@ -309,7 +334,8 @@
                         response/add-failure :pipeline
                         :anomalies.workflow/invalid-transition
                         {:error (str "Invalid next index: " next-index)
-                         :next-index next-index}))))))))
+                         :next-index next-index})
+                (transition-to-failed))))))))
 
 (defn run-pipeline
   "Execute a workflow pipeline.
@@ -334,14 +360,14 @@
 
      (if (empty? pipeline)
        (-> initial-ctx
-           (assoc :execution/status :failed)
            (update :execution/errors conj
                    {:type :empty-pipeline
                     :message "Workflow has no phases"})
            (update :execution/response-chain
                    response/add-failure :pipeline
                    :anomalies.workflow/empty-pipeline
-                   {:error "Workflow has no phases"}))
+                   {:error "Workflow has no phases"})
+           (transition-to-failed))
 
        ;; Execute pipeline loop
        (loop [ctx initial-ctx
@@ -351,10 +377,9 @@
            (#{:completed :failed} (:execution/status ctx))
            ctx
 
-           ;; Max phases exceeded
+           ;; Max phases exceeded - use FSM transition
            (>= iteration max-phases)
            (-> ctx
-               (assoc :execution/status :failed)
                (update :execution/errors conj
                        {:type :max-phases-exceeded
                         :message (str "Exceeded maximum phase count: " max-phases)})
@@ -363,7 +388,7 @@
                        :anomalies.workflow/max-phases
                        {:error (str "Exceeded maximum phase count: " max-phases)
                         :max-phases max-phases})
-               (assoc :execution/ended-at (System/currentTimeMillis)))
+               (transition-to-failed))
 
            ;; Execute next phase
            :else

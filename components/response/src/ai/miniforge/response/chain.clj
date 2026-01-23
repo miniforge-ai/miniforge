@@ -168,6 +168,28 @@
   [chain]
   (filterv (complement :succeeded?) (:response-chain chain)))
 
+(defn errors
+  "Get errors from the chain in a flat format.
+
+   Returns a vector of error maps with:
+   - :type - The operation name as a keyword prefixed with 'error-'
+   - :operation - The original operation name
+   - :anomaly - The anomaly code
+   - :message - Error message from response
+   - :data - Additional error data from response
+
+   This provides a migration path from :execution/errors to response chains."
+  [chain]
+  (->> (all-failures chain)
+       (mapv (fn [{:keys [operation anomaly response]}]
+               {:type (keyword (str "error-" (name operation)))
+                :operation operation
+                :anomaly anomaly
+                :message (or (:error response)
+                             (:message response)
+                             (str "Operation " operation " failed"))
+                :data (dissoc response :error :message)}))))
+
 (defn operations
   "Get the sequence of operation names in order."
   [chain]

@@ -186,3 +186,30 @@
       (is (= :completed (:execution/status result)))
       (is (>= (count (:response-chain chain)) 2))
       (is (true? (:succeeded? chain))))))
+
+;; ============================================================================
+;; FSM state tracking tests
+;; ============================================================================
+
+(deftest fsm-state-tracked-test
+  (testing "FSM state is tracked in context"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"}
+          ctx (runner/create-context workflow {:task "Test"} {})]
+      (is (contains? ctx :execution/fsm-state))
+      (is (map? (:execution/fsm-state ctx)))
+      (is (= :running (:_state (:execution/fsm-state ctx))))))
+
+  (testing "FSM state transitions on completion"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase :done}]}
+          result (runner/run-pipeline workflow {:task "Test"} {})]
+      (is (= :completed (:execution/status result)))
+      (is (= :completed (:_state (:execution/fsm-state result))))))
+
+  (testing "FSM state transitions on failure"
+    (let [workflow {:workflow/pipeline []}
+          result (runner/run-pipeline workflow {} {})]
+      (is (= :failed (:execution/status result)))
+      (is (= :failed (:_state (:execution/fsm-state result)))))))
