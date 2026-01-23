@@ -142,6 +142,27 @@
   "Get all failed entries in the chain."
   chain/all-failures)
 
+(def errors
+  "Get errors from the chain in a flat format.
+
+   Returns a vector of error maps with:
+   - :type - The operation name as a keyword prefixed with 'error-'
+   - :operation - The original operation name
+   - :anomaly - The anomaly code
+   - :message - Error message from response
+   - :data - Additional error data from response
+
+   This provides a migration path from :execution/errors to response chains.
+
+   Example:
+     (errors chain)
+     ;; => [{:type :error-verify
+     ;;      :operation :verify
+     ;;      :anomaly :anomalies.gate/validation-failed
+     ;;      :message \"test failed\"
+     ;;      :data {:errors [...]}}]"
+  chain/errors)
+
 (def operations
   "Get the sequence of operation names in order.
 

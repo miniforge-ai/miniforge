@@ -1,0 +1,5 @@
+{:paths ["src" "resources"]
+ :deps {clj-statecharts/clj-statecharts {:mvn/version "0.1.5"}}
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps {}}}}

@@ -230,3 +230,32 @@
 
   (testing "returns nil for unknown"
     (is (nil? (r/anomaly-category :not-an-anomaly)))))
+
+;; ============================================================================
+;; Errors extraction tests
+;; ============================================================================
+
+(deftest errors-test
+  (testing "extracts errors in flat format"
+    (let [chain (-> (r/create :test)
+                    (r/add-success :plan {})
+                    (r/add-failure :verify :anomalies.gate/validation-failed
+                                   {:error "test failed" :errors ["error1" "error2"]})
+                    (r/add-failure :impl :anomalies.phase/agent-failed
+                                   {:message "timeout occurred"}))
+          errors (r/errors chain)]
+      (is (= 2 (count errors)))
+      ;; First error
+      (is (= :error-verify (:type (first errors))))
+      (is (= :verify (:operation (first errors))))
+      (is (= :anomalies.gate/validation-failed (:anomaly (first errors))))
+      (is (= "test failed" (:message (first errors))))
+      (is (= {:errors ["error1" "error2"]} (:data (first errors))))
+      ;; Second error
+      (is (= :error-impl (:type (second errors))))
+      (is (= "timeout occurred" (:message (second errors))))))
+
+  (testing "returns empty vector when no failures"
+    (let [chain (-> (r/create :test)
+                    (r/add-success :step-1 {}))]
+      (is (= [] (r/errors chain))))))

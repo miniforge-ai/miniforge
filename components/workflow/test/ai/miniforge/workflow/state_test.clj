@@ -22,7 +22,10 @@
    :workflow/version "1.0.0"
    :workflow/type :test
    :workflow/entry-phase :plan
-   :workflow/exit-phases [:done]})
+   :workflow/exit-phases [:done]
+   :workflow/phases [{:phase/id :plan}
+                     {:phase/id :implement}
+                     {:phase/id :done}]})
 
 (deftest create-execution-state-test
   (testing "Create initial execution state"
@@ -64,16 +67,18 @@
           "Should update current phase")
       (is (= :running (:execution/status exec-state2))
           "Should update status to running")
-      (is (= 1 (count (:execution/history exec-state2)))
-          "Should add transition to history")
-      (let [transition (first (:execution/history exec-state2))]
-        (is (= :plan (:from transition))
+      ;; History now includes both FSM transition (pending->running) and phase transition
+      (is (= 2 (count (:execution/history exec-state2)))
+          "Should have FSM and phase transitions in history")
+      ;; Phase transition is the second entry (after FSM transition)
+      (let [phase-transition (second (:execution/history exec-state2))]
+        (is (= :plan (:from-phase phase-transition))
             "Transition should record from phase")
-        (is (= :implement (:to transition))
+        (is (= :implement (:to-phase phase-transition))
             "Transition should record to phase")
-        (is (= :advance (:reason transition))
+        (is (= :advance (:reason phase-transition))
             "Transition should record reason")
-        (is (number? (:timestamp transition))
+        (is (number? (:timestamp phase-transition))
             "Transition should have timestamp"))))
 
   (testing "Transition with custom reason"
@@ -81,8 +86,9 @@
           exec-state2 (state/transition-to-phase exec-state :implement :rollback)]
       (is (= :implement (:execution/current-phase exec-state2))
           "Should update current phase")
-      (let [transition (first (:execution/history exec-state2))]
-        (is (= :rollback (:reason transition))
+      ;; Phase transition is the second entry
+      (let [phase-transition (second (:execution/history exec-state2))]
+        (is (= :rollback (:reason phase-transition))
             "Should record custom reason")))))
 
 (deftest record-phase-result-test
@@ -141,8 +147,10 @@
 
 (deftest mark-completed-test
   (testing "Mark execution as completed"
+    ;; Must first transition to running before completing
     (let [exec-state (state/create-execution-state sample-workflow {})
-          exec-state2 (state/mark-completed exec-state)]
+          exec-state-running (state/transition-status exec-state :start)
+          exec-state2 (state/mark-completed exec-state-running)]
       (is (= :completed (:execution/status exec-state2))
           "Should set status to completed")
       (is (number? (:execution/completed-at exec-state2))
@@ -156,9 +164,11 @@
 
 (deftest mark-failed-test
   (testing "Mark execution as failed with error map"
+    ;; Must first transition to running before failing
     (let [exec-state (state/create-execution-state sample-workflow {})
+          exec-state-running (state/transition-status exec-state :start)
           error {:type :execution-failed :message "Something went wrong"}
-          exec-state2 (state/mark-failed exec-state error)]
+          exec-state2 (state/mark-failed exec-state-running error)]
       (is (= :failed (:execution/status exec-state2))
           "Should set status to failed")
       (is (= 1 (count (:execution/errors exec-state2)))
@@ -173,8 +183,10 @@
           "completed? predicate should return false")))
 
   (testing "Mark execution as failed with error string"
+    ;; Must first transition to running before failing
     (let [exec-state (state/create-execution-state sample-workflow {})
-          exec-state2 (state/mark-failed exec-state "Error message")]
+          exec-state-running (state/transition-status exec-state :start)
+          exec-state2 (state/mark-failed exec-state-running "Error message")]
       (is (= :failed (:execution/status exec-state2))
           "Should set status to failed")
       (is (= 1 (count (:execution/errors exec-state2)))
@@ -213,9 +225,11 @@
           "Should return accumulated metrics")))
 
   (testing "get-duration-ms"
-    (let [exec-state (state/create-execution-state sample-workflow {})]
+    ;; Must first transition to running before completing
+    (let [exec-state (state/create-execution-state sample-workflow {})
+          exec-state-running (state/transition-status exec-state :start)]
       (Thread/sleep 10)  ; Wait a bit
-      (let [exec-state2 (state/mark-completed exec-state)
+      (let [exec-state2 (state/mark-completed exec-state-running)
             duration (state/get-duration-ms exec-state2)]
         (is (pos? duration)
             "Duration should be positive")
@@ -226,7 +240,7 @@
   (testing "Complete workflow execution flow"
     (let [input {:task "Build feature"}
           exec-state (state/create-execution-state sample-workflow input)
-          ;; Execute plan phase
+          ;; Execute plan phase (this will auto-start the workflow)
           exec-state2 (-> exec-state
                           (state/transition-to-phase :plan)
                           (state/record-phase-result :plan
@@ -258,5 +272,7 @@
       (is (= {:tokens 300 :cost-usd 0.0 :duration-ms 0}
              (:execution/metrics exec-state4))
           "Should have accumulated metrics")
-      (is (= 3 (count (:execution/history exec-state4)))
-          "Should have transition history for plan->plan, plan->implement, implement->done"))))
+      ;; History now includes: FSM (pending->running), phase (plan->plan),
+      ;; phase (plan->implement), phase (implement->done), FSM (running->completed)
+      (is (= 5 (count (:execution/history exec-state4)))
+          "Should have FSM and phase transitions in history"))))
