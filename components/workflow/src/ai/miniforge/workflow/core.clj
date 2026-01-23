@@ -1,6 +1,11 @@
 (ns ai.miniforge.workflow.core
   "Core workflow implementation.
-   Manages SDLC phase execution: Plan → Design → Implement → Verify → Review → Release → Observe"
+   Manages SDLC phase execution: Plan → Design → Implement → Verify → Review → Release → Observe
+
+   Architecture:
+   - Layer 0: Configuration and pure functions
+   - Layer 1: Workflow state management and phase execution logic
+   - Layer 2: Workflow orchestration (SimpleWorkflow, phase executors, run-workflow)"
   (:require
    [ai.miniforge.workflow.protocol :as proto]
    [ai.miniforge.workflow.release :as release]
@@ -8,9 +13,7 @@
    [ai.miniforge.task.interface :as task]
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.artifact.interface :as artifact]
-   [ai.miniforge.logging.interface :as log]
-   [clojure.edn]
-   [clojure.java.io]))
+   [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration
@@ -22,7 +25,7 @@
    :timeout-per-phase-ms (* 10 60 1000)}) ; 10 minutes per phase
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Workflow state management
+;; Workflow state management and phase execution helpers
 
 (defn create-workflow-state
   "Create initial workflow state."
@@ -66,8 +69,75 @@
     :observe :done
     :done :done))
 
+;; Phase execution helpers to reduce nesting
+
+(defn- persist-artifact
+  "Persist an artifact to the store if available.
+   Returns nil on success or error (side effect only)."
+  [artifact-store artifact]
+  (when artifact-store
+    (try
+      (artifact/save! artifact-store artifact)
+      (catch Exception _e nil))))
+
+(defn- persist-and-link-artifact
+  "Persist an artifact and link it to a parent.
+   Returns nil on success or error (side effect only)."
+  [artifact-store artifact parent-id]
+  (when artifact-store
+    (try
+      (artifact/save! artifact-store artifact)
+      (artifact/link! artifact-store parent-id (:artifact/id artifact))
+      (catch Exception _e nil))))
+
+(defn- build-standard-artifact
+  "Build a standard artifact from type-specific content."
+  [artifact-type content-map metadata]
+  (let [artifact-id (or (get content-map (keyword (name artifact-type) "id"))
+                        (random-uuid))]
+    (artifact/build-artifact
+     {:id artifact-id
+      :type artifact-type
+      :version "1.0.0"
+      :content content-map
+      :metadata metadata})))
+
+(defn- extract-artifact-content
+  "Extract artifact content from either old or new format."
+  [artifact]
+  (or (:artifact/content artifact)
+      (:content artifact)))
+
+(defn- extract-artifact-id
+  "Extract artifact ID from either old or new format."
+  [artifact]
+  (or (:artifact/id artifact)
+      (get-in artifact [:artifact/content :code/id])
+      (get-in artifact [:content :code/id])
+      (random-uuid)))
+
+(defn- filter-artifacts-by-type
+  "Filter workflow artifacts by type (handles both old and new format)."
+  [workflow-state artifact-type]
+  (->> (:workflow/artifacts workflow-state)
+       (filter #(or (= artifact-type (:type %))
+                    (= artifact-type (:artifact/type %))))))
+
+(defn- run-agent-with-loop
+  "Run an agent with simple loop and return result.
+   Pure function that orchestrates agent execution."
+  [agent-constructor task context max-iterations]
+  (let [agent-instance (agent-constructor)
+        invoke-args (or (:invoke-args context) task)
+        generate-fn (fn [_task _ctx]
+                      (let [result (agent/invoke agent-instance invoke-args context)]
+                        {:artifact (:artifact result)
+                         :tokens (or (:tokens result) 0)}))]
+    (loop/run-simple task generate-fn
+                     (merge context {:max-iterations max-iterations}))))
+
 ;------------------------------------------------------------------------------ Layer 2
-;; Core workflow implementation
+;; Workflow orchestration: SimpleWorkflow, phase executors, run-workflow
 
 (defrecord SimpleWorkflow [config workflows observers logger]
   proto/Workflow
@@ -228,7 +298,6 @@
   (swap! (:observers workflow) (fn [obs] (remove #(= % observer) obs)))
   workflow)
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Phase executors
 
 (defrecord PlanPhaseExecutor [llm-backend]
@@ -243,34 +312,20 @@
                  :task/title (str "Plan: " (:title spec))
                  :task/description (:description spec)
                  :task/status :pending})
-          planner (agent/create-planner {:llm-backend llm-backend})
-          generate-fn (fn [_task _ctx]
-                        (let [result (agent/invoke planner task context)]
-                          {:artifact (:artifact result)
-                           :tokens (or (:tokens result) 0)}))
-          result (loop/run-simple task generate-fn
-                                  (merge context {:max-iterations 3}))]
+          result (run-agent-with-loop
+                  #(agent/create-planner {:llm-backend llm-backend})
+                  task context 3)]
       (if (:success result)
-        ;; Build standard artifact format for plan
         (let [plan-artifact (:artifact result)
-              plan-id (or (:plan/id plan-artifact) (random-uuid))
-              standard-artifact (artifact/build-artifact
-                                 {:id plan-id
-                                  :type :plan
-                                  :version "1.0.0"
-                                  :content plan-artifact
-                                  :metadata {:phase :plan
-                                             :spec-title (:title spec)}})]
-          ;; Persist to store if available
-          (when artifact-store
-            (try
-              (artifact/save! artifact-store standard-artifact)
-              (catch Exception _e nil)))
+              standard-artifact (build-standard-artifact
+                                 :plan
+                                 plan-artifact
+                                 {:phase :plan :spec-title (:title spec)})]
+          (persist-artifact artifact-store standard-artifact)
           {:success? true
            :artifacts [standard-artifact]
            :errors []
            :metrics (:metrics result)})
-        ;; Planning failed
         {:success? false
          :artifacts []
          :errors [{:type :plan-failed
@@ -284,73 +339,59 @@
     {:required-artifacts [:spec]
      :optional-artifacts []}))
 
+(defn- process-implementation-plan
+  "Process a single plan artifact and return implementation result.
+   Pure function that coordinates implementation for one plan."
+  [plan-artifact llm-backend context]
+  (let [plan-content (extract-artifact-content plan-artifact)
+        task (task/create-task
+              {:task/id (random-uuid)
+               :task/type :implement
+               :task/title "Implement from plan"
+               :task/description (str plan-content)
+               :task/status :pending})
+        result (run-agent-with-loop
+                #(agent/create-implementer {:llm-backend llm-backend})
+                task context 5)]
+    (if (:success result)
+      {:artifact (:artifact result)
+       :metrics (:metrics result)}
+      {:error {:type :implement-failed
+               :message (or (:error result) "Implementation failed")}
+       :metrics (:metrics result)})))
+
 (defn- code-artifact->standard-artifact
-  "Convert a CodeArtifact to standard artifact format and persist to store."
-  [code-artifact artifact-store phase]
-  (let [artifact-id (or (:code/id code-artifact) (random-uuid))
-        standard-artifact (artifact/build-artifact
-                           {:id artifact-id
-                            :type :code
-                            :version "1.0.0"
-                            :content code-artifact
-                            :metadata {:phase phase
-                                       :language (:code/language code-artifact)
-                                       :file-count (count (:code/files code-artifact))}})]
-    ;; Persist to store if available
-    (when artifact-store
-      (try
-        (artifact/save! artifact-store standard-artifact)
-        (catch Exception _e
-          ;; Log but don't fail - persistence is optional
-          nil)))
-    standard-artifact))
+  "Convert a CodeArtifact to standard artifact format."
+  [code-artifact]
+  (build-standard-artifact
+   :code
+   code-artifact
+   {:phase :implement
+    :language (:code/language code-artifact)
+    :file-count (count (:code/files code-artifact))}))
 
 (defrecord ImplementPhaseExecutor [llm-backend]
   proto/PhaseExecutor
 
   (execute-phase [_this workflow-state context]
-    (let [plan-artifacts (->> (:workflow/artifacts workflow-state)
-                              (filter #(or (= :plan (:type %))
-                                           (= :plan (:artifact/type %)))))
+    (let [plan-artifacts (filter-artifacts-by-type workflow-state :plan)
           artifact-store (:artifact-store context)
-          results (atom {:artifacts [] :errors [] :metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}})]
-
-      ;; Execute each implementation task from the plan
-      (doseq [plan-artifact plan-artifacts]
-        (let [plan-content (or (:content plan-artifact)
-                               (:artifact/content plan-artifact))
-              task (task/create-task
-                    {:task/id (random-uuid)
-                     :task/type :implement
-                     :task/title "Implement from plan"
-                     :task/description (str plan-content)
-                     :task/status :pending})
-              implementer (agent/create-implementer {:llm-backend llm-backend})
-              generate-fn (fn [_task _ctx]
-                            (let [result (agent/invoke implementer task context)]
-                              {:artifact (:artifact result)
-                               :tokens (or (:tokens result) 0)}))
-              result (loop/run-simple task generate-fn
-                                      (merge context {:max-iterations 5}))]
-
-          (if (:success result)
-            ;; Convert CodeArtifact to standard format and persist
-            (let [code-artifact (:artifact result)
-                  standard-artifact (code-artifact->standard-artifact
-                                     code-artifact artifact-store :implement)]
-              (swap! results update :artifacts conj standard-artifact))
-            ;; Record error
-            (swap! results update :errors conj
-                   {:type :implement-failed
-                    :message (or (:error result) "Implementation failed")}))
-          (swap! results update :metrics
-                 (fn [m] (merge-with + m (or (:metrics result) {}))))))
-
-      (let [{:keys [artifacts errors metrics]} @results]
-        {:success? (empty? errors)
-         :artifacts artifacts
-         :errors errors
-         :metrics metrics})))
+          results (map #(process-implementation-plan % llm-backend context)
+                       plan-artifacts)
+          artifacts (keep (fn [r]
+                            (when-let [art (:artifact r)]
+                              (let [standard-art (code-artifact->standard-artifact art)]
+                                (persist-artifact artifact-store standard-art)
+                                standard-art)))
+                          results)
+          errors (keep :error results)
+          metrics (reduce (fn [m r] (merge-with + m (:metrics r)))
+                          {:tokens 0 :cost-usd 0.0 :duration-ms 0}
+                          results)]
+      {:success? (empty? errors)
+       :artifacts artifacts
+       :errors errors
+       :metrics metrics}))
 
   (can-execute? [_this phase]
     (= phase :implement))
@@ -359,88 +400,60 @@
     {:required-artifacts [:plan]
      :optional-artifacts [:design]}))
 
-(defn- extract-code-content
-  "Extract code content from either old or new artifact format."
-  [artifact]
-  (or
-   ;; New standard format: {:artifact/type :code :artifact/content {...}}
-   (:artifact/content artifact)
-   ;; Old format: {:type :code :content {...}}
-   (:content artifact)))
-
-(defn- extract-artifact-id
-  "Extract artifact ID from either old or new format."
-  [artifact]
-  (or
-   ;; New standard format
-   (:artifact/id artifact)
-   ;; Old format - try to get from content
-   (get-in artifact [:artifact/content :code/id])
-   (get-in artifact [:content :code/id])
-   ;; Fallback
-   (random-uuid)))
+(defn- process-verification-for-code
+  "Process verification (test generation) for a single code artifact.
+   Pure function that coordinates test generation."
+  [code-artifact llm-backend context]
+  (let [artifact-id (extract-artifact-id code-artifact)
+        code-content (extract-artifact-content code-artifact)
+        task (task/create-task
+              {:task/id (random-uuid)
+               :task/type :test
+               :task/title "Generate tests"
+               :task/description (str "Generate tests for code artifact " artifact-id)
+               :task/status :pending
+               :task/inputs [artifact-id]})
+        test-context (assoc context :code-artifact code-content)
+        result (run-agent-with-loop
+                #(agent/create-tester {:llm-backend llm-backend})
+                task
+                (merge test-context {:invoke-args {:code code-content}})
+                3)]
+    (if (:success result)
+      {:artifact (:artifact result)
+       :parent-id artifact-id
+       :metrics (:metrics result)}
+      {:error {:type :verify-failed
+               :message (or (:error result) "Verification failed")}
+       :metrics (:metrics result)})))
 
 (defrecord VerifyPhaseExecutor [llm-backend]
   proto/PhaseExecutor
 
   (execute-phase [_this workflow-state context]
-    (let [;; Handle both old and new artifact format
-          code-artifacts (->> (:workflow/artifacts workflow-state)
-                              (filter #(or (= :code (:type %))
-                                           (= :code (:artifact/type %)))))
+    (let [code-artifacts (filter-artifacts-by-type workflow-state :code)
           artifact-store (:artifact-store context)
-          results (atom {:artifacts [] :errors [] :metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}})]
-
-      ;; Generate and run tests for each code artifact
-      (doseq [code-artifact code-artifacts]
-        (let [artifact-id (extract-artifact-id code-artifact)
-              code-content (extract-code-content code-artifact)
-              task (task/create-task
-                    {:task/id (random-uuid)
-                     :task/type :test
-                     :task/title "Generate tests"
-                     :task/description (str "Generate tests for code artifact " artifact-id)
-                     :task/status :pending
-                     :task/inputs [artifact-id]})
-              tester (agent/create-tester {:llm-backend llm-backend})
-              test-context (assoc context :code-artifact code-content)
-              generate-fn (fn [_task _ctx]
-                            (let [result (agent/invoke tester {:code code-content} test-context)]
-                              {:artifact (:artifact result)
-                               :tokens (or (:tokens result) 0)}))
-              result (loop/run-simple task generate-fn
-                                      (merge context {:max-iterations 3}))]
-
-          (if (:success result)
-            ;; Build standard artifact format for test
-            (let [test-artifact (:artifact result)
-                  test-id (or (:test/id test-artifact) (random-uuid))
-                  standard-artifact (artifact/build-artifact
-                                     {:id test-id
-                                      :type :test
-                                      :version "1.0.0"
-                                      :content test-artifact
-                                      :parents [artifact-id]
-                                      :metadata {:phase :verify}})]
-              ;; Persist and link
-              (when artifact-store
-                (try
-                  (artifact/save! artifact-store standard-artifact)
-                  (artifact/link! artifact-store artifact-id test-id)
-                  (catch Exception _e nil)))
-              (swap! results update :artifacts conj standard-artifact))
-            ;; Record error
-            (swap! results update :errors conj
-                   {:type :verify-failed
-                    :message (or (:error result) "Verification failed")}))
-          (swap! results update :metrics
-                 (fn [m] (merge-with + m (or (:metrics result) {}))))))
-
-      (let [{:keys [artifacts errors metrics]} @results]
-        {:success? (empty? errors)
-         :artifacts artifacts
-         :errors errors
-         :metrics metrics})))
+          results (map #(process-verification-for-code % llm-backend context)
+                       code-artifacts)
+          artifacts (keep (fn [r]
+                            (when-let [test-artifact (:artifact r)]
+                              (let [parent-id (:parent-id r)
+                                    standard-artifact (build-standard-artifact
+                                                       :test
+                                                       test-artifact
+                                                       {:phase :verify
+                                                        :parents [parent-id]})]
+                                (persist-and-link-artifact artifact-store standard-artifact parent-id)
+                                standard-artifact)))
+                          results)
+          errors (keep :error results)
+          metrics (reduce (fn [m r] (merge-with + m (:metrics r)))
+                          {:tokens 0 :cost-usd 0.0 :duration-ms 0}
+                          results)]
+      {:success? (empty? errors)
+       :artifacts artifacts
+       :errors errors
+       :metrics metrics}))
 
   (can-execute? [_this phase]
     (= phase :verify))
@@ -459,9 +472,6 @@
     :release (release/->ReleasePhaseExecutor)
     ;; Other phases return nil - they may need different executors
     nil))
-
-;------------------------------------------------------------------------------ Layer 4
-;; Workflow runner
 
 (defn run-workflow
   "Run a complete workflow from spec to completion.
@@ -504,78 +514,6 @@
                                             :errors []})]
               (recur new-state))))))))
 
-;------------------------------------------------------------------------------ Layer 5
-;; Active workflow management
-
-(defn- active-config-path
-  "Get path to active workflow config file.
-   Defaults to ~/.miniforge/workflows/active.edn"
-  []
-  (let [home (System/getProperty "user.home")
-        config-dir (str home "/.miniforge/workflows")]
-    ;; Ensure directory exists
-    (.mkdirs (java.io.File. config-dir))
-    (str config-dir "/active.edn")))
-
-(defn load-active-config
-  "Load active workflow configuration from ~/.miniforge/workflows/active.edn
-
-   Returns map of task-type -> {:workflow-id :version}
-   Returns empty map if file doesn't exist or on error."
-  []
-  (let [path (active-config-path)]
-    (try
-      (when (.exists (java.io.File. path))
-        (with-open [rdr (java.io.PushbackReader. (clojure.java.io/reader path))]
-          (clojure.edn/read rdr)))
-      (catch Exception _e
-        ;; Return empty config on error
-        {}))))
-
-(defn save-active-config
-  "Save active workflow configuration to ~/.miniforge/workflows/active.edn
-
-   Arguments:
-   - config: Map of task-type -> {:workflow-id :version}
-
-   Returns true on success, false on error."
-  [config]
-  (let [path (active-config-path)]
-    (try
-      (with-open [wtr (clojure.java.io/writer path)]
-        (binding [*print-length* nil
-                  *print-level* nil]
-          (.write wtr (pr-str config))))
-      true
-      (catch Exception _e
-        false))))
-
-(defn get-active-workflow-id
-  "Get the active workflow ID for a task type.
-
-   Arguments:
-   - task-type: Task type keyword (e.g., :feature, :bugfix)
-
-   Returns map {:workflow-id :version} or nil if not set."
-  [task-type]
-  (let [config (load-active-config)]
-    (get config task-type)))
-
-(defn set-active-workflow
-  "Set the active workflow for a task type.
-
-   Arguments:
-   - task-type: Task type keyword (e.g., :feature, :bugfix)
-   - workflow-id: Workflow identifier
-   - version: Workflow version
-
-   Returns true on success, false on error."
-  [task-type workflow-id version]
-  (let [config (load-active-config)
-        new-config (assoc config task-type {:workflow-id workflow-id
-                                            :version version})]
-    (save-active-config new-config)))
-
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (require '[ai.miniforge.llm.interface :as llm])
@@ -597,10 +535,5 @@
   (:workflow/status result)
   (:workflow/phase result)
   (:workflow/artifacts result)
-
-  ;; Test active workflow management
-  (set-active-workflow :feature :canonical-sdlc-v1 "1.0.0")
-  (get-active-workflow-id :feature)
-  (load-active-config)
 
   :end)
