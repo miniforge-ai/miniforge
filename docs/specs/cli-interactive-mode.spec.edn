@@ -1,0 +1,531 @@
+;; Copyright 2025 miniforge.ai
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+{:spec/id :cli-interactive-mode
+ :spec/version "1.0.0"
+ :spec/status :draft
+ :spec/created "2026-01-22"
+ :spec/author "miniforge.ai"
+
+ :spec/title "CLI Interactive Mode - Human-in-the-Loop"
+ :spec/description
+ "Interactive workflow execution with pause/resume, user intervention,
+  and decision points. Enables human-in-the-loop workflows via terminal."
+
+ :spec/context
+ {:problem
+  "Workflows need human intervention at key decision points:
+   - Review generated artifacts before proceeding
+   - Approve/reject phase outputs
+   - Modify inputs between phases
+   - Handle unexpected errors with human guidance
+   - Debug workflow execution step-by-step
+
+   Currently workflows run fully autonomous or not at all.
+   Need interactive mode for human collaboration."
+
+  :constraints
+  ["Must work in terminal/TTY environment"
+   "Must preserve execution state across pause/resume"
+   "Must integrate with FSM :paused state"
+   "Must not block in non-interactive mode (CI/automation)"
+   "Must provide clear prompts and options"]
+
+  :dependencies
+  ["workflow/fsm - FSM pause/resume transitions"
+   "workflow/state - State persistence"
+   "cli/runner - Workflow execution"
+   "cli/tui - Terminal UI components (gum)"
+   "observer - Metrics and monitoring"]}
+
+ :spec/requirements
+ {:functional
+  {:intervention-points
+   {:phase-completion
+    {:description "Pause after each phase completes"
+     :trigger :phase-complete
+     :options
+     ["Continue to next phase"
+      "Review phase output"
+      "Modify phase result"
+      "Skip next phase"
+      "Cancel workflow"]
+     :prompt "Phase {phase-name} completed. Continue?"
+     :default "Continue to next phase"}
+
+    :gate-failure
+    {:description "Pause when gate validation fails"
+     :trigger :gate-failed
+     :options
+     ["Retry phase execution"
+      "Skip gate check (override)"
+      "Modify artifacts to pass gate"
+      "Cancel workflow"]
+     :prompt "Gate {gate-name} failed: {error}. Action?"
+     :default "Retry phase execution"
+     :danger-actions ["Skip gate check"]}
+
+    :error-recovery
+    {:description "Pause on execution error"
+     :trigger :execution-error
+     :options
+     ["Retry with same input"
+      "Modify input and retry"
+      "Skip phase"
+      "Cancel workflow"
+      "Debug mode (step through)"]
+     :prompt "Error in {phase-name}: {error}. Action?"
+     :default "Retry with same input"}
+
+    :artifact-review
+    {:description "Review generated artifacts before commit"
+     :trigger :artifacts-generated
+     :options
+     ["Accept artifacts"
+      "Edit artifacts"
+      "Regenerate artifacts"
+      "Cancel workflow"]
+     :prompt "{count} artifacts generated. Review?"
+     :default "Accept artifacts"
+     :display "Show artifact preview/diff"}
+
+    :decision-point
+    {:description "Workflow requests human decision"
+     :trigger :decision-required
+     :context "workflow-defined decision point"
+     :options "provided by workflow configuration"
+     :prompt "workflow-defined prompt"
+     :examples
+     ["Which database schema migration strategy?"
+      "Approve PR content before submission?"
+      "Select code review focus areas?"]}}
+
+   :pause-modes
+   {:manual-pause
+    {:command "Ctrl+P or miniforge pause"
+     :behavior "Pause at next safe checkpoint (phase boundary)"
+     :state-transition ":running → :paused"
+     :resume "miniforge resume <execution-id>"}
+
+    :automatic-pause
+    {:triggers
+     ["Phase completion (if --interactive mode)"
+      "Gate failure"
+      "Execution error"
+      "Decision point in workflow"]
+     :behavior "Pause and wait for user input"
+     :timeout "Configurable timeout for unattended mode"
+     :timeout-action "Configurable (continue, cancel, or wait)"}
+
+    :breakpoint-pause
+    {:command "miniforge run --breakpoint <phase-id>"
+     :behavior "Pause before executing specified phase"
+     :use-case "Debug specific phase in workflow"}}
+
+   :resume-behavior
+   {:from-checkpoint
+    {:description "Resume from last saved state"
+     :validation "Verify state is :paused"
+     :state-transition ":paused → :running"
+     :context "Restore full execution context"
+     :options "Can modify input/context before resume"}
+
+    :with-modification
+    {:description "Resume with changed parameters"
+     :allowed-changes
+     ["Input data modifications"
+      "Phase skip list"
+      "Gate override flags"
+      "Budget adjustments"]
+     :validation "Ensure changes are compatible with FSM state"}
+
+    :step-mode
+    {:description "Resume in step-by-step mode"
+     :behavior "Pause after each phase automatically"
+     :command "miniforge resume --step <execution-id>"}}
+
+   :state-inspection
+   {:view-execution-state
+    {:command "miniforge inspect <execution-id>"
+     :shows
+     ["Current phase and status"
+      "Phase results so far"
+      "Artifacts generated"
+      "Errors encountered"
+      "Metrics (tokens, cost, duration)"
+      "FSM transition history"]}
+
+    :view-phase-details
+    {:command "miniforge inspect <execution-id> --phase <phase-id>"
+     :shows
+     ["Phase configuration"
+      "Agent used"
+      "Input to phase"
+      "Output from phase"
+      "Gate results"
+      "Inner loop iterations"]}
+
+    :view-artifacts
+    {:command "miniforge artifacts <execution-id>"
+     :options
+     {:list "List all artifacts"
+      :show "Show artifact contents"
+      :diff "Diff against current filesystem"
+      :export "Export to directory"}}}
+
+   :modification-tools
+   {:edit-artifact
+    {:command "miniforge edit <execution-id> --artifact <artifact-id>"
+     :behavior "Open artifact in $EDITOR"
+     :save "Update artifact in execution state"
+     :validation "Optionally re-run gates after edit"}
+
+    :modify-input
+    {:command "miniforge modify <execution-id> --input <new-input.edn>"
+     :behavior "Update execution input data"
+     :validation "Must be in :paused state"
+     :effect "Affects subsequent phase executions"}
+
+    :set-variable
+    {:command "miniforge set <execution-id> <key> <value>"
+     :examples
+     ["miniforge set abc123 skip-phases '[validate review]'"
+      "miniforge set abc123 override-gates true"]
+     :validation "Type-safe value parsing"}}}
+
+  :non-functional
+  {:usability
+   ["Clear prompts with numbered options"
+    "Default selections highlighted"
+    "Dangerous actions require confirmation"
+    "Context-aware help at each prompt"
+    "Keyboard shortcuts for common actions"]
+
+   :safety
+   ["State saves before each user action"
+    "Dangerous actions show impact preview"
+    "Undo/rollback capability for modifications"
+    "Confirmation for destructive operations"
+    "Audit log of user interventions"]
+
+   :performance
+   ["State save/load < 100ms"
+    "Prompt display < 50ms"
+    "Artifact preview < 500ms"
+    "Support for large artifact sets (>100 files)"]
+
+   :compatibility
+   ["TTY detection (disable interactive in non-TTY)"
+    "Graceful degradation for limited terminals"
+    "Session persistence across terminal disconnects"
+    "Support for remote sessions (tmux, screen)"]}}
+
+ :spec/architecture
+ {:components
+  {:interactive-controller
+   {:namespace "ai.miniforge.cli.interactive"
+    :description "Manages interactive mode lifecycle"
+    :responsibilities
+    ["Detect intervention points"
+     "Pause execution and save state"
+     "Display prompts and options"
+     "Collect user input"
+     "Resume execution with modifications"
+     "Track intervention history"]
+    :protocols
+    [{:name "InteractiveController"
+      :methods
+      [{:name "should-pause?"
+        :args ["execution-state" "trigger"]
+        :returns "boolean"}
+       {:name "pause-for-intervention"
+        :args ["execution-state" "trigger" "context"]
+        :returns "paused-state"}
+       {:name "prompt-user"
+        :args ["prompt-config" "options"]
+        :returns "user-choice"}
+       {:name "apply-modification"
+        :args ["execution-state" "modification"]
+        :returns "updated-state"}
+       {:name "resume-execution"
+        :args ["execution-state" "resume-mode"]
+        :returns "running-state"}]}]}
+
+   :checkpoint-manager
+   {:namespace "ai.miniforge.cli.checkpoint"
+    :description "Save and restore execution checkpoints"
+    :responsibilities
+    ["Serialize execution state"
+     "Persist to disk atomically"
+     "Load from checkpoint file"
+     "Validate checkpoint integrity"
+     "Manage checkpoint retention"]
+    :storage
+    {:location "~/.miniforge/checkpoints/"
+     :format "EDN with timestamp and metadata"
+     :naming "<execution-id>-<checkpoint-num>.edn"
+     :retention "Last 10 checkpoints per execution"}}
+
+   :artifact-viewer
+   {:namespace "ai.miniforge.cli.artifact-viewer"
+    :description "Display and edit artifacts interactively"
+    :responsibilities
+    ["Preview artifact contents"
+     "Syntax highlighting for code"
+     "Diff against filesystem"
+     "Invoke editor for modifications"
+     "Validate edited artifacts"]
+    :functions
+    ["preview-artifact"
+     "show-artifact-diff"
+     "edit-artifact-in-editor"
+     "validate-artifact-edits"]}
+
+   :prompt-engine
+   {:namespace "ai.miniforge.cli.prompt"
+    :description "Generate context-aware prompts"
+    :responsibilities
+    ["Build prompt from template and context"
+     "Format options with descriptions"
+     "Highlight defaults and warnings"
+     "Provide inline help"
+     "Track prompt history"]
+    :templates
+    {:phase-complete "Phase {phase} completed successfully.\n{artifacts-summary}\nContinue?"
+     :gate-failed "Gate {gate} failed:\n{error-details}\nRetry, skip, or cancel?"
+     :error-occurred "Error in {phase}:\n{error-message}\n{stack-trace}\nHow to proceed?"}}}
+
+  :integration-points
+  {:fsm-integration
+   {:pause-transition "fsm/transition state :pause"
+    :resume-transition "fsm/transition state :resume"
+    :cancel-transition "fsm/transition state :cancel"
+    :validation "Use fsm/can-transition? before prompting"}
+
+   :runner-integration
+   {:execution-hook "Register pause-points in runner"
+    :state-callback "Runner calls interactive-controller at checkpoints"
+    :resume-entry "Runner accepts paused state to resume"}
+
+   :tui-integration
+   {:prompts "Use gum-choose for option selection"
+    :input "Use gum-input for text entry"
+    :confirm "Use gum-confirm for yes/no"
+    :editor "Use gum-write or $EDITOR for artifact edits"}}}
+
+ :spec/data-structures
+ {:intervention-point
+  {:description "Configuration for pause/intervention point"
+   :schema
+   {:intervention/id "keyword - unique ID"
+    :intervention/trigger "keyword - what caused pause"
+    :intervention/phase "keyword - which phase"
+    :intervention/timestamp "inst"
+    :intervention/context "map - relevant context"
+    :intervention/options "[option-map] - available choices"
+    :intervention/prompt "string - message to user"
+    :intervention/default "keyword - default option"
+    :intervention/danger? "boolean - requires confirmation"}}
+
+  :checkpoint
+  {:description "Saved execution state for resume"
+   :schema
+   {:checkpoint/id "uuid"
+    :checkpoint/execution-id "uuid - parent execution"
+    :checkpoint/number "integer - sequence number"
+    :checkpoint/created-at "inst"
+    :checkpoint/trigger "keyword - why checkpoint was created"
+    :checkpoint/state "map - full execution state"
+    :checkpoint/fsm-state "keyword - FSM state at checkpoint"
+    :checkpoint/modifications "[modification] - user changes applied"
+    :checkpoint/resumable? "boolean - can resume from this point"}}
+
+  :modification
+  {:description "User-applied change to execution"
+   :schema
+   {:modification/id "uuid"
+    :modification/type "keyword - :input :artifact :config"
+    :modification/target "string - what was modified"
+    :modification/before "any - original value"
+    :modification/after "any - new value"
+    :modification/applied-at "inst"
+    :modification/reason "string - user's reason"}}}
+
+ :spec/user-flows
+ [{:flow "Phase-by-phase review"
+   :steps
+   ["User runs: miniforge run :workflow-id --interactive"
+    "Phase 1 executes"
+    "Prompt: 'Phase plan completed. Review artifacts? (y/n)'"
+    "User selects 'y', sees artifact list"
+    "User runs: miniforge artifacts <exec-id> --show plan.md"
+    "User approves, workflow continues to Phase 2"
+    "Repeat for each phase"]}
+
+  {:flow "Gate failure recovery"
+   :steps
+   ["Workflow executes Phase 4: implement"
+    "Gate :tests-pass fails (3 tests failing)"
+    "Automatic pause with prompt: 'Gate tests-pass failed. Retry, skip, or cancel?'"
+    "User selects 'Retry'"
+    "Phase re-executes"
+    "Gate passes, workflow continues"]}
+
+  {:flow "Error debugging"
+   :steps
+   ["Workflow fails in Phase 5 with error"
+    "Automatic pause with error details"
+    "User runs: miniforge inspect <exec-id> --phase implement"
+    "User sees inner loop history and error context"
+    "User runs: miniforge modify <exec-id> --input modified.edn"
+    "User runs: miniforge resume <exec-id>"
+    "Workflow retries phase with modified input"]}
+
+  {:flow "Artifact editing"
+   :steps
+   ["Phase generates design.md artifact"
+    "Workflow pauses for review"
+    "User runs: miniforge edit <exec-id> --artifact design.md"
+    "Editor opens with design.md"
+    "User makes changes, saves, exits"
+    "Artifact updated in execution state"
+    "User approves, workflow continues"]}
+
+  {:flow "Step-through debugging"
+   :steps
+   ["User runs: miniforge run :workflow-id --step"
+    "Workflow executes Phase 1, then pauses"
+    "User reviews, continues"
+    "Workflow executes Phase 2, then pauses"
+    "User modifies Phase 2 output"
+    "User continues through remaining phases one at a time"]}]
+
+ :spec/implementation-phases
+ [{:phase 1
+   :title "Basic Pause/Resume"
+   :deliverables
+   ["Manual pause via Ctrl+P"
+    "FSM integration for :paused state"
+    "State persistence to checkpoint"
+    "Resume command"
+    "Status display for paused executions"]
+   :tests
+   ["Can pause running execution"
+    "Checkpoint saves full state"
+    "Can resume from checkpoint"
+    "FSM validates pause/resume transitions"]}
+
+  {:phase 2
+   :title "Automatic Intervention Points"
+   :deliverables
+   ["Phase completion pause (--interactive mode)"
+    "Gate failure pause"
+    "Error pause"
+    "Prompt engine for user choices"
+    "Option selection via TUI"]
+   :tests
+   ["Pauses after each phase in interactive mode"
+    "Pauses on gate failure with options"
+    "Pauses on error with retry options"
+    "User can select from options"]}
+
+  {:phase 3
+   :title "State Inspection"
+   :deliverables
+   ["miniforge inspect command"
+    "Phase details view"
+    "Artifact listing and preview"
+    "FSM history display"
+    "Metrics display"]
+   :tests
+   ["Shows current execution state"
+    "Displays phase results"
+    "Lists artifacts with previews"
+    "Shows FSM transition history"]}
+
+  {:phase 4
+   :title "State Modification"
+   :deliverables
+   ["Artifact editing in $EDITOR"
+    "Input modification"
+    "Configuration overrides"
+    "Modification history tracking"
+    "Undo/rollback support"]
+   :tests
+   ["Can edit artifact and save changes"
+    "Can modify execution input"
+    "Can override workflow config"
+    "Modifications tracked in history"
+    "Can rollback to previous checkpoint"]}
+
+  {:phase 5
+   :title "Advanced Features"
+   :deliverables
+   ["Step-through mode"
+    "Breakpoint support"
+    "Conditional pause rules"
+    "Session persistence"
+    "Multi-user collaboration support"]
+   :tests
+   ["Step mode pauses after each phase"
+    "Breakpoints trigger at specified phases"
+    "Conditional rules evaluated correctly"
+    "Session survives terminal disconnect"]}]
+
+ :spec/testing-strategy
+ {:unit-tests
+  {:interactive-controller
+   ["Detects intervention points correctly"
+    "Generates appropriate prompts"
+    "Applies modifications to state"
+    "Validates FSM transitions before pause/resume"]
+
+   :checkpoint-manager
+   ["Serializes state to EDN correctly"
+    "Writes checkpoint atomically"
+    "Loads checkpoint with validation"
+    "Manages checkpoint retention policy"]
+
+   :prompt-engine
+   ["Formats prompts from templates"
+    "Highlights defaults and warnings"
+    "Provides context-aware help"]}
+
+  :integration-tests
+  ["Pause and resume workflow execution"
+   "Pause on gate failure, retry successfully"
+   "Edit artifact during pause, continue with changes"
+   "Modify input during pause, resume with new input"
+   "Step through workflow phase by phase"
+   "Set breakpoint, pause at specified phase"
+   "Cancel paused execution"]
+
+  :user-acceptance-tests
+  ["Developer can review and approve each phase"
+   "Developer can debug gate failures interactively"
+   "Developer can fix errors without restarting workflow"
+   "Developer can edit generated code before commit"
+   "Developer can make decision at workflow decision point"]}
+
+ :spec/success-criteria
+ ["FSM :paused state works correctly"
+  "Execution state persists to disk and reloads"
+  "User can pause at any phase boundary"
+  "User can resume with or without modifications"
+  "Clear prompts guide user through options"
+  "Artifact editing works in standard editors"
+  "All modifications are audited and tracked"
+  "Step-through mode for debugging"
+  "Integration tests pass"
+  "Documentation with examples complete"]}
