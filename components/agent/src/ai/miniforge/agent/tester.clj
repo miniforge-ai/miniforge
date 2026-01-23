@@ -2,7 +2,7 @@
   "Tester agent implementation.
    Generates tests for code artifacts and validates coverage."
   (:require
-   [ai.miniforge.agent.core :as core]
+   [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
@@ -367,7 +367,7 @@ and what behavior is expected. Make tests readable and maintainable.")
   [& [opts]]
   (let [logger (or (:logger opts)
                    (log/create-logger {:min-level :info :output (fn [_])}))]
-    (core/create-base-agent
+    (specialized/create-base-agent
      {:role :tester
       :system-prompt tester-system-prompt
       :config (merge {:model "claude-sonnet-4"
@@ -494,7 +494,7 @@ and what behavior is expected. Make tests readable and maintainable.")
   (def tester (create-tester))
 
   ;; Invoke with a code artifact
-  (core/invoke tester
+  (specialized/invoke tester
                {:test-framework "clojure.test"}
                {:code {:code/id (random-uuid)
                        :code/files [{:path "src/auth/login.clj"

@@ -2,7 +2,7 @@
   "Planner agent implementation.
    Analyzes specifications and creates detailed implementation plans."
   (:require
-   [ai.miniforge.agent.core :as core]
+   [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
@@ -322,7 +322,7 @@ necessary dependencies. Optimize for clarity and testability.")
   [& [opts]]
   (let [logger (or (:logger opts)
                    (log/create-logger {:min-level :info :output (fn [_])}))]
-    (core/create-base-agent
+    (specialized/create-base-agent
      {:role :planner
       :system-prompt planner-system-prompt
       :config (merge {:model "claude-sonnet-4"
@@ -425,7 +425,7 @@ necessary dependencies. Optimize for clarity and testability.")
   (def planner (create-planner))
 
   ;; Invoke with a specification
-  (core/invoke planner
+  (specialized/invoke planner
                {:codebase {:has-tests? true}}
                "As a user, I want to log in with my email so that I can access my account.")
   ;; => {:status :success, :output {:plan/id ..., :plan/tasks [...], ...}}
