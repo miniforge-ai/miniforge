@@ -1,4 +1,4 @@
-{:paths ["src"]
+{:paths ["src" "resources"]
 
  :deps {;; CLI dependencies (BB-compatible, all bundled with Babashka)
         ;; babashka.cli, babashka.fs, babashka.process, cheshire.core
