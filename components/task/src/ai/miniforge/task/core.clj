@@ -1,13 +1,14 @@
 (ns ai.miniforge.task.core
   "Task CRUD operations and state machine.
-   Layer 0: Pure functions for state transitions
-   Layer 1: Task store operations with side effects"
+   Layer 0: State machine definitions and pure utilities
+   Layer 1: Task store operations (CRUD)
+   Layer 2: Orchestration (queries, decomposition, state transitions)"
   (:require
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; State machine definitions
+;; State machine definitions and pure utilities
 
 (def valid-transitions
   "Valid state transitions for tasks.
@@ -46,6 +47,12 @@
                     (when constraints {:task/constraints constraints})
                     (dissoc task-data :task/id :task/type :task/status :task/constraints))]
     (schema/validate schema/Task task)))
+
+(defn compute-child-tasks
+  "Pure function to compute child task specs from parent task ID and sub-tasks.
+   Returns a vector of child task specs with parent references."
+  [parent-task-id sub-tasks]
+  (mapv #(assoc % :task/parent parent-task-id) sub-tasks))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Task store operations
@@ -117,6 +124,8 @@
      (throw (ex-info "Task not found" {:task-id task-id})))))
 
 ;------------------------------------------------------------------------------ Layer 2
+;; Orchestration (state transitions, queries, decomposition)
+
 ;; State transitions
 
 (defn- transition-task!
@@ -188,7 +197,6 @@
      (update-task! (:task/id updated) (dissoc updated :task/blocked-reason))
      updated)))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Task queries
 
 (defn tasks-by-status
@@ -217,26 +225,30 @@
   []
   (vec (vals @task-store)))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Task decomposition
 
 (defn decompose-task!
   "Decompose a parent task into sub-tasks.
    Creates parent/child relationships between tasks.
-   Returns the updated parent task with children."
+   Returns the updated parent task with children.
+
+   This function separates pure computation from side effects:
+   1. Validates parent exists
+   2. Computes child task specs (pure)
+   3. Creates child tasks (side effects)
+   4. Updates parent with child references (side effects)"
   ([parent-task-id sub-tasks] (decompose-task! parent-task-id sub-tasks nil))
   ([parent-task-id sub-tasks logger]
    (let [parent (get-task parent-task-id)]
      (when-not parent
        (throw (ex-info "Parent task not found" {:task-id parent-task-id})))
-     ;; Create all child tasks with parent reference
-     (let [child-ids (mapv (fn [sub-task]
-                             (let [child (create-task!
-                                          (assoc sub-task :task/parent parent-task-id)
-                                          logger)]
-                               (:task/id child)))
-                           sub-tasks)
-           ;; Update parent with child references
+     ;; Compute child task specs with parent references (pure)
+     (let [child-specs (compute-child-tasks parent-task-id sub-tasks)
+           ;; Create all child tasks (side effects)
+           child-ids (mapv (fn [child-spec]
+                             (:task/id (create-task! child-spec logger)))
+                           child-specs)
+           ;; Update parent with child references (side effect)
            updated-parent (update-task! parent-task-id
                                         {:task/children child-ids}
                                         logger)]
