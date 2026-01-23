@@ -5,7 +5,10 @@
         ai.miniforge/task {:local/root "../task"}
         ai.miniforge/loop {:local/root "../loop"}
         ai.miniforge/artifact {:local/root "../artifact"}
+        ai.miniforge/policy {:local/root "../policy"}      ; Gate evaluation
+        ai.miniforge/heuristic {:local/root "../heuristic"} ; Workflow storage
         babashka/fs {:mvn/version "0.5.22"}
-        babashka/process {:mvn/version "0.5.22"}}
+        babashka/process {:mvn/version "0.5.22"}
+        metosin/malli {:mvn/version "0.16.1"}}             ; Schema validation
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}
