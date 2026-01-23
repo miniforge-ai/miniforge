@@ -1,0 +1,24 @@
+;; Simple Workflow v2.0.0 (Interceptor-based)
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; Minimal workflow using the new interceptor-based pipeline.
+;; Phase behavior is defined by registry, not configuration.
+;;
+;; Compare to simple-test-v1.0.0.edn (76 lines) - this is ~20 lines.
+
+{:workflow/id :simple
+ :workflow/version "2.0.0"
+ :workflow/name "Simple Workflow"
+ :workflow/description "Minimal plan -> implement -> done workflow using interceptors."
+
+ ;; Pipeline: vector of phase configurations
+ ;; Each phase resolves behavior from the phase registry
+ :workflow/pipeline
+ [{:phase :plan}       ; Uses registry defaults: planner agent, 3 iterations
+  {:phase :implement}  ; Uses registry defaults: implementer agent, [:syntax :lint] gates
+  {:phase :done}]      ; Terminal phase
+
+ ;; Optional: global config overrides
+ :workflow/config
+ {:max-tokens 30000
+  :max-iterations 20}}

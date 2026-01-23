@@ -1,0 +1,150 @@
+;; Copyright 2025 miniforge.ai
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+(ns ai.miniforge.phase.interface
+  "Phase interceptor registry interface.
+
+   Phases are interceptors with :enter, :leave, and :error functions.
+   Each phase type registers via defmethod, providing defaults and behavior.
+
+   Usage:
+     (get-phase-interceptor {:phase :implement})
+     (get-phase-interceptor {:phase :implement :budget {:tokens 50000}})
+
+   Interceptor structure (Pedestal-style):
+     {:name    keyword?
+      :enter   (fn [ctx] -> ctx)    ; Execute phase
+      :leave   (fn [ctx] -> ctx)    ; Post-processing
+      :error   (fn [ctx ex] -> ctx) ; Error handling/repair}"
+  (:require
+   ;; Require implementation namespaces for side effects (method registration)
+   [ai.miniforge.phase.plan]
+   [ai.miniforge.phase.implement]
+   [ai.miniforge.phase.verify]
+   [ai.miniforge.phase.review]
+   [ai.miniforge.phase.release]
+   [ai.miniforge.phase.registry :as registry]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Re-export registry functions
+
+(def get-phase-interceptor
+  "Get interceptor for a phase configuration.
+
+   Arguments:
+     config - Map with :phase keyword and optional overrides
+              {:phase :implement :budget {:tokens 50000}}
+
+   Returns:
+     Interceptor map with :name, :enter, :leave, :error"
+  registry/get-phase-interceptor)
+
+(def list-phases
+  "List all registered phase types.
+
+   Returns:
+     Set of phase keywords"
+  registry/list-phases)
+
+(def phase-defaults
+  "Get default configuration for a phase type.
+
+   Arguments:
+     phase-kw - Phase keyword like :plan, :implement
+
+   Returns:
+     Default config map or nil if unknown"
+  registry/phase-defaults)
+
+;------------------------------------------------------------------------------ Layer 1
+;; Pipeline construction
+
+(defn build-pipeline
+  "Build interceptor pipeline from workflow config.
+
+   Arguments:
+     workflow - Workflow map with :workflow/pipeline vector
+
+   Returns:
+     Vector of interceptor maps"
+  [workflow]
+  (mapv get-phase-interceptor (:workflow/pipeline workflow)))
+
+(defn validate-pipeline
+  "Validate a workflow pipeline configuration.
+
+   Arguments:
+     workflow - Workflow map
+
+   Returns:
+     {:valid? bool :errors [...] :warnings [...]}"
+  [workflow]
+  (let [pipeline (:workflow/pipeline workflow)
+        known-phases (list-phases)
+        errors (atom [])
+        warnings (atom [])]
+
+    (when (empty? pipeline)
+      (swap! errors conj {:error :empty-pipeline
+                          :message "Workflow pipeline is empty"}))
+
+    (doseq [{:keys [phase on-fail on-success] :as config} pipeline]
+      (when-not (contains? known-phases phase)
+        (swap! errors conj {:error :unknown-phase
+                            :phase phase
+                            :message (str "Unknown phase: " phase)}))
+
+      (when (and on-fail (not (contains? known-phases on-fail)))
+        (swap! warnings conj {:warning :unknown-on-fail-target
+                              :phase phase
+                              :target on-fail}))
+
+      (when (and on-success (not (contains? known-phases on-success)))
+        (swap! warnings conj {:warning :unknown-on-success-target
+                              :phase phase
+                              :target on-success})))
+
+    {:valid? (empty? @errors)
+     :errors @errors
+     :warnings @warnings}))
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  ;; List available phases
+  (list-phases)
+  ;; => #{:plan :implement :verify :review :release :done}
+
+  ;; Get defaults for a phase
+  (phase-defaults :implement)
+  ;; => {:agent :implementer :gates [:syntax :lint] :budget {...}}
+
+  ;; Get interceptor with defaults
+  (get-phase-interceptor {:phase :plan})
+
+  ;; Get interceptor with overrides
+  (get-phase-interceptor {:phase :implement
+                          :budget {:tokens 50000}
+                          :gates [:syntax :lint :no-secrets]})
+
+  ;; Build pipeline from workflow
+  (def workflow {:workflow/id :test
+                 :workflow/pipeline [{:phase :plan}
+                                     {:phase :implement}
+                                     {:phase :done}]})
+  (build-pipeline workflow)
+
+  ;; Validate pipeline
+  (validate-pipeline workflow)
+
+  :leave-this-here)

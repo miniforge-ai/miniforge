@@ -165,7 +165,68 @@
   core/run-workflow)
 
 ;------------------------------------------------------------------------------ Layer 5
-;; Configurable workflow API (Layer 2)
+;; Interceptor-based workflow API (Simplified)
+
+(defn run-pipeline
+  "Execute a workflow using interceptor pipeline.
+
+   This is the new simplified API using phase and gate interceptors.
+   Workflows are defined as vectors of phase configurations.
+
+   Arguments:
+   - workflow: Workflow configuration with :workflow/pipeline
+   - input: Input data for the workflow
+   - opts: Execution options
+     - :max-phases - Max phases to execute (default 50)
+     - :on-phase-start - Callback fn [ctx interceptor]
+     - :on-phase-complete - Callback fn [ctx interceptor result]
+
+   Returns execution context with:
+   - :execution/status - :completed or :failed
+   - :execution/phase-results - Results per phase
+   - :execution/artifacts - All artifacts produced
+   - :execution/metrics - Accumulated metrics
+
+   Example:
+     (def workflow
+       {:workflow/id :simple
+        :workflow/version \"2.0.0\"
+        :workflow/pipeline
+        [{:phase :plan}
+         {:phase :implement}
+         {:phase :done}]})
+     (run-pipeline workflow {:task \"Build feature\"} {})"
+  ([workflow input]
+   (run-pipeline workflow input {}))
+  ([workflow input opts]
+   ((requiring-resolve 'ai.miniforge.workflow.runner/run-pipeline)
+    workflow input opts)))
+
+(defn build-pipeline
+  "Build interceptor pipeline from workflow config.
+
+   Arguments:
+   - workflow: Workflow configuration with :workflow/pipeline
+
+   Returns vector of interceptor maps.
+
+   Example:
+     (build-pipeline {:workflow/pipeline [{:phase :plan} {:phase :implement}]})"
+  [workflow]
+  ((requiring-resolve 'ai.miniforge.workflow.runner/build-pipeline) workflow))
+
+(defn validate-pipeline
+  "Validate a workflow pipeline configuration.
+
+   Arguments:
+   - workflow: Workflow configuration with :workflow/pipeline
+
+   Returns {:valid? bool :errors []}"
+  [workflow]
+  ((requiring-resolve 'ai.miniforge.workflow.runner/validate-pipeline) workflow))
+
+;------------------------------------------------------------------------------ Layer 6
+;; Configurable workflow API (Legacy)
 
 (defn load-workflow
   "Load a workflow configuration by ID and version.
