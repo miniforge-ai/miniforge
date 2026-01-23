@@ -1,0 +1,212 @@
+{:pack/id "foundations"
+ :pack/name "Foundations Pack"
+ :pack/version "2026.01.22"
+ :pack/description "Core architectural principles: Stratified Design and Simple Made Easy"
+ :pack/author "miniforge-official"
+ :pack/license "Apache-2.0"
+
+ :pack/categories
+ [{:category/id "001"
+   :category/name "Stratified Design"
+   :category/rules [:001-no-upward-imports
+                    :001-no-cycles
+                    :001-pure-domain]}
+  {:category/id "002"
+   :category/name "Simple Made Easy"
+   :category/rules [:002-values-over-state
+                    :002-data-over-syntax]}]
+
+ :pack/rules
+ [;;============================================================================
+  ;; Category 001: Stratified Design
+  ;;============================================================================
+
+  {:rule/id :001-no-upward-imports
+   :rule/title "No upward imports in stratified design"
+   :rule/description "Modules may only import from same stratum or below. Never import 'up' the stack."
+   :rule/severity :major
+   :rule/category "001"
+
+   :rule/applies-to
+   {:file-globs ["**/*.clj" "**/*.cljc" "**/*.ts" "**/*.py"]}
+
+   :rule/detection
+   {:type :custom
+    :custom-fn 'miniforge.packs.foundations/detect-upward-import}
+
+   :rule/agent-behavior
+   "Before writing code for a feature, output:
+    - A short stratified plan (modules, their stratum, and allowed dependencies)
+    - The ports/interfaces to be introduced or reused
+
+    When editing existing code:
+    - Detect and call out any 'upward' import or cross-strata leakage
+    - If violation found, propose minimal refactor (move interface down, split module, add adapter)
+
+    Canonical strata (innermost to outermost):
+    0. Foundations - pure utilities, types, data schemas, constants (no I/O)
+    1. Domain - business rules, pure functions, policies, invariants (no I/O)
+    2. Application/Use-Cases - orchestration, ports (no infra details)
+    3. Adapters - HTTP controllers, CLIs, event handlers, API/DTO mapping
+    4. Infrastructure - DB/ORM, queues, caches, cloud SDKs, external services
+
+    Allowed imports: Adapters -> Application -> Domain -> Foundations
+    Infrastructure -> (Application|Domain|Foundations) via ports/interfaces only"
+
+   :rule/enforcement
+   {:action :hard-halt
+    :message "Upward import detected: %s imports from %s (stratum %d -> %d)"
+    :remediation "Move the interface to a lower stratum, or inject via port/adapter pattern"}}
+
+  {:rule/id :001-no-cycles
+   :rule/title "No import cycles"
+   :rule/description "Reject any change that introduces an import/namespace cycle"
+   :rule/severity :critical
+   :rule/category "001"
+
+   :rule/applies-to
+   {:file-globs ["**/*.clj" "**/*.cljc" "**/*.ts" "**/*.py"]}
+
+   :rule/detection
+   {:type :custom
+    :custom-fn 'miniforge.packs.foundations/detect-import-cycle}
+
+   :rule/agent-behavior
+   "Use a single-direction DAG for code dependencies. No cycles. Modules only depend 'down' the stack.
+
+    When a cycle is detected:
+    1. Identify which module(s) are causing the cycle
+    2. Propose minimal refactor: move interface 'down', split module, or add adapter
+    3. Extract shared interfaces to a lower stratum that both modules can depend on
+
+    In PRs, include a tiny import graph (or summary) showing no upward edges/no cycles."
+
+   :rule/enforcement
+   {:action :hard-halt
+    :message "Import cycle detected: %s"
+    :remediation "Break the cycle by extracting shared interface to lower stratum"}}
+
+  {:rule/id :001-pure-domain
+   :rule/title "Domain layer must be pure"
+   :rule/description "Domain modules must be free of I/O, frameworks, and runtime state"
+   :rule/severity :major
+   :rule/category "001"
+
+   :rule/applies-to
+   {:file-globs ["**/domain/**/*.clj" "**/domain/**/*.cljc"
+                 "**/domain/**/*.ts" "**/domain/**/*.py"]}
+
+   :rule/detection
+   {:type :content-scan
+    :patterns [;; Clojure I/O
+               "slurp\\s*\\("
+               "spit\\s*\\("
+               "clojure\\.java\\.io"
+               "http/get"
+               "http/post"
+               "jdbc/"
+               ;; TypeScript I/O
+               "fetch\\s*\\("
+               "\\bfs\\."
+               "axios\\."
+               "prisma\\."
+               ;; Python I/O
+               "\\bopen\\s*\\("
+               "requests\\."
+               "urllib"
+               "sqlalchemy"]}
+
+   :rule/agent-behavior
+   "Domain layer must contain only:
+    - Pure functions (no side effects)
+    - Business rules and invariants
+    - Data transformations
+
+    If I/O is needed, define a port (interface) in Application layer and inject adapter.
+
+    Anti-patterns to reject:
+    - Domain importing framework/ORM/cloud SDKs
+    - Direct file/network operations in domain code
+    - Mutable state in domain modules
+
+    Pure core principle: Inject effects at edges. Domain remains referentially transparent."
+
+   :rule/enforcement
+   {:action :hard-halt
+    :message "I/O detected in Domain layer: %s"
+    :remediation "Move I/O to Infrastructure adapter, inject via port"}}
+
+  ;;============================================================================
+  ;; Category 002: Simple Made Easy
+  ;;============================================================================
+
+  {:rule/id :002-values-over-state
+   :rule/title "Prefer values over mutable state"
+   :rule/description "Minimize mutable state; make it explicit, local, and small when necessary"
+   :rule/severity :minor
+   :rule/category "002"
+
+   :rule/applies-to
+   {:file-globs ["**/*.clj" "**/*.cljc"]}
+
+   :rule/detection
+   {:type :content-scan
+    :patterns ["def\\s+\\S+\\s+\\(atom"
+               "def\\s+\\S+\\s+\\(ref\\s"
+               "volatile!"
+               "set!"]}
+
+   :rule/agent-behavior
+   "When proposing a design, include:
+    1) A short 'simple vs easy' comparison (2-3 bullets)
+    2) The minimal set of pure functions and data structures
+    3) Where any state is confined and why it's necessary
+
+    Treat state as hazardous material:
+    - Justify it, minimize scope, isolate at the edge
+    - Model with managed references/STM/actors only when true concurrency requires it
+
+    Prefer idempotent, deterministic operations; make time and randomness injectable.
+
+    Simple = one braid (uncomplected). Easy = familiar/near. Choose simple."
+
+   :rule/enforcement
+   {:action :warn
+    :message "Mutable state detected: %s. Is this necessary?"
+    :remediation "Consider if immutable value + pure function would suffice"}}
+
+  {:rule/id :002-data-over-syntax
+   :rule/title "Prefer data over syntax"
+   :rule/description "Represent information as plain data (maps, vectors, sets). Avoid DSL-ish micro-syntaxes."
+   :rule/severity :minor
+   :rule/category "002"
+
+   :rule/applies-to
+   {:file-globs ["**/*.clj" "**/*.cljc"]}
+
+   :rule/detection
+   {:type :content-scan
+    :patterns [;; Macro-heavy patterns that could be data
+               "defmacro\\s+def-"
+               "defmacro\\s+with-"]}
+
+   :rule/agent-behavior
+   "When choosing designs/constructs, prefer options that reduce intertwining of concerns.
+
+    Decision rubric:
+    - Values over state: prefer immutable values and pure functions
+    - Data over syntax: represent information as plain data (maps, vectors, sets)
+    - Functions over methods: favor small, stateless functions over deep OO hierarchies
+    - Declarative over imperative: use set/relational operations for 'what', not 'how'
+
+    When editing code that's overly complex:
+    - Suggest a 'data first' rewrite of the hot path
+    - Extract policy into a dedicated rules module or data file
+    - Replace switch/if jungles with open polymorphism where beneficial
+
+    Accept that simple != fewer things. More but smaller modules is often better."
+
+   :rule/enforcement
+   {:action :warn
+    :message "Consider if macro could be replaced with data: %s"
+    :remediation "Represent configuration/rules as EDN data rather than macro DSL"}}]}

@@ -1,0 +1,217 @@
+{:pack/id "kubernetes-safety"
+ :pack/name "Kubernetes Safety Pack"
+ :pack/version "2026.01.22"
+ :pack/description "Safety rules for Kubernetes deployments"
+ :pack/author "miniforge-official"
+ :pack/license "Apache-2.0"
+
+ :pack/categories
+ [{:category/id "410"
+   :category/name "Container Safety"
+   :category/rules [:410-no-latest-tag
+                    :411-no-privileged
+                    :412-resource-limits-required]}
+  {:category/id "430"
+   :category/name "Security Context"
+   :category/rules [:430-run-as-non-root]}]
+
+ :pack/rules
+ [;;============================================================================
+  ;; Category 410: Container Safety
+  ;;============================================================================
+
+  {:rule/id :410-no-latest-tag
+   :rule/title "No 'latest' image tags"
+   :rule/description "Container images must use explicit version tags, not 'latest'"
+   :rule/severity :major
+   :rule/category "410"
+
+   :rule/applies-to
+   {:file-globs ["**/*.yaml" "**/*.yml"]
+    :repo-types #{:kubernetes :argocd}}
+
+   :rule/detection
+   {:type :content-scan
+    :patterns [;; Explicit :latest tag
+               "image:\\s*\\S+:latest\\b"
+               ;; No tag at all (defaults to latest)
+               "image:\\s*[a-zA-Z0-9./-]+\\s*$"]}
+
+   :rule/agent-behavior
+   "Always use explicit image tags for reproducibility and rollback capability.
+
+    WRONG: image: nginx:latest
+    WRONG: image: nginx  (defaults to latest)
+    RIGHT: image: nginx:1.25.3
+    RIGHT: image: nginx@sha256:abc123...
+
+    Why this matters:
+    - latest tag can change at any time, causing unexpected behavior
+    - Rollbacks become impossible if you don't know which version was running
+    - Different nodes may pull different versions of 'latest'
+    - No audit trail of what version is deployed
+
+    Best practices:
+    - Use semantic version tags (1.25.3, v2.1.0)
+    - Even better: use SHA256 digests for immutability
+    - Pin to specific versions in production
+    - Use automated image scanning with pinned versions"
+
+   :rule/enforcement
+   {:action :hard-halt
+    :message "Image uses 'latest' tag or no tag: %s"
+    :remediation "Specify explicit version tag or SHA256 digest"}}
+
+  {:rule/id :411-no-privileged
+   :rule/title "No privileged containers"
+   :rule/description "Containers must not run in privileged mode"
+   :rule/severity :critical
+   :rule/category "410"
+
+   :rule/applies-to
+   {:file-globs ["**/*.yaml" "**/*.yml"]
+    :repo-types #{:kubernetes}}
+
+   :rule/detection
+   {:type :content-scan
+    :pattern "privileged:\\s*true"}
+
+   :rule/agent-behavior
+   "Privileged containers have full host access and bypass security controls.
+
+    What privileged mode grants:
+    - Full access to all host devices
+    - Can load kernel modules
+    - Can modify host network settings
+    - Bypasses all Linux capabilities restrictions
+    - Essentially root on the host machine
+
+    This is almost NEVER needed for application workloads. Only allowed for:
+    - CNI plugins (networking)
+    - Storage drivers (CSI)
+    - Node-level monitoring agents
+    - Specific infrastructure components
+
+    Instead of privileged: true, use specific capabilities:
+    securityContext:
+      capabilities:
+        add:
+          - NET_ADMIN  # Only if needed for networking
+          - SYS_TIME   # Only if needed to set time
+
+    If privileged is truly required, document:
+    1. Why specific capabilities aren't sufficient
+    2. What host resources are accessed
+    3. Get security team approval"
+
+   :rule/enforcement
+   {:action :hard-halt
+    :message "Privileged container detected"
+    :remediation "Remove privileged: true. Use specific capabilities instead if needed."}}
+
+  {:rule/id :412-resource-limits-required
+   :rule/title "Resource limits required"
+   :rule/description "All containers must specify CPU and memory limits"
+   :rule/severity :major
+   :rule/category "410"
+
+   :rule/applies-to
+   {:file-globs ["**/*.yaml" "**/*.yml"]
+    :repo-types #{:kubernetes}}
+
+   :rule/detection
+   {:type :custom
+    :custom-fn 'miniforge.packs.kubernetes/detect-missing-limits}
+
+   :rule/agent-behavior
+   "Every container must have resource requests AND limits:
+
+    resources:
+      requests:
+        memory: '128Mi'
+        cpu: '100m'
+      limits:
+        memory: '512Mi'
+        cpu: '500m'
+
+    Why this matters:
+    - Without limits, a single pod can consume all node resources
+    - Causes cascading failures (OOMKilled, CPU starvation)
+    - Makes capacity planning impossible
+    - Prevents Kubernetes from making good scheduling decisions
+
+    Guidelines for setting limits:
+    - requests: What the container needs under normal operation
+    - limits: Maximum the container should ever use
+    - Memory limit = 2-4x request is common
+    - CPU limit = 2-10x request (CPU is compressible)
+
+    For Java/JVM apps:
+    - Set -Xmx to ~75% of memory limit
+    - Account for off-heap memory
+
+    For Node.js apps:
+    - Use --max-old-space-size
+    - Memory limit should exceed max heap + overhead"
+
+   :rule/enforcement
+   {:action :hard-halt
+    :message "Container missing resource limits: %s"
+    :remediation "Add resources.limits.cpu and resources.limits.memory"}}
+
+  ;;============================================================================
+  ;; Category 430: Security Context
+  ;;============================================================================
+
+  {:rule/id :430-run-as-non-root
+   :rule/title "Run as non-root user"
+   :rule/description "Containers should not run as root"
+   :rule/severity :major
+   :rule/category "430"
+
+   :rule/applies-to
+   {:file-globs ["**/*.yaml" "**/*.yml"]
+    :repo-types #{:kubernetes}}
+
+   :rule/detection
+   {:type :custom
+    :custom-fn 'miniforge.packs.kubernetes/detect-root-user}
+
+   :rule/agent-behavior
+   "Set securityContext at pod or container level:
+
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+
+    Or at container level:
+    containers:
+      - name: app
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+
+    Why running as root is dangerous:
+    - Container escape vulnerabilities often require root
+    - Host filesystem access may be possible
+    - Kernel exploits are easier as root
+    - Reduces blast radius of compromised containers
+
+    If image requires root:
+    1. Consider using a different base image (distroless, alpine with non-root)
+    2. Use init containers for privileged setup, then drop to non-root
+    3. Rebuild image with USER directive
+    4. Document why root is required and get security approval
+
+    Many official images support non-root:
+    - nginx:1.25 - can run as non-root with proper config
+    - node:20-slim - use USER node
+    - python:3.12-slim - create non-root user in Dockerfile"
+
+   :rule/enforcement
+   {:action :warn
+    :message "Container may run as root"
+    :remediation "Add securityContext.runAsNonRoot: true"}}]}

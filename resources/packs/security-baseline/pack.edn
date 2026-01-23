@@ -1,0 +1,210 @@
+{:pack/id "security-baseline"
+ :pack/name "Security Baseline Pack"
+ :pack/version "2026.01.22"
+ :pack/description "Security best practices for all code"
+ :pack/author "miniforge-official"
+ :pack/license "Apache-2.0"
+
+ :pack/categories
+ [{:category/id "510"
+   :category/name "Secrets Management"
+   :category/rules [:510-no-hardcoded-secrets
+                    :511-no-secrets-in-logs]}
+  {:category/id "520"
+   :category/name "IAM Best Practices"
+   :category/rules [:520-no-wildcard-actions]}]
+
+ :pack/rules
+ [;;============================================================================
+  ;; Category 510: Secrets Management
+  ;;============================================================================
+
+  {:rule/id :510-no-hardcoded-secrets
+   :rule/title "No hardcoded secrets"
+   :rule/description "Secrets must not be hardcoded in source files"
+   :rule/severity :critical
+   :rule/category "510"
+
+   :rule/applies-to
+   {:file-globs ["**/*.clj" "**/*.cljc" "**/*.ts" "**/*.js"
+                 "**/*.py" "**/*.tf" "**/*.yaml" "**/*.yml"
+                 "**/*.json" "**/*.edn"]}
+
+   :rule/detection
+   {:type :content-scan
+    :patterns [;; API keys and tokens (generic)
+               "(?i)(api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token)\\s*[:=]\\s*['\"][a-zA-Z0-9_-]{16,}['\"]"
+               ;; AWS credentials
+               "AKIA[0-9A-Z]{16}"
+               "(?i)aws[_-]?secret[_-]?access[_-]?key\\s*[:=]\\s*['\"][^'\"]{40}['\"]"
+               ;; Private keys
+               "-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"
+               ;; Bearer tokens
+               "(?i)bearer\\s+[a-zA-Z0-9_-]{20,}"
+               ;; Generic passwords in config
+               "(?i)password\\s*[:=]\\s*['\"][^'\"]{8,}['\"]"
+               ;; GitHub tokens
+               "ghp_[a-zA-Z0-9]{36}"
+               "gho_[a-zA-Z0-9]{36}"
+               "ghu_[a-zA-Z0-9]{36}"
+               "ghs_[a-zA-Z0-9]{36}"
+               "ghr_[a-zA-Z0-9]{36}"
+               ;; Slack tokens
+               "xox[baprs]-[0-9a-zA-Z]{10,48}"
+               ;; Stripe keys
+               "sk_live_[0-9a-zA-Z]{24}"
+               "rk_live_[0-9a-zA-Z]{24}"]}
+
+   :rule/agent-behavior
+   "Never hardcode secrets in source code. Use one of these approaches:
+
+    Environment variables (simplest):
+    - Clojure: (System/getenv \"API_KEY\")
+    - Python: os.environ.get('API_KEY')
+    - TypeScript: process.env.API_KEY
+    - Terraform: variable \"api_key\" { sensitive = true }
+
+    Secrets manager (recommended for production):
+    - AWS Secrets Manager
+    - HashiCorp Vault
+    - Google Secret Manager
+    - Azure Key Vault
+
+    Kubernetes secrets:
+    - Mount as files: /var/secrets/api-key
+    - Inject as env vars via secretKeyRef
+
+    If you see what looks like a secret in code, flag it IMMEDIATELY:
+    1. Do not commit the change
+    2. If already committed, rotate the secret
+    3. Use git-secrets or similar pre-commit hooks
+    4. Check git history for exposed secrets
+
+    Common false positives to ignore:
+    - Example values in documentation (use 'xxx' or 'your-key-here')
+    - Test fixtures with obviously fake values
+    - Hash values (SHA256, MD5) that aren't secrets"
+
+   :rule/enforcement
+   {:action :hard-halt
+    :message "Possible hardcoded secret detected"
+    :remediation "Remove secret from code. Use environment variable or secrets manager."}}
+
+  {:rule/id :511-no-secrets-in-logs
+   :rule/title "No secrets in log statements"
+   :rule/description "Log statements must not include sensitive data"
+   :rule/severity :critical
+   :rule/category "510"
+
+   :rule/applies-to
+   {:file-globs ["**/*.clj" "**/*.cljc" "**/*.ts" "**/*.js" "**/*.py"]}
+
+   :rule/detection
+   {:type :content-scan
+    :patterns [;; Logging patterns with secret-like variable names
+               "(?i)(log|logger|console)\\.(info|debug|warn|error|log).*\\b(password|secret|token|api[_-]?key|credentials?)\\b"
+               ;; Clojure logging
+               "(?i)\\(log/(info|debug|warn|error).*\\b(password|secret|token|api[_-]?key|credentials?)\\b"
+               ;; Print statements (often used for debugging)
+               "(?i)(println|print|printf|fmt\\.Print).*\\b(password|secret|token|api[_-]?key|credentials?)\\b"]}
+
+   :rule/agent-behavior
+   "Secrets must never appear in logs. Logs are often:
+    - Stored unencrypted
+    - Accessible to many team members
+    - Sent to third-party log aggregators
+    - Retained for extended periods
+
+    Common mistakes:
+    - Logging full request/response bodies
+    - Debug logging of configuration objects
+    - Error messages that include credentials
+    - Logging user input without sanitization
+
+    Safe logging practices:
+    1. Log only what's necessary for debugging
+    2. Mask sensitive fields: 'api_key: ***REDACTED***'
+    3. Use structured logging with explicit field lists
+    4. Review log statements in code review
+
+    Example of safe logging:
+    (log/info \"API call completed\" {:user-id user-id :status status})
+    NOT: (log/info \"API call\" {:config config})  ; config may contain secrets
+
+    If you need to debug auth issues:
+    - Log that a token was present/absent, not the token itself
+    - Log token length or last 4 characters at most
+    - Use request IDs to correlate without exposing data"
+
+   :rule/enforcement
+   {:action :hard-halt
+    :message "Possible secret in log statement: %s"
+    :remediation "Remove sensitive data from log. Use redaction or omit entirely."}}
+
+  ;;============================================================================
+  ;; Category 520: IAM Best Practices
+  ;;============================================================================
+
+  {:rule/id :520-no-wildcard-actions
+   :rule/title "No wildcard IAM actions"
+   :rule/description "IAM policies must not use Action: '*'"
+   :rule/severity :critical
+   :rule/category "520"
+
+   :rule/applies-to
+   {:file-globs ["**/*.tf" "**/*.json"]
+    :resource-patterns ["aws_iam_policy" "aws_iam_role_policy"]}
+
+   :rule/detection
+   {:type :content-scan
+    :patterns [;; JSON format
+               "\"Action\"\\s*:\\s*\"\\*\""
+               "\"Action\"\\s*:\\s*\\[\\s*\"\\*\"\\s*\\]"
+               ;; HCL format
+               "Action\\s*=\\s*\\[\\s*\"\\*\"\\s*\\]"
+               "actions\\s*=\\s*\\[\\s*\"\\*\"\\s*\\]"
+               ;; Also catch service wildcards
+               "\"Action\"\\s*:\\s*\"[a-z0-9]+:\\*\""]}
+
+   :rule/agent-behavior
+   "IAM policies must follow the principle of least privilege:
+
+    WRONG:
+    {
+      \"Effect\": \"Allow\",
+      \"Action\": \"*\",
+      \"Resource\": \"*\"
+    }
+
+    RIGHT:
+    {
+      \"Effect\": \"Allow\",
+      \"Action\": [
+        \"s3:GetObject\",
+        \"s3:PutObject\"
+      ],
+      \"Resource\": \"arn:aws:s3:::my-bucket/*\"
+    }
+
+    Guidelines:
+    1. Specify exact actions needed (s3:GetObject, s3:PutObject)
+    2. Never use Action: '*' (admin access)
+    3. Scope resources to specific ARNs, not '*'
+    4. Use conditions to further restrict access
+
+    Service-level wildcards (e.g., s3:*) are also dangerous:
+    - s3:* includes s3:DeleteBucket
+    - ec2:* includes ec2:TerminateInstances
+    - iam:* includes iam:CreateUser (privilege escalation)
+
+    If broad access is truly needed:
+    1. Document business justification
+    2. Limit to specific resources/accounts
+    3. Add time-based conditions if possible
+    4. Get security team review
+    5. Consider using AWS Organizations SCPs as guardrails"
+
+   :rule/enforcement
+   {:action :hard-halt
+    :message "IAM policy uses wildcard action"
+    :remediation "Replace '*' with specific actions needed. Document if broad access required."}}]}

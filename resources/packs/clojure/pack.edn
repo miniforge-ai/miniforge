@@ -1,0 +1,179 @@
+{:pack/id "clojure"
+ :pack/name "Clojure Conventions Pack"
+ :pack/version "2026.01.22"
+ :pack/description "Clojure and Polylith coding conventions"
+ :pack/author "miniforge-official"
+ :pack/license "Apache-2.0"
+
+ :pack/extends
+ [{:pack-id "foundations" :version-constraint ">=2026.01.01"}]
+
+ :pack/categories
+ [{:category/id "210"
+   :category/name "Polylith Architecture"
+   :category/rules [:210-interface-only-deps]}
+  {:category/id "211"
+   :category/name "Per-File Stratification"
+   :category/rules [:211-layer-headings
+                    :211-max-three-layers
+                    :211-comment-block-last]}]
+
+ :pack/rules
+ [;;============================================================================
+  ;; Category 210: Polylith Architecture
+  ;;============================================================================
+
+  {:rule/id :210-interface-only-deps
+   :rule/title "Cross-component deps must target interface"
+   :rule/description "Components may only depend on other components via their .interface namespace"
+   :rule/severity :major
+   :rule/category "210"
+
+   :rule/applies-to
+   {:file-globs ["components/**/src/**/*.clj" "components/**/src/**/*.cljc"]}
+
+   :rule/detection
+   {:type :content-scan
+    :patterns [;; Importing .core directly from another component
+               "\\[ai\\.miniforge\\.\\w+\\.core\\s"
+               "\\[ai\\.miniforge\\.\\w+\\.impl\\s"
+               ;; require with .core or .impl suffix
+               "require.*\\.core\\]"
+               "require.*\\.impl\\]"]}
+
+   :rule/agent-behavior
+   "For cross-component calls, target ...<other>.interface - surface a fix if .core is used.
+
+    Polylith architecture rules:
+    - Workspace: components/, bases/, projects/
+    - Cross-component deps must target ...<component>.interface (not .core)
+    - bases can depend on component interfaces
+    - projects can depend on bases and component interfaces
+    - components may depend on other components only via their .interface ns
+    - Never depend on projects from bases or components
+
+    WRONG: [ai.miniforge.agent.core :as agent-core]
+    RIGHT: [ai.miniforge.agent.interface :as agent]
+
+    When you see a violation, suggest changing the require to use .interface instead."
+
+   :rule/enforcement
+   {:action :hard-halt
+    :message "Direct dependency on component implementation: %s"
+    :remediation "Change to .interface namespace"}}
+
+  ;;============================================================================
+  ;; Category 211: Per-File Stratification
+  ;;============================================================================
+
+  {:rule/id :211-layer-headings
+   :rule/title "Use layer headings in namespaces"
+   :rule/description "Structure each ns with labeled strata as headings"
+   :rule/severity :minor
+   :rule/category "211"
+
+   :rule/applies-to
+   {:file-globs ["components/**/src/**/*.clj" "bases/**/src/**/*.clj"]}
+
+   :rule/detection
+   {:type :content-scan
+    ;; Multiple defns without any layer separator comment between them
+    :patterns ["\\)\\s*\\n\\s*\\(defn\\s"]}
+
+   :rule/agent-behavior
+   "When creating/editing a namespace:
+    1) Insert/maintain Layer 0/1/2 headings: ;-------------- Layer N
+    2) Keep them monotonic increasing (0 -> 1 -> 2)
+    3) Keep pure helpers in Layer 0
+    4) Put orchestration in higher layers
+
+    Example structure:
+    ;------------------------------------------------------------------------------ Layer 0
+    ;; Pure helpers and value-level functions
+
+    (defn helper-fn [x] ...)
+
+    ;------------------------------------------------------------------------------ Layer 1
+    ;; Functions that compose Layer 0
+
+    (defn orchestrate-fn [data] ...)
+
+    ;------------------------------------------------------------------------------ Layer 2
+    ;; Entry points and side-effecting operations
+
+    (defn main-entry [args] ...)
+
+    Reverse DAG: Layer 0 at top (pure/value-level); higher layers may call lower ones but not vice-versa."
+
+   :rule/enforcement
+   {:action :warn
+    :message "Namespace lacks layer headings"
+    :remediation "Add layer heading comments to organize code by abstraction level"}}
+
+  {:rule/id :211-max-three-layers
+   :rule/title "Maximum 3 layers per file"
+   :rule/description "If you need more than 3 strata, split the namespace"
+   :rule/severity :minor
+   :rule/category "211"
+
+   :rule/applies-to
+   {:file-globs ["components/**/src/**/*.clj"]}
+
+   :rule/detection
+   {:type :content-scan
+    :pattern "Layer\\s+[4-9]"}
+
+   :rule/agent-behavior
+   "If you cross 3 layers, propose a split into another namespace.
+
+    Max 3 strata per file keeps code comprehensible:
+    - Layer 0: Pure helpers, no side effects
+    - Layer 1: Orchestration depending on Layer 0
+    - Layer 2: Entry points, side effects
+
+    If Layer 3+ emerges, the namespace is doing too much. Split by:
+    - Extracting pure helpers to a separate utilities namespace
+    - Moving orchestration to a dedicated coordinator namespace
+    - Separating concerns into distinct components"
+
+   :rule/enforcement
+   {:action :warn
+    :message "More than 3 layers detected"
+    :remediation "Split into separate namespaces to maintain clarity"}}
+
+  {:rule/id :211-comment-block-last
+   :rule/title "Rich comment block must be last"
+   :rule/description "Reserve the very bottom of file for (comment ...) section. No def/defn after it."
+   :rule/severity :minor
+   :rule/category "211"
+
+   :rule/applies-to
+   {:file-globs ["**/*.clj" "**/*.cljc"]}
+
+   :rule/detection
+   {:type :content-scan
+    :pattern "\\(comment[\\s\\S]*?\\)\\s*\\n\\s*\\(def"}
+
+   :rule/agent-behavior
+   "Ensure the last top-level form is a single (comment ...) block with quick REPL samples.
+
+    The rich comment block serves as:
+    - REPL-driven development playground
+    - Usage examples for the namespace
+    - Quick test cases during development
+
+    Correct structure:
+    (defn my-fn [x] ...)
+
+    (comment
+      ;; REPL examples
+      (my-fn 42)
+      (-> data transform process)
+      )  ;; End of file
+
+    No def/defn/defmacro should appear after the comment block."
+
+   :rule/enforcement
+   {:action :warn
+    :message "Code appears after (comment ...) block"
+    :remediation "Move all def/defn above the comment block"}}]}

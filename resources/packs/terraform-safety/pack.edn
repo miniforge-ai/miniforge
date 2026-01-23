@@ -1,0 +1,252 @@
+{:pack/id "terraform-safety"
+ :pack/name "Terraform Safety Pack"
+ :pack/version "2026.01.22"
+ :pack/description "Essential safety rules for Terraform infrastructure changes"
+ :pack/author "miniforge-official"
+ :pack/license "Apache-2.0"
+
+ :pack/categories
+ [{:category/id "310"
+   :category/name "Import Safety"
+   :category/rules [:310-import-block-preservation
+                    :311-import-no-creates]}
+  {:category/id "320"
+   :category/name "Network Safety"
+   :category/rules [:320-network-recreation-block]}
+  {:category/id "330"
+   :category/name "State Safety"
+   :category/rules [:330-state-drift-detection]}
+  {:category/id "340"
+   :category/name "Data Safety"
+   :category/rules [:340-s3-lifecycle-data-loss]}]
+
+ :pack/rules
+ [;;============================================================================
+  ;; Category 310: Import Safety
+  ;;============================================================================
+
+  {:rule/id :310-import-block-preservation
+   :rule/title "Preserve import blocks during IMPORT tasks"
+   :rule/description "When task type is IMPORT, never remove import blocks"
+   :rule/severity :critical
+   :rule/category "310"
+
+   :rule/applies-to
+   {:task-types #{:import}
+    :file-globs ["**/*.tf" "**/terragrunt.hcl"]}
+
+   :rule/detection
+   {:type :diff-analysis
+    :pattern "^-\\s*import\\s*\\{"
+    :context-lines 5}
+
+   :rule/agent-behavior
+   "When Atlantis reports 'resource already exists':
+    - WRONG interpretation: Remove import block (agent thinks import is done)
+    - RIGHT interpretation: Keep import block (resource exists in AWS, import is working)
+
+    Only remove import block when Atlantis reports 'already managed by Terraform'.
+
+    Error interpretation guide:
+    | Error Message                    | Meaning                          | Action                    |
+    |----------------------------------|----------------------------------|---------------------------|
+    | 'resource already exists'        | Resource in AWS, import working  | KEEP import block         |
+    | 'already managed by Terraform'   | Import complete                  | OK to remove import block |
+    | 'resource not found'             | Resource doesn't exist           | Check AWS, maybe create   |
+
+    CRITICAL: During IMPORT tasks, the import block is how Terraform knows to import rather than create.
+    Removing it prematurely causes Terraform to try creating a resource that already exists."
+
+   :rule/enforcement
+   {:action :hard-halt
+    :message "Cannot remove import blocks during IMPORT task"
+    :remediation "Restore the import block and re-run the plan"}
+
+   :rule/examples
+   [{:description "Agent removes import block thinking import is done"
+     :input "- import {\n-   to = aws_s3_bucket.logs\n-   id = \"my-bucket\"\n- }"
+     :expected :fail
+     :explanation "Import block removal forbidden during IMPORT task"}
+    {:description "Import block unchanged"
+     :input "  import {\n    to = aws_s3_bucket.logs\n    id = \"my-bucket\"\n  }"
+     :expected :pass}]}
+
+  {:rule/id :311-import-no-creates
+   :rule/title "IMPORT tasks must not create resources"
+   :rule/description "When task type is IMPORT, plan should show 0 resources to create"
+   :rule/severity :critical
+   :rule/category "310"
+
+   :rule/applies-to
+   {:task-types #{:import}}
+
+   :rule/detection
+   {:type :plan-output
+    :pattern "Plan:.*[1-9]\\d* to add"}
+
+   :rule/agent-behavior
+   "For IMPORT tasks, the terraform plan should show:
+    - 0 to add (no creates)
+    - 0 to destroy (no destroys)
+    - N to change (importing existing resources)
+
+    If 'to add' > 0, something is wrong:
+    - The import block may reference the wrong resource ID
+    - The resource might not exist in AWS
+    - The resource address in 'to' may not match your configuration
+
+    Debugging steps:
+    1. Verify resource exists in AWS console/CLI
+    2. Confirm the import ID matches the AWS resource identifier
+    3. Check that 'to' address matches a resource block in your .tf files
+    4. Ensure no typos in resource type or name"
+
+   :rule/enforcement
+   {:action :hard-halt
+    :message "IMPORT task would create %d new resources - this violates import semantics"
+    :remediation "Verify resource exists in AWS and import block references correct ID"}}
+
+  ;;============================================================================
+  ;; Category 320: Network Safety
+  ;;============================================================================
+
+  {:rule/id :320-network-recreation-block
+   :rule/title "Block recreation of network resources"
+   :rule/description "Prevent destroy-then-create operations on critical network infrastructure"
+   :rule/severity :critical
+   :rule/category "320"
+
+   :rule/applies-to
+   {:file-globs ["**/*.tf"]}
+
+   :rule/detection
+   {:type :plan-output
+    :patterns ["-/\\+\\s+aws_route\\b"
+               "-/\\+\\s+aws_route_table\\b"
+               "-/\\+\\s+aws_subnet\\b"
+               "-/\\+\\s+aws_nat_gateway\\b"
+               "-/\\+\\s+aws_vpc\\b"
+               "-/\\+\\s+aws_security_group\\b"
+               "-/\\+\\s+aws_internet_gateway\\b"
+               "-/\\+\\s+aws_vpc_peering_connection\\b"]}
+
+   :rule/agent-behavior
+   "HIGHEST PRIORITY - Network resources affect all services:
+    - aws_route, aws_route_table
+    - aws_subnet, aws_nat_gateway
+    - aws_vpc, aws_internet_gateway
+    - aws_security_group (if attached to instances)
+    - aws_vpc_peering_connection
+
+    Recreation (-/+) of these resources causes:
+    - Service outage during recreation window
+    - IP address changes breaking DNS/routing
+    - Security group detachment from running instances
+    - NAT gateway replacement = all outbound traffic blocked
+    - VPC peering = cross-account connectivity lost
+
+    The -/+ symbol in terraform plan means 'destroy then create' (replacement).
+    This is DIFFERENT from ~ (in-place update) which is usually safe.
+
+    If recreation is truly required:
+    1. Document blast radius (which services will be affected)
+    2. Schedule maintenance window
+    3. Get explicit approval from senior engineer
+    4. Consider blue-green deployment instead"
+
+   :rule/enforcement
+   {:action :require-approval
+    :approvers [:human :senior-engineer]
+    :message "Network resource recreation detected: %s"
+    :remediation "Review plan carefully. Consider lifecycle { prevent_destroy = true }. Document blast radius."}}
+
+  ;;============================================================================
+  ;; Category 330: State Safety
+  ;;============================================================================
+
+  {:rule/id :330-state-drift-detection
+   :rule/title "Detect and flag state drift"
+   :rule/description "Warn when terraform plan shows unexpected changes from manual modifications"
+   :rule/severity :major
+   :rule/category "330"
+
+   :rule/applies-to
+   {:file-globs ["**/*.tf"]}
+
+   :rule/detection
+   {:type :plan-output
+    :patterns [;; Changes that weren't in the PR diff
+               "~ resource.*will be updated"
+               "Note: Objects have changed outside of Terraform"]}
+
+   :rule/agent-behavior
+   "State drift occurs when AWS resources are modified outside of Terraform (console, CLI, other tools).
+
+    When drift is detected:
+    1. DO NOT blindly apply - you might overwrite intentional manual changes
+    2. Investigate WHY the drift occurred:
+       - Emergency hotfix that wasn't back-ported to Terraform?
+       - Another team made changes?
+       - AWS made automatic changes (security patches, etc.)?
+    3. Decide on action:
+       - If drift was intentional: Update Terraform to match reality
+       - If drift was accidental: Terraform apply will fix it
+       - If unsure: Consult with the team before proceeding
+
+    Use 'terraform refresh' to update state without applying changes.
+    Use 'terraform import' if new resources were created manually."
+
+   :rule/enforcement
+   {:action :warn
+    :message "State drift detected - resources changed outside Terraform"
+    :remediation "Investigate drift cause before applying. Run terraform refresh if needed."}}
+
+  ;;============================================================================
+  ;; Category 340: Data Safety
+  ;;============================================================================
+
+  {:rule/id :340-s3-lifecycle-data-loss
+   :rule/title "S3 lifecycle rules that delete data require approval"
+   :rule/description "Flag lifecycle expiration rules that permanently delete objects"
+   :rule/severity :major
+   :rule/category "340"
+
+   :rule/applies-to
+   {:file-globs ["**/*.tf"]}
+
+   :rule/detection
+   {:type :content-scan
+    :patterns ["expiration\\s*\\{[^}]*days\\s*=\\s*\\d+"
+               "noncurrent_version_expiration"
+               "abort_incomplete_multipart_upload"]}
+
+   :rule/agent-behavior
+   "S3 lifecycle rules that expire objects result in PERMANENT DATA LOSS.
+
+    Before adding expiration rules, verify:
+    1. Data is not needed for compliance/audit (HIPAA, SOC2, legal holds)
+    2. Retention period meets business requirements
+    3. Cross-region replication provides backup (if needed)
+    4. Versioning is enabled for accidental deletion recovery
+
+    Safe patterns:
+    - Transition to GLACIER/DEEP_ARCHIVE (not delete) - saves cost while preserving data
+    - Expire only noncurrent versions after backup period - keeps current version
+    - Expire incomplete multipart uploads (usually safe after 7 days)
+
+    Dangerous patterns:
+    - expiration { days = N } on current versions - data is GONE after N days
+    - Combining expiration with disabled versioning - no recovery possible
+
+    Risk levels:
+    | Pattern                           | Risk     | Notes                        |
+    |-----------------------------------|----------|------------------------------|
+    | abort_incomplete_multipart_upload | Low      | Cleans up failed uploads     |
+    | noncurrent_version_expiration     | Medium   | Affects old versions only    |
+    | expiration on current versions    | HIGH     | Permanent data loss          |"
+
+   :rule/enforcement
+   {:action :require-approval
+    :approvers [:human]
+    :message "S3 lifecycle rule may cause data loss: %s"
+    :remediation "Confirm data retention requirements. Consider transition instead of expiration."}}]}
