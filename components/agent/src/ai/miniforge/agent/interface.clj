@@ -1,15 +1,18 @@
 (ns ai.miniforge.agent.interface
   "Public API for the agent component.
-   Provides agent creation, execution, and memory management.
+   Provides agent creation, execution, memory management, and inter-agent messaging.
 
    Agents are pure functions: (context, task) -> (artifacts, decisions, signals)"
   (:require
    [ai.miniforge.agent.core :as core]
    [ai.miniforge.agent.interface.protocols.agent :as agent-proto]
    [ai.miniforge.agent.interface.protocols.memory :as mem-proto]
+   [ai.miniforge.agent.interface.protocols.messaging :as msg-proto]
    [ai.miniforge.agent.protocols.records.memory :as mem-records]
    [ai.miniforge.agent.protocols.records.specialized :as specialized-records]
+   [ai.miniforge.agent.protocols.records.messaging :as msg-records]
    [ai.miniforge.agent.protocols.impl.memory :as mem-impl]
+   [ai.miniforge.agent.protocols.impl.messaging :as msg-impl]
    [ai.miniforge.agent.planner :as planner]
    [ai.miniforge.agent.implementer :as implementer]
    [ai.miniforge.agent.tester :as tester]
@@ -24,6 +27,9 @@
 (def LLMBackend agent-proto/LLMBackend)
 (def Memory mem-proto/Memory)
 (def MemoryStore mem-proto/MemoryStore)
+(def InterAgentMessaging msg-proto/InterAgentMessaging)
+(def MessageRouter msg-proto/MessageRouter)
+(def MessageValidator msg-proto/MessageValidator)
 
 ;; Configuration re-exports
 (def default-role-configs core/default-role-configs)
@@ -243,6 +249,163 @@
   (mem-proto/list-memories store scope scope-id))
 
 ;------------------------------------------------------------------------------ Layer 6
+;; Inter-Agent Messaging
+
+(defn create-message-router
+  "Create a message router for inter-agent communication.
+
+   The router maintains message queues and handles delivery.
+
+   Example:
+     (create-message-router)"
+  []
+  (msg-records/create-message-router))
+
+(defn create-agent-messaging
+  "Create messaging capability for an agent.
+
+   Required:
+   - agent-id    - Agent role keyword (:planner, :implementer, etc.)
+   - instance-id - Agent instance UUID
+   - workflow-id - Workflow UUID
+   - router      - MessageRouter instance
+
+   Example:
+     (create-agent-messaging :implementer instance-id workflow-id router)"
+  [agent-id instance-id workflow-id router]
+  (msg-records/create-agent-messaging agent-id instance-id workflow-id router))
+
+(defn send-message
+  "Send a message from one agent to another.
+
+   Arguments:
+   - agent-messaging - AgentMessaging instance
+   - message-data    - Map with :type, :to-agent, :content
+
+   Returns:
+     {:message message-map :event event-map}
+
+   Example:
+     (send-message messaging
+                   {:type :clarification-request
+                    :to-agent :planner
+                    :content \"Should we create new security group?\"})"
+  [agent-messaging message-data]
+  (msg-proto/send-message agent-messaging message-data))
+
+(defn receive-messages
+  "Get all messages received by an agent.
+
+   Returns sequence of message maps."
+  [agent-messaging]
+  (msg-proto/receive-messages agent-messaging))
+
+(defn respond-to-message
+  "Send a response to a received message.
+
+   Arguments:
+   - agent-messaging  - AgentMessaging instance
+   - original-message - The message being responded to
+   - response-content - Response content string
+
+   Example:
+     (respond-to-message messaging original-msg \"Yes, create new sg.\")"
+  [agent-messaging original-message response-content]
+  (msg-proto/respond-to-message agent-messaging original-message response-content))
+
+;; Convenience functions for specific message types
+
+(defn send-clarification-request
+  "Send a clarification request to another agent.
+
+   Example:
+     (send-clarification-request messaging :planner \"Clarify X?\")"
+  [agent-messaging to-agent content]
+  (msg-records/send-clarification-request agent-messaging to-agent content))
+
+(defn send-concern
+  "Send a concern to another agent.
+
+   Example:
+     (send-concern messaging :implementer \"Security concern: ...\")"
+  [agent-messaging to-agent content]
+  (msg-records/send-concern agent-messaging to-agent content))
+
+(defn send-suggestion
+  "Send a suggestion to another agent.
+
+   Example:
+     (send-suggestion messaging :tester \"Consider adding edge case test\")"
+  [agent-messaging to-agent content]
+  (msg-records/send-suggestion agent-messaging to-agent content))
+
+(defn get-clarification-requests
+  "Get all clarification requests received by agent."
+  [agent-messaging]
+  (msg-records/get-clarification-requests agent-messaging))
+
+(defn get-concerns
+  "Get all concerns received by agent."
+  [agent-messaging]
+  (msg-records/get-concerns agent-messaging))
+
+(defn get-suggestions
+  "Get all suggestions received by agent."
+  [agent-messaging]
+  (msg-records/get-suggestions agent-messaging))
+
+;; Router operations
+
+(defn route-message
+  "Route a message to its recipient (internal use).
+
+   Returns the routed message with delivery metadata."
+  [router message]
+  (msg-proto/route-message router message))
+
+(defn get-messages-for-agent
+  "Get all messages for a specific agent in a workflow.
+
+   Example:
+     (get-messages-for-agent router :implementer workflow-id)"
+  [router agent-id workflow-id]
+  (msg-proto/get-messages-for-agent router agent-id workflow-id))
+
+(defn get-messages-by-workflow
+  "Get all messages in a workflow, ordered by timestamp.
+
+   Example:
+     (get-messages-by-workflow router workflow-id)"
+  [router workflow-id]
+  (msg-proto/get-messages-by-workflow router workflow-id))
+
+(defn clear-workflow-messages
+  "Clear all messages for a workflow.
+
+   Example:
+     (clear-workflow-messages router workflow-id)"
+  [router workflow-id]
+  (msg-proto/clear-messages router workflow-id))
+
+;; Message validation and schemas
+
+(defn validate-message
+  "Validate a message against the schema.
+
+   Returns {:valid? boolean :errors [...]}"
+  [message]
+  (msg-impl/validate-message-impl message))
+
+(def Message
+  "Message schema for validation.
+   See ai.miniforge.agent.protocols.impl.messaging/Message"
+  msg-impl/Message)
+
+(def MessageType
+  "Valid message types: :clarification-request, :clarification-response, :concern, :suggestion"
+  msg-impl/MessageType)
+
+;------------------------------------------------------------------------------ Layer 7
 ;; Utility functions
 
 (defn estimate-tokens
@@ -273,7 +436,7 @@
   ([] (core/create-mock-llm))
   ([responses] (core/create-mock-llm responses)))
 
-;------------------------------------------------------------------------------ Layer 7
+;------------------------------------------------------------------------------ Layer 8
 ;; Specialized agent support
 
 (defn create-base-agent
@@ -307,7 +470,7 @@
   [agent context input & {:keys [max-iterations] :or {max-iterations 3}}]
   (specialized-records/cycle-agent agent context input :max-iterations max-iterations))
 
-;------------------------------------------------------------------------------ Layer 8
+;------------------------------------------------------------------------------ Layer 9
 ;; Specialized agent creation
 
 (def create-planner
@@ -330,7 +493,7 @@
    The Reviewer runs static analysis gates without using an LLM."
   reviewer/create-reviewer)
 
-;------------------------------------------------------------------------------ Layer 8
+;------------------------------------------------------------------------------ Layer 10
 ;; Specialized agent schemas
 
 ;; Planner schemas
@@ -350,7 +513,7 @@
 (def ReviewArtifact reviewer/ReviewArtifact)
 (def GateFeedback reviewer/GateFeedback)
 
-;------------------------------------------------------------------------------ Layer 9
+;------------------------------------------------------------------------------ Layer 11
 ;; Specialized agent utilities
 
 ;; Planner utilities
@@ -478,5 +641,91 @@
   default-role-configs
   role-capabilities
   role-system-prompts
+
+  ;; Inter-Agent Messaging
+  ;; ---------------------
+
+  ;; 1. Create message router and agent messaging capabilities
+  (def router (create-message-router))
+  (def workflow-id (random-uuid))
+  (def planner-id (random-uuid))
+  (def implementer-id (random-uuid))
+
+  (def planner-messaging
+    (create-agent-messaging :planner planner-id workflow-id router))
+
+  (def implementer-messaging
+    (create-agent-messaging :implementer implementer-id workflow-id router))
+
+  ;; 2. Send clarification request from implementer to planner
+  (def {:keys [message event]}
+    (send-clarification-request
+     implementer-messaging
+     :planner
+     "Should we create a new security group or reuse sg-prod-rds?"))
+
+  ;; The event can be emitted to the event stream
+  ;; event => {:event/type :agent/message-sent
+  ;;          :from-agent/id :implementer
+  ;;          :to-agent/id :planner
+  ;;          :message-type :clarification-request
+  ;;          ...}
+
+  ;; 3. Planner receives messages
+  (def planner-inbox (receive-messages planner-messaging))
+  ;; => [{:message/id #uuid "..."
+  ;;      :message/type :clarification-request
+  ;;      :message/from-agent :implementer
+  ;;      :message/to-agent :planner
+  ;;      :message/content "Should we create..."
+  ;;      ...}]
+
+  ;; 4. Get specific types of messages
+  (def clarifications (get-clarification-requests planner-messaging))
+
+  ;; 5. Planner responds to the clarification request
+  (def {:keys [message event]}
+    (respond-to-message
+     planner-messaging
+     (first planner-inbox)
+     "Reuse the existing security group sg-prod-rds to maintain consistency."))
+
+  ;; 6. Implementer checks for responses
+  (def implementer-inbox (receive-messages implementer-messaging))
+  ;; Will contain the response from planner
+
+  ;; 7. Send concern from reviewer to implementer
+  (def reviewer-messaging
+    (create-agent-messaging :reviewer (random-uuid) workflow-id router))
+
+  (send-concern
+   reviewer-messaging
+   :implementer
+   "Policy violation: Missing required tags on S3 bucket resource.")
+
+  ;; 8. Send suggestion from tester to implementer
+  (def tester-messaging
+    (create-agent-messaging :tester (random-uuid) workflow-id router))
+
+  (send-suggestion
+   tester-messaging
+   :implementer
+   "Consider adding error handling for network timeout scenarios.")
+
+  ;; 9. Query all messages in workflow
+  (def all-workflow-messages (get-messages-by-workflow router workflow-id))
+  ;; Returns all messages ordered by timestamp
+
+  ;; 10. Validate message structure
+  (def example-message {:type :clarification-request :to-agent :planner :content "..."})
+  (validate-message example-message)
+  ;; => {:valid? true :errors []}
+
+  ;; 11. Filter messages by type
+  (def concerns (get-concerns implementer-messaging))
+  (def suggestions (get-suggestions implementer-messaging))
+
+  ;; 12. Clean up workflow messages
+  (clear-workflow-messages router workflow-id)
 
   :leave-this-here)
