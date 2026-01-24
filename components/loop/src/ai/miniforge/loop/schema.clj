@@ -166,6 +166,13 @@
    [:loop/created-at {:optional true} :common/timestamp]
    [:loop/updated-at {:optional true} :common/timestamp]
 
+   ;; Escalation (optional)
+   [:loop/escalation {:optional true}
+    [:map
+     [:hints {:optional true} string?]
+     [:resumed-at {:optional true} :common/timestamp]]]
+   [:loop/override-termination? {:optional true} boolean?]
+
    ;; Termination
    [:loop/termination {:optional true}
     [:map

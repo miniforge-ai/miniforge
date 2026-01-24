@@ -234,6 +234,26 @@
       (is (:success result))
       (is (= 2 (:iterations result)))))
 
+  (testing "escalation with hints resumes generation"
+    (let [hints-seen (atom nil)
+          loop-state (inner/create-inner-loop test-task {:max-iterations 1})
+          generate-fn (fn [_task ctx]
+                        (when-let [hints (:escalation-hints ctx)]
+                          (reset! hints-seen hints))
+                        (if (:escalation-hints ctx)
+                          {:artifact (valid-artifact) :tokens 10}
+                          {:artifact (invalid-artifact) :tokens 10}))
+          escalation-fn (fn [_state & _opts] {:action :continue :hints "use this"})
+          result (inner/run-inner-loop loop-state
+                                       generate-fn
+                                       (gates/minimal-gates)
+                                       [(repair/retry-strategy {:delay-ms 0})]
+                                       {:escalation-fn escalation-fn})]
+      (is (:success result))
+      (is (= 2 (:iterations result)))
+      (is (= "use this" @hints-seen))
+      (is (= :gates-passed (get-in result [:termination :reason])))))
+
   (testing "max iterations escalates"
     (let [loop-state (inner/create-inner-loop test-task {:max-iterations 2})
           generate-fn (make-generate-fn (invalid-artifact))
