@@ -1,3 +1,8 @@
+---
+description: PR documentation guidelines
+alwaysApply: true
+---
+
 # Pull Request Documentation Convention
 
 ## Purpose
@@ -14,9 +19,9 @@ Maintain structured, version-controlled documentation for all pull requests to p
 ```zsh
 docs/
 └── pull-requests/
-    ├── 2025-11-04-migrate-rds-api-mysql.md
-    ├── 2025-11-15-feature-xyz.md
-    └── 2025-12-01-refactor-abc.md
+    ├── 2026-01-04-migrate-protocols-to-composition-pattern.md
+    ├── 2026-01-15-feat-add-fsm-component.md
+    └── 2026-02-01-refactor-workflow-unit-tests.md
 ```
 
 ## Naming Convention
@@ -137,12 +142,12 @@ When creating a PR or preparing to open one:
 
 ```bash
 # When user says: "Let's create a PR for this migration"
-1. Create: docs/pull-requests/2025-11-04-migrate-rds-api-mysql.md
+1. Create: docs/pull-requests/2026-01-04-migrate-protocols-to-composition-pattern.md`
 2. Write comprehensive PR description in that file
 3. Commit the file along with the changes:
-   git add docs/pull-requests/2025-11-04-migrate-rds-api-mysql.md
+   git add docs/pull-requests/2026-01-04-migrate-protocols-to-composition-pattern.md`
 4. Reference in commit message:
-   "feat: migrate RDS (see docs/pull-requests/2025-11-04-migrate-rds-api-mysql.md)"
+   "feat: migrate protocols (see docs/pull-requests/2026-01-04-migrate-protocols-to-composition-pattern.md')"
 ```
 
 ## Repository Maintenance
@@ -189,9 +194,9 @@ docs/pull-requests/
 
 ### Good PR Doc Names
 
-- `2025-11-04-migrate-rds-api-mysql.md`
-- `2025-11-15-feat-aws-rds-secrets-module.md`
-- `2025-12-01-refactor-terraform-structure.md`
+- `2026-01-04-migrate-protocols-to-composition-pattern.md`
+- `2026-01-15-feat-add-fsm-component.md`
+- `2026-02-01-refactor-workflow-unit-tests.md`
 
 ### Bad PR Doc Names
 

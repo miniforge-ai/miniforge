@@ -24,7 +24,7 @@ Uses Dewey Decimal principles: hierarchical, numeric, extensible.
 
 ## Directory Structure
 
-```
+```zsh
 .cursor/rules/
 ├── 000-index.mdc                    # This catalog
 ├── 000-foundations/
@@ -47,6 +47,7 @@ Uses Dewey Decimal principles: hierarchical, numeric, extensible.
 ## Current Rules
 
 ### 000-foundations/
+
 | ID | File | Description |
 |----|------|-------------|
 | 001 | `001-stratified-design` | One-way DAG dependencies, layered architecture |
@@ -54,17 +55,20 @@ Uses Dewey Decimal principles: hierarchical, numeric, extensible.
 | 020 | `020-specification-standards` | Normative specs (N1-N6), spec governance, conformance |
 
 ### 200-languages/
+
 | ID | File | Description |
 |----|------|-------------|
 | 210 | `210-clojure` | Polylith + per-file stratified design |
 | 220 | `220-python` | Poetry, functional Python |
 
 ### 300-frameworks/
+
 | ID | File | Description |
 |----|------|-------------|
 | 320 | `320-kubernetes` | K8s/Kustomize/ArgoCD conventions |
 
 ### 700-workflows/
+
 | ID | File | Description |
 |----|------|-------------|
 | 710 | `710-git-branch-management` | Branch from main, single-purpose PRs |
@@ -73,6 +77,7 @@ Uses Dewey Decimal principles: hierarchical, numeric, extensible.
 | 730 | `730-datever` | Date-based versioning strategy |
 
 ### 900-meta/
+
 | ID | File | Description |
 |----|------|-------------|
 | 900 | `900-rule-format` | Rule creation template & Dewey classification |

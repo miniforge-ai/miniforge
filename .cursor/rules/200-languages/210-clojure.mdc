@@ -41,17 +41,21 @@ globs:
 ### Interface.clj pattern (CRITICAL)
 
 **Layer guidance for interfaces:**
+
 - The 3-layer maximum is **not a hard rule** for pure interface files that only contain pass-through functions
 - However, if an interface has many layers (>5), it may indicate the component is doing too much
 - Consider splitting large components into smaller, focused components to maintain simplicity and clear boundaries
-- Example: An agent component with 10 layers of pass-throughs might be better as separate planner, implementer, and tester components
+- Example: An agent component with 10 layers of pass-throughs might be better as separate planner,<br>
+implementer, and tester components
 
 **Interface requirements:**
+
 - **interface.clj must contain ALL public functions** for the component
 - **interface.clj should contain NO implementations** — only thin pass-throughs
 - Pass-through functions forward to implementation functions in `core.clj` or other namespaces within the component
 - Input validation (specs) should happen in interface before forwarding
 - Example:
+
   ```clojure
   ;; CORRECT: interface.clj
   (defn create-task

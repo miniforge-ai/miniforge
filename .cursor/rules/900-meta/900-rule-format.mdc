@@ -40,7 +40,7 @@ Invalid concise example with explanation
 - Extension: `.mdc`
 - Structure: `<category-folder>/<NNN-name>.mdc`
 
-```
+```zsh
 .cursor/rules/
 ├── 000-index.mdc           # Master catalog (root level)
 ├── 000-foundations/        # Core principles
