@@ -17,7 +17,8 @@
         ai.miniforge/response {:local/root "../../components/response"}
         ai.miniforge/fsm {:local/root "../../components/fsm"}
         ai.miniforge/phase {:local/root "../../components/phase"}
-        ai.miniforge/gate {:local/root "../../components/gate"}}
+        ai.miniforge/gate {:local/root "../../components/gate"}
+        ai.miniforge/evidence-bundle {:local/root "../../components/evidence-bundle"}}
 
  :aliases
  {:uberjar
