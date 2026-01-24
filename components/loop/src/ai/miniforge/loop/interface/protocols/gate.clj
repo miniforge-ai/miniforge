@@ -18,4 +18,12 @@
   (gate-id [this]
     "Return the unique identifier for this gate.")
   (gate-type [this]
-    "Return the gate type: :syntax, :lint, :test, :policy, :custom"))
+    "Return the gate type: :syntax, :lint, :test, :policy, :custom")
+  (repair [this artifact violations context]
+    "Attempt to repair artifact to fix violations.
+     Returns:
+     {:repaired? boolean
+      :artifact artifact         ; Repaired artifact (if repaired? true)
+      :changes [...]             ; List of changes made
+      :remaining-violations [...]} ; Violations that couldn't be fixed
+     If gate cannot perform repairs, return {:repaired? false}"))

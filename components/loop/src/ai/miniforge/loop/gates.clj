@@ -17,6 +17,7 @@
 (def check p/check)
 (def gate-id p/gate-id)
 (def gate-type p/gate-type)
+(def repair p/repair)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Gate result constructors (pure functions)
@@ -81,7 +82,13 @@
                        :duration-ms (- (System/currentTimeMillis) start))))))
 
   (gate-id [_this] id)
-  (gate-type [_this] :syntax))
+  (gate-type [_this] :syntax)
+
+  (repair [_this _artifact violations _context]
+    ;; Syntax errors require LLM-based repair
+    {:repaired? false
+     :changes []
+     :remaining-violations violations}))
 
 (defn syntax-gate
   "Create a syntax validation gate.
@@ -128,7 +135,24 @@
                      :duration-ms (- (System/currentTimeMillis) start)))))
 
   (gate-id [_this] id)
-  (gate-type [_this] :lint))
+  (gate-type [_this] :lint)
+
+  (repair [_this artifact violations _context]
+    ;; Basic lint auto-fixes (expand as needed)
+    (let [content (:artifact/content artifact)
+          ;; Remove println statements
+          fixed-content (when (string? content)
+                          (clojure.string/replace content #"\(println\s[^\)]+\)\n?" ""))
+          changes (if (and (string? content) (not= content fixed-content))
+                    [:removed-debug-println]
+                    [])
+          remaining (if (seq changes)
+                      (filter #(not= :debug-println (:code %)) violations)
+                      violations)]
+      {:repaired? (seq changes)
+       :artifact (assoc artifact :artifact/content fixed-content)
+       :changes changes
+       :remaining-violations remaining})))
 
 (defn lint-gate
   "Create a lint validation gate.
@@ -170,7 +194,13 @@
                      :duration-ms (- (System/currentTimeMillis) start)))))
 
   (gate-id [_this] id)
-  (gate-type [_this] :test))
+  (gate-type [_this] :test)
+
+  (repair [_this _artifact violations _context]
+    ;; Test failures require code changes by implementer agent
+    {:repaired? false
+     :changes []
+     :remaining-violations violations}))
 
 (defn test-gate
   "Create a test validation gate.
@@ -233,7 +263,24 @@
                        :duration-ms (- (System/currentTimeMillis) start))))))
 
   (gate-id [_this] id)
-  (gate-type [_this] :policy))
+  (gate-type [_this] :policy)
+
+  (repair [_this artifact violations _context]
+    ;; Policy violations may have automatic fixes
+    (let [content (:artifact/content artifact)
+          ;; Remove TODO comments
+          fixed-content (when (string? content)
+                          (clojure.string/replace content #"(?m)^\s*;;.*\b(TODO|FIXME|HACK|XXX)\b.*$\n?" ""))
+          changes (if (and (string? content) (not= content fixed-content))
+                    [:removed-todo-comments]
+                    [])
+          remaining (if (seq changes)
+                      (filter #(not= :todo-found (:code %)) violations)
+                      violations)]
+      {:repaired? (seq changes)
+       :artifact (assoc artifact :artifact/content fixed-content)
+       :changes changes
+       :remaining-violations remaining})))
 
 (defn policy-gate
   "Create a policy validation gate.
@@ -260,7 +307,13 @@
                        :duration-ms (- (System/currentTimeMillis) start))))))
 
   (gate-id [_this] id)
-  (gate-type [_this] type-kw))
+  (gate-type [_this] type-kw)
+
+  (repair [_this _artifact violations _context]
+    ;; Custom gates don't have default repair logic
+    {:repaired? false
+     :changes []
+     :remaining-violations violations}))
 
 (defn custom-gate
   "Create a custom validation gate.
