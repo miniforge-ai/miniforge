@@ -272,7 +272,25 @@ Output execution logs and status reports."})
 
   (shutdown [this]
     (assoc this :state {:status :shutdown
-                        :shutdown-at (java.util.Date.)})))
+                        :shutdown-at (java.util.Date.)}))
+
+  (abort [this reason]
+    ;; Idempotent abort - if already aborted, return info about existing abort
+    (if (= :aborted (:status state))
+      ;; Already aborted, return info
+      {:aborted true
+       :reason (:abort-reason state)
+       :aborted-at (:aborted-at state)
+       :already-aborted true}
+      ;; Not yet aborted, perform abort
+      (let [now (java.util.Date.)]
+        {:aborted true
+         :reason reason
+         :aborted-at now
+         :agent (assoc this :state {:status :aborted
+                                    :abort-reason reason
+                                    :aborted-at now
+                                    :previous-state state})}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Agent factory and executor

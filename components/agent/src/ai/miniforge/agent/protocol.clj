@@ -22,5 +22,6 @@
 (def init p/init)
 (def status p/status)
 (def shutdown p/shutdown)
+(def abort p/abort)
 (def execute p/execute)
 (def complete p/complete)
