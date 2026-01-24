@@ -51,6 +51,7 @@ Uses Dewey Decimal principles: hierarchical, numeric, extensible.
 |----|------|-------------|
 | 001 | `001-stratified-design` | One-way DAG dependencies, layered architecture |
 | 010 | `010-simple-made-easy` | Simplicity over familiarity, uncomplected artifacts |
+| 020 | `020-specification-standards` | Normative specs (N1-N6), spec governance, conformance |
 
 ### 200-languages/
 | ID | File | Description |
