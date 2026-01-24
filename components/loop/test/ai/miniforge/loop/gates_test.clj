@@ -221,6 +221,54 @@
       (is (= "message" (:message error)))
       (is (= {:file "test.clj" :line 10} (:location error))))))
 
+;------------------------------------------------------------------------------ Layer 3
+;; Gate repair tests (N1 conformance)
+
+(deftest gate-repair-protocol-test
+  (testing "syntax gate repair returns not repaired"
+    (let [gate (gates/syntax-gate)
+          violations [{:code :syntax-error :message "Parse error"}]
+          result (gates/repair gate invalid-syntax-artifact violations {})]
+      (is (not (:repaired? result)))
+      (is (= violations (:remaining-violations result)))))
+
+  (testing "lint gate can repair println"
+    (let [gate (gates/lint-gate)
+          violations [{:code :debug-println :message "Debug println found"}]
+          result (gates/repair gate artifact-with-println violations {})]
+      (is (:repaired? result))
+      (is (seq (:changes result)))
+      (is (some #{:removed-debug-println} (:changes result)))
+      (let [fixed-content (get-in result [:artifact :artifact/content])]
+        (is (string? fixed-content))
+        (is (not (re-find #"println" fixed-content))))))
+
+  (testing "test gate repair returns not repaired"
+    (let [gate (gates/test-gate)
+          violations [{:code :test-failed :message "Test failed"}]
+          result (gates/repair gate valid-code-artifact violations {})]
+      (is (not (:repaired? result)))
+      (is (= violations (:remaining-violations result)))))
+
+  (testing "policy gate can repair TODO comments"
+    (let [gate (gates/policy-gate :todos {:policies [:no-todos]})
+          artifact {:artifact/id (random-uuid)
+                    :artifact/type :code
+                    :artifact/content ";; TODO: fix this\n(defn x [] :ok)"}
+          violations [{:code :todo-found :message "TODO found"}]
+          result (gates/repair gate artifact violations {})]
+      (is (:repaired? result))
+      (is (seq (:changes result)))
+      (is (some #{:removed-todo-comments} (:changes result)))))
+
+  (testing "custom gate repair returns not repaired by default"
+    (let [gate (gates/custom-gate :custom-check
+                                  (fn [_a _c] (gates/pass-result :custom-check :custom)))
+          violations [{:code :custom-error :message "Error"}]
+          result (gates/repair gate valid-code-artifact violations {})]
+      (is (not (:repaired? result)))
+      (is (= violations (:remaining-violations result))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (test/run-tests 'ai.miniforge.loop.gates-test)
