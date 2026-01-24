@@ -4,18 +4,21 @@
   (:require
    [ai.miniforge.workflow.core :as core]
    [ai.miniforge.workflow.persistence :as persist]
-   [ai.miniforge.workflow.protocol :as proto]))
+   [ai.miniforge.workflow.interface.protocols.workflow :as workflow-proto]
+   [ai.miniforge.workflow.interface.protocols.phase-executor :as executor-proto]
+   [ai.miniforge.workflow.interface.protocols.workflow-observer :as observer-proto]
+   [ai.miniforge.workflow.protocols.impl.workflow :as workflow-impl]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol re-exports
 
-(def Workflow proto/Workflow)
-(def PhaseExecutor proto/PhaseExecutor)
-(def WorkflowObserver proto/WorkflowObserver)
+(def Workflow workflow-proto/Workflow)
+(def PhaseExecutor executor-proto/PhaseExecutor)
+(def WorkflowObserver observer-proto/WorkflowObserver)
 
 ;; Phase definitions
-(def phases proto/phases)
-(def phase-transitions proto/phase-transitions)
+(def phases workflow-impl/phases)
+(def phase-transitions workflow-impl/phase-transitions)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Workflow creation
@@ -55,7 +58,7 @@
 
    Returns workflow-id."
   [workflow spec context]
-  (proto/start workflow spec context))
+  (workflow-proto/start workflow spec context))
 
 (defn get-state
   "Get current workflow state.
@@ -69,7 +72,7 @@
       :workflow/metrics {:tokens :cost-usd :duration-ms}
       :workflow/history []}"
   [workflow workflow-id]
-  (proto/get-state workflow workflow-id))
+  (workflow-proto/get-state workflow workflow-id))
 
 (defn advance
   "Advance workflow based on phase execution result.
@@ -82,7 +85,7 @@
 
    Returns updated workflow state."
   [workflow workflow-id phase-result]
-  (proto/advance workflow workflow-id phase-result))
+  (workflow-proto/advance workflow workflow-id phase-result))
 
 (defn rollback
   "Rollback workflow to a previous phase.
@@ -95,19 +98,19 @@
 
    Returns updated workflow state."
   [workflow workflow-id target-phase reason]
-  (proto/rollback workflow workflow-id target-phase reason))
+  (workflow-proto/rollback workflow workflow-id target-phase reason))
 
 (defn complete
   "Mark workflow as complete.
    Returns final workflow state."
   [workflow workflow-id]
-  (proto/complete workflow workflow-id))
+  (workflow-proto/complete workflow workflow-id))
 
 (defn fail
   "Mark workflow as failed.
    Returns final workflow state."
   [workflow workflow-id error]
-  (proto/fail workflow workflow-id error))
+  (workflow-proto/fail workflow workflow-id error))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Phase execution
@@ -131,17 +134,17 @@
       :errors []
       :metrics {}}"
   [executor workflow-state context]
-  (proto/execute-phase executor workflow-state context))
+  (executor-proto/execute-phase executor workflow-state context))
 
 (defn can-execute?
   "Check if an executor can handle a phase."
   [executor phase]
-  (proto/can-execute? executor phase))
+  (executor-proto/can-execute? executor phase))
 
 (defn get-phase-requirements
   "Get required inputs for a phase."
   [executor phase]
-  (proto/get-phase-requirements executor phase))
+  (executor-proto/get-phase-requirements executor phase))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Workflow runner

@@ -1,97 +1,43 @@
 (ns ai.miniforge.workflow.protocol
   "Workflow protocols for SDLC phase execution.
 
-   The workflow component handles the Outer Loop:
-   Plan → Design → Implement → Verify → Review → Release → Observe
+   Note: The protocols have been moved to:
+   - ai.miniforge.workflow.interface.protocols.workflow (Workflow protocol)
+   - ai.miniforge.workflow.interface.protocols.phase-executor (PhaseExecutor protocol)
+   - ai.miniforge.workflow.interface.protocols.workflow-observer (WorkflowObserver protocol)
 
-   Each phase produces artifacts that flow to the next phase.")
+   This namespace remains for backward compatibility."
+  (:require
+   [ai.miniforge.workflow.interface.protocols.workflow :as workflow-proto]
+   [ai.miniforge.workflow.interface.protocols.phase-executor :as executor-proto]
+   [ai.miniforge.workflow.interface.protocols.workflow-observer :as observer-proto]
+   [ai.miniforge.workflow.protocols.impl.workflow :as impl]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Phase definitions
+;; Phase definitions (re-export from impl)
 
-(def phases
-  "Ordered SDLC phases."
-  [:spec :plan :design :implement :verify :review :release :observe :done])
-
-(def phase-transitions
-  "Valid phase transitions."
-  {:spec      #{:plan}
-   :plan      #{:design :implement}  ; design is optional
-   :design    #{:implement}
-   :implement #{:verify}
-   :verify    #{:review :implement}  ; can loop back on failure
-   :review    #{:release :implement} ; can reject
-   :release   #{:observe}
-   :observe   #{:done :implement}    ; can trigger new work
-   :done      #{}})
+(def phases impl/phases)
+(def phase-transitions impl/phase-transitions)
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Workflow protocol
+;; Protocol re-exports
 
-(defprotocol Workflow
-  "Protocol for SDLC workflow execution.
-   Manages state transitions through phases."
+(def Workflow workflow-proto/Workflow)
+(def start workflow-proto/start)
+(def get-state workflow-proto/get-state)
+(def advance workflow-proto/advance)
+(def rollback workflow-proto/rollback)
+(def complete workflow-proto/complete)
+(def fail workflow-proto/fail)
 
-  (start [this spec context]
-    "Start a new workflow from a specification.
-     Returns workflow-id.")
+(def PhaseExecutor executor-proto/PhaseExecutor)
+(def execute-phase executor-proto/execute-phase)
+(def can-execute? executor-proto/can-execute?)
+(def get-phase-requirements executor-proto/get-phase-requirements)
 
-  (get-state [this workflow-id]
-    "Get current workflow state.
-     Returns {:phase :status :artifacts :errors :metrics}")
-
-  (advance [this workflow-id phase-result]
-    "Advance workflow based on phase execution result.
-     phase-result: {:success? :artifacts :errors}
-     Returns updated workflow state.")
-
-  (rollback [this workflow-id target-phase reason]
-    "Rollback to a previous phase.
-     Returns updated workflow state.")
-
-  (complete [this workflow-id]
-    "Mark workflow as complete.
-     Returns final workflow state.")
-
-  (fail [this workflow-id error]
-    "Mark workflow as failed.
-     Returns final workflow state."))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Phase executor protocol
-
-(defprotocol PhaseExecutor
-  "Protocol for executing individual SDLC phases."
-
-  (execute-phase [this workflow-state context]
-    "Execute the current phase.
-     Returns {:success? :artifacts :errors :metrics}")
-
-  (can-execute? [this phase]
-    "Check if this executor can handle a phase.")
-
-  (get-phase-requirements [this phase]
-    "Get required inputs for a phase.
-     Returns {:required-artifacts [...] :optional-artifacts [...]}"))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Workflow observer protocol (for operator/meta-loop)
-
-(defprotocol WorkflowObserver
-  "Protocol for observing workflow events.
-   Used by the operator for meta-loop signals."
-
-  (on-phase-start [this workflow-id phase context]
-    "Called when a phase starts.")
-
-  (on-phase-complete [this workflow-id phase result]
-    "Called when a phase completes.")
-
-  (on-phase-error [this workflow-id phase error]
-    "Called when a phase errors.")
-
-  (on-workflow-complete [this workflow-id final-state]
-    "Called when entire workflow completes.")
-
-  (on-rollback [this workflow-id from-phase to-phase reason]
-    "Called when workflow rolls back."))
+(def WorkflowObserver observer-proto/WorkflowObserver)
+(def on-phase-start observer-proto/on-phase-start)
+(def on-phase-complete observer-proto/on-phase-complete)
+(def on-phase-error observer-proto/on-phase-error)
+(def on-workflow-complete observer-proto/on-workflow-complete)
+(def on-rollback observer-proto/on-rollback)

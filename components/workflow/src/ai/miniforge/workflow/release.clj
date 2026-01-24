@@ -11,7 +11,7 @@
    Layer 3: Code artifact extraction
    Layer 4: ReleasePhaseExecutor implementation"
   (:require
-   [ai.miniforge.workflow.protocol :as proto]
+   [ai.miniforge.workflow.interface.protocols.phase-executor :as p]
    [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.logging.interface :as log]
    [babashka.fs :as fs]
@@ -183,7 +183,7 @@
 ;; ReleasePhaseExecutor implementation
 
 (defrecord ReleasePhaseExecutor []
-  proto/PhaseExecutor
+  p/PhaseExecutor
 
   (execute-phase [_this workflow-state context]
     (let [logger (:logger context)
@@ -338,14 +338,14 @@
      :logger (log/create-logger {:min-level :debug :output :human})})
   
   ;; Execute phase
-  (proto/execute-phase executor workflow-state context)
-  
+  (p/execute-phase executor workflow-state context)
+
   ;; Check executor capabilities
-  (proto/can-execute? executor :release)  ; => true
-  (proto/can-execute? executor :implement)  ; => false
-  
+  (p/can-execute? executor :release)  ; => true
+  (p/can-execute? executor :implement)  ; => false
+
   ;; Get requirements
-  (proto/get-phase-requirements executor :release)
+  (p/get-phase-requirements executor :release)
   ; => {:required-artifacts [:code], :optional-artifacts []}
   
   :end)
