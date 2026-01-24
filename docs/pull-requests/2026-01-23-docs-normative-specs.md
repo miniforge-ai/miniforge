@@ -99,10 +99,17 @@ Establishes governance rules to prevent future spec explosion.
 - `OSS_PAID_ROADMAP.md` (superseded by informative/oss-paid-roadmap.md)
 - `REVISED_TIMELINE.md` (merged into roadmap)
 
+**Moved to specs/archived/** (historical specs):
+
+- All 23 files from `docs/specs/` → `specs/archived/`
+- Early product and component specifications (`.spec` and `.spec.edn` files)
+- Included: architecture.spec, miniforge.spec, workflow-*.spec.edn, cli-*.spec.edn, policy-pack.spec, etc.
+- Added `specs/archived/README.md` explaining their historical nature and migration to normative specs
+
 ### Summary Documents Created
 
-- `SPEC_SYNTHESIS_SUMMARY.md` - Complete process documentation (methodology, decisions, phase breakdown)
-- `NORMATIVE_SPECS_COMPLETE.md` - Reference for all 6 specs (dependencies, conformance, priority)
+- `docs/SPEC_SYNTHESIS_SUMMARY.md` - Complete process documentation (methodology, decisions, phase breakdown)
+- `docs/NORMATIVE_SPECS_COMPLETE.md` - Reference for all 6 specs (dependencies, conformance, priority)
 
 ## Design Decisions
 
