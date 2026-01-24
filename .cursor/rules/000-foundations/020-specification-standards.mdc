@@ -1,0 +1,194 @@
+---
+description: Follow normative specs (N1-N6) for all implementation and maintain spec governance
+globs: specs/**/*.md
+---
+
+# Specification Standards
+
+<version>0.1.0</version>
+
+## Context
+
+miniforge uses 6 normative specifications (N1-N6) that define ALL contractual requirements. All implementation MUST conform to these specs. Specs extracted from strategic vision, NOT from code.
+
+**Entry point:** `specs/SPEC_INDEX.md`
+
+## Hierarchy
+
+```
+specs/
+├── SPEC_INDEX.md          # START HERE - authoritative entry point
+├── README.md              # Implementation guide
+├── normative/             # N1-N6 (MUST/SHALL only)
+├── informative/           # Guidance (no MUST/SHALL)
+├── examples/              # Reference implementations
+└── deprecated/            # Superseded (ignore)
+```
+
+## Requirements
+
+### When Reading Specs
+
+<required>
+- ALWAYS start with `specs/SPEC_INDEX.md` for overview
+- Read normative specs (N1-N6) for MUST/SHALL requirements
+- NEVER use deprecated/ directory content
+- Cross-reference: specs link to each other
+- Use examples/ for concrete patterns
+</required>
+
+### When Implementing
+
+<required>
+- Implementation MUST conform to all 6 normative specs
+- Event emission MUST follow N3 (Event Stream)
+- Evidence bundles MUST follow N6 (Evidence & Provenance)
+- Workflow execution MUST follow N2 (Workflows)
+- Policy packs MUST follow N4 (Policy Packs)
+- CLI/TUI/API MUST follow N5 (Interface Standard)
+- Architecture MUST follow N1 (Core Architecture)
+</required>
+
+### When Amending Specs
+
+<required>
+- NO new normative spec files (only amend N1-N6)
+- New concepts MUST land in N1 or they're not real
+- New runtime data MUST land in N3 or N6 or it's unobservable
+- New UX features MUST point to contract in N3/N5/N6
+- Normative specs MUST use RFC 2119 keywords (MUST/SHALL/SHOULD/MAY)
+- Informative docs MUST NOT use RFC 2119 keywords
+</required>
+
+### Spec Extraction Source
+
+<critical>
+- Extract specs from strategic documents (software-factory-vision.md, oss-paid-roadmap.md)
+- NEVER extract specs from implementation code
+- Specs define what MUST be built, not what happens to exist
+- Code conforms to specs, not the reverse
+</critical>
+
+## Six Normative Specs
+
+| Spec | File | Purpose | Key Contracts |
+|------|------|---------|---------------|
+| N1 | `N1-architecture.md` | Core concepts, layering | 12 nouns, 3-layer architecture, Polylith boundaries |
+| N2 | `N2-workflows.md` | Workflow execution | Phase graph, inner/outer loops, gate contract |
+| N3 | `N3-event-stream.md` | Event stream & observability | 9 event types, SSE/WebSocket, ordering guarantees |
+| N4 | `N4-policy-packs.md` | Policy packs & gates | Semantic intent validation, check/repair contract |
+| N5 | `N5-cli-tui-api.md` | CLI/TUI/API interface | Command taxonomy, TUI views, streaming endpoints |
+| N6 | `N6-evidence-provenance.md` | Evidence & provenance | Evidence bundles, artifact provenance, semantic validation |
+
+**Most leverageful:** N3 (Event Stream) and N6 (Evidence & Provenance) - everything builds on these.
+
+## Governance Rules
+
+**Prevent spec explosion:**
+
+1. **No new normative spec files** - Only amend N1-N6
+2. **Every new concept must land in N1** - Or it's not real
+3. **Every new runtime datum must land in N3 or N6** - Or it's unobservable
+4. **Every UX feature must point to a contract** - Or it's just a mock
+5. **Roadmaps never contain contracts** - They link to specs
+
+## Examples
+
+<example>
+✅ GOOD: Implementing event emission
+
+```clojure
+;; Following N3 event schema
+(emit-event {:event/type :agent/status
+             :event/id (uuid)
+             :event/timestamp (Instant/now)
+             :event/version "1.0.0"
+             :workflow/id workflow-id
+             :event/sequence-number (next-seq)
+             :agent/id :implementer
+             :status/type :generating
+             :message "Generating Terraform code..."})
+```
+
+Agent emits events following N3 schema exactly. Event stream is product infrastructure.
+</example>
+
+<example>
+✅ GOOD: Semantic intent validation
+
+```clojure
+;; Following N6 semantic validation
+(validate-intent {:declared :import
+                  :actual-creates 0    ; MUST be 0 for :import
+                  :actual-destroys 0}) ; MUST be 0 for :import
+;; => {:passed? true}
+
+(validate-intent {:declared :import
+                  :actual-creates 3    ; VIOLATION!
+                  :actual-destroys 0})
+;; => {:passed? false :violation "Declared IMPORT but creates 3 resources"}
+```
+
+Semantic validation catches intent violations (declared IMPORT but code creates resources).
+</example>
+
+<example type="invalid">
+❌ BAD: Extracting spec from code
+
+```clojure
+;; Reading implementation to write spec
+(read-file "miniforge/components/agent/core.clj")
+;; Then writing spec based on what code does
+```
+
+NEVER extract specs from code. Specs define requirements, code implements them.
+Extract from strategic documents (software-factory-vision.md, oss-paid-roadmap.md).
+</example>
+
+<example type="invalid">
+❌ BAD: Creating new normative spec
+
+```
+specs/normative/N7-new-feature.md  # WRONG!
+```
+
+NO new normative specs. Amend existing N1-N6 only. This prevents spec explosion.
+</example>
+
+<example type="invalid">
+❌ BAD: Using MUST/SHALL in informative docs
+
+```markdown
+# Informative Guide
+
+The TUI MUST display workflow progress...  # WRONG in informative!
+```
+
+Only normative specs (N1-N6) use RFC 2119 keywords. Informative docs use descriptive language.
+</example>
+
+## Conformance
+
+Implementation is conformant if:
+
+- ✅ Events follow N3 schema, maintain sequencing, support replay
+- ✅ Evidence bundles follow N6 schema, immutable, complete provenance
+- ✅ Workflows execute N2 phase graph, inner/outer loops work
+- ✅ Policy packs follow N4 schema, semantic validation works
+- ✅ CLI/TUI/API match N5 taxonomy, event streaming works
+- ✅ Architecture follows N1 layering, components respect boundaries
+
+**Enforcement:** Schema validation + integration tests + conformance suite
+
+## Quick Reference
+
+**Building agents?** → N3 (emit events), N6 (create evidence)
+**Building CLI/TUI?** → N5 (interface), N3 (consume events)
+**Building policy packs?** → N4 (pack schema, gate contract)
+**Understanding execution?** → N2 (workflows), N6 (semantic validation)
+**Architecture questions?** → N1 (core concepts, layering)
+
+## Related Rules
+
+- `001-stratified-design.mdc` - Layering principles (complements N1)
+- `721-pr-documentation.mdc` - PR docs (includes spec conformance notes)
