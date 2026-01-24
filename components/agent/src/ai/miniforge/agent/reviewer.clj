@@ -3,7 +3,6 @@
    Runs static analysis gates (syntax, lint, policy) on code artifacts.
    Does not use LLM - purely deterministic gate evaluation."
   (:require
-   [ai.miniforge.agent.core :as core]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.loop.interface :as loop]
@@ -308,38 +307,37 @@
                        (loop/lint-gate)
                        (loop/policy-gate :security {:policies [:no-secrets]})]
         gates (or (:gates opts) default-gates)
-        config {:strict (or (:strict opts) false)}]
-    (core/create-base-agent
-     {:role :reviewer
-      :system-prompt ""  ; No LLM used - empty prompt
-      :config config
-      :logger logger
+        config {:strict (or (:strict opts) false)}
+        ;; Note: Reviewer doesn't use LLM - it's a pure gate-based agent
+        ;; We'll create a minimal agent structure
+        invoke-fn (fn [context input]
+                    (let [[artifact artifact-id] (extract-artifact-and-id input)
+                          start-time (System/currentTimeMillis)]
+                      (log/info logger :reviewer :reviewer/review-start
+                                {:data {:artifact-id artifact-id
+                                        :gate-count (count gates)}})
 
-      :invoke-fn
-      (fn [context input]
-        (let [[artifact artifact-id] (extract-artifact-and-id input)
-              start-time (System/currentTimeMillis)]
-          (log/info logger :reviewer :reviewer/review-start
-                    {:data {:artifact-id artifact-id
-                            :gate-count (count gates)}})
+                      (let [gate-feedbacks (run-gates-on-artifact gates artifact context logger)
+                            {:keys [decision blocking-issues warnings]} (make-review-decision gate-feedbacks config)
+                            counts (calculate-gate-counts gate-feedbacks)
+                            review (build-review-artifact gate-feedbacks decision blocking-issues warnings artifact-id counts)
+                            duration (- (System/currentTimeMillis) start-time)]
 
-          (let [gate-feedbacks (run-gates-on-artifact gates artifact context logger)
-                {:keys [decision blocking-issues warnings]} (make-review-decision gate-feedbacks config)
-                counts (calculate-gate-counts gate-feedbacks)
-                review (build-review-artifact gate-feedbacks decision blocking-issues warnings artifact-id counts)
-                duration (- (System/currentTimeMillis) start-time)]
+                        (log/info logger :reviewer :reviewer/review-complete
+                                  {:data {:decision decision
+                                          :gates-passed (:passed counts)
+                                          :gates-failed (:failed counts)
+                                          :duration-ms duration}})
 
-            (log/info logger :reviewer :reviewer/review-complete
-                      {:data {:decision decision
-                              :gates-passed (:passed counts)
-                              :gates-failed (:failed counts)
-                              :duration-ms duration}})
-
-            (build-review-result review counts duration))))
-
-      :validate-fn validate-review-artifact
-
-      :repair-fn repair-review-artifact})))
+                        (build-review-result review counts duration))))]
+    ;; Return a reviewer "agent" structure (not using core/create-agent since reviewer is special)
+    {:role :reviewer
+     :config config
+     :logger logger
+     :gates gates
+     :invoke-fn invoke-fn
+     :validate-fn validate-review-artifact
+     :repair-fn repair-review-artifact}))
 
 (defn review-summary
   "Get a summary of a review artifact for logging/display."
@@ -384,8 +382,6 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  (require '[ai.miniforge.loop.interface :as loop])
-
   ;; Create a reviewer with default gates
   (def reviewer (create-reviewer))
 
@@ -397,14 +393,14 @@
 
   ;; Invoke with a code artifact
   (def result
-    (core/invoke reviewer
-                 {}
-                 {:artifact {:artifact/id (random-uuid)
-                             :artifact/type :code
-                             :artifact/content {:code/files [{:path "src/example.clj"
-                                                              :content "(ns example)\n(defn hello [] \"world\")"
-                                                              :action :create}]}}}))
-  ;; => {:status :success, :output {:review/id ..., :review/decision :approved, ...}}
+    ((:invoke-fn reviewer)
+     {}
+     {:artifact {:artifact/id (random-uuid)
+                 :artifact/type :code
+                 :artifact/content {:code/files [{:path "src/example.clj"
+                                                  :content "(ns example)\n(defn hello [] \"world\")"
+                                                  :action :create}]}}}))
+  ;; => {:status :success, :artifact {:review/id ..., :review/decision :approved, ...}}
 
   ;; Check review result
   (approved? (:artifact result))

@@ -165,9 +165,13 @@
    - Status transitioned to :completed via FSM
    - Completed timestamp added"
   [state]
-  (-> state
-      (transition-status :complete)
-      (assoc :execution/completed-at (System/currentTimeMillis))))
+  (let [;; Ensure workflow is running before completing
+        state-with-running (if (= :pending (:execution/status state))
+                            (transition-status state :start)
+                            state)]
+    (-> state-with-running
+        (transition-status :complete)
+        (assoc :execution/completed-at (System/currentTimeMillis)))))
 
 (defn mark-failed
   "Mark execution as failed using FSM transition.
@@ -184,8 +188,12 @@
   (let [error-map (if (string? error)
                     {:type :execution-failed
                      :message error}
-                    error)]
-    (-> state
+                    error)
+        ;; Ensure workflow is running before failing
+        state-with-running (if (= :pending (:execution/status state))
+                            (transition-status state :start)
+                            state)]
+    (-> state-with-running
         (transition-status :fail)
         (update :execution/errors conj error-map)
         (assoc :execution/failed-at (System/currentTimeMillis)))))

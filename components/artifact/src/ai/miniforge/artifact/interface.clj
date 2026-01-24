@@ -6,8 +6,42 @@
 (def ArtifactStore core/ArtifactStore)
 
 (defn create-store
-  ([] (core/create-store))
-  ([opts] (core/create-store opts)))
+  "Create a Datalevin-based artifact store (JVM only).
+   For Babashka compatibility, use create-transit-store instead.
+
+   Options:
+   - :dir      - Directory for storage (nil for in-memory)
+   - :logger   - Optional logger
+   - :schema   - Optional custom Datalevin schema
+
+   Examples:
+     (create-store)                          ; in-memory
+     (create-store {:dir \"data/artifacts\"})  ; persistent"
+  ([] ((requiring-resolve 'ai.miniforge.artifact.datalevin-store/create-datalevin-store)))
+  ([opts] ((requiring-resolve 'ai.miniforge.artifact.datalevin-store/create-datalevin-store) opts)))
+
+(defn create-transit-store
+  "Create a Transit-based artifact store (Babashka compatible).
+
+   Options:
+   - :dir      - Base directory for storage (defaults to ~/.miniforge)
+   - :logger   - Optional logger
+
+   The artifacts will be stored in {dir}/artifacts/
+
+   Features:
+   - In-memory cache for fast access during execution
+   - Transit JSON files for persistence
+   - Lazy loading from disk
+   - Full ArtifactStore protocol support
+   - Babashka compatible (no JVM-only deps)
+
+   Examples:
+     (create-transit-store)                              ; Uses ~/.miniforge/artifacts
+     (create-transit-store {:dir \"/tmp/test\"})          ; Uses /tmp/test/artifacts
+     (create-transit-store {:logger my-logger})"
+  ([] ((requiring-resolve 'ai.miniforge.artifact.transit-store/create-transit-store)))
+  ([opts] ((requiring-resolve 'ai.miniforge.artifact.transit-store/create-transit-store) opts)))
 
 (defn close-store [store] (core/close store))
 (defn save! [store artifact] (core/save store artifact))

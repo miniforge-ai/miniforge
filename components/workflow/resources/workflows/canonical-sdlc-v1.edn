@@ -22,6 +22,10 @@
  :workflow/description "Canonical SDLC workflow for feature development"
  :workflow/created-at #inst "2026-01-21T00:00:00.000-00:00"
  :workflow/task-types [:feature :enhancement]
+ :workflow/type :feature
+ :workflow/entry-phase :spec
+ :workflow/exit-phases [:done]
+ :workflow/metadata {:author "miniforge" :stable true}
 
  :workflow/phases
  [{:phase/id :spec

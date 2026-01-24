@@ -427,6 +427,51 @@ Output execution logs and status reports."})
                                 :usage {:input-tokens 100 :output-tokens 50}
                                 :model "mock"})))))
 
+(defn invoke
+  "Convenience wrapper for invoking specialized agents.
+   Supports both protocol-based agents and map-based agents with :invoke-fn.
+
+   For protocol-based agents:
+     (invoke agent context input)
+
+   For functional agents (e.g., from specialized/create-base-agent):
+     (invoke agent context input)
+
+   Example:
+     (invoke planner-agent {} \"Build user login\")"
+  [agent context input]
+  (if (fn? (:invoke-fn agent))
+    ;; Map-based agent with invoke-fn (e.g., reviewer)
+    ((:invoke-fn agent) context input)
+    ;; Protocol-based agent
+    (protocol/invoke agent input context)))
+
+(defn cycle-agent
+  "Convenience wrapper for cycle-agent function from specialized namespace.
+   Execute a full invoke-validate-repair cycle on a specialized agent.
+
+   Options:
+   - :max-iterations - Maximum repair attempts (default 3)
+
+   Example:
+     (cycle-agent planner-agent {} \"Build user login\" :max-iterations 5)"
+  [agent context input & {:keys [max-iterations] :or {max-iterations 3}}]
+  (let [cycle-fn (requiring-resolve 'ai.miniforge.agent.specialized/cycle-agent)]
+    (cycle-fn agent context input :max-iterations max-iterations)))
+
+(defn repair
+  "Convenience wrapper for repairing agent output.
+   Supports both protocol-based agents and map-based agents with :repair-fn.
+
+   Example:
+     (repair agent output errors context)"
+  [agent output errors context]
+  (if (fn? (:repair-fn agent))
+    ;; Map-based agent with repair-fn (e.g., reviewer)
+    ((:repair-fn agent) output errors context)
+    ;; Protocol-based agent
+    (protocol/repair agent output errors context)))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Create an agent

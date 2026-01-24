@@ -128,7 +128,7 @@
       :task/title (str phase-name)
       :task/description (or phase-desc (str "Execute phase: " phase-name))
       :task/status :pending
-      :task/inputs artifacts
+      :task/inputs (mapv :artifact/id artifacts)
       :task/metadata {:phase-id phase-id
                       :workflow-input input-data}})))
 
