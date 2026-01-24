@@ -9,13 +9,14 @@ globs: specs/**/*.md
 
 ## Context
 
-miniforge uses 6 normative specifications (N1-N6) that define ALL contractual requirements. All implementation MUST conform to these specs. Specs extracted from strategic vision, NOT from code.
+miniforge uses 6 normative specifications (N1-N6) that define ALL contractual requirements. All
+implementation MUST conform to these specs. Specs extracted from strategic vision, NOT from code.
 
 **Entry point:** `specs/SPEC_INDEX.md`
 
 ## Hierarchy
 
-```
+```zsh
 specs/
 ├── SPEC_INDEX.md          # START HERE - authoritative entry point
 ├── README.md              # Implementation guide
@@ -148,7 +149,7 @@ Extract from strategic documents (software-factory-vision.md, oss-paid-roadmap.m
 <example type="invalid">
 ❌ BAD: Creating new normative spec
 
-```
+```zsh
 specs/normative/N7-new-feature.md  # WRONG!
 ```
 

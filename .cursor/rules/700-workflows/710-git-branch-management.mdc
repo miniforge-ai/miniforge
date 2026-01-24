@@ -1,7 +1,12 @@
+---
+description: Git branch management 
+alwaysApply: true
+---
 # Git Branch & PR Management (ALWAYS)
 
 ## Branch Creation Rules
 
+**CRITICAL**: **ALWAYS create a new session unique git worktree for your session.
 **CRITICAL**: **ALWAYS create new branches from `main` or `master` (the primary branch) unless explicitly requested otherwise.**
 
 ### Pre-Branch Checklist
@@ -49,6 +54,7 @@ git checkout -b migrate/feature-b  # ✅ Correct - clean start
 ### Single Purpose PRs
 
 Each PR should have **one focused purpose**:
+
 - ✅ Migrate security groups batch 1
 - ✅ Migrate IAM policies for ElasticSearch
 - ❌ Migrate security groups + DynamoDB + IAM roles (mixed concerns)
@@ -61,6 +67,7 @@ Before pushing a branch, run:
 git log origin/main..HEAD --oneline
 git diff origin/main..HEAD --stat
 ```
+
 This shows what will be in the PR to catch unintended changes.
 
 ## Agent Behavior (Cursor)
@@ -101,5 +108,6 @@ In PR docs, include:
 ## When in Doubt
 
 - Check git state first
+- Create a unique git worktree for your work
 - Branch from main
 - Keep PRs focused and single-purpose

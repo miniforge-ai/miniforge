@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Simple Made Easy (ALWAYS)
 
-Optimize for **simple artifacts** (unbraided, decoupled), not for what is **easy** (familiar, at hand). 
+Optimize for **simple artifacts** (unbraided, decoupled), not for what is **easy** (familiar, at hand).
 Users live with the artifact, not the authoring experience.
 
 > “Simplicity is a prerequisite for reliability.” — Dijkstra  
@@ -18,7 +18,8 @@ When choosing designs/constructs, prefer the option that **reduces intertwining*
 - **Values over state**: prefer immutable values and pure functions; make state explicit, local, and small.
 - **Data over syntax**: represent information as plain data (maps, vectors, sets). Avoid DSL-ish micro-syntaxes unless necessary.
 - **Functions over methods**: favor small, stateless functions and namespaces over deep OO hierarchies.
-- **A-la-carte polymorphism**: choose open, decoupled dispatch (protocols/typeclasses/interfaces) over inheritance and giant enums/switches.
+- **A-la-carte polymorphism**: choose open, decoupled dispatch (protocols/typeclasses/interfaces) over
+                               inheritance and giant enums/switches.
 - **Declarative over imperative**: use set/relational operations, queries, and rules for “what,” not “how.”
 - **Queues over calls (when/where)**: decouple time/place with message queues or async boundaries; don’t make A know B unnecessarily.
 - **Rules live in one place (why)**: centralize policy in data/rules tables or a rules engine, not scattered conditionals.
@@ -54,7 +55,7 @@ When choosing designs/constructs, prefer the option that **reduces intertwining*
 - **Swapability**: Can we replace implementations without touching callers?
 - **Evidence**: Include a short note comparing the “easy but complex” option you rejected.
 
-## Agent behavior 
+## Agent behavior
 
 - When proposing a design, include:
   1) A short “simple vs easy” comparison (2–3 bullets).  

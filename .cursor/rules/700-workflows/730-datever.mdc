@@ -11,11 +11,12 @@ Use **DateVer** instead of SemVer for all version numbers.
 
 ## Format
 
-```
+```zsh
 YYYY.MM.DD.N
 ```
 
 Where:
+
 - `YYYY` — four-digit year
 - `MM` — two-digit month (zero-padded)
 - `DD` — two-digit day (zero-padded)
