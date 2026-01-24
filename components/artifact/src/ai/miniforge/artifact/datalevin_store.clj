@@ -7,6 +7,7 @@
   (:require
    [datalevin.core :as d]
    [ai.miniforge.artifact.core :as core]
+   [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
    [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -24,7 +25,7 @@
 ;; DatalevinStore implementation
 
 (defrecord DatalevinStore [conn logger]
-  core/ArtifactStore
+  p/ArtifactStore
   (save [_this artifact]
     (let [id (:artifact/id artifact)]
       (d/transact! conn [artifact])
@@ -111,7 +112,7 @@
 
   ;; Save an artifact
   (def art-id (random-uuid))
-  (core/save store {:artifact/id art-id
+  (p/save store {:artifact/id art-id
                     :artifact/type :code
                     :artifact/version "1.0.0"
                     :artifact/content {:file "foo.clj" :code "(defn hello [] \"world\")"}
@@ -122,19 +123,19 @@
                     :artifact/metadata {:language :clojure}})
 
   ;; Load an artifact
-  (core/load-artifact store art-id)
+  (p/load-artifact store art-id)
 
   ;; Query artifacts
-  (core/query store {:artifact/type :code})
+  (p/query store {:artifact/type :code})
 
   ;; Link artifacts
   (def parent-id (random-uuid))
   (def child-id (random-uuid))
-  (core/save store {:artifact/id parent-id :artifact/type :spec :artifact/version "1.0.0" :artifact/content "spec content"})
-  (core/save store {:artifact/id child-id :artifact/type :code :artifact/version "1.0.0" :artifact/content "code content"})
-  (core/link store parent-id child-id)
+  (p/save store {:artifact/id parent-id :artifact/type :spec :artifact/version "1.0.0" :artifact/content "spec content"})
+  (p/save store {:artifact/id child-id :artifact/type :code :artifact/version "1.0.0" :artifact/content "code content"})
+  (p/link store parent-id child-id)
 
   ;; Close store
-  (core/close store)
+  (p/close store)
 
   :end)
