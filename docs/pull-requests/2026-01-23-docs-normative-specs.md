@@ -5,7 +5,9 @@
 
 ## Summary
 
-Collapses specification sprawl into 6 canonical normative specifications plus supporting documentation hierarchy. Extracts complete contractual requirements from strategic documents (NOT code) to define what miniforge MUST be. Establishes governance rules to prevent future spec explosion.
+Collapses specification sprawl into 6 canonical normative specifications plus supporting documentation hierarchy.
+Extracts complete contractual requirements from strategic documents (NOT code) to define what miniforge MUST be.
+Establishes governance rules to prevent future spec explosion.
 
 **Total:** ~270 pages of normative contracts defining the complete miniforge product.
 
@@ -30,41 +32,54 @@ Collapses specification sprawl into 6 canonical normative specifications plus su
 #### N1 - Core Architecture & Concepts (40+ pages)
 
 - `specs/normative/N1-architecture.md`
-- **Defines:** Core domain model (12 key nouns), three-layer architecture (Control Plane → Agent Layer → Learning Layer), Polylith component boundaries, operational model (local-first, reproducibility, failure semantics), agent communication protocols
+- **Defines:** Core domain model (12 key nouns), three-layer architecture (Control Plane → Agent Layer →
+  Learning Layer), Polylith component boundaries, operational model (local-first, reproducibility,
+  failure semantics), agent communication protocols
 - **Key contracts:** Component interface requirements, agent communication protocol, layering rules
 
 #### N2 - Workflow Execution Model (45+ pages)
 
 - `specs/normative/N2-workflows.md`
-- **Defines:** Phase graph (Plan → Design → Implement → Verify → Review → Release → Observe), phase responsibilities, inner loop (validate → repair with multi-strategy), outer loop state machine, gate contract, context handoff protocol
+- **Defines:** Phase graph (Plan → Design → Implement → Verify → Review → Release → Observe),
+  phase responsibilities, inner loop (validate → repair with multi-strategy), outer loop state machine,
+  gate contract, context handoff protocol
 - **Key contracts:** Phase execution requirements, inner loop termination conditions, gate function signatures
 
 #### N3 - Event Stream & Observability Contract (52 pages)
 
 - `specs/normative/N3-event-stream.md`
-- **Defines:** Event envelope schema, 9 event type categories (workflow, agent, status, subagent, tool, LLM, messages, milestone, gate), ordering guarantees, SSE/WebSocket streaming API, throttling rules, performance requirements (<10ms emit, <100ms stream)
+- **Defines:** Event envelope schema, 9 event type categories (workflow, agent, status, subagent, tool, LLM,
+  messages, milestone, gate), ordering guarantees, SSE/WebSocket streaming API, throttling rules,
+  performance requirements (<10ms emit, <100ms stream)
 - **Key contracts:** Event schema validation, sequence number monotonicity, subscription API
 - **Most leverageful spec:** Powers UI, debugging, analytics, and future learning
 
 #### N4 - Policy Packs & Gates Standard (48+ pages)
 
 - `specs/normative/N4-policy-packs.md`
-- **Defines:** Pack structure (schema, versioning, signatures), gate execution contract (check/repair interfaces), semantic intent validation (IMPORT/CREATE/UPDATE/DESTROY/REFACTOR/MIGRATE), violation schema, Terraform/Kubernetes-specific validation
+- **Defines:** Pack structure (schema, versioning, signatures), gate execution contract (check/repair interfaces),
+  semantic intent validation (IMPORT/CREATE/UPDATE/DESTROY/REFACTOR/MIGRATE), violation schema,
+  Terraform/Kubernetes-specific validation
 - **Key contracts:** Policy pack manifest schema, rule detection protocol, gate function signatures
 - **Why critical:** Prevents accidental infrastructure changes (declared IMPORT but code creates → violation)
 
 #### N5 - Interface Standard: CLI/TUI/API (42+ pages)
 
 - `specs/normative/N5-cli-tui-api.md`
-- **Defines:** CLI command taxonomy (6 namespaces: init, workflow, fleet, policy, evidence, artifact), TUI primitives (4 primary views), API surface (minimal REST + event streaming), operations console purpose (monitoring factory, NOT PR management), manual override mechanisms
+- **Defines:** CLI command taxonomy (6 namespaces: init, workflow, fleet, policy, evidence, artifact),
+  TUI primitives (4 primary views), API surface (minimal REST + event streaming), operations console purpose
+  (monitoring factory, NOT PR management), manual override mechanisms
 - **Key contracts:** CLI command stability, TUI keyboard navigation, API endpoints
 - **Critical mental model:** Operations console monitors the factory, it's NOT the product
 
 #### N6 - Evidence & Provenance Standard (47 pages)
 
 - `specs/normative/N6-evidence-provenance.md`
-- **Defines:** Evidence bundle schema (intent → phases → validation → outcome), artifact provenance (source inputs, tool executions, hashes), semantic intent validation rules, queryable provenance API, compliance metadata (SOCII/FedRAMP)
-- **Key contracts:** Evidence bundles MUST be immutable, all artifacts MUST have provenance, semantic validation MUST check intent vs. behavior
+- **Defines:** Evidence bundle schema (intent → phases → validation → outcome), artifact provenance
+  (source inputs, tool executions, hashes), semantic intent validation rules, queryable provenance API,
+  compliance metadata (SOCII/FedRAMP)
+- **Key contracts:** Evidence bundles MUST be immutable, all artifacts MUST have provenance,
+  semantic validation MUST check intent vs. behavior
 - **Why critical:** Enables credibility and compliance, complete audit trail from requirement → outcome
 
 ### Files Reorganized
@@ -93,33 +108,42 @@ Collapses specification sprawl into 6 canonical normative specifications plus su
 
 ### 1. Extract from Strategic Documents, NOT Code
 
-**Critical decision:** All normative specs extracted from strategic vision documents (software-factory-vision.md, oss-paid-roadmap.md), NOT from implementation code.
+**Critical decision:** All normative specs extracted from strategic vision documents
+(software-factory-vision.md, oss-paid-roadmap.md), NOT from implementation code.
 
-**Rationale:** Specs define what MUST be built, not what happens to exist in partially-built product. Code conforms to specs, not reverse. This prevents implementation shortcuts and drift from being codified as requirements.
+**Rationale:** Specs define what MUST be built, not what happens to exist in partially-built product.
+Code conforms to specs, not reverse. This prevents implementation shortcuts and drift from being codified
+as requirements.
 
 ### 2. Event Stream as Product Surface, Not Logging
 
-**Normative requirement (N3):** Event stream is product infrastructure that powers UI, debugging, analytics, and learning.
+**Normative requirement (N3):** Event stream is product infrastructure that powers UI, debugging, analytics,
+and learning.
 
-**Rationale:** Forces clarity on observability contracts, enables replay/debugging, provides foundation for future learning systems.
+**Rationale:** Forces clarity on observability contracts, enables replay/debugging, provides foundation
+for future learning systems.
 
 ### 3. Semantic Intent Validation is Mandatory
 
-**Normative requirement (N6):** Workflows MUST declare intent (`:import`, `:create`, `:update`, `:destroy`), implementations MUST validate declared vs. actual behavior, critical mismatches MUST block merge.
+**Normative requirement (N6):** Workflows MUST declare intent (`:import`, `:create`, `:update`, `:destroy`),
+implementations MUST validate declared vs. actual behavior, critical mismatches MUST block merge.
 
-**Rationale:** Makes autonomous workflows credible to platform/security teams. Prevents "declared IMPORT but actually CREATE" violations that would destroy production infrastructure.
+**Rationale:** Makes autonomous workflows credible to platform/security teams.
+Prevents "declared IMPORT but actually CREATE" violations that would destroy production infrastructure.
 
 ### 4. Evidence Bundles are Immutable
 
-**Normative requirement (N6):** Evidence bundles MUST NOT be modified after creation, content hashes MUST be calculated for all artifacts, bundles MUST link to event stream.
+**Normative requirement (N6):** Evidence bundles MUST NOT be modified after creation, content hashes MUST be
+calculated for all artifacts, bundles MUST link to event stream.
 
 **Rationale:** Immutability enables compliance (SOCII, FedRAMP), debugging, and trust.
 
 ### 5. Exactly 6 Normative Specs (No More)
 
-**Governance rule:** Only N1-N6 can contain MUST/SHALL language. New concepts amend existing specs. No new normative spec files.
+**Governance rule:** Only N1-N6 can contain MUST/SHALL language. New concepts amend existing specs.
+No new normative spec files.
 
-**Rationale:** Prevents Windows-style spec explosion. Forces clarity and consolidation.
+**Rationale:** Prevents spec explosion. Forces clarity and consolidation.
 
 ### 6. RFC 2119 Language Discipline
 
@@ -130,7 +154,7 @@ Collapses specification sprawl into 6 canonical normative specifications plus su
 
 ## Specification Dependencies
 
-```
+```text
 ┌─────────────────────┐
 │  N1 (Architecture)  │  ← Defines core concepts
 └──────────┬──────────┘
@@ -158,18 +182,25 @@ Collapses specification sprawl into 6 canonical normative specifications plus su
            └─────────────────────┘
 ```
 
-**Key insight:** N3 (Event Stream) and N6 (Evidence & Provenance) are the most leverageful specs. Everything else builds on these foundations.
+**Key insight:** N3 (Event Stream) and N6 (Evidence & Provenance) are the most leverageful specs.
+Everything else builds on these foundations.
 
 ## Conformance Criteria
 
 miniforge implementation is conformant if it satisfies ALL requirements in all 6 specs:
 
-1. **N1 conformance:** Components respect layer boundaries, provide interface namespaces, use defined agent protocols
-2. **N2 conformance:** Executes all required phases, inner loop validates/repairs until gates pass, outer loop follows state machine
-3. **N3 conformance:** Emits all required event types, maintains per-workflow sequencing, event replay is deterministic, streaming endpoints work
-4. **N4 conformance:** Policy packs validate against schema, gates implement check/repair contract, semantic intent validation detects mismatches
-5. **N5 conformance:** CLI commands match taxonomy, TUI provides required views, API exposes minimal endpoints, evidence viewer shows full audit trail
-6. **N6 conformance:** Evidence bundles generated for all workflows, all artifacts have provenance, semantic validation checks intent vs. behavior
+1. **N1 conformance:** Components respect layer boundaries, provide interface namespaces,
+   use defined agent protocols
+2. **N2 conformance:** Executes all required phases, inner loop validates/repairs until gates pass,
+   outer loop follows state machine
+3. **N3 conformance:** Emits all required event types, maintains per-workflow sequencing,
+   event replay is deterministic, streaming endpoints work
+4. **N4 conformance:** Policy packs validate against schema, gates implement check/repair contract,
+   semantic intent validation detects mismatches
+5. **N5 conformance:** CLI commands match taxonomy, TUI provides required views, API exposes minimal endpoints,
+   evidence viewer shows full audit trail
+6. **N6 conformance:** Evidence bundles generated for all workflows, all artifacts have provenance,
+   semantic validation checks intent vs. behavior
 
 **Enforcement:** Schema validation tests + integration tests + conformance test suite.
 

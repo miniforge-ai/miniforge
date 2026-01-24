@@ -7,7 +7,8 @@
 
 ## What Was Done
 
-Executed the specification synthesis recipe to collapse 9+ scattered documents into **6 normative specs** plus supporting documentation with clear governance rules.
+Executed the specification synthesis recipe to collapse 9+ scattered documents into **6 normative specs**
+plus supporting documentation with clear governance rules.
 
 ### Files Created
 
@@ -62,7 +63,7 @@ Added deprecation warnings to deprecated files pointing to normative specs.
 
 ### Directory Structure Created
 
-```
+```text
 specs/
 ├── SPEC_INDEX.md              # Entry point ⭐
 ├── README.md                  # Guide for implementers
@@ -227,7 +228,7 @@ Create test suite validating:
 - New concepts amend existing specs
 - No new normative spec files
 
-**Rationale:** Prevents Windows-style spec explosion.
+**Rationale:** Prevents spec explosion.
 
 ---
 
@@ -407,7 +408,7 @@ Create test suite validating:
 
 ### Spec Relationships
 
-```
+```text
 N1 (Architecture)
   ↓ defines core concepts for ↓
 N2 (Workflows) ←→ N4 (Policy Packs)
