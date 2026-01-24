@@ -34,8 +34,8 @@
    [clojure.string :as str]
    [clojure.edn :as edn]
    [cheshire.core :as json]
-   [bblgum.core :as gum]
-   [ai.miniforge.cli.web :as web]))
+   [ai.miniforge.cli.web :as web]
+   [ai.miniforge.cli.workflow-runner :as workflow-runner]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants and pure helpers
@@ -287,265 +287,11 @@
     (println (str "  Failed: " (get-in state [:workflows :failed] 0)))
     (println)))
 
-(defn- draw-box
-  "Draw a styled box using gum."
-  [title content]
-  (let [full-content (str title "\n\n" content)
-        result (gum/gum :style [full-content]
-                        :border "rounded"
-                        :border-foreground "cyan"
-                        :padding "0 1")]
-    (str/join "\n" (:result result))))
-
-(defn- clear-screen
-  "Clear terminal screen."
-  []
-  (print "\033[2J\033[H")
-  (flush))
-
-(defn- gum-choose
-  "Present a choice menu and return selected item."
-  [items & {:keys [header cursor]}]
-  (let [result (gum/gum :choose items
-                        :header (or header "Select an option:")
-                        :cursor (or cursor "▸ ")
-                        :cursor-prefix "● "
-                        :selected-prefix "● "
-                        :unselected-prefix "○ ")]
-    (first (:result result))))
-
-(defn- gum-confirm
-  "Ask for confirmation."
-  [prompt]
-  (let [result (gum/gum :confirm [prompt])]
-    (zero? (:status result))))
-
-(defn- gum-input
-  "Get text input from user."
-  [& {:keys [placeholder header]}]
-  (let [result (gum/gum :input []
-                        :placeholder (or placeholder "")
-                        :header (or header ""))]
-    (first (:result result))))
-
-(defn- fetch-prs-for-repo
-  "Fetch open PRs for a repository."
-  [repo]
-  (let [result (process/sh "gh" "pr" "list" "--repo" repo
-                           "--json" "number,title,state,author,createdAt,url"
-                           "--limit" "20")]
-    (if (zero? (:exit result))
-      (try
-        (json/parse-string (:out result) true)
-        (catch Exception _ []))
-      [])))
-
-(defn- display-status-panel
-  "Display the status panel with workflow counts."
-  [state repos]
-  (let [wf-content (str "Active:    " (style (str (get-in state [:workflows :active] 0)) :foreground :green) "\n"
-                        "Pending:   " (style (str (get-in state [:workflows :pending] 0)) :foreground :yellow) "\n"
-                        "Completed: " (style (str (get-in state [:workflows :completed] 0)) :foreground :green) "\n"
-                        "Failed:    " (style (str (get-in state [:workflows :failed] 0)) :foreground :red) "\n"
-                        "\nRepositories: " (count repos))]
-    (println (draw-box "FLEET STATUS" wf-content))
-    (println)))
-
-(defn- handle-empty-repos
-  "Handle case when no repositories are configured."
-  [config config-path]
-  (println (style "\nNo repositories configured." :foreground :yellow))
-  (if (gum-confirm "Add a repository now?")
-    (if-let [repo (gum-input :placeholder "owner/repo" :header "Enter repository:")]
-      (when-not (str/blank? repo)
-        (let [new-cfg (update-in config [:fleet :repos] (fnil conj []) repo)]
-          (save-config new-cfg config-path)
-          (print-success (str "Added " repo))
-          new-cfg))
-      config)
-    config))
-
-(defn- add-repository
-  "Add a new repository to config."
-  [config config-path]
-  (if-let [repo (gum-input :placeholder "owner/repo" :header "Enter repository:")]
-    (if-not (str/blank? repo)
-      (let [new-cfg (update-in config [:fleet :repos] (fnil conj []) repo)]
-        (save-config new-cfg config-path)
-        (print-success (str "Added " repo))
-        new-cfg)
-      config)
-    config))
-
-(defn- remove-repository
-  "Remove a repository from config."
-  [config config-path repos]
-  (if-let [repo-choice (gum-choose repos :header "Select repository to remove:")]
-    (let [new-cfg (update-in config [:fleet :repos] #(vec (remove #{repo-choice} %)))]
-      (save-config new-cfg config-path)
-      (print-success (str "Removed " repo-choice))
-      new-cfg)
-    config))
-
-(defn- display-repository-prs
-  "Display PRs for a selected repository."
-  [repo]
-  (println (style (str "\nRepository: " repo) :foreground :cyan :bold true))
-  (println "Fetching PRs...")
-  (let [prs (fetch-prs-for-repo repo)]
-    (if (empty? prs)
-      (println "  No open PRs")
-      (do
-        (println (str "  " (count prs) " open PR(s):"))
-        (doseq [{:keys [number title author]} prs]
-          (println (str "  #" number " " title " (" (:login author) ")")))))))
-
-(defn- handle-repository-selection
-  "Handle selection of a specific repository."
-  [config selection]
-  (let [repo (subs selection 3)]
-    (display-repository-prs repo)
-    (println)
-    (gum-input :placeholder "Press Enter to continue...")
-    config))
-
-(defn- handle-repos-menu
-  "Handle repository management menu with existing repos."
-  [config config-path repos selection]
-  (cond
-    (or (nil? selection) (= selection "← Back"))
-    config
-
-    (= selection "➕ Add repository")
-    (add-repository config config-path)
-
-    (= selection "➖ Remove repository")
-    (remove-repository config config-path repos)
-
-    (str/starts-with? selection "📦 ")
-    (handle-repository-selection config selection)
-
-    :else
-    config))
-
-(defn- dashboard-view-repos
-  "View and manage fleet repositories."
-  [config config-path]
-  (let [repos (get-in config [:fleet :repos] [])]
-    (if (empty? repos)
-      (handle-empty-repos config config-path)
-      (let [choices (concat (map #(str "📦 " %) repos)
-                            ["" "➕ Add repository" "➖ Remove repository" "← Back"])
-            selection (gum-choose choices :header "Fleet Repositories")]
-        (handle-repos-menu config config-path repos selection)))))
-
-(defn- dashboard-view-prs
-  "View all PRs across fleet repositories."
-  [config]
-  (let [repos (get-in config [:fleet :repos] [])]
-    (if (empty? repos)
-      (println (style "\nNo repositories configured. Add some first." :foreground :yellow))
-      (do
-        (println (style "\nFetching PRs across fleet..." :foreground :cyan))
-        (let [all-prs (mapcat (fn [repo]
-                                (map #(assoc % :repo repo) (fetch-prs-for-repo repo)))
-                              repos)]
-          (if (empty? all-prs)
-            (println "  No open PRs across fleet")
-            (let [pr-choices (concat
-                               (map (fn [{:keys [repo number title]}]
-                                      (str "#" number " [" repo "] " (subs title 0 (min 50 (count title)))))
-                                    all-prs)
-                               ["" "← Back"])
-                  selection (gum-choose pr-choices :header (str (count all-prs) " Open PRs"))]
-              (when (and selection (not= selection "← Back") (not (str/blank? selection)))
-                (let [pr-num (-> selection (str/split #" ") first (subs 1) Integer/parseInt)
-                      pr-data (first (filter #(= (:number %) pr-num) all-prs))]
-                  (when pr-data
-                    (println)
-                    (println (draw-box (str "PR #" (:number pr-data))
-                                       (str "Repository: " (:repo pr-data) "\n"
-                                            "Title: " (:title pr-data) "\n"
-                                            "Author: " (get-in pr-data [:author :login]) "\n"
-                                            "State: " (:state pr-data) "\n"
-                                            "URL: " (:url pr-data))))
-                    (let [action (gum-choose ["Review PR" "Open in browser" "← Back"]
-                                             :header "Action:")]
-                      (case action
-                        "Review PR" (do
-                                      (print-info "Starting PR review...")
-                                      (println "TODO: Implement agent-based PR review"))
-                        "Open in browser" (process/sh "open" (:url pr-data))
-                        nil))))))))))))
-
-(defn- dashboard-quick-actions
-  "Show quick actions menu."
-  [config]
-  (let [action (gum-choose ["🔍 Review next PR"
-                            "🚀 Start new workflow"
-                            "📊 Refresh status"
-                            "⚙️  Configure settings"
-                            "← Back"]
-                           :header "Quick Actions")]
-    (case action
-      "🔍 Review next PR"
-      (let [repos (get-in config [:fleet :repos] [])
-            all-prs (mapcat (fn [repo]
-                              (map #(assoc % :repo repo) (fetch-prs-for-repo repo)))
-                            repos)]
-        (if (empty? all-prs)
-          (println (style "\nNo PRs to review." :foreground :yellow))
-          (let [pr (first all-prs)]
-            (println)
-            (println (style (str "Next PR: #" (:number pr) " in " (:repo pr)) :foreground :cyan))
-            (println (:title pr))
-            (when (gum-confirm "Start review?")
-              (print-info "Starting PR review...")
-              (println "TODO: Implement agent-based PR review")))))
-
-      "🚀 Start new workflow"
-      (let [spec-file (gum-input :placeholder "path/to/spec.edn" :header "Workflow spec file:")]
-        (when (and spec-file (not (str/blank? spec-file)))
-          (if (fs/exists? spec-file)
-            (do
-              (print-info (str "Starting workflow from: " spec-file))
-              (println "TODO: Integrate with orchestrator"))
-            (print-error (str "File not found: " spec-file)))))
-
-      "📊 Refresh status"
-      (println (style "\nStatus refreshed." :foreground :green))
-
-      "⚙️  Configure settings"
-      (let [setting (gum-choose ["Auto-review PRs"
-                                 "Auto-merge approved PRs"
-                                 "Poll interval"
-                                 "← Back"]
-                                :header "Settings")]
-        (case setting
-          "Auto-review PRs"
-          (let [current (get-in config [:fleet :auto-review?] false)]
-            (println (str "Current: " (if current "enabled" "disabled")))
-            (when (gum-confirm (str (if current "Disable" "Enable") " auto-review?"))
-              (println "TODO: Update config")))
-
-          "Auto-merge approved PRs"
-          (let [current (get-in config [:fleet :auto-merge?] false)]
-            (println (str "Current: " (if current "enabled" "disabled")))
-            (when (gum-confirm (str (if current "Disable" "Enable") " auto-merge?"))
-              (println "TODO: Update config")))
-
-          "Poll interval"
-          (println (str "Current: " (get-in config [:fleet :poll-interval-ms] 60000) "ms"))
-
-          nil))
-
-      nil)))
-
-;
+;; Deprecated TUI dashboard functions removed - use web dashboard instead
 
 (defn fleet-dashboard-cmd
   "Open interactive two-pane TUI dashboard."
-  [m]
+  [_m]
   (print-info "TUI dashboard is deprecated. Use the web dashboard instead:")
   (println "  bb miniforge fleet web")
   (println)
@@ -662,6 +408,31 @@
         (println "TODO: Use gh pr merge")))))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
+;; Workflow commands
+
+(defn workflow-run-cmd
+  "Execute a workflow by ID."
+  [m]
+  (let [{:keys [workflow-id version input input-json output quiet]} (get-opts m)]
+    (if-not workflow-id
+      (print-error "Usage: miniforge workflow run <workflow-id> [options]")
+      (try
+        (workflow-runner/run-workflow!
+         (keyword (str/replace workflow-id #"^:" ""))
+         {:version (or version "latest")
+          :input input
+          :input-json input-json
+          :output (or output :pretty)
+          :quiet (boolean quiet)})
+        (catch Exception e
+          (print-error (str "Workflow execution failed: " (ex-message e))))))))
+
+(defn workflow-list-cmd
+  "List available workflows."
+  [_m]
+  (workflow-runner/list-workflows!))
+
+;; ─────────────────────────────────────────────────────────────────────────────
 ;; Help command
 
 (defn help-cmd
@@ -678,6 +449,15 @@ Commands:
     --worktree <path> Custom worktree path
 
   status [id]         Show workflow status
+
+  workflow <subcommand>  Workflow execution
+    run <id>          Execute a workflow by ID
+      -v, --version   Workflow version (default: latest)
+      -i, --input     Input file (EDN or JSON)
+      --input-json    Inline JSON input
+      -o, --output    Output format: pretty, json, edn (default: pretty)
+      -q, --quiet     Suppress progress output
+    list              List available workflows
 
   fleet <subcommand>  Multi-repo management
     start             Start fleet daemon
@@ -707,6 +487,10 @@ Commands:
 Examples:
   miniforge doctor
   miniforge run feature.spec.edn
+  miniforge workflow list
+  miniforge workflow run :simple-v2
+  miniforge workflow run :canonical-sdlc-v1 -i input.edn
+  miniforge workflow run :workflow-id --input-json '{\"task\": \"Build feature\"}'
   miniforge fleet add myorg/myrepo
   miniforge fleet web                  # Start web dashboard
   miniforge pr review https://github.com/org/repo/pull/123
@@ -732,6 +516,19 @@ Examples:
    {:cmds ["status"]
     :fn status-cmd
     :args->opts [:workflow-id]}
+
+   ;; Workflow commands
+   {:cmds ["workflow" "run"]
+    :fn workflow-run-cmd
+    :args->opts [:workflow-id]
+    :spec {:version {:coerce :string :alias :v :default "latest"}
+           :input {:alias :i}
+           :input-json {}
+           :output {:coerce :keyword :alias :o :default :pretty}
+           :quiet {:coerce :boolean :alias :q}}}
+
+   {:cmds ["workflow" "list"]
+    :fn workflow-list-cmd}
 
    ;; Config subcommands
    {:cmds ["config" "init"] :fn config-init-cmd}

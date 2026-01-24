@@ -77,10 +77,10 @@
   "Handle the first iteration: invoke the agent and validate output.
    Returns either the successful result or continues to repair loop."
   [agent context input max-iterations]
-  (let [result (invoke agent context input)]
+  (let [result ((:invoke-fn agent) context input)]
     (if (= :error (:status result))
       result
-      (let [validation (validate agent (:output result))]
+      (let [validation ((:validate-fn agent) (:output result))]
         (if (:valid? validation)
           result
           (if (>= 0 max-iterations)
@@ -96,7 +96,7 @@
   "Handle a repair iteration: validate output and attempt repair if needed.
    Returns either success, error, or continuation signal."
   [agent current-output iteration max-iterations context]
-  (let [validation (validate agent current-output)]
+  (let [validation ((:validate-fn agent) current-output)]
     (if (:valid? validation)
       {:status :success :output current-output}
       (if (>= iteration max-iterations)
@@ -104,7 +104,7 @@
          :output current-output
          :errors (:errors validation)
          :message "Max repair iterations reached"}
-        (let [repair-result (repair agent current-output (:errors validation) context)]
+        (let [repair-result ((:repair-fn agent) current-output (:errors validation) context)]
           (if (= :error (:status repair-result))
             repair-result
             {:continue-repair true

@@ -16,20 +16,21 @@
                       (loop/pass-result gate-id :test))))
 
 (defn- failing-gate
-  "Create a gate that always fails."
+  "Create a gate that always fails with non-blocking errors."
   [gate-id error-message]
   (loop/custom-gate gate-id :test
                     (fn [_artifact _context]
                       (loop/fail-result gate-id :test
-                                        [(loop/make-error :test-error error-message)]))))
+                                        [(assoc (loop/make-error :test-error error-message)
+                                                :severity :non-blocking)]))))
 
 (defn- warning-gate
   "Create a gate that passes but emits warnings."
   [gate-id warning-message]
   (loop/custom-gate gate-id :test
                     (fn [_artifact _context]
-                      (assoc (loop/pass-result gate-id :test)
-                             :warnings [(loop/make-error :warning warning-message)]))))
+                      (loop/pass-result gate-id :test
+                                        :warnings [(loop/make-error :warning warning-message)]))))
 
 (def sample-artifact
   {:artifact/id (random-uuid)
@@ -122,34 +123,34 @@
     (let [gates [(passing-gate :gate1)
                  (failing-gate :gate2 "Test failure")]
           reviewer (reviewer/create-reviewer {:gates gates :strict true})
-          result (core/invoke reviewer {} sample-artifact)]
+          result (core/invoke reviewer {} sample-artifact)
+          review (:artifact result)]
 
-      (let [review (:artifact result)]
-        (is (= :rejected (:review/decision review))
-            "Should be rejected in strict mode")
+      (is (= :rejected (:review/decision review))
+          "Should be rejected in strict mode")
 
-        (is (reviewer/rejected? review)
-            "rejected? helper should return true")
+      (is (reviewer/rejected? review)
+          "rejected? helper should return true")
 
-        (is (seq (:review/blocking-issues review))
-            "Should have blocking issues in strict mode")))))
+      (is (seq (:review/blocking-issues review))
+          "Should have blocking issues in strict mode"))))
 
 (deftest test-reviewer-invoke-with-warnings
   (testing "Review with warnings but all passing"
     (let [gates [(passing-gate :gate1)
                  (warning-gate :gate2 "Minor issue")]
           reviewer (reviewer/create-reviewer {:gates gates})
-          result (core/invoke reviewer {} sample-artifact)]
+          result (core/invoke reviewer {} sample-artifact)
+          review (:artifact result)]
 
-      (let [review (:artifact result)]
-        (is (= :approved (:review/decision review))
-            "Should still be approved with warnings")
+      (is (= :approved (:review/decision review))
+          "Should still be approved with warnings")
 
-        (is (seq (:review/warnings review))
-            "Should have warnings")
+      (is (seq (:review/warnings review))
+          "Should have warnings")
 
-        (is (= 2 (:review/gates-passed review))
-            "Both gates should pass")))))
+      (is (= 2 (:review/gates-passed review))
+          "Both gates should pass"))))
 
 (deftest test-reviewer-no-llm-usage
   (testing "Reviewer uses no tokens (no LLM)"
@@ -279,12 +280,12 @@
 (deftest test-reviewer-with-no-gates
   (testing "Review with no gates should approve"
     (let [reviewer (reviewer/create-reviewer {:gates []})
-          result (core/invoke reviewer {} sample-artifact)]
+          result (core/invoke reviewer {} sample-artifact)
+          review (:artifact result)]
 
-      (let [review (:artifact result)]
-        (is (= :approved (:review/decision review))
-            "Should approve when no gates configured")
-        (is (= 0 (:review/gates-total review)))))))
+      (is (= :approved (:review/decision review))
+          "Should approve when no gates configured")
+      (is (= 0 (:review/gates-total review))))))
 
 (deftest test-reviewer-with-gate-exception
   (testing "Review handles gate exceptions gracefully"

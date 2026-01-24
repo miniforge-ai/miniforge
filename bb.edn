@@ -349,6 +349,24 @@
 
   miniforge
   {:doc     "Run miniforge CLI in development mode"
-   :extra-paths ["bases/cli/src"]
+   :extra-paths ["bases/cli/src"
+                 "components/schema/src"
+                 "components/logging/src"
+                 "components/llm/src"
+                 "components/tool/src"
+                 "components/artifact/src"
+                 "components/agent/src"
+                 "components/task/src"
+                 "components/loop/src"
+                 "components/knowledge/src"
+                 "components/policy/src"
+                 "components/heuristic/src"
+                 "components/response/src"
+                 "components/fsm/src"
+                 "components/phase/src"
+                 "components/gate/src"
+                 "components/workflow/src"]
+   :extra-deps {metosin/malli {:mvn/version "0.16.1"}
+                clj-statecharts/clj-statecharts {:mvn/version "0.1.5"}}
    :requires ([ai.miniforge.cli.main :as cli])
    :task    (apply cli/-main *command-line-args*)}}}
