@@ -42,14 +42,14 @@
 
 (defn validate-params
   "Validate parameters against a parameter spec.
-   Returns {:valid true} or {:valid false :errors [...]}."
+   Returns {:valid? true} or {:valid? false :errors [...]}."
   [param-spec params]
   (let [required (set (keys (filter (fn [[_k v]] (:required v)) param-spec)))
         provided (set (keys params))
         missing (set/difference required provided)]
     (if (empty? missing)
-      {:valid true}
-      {:valid false
+      {:valid? true}
+      {:valid? false
        :errors (mapv #(str "Missing required parameter: " (name %)) missing)})))
 
 (defn build-tool-definition
@@ -75,7 +75,9 @@
   "Protocol for executable tools."
   (tool-id [this] "Return the tool's identifier.")
   (tool-info [this] "Return tool metadata and description.")
-  (execute [this params context] "Execute the tool with given params and context."))
+  (execute [this params context] "Execute the tool with given params and context.")
+  (validate-args [this args] "Validate arguments against tool schema. Returns {:valid? bool :errors [...]}")
+  (get-schema [this] "Return tool parameter schema."))
 
 (defprotocol ToolRegistry
   "Protocol for tool registration and lookup."
@@ -96,7 +98,7 @@
      :metadata metadata})
   (execute [_this params context]
     (let [validation (validate-params parameters params)]
-      (if (:valid validation)
+      (if (:valid? validation)
         (try
           {:success true
            :result (handler params context)}
@@ -106,7 +108,11 @@
                      :message (.getMessage e)}}))
         {:success false
          :error {:type "validation_error"
-                 :errors (:errors validation)}}))))
+                 :errors (:errors validation)}})))
+  (validate-args [_this args]
+    (validate-params parameters args))
+  (get-schema [_this]
+    parameters))
 
 (defrecord AtomRegistry [tools-atom logger]
   ToolRegistry

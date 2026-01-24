@@ -180,6 +180,49 @@
       (is (not (tool/success? result)))
       (is (= "not_found" (get-in (tool/get-error result) [:type]))))))
 
+;; Protocol method tests (N1 conformance)
+
+(deftest validate-args-test
+  (testing "validate-args protocol method works"
+    (let [my-tool (tool/create-tool
+                   {:id :test/validate
+                    :parameters {:x {:required true}
+                                 :y {:required false}}
+                    :handler (constantly nil)})
+          valid-result (tool/validate-args my-tool {:x 10 :y 20})
+          invalid-result (tool/validate-args my-tool {:y 20})]
+      (is (:valid? valid-result))
+      (is (not (:valid? invalid-result)))
+      (is (seq (:errors invalid-result)))))
+
+  (testing "validate-args with all required params"
+    (let [my-tool (tool/create-tool
+                   {:id :test/all-required
+                    :parameters {:a {:required true}
+                                 :b {:required true}}
+                    :handler (constantly nil)})
+          result (tool/validate-args my-tool {:a 1 :b 2})]
+      (is (:valid? result))
+      (is (empty? (:errors result))))))
+
+(deftest get-schema-test
+  (testing "get-schema protocol method returns parameters"
+    (let [params {:message {:type :string :required true}
+                  :count {:type :number :required false}}
+          my-tool (tool/create-tool
+                   {:id :test/schema
+                    :parameters params
+                    :handler (constantly nil)})
+          schema (tool/get-schema my-tool)]
+      (is (= params schema))))
+
+  (testing "get-schema returns empty map for parameterless tool"
+    (let [my-tool (tool/create-tool
+                   {:id :test/no-params
+                    :handler (constantly :ok)})
+          schema (tool/get-schema my-tool)]
+      (is (map? schema)))))
+
 ;; Response helper tests
 
 (deftest response-helpers-test
