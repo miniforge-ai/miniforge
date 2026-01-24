@@ -1,0 +1,191 @@
+---
+description: Pre-commit hook discipline and bypass constraints
+alwaysApply: true
+---
+# Pre-Commit Hook Discipline (ALWAYS)
+
+## Core Principle
+
+**Pre-commit hooks enforce quality gates. Bypassing them violates miniforge's self-validation principle.**
+
+The pre-commit hook runs:
+- **Linting** (clj-kondo for Clojure)
+- **Formatting** (markdownlint for Markdown)
+- **Tests** (full test suite via `bb pre-commit`)
+- **Email validation** (must use @miniforge.ai)
+
+Failures indicate **real problems** that must be fixed, not bypassed.
+
+---
+
+## NEVER Bypass Without Investigation
+
+**CRITICAL**: When `bb pre-commit` or the git pre-commit hook fails, **NEVER** immediately use `git commit --no-verify`.
+
+### Required Investigation Steps (Before Bypass)
+
+When a pre-commit hook fails, you MUST:
+
+1. **Read the full error output** - Don't assume what's failing
+2. **Check what's staged** - Run `git diff --cached --stat` to see exactly what files are staged
+3. **Identify the root cause:**
+   - Are you staging unintended files? (e.g., `git add -A` in a dirty worktree)
+   - Are there legitimate test failures?
+   - Are there linting errors in your new code?
+   - Is there a pre-existing issue unrelated to your changes?
+4. **Fix the root cause:**
+   - If staging too many files: `git reset` and stage only your changes
+   - If test failures: Fix the tests or the code causing them
+   - If linting errors: Fix the code
+   - If pre-existing issues: Fix them in your PR (you're improving the codebase)
+
+### Bypass is Only Allowed When
+
+Use `git commit --no-verify` **ONLY** when **ALL** of these conditions are met:
+
+1. ✅ You've completed all investigation steps above
+2. ✅ You've documented the **specific reason** in the commit message with `[BYPASS-HOOKS: reason]`
+3. ✅ The failure is **environmental** (e.g., missing tools, permission issues) and **NOT** code quality
+4. ✅ Manual validation confirms:
+   - Tests pass: `clojure -M:poly test` (or equivalent)
+   - Linting passes: `bb lint:clj` for staged Clojure files
+   - Formatting passes: `bb fmt:md` for staged Markdown files
+5. ✅ You're committing to a feature branch (never bypass on main)
+6. ✅ CI will catch the issue if you're wrong
+
+### Bypass Commit Message Format
+
+When bypass is necessary, use this exact format:
+
+```bash
+git commit --no-verify -m "$(cat <<'EOF'
+feat: your commit message here
+
+[BYPASS-HOOKS: reason]
+Pre-commit hook failed due to: <specific environmental reason>
+
+Manual validation:
+- Tests passed: clojure -M:poly test (exit code 0)
+- Linting passed: bb lint:clj (exit code 0)
+- Formatting passed: bb fmt:md (exit code 0)
+
+Root cause: <what actually failed and why>
+Why bypass: <why fixing it isn't possible right now>
+CI validation: Will be enforced by CI workflow
+EOF
+)"
+```
+
+---
+
+## Anti-Patterns to Reject
+
+❌ **"Pre-commit is broken in this worktree"** - Investigate why, don't bypass
+❌ **"Tests pass manually but hook fails"** - Investigate what the hook is doing differently
+❌ **"It's taking too long"** - Speed is not a valid reason
+❌ **"CI will catch it anyway"** - That's wasteful; fix it now
+❌ **"It's a minor warning"** - Fix minor warnings; they accumulate into major debt
+❌ **"I'll fix it in the next commit"** - Fix it in THIS commit
+❌ **"The hook suggests I can bypass"** - The hook also says "BUT YOU REALLY SHOULDN'T!"
+
+---
+
+## Agent Behavior (Cursor)
+
+### When Pre-Commit Fails
+
+1. **STOP** - Don't immediately try `--no-verify`
+2. **READ** the full error output (don't truncate)
+3. **CHECK** staging: `git diff --cached --stat`
+4. **IDENTIFY** the specific failure:
+   - What command failed? (lint/format/test)
+   - What files are affected?
+   - Is it your new code or pre-existing?
+5. **FIX** the root cause:
+   - If staging issue: Reset and stage correctly
+   - If test failure: Fix the test or code
+   - If linting: Fix the code
+   - If pre-existing: Fix it in your PR
+6. **VERIFY** the fix: Re-run the specific failing command
+7. **COMMIT** normally (no `--no-verify`)
+
+### When to Alert the User
+
+If you discover:
+- Pre-existing test failures blocking your commit
+- Linting errors in files you didn't touch
+- Environmental issues preventing hook execution
+
+Alert the user with:
+1. **What's failing** (specific command and error)
+2. **Why it's failing** (root cause analysis)
+3. **Proposed fix** (correct solution, not bypass)
+4. **Impact** (blocks commit until resolved)
+
+Ask the user for guidance on how to proceed.
+
+### Red Flags in Your Reasoning
+
+If you find yourself thinking:
+- "The hook might have environmental issues"
+- "Tests passed manually, so it's probably fine"
+- "We can bypass this once"
+- "CI will catch it"
+
+**STOP.** You're about to make a poor decision. Go back to investigation steps.
+
+---
+
+## Pre-Commit Hook Failures are Learning Opportunities
+
+When the hook fails, it's teaching you:
+- You're staging too many files
+- Your code has quality issues
+- There are pre-existing problems to fix
+- Your git workflow needs refinement
+
+**Embrace the failure, investigate, and fix.** Don't bypass your way around learning.
+
+---
+
+## Exception: True Emergencies
+
+In a true emergency (production down, security incident), document extensively:
+
+```bash
+git commit --no-verify -m "$(cat <<'EOF'
+hotfix: emergency fix for production outage
+
+[BYPASS-HOOKS: EMERGENCY]
+Production is down. Incident: INC-12345
+Impact: 100% of users affected
+Time sensitivity: Every minute costs $$$
+
+This commit:
+- Rolls back problematic deployment
+- Restores service immediately
+- Will be followed by proper fix with tests in PR #XXX
+
+Pre-commit bypassed to restore service ASAP.
+Post-incident review will happen in INC-12345.
+EOF
+)"
+```
+
+Emergencies are **RARE**. Feature development is never an emergency.
+
+---
+
+## Summary
+
+| Situation | Action | Tool |
+|-----------|--------|------|
+| Pre-commit fails | Investigate root cause | Read errors, check staging |
+| Staging issue | Fix staging | `git reset`, stage correctly |
+| Test failure | Fix test/code | Debug, fix, re-test |
+| Linting error | Fix code | Address linter feedback |
+| Environmental issue | Document & bypass OR fix environment | `--no-verify` with extensive docs |
+| Emergency | Document extensively & bypass | `--no-verify` with incident details |
+| **Default** | **Fix the issue** | **Never bypass** |
+
+**When in doubt: Don't bypass. Investigate and fix.**
