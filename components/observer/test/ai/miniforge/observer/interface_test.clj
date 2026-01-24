@@ -3,7 +3,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.observer.interface :as observer]
-   [ai.miniforge.workflow.interface :as wf]))
+   [ai.miniforge.workflow.interface.protocols.workflow-observer :as wf-proto]))
 
 ;; ============================================================================
 ;; Test Fixtures
@@ -43,7 +43,7 @@
   (testing "Creating a new observer"
     (let [obs (observer/create-observer)]
       (is (some? obs) "Observer should be created")
-      (is (satisfies? wf/WorkflowObserver obs)
+      (is (satisfies? wf-proto/WorkflowObserver obs)
           "Observer should implement WorkflowObserver protocol")))
 
   (testing "Creating observer with initial state"
@@ -371,18 +371,18 @@
           workflow-id (random-uuid)]
 
       ;; Simulate workflow execution callbacks
-      (wf/on-phase-start obs workflow-id :implement {})
+      (wf-proto/on-phase-start obs workflow-id :implement {})
 
-      (wf/on-phase-complete obs workflow-id :implement
-                           (sample-phase-result true))
+      (wf-proto/on-phase-complete obs workflow-id :implement
+                                   (sample-phase-result true))
 
-      (wf/on-phase-start obs workflow-id :test {})
+      (wf-proto/on-phase-start obs workflow-id :test {})
 
-      (wf/on-phase-complete obs workflow-id :test
-                           (sample-phase-result true))
+      (wf-proto/on-phase-complete obs workflow-id :test
+                                   (sample-phase-result true))
 
-      (wf/on-workflow-complete obs workflow-id
-                              (sample-workflow-state workflow-id :completed))
+      (wf-proto/on-workflow-complete obs workflow-id
+                                      (sample-workflow-state workflow-id :completed))
 
       ;; Verify metrics were collected
       (let [metrics (observer/get-workflow-metrics obs workflow-id)]
@@ -394,11 +394,11 @@
     (let [obs (observer/create-observer)
           workflow-id (random-uuid)]
 
-      (wf/on-phase-error obs workflow-id :test
-                        {:message "Test failed" :type :assertion-error})
+      (wf-proto/on-phase-error obs workflow-id :test
+                                {:message "Test failed" :type :assertion-error})
 
-      (wf/on-workflow-complete obs workflow-id
-                              (sample-workflow-state workflow-id :failed))
+      (wf-proto/on-workflow-complete obs workflow-id
+                                      (sample-workflow-state workflow-id :failed))
 
       (let [metrics (observer/get-workflow-metrics obs workflow-id)]
         (is (= :failed (:status metrics)) "Workflow should be failed")
@@ -408,7 +408,7 @@
     (let [obs (observer/create-observer)
           workflow-id (random-uuid)]
 
-      (wf/on-rollback obs workflow-id :test :implement "Test failed, rolling back")
+      (wf-proto/on-rollback obs workflow-id :test :implement "Test failed, rolling back")
 
       ;; Rollback doesn't fail the test, just exercises the callback
       (is true "Rollback callback should not throw"))))
