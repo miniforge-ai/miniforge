@@ -105,44 +105,126 @@
                    (when duration
                      (str " (" (format-duration duration) ")")))))))
 
+(defn- print-workflow-summary
+  "Print workflow execution summary with metrics and errors."
+  [result]
+  (let [status (:execution/status result)
+        success? (= status :completed)
+        metrics (:execution/metrics result)
+        errors (:execution/errors result)]
+    (println (if success?
+               (colorize :green "✓ Workflow completed")
+               (colorize :red "✗ Workflow failed")))
+    (when metrics
+      (println (str "Tokens: " (:tokens metrics 0)
+                   " | Cost: $" (format "%.4f" (:cost-usd metrics 0.0))
+                   " | Duration: " (format-duration (:duration-ms metrics 0)))))
+    (when (seq errors)
+      (println (colorize :red "\nErrors:"))
+      (doseq [err errors]
+        (println (str "  • " err))))))
+
+(defn- print-pretty-result
+  "Print result in pretty format with summary and full data."
+  [result]
+  (println (colorize :cyan (str "\n" (apply str (repeat 65 "━")))))
+  (print-workflow-summary result)
+  (println (colorize :cyan (str (apply str (repeat 65 "━")) "\n")))
+  (println "\nFull result:")
+  (clojure.pprint/pprint result))
+
 (defn print-result
   "Format and display execution result."
   [result {:keys [output quiet]}]
   (case output
-    :json
-    (println (json/generate-string result {:pretty true}))
-
-    :pretty
-    (do
-      (when-not quiet
-        (println (colorize :cyan (str "\n" (apply str (repeat 65 "━")))))
-        (let [status (:execution/status result)
-              success? (= status :completed)
-              metrics (:execution/metrics result)
-              errors (:execution/errors result)]
-          (println (str (if success?
-                          (colorize :green "✓ Workflow completed")
-                          (colorize :red "✗ Workflow failed"))))
-          (when metrics
-            (println (str "Tokens: " (:tokens metrics 0)
-                         " | Cost: $" (format "%.4f" (:cost-usd metrics 0.0))
-                         " | Duration: " (format-duration (:duration-ms metrics 0)))))
-          (when (seq errors)
-            (println (colorize :red "\nErrors:"))
-            (doseq [err errors]
-              (println (str "  • " err)))))
-        (println (colorize :cyan (str (apply str (repeat 65 "━")) "\n"))))
-
-      ;; Also print the full result data structure for inspection
-      (when-not quiet
-        (println "\nFull result:")
-        (clojure.pprint/pprint result)))
-
-    ;; default - just pprint
+    :json (println (json/generate-string result {:pretty true}))
+    :pretty (when-not quiet (print-pretty-result result))
     (clojure.pprint/pprint result)))
 
 ;; Workflow Execution
 ;; ==================
+
+;; Layer 0: Interface resolution
+
+(defn- resolve-workflow-interface
+  "Resolve workflow interface functions with helpful error messages."
+  []
+  (let [load-workflow (try
+                        (requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)
+                        (catch Exception e
+                          (println (colorize :red "\nWorkflow execution requires JVM-only dependencies."))
+                          (println (colorize :yellow "This feature is not available in the Babashka CLI build."))
+                          (println (colorize :cyan "\nTo run workflows, use the full JVM version:"))
+                          (println "  clojure -M:dev -m ai.miniforge.cli.main workflow run <workflow-id>")
+                          (throw (ex-info "Workflow execution not available in Babashka build"
+                                        {:reason "JVM-only dependencies required"} e))))
+        run-pipeline (requiring-resolve 'ai.miniforge.workflow.interface/run-pipeline)]
+    (when-not load-workflow
+      (throw (ex-info "Workflow interface not available" {})))
+    {:load-workflow load-workflow
+     :run-pipeline run-pipeline}))
+
+(defn- create-phase-callbacks
+  "Create callbacks for phase start and complete events."
+  [quiet]
+  {:on-phase-start
+   (fn [_ctx interceptor]
+     (let [phase-name (get-in interceptor [:config :phase])]
+       (when phase-name
+         (print-phase-start phase-name quiet))))
+
+   :on-phase-complete
+   (fn [_ctx interceptor result]
+     (let [phase-name (get-in interceptor [:config :phase])]
+       (when phase-name
+         (print-phase-complete phase-name result quiet))))})
+
+;; Layer 1: Workflow operations
+
+(defn- load-and-validate-workflow
+  "Load workflow and validate it, throwing on errors."
+  [load-workflow workflow-id version]
+  (let [{:keys [workflow validation]} (load-workflow workflow-id version {})]
+    (when-not workflow
+      (throw (ex-info (str "Workflow '" workflow-id "' not found. Use 'workflow list' to see available workflows.")
+                      {:workflow-id workflow-id :version version})))
+    (when (and validation (not (:valid? validation)))
+      (throw (ex-info (str "Workflow validation failed: " (:errors validation))
+                      {:workflow-id workflow-id :validation validation})))
+    workflow))
+
+(defn- create-artifact-store
+  "Try to create transit artifact store, return nil if unavailable."
+  [quiet]
+  (try
+    (let [create-transit-store (requiring-resolve 'ai.miniforge.artifact.interface/create-transit-store)]
+      (when create-transit-store
+        (create-transit-store)))
+    (catch Exception _e
+      (when-not quiet
+        (println (colorize :yellow "Warning: Could not create artifact store, running without persistence")))
+      nil)))
+
+(defn- close-artifact-store
+  "Close artifact store if it was created."
+  [artifact-store]
+  (when artifact-store
+    (try
+      (let [close-store (requiring-resolve 'ai.miniforge.artifact.interface/close-store)]
+        (when close-store
+          (close-store artifact-store)))
+      (catch Exception _))))
+
+;; Layer 2: Execution
+
+(defn- execute-workflow-pipeline
+  "Execute workflow pipeline with callbacks and artifact store."
+  [run-pipeline workflow input callbacks artifact-store]
+  (let [context (cond-> callbacks
+                  artifact-store (assoc :artifact-store artifact-store))]
+    (run-pipeline workflow input context)))
+
+;; Layer 3: Orchestration
 
 (defn run-workflow!
   "Main entry point - load, execute, and display workflow results.
@@ -157,79 +239,16 @@
                 :or {version "latest" output :pretty quiet false}
                 :as opts}]
   (try
-    ;; Lazy load workflow interface
-    (let [load-workflow (try
-                          (requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)
-                          (catch Exception e
-                            (println (colorize :red "\nWorkflow execution requires JVM-only dependencies."))
-                            (println (colorize :yellow "This feature is not available in the Babashka CLI build."))
-                            (println (colorize :cyan "\nTo run workflows, use the full JVM version:"))
-                            (println "  clojure -M:dev -m ai.miniforge.cli.main workflow run <workflow-id>")
-                            (throw (ex-info "Workflow execution not available in Babashka build"
-                                          {:reason "JVM-only dependencies required"} e))))
-          run-pipeline (requiring-resolve 'ai.miniforge.workflow.interface/run-pipeline)]
-
-      (when-not load-workflow
-        (throw (ex-info "Workflow interface not available" {})))
-
-      ;; Print header
+    (let [{:keys [load-workflow run-pipeline]} (resolve-workflow-interface)]
       (print-workflow-header workflow-id version quiet)
-
-      ;; Resolve input and load workflow
       (let [workflow-input (resolve-input {:input input :input-json input-json})
-            {:keys [workflow validation]} (load-workflow workflow-id version {})]
-
-        (when-not workflow
-          (throw (ex-info (str "Workflow '" workflow-id "' not found. Use 'workflow list' to see available workflows.")
-                          {:workflow-id workflow-id :version version})))
-
-        (when (and validation (not (:valid? validation)))
-          (throw (ex-info (str "Workflow validation failed: " (:errors validation))
-                          {:workflow-id workflow-id :validation validation})))
-
-        ;; Create artifact store for this workflow execution
-        ;; Try to use transit store (BB-compatible), fall back to no store
-        (let [artifact-store (try
-                               (let [create-transit-store (requiring-resolve 'ai.miniforge.artifact.interface/create-transit-store)]
-                                 (when create-transit-store
-                                   (create-transit-store)))
-                               (catch Exception _e
-                                 (when-not quiet
-                                   (println (colorize :yellow "Warning: Could not create artifact store, running without persistence")))
-                                 nil))
-              ;; Execute with callbacks and artifact store
-              result (run-pipeline
-                          workflow
-                          workflow-input
-                          (cond-> {:on-phase-start
-                                   (fn [_ctx interceptor]
-                                     (let [phase-name (get-in interceptor [:config :phase])]
-                                       (when phase-name
-                                         (print-phase-start phase-name quiet))))
-
-                                   :on-phase-complete
-                                   (fn [_ctx interceptor result]
-                                     (let [phase-name (get-in interceptor [:config :phase])]
-                                       (when phase-name
-                                         (print-phase-complete phase-name result quiet))))}
-
-                            ;; Add artifact store if available
-                            artifact-store (assoc :artifact-store artifact-store)))]
-
-          ;; Close artifact store if it was created
-          (when artifact-store
-            (try
-              (let [close-store (requiring-resolve 'ai.miniforge.artifact.interface/close-store)]
-                (when close-store
-                  (close-store artifact-store)))
-              (catch Exception _)))
-
-          ;; Print result
-          (print-result result opts)
-
-          ;; Return result for programmatic use
-          result)))
-
+            workflow (load-and-validate-workflow load-workflow workflow-id version)
+            artifact-store (create-artifact-store quiet)
+            callbacks (create-phase-callbacks quiet)
+            result (execute-workflow-pipeline run-pipeline workflow workflow-input callbacks artifact-store)]
+        (close-artifact-store artifact-store)
+        (print-result result opts)
+        result))
     (catch Exception e
       (when-not quiet
         (println (colorize :red (str "\n✗ Error: " (ex-message e)))))
@@ -241,12 +260,54 @@
                   {:pretty true})))
       (throw e))))
 
+(defn- parse-workflow-filename
+  "Parse workflow filename into id and version.
+   Returns [id version] or nil if invalid."
+  [filename]
+  (when-let [[_ id version] (re-matches #"(.+)-v(\d+(?:\.\d+\.\d+)?).edn" filename)]
+    [(keyword id) version]))
+
+(defn- load-workflow-metadata
+  "Load metadata for a single workflow from resources.
+   Returns workflow metadata map or nil on error."
+  [filename]
+  (try
+    (when-let [[id version] (parse-workflow-filename filename)]
+      (let [resource-path (str "workflows/" filename)]
+        (if-let [resource (io/resource resource-path)]
+          (let [content (edn/read-string (slurp resource))]
+            {:id id
+             :version version
+             :description (or (:workflow/description content)
+                            (:description content)
+                            "No description available")})
+          (do
+            (println (colorize :yellow (str "Warning: Resource not found: " resource-path)))
+            nil))))
+    (catch Exception e
+      (println (colorize :yellow (str "Warning: Failed to read " filename ": " (ex-message e))))
+      nil)))
+
+(defn- format-workflow-listing
+  "Format and print workflow listing."
+  [workflows]
+  (if (empty? workflows)
+    (println "No workflows found.")
+    (do
+      (println (colorize :cyan "\nAvailable Workflows:"))
+      (println (colorize :cyan (apply str (repeat 50 "─"))))
+      (doseq [{:keys [id version description]} workflows]
+        (println (str (colorize :bold (str "  " (name id)))
+                     " (v" version ")"
+                     (when description (str "\n    " description))))
+        (println))
+      (println (colorize :cyan (apply str (repeat 50 "─")))))))
+
 (defn- list-workflows-from-resources
   "Lightweight workflow listing that reads directly from resources.
    Used as fallback when full workflow component isn't available."
   []
   (try
-    ;; List of known workflow files (hardcoded since we can't easily scan resources in jar)
     (let [workflow-files ["simple-v2.0.0.edn"
                           "simple-test-v1.0.0.edn"
                           "minimal-test-v1.0.0.edn"
@@ -254,37 +315,10 @@
                           "lean-sdlc-v1.0.0.edn"
                           "standard-sdlc-v2.0.0.edn"
                           "canonical-sdlc-v1.0.0.edn"]
-          workflows (for [filename workflow-files
-                          :let [;; Parse filename like "simple-v2.0.0.edn" or "simple-test-v1.edn"
-                                [_ id version] (re-matches #"(.+)-v(\d+(?:\.\d+\.\d+)?).edn" filename)
-                                resource-path (str "workflows/" filename)]
-                          :when (and id version)]
-                      (try
-                        (if-let [resource (io/resource resource-path)]
-                          (let [content (edn/read-string (slurp resource))]
-                            {:id (keyword id)
-                             :version version
-                             :description (or (:workflow/description content)
-                                            (:description content)
-                                            "No description available")})
-                          (do
-                            (println (colorize :yellow (str "Warning: Resource not found: " resource-path)))
-                            nil))
-                        (catch Exception e
-                          (println (colorize :yellow (str "Warning: Failed to read " filename ": " (ex-message e))))
-                          nil)))
-          valid-workflows (remove nil? workflows)]
-      (if (empty? valid-workflows)
-        (println "No workflows found.")
-        (do
-          (println (colorize :cyan "\nAvailable Workflows:"))
-          (println (colorize :cyan (apply str (repeat 50 "─"))))
-          (doseq [{:keys [id version description]} valid-workflows]
-            (println (str (colorize :bold (str "  " (name id)))
-                         " (v" version ")"
-                         (when description (str "\n    " description))))
-            (println))
-          (println (colorize :cyan (apply str (repeat 50 "─")))))))
+          workflows (->> workflow-files
+                         (map load-workflow-metadata)
+                         (remove nil?))]
+      (format-workflow-listing workflows))
     (catch Exception e
       (println (colorize :red (str "Failed to list workflows: " (ex-message e)))))))
 
