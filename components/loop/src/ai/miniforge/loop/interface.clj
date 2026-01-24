@@ -7,7 +7,9 @@
    [ai.miniforge.loop.outer :as outer]
    [ai.miniforge.loop.gates :as gates]
    [ai.miniforge.loop.repair :as repair]
-   [ai.miniforge.loop.schema :as schema]))
+   [ai.miniforge.loop.schema :as schema]
+   [ai.miniforge.loop.interface.protocols.gate :as gate-proto]
+   [ai.miniforge.loop.interface.protocols.repair-strategy :as repair-proto]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
@@ -31,8 +33,8 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol re-exports
 
-(def Gate gates/Gate)
-(def RepairStrategy repair/RepairStrategy)
+(def Gate gate-proto/Gate)
+(def RepairStrategy repair-proto/RepairStrategy)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Inner Loop API

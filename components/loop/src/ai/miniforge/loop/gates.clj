@@ -1,29 +1,22 @@
 (ns ai.miniforge.loop.gates
   "Validation gate protocol and built-in gate implementations.
-   Layer 0: Gate protocol definition
+
+   Note: The Gate protocol has been moved to:
+   - ai.miniforge.loop.interface.protocols.gate (Gate protocol)
+
+   This namespace contains the built-in gate implementations.
+   Layer 0: Pure functions for gate results
    Layer 1: Built-in gates (syntax, lint, test, policy)
    Layer 2: Gate runner and composition"
   (:require
+   [ai.miniforge.loop.interface.protocols.gate :as p]
    [ai.miniforge.logging.interface :as log]))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Gate protocol
-
-(defprotocol Gate
-  "Protocol for validation gates.
-   Gates check artifacts and return pass/fail results with errors."
-  (check [this artifact context]
-    "Run gate check on artifact. Returns:
-     {:gate/id keyword
-      :gate/type keyword
-      :gate/passed? boolean
-      :gate/errors [{:code keyword :message string :location map}...]
-      :gate/warnings [...]}
-     The context map provides access to logger, config, and other runtime state.")
-  (gate-id [this]
-    "Return the unique identifier for this gate.")
-  (gate-type [this]
-    "Return the gate type: :syntax, :lint, :test, :policy, :custom"))
+;; Re-export protocol for backward compatibility
+(def Gate p/Gate)
+(def check p/check)
+(def gate-id p/gate-id)
+(def gate-type p/gate-type)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Gate result constructors (pure functions)
@@ -60,7 +53,7 @@
 ;; Built-in gates
 
 (defrecord SyntaxGate [id config]
-  Gate
+  p/Gate
   (check [_this artifact context]
     (let [start (System/currentTimeMillis)
           content (:artifact/content artifact)
@@ -99,7 +92,7 @@
 
 
 (defrecord LintGate [id config]
-  Gate
+  p/Gate
   (check [_this artifact context]
     (let [start (System/currentTimeMillis)
           content (:artifact/content artifact)
@@ -147,7 +140,7 @@
 
 
 (defrecord TestGate [id config]
-  Gate
+  p/Gate
   (check [_this artifact context]
     (let [start (System/currentTimeMillis)
           logger (:logger context)
@@ -189,7 +182,7 @@
 
 
 (defrecord PolicyGate [id config]
-  Gate
+  p/Gate
   (check [_this artifact context]
     (let [start (System/currentTimeMillis)
           logger (:logger context)
@@ -253,7 +246,7 @@
 
 
 (defrecord CustomGate [id type-kw check-fn]
-  Gate
+  p/Gate
   (check [_this artifact context]
     (let [start (System/currentTimeMillis)]
       (try

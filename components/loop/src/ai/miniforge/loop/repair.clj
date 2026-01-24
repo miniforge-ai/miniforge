@@ -1,30 +1,21 @@
 (ns ai.miniforge.loop.repair
   "Repair strategy protocol and built-in implementations.
-   Layer 0: RepairStrategy protocol
+
+   Note: The RepairStrategy protocol has been moved to:
+   - ai.miniforge.loop.interface.protocols.repair-strategy (RepairStrategy protocol)
+
+   This namespace contains the built-in repair strategy implementations.
+   Layer 0: Pure functions for repair results
    Layer 1: Built-in strategies (llm-fix, retry, escalate)
    Layer 2: Repair orchestration"
   (:require
+   [ai.miniforge.loop.interface.protocols.repair-strategy :as p]
    [ai.miniforge.logging.interface :as log]))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Repair protocol
-
-(defprotocol RepairStrategy
-  "Protocol for artifact repair strategies.
-   Strategies attempt to fix validation errors in artifacts."
-  (can-repair? [this errors context]
-    "Check if this strategy can handle the given errors.
-     Returns true if the strategy should be attempted.")
-  (repair [this artifact errors context]
-    "Attempt to repair the artifact given the errors.
-     Returns:
-     {:success? boolean
-      :artifact artifact-map (if success)
-      :errors [error...] (if failure)
-      :strategy keyword
-      :tokens-used int (optional)
-      :duration-ms int (optional)}
-     The context map provides access to agent, logger, and config."))
+;; Re-export protocol for backward compatibility
+(def RepairStrategy p/RepairStrategy)
+(def can-repair? p/can-repair?)
+(def repair p/repair)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Repair result constructors (pure functions)
@@ -53,7 +44,7 @@
 ;; Built-in repair strategies
 
 (defrecord LLMFixStrategy [config]
-  RepairStrategy
+  p/RepairStrategy
   (can-repair? [_this errors _context]
     ;; LLM can attempt to fix most errors except hardware/infrastructure issues
     (let [unfixable-codes #{:out-of-memory :disk-full :network-error}]
@@ -105,7 +96,7 @@
 
 
 (defrecord RetryStrategy [config]
-  RepairStrategy
+  p/RepairStrategy
   (can-repair? [_this errors _context]
     ;; Retry is suitable for transient errors
     (let [transient-codes #{:timeout :rate-limit :service-unavailable :network-error}]
@@ -136,7 +127,7 @@
 
 
 (defrecord EscalateStrategy [_config]
-  RepairStrategy
+  p/RepairStrategy
   (can-repair? [_this _errors _context]
     ;; Escalate can always be used as a last resort
     true)

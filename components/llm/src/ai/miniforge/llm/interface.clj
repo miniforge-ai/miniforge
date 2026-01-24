@@ -2,14 +2,19 @@
   "Public API for LLM client using CLI backends.
    Supports claude CLI, cursor CLI, and mock backends."
   (:require
-   [ai.miniforge.llm.core :as core]))
+   [ai.miniforge.llm.interface.protocols.llm-client :as p]
+   [ai.miniforge.llm.protocols.impl.llm-client :as impl]
+   [ai.miniforge.llm.protocols.records.llm-client :as records]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Backend information
 
 (def backends
   "Available CLI backends."
-  core/backends)
+  impl/backends)
+
+;; Re-export protocol for public API
+(def LLMClient p/LLMClient)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Client creation
@@ -25,8 +30,8 @@
      (create-client)                    ; uses claude CLI
      (create-client {:backend :cursor}) ; uses cursor CLI
      (create-client {:backend :claude :logger my-logger})"
-  ([] (core/create-client))
-  ([opts] (core/create-client opts)))
+  ([] (records/create-client))
+  ([opts] (records/create-client opts)))
 
 (defn mock-client
   "Create a mock client for testing.
@@ -41,9 +46,9 @@
      (mock-client {:outputs [\"First\" \"Second\" \"Third\"]})"
   [{:keys [output outputs exit] :or {exit 0}}]
   (let [exec-fn (if outputs
-                  (core/mock-exec-fn-multi outputs)
-                  (core/mock-exec-fn (or output "Mock response") :exit exit))]
-    (core/create-client {:backend :claude :exec-fn exec-fn})))
+                  (impl/mock-exec-fn-multi outputs)
+                  (impl/mock-exec-fn (or output "Mock response") :exit exit))]
+    (records/create-client {:backend :claude :exec-fn exec-fn})))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Completion API
@@ -70,7 +75,7 @@
                {:system \"You are a helpful coding assistant.\"
                 :messages [{:role \"user\" :content \"Write hello world\"}]})"
   [client request]
-  (core/complete* client request))
+  (p/complete* client request))
 
 (defn chat
   "Convenience function for simple single-turn chat.

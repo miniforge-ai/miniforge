@@ -5,9 +5,11 @@
    Agents are pure functions: (context, task) -> (artifacts, decisions, signals)"
   (:require
    [ai.miniforge.agent.core :as core]
-   [ai.miniforge.agent.memory :as mem]
-   [ai.miniforge.agent.protocol :as proto]
-   [ai.miniforge.agent.specialized :as specialized]
+   [ai.miniforge.agent.interface.protocols.agent :as agent-proto]
+   [ai.miniforge.agent.interface.protocols.memory :as mem-proto]
+   [ai.miniforge.agent.protocols.records.memory :as mem-records]
+   [ai.miniforge.agent.protocols.records.specialized :as specialized-records]
+   [ai.miniforge.agent.protocols.impl.memory :as mem-impl]
    [ai.miniforge.agent.planner :as planner]
    [ai.miniforge.agent.implementer :as implementer]
    [ai.miniforge.agent.tester :as tester]
@@ -16,12 +18,12 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol re-exports (allow other components to reference protocols)
 
-(def Agent proto/Agent)
-(def AgentLifecycle proto/AgentLifecycle)
-(def AgentExecutor proto/AgentExecutor)
-(def LLMBackend proto/LLMBackend)
-(def Memory mem/Memory)
-(def MemoryStore mem/MemoryStore)
+(def Agent agent-proto/Agent)
+(def AgentLifecycle agent-proto/AgentLifecycle)
+(def AgentExecutor agent-proto/AgentExecutor)
+(def LLMBackend agent-proto/LLMBackend)
+(def Memory mem-proto/Memory)
+(def MemoryStore mem-proto/MemoryStore)
 
 ;; Configuration re-exports
 (def default-role-configs core/default-role-configs)
@@ -85,7 +87,7 @@
    Example:
      (execute executor agent task {:llm-backend llm})"
   [executor agent task context]
-  (proto/execute executor agent task context))
+  (agent-proto/execute executor agent task context))
 
 (defn create-executor
   "Create an agent executor.
@@ -109,42 +111,42 @@
 
    Returns {:success bool :outputs [...] :decisions [...] :signals [...] :metrics {...}}"
   [agent task context]
-  (proto/invoke agent task context))
+  (agent-proto/invoke agent task context))
 
 (defn validate
   "Check if agent output meets requirements.
 
    Returns {:valid? bool :errors [...] :warnings [...]}"
   [agent output context]
-  (proto/validate agent output context))
+  (agent-proto/validate agent output context))
 
 (defn repair
   "Attempt to fix validation failures in agent output.
 
    Returns {:repaired output :changes [...] :success bool}"
   [agent output errors context]
-  (proto/repair agent output errors context))
+  (agent-proto/repair agent output errors context))
 
 (defn init
   "Initialize agent with configuration.
 
    Returns initialized agent instance."
   [agent config]
-  (proto/init agent config))
+  (agent-proto/init agent config))
 
 (defn agent-status
   "Return current agent status.
 
    Returns {:state keyword :metrics {...} :last-activity inst}"
   [agent]
-  (proto/status agent))
+  (agent-proto/status agent))
 
 (defn shutdown
   "Clean up agent resources.
 
    Returns {:success bool}"
   [agent]
-  (proto/shutdown agent))
+  (agent-proto/shutdown agent))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Memory operations
@@ -160,8 +162,8 @@
    Example:
      (create-memory)
      (create-memory {:scope :task :scope-id task-id})"
-  ([] (mem/create-memory))
-  ([opts] (mem/create-memory opts)))
+  ([] (mem-records/create-memory))
+  ([opts] (mem-records/create-memory opts)))
 
 (defn add-to-memory
   "Add a message to memory.
@@ -173,44 +175,44 @@
 
    Returns updated memory."
   [memory role content]
-  (mem/add-message memory role content {}))
+  (mem-proto/add-message memory role content {}))
 
 (defn add-system-message
   "Add a system message to memory. Convenience function."
   [memory content]
-  (mem/add-system-message memory content))
+  (mem-records/add-system-message memory content))
 
 (defn add-user-message
   "Add a user message to memory. Convenience function."
   [memory content]
-  (mem/add-user-message memory content))
+  (mem-records/add-user-message memory content))
 
 (defn add-assistant-message
   "Add an assistant message to memory. Convenience function."
   [memory content]
-  (mem/add-assistant-message memory content))
+  (mem-records/add-assistant-message memory content))
 
 (defn get-messages
   "Get all messages from memory in chronological order."
   [memory]
-  (mem/get-messages memory))
+  (mem-proto/get-messages memory))
 
 (defn get-memory-window
   "Get messages that fit within token limit, prioritizing recent.
 
    Returns {:messages [...] :total-tokens int :trimmed-count int}"
   [memory token-limit]
-  (mem/get-window memory token-limit))
+  (mem-proto/get-window memory token-limit))
 
 (defn clear-memory
   "Clear all messages from memory. Returns empty memory."
   [memory]
-  (mem/clear-messages memory))
+  (mem-proto/clear-messages memory))
 
 (defn memory-metadata
   "Get memory metadata (scope, created-at, etc.)."
   [memory]
-  (mem/get-metadata memory))
+  (mem-proto/get-metadata memory))
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Memory store operations
@@ -218,27 +220,27 @@
 (defn create-memory-store
   "Create an in-memory store for agent memories."
   []
-  (mem/create-memory-store))
+  (mem-records/create-memory-store))
 
 (defn get-memory
   "Retrieve a memory by ID from store."
   [store memory-id]
-  (mem/get-memory store memory-id))
+  (mem-proto/get-memory store memory-id))
 
 (defn save-memory
   "Save/update a memory in store. Returns the memory."
   [store memory]
-  (mem/save-memory store memory))
+  (mem-proto/save-memory store memory))
 
 (defn delete-memory
   "Delete a memory by ID from store."
   [store memory-id]
-  (mem/delete-memory store memory-id))
+  (mem-proto/delete-memory store memory-id))
 
 (defn list-memories
   "List all memories for a given scope."
   [store scope scope-id]
-  (mem/list-memories store scope scope-id))
+  (mem-proto/list-memories store scope scope-id))
 
 ;------------------------------------------------------------------------------ Layer 6
 ;; Utility functions
@@ -247,7 +249,7 @@
   "Estimate token count for content.
    Uses rough heuristic: ~4 chars per token."
   [content]
-  (mem/estimate-tokens content))
+  (mem-impl/estimate-tokens content))
 
 (defn estimate-cost
   "Estimate cost in USD for tokens used.
@@ -289,12 +291,12 @@
    - :config - Agent configuration map (model, temperature, etc.)
    - :logger - Logger instance (defaults to silent logger)"
   [opts]
-  (specialized/create-base-agent opts))
+  (specialized-records/create-base-agent opts))
 
 (defn make-validator
   "Create a validation function from a Malli schema."
   [malli-schema]
-  (specialized/make-validator malli-schema))
+  (specialized-records/make-validator malli-schema))
 
 (defn cycle-agent
   "Execute a full invoke-validate-repair cycle on a specialized agent.
@@ -303,7 +305,7 @@
    Options:
    - :max-iterations - Maximum repair attempts (default 3)"
   [agent context input & {:keys [max-iterations] :or {max-iterations 3}}]
-  (specialized/cycle-agent agent context input :max-iterations max-iterations))
+  (specialized-records/cycle-agent agent context input :max-iterations max-iterations))
 
 ;------------------------------------------------------------------------------ Layer 8
 ;; Specialized agent creation
