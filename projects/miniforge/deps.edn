@@ -1,0 +1,25 @@
+{:paths []
+
+ :deps {ai.miniforge/cli {:local/root "../../bases/cli"}
+        ;; Workflow and all its transitive dependencies
+        ai.miniforge/workflow {:local/root "../../components/workflow"}
+        ai.miniforge/schema {:local/root "../../components/schema"}
+        ai.miniforge/logging {:local/root "../../components/logging"}
+        ai.miniforge/llm {:local/root "../../components/llm"}
+        ai.miniforge/tool {:local/root "../../components/tool"}
+        ai.miniforge/artifact {:local/root "../../components/artifact"}
+        ai.miniforge/agent {:local/root "../../components/agent"}
+        ai.miniforge/task {:local/root "../../components/task"}
+        ai.miniforge/loop {:local/root "../../components/loop"}
+        ai.miniforge/knowledge {:local/root "../../components/knowledge"}
+        ai.miniforge/policy {:local/root "../../components/policy"}
+        ai.miniforge/heuristic {:local/root "../../components/heuristic"}
+        ai.miniforge/response {:local/root "../../components/response"}
+        ai.miniforge/fsm {:local/root "../../components/fsm"}
+        ai.miniforge/phase {:local/root "../../components/phase"}
+        ai.miniforge/gate {:local/root "../../components/gate"}
+        ai.miniforge/evidence-bundle {:local/root "../../components/evidence-bundle"}}
+
+ :aliases
+ {:uberjar
+  {:main ai.miniforge.cli.main}}}
