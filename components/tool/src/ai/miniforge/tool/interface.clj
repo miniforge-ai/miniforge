@@ -129,6 +129,25 @@
   [tool]
   (core/tool-info tool))
 
+(defn validate-args
+  "Validate arguments against tool schema.
+   Returns {:valid? boolean :errors [...]}
+   
+   Example:
+     (validate-args my-tool {:param1 \"value\"})"
+  [tool args]
+  (core/validate-args tool args))
+
+(defn get-schema
+  "Get the parameter schema for a tool.
+   Returns the tool's parameter specification map.
+   
+   Example:
+     (get-schema my-tool)
+     ;; => {:param1 {:type :string :required true}}"
+  [tool]
+  (core/get-schema tool))
+
 ;; Response helpers
 
 (defn success?
