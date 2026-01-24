@@ -180,7 +180,48 @@
     (let [agent (core/create-agent :implementer)
           shutdown (proto/shutdown agent)]
       (is (= :shutdown (get-in shutdown [:state :status])))
-      (is (some? (get-in shutdown [:state :shutdown-at]))))))
+      (is (some? (get-in shutdown [:state :shutdown-at])))))
+
+  (testing "abort sets status to aborted"
+    (let [agent (core/create-agent :implementer)
+          result (proto/abort agent "User cancelled")]
+      (is (:aborted result))
+      (is (= "User cancelled" (:reason result)))
+      (is (some? (:aborted-at result)))
+      (is (contains? result :agent))
+      (let [aborted-agent (:agent result)]
+        (is (= :aborted (get-in aborted-agent [:state :status])))
+        (is (= "User cancelled" (get-in aborted-agent [:state :abort-reason]))))))
+
+  (testing "abort records reason and timestamp"
+    (let [agent (core/create-agent :implementer)
+          initialized (proto/init agent {})
+          result (proto/abort initialized "Timeout exceeded")]
+      (is (:aborted result))
+      (is (= "Timeout exceeded" (:reason result)))
+      (is (inst? (:aborted-at result)))
+      (let [aborted-agent (:agent result)]
+        (is (= :aborted (get-in aborted-agent [:state :status]))))))
+
+  (testing "abort is idempotent"
+    (let [agent (core/create-agent :implementer)
+          first-result (proto/abort agent "First reason")
+          first-agent (:agent first-result)
+          second-result (proto/abort first-agent "Second reason")]
+      (is (:aborted first-result))
+      (is (:aborted second-result))
+      ;; Second abort returns first reason (idempotent)
+      (is (= "First reason" (:reason second-result)))
+      (is (:already-aborted second-result))))
+
+  (testing "abort works on any agent status"
+    (let [agent (core/create-agent :implementer)
+          initialized (proto/init agent {})
+          result (proto/abort initialized "Aborted during execution")]
+      (is (:aborted result))
+      (is (= "Aborted during execution" (:reason result)))
+      (let [aborted-agent (:agent result)]
+        (is (= :aborted (get-in aborted-agent [:state :status])))))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Executor tests

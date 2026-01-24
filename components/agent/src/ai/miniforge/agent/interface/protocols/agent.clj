@@ -38,7 +38,13 @@
 
   (shutdown [this]
     "Clean up agent resources.
-     Returns {:success bool}"))
+     Returns {:success bool}")
+
+  (abort [this reason]
+    "Abort agent execution with a specific reason.
+     Sets agent status to :aborted and records the reason.
+     Idempotent - safe to call multiple times.
+     Returns {:aborted true :reason reason :aborted-at inst}"))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Agent Executor Protocol
