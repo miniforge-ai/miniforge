@@ -1,7 +1,0 @@
-{:paths ["src" "resources"]
- :deps {ai.miniforge/schema {:local/root "../schema"}
-        ai.miniforge/logging {:local/root "../logging"}
-        ai.miniforge/artifact {:local/root "../artifact"}}
- :aliases
- {:test {:extra-paths ["test"]
-         :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}}}}}

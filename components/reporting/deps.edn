@@ -1,9 +1,0 @@
-{:paths ["src" "resources"]
- :deps {ai.miniforge/schema {:local/root "../schema"}
-        ai.miniforge/logging {:local/root "../logging"}
-        ai.miniforge/workflow {:local/root "../workflow"}
-        ai.miniforge/orchestrator {:local/root "../orchestrator"}
-        ai.miniforge/operator {:local/root "../operator"}
-        ai.miniforge/artifact {:local/root "../artifact"}}
- :aliases {:test {:extra-paths ["test"]
-                  :extra-deps {}}}}
