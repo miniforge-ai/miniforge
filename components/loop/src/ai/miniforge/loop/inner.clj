@@ -380,13 +380,15 @@
   [state hints]
   (let [current-iter (:loop/iteration state)
         current-max (get-in state [:loop/config :max-iterations] 5)
+        current-count (get-in state [:loop/escalation :count] 0)
         target-max (max (inc current-max) (inc current-iter))]
     (-> state
         (dissoc :loop/termination)
         (assoc :loop/state :generating
                :loop/override-termination? true
                :loop/escalation {:hints hints
-                                 :resumed-at (java.util.Date.)})
+                                 :resumed-at (java.util.Date.)
+                                 :count (inc current-count)})
         (assoc-in [:loop/config :max-iterations] target-max)
         (assoc :loop/updated-at (java.util.Date.)))))
 
@@ -446,21 +448,31 @@
                     (dissoc state :loop/override-termination?)
                     state)
             termination-check (when-not override-termination?
-                                (should-terminate? state))]
+                                (should-terminate? state))
+            termination-check (if (and (= current-state :validating)
+                                       (= :max-iterations (:reason termination-check)))
+                                nil
+                                termination-check)]
         (cond
           ;; Escalated state - prompt user for guidance
           (= current-state :escalated)
-          (let [result (escalation/handle-escalation state ctx)]
-            (if (= :continue (:action result))
-              (let [hints (:hints result)
-                    resumed-state (resume-after-escalation state hints)
-                    next-ctx (assoc ctx :escalation-hints hints)]
-                (when logger
-                  (log/info logger :loop :inner/escalated
-                            {:message "Resuming after escalation"
-                             :data {:hints-provided? (boolean (seq hints))}}))
-                (recur resumed-state next-ctx))
-              (handle-terminal-state state logger)))
+          (let [escalation-count (get-in state [:loop/escalation :count] 0)]
+            (if (>= escalation-count 1)
+              (handle-terminal-state
+               (set-termination state :max-iterations
+                                :message "Escalation already handled")
+               logger)
+              (let [result (escalation/handle-escalation state ctx)]
+                (if (= :continue (:action result))
+                  (let [hints (:hints result)
+                        resumed-state (resume-after-escalation state hints)
+                        next-ctx (assoc ctx :escalation-hints hints)]
+                    (when logger
+                      (log/info logger :loop :inner/escalated
+                                {:message "Resuming after escalation"
+                                 :data {:hints-provided? (boolean (seq hints))}}))
+                    (recur resumed-state next-ctx))
+                  (handle-terminal-state state logger)))))
 
           ;; Terminal states - return result
           (terminal-state? current-state)

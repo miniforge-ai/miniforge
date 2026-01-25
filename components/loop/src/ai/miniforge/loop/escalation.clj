@@ -54,7 +54,7 @@
         reason (get-in loop-state [:loop/termination :reason])]
     (str "\n"
          "=================================================================\n"
-         "🚨 AGENT ESCALATION\n"
+         "AGENT ESCALATION\n"
          "=================================================================\n\n"
          (format-error-context errors iteration artifact)
          "\n\n"

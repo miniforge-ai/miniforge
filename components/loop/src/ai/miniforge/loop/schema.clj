@@ -170,7 +170,8 @@
    [:loop/escalation {:optional true}
     [:map
      [:hints {:optional true} string?]
-     [:resumed-at {:optional true} :common/timestamp]]]
+     [:resumed-at {:optional true} :common/timestamp]
+     [:count {:optional true} :common/non-neg-int]]]
    [:loop/override-termination? {:optional true} boolean?]
 
    ;; Termination
