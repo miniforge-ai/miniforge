@@ -11,6 +11,13 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Prompt formatting (pure functions)
 
+(defn format-error-entry
+  "Format a single error entry for display."
+  [idx err]
+  (str "  " (inc idx) ". " (:message err)
+       (when-let [code (:code err)]
+         (str " [" (name code) "]"))))
+
 (defn format-error-context
   "Format error context for user display.
    
@@ -24,12 +31,7 @@
   (str "After " iteration " attempts, validation failed:\n\n"
        "Errors:\n"
        (str/join "\n"
-         (map-indexed
-          (fn [idx err]
-            (str "  " (inc idx) ". " (:message err)
-                 (when-let [code (:code err)]
-                   (str " [" (name code) "]"))))
-          errors))
+         (map-indexed format-error-entry errors))
        "\n\n"
        "Last attempt:\n"
        (if-let [content (:artifact/content artifact)]

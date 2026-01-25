@@ -416,6 +416,16 @@
   [state strategies context]
   (repair-step state strategies context))
 
+(defn- compute-termination-check
+  "Compute the termination result, allowing validation to complete once."
+  [state current-state override-termination?]
+  (when-not override-termination?
+    (let [termination (should-terminate? state)]
+      (if (and (= current-state :validating)
+               (= :max-iterations (:reason termination)))
+        nil
+        termination))))
+
 (defn run-inner-loop
   "Run the inner loop to completion.
 
@@ -447,12 +457,10 @@
             state (if override-termination?
                     (dissoc state :loop/override-termination?)
                     state)
-            termination-check (when-not override-termination?
-                                (should-terminate? state))
-            termination-check (if (and (= current-state :validating)
-                                       (= :max-iterations (:reason termination-check)))
-                                nil
-                                termination-check)]
+            termination-check (compute-termination-check
+                               state
+                               current-state
+                               override-termination?)]
         (cond
           ;; Escalated state - prompt user for guidance
           (= current-state :escalated)
