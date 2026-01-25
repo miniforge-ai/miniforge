@@ -29,6 +29,15 @@
     (.mkdirs (java.io.File. config-dir))
     config-dir))
 
+(defn event-log-path
+  "Get path to event log file for a workflow.
+   Format: ~/.miniforge/workflows/events/<workflow-id>.edn"
+  [workflow-id]
+  (let [config-dir (ensure-config-dir)
+        events-dir (str config-dir "/events")]
+    (.mkdirs (java.io.File. events-dir))
+    (str events-dir "/" (str workflow-id) ".edn")))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; File I/O operations
 
@@ -91,3 +100,50 @@
         new-config (assoc config task-type {:workflow-id workflow-id
                                             :version version})]
     (save-active-config new-config)))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Event log persistence
+
+(defn append-event
+  "Append an event to a workflow's event log.
+   Events are appended to ~/.miniforge/workflows/events/<workflow-id>.edn
+   
+   Arguments:
+   - workflow-id: Workflow UUID
+   - event: Log event map
+   
+   Returns true on success, false on error."
+  [workflow-id event]
+  (let [path (event-log-path workflow-id)]
+    (try
+      (with-open [wtr (clojure.java.io/writer path :append true)]
+        (binding [*print-length* nil
+                  *print-level* nil]
+          (.write wtr (pr-str event))
+          (.write wtr "\n")))
+      true
+      (catch Exception _e
+        false))))
+
+(defn load-event-log
+  "Load all events for a workflow from its event log.
+   
+   Arguments:
+   - workflow-id: Workflow UUID
+   
+   Returns vector of event maps, or empty vector if log doesn't exist."
+  [workflow-id]
+  (let [path (event-log-path workflow-id)]
+    (try
+      (if (.exists (java.io.File. path))
+        (with-open [rdr (java.io.PushbackReader. (clojure.java.io/reader path))]
+          (loop [events []]
+            (let [event (try
+                          (clojure.edn/read rdr)
+                          (catch java.io.EOFException _eof nil))]
+              (if event
+                (recur (conj events event))
+                events))))
+        [])
+      (catch Exception _e
+        []))))

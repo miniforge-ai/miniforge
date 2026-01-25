@@ -4,6 +4,7 @@
   (:require
    [ai.miniforge.workflow.core :as core]
    [ai.miniforge.workflow.persistence :as persist]
+   [ai.miniforge.workflow.replay :as replay]
    [ai.miniforge.workflow.interface.protocols.workflow :as workflow-proto]
    [ai.miniforge.workflow.interface.protocols.phase-executor :as executor-proto]
    [ai.miniforge.workflow.interface.protocols.workflow-observer :as observer-proto]
@@ -314,6 +315,69 @@
      (set-active-workflow :bugfix :simple-test-v1 \"1.0.0\")"
   [task-type workflow-id version]
   (persist/set-active-workflow task-type workflow-id version))
+
+;; Event log persistence
+
+(defn append-event
+  "Append an event to a workflow's event log.
+   Events are stored in ~/.miniforge/workflows/events/<workflow-id>.edn
+   
+   Arguments:
+   - workflow-id - Workflow UUID
+   - event - Log event map
+   
+   Returns true on success."
+  [workflow-id event]
+  (persist/append-event workflow-id event))
+
+(defn load-event-log
+  "Load all events for a workflow.
+   
+   Arguments:
+   - workflow-id - Workflow UUID
+   
+   Returns vector of events, or empty vector if no log exists."
+  [workflow-id]
+  (persist/load-event-log workflow-id))
+
+;; Event stream replay
+
+(defn replay-workflow
+  "Reconstruct workflow state from event stream.
+   
+   Arguments:
+   - events - All events for this workflow
+   - opts   - Options map:
+     :workflow-id - Filter to specific workflow (optional)
+     :until       - Replay only up to this timestamp (optional)
+   
+   Returns:
+   {:state workflow-state
+    :events-applied int
+    :final-status keyword}
+   
+   Example:
+     (replay-workflow (load-event-log wf-id) :workflow-id wf-id)"
+  [events & {:keys [workflow-id until] :as _opts}]
+  (replay/replay-workflow events :workflow-id workflow-id :until until))
+
+(defn verify-determinism
+  "Verify that replaying events produces the expected state.
+   
+   Arguments:
+   - events - Event stream
+   - expected-state - Expected final state
+   - & opts - Keyword options for replay
+   
+   Returns:
+   {:deterministic? boolean
+    :differences [...]
+    :replayed-state map}
+   
+   Example:
+     (verify-determinism events final-state :workflow-id wf-id)"
+  [events expected-state & {:keys [workflow-id until] :as _opts}]
+  (replay/verify-determinism events expected-state :workflow-id workflow-id :until until))
 
 (defn save-workflow
   "Save a workflow configuration to the heuristic store.
