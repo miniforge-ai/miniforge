@@ -122,11 +122,11 @@
           workflow-id (random-uuid)
           state (create-test-workflow-state workflow-id :completed)
           bundle (evidence/create-bundle manager workflow-id {:workflow-state state})
-          bundle-id (:evidence-bundle/id bundle)]
+          bundle-id (:evidence-bundle/id bundle)
+          retrieved (evidence/get-bundle manager bundle-id)]
 
-      (let [retrieved (evidence/get-bundle manager bundle-id)]
-        (is (= bundle-id (:evidence-bundle/id retrieved)))
-        (is (= workflow-id (:evidence-bundle/workflow-id retrieved))))))
+      (is (= bundle-id (:evidence-bundle/id retrieved)))
+      (is (= workflow-id (:evidence-bundle/workflow-id retrieved)))))
 
   (testing "Returns nil for non-existent bundle"
     (let [store (create-test-artifact-store)
@@ -139,11 +139,11 @@
           manager (evidence/create-evidence-manager {:artifact-store store})
           workflow-id (random-uuid)
           state (create-test-workflow-state workflow-id :completed)
-          bundle (evidence/create-bundle manager workflow-id {:workflow-state state})]
+          bundle (evidence/create-bundle manager workflow-id {:workflow-state state})
+          retrieved (evidence/get-bundle-by-workflow manager workflow-id)]
 
-      (let [retrieved (evidence/get-bundle-by-workflow manager workflow-id)]
-        (is (= workflow-id (:evidence-bundle/workflow-id retrieved)))
-        (is (= (:evidence-bundle/id bundle) (:evidence-bundle/id retrieved)))))))
+      (is (= workflow-id (:evidence-bundle/workflow-id retrieved)))
+      (is (= (:evidence-bundle/id bundle) (:evidence-bundle/id retrieved))))))
 
 ;------------------------------------------------------------------------------ Layer 4: Bundle Querying
 
