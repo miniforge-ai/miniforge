@@ -7,7 +7,8 @@
    Agents are pure functions: (context, task) -> (artifacts, decisions, signals)"
   (:require
    [ai.miniforge.agent.protocol :as protocol]
-   [ai.miniforge.agent.memory :as memory]))
+   [ai.miniforge.agent.memory :as memory]
+   [ai.miniforge.tool.interface :as tool]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Role configurations and defaults
@@ -355,10 +356,11 @@ Output execution logs and status reports."})
                   (memory/create-memory {:scope :task :scope-id task-id}))
 
           ;; Add context to execution
-          exec-context (assoc context
-                              :memory mem
-                              :agent-id agent-id
-                              :task-id task-id)
+          exec-context (-> context
+                           (assoc :memory mem
+                                  :agent-id agent-id
+                                  :task-id task-id)
+                           (tool/attach-invocation-tracking))
 
           ;; Initialize agent
           initialized-agent (protocol/init agent (:config agent))
@@ -390,7 +392,8 @@ Output execution logs and status reports."})
 
           ;; Update metrics with total duration
           final-metrics (-> (or (:metrics final-result) (make-metrics))
-                            (assoc :total-duration-ms duration))]
+                            (assoc :total-duration-ms duration))
+          tool-invocations (tool/tool-invocations exec-context)]
 
       ;; Save memory if store available
       (when memory-store
@@ -399,6 +402,7 @@ Output execution logs and status reports."})
       ;; Return result
       (assoc final-result
              :metrics final-metrics
+             :tool/invocations tool-invocations
              :agent-id agent-id
              :task-id task-id
              :executed-at (java.util.Date.)))))

@@ -5,7 +5,8 @@
   (:require
    [clojure.set :as set]
    [clojure.string :as str]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.tool.tracking :as tracking]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Tool schema and validation
@@ -97,18 +98,23 @@
      :parameters parameters
      :metadata metadata})
   (execute [_this params context]
-    (let [validation (validate-params parameters params)]
-      (if (:valid? validation)
-        (try
-          {:success true
-           :result (handler params context)}
-          (catch Exception e
-            {:success false
-             :error {:type "execution_error"
-                     :message (.getMessage e)}}))
-        {:success false
-         :error {:type "validation_error"
-                 :errors (:errors validation)}})))
+    (let [start-ms (System/currentTimeMillis)
+          validation (validate-params parameters params)
+          result (if (:valid? validation)
+                   (try
+                     {:success true
+                      :result (handler params context)}
+                     (catch Exception e
+                       {:success false
+                        :error {:type "execution_error"
+                                :message (.getMessage e)}}))
+                   {:success false
+                    :error {:type "validation_error"
+                            :errors (:errors validation)}})
+          end-ms (System/currentTimeMillis)
+          invocation (tracking/build-invocation id params start-ms end-ms result)]
+      (tracking/record-invocation context invocation)
+      result))
   (validate-args [_this args]
     (validate-params parameters args))
   (get-schema [_this]

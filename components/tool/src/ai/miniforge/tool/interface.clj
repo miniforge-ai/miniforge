@@ -7,7 +7,8 @@
 
    See docs/specs/extensibility.spec for MCP integration details."
   (:require
-   [ai.miniforge.tool.core :as core]))
+   [ai.miniforge.tool.core :as core]
+   [ai.miniforge.tool.tracking :as tracking]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Re-export protocols for extension
@@ -164,6 +165,19 @@
   "Extract error details from a failed execution."
   [result]
   (:error result))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Invocation tracking
+
+(defn attach-invocation-tracking
+  "Attach tool invocation tracking to a context map."
+  [context]
+  (tracking/attach-invocation-tracking context))
+
+(defn tool-invocations
+  "Get tool invocation records from a context map."
+  [context]
+  (tracking/tool-invocations context))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
