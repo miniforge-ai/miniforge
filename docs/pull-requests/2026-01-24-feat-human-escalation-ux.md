@@ -51,6 +51,7 @@ Update inner loop to call escalation:
 - Pass error context to escalation
 - Use user hints in next retry attempt
 - Respect user abort decision
+- Guard against repeated escalation loops
 
 ### 3. Public API
 
@@ -68,6 +69,13 @@ Test cases:
 - User hints are correctly passed to agent
 - Abort decision is respected
 - No prompt if budget not exhausted
+
+### 5. Test Infrastructure
+
+**File:** `components/artifact/test/ai/miniforge/artifact/interface_test.clj`
+
+Make artifact tests fall back to the transit store when Datalevin
+cannot open a database (e.g., sandboxed environments).
 
 ## Testing Plan
 
@@ -89,6 +97,11 @@ bb pre-commit
 
 - ❌ `bb test components/loop` (sandboxed) failed due to Datalevin "Operation not permitted" when opening test DB.
 - ⚠️ `bb test components/loop` (elevated) timed out after 300s before completing.
+- ✅ Targeted inner-loop test pass:
+
+```bash
+clojure -M:dev:test -e "(require '[clojure.test :as t]) (require '[ai.miniforge.loop.inner-test]) (t/run-tests 'ai.miniforge.loop.inner-test)"
+```
 
 ## Deployment Plan
 
