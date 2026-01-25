@@ -5,7 +5,8 @@
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.task.interface :as task]
    [ai.miniforge.loop.interface :as loop]
-   [ai.miniforge.artifact.interface :as artifact]))
+   [ai.miniforge.artifact.interface :as artifact]
+   [ai.miniforge.tool.interface :as tool]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helper functions
@@ -67,13 +68,18 @@
    Pure function that orchestrates agent execution."
   [agent-constructor task context max-iterations]
   (let [agent-instance (agent-constructor)
-        invoke-args (or (:invoke-args context) task)
+        tracking-context (tool/attach-invocation-tracking context)
+        invoke-args (or (:invoke-args tracking-context) task)
         generate-fn (fn [_task _ctx]
-                      (let [result (agent/invoke agent-instance invoke-args context)]
+                      (let [result (agent/invoke agent-instance invoke-args tracking-context)]
                         {:artifact (:artifact result)
-                         :tokens (or (:tokens result) 0)}))]
-    (loop/run-simple task generate-fn
-                     (merge context {:max-iterations max-iterations}))))
+                         :tokens (or (:tokens result) 0)}))
+        result (loop/run-simple task
+                                generate-fn
+                                (merge tracking-context
+                                       {:max-iterations max-iterations}))
+        tool-invocations (tool/tool-invocations tracking-context)]
+    (assoc result :tool/invocations tool-invocations)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Plan phase implementation

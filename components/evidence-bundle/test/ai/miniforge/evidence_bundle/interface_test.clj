@@ -14,7 +14,7 @@
 
 (defn create-test-workflow-state
   "Create a test workflow state."
-  [workflow-id status]
+  [workflow-id status & {:keys [tool-invocations] :or {tool-invocations []}}]
   {:workflow/id workflow-id
    :workflow/status status
    :workflow/spec {:intent/type :import
@@ -34,6 +34,7 @@
                                 :output {:implementation "Test impl"}
                                 :artifacts []}}
    :workflow/gate-results []
+   :workflow/tool-invocations tool-invocations
    :workflow/pr-info {:number 123
                       :url "https://github.com/test/repo/pull/123"
                       :status :merged
@@ -83,6 +84,20 @@
       ;; Check outcome
       (is (true? (get-in bundle [:evidence/outcome :outcome/success])))
       (is (= 123 (get-in bundle [:evidence/outcome :outcome/pr-number])))))
+
+  (testing "Includes tool invocations when present"
+    (let [store (create-test-artifact-store)
+          manager (evidence/create-evidence-manager {:artifact-store store})
+          workflow-id (random-uuid)
+          invocations [{:tool/id :tools/demo
+                        :tool/invoked-at (java.time.Instant/now)
+                        :tool/duration-ms 12
+                        :tool/args {:x 1}
+                        :tool/result {:ok true}}]
+          state (create-test-workflow-state workflow-id :completed
+                                            :tool-invocations invocations)
+          bundle (evidence/create-bundle manager workflow-id {:workflow-state state})]
+      (is (= invocations (:evidence/tool-invocations bundle)))))
 
   (testing "Creates bundle for failed workflow"
     (let [store (create-test-artifact-store)

@@ -180,6 +180,37 @@
       (is (not (tool/success? result)))
       (is (= "not_found" (get-in (tool/get-error result) [:type]))))))
 
+;; Invocation tracking tests
+
+(deftest invocation-tracking-test
+  (testing "records successful invocation"
+    (let [context (tool/attach-invocation-tracking {})
+          my-tool (tool/create-tool
+                   {:id :test/track
+                    :parameters {:message {:type :string :required true}}
+                    :handler echo-handler})
+          result (tool/execute my-tool {:message "Hello"} context)
+          invocations (tool/tool-invocations context)
+          invocation (first invocations)]
+      (is (tool/success? result))
+      (is (= 1 (count invocations)))
+      (is (= :test/track (:tool/id invocation)))
+      (is (= {:message "Hello"} (:tool/args invocation)))
+      (is (inst? (:tool/invoked-at invocation)))
+      (is (>= (:tool/duration-ms invocation) 0))
+      (is (= "Hello" (:tool/result invocation)))))
+
+  (testing "records validation errors"
+    (let [context (tool/attach-invocation-tracking {})
+          my-tool (tool/create-tool
+                   {:id :test/track-error
+                    :parameters {:required-param {:required true}}
+                    :handler (constantly nil)})
+          _result (tool/execute my-tool {} context)
+          [invocation] (tool/tool-invocations context)]
+      (is (= :test/track-error (:tool/id invocation)))
+      (is (= "validation_error" (get-in invocation [:tool/error :type]))))))
+
 ;; Protocol method tests (N1 conformance)
 
 (deftest validate-args-test

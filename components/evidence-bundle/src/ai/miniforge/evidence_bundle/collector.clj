@@ -63,6 +63,11 @@
      {}
      phases)))
 
+(defn collect-tool-invocations
+  "Collect tool invocation records from workflow state."
+  [workflow-state]
+  (vec (or (:workflow/tool-invocations workflow-state) [])))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Policy Check Evidence
 
@@ -119,6 +124,7 @@
         phase-evidence (collect-all-phases workflow-state)
         policy-checks (collect-policy-checks workflow-state)
         outcome (build-outcome-evidence workflow-state)
+        tool-invocations (collect-tool-invocations workflow-state)
 
         ;; Get artifacts for semantic validation
         artifacts (when artifact-store
@@ -144,6 +150,8 @@
       :evidence/policy-checks policy-checks
       :evidence/outcome outcome}
      phase-evidence
+     (when (seq tool-invocations)
+       {:evidence/tool-invocations tool-invocations})
      (when semantic-validation
        {:evidence/semantic-validation semantic-validation}))))
 

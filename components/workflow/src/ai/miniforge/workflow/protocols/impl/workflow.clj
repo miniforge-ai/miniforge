@@ -35,6 +35,7 @@
    :workflow/phase :spec
    :workflow/status :pending
    :workflow/artifacts []
+   :workflow/tool-invocations []
    :workflow/errors []
    :workflow/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
    :workflow/history []
@@ -104,6 +105,8 @@
           new-phase (next-phase current-phase success?)
           new-artifacts (into (:workflow/artifacts state)
                               (:artifacts phase-result []))
+          tool-invocations (into (:workflow/tool-invocations state)
+                                 (:tool/invocations phase-result []))
           new-errors (into (:workflow/errors state)
                            (:errors phase-result []))
           new-metrics (merge-with + (:workflow/metrics state)
@@ -112,6 +115,7 @@
                         (assoc :workflow/phase new-phase)
                         (assoc :workflow/status (if (= new-phase :done) :completed :running))
                         (assoc :workflow/artifacts new-artifacts)
+                        (assoc :workflow/tool-invocations tool-invocations)
                         (assoc :workflow/errors new-errors)
                         (assoc :workflow/metrics new-metrics)
                         (record-phase-transition current-phase new-phase

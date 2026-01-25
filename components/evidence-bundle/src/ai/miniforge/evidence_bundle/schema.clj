@@ -149,6 +149,7 @@
    ;; Validation
    :evidence/semantic-validation map?
    :evidence/policy-checks vector?
+   (optional-key :evidence/tool-invocations) vector?
 
    ;; Outcome
    :evidence/outcome map?
@@ -185,6 +186,16 @@
    (optional-key :tool/exit-code) int?
    (optional-key :tool/output-summary) string?})
 
+(def tool-invocation-schema
+  "Schema for tool invocation record."
+  {:tool/id keyword?
+   :tool/invoked-at inst?
+   :tool/duration-ms nat-int?
+   :tool/args map?
+   (optional-key :tool/result) (fn [_] true)
+   (optional-key :tool/exit-code) int?
+   (optional-key :tool/error) map?})
+
 ;------------------------------------------------------------------------------ Layer 8
 ;; Helper Functions
 
@@ -214,4 +225,5 @@
    :evidence/intent {}
    :evidence/semantic-validation {}
    :evidence/policy-checks []
-   :evidence/outcome {}})
+   :evidence/outcome {}
+   :evidence/tool-invocations []})

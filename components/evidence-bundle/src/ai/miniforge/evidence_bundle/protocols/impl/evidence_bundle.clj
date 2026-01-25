@@ -57,6 +57,9 @@
         policy-checks (or (:policy-checks opts)
                          (let [collect-fn (requiring-resolve 'ai.miniforge.evidence-bundle.collector/collect-policy-checks)]
                            (collect-fn workflow-state)))
+        tool-invocations (let [collect-fn (requiring-resolve
+                                           'ai.miniforge.evidence-bundle.collector/collect-tool-invocations)]
+                           (collect-fn workflow-state))
         semantic-validation (or (:semantic-validation opts) {})
         collect-all-fn (requiring-resolve 'ai.miniforge.evidence-bundle.collector/collect-all-phases)
         phase-evidence (collect-all-fn workflow-state)
@@ -72,6 +75,9 @@
                  :evidence/policy-checks policy-checks
                  :evidence/outcome outcome}
                 phase-evidence)
+        bundle (cond-> bundle
+                 (seq tool-invocations)
+                 (assoc :evidence/tool-invocations tool-invocations))
 
         new-bundles (assoc @bundles bundle-id bundle)]
 
