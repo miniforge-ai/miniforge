@@ -7,6 +7,7 @@
    Layer 2: Loop runner"
   (:require
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.loop.escalation :as escalation]
    [ai.miniforge.loop.gates :as gates]
    [ai.miniforge.loop.repair :as repair]))
 
@@ -262,7 +263,8 @@
    Arguments:
    - loop-state - Current loop state (must be :repairing)
    - strategies - Sequence of RepairStrategy implementations
-   - context - Context map with :logger, :repair-fn, etc.
+   - context - Context map with :logger, :repair-fn, :escalation-fn, etc.
+     If escalation resumes, :escalation-hints is added to context for generation.
 
    Returns updated loop state with :generating (success) or :escalated/:failed."
   [loop-state strategies context]
@@ -373,6 +375,23 @@
                       :complete
                       :escalated)))))
 
+(defn- resume-after-escalation
+  "Resume the loop after human escalation with provided hints."
+  [state hints]
+  (let [current-iter (:loop/iteration state)
+        current-max (get-in state [:loop/config :max-iterations] 5)
+        current-count (get-in state [:loop/escalation :count] 0)
+        target-max (max (inc current-max) (inc current-iter))]
+    (-> state
+        (dissoc :loop/termination)
+        (assoc :loop/state :generating
+               :loop/override-termination? true
+               :loop/escalation {:hints hints
+                                 :resumed-at (java.util.Date.)
+                                 :count (inc current-count)})
+        (assoc-in [:loop/config :max-iterations] target-max)
+        (assoc :loop/updated-at (java.util.Date.)))))
+
 (defn- handle-pending-state
   "Handle pending state - initiate generation.
    Returns updated state."
@@ -396,6 +415,39 @@
    Returns updated state."
   [state strategies context]
   (repair-step state strategies context))
+
+(defn- handle-escalated-state
+  "Handle escalated state - prompt user or terminate.
+   Returns {:next-state state :next-ctx ctx} or {:terminal result}."
+  [state ctx logger]
+  (let [escalation-count (get-in state [:loop/escalation :count] 0)]
+    (if (>= escalation-count 1)
+      {:terminal (handle-terminal-state
+                  (set-termination state :max-iterations
+                                   :message "Escalation already handled")
+                  logger)}
+      (let [result (escalation/handle-escalation state ctx)]
+        (if (= :continue (:action result))
+          (let [hints (:hints result)
+                resumed-state (resume-after-escalation state hints)
+                next-ctx (assoc ctx :escalation-hints hints)]
+            (when logger
+              (log/info logger :loop :inner/escalated
+                        {:message "Resuming after escalation"
+                         :data {:hints-provided? (boolean (seq hints))}}))
+            {:next-state resumed-state
+             :next-ctx next-ctx})
+          {:terminal (handle-terminal-state state logger)})))))
+
+(defn- compute-termination-check
+  "Compute the termination result, allowing validation to complete once."
+  [state current-state override-termination?]
+  (when-not override-termination?
+    (let [termination (should-terminate? state)]
+      (if (and (= current-state :validating)
+               (= :max-iterations (:reason termination)))
+        nil
+        termination))))
 
 (defn run-inner-loop
   "Run the inner loop to completion.
@@ -421,30 +473,45 @@
                  :data {:task-id (get-in loop-state [:loop/task :task/id])
                         :max-iterations (get-in loop-state [:loop/config :max-iterations])}}))
 
-    (loop [state loop-state]
+    (loop [state loop-state
+           ctx context]
       (let [current-state (:loop/state state)
-            termination-check (should-terminate? state)]
+            override-termination? (:loop/override-termination? state)
+            state (if override-termination?
+                    (dissoc state :loop/override-termination?)
+                    state)
+            termination-check (compute-termination-check
+                               state
+                               current-state
+                               override-termination?)]
         (cond
+          ;; Escalated state - prompt user for guidance
+          (= current-state :escalated)
+          (let [result (handle-escalated-state state ctx logger)]
+            (if-let [next-state (:next-state result)]
+              (recur next-state (:next-ctx result))
+              (:terminal result)))
+
           ;; Terminal states - return result
           (terminal-state? current-state)
           (handle-terminal-state state logger)
 
           ;; Pre-termination check - cache result to avoid calling twice
           termination-check
-          (recur (handle-pre-termination state termination-check))
+          (recur (handle-pre-termination state termination-check) ctx)
 
           ;; State-based dispatch
           (= current-state :pending)
-          (recur (handle-pending-state state generate-fn context))
+          (recur (handle-pending-state state generate-fn ctx) ctx)
 
           (= current-state :generating)
-          (recur (handle-generating-state state generate-fn context))
+          (recur (handle-generating-state state generate-fn ctx) ctx)
 
           (= current-state :validating)
-          (recur (handle-validating-state state gates context))
+          (recur (handle-validating-state state gates ctx) ctx)
 
           (= current-state :repairing)
-          (recur (handle-repairing-state state strategies context))
+          (recur (handle-repairing-state state strategies ctx) ctx)
 
           ;; Unknown state (shouldn't happen)
           :else

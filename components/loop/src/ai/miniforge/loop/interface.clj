@@ -5,6 +5,7 @@
   (:require
    [ai.miniforge.loop.inner :as inner]
    [ai.miniforge.loop.outer :as outer]
+   [ai.miniforge.loop.escalation :as escalation]
    [ai.miniforge.loop.gates :as gates]
    [ai.miniforge.loop.repair :as repair]
    [ai.miniforge.loop.schema :as schema]
@@ -65,7 +66,8 @@
    - generate-fn - Function (fn [task context] -> {:artifact map :tokens int})
    - gates - Sequence of Gate implementations
    - strategies - Sequence of RepairStrategy implementations
-   - context - Context map with :logger, :repair-fn, etc.
+   - context - Context map with :logger, :repair-fn, :escalation-fn, etc.
+     If escalation resumes, :escalation-hints is added to context for generation.
 
    Returns:
    {:success boolean
@@ -95,6 +97,8 @@
    - :max-iterations - Max iterations (default 5)
    - :logger - Logger instance
    - :repair-fn - Repair function for LLM strategy
+   - :escalation-fn - Escalation handler for human-in-the-loop prompting
+   - :prompt-fn - Optional prompt function for escalation UX
 
    Example:
      (run-simple {:task/id (random-uuid) :task/type :implement}
@@ -156,6 +160,35 @@
   "Check if a state is terminal (complete, failed, or escalated)."
   [state]
   (inner/terminal-state? state))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Escalation API
+
+(defn format-error-context
+  "Format error context for user display."
+  [errors iteration artifact]
+  (escalation/format-error-context errors iteration artifact))
+
+(defn format-escalation-prompt
+  "Format the escalation prompt for user."
+  [loop-state]
+  (escalation/format-escalation-prompt loop-state))
+
+(defn prompt-user
+  "Prompt user for input via stdin."
+  [prompt-text]
+  (escalation/prompt-user prompt-text))
+
+(defn escalate-to-user
+  "Escalate to user for guidance."
+  [loop-state & {:keys [prompt-fn]}]
+  (escalation/escalate-to-user loop-state :prompt-fn prompt-fn))
+
+(defn handle-escalation
+  "Handle escalation in inner loop.
+   Context accepts :escalation-fn and optional :prompt-fn."
+  [loop-state context]
+  (escalation/handle-escalation loop-state context))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Gates API

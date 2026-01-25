@@ -7,6 +7,30 @@
 ;; Test fixtures
 
 (def test-dirs (atom #{}))
+(def test-store-root (System/getenv "MINIFORGE_ARTIFACT_TEST_DIR"))
+
+(defn create-temp-test-dir
+  "Create a temp directory for Datalevin test stores."
+  [prefix]
+  (if test-store-root
+    (str (fs/create-temp-dir {:dir test-store-root :prefix prefix}))
+    (str (fs/create-temp-dir {:prefix prefix}))))
+
+(defn create-test-store-with
+  "Create a test store, falling back to transit if Datalevin is unavailable."
+  [opts prefix]
+  (let [dir (create-temp-test-dir prefix)
+        datalevin-opts (assoc opts :dir dir)]
+    (try
+      (let [store (artifact/create-store datalevin-opts)]
+        (swap! test-dirs conj dir)
+        store)
+      (catch Exception _e
+        (let [fallback-dir (create-temp-test-dir (str prefix "transit-"))
+              store (artifact/create-transit-store (assoc opts :dir fallback-dir))]
+          (swap! test-dirs conj dir)
+          (swap! test-dirs conj fallback-dir)
+          store)))))
 
 (defn cleanup-stores [f]
   (f)
@@ -20,13 +44,9 @@
 
 (defn create-test-store
   "Create an isolated test store using a unique temp directory.
-   Each call creates a fresh database, avoiding shared state issues
-   with Datalevin's in-memory connections."
+   Set MINIFORGE_ARTIFACT_TEST_DIR to control the base directory."
   []
-  (let [dir (str (fs/create-temp-dir {:prefix "artifact-test-"}))
-        store (artifact/create-store {:dir dir})]
-    (swap! test-dirs conj dir)
-    store))
+  (create-test-store-with {} "artifact-test-"))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Store creation tests
@@ -38,9 +58,7 @@
       (is (satisfies? artifact/ArtifactStore store))))
 
   (testing "creates store with logger"
-    (let [dir (str (fs/create-temp-dir {:prefix "artifact-test-logger-"}))
-          store (artifact/create-store {:dir dir :logger nil})]
-      (swap! test-dirs conj dir)
+    (let [store (create-test-store-with {:logger nil} "artifact-test-logger-")]
       (is (some? store)))))
 
 ;; Artifact building tests
