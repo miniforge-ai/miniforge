@@ -416,6 +416,29 @@
   [state strategies context]
   (repair-step state strategies context))
 
+(defn- handle-escalated-state
+  "Handle escalated state - prompt user or terminate.
+   Returns {:next-state state :next-ctx ctx} or {:terminal result}."
+  [state ctx logger]
+  (let [escalation-count (get-in state [:loop/escalation :count] 0)]
+    (if (>= escalation-count 1)
+      {:terminal (handle-terminal-state
+                  (set-termination state :max-iterations
+                                   :message "Escalation already handled")
+                  logger)}
+      (let [result (escalation/handle-escalation state ctx)]
+        (if (= :continue (:action result))
+          (let [hints (:hints result)
+                resumed-state (resume-after-escalation state hints)
+                next-ctx (assoc ctx :escalation-hints hints)]
+            (when logger
+              (log/info logger :loop :inner/escalated
+                        {:message "Resuming after escalation"
+                         :data {:hints-provided? (boolean (seq hints))}}))
+            {:next-state resumed-state
+             :next-ctx next-ctx})
+          {:terminal (handle-terminal-state state logger)})))))
+
 (defn- compute-termination-check
   "Compute the termination result, allowing validation to complete once."
   [state current-state override-termination?]
@@ -464,23 +487,10 @@
         (cond
           ;; Escalated state - prompt user for guidance
           (= current-state :escalated)
-          (let [escalation-count (get-in state [:loop/escalation :count] 0)]
-            (if (>= escalation-count 1)
-              (handle-terminal-state
-               (set-termination state :max-iterations
-                                :message "Escalation already handled")
-               logger)
-              (let [result (escalation/handle-escalation state ctx)]
-                (if (= :continue (:action result))
-                  (let [hints (:hints result)
-                        resumed-state (resume-after-escalation state hints)
-                        next-ctx (assoc ctx :escalation-hints hints)]
-                    (when logger
-                      (log/info logger :loop :inner/escalated
-                                {:message "Resuming after escalation"
-                                 :data {:hints-provided? (boolean (seq hints))}}))
-                    (recur resumed-state next-ctx))
-                  (handle-terminal-state state logger)))))
+          (let [result (handle-escalated-state state ctx logger)]
+            (if-let [next-state (:next-state result)]
+              (recur next-state (:next-ctx result))
+              (:terminal result)))
 
           ;; Terminal states - return result
           (terminal-state? current-state)
