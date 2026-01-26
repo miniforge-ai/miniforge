@@ -106,6 +106,72 @@
                       ai.miniforge/orchestrator {:local/root "components/orchestrator"}
                       ai.miniforge/reporting {:local/root "components/reporting"}}}
 
+  :conformance {:extra-paths ["development/test"
+                              "tests/conformance"
+                              "components/schema/src"
+                              "components/schema/test"
+                              "components/logging/src"
+                              "components/logging/test"
+                              "components/llm/src"
+                              "components/llm/test"
+                              "components/tool/src"
+                              "components/tool/test"
+                              "components/artifact/src"
+                              "components/artifact/test"
+                              "components/agent/src"
+                              "components/agent/test"
+                              "components/task/src"
+                              "components/task/test"
+                              "components/loop/src"
+                              "components/loop/test"
+                              "components/knowledge/src"
+                              "components/knowledge/test"
+                              "components/policy/src"
+                              "components/policy/test"
+                              "components/heuristic/src"
+                              "components/heuristic/test"
+                              "components/response/src"
+                              "components/response/test"
+                              "components/fsm/src"
+                              "components/fsm/test"
+                              "components/phase/src"
+                              "components/phase/test"
+                              "components/gate/src"
+                              "components/gate/test"
+                              "components/workflow/src"
+                              "components/workflow/test"
+                              "components/operator/src"
+                              "components/operator/test"
+                              "components/observer/src"
+                              "components/observer/test"
+                              "components/orchestrator/src"
+                              "components/orchestrator/test"
+                              "components/reporting/src"
+                              "components/reporting/test"
+                              "components/evidence-bundle/src"
+                              "components/evidence-bundle/test"]
+                :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
+                             ai.miniforge/logging {:local/root "components/logging"}
+                             ai.miniforge/llm {:local/root "components/llm"}
+                             ai.miniforge/tool {:local/root "components/tool"}
+                             ai.miniforge/artifact {:local/root "components/artifact"}
+                             ai.miniforge/agent {:local/root "components/agent"}
+                             ai.miniforge/task {:local/root "components/task"}
+                             ai.miniforge/loop {:local/root "components/loop"}
+                             ai.miniforge/knowledge {:local/root "components/knowledge"}
+                             ai.miniforge/policy {:local/root "components/policy"}
+                             ai.miniforge/heuristic {:local/root "components/heuristic"}
+                             ai.miniforge/response {:local/root "components/response"}
+                             ai.miniforge/fsm {:local/root "components/fsm"}
+                             ai.miniforge/phase {:local/root "components/phase"}
+                             ai.miniforge/gate {:local/root "components/gate"}
+                             ai.miniforge/workflow {:local/root "components/workflow"}
+                             ai.miniforge/operator {:local/root "components/operator"}
+                             ai.miniforge/observer {:local/root "components/observer"}
+                             ai.miniforge/orchestrator {:local/root "components/orchestrator"}
+                             ai.miniforge/reporting {:local/root "components/reporting"}
+                             ai.miniforge/evidence-bundle {:local/root "components/evidence-bundle"}}}
+
   :poly {:main-opts  ["-m" "polylith.clj.core.poly-cli.core"]
          :extra-deps {polylith/clj-poly {:mvn/version "0.2.21"}}}
 

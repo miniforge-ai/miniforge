@@ -144,6 +144,28 @@
            (run 'test)
            (run 'test:integration))}
 
+  test:conformance
+  {:doc  "Run N1 conformance test suite"
+   :task (do
+           (println "🧪 Running N1 conformance tests...")
+           (let [test-nses ["conformance.n1_architecture_test"
+                            "conformance.event_stream_test"
+                            "conformance.agent_context_handoff_test"
+                            "conformance.protocol_conformance_test"
+                            "conformance.gate_enforcement_test"]
+                 require-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
+                 run-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
+                 expr (str "(require 'clojure.test" require-expr ") "
+                           "(clojure.test/run-tests" run-expr ")")
+                 {:keys [exit out err]}
+                 (p/sh {:out :string :err :string}
+                       "clojure" "-M:conformance" "-e" expr)]
+             (when-not (str/blank? out) (println out))
+             (when-not (str/blank? err) (binding [*out* *err*] (println err)))
+             (when-not (zero? exit)
+               (println "❌ Conformance tests failed with exit code:" exit)
+               (System/exit exit))))}
+
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Pre-commit
   ;; ──────────────────────────────────────────────────────────────────────────
