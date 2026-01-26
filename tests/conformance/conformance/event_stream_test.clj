@@ -239,8 +239,169 @@
           (is (= expected-sequence phase-sequence)
               "Event stream should preserve execution order"))))))
 
+;------------------------------------------------------------------------------ Layer 3
+;; N3 §3.4: ETL lifecycle events
+
+(deftest etl-completed-event-test
+  (testing "N3 §3.4: etl/completed event is emitted on successful ETL workflow"
+    (let [[logger entries] (logging/collecting-logger {:min-level :info})]
+
+      ;; Simulate successful ETL workflow
+      (logging/emit-etl-completed logger
+                                  (random-uuid)
+                                  1500
+                                  {:packs-generated 5
+                                   :packs-promoted 3
+                                   :high-risk-findings 2
+                                   :sources-processed 10})
+
+      ;; Verify event was emitted
+      (let [events @entries
+            etl-event (first (filter #(= :etl/completed (:log/event %)) events))]
+        (is (some? etl-event)
+            "etl/completed event must be emitted")
+        (is (= :info (:log/level etl-event))
+            "etl/completed must be logged at :info level")
+        (is (= :etl (:log/category etl-event))
+            "etl/completed must have :etl category")
+
+        ;; Verify required fields per N3 §3.4
+        (let [event-data (:data etl-event)]
+          (is (= :etl/completed (:event/type event-data))
+              "event/type must be :etl/completed")
+          (is (uuid? (:event/id event-data))
+              "event/id must be a UUID")
+          (is (inst? (:event/timestamp event-data))
+              "event/timestamp must be an instant")
+          (is (= "1.0.0" (:event/version event-data))
+              "event/version must be 1.0.0")
+          (is (uuid? (:workflow/id event-data))
+              "workflow/id must be a UUID")
+          (is (= 1500 (:etl/duration-ms event-data))
+              "etl/duration-ms must be recorded")
+
+          ;; Verify summary statistics
+          (let [summary (:etl/summary event-data)]
+            (is (= 5 (:packs-generated summary))
+                "summary must include packs-generated")
+            (is (= 3 (:packs-promoted summary))
+                "summary must include packs-promoted")
+            (is (= 2 (:high-risk-findings summary))
+                "summary must include high-risk-findings")
+            (is (= 10 (:sources-processed summary))
+                "summary must include sources-processed")))))))
+
+(deftest etl-failed-event-test
+  (testing "N3 §3.4: etl/failed event is emitted on ETL workflow failure"
+    (let [[logger entries] (logging/collecting-logger {:min-level :error})]
+
+      ;; Simulate failed ETL workflow
+      (logging/emit-etl-failed logger
+                               (random-uuid)
+                               :scanning
+                               "Prompt injection detected in source file"
+                               {:file "untrusted/config.md"
+                                :scanner :prompt-injection-tripwire
+                                :severity :critical})
+
+      ;; Verify event was emitted
+      (let [events @entries
+            etl-event (first (filter #(= :etl/failed (:log/event %)) events))]
+        (is (some? etl-event)
+            "etl/failed event must be emitted")
+        (is (= :error (:log/level etl-event))
+            "etl/failed must be logged at :error level")
+        (is (= :etl (:log/category etl-event))
+            "etl/failed must have :etl category")
+
+        ;; Verify required fields per N3 §3.4
+        (let [event-data (:data etl-event)]
+          (is (= :etl/failed (:event/type event-data))
+              "event/type must be :etl/failed")
+          (is (uuid? (:event/id event-data))
+              "event/id must be a UUID")
+          (is (inst? (:event/timestamp event-data))
+              "event/timestamp must be an instant")
+          (is (= "1.0.0" (:event/version event-data))
+              "event/version must be 1.0.0")
+          (is (uuid? (:workflow/id event-data))
+              "workflow/id must be a UUID")
+          (is (= :scanning (:etl/failure-stage event-data))
+              "etl/failure-stage must be recorded")
+          (is (= "Prompt injection detected in source file"
+                 (:etl/failure-reason event-data))
+              "etl/failure-reason must be recorded")
+
+          ;; Verify optional error details
+          (let [error-details (:etl/error-details event-data)]
+            (is (some? error-details)
+                "error-details should be included when provided")
+            (is (= "untrusted/config.md" (:file error-details))
+                "error-details must include structured error info")
+            (is (= :prompt-injection-tripwire (:scanner error-details))
+                "error-details must include scanner info")
+            (is (= :critical (:severity error-details))
+                "error-details must include severity")))))))
+
+(deftest etl-failure-stages-test
+  (testing "N3 §3.4: etl/failed supports all required failure stages"
+    (let [[logger entries] (logging/collecting-logger {:min-level :error})]
+
+      ;; Test each failure stage
+      (doseq [stage [:classification :scanning :extraction :validation]]
+        (logging/emit-etl-failed logger
+                                 (random-uuid)
+                                 stage
+                                 (str "Failure in " (name stage) " stage")))
+
+      ;; Verify all stages were recorded
+      (let [events @entries
+            etl-events (filter #(= :etl/failed (:log/event %)) events)
+            stages (map #(get-in % [:data :etl/failure-stage]) etl-events)]
+        (is (= 4 (count etl-events))
+            "All 4 failure stages must be supported")
+        (is (= #{:classification :scanning :extraction :validation}
+               (set stages))
+            "All required failure stages must be present")))))
+
+(deftest etl-workflow-integration-test
+  (testing "N3 §3.4: ETL workflow emits lifecycle events during execution"
+    (let [[logger entries] (logging/collecting-logger {:min-level :debug})]
+
+      ;; Run ETL workflow (this will be a stub until actual ETL is implemented)
+      ;; For now, just verify that the event emission functions are callable
+      (let [workflow-id (random-uuid)]
+
+        ;; Successful workflow
+        (logging/emit-etl-completed logger workflow-id 1000
+                                    {:packs-generated 3
+                                     :packs-promoted 2
+                                     :high-risk-findings 0
+                                     :sources-processed 5})
+
+        ;; Failed workflow
+        (logging/emit-etl-failed logger workflow-id :validation
+                                 "Schema validation failed"
+                                 {:field :pack/id})
+
+        ;; Verify both events were emitted
+        (let [events @entries
+              completed-events (filter #(= :etl/completed (:log/event %)) events)
+              failed-events (filter #(= :etl/failed (:log/event %)) events)]
+          (is (= 1 (count completed-events))
+              "Completed event must be emitted")
+          (is (= 1 (count failed-events))
+              "Failed event must be emitted"))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'conformance.event_stream_test)
+
+  ;; Run just ETL tests
+  (clojure.test/test-vars
+   [#'etl-completed-event-test
+    #'etl-failed-event-test
+    #'etl-failure-stages-test
+    #'etl-workflow-integration-test])
 
   :leave-this-here)
