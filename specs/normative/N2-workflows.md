@@ -535,6 +535,39 @@ Each phase MUST receive a complete context:
  :phase/success-criteria [...]}    ; Success criteria to meet
 ```
 
+#### 4.4.1 Instruction vs Data Channels (Cognitive Safety Boundary)
+
+Phase context MUST explicitly separate **instruction authority** from **untrusted data**.
+
+- `:instructions` are platform-authored or policy-approved and MAY shape plans and execution.
+- `:data` is repo- or user-derived content and MUST be treated as reference material only.
+
+Implementations MUST ensure that untrusted documents (e.g., markdown specs, READMEs, `agents.md`) are never elevated into instruction authority unless first normalized into schema-valid packs and promoted to `:trusted` under policy.
+
+Recommended context shape:
+
+```clojure
+:phase/input-context
+{:instructions
+ {:policy/active-packs [...]
+  :constraints [...]
+  :success-criteria [...]}
+
+ :data
+ {:prior-phases {...}
+  :knowledge/patterns [...]          ; Trusted patterns only
+  :knowledge/inputs [...]            ; All knowledge inputs with trust labels + hashes
+  :repo/docs [...]                   ; Untrusted docs (data channel)
+  :artifacts/available [uuid ...]}
+
+ :data/trust-verified                ; OPTIONAL: scanner-verified but not promoted content
+ {:repo/specs [...]                  ; Specs that passed safety scanning
+  :repo/docs [...]                   ; Docs that passed injection scanning
+  :scanner-findings [...]}}          ; Associated scanner findings for transparency
+```
+
+The `:data/trust-verified` subchannel MAY be used to provide richer context for agent reasoning without elevating content to instruction authority. Content in this channel MUST have passed deterministic safety scanners (see N4 "knowledge-safety") but retains `:untrusted` trust level.
+
 Each phase MUST produce a next context:
 
 ```clojure
@@ -688,13 +721,13 @@ A **gate** is a validation checkpoint that artifacts must pass before phase comp
 
 Implementations MUST support:
 
-| Gate Type | Purpose | When Executed |
-|-----------|---------|---------------|
-| **Policy Validation** | Check policy pack rules | Implement, Review phases |
-| **Semantic Intent** | Verify intent matches behavior | Review phase |
-| **Test Pass/Fail** | Ensure tests pass | Verify phase |
-| **Review Approval** | Human or automated review | Review phase |
-| **Deployment Validation** | Validate deployment safety | Release phase |
+| Gate Type                 | Purpose                        | When Executed            |
+| ------------------------- | ------------------------------ | ------------------------ |
+| **Policy Validation**     | Check policy pack rules        | Implement, Review phases |
+| **Semantic Intent**       | Verify intent matches behavior | Review phase             |
+| **Test Pass/Fail**        | Ensure tests pass              | Verify phase             |
+| **Review Approval**       | Human or automated review      | Review phase             |
+| **Deployment Validation** | Validate deployment safety     | Release phase            |
 
 ### 6.3 Gate Execution Protocol
 
@@ -765,14 +798,14 @@ The **semantic intent gate** validates that actual behavior matches declared int
 
 #### 6.7.1 Semantic Validation Rules
 
-| Intent Type | Validation Rule |
-|-------------|----------------|
-| `:import` | 0 creates, 0 updates, 0 destroys |
-| `:create` | >0 creates, 0 destroys |
-| `:update` | 0 creates, >0 updates, 0 destroys |
-| `:destroy` | 0 creates, 0 updates, >0 destroys |
-| `:refactor` | Code changes only, 0 resource changes |
-| `:migrate` | Balanced creates and destroys (logical move) |
+| Intent Type | Validation Rule                              |
+| ----------- | -------------------------------------------- |
+| `:import`   | 0 creates, 0 updates, 0 destroys             |
+| `:create`   | >0 creates, 0 destroys                       |
+| `:update`   | 0 creates, >0 updates, 0 destroys            |
+| `:destroy`  | 0 creates, 0 updates, >0 destroys            |
+| `:refactor` | Code changes only, 0 resource changes        |
+| `:migrate`  | Balanced creates and destroys (logical move) |
 
 #### 6.7.2 Terraform-Specific Semantic Validation
 
@@ -887,7 +920,7 @@ Implementations MUST NOT resume if:
 ### 9.1 Workflow Spec Structure
 
 ```clojure
-{:workflow/type keyword            ; REQUIRED: :infrastructure-change, :feature, :refactor
+{:workflow/type keyword            ; REQUIRED: :infrastructure-change, :feature, :refactor, :etl
 
  :workflow/intent
  {:intent/type keyword             ; REQUIRED: :import, :create, :update, :destroy, :refactor, :migrate
@@ -912,6 +945,31 @@ Implementations MUST NOT resume if:
  {:skip-design? boolean            ; OPTIONAL: Skip design phase if true
   :auto-merge? boolean             ; OPTIONAL: Auto-merge PR if gates pass
   :max-inner-loop-iterations long}} ; OPTIONAL: Override default retry budget
+```
+
+#### 9.1.1 ETL Workflow Type
+
+The `:etl` workflow type is used to normalize existing repositories into safe, schema-valid packs.
+
+ETL workflows SHOULD emit:
+
+- `:feature-pack` units (normalized intent + acceptance criteria)
+- `:policy-pack` units (deterministic rules extracted or generated)
+- `:agent-profile-pack` units (optional)
+- `:pack-index` manifest (hashes, trust labels, provenance)
+
+ETL workflows MUST default generated packs to `:untrusted` unless explicitly promoted under policy.
+
+**Custom Phase Sequence:** ETL workflows use a fundamentally different process than standard infrastructure change workflows. While the standard phase sequence is (Plan → Design → Implement → Verify → Review → Release → Observe), ETL workflows MAY define custom phases appropriate to the ingestion and normalization process (e.g., Inventory → Classify → Scan → Extract → Validate → Index). The workflow extensibility model treats ETL as just another workflow type with its own phase graph.
+
+Recommended `:workflow/context` for ETL:
+
+```clojure
+{:etl/source {:repo/path string}
+ :etl/output {:pack-root string
+              :report-root string}
+ :etl/options {:strict? boolean
+               :max-files long}}
 ```
 
 ### 9.2 Workflow Spec Validation

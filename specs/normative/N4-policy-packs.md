@@ -76,13 +76,13 @@ Policy packs enable **policy-as-code** enforcement at workflow gates, preventing
 
 #### 2.2.1 Rule Severity Levels
 
-| Severity | Meaning | Enforcement |
-|----------|---------|-------------|
-| `:critical` | Blocks deployment, requires human override | MUST block phase completion |
-| `:high` | Strongly discouraged, auto-repair or review | SHOULD block unless auto-repaired |
-| `:medium` | Warning, may auto-repair | MAY proceed with warning |
-| `:low` | Informational, suggests improvement | MAY proceed |
-| `:info` | Informational only, no action needed | MUST NOT block |
+| Severity    | Meaning                                     | Enforcement                       |
+| ----------- | ------------------------------------------- | --------------------------------- |
+| `:critical` | Blocks deployment, requires human override  | MUST block phase completion       |
+| `:high`     | Strongly discouraged, auto-repair or review | SHOULD block unless auto-repaired |
+| `:medium`   | Warning, may auto-repair                    | MAY proceed with warning          |
+| `:low`      | Informational, suggests improvement         | MAY proceed                       |
+| `:info`     | Informational only, no action needed        | MUST NOT block                    |
 
 ### 2.3 Scanner Protocol
 
@@ -124,6 +124,71 @@ Policy packs enable **policy-as-code** enforcement at workflow gates, preventing
       :total-updates 1
       :total-destroys 0}}))
 ```
+
+### 2.4 Knowledge Safety and Pack Validation (Reference)
+
+miniforge MUST support deterministic policy packs that protect the system from prompt-injection and untrusted input escalation during ingestion and execution.
+
+A reference policy pack named `knowledge-safety` SHOULD be provided.
+
+#### 2.4.1 Threat Model
+
+Untrusted repository content (markdown, issues, wikis, etc.) may contain instructions that attempt to override agent behavior. The platform MUST treat such content as *data* unless it is normalized into schema-valid packs and promoted to `:trusted` under policy.
+
+#### 2.4.2 Reference Rules (knowledge-safety)
+
+The `knowledge-safety` pack SHOULD include rules such as:
+
+- `require-trust-labels`
+  - FAIL if ingested knowledge units or packs lack `:trust-level` and `:authority`
+- `no-untrusted-instruction-authority`
+  - FAIL if any `:trust-level :untrusted` content is routed into instruction authority
+- `no-markdown-agent-interface`
+  - FAIL if runtime agent definitions are derived from markdown rather than EDN packs
+- `prompt-injection-tripwire`
+  - WARN/FAIL on high-confidence prompt injection patterns in untrusted sources
+- `pack-schema-validation`
+  - FAIL if generated packs do not conform to schemas
+- `pack-root-allowlist`
+  - FAIL if packs are loaded from non-declared registry roots
+- `pack-dependency-validation`
+  - FAIL if pack dependencies contain circular references, missing dependencies, or version conflicts
+  - FAIL if pack depends on higher-trust content without explicit promotion path
+  - WARN if pack dependency chain exceeds configured depth limit (default: 5 levels)
+  - Implementations MUST:
+    1. Build complete dependency graph before loading any pack
+    2. Detect circular dependencies (A depends on B, B depends on A)
+    3. Validate all transitive dependencies are available
+    4. Check version constraints are satisfiable across dependency tree
+    5. Enforce trust level constraints (untrusted pack cannot require trusted dependency)
+  - Example violations:
+    - Circular: pack A v1.0 → pack B v1.0 → pack A v2.0
+    - Missing: pack A requires pack B v1.0, but pack B not in registry
+    - Version conflict: pack A requires pack C v1.x, pack B requires pack C v2.x
+    - Trust violation: pack A (:untrusted) requires pack B (:trusted, :authority/instruction)
+
+#### 2.4.3 Deterministic Prompt Injection Tripwire Scanner
+
+The platform SHOULD ship a deterministic scanner that emits findings on suspicious directives, including (non-exhaustive):
+
+- **Role and instruction overrides:** `SYSTEM:`, `DEVELOPER:`, "ignore previous instructions", "you are now", "disregard all prior"
+- **Tool invocation bait:** "run this command", "call tool", "execute the following", "invoke function"
+- **Data exfiltration attempts:** "send output to", "POST to", "curl http", "webhook", patterns suggesting data leakage to external endpoints
+- **Embedded execution patterns:** Unusual code blocks in documentation context (e.g., shell scripts, base64 blobs with `eval`, obfuscated JavaScript/Python)
+- **Time-based triggers:** Patterns suggesting delayed or conditional execution ("wait until", "after N days", "when timestamp", "cron-like expressions" in unexpected contexts)
+- **Obfuscation indicators:** Large base64 blobs, repeated encoding markers (multiple layers of encoding), hexadecimal or unicode escape sequences suggesting hidden content
+- **Authority escalation:** "this is the system prompt", "highest priority", "override all policies", "administrator mode", "root access"
+- **Context confusion:** Attempts to blur boundaries between documentation and instructions ("the following is a system message", "internal use only: execute")
+
+The scanner SHOULD use pattern matching (regex, keyword detection) combined with contextual heuristics (e.g., code blocks in markdown files that aren't in fenced code syntax).
+
+Implementations SHOULD tune sensitivity based on content type:
+
+- Markdown files in wiki/docs directories → higher sensitivity
+- Code files with inline documentation → moderate sensitivity
+- Structured data files (JSON, YAML, EDN) → context-dependent
+
+This scanner MUST be treated as a *tripwire* rather than a complete security solution. The primary defense MUST remain trust labeling, schema validation, and instruction/data separation.
 
 ---
 
@@ -302,14 +367,14 @@ Repair functions SHOULD:
 
 Semantic intent validation MUST enforce these rules:
 
-| Intent Type | Creates | Updates | Destroys | Notes |
-|-------------|---------|---------|----------|-------|
-| `:import` | 0 | 0 (state-only) | 0 | Pure import, no infrastructure changes |
-| `:create` | >0 | Any | 0 | Creating new resources |
-| `:update` | 0 | >0 | 0 | Modifying existing resources |
-| `:destroy` | 0 | 0 | >0 | Removing resources |
-| `:refactor` | 0 | 0 | 0 | Code/structure changes only |
-| `:migrate` | >0 | 0 | >0 | Moving resources (create + destroy) |
+| Intent Type | Creates | Updates        | Destroys | Notes                                  |
+| ----------- | ------- | -------------- | -------- | -------------------------------------- |
+| `:import`   | 0       | 0 (state-only) | 0        | Pure import, no infrastructure changes |
+| `:create`   | >0      | Any            | 0        | Creating new resources                 |
+| `:update`   | 0       | >0             | 0        | Modifying existing resources           |
+| `:destroy`  | 0       | 0              | >0       | Removing resources                     |
+| `:refactor` | 0       | 0              | 0        | Code/structure changes only            |
+| `:migrate`  | >0      | 0              | >0       | Moving resources (create + destroy)    |
 
 ### 4.2 Semantic Intent Check Function
 

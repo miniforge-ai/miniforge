@@ -43,14 +43,16 @@ All commands MUST follow this structure for consistency.
 
 Implementations MUST provide these namespaces:
 
-| Namespace | Purpose | Example Commands |
-|-----------|---------|------------------|
-| `init` | Initialize miniforge | `miniforge init` |
-| `workflow` | Workflow execution | `miniforge workflow execute`, `miniforge workflow status` |
-| `fleet` | Local fleet management | `miniforge fleet watch`, `miniforge fleet list` |
-| `policy` | Policy pack management | `miniforge policy list`, `miniforge policy install` |
-| `evidence` | Evidence bundle access | `miniforge evidence show`, `miniforge evidence export` |
-| `artifact` | Artifact queries | `miniforge artifact provenance`, `miniforge artifact list` |
+| Namespace  | Purpose                       | Example Commands                                           |
+| ---------- | ----------------------------- | ---------------------------------------------------------- |
+| `init`     | Initialize miniforge          | `miniforge init`                                           |
+| `workflow` | Workflow execution            | `miniforge workflow execute`, `miniforge workflow status`  |
+| `fleet`    | Local fleet management        | `miniforge fleet watch`, `miniforge fleet list`            |
+| `policy`   | Policy pack management        | `miniforge policy list`, `miniforge policy install`        |
+| `evidence` | Evidence bundle access        | `miniforge evidence show`, `miniforge evidence export`     |
+| `artifact` | Artifact queries              | `miniforge artifact provenance`, `miniforge artifact list` |
+| `etl`      | Repository → pack ETL         | `miniforge etl repo`, `miniforge etl report`               |
+| `pack`     | Pack inspection and promotion | `miniforge pack list`, `miniforge pack promote`            |
 
 ### 2.3 Command Specifications
 
@@ -441,6 +443,82 @@ Full Evidence Bundle: miniforge evidence show abc123
 
 ---
 
+#### 2.3.7 ETL Namespace
+
+**Purpose:** Convert existing repositories (docs/specs/rules) into sanitized, schema-valid packs for workflow execution.
+
+```bash
+# Generate packs from a local repository
+miniforge etl repo PATH [flags]
+
+Arguments:
+  PATH                Path to repository root
+
+Flags:
+  --emit DIR           Output directory for packs (default: ./packs)
+  --report DIR         Output directory for reports (default: ./reports)
+  --strict             Fail on any high-risk findings (default: false)
+  --max-files N        Limit files considered (default: 5000)
+  --include-globs G    Additional globs to include (repeatable)
+  --exclude-globs G    Globs to exclude (repeatable)
+  --dry-run            Show what would be processed without generating packs
+
+# Show latest ETL report
+miniforge etl report [flags]
+
+Flags:
+  --json               Output as JSON
+```
+
+**Requirements:**
+
+- MUST emit a `:pack-index` manifest containing content hashes and trust labels
+- MUST run `knowledge-safety` scanners (see N4) over untrusted sources
+- MUST default generated packs to `:trust-level :untrusted`
+- MUST emit `etl/*` lifecycle events (see N3)
+
+---
+
+#### 2.3.8 Pack Namespace
+
+**Purpose:** Inspect, verify, and promote packs.
+
+```bash
+# List packs in registry roots
+miniforge pack list [flags]
+
+Flags:
+  --root DIR           Add an additional registry root
+  --type TYPE          Filter by pack type (feature|policy|agent-profile|index)
+  --json               Output as JSON
+
+# Show pack details (including provenance + hash)
+miniforge pack show PACK_ID [flags]
+
+# Promote pack trust level (local OSS workflow)
+miniforge pack promote PACK_ID [flags]
+
+Flags:
+  --to TRUST           Target trust level (trusted)
+  --policy PACK_ID     Policy pack(s) used for promotion gate (repeatable, default: knowledge-safety)
+  --sign               Sign promoted pack manifest (if key configured)
+
+Policy Enforcement:
+  By default, pack promotion requires passing ALL configured policy packs (AND logic).
+  If multiple --policy flags are provided, the pack MUST pass all of them to be promoted.
+  This is configurable in ~/.miniforge/config.edn under :pack-promotion/require-all-policies
+  (default: true).
+
+# Verify pack signature/hash
+miniforge pack verify PACK_ID [flags]
+```
+
+**Requirements:**
+
+- MUST treat pack promotion as a policy-gated operation
+- MUST record pack hashes and promotion evidence in N6 evidence bundles
+- MUST NOT allow untrusted packs to gain instruction authority without promotion/signature
+
 ## 3. TUI Primitives
 
 ### 3.1 TUI Purpose
@@ -609,20 +687,20 @@ Implementations MUST provide these views:
 
 Implementations MUST support:
 
-| Key | Action |
-|-----|--------|
-| `j` / `↓` | Move down |
-| `k` / `↑` | Move up |
-| `Enter` | Select / Drill into |
-| `Esc` | Go back / Exit |
-| `Space` | Expand/Collapse (in tree views) |
-| `e` | View evidence |
-| `a` | View artifacts |
-| `v` | View events |
-| `c` | Cancel workflow |
-| `q` | Quit TUI |
-| `r` | Refresh now |
-| `?` | Show help |
+| Key       | Action                          |
+| --------- | ------------------------------- |
+| `j` / `↓` | Move down                       |
+| `k` / `↑` | Move up                         |
+| `Enter`   | Select / Drill into             |
+| `Esc`     | Go back / Exit                  |
+| `Space`   | Expand/Collapse (in tree views) |
+| `e`       | View evidence                   |
+| `a`       | View artifacts                  |
+| `v`       | View events                     |
+| `c`       | Cancel workflow                 |
+| `q`       | Quit TUI                        |
+| `r`       | Refresh now                     |
+| `?`       | Show help                       |
 
 ### 3.4 TUI Real-Time Updates
 
@@ -914,11 +992,11 @@ Implementations MUST support configuration file at `~/.miniforge/config.edn`:
 
 Implementations MUST support these environment variables:
 
-| Variable | Purpose |
-|----------|---------|
-| `MINIFORGE_LLM_KEY` | LLM API key |
-| `MINIFORGE_CONFIG` | Path to config file |
-| `MINIFORGE_WORKSPACE` | Workspace directory |
+| Variable              | Purpose                                  |
+| --------------------- | ---------------------------------------- |
+| `MINIFORGE_LLM_KEY`   | LLM API key                              |
+| `MINIFORGE_CONFIG`    | Path to config file                      |
+| `MINIFORGE_WORKSPACE` | Workspace directory                      |
 | `MINIFORGE_LOG_LEVEL` | Logging level (debug, info, warn, error) |
 
 ---
