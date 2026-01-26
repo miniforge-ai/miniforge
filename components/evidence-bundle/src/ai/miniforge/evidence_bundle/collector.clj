@@ -91,6 +91,39 @@
     (mapv build-policy-check-evidence gate-results)))
 
 ;------------------------------------------------------------------------------ Layer 3
+;; Pack Promotion Evidence
+
+(defn build-pack-promotion-evidence
+  "Build pack promotion evidence from promotion record.
+   Returns pack promotion evidence per N6 section 2.1.
+
+   If the promotion record already has the correct format (with :pack/id),
+   return it as-is. Otherwise, build from legacy format."
+  [promotion-record]
+  ;; If already in correct format, return as-is
+  (if (contains? promotion-record :pack/id)
+    promotion-record
+    ;; Otherwise, build from legacy format
+    {:pack/id (or (:pack-id promotion-record) "unknown")
+     :pack/type (or (:pack-type promotion-record) :knowledge)
+     :from-trust (or (:from-trust promotion-record) :untrusted)
+     :to-trust (or (:to-trust promotion-record) :trusted)
+     :promoted-by (or (:promoted-by promotion-record) "system")
+     :promoted-at (or (:promoted-at promotion-record) (java.time.Instant/now))
+     :promotion-policy (or (:promotion-policy promotion-record) "knowledge-safety")
+     :promotion-justification (or (:promotion-justification promotion-record)
+                                  "No justification provided")
+     :pack-hash (or (:pack-hash promotion-record) "")
+     :pack-signature (or (:pack-signature promotion-record) "")}))
+
+(defn collect-pack-promotions
+  "Collect all pack promotion evidence from workflow state.
+   Returns vector of pack promotion evidence."
+  [workflow-state]
+  (let [promotions (get workflow-state :workflow/pack-promotions [])]
+    (mapv build-pack-promotion-evidence promotions)))
+
+;------------------------------------------------------------------------------ Layer 4
 ;; Outcome Evidence
 
 (defn build-outcome-evidence
@@ -112,7 +145,7 @@
         :outcome/error-phase (:phase error-info)
         :outcome/error-details error-info}))))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 5
 ;; Complete Bundle Assembly
 
 (defn assemble-evidence-bundle
@@ -123,6 +156,7 @@
         intent (extract-intent workflow-spec)
         phase-evidence (collect-all-phases workflow-state)
         policy-checks (collect-policy-checks workflow-state)
+        pack-promotions (collect-pack-promotions workflow-state)
         outcome (build-outcome-evidence workflow-state)
         tool-invocations (collect-tool-invocations workflow-state)
 
@@ -152,10 +186,12 @@
      phase-evidence
      (when (seq tool-invocations)
        {:evidence/tool-invocations tool-invocations})
+     (when (seq pack-promotions)
+       {:evidence/pack-promotions pack-promotions})
      (when semantic-validation
        {:evidence/semantic-validation semantic-validation}))))
 
-;------------------------------------------------------------------------------ Layer 5
+;------------------------------------------------------------------------------ Layer 6
 ;; Workflow Integration Helpers
 
 (defn should-create-bundle?

@@ -5,10 +5,24 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema Utilities
 
+(defrecord OptionalKey [key])
+
 (defn optional-key
   "Mark a schema key as optional."
   [k]
-  k)
+  (->OptionalKey k))
+
+(defn optional-key?
+  "Check if a key is marked as optional."
+  [k]
+  (instance? OptionalKey k))
+
+(defn unwrap-key
+  "Unwrap an optional key to get the actual key."
+  [k]
+  (if (optional-key? k)
+    (:key k)
+    k))
 
 ;; Intent Schema
 
@@ -147,9 +161,12 @@
    (optional-key :evidence/observe) map?
 
    ;; Validation
-   :evidence/semantic-validation map?
+   (optional-key :evidence/semantic-validation) map?
    :evidence/policy-checks vector?
    (optional-key :evidence/tool-invocations) vector?
+
+   ;; Pack Promotions (optional, for ETL workflows)
+   (optional-key :evidence/pack-promotions) vector?
 
    ;; Outcome
    :evidence/outcome map?
@@ -197,6 +214,26 @@
    (optional-key :tool/error) map?})
 
 ;------------------------------------------------------------------------------ Layer 8
+;; Pack Promotion Schema
+
+(def trust-levels
+  "Valid trust levels for pack promotion per N6 spec."
+  #{:untrusted :tainted :trusted})
+
+(def pack-promotion-schema
+  "Schema for pack promotion evidence per N6 section 2.1."
+  {:pack/id string?
+   :pack/type keyword?
+   :from-trust (fn [t] (contains? trust-levels t))
+   :to-trust (fn [t] (contains? trust-levels t))
+   :promoted-by string?
+   :promoted-at inst?
+   :promotion-policy string?
+   :promotion-justification string?  ; REQUIRED: audit trail for trust decision
+   :pack-hash string?
+   (optional-key :pack-signature) string?})
+
+;------------------------------------------------------------------------------ Layer 9
 ;; Helper Functions
 
 (defn validate-schema
@@ -205,13 +242,15 @@
   [schema data]
   (let [errors (atom [])]
     (doseq [[k validator] schema]
-      (let [v (get data k)]
+      (let [is-optional? (optional-key? k)
+            actual-key (unwrap-key k)
+            v (get data actual-key)]
         (cond
-          (and (nil? v) (not (optional-key k)))
-          (swap! errors conj {:key k :error "Required key missing"})
+          (and (nil? v) (not is-optional?))
+          (swap! errors conj {:key actual-key :error "Required key missing"})
 
           (and v (fn? validator) (not (validator v)))
-          (swap! errors conj {:key k :error "Validation failed" :value v}))))
+          (swap! errors conj {:key actual-key :error "Validation failed" :value v}))))
     {:valid? (empty? @errors)
      :errors @errors}))
 
@@ -223,7 +262,7 @@
    :evidence-bundle/created-at (java.time.Instant/now)
    :evidence-bundle/version "1.0.0"
    :evidence/intent {}
-   :evidence/semantic-validation {}
    :evidence/policy-checks []
    :evidence/outcome {}
-   :evidence/tool-invocations []})
+   :evidence/tool-invocations []
+   :evidence/pack-promotions []})

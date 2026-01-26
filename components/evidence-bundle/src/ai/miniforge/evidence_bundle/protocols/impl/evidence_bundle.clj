@@ -155,9 +155,9 @@
         _ (when (and intent-validation (not (:valid? intent-validation)))
             (swap! errors concat (:errors intent-validation)))
 
-        ;; Validate semantic validation structure
+        ;; Validate semantic validation structure (only if present and non-empty)
         sem-val (:evidence/semantic-validation bundle)
-        sem-val-validation (when sem-val
+        sem-val-validation (when (and sem-val (seq sem-val))
                              (schema/validate-schema
                               schema/semantic-validation-schema sem-val))
 
