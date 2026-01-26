@@ -365,53 +365,6 @@
 ;; WorkflowObserver Integration Tests
 ;; ============================================================================
 
-(deftest workflow-observer-integration-test
-  (testing "Observer implements WorkflowObserver protocol"
-    (let [obs (observer/create-observer)
-          workflow-id (random-uuid)]
-
-      ;; Simulate workflow execution callbacks
-      (wf-proto/on-phase-start obs workflow-id :implement {})
-
-      (wf-proto/on-phase-complete obs workflow-id :implement
-                                   (sample-phase-result true))
-
-      (wf-proto/on-phase-start obs workflow-id :test {})
-
-      (wf-proto/on-phase-complete obs workflow-id :test
-                                   (sample-phase-result true))
-
-      (wf-proto/on-workflow-complete obs workflow-id
-                                      (sample-workflow-state workflow-id :completed))
-
-      ;; Verify metrics were collected
-      (let [metrics (observer/get-workflow-metrics obs workflow-id)]
-        (is (some? metrics) "Metrics should be collected via callbacks")
-        (is (= 2 (count (:phases metrics))) "Should have 2 phases")
-        (is (= :completed (:status metrics)) "Workflow should be completed"))))
-
-  (testing "Observer handles phase errors"
-    (let [obs (observer/create-observer)
-          workflow-id (random-uuid)]
-
-      (wf-proto/on-phase-error obs workflow-id :test
-                                {:message "Test failed" :type :assertion-error})
-
-      (wf-proto/on-workflow-complete obs workflow-id
-                                      (sample-workflow-state workflow-id :failed))
-
-      (let [metrics (observer/get-workflow-metrics obs workflow-id)]
-        (is (= :failed (:status metrics)) "Workflow should be failed")
-        (is (seq (:phases metrics)) "Should have phase metrics for error"))))
-
-  (testing "Observer handles rollback"
-    (let [obs (observer/create-observer)
-          workflow-id (random-uuid)]
-
-      (wf-proto/on-rollback obs workflow-id :test :implement "Test failed, rolling back")
-
-      ;; Rollback doesn't fail the test, just exercises the callback
-      (is true "Rollback callback should not throw"))))
 
 ;; ============================================================================
 ;; Run All Tests

@@ -204,18 +204,6 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Integration tests
 
-(deftest full-inner-loop-integration-test
-  (testing "full loop execution"
-    (let [loop-state (loop/create-inner-loop test-task {:max-iterations 3})
-          generate-fn (make-generate-fn (valid-artifact))
-          gates (loop/minimal-gates)
-          strategies (loop/default-strategies)
-          result (loop/run-inner-loop loop-state generate-fn gates strategies {})]
-      (is (:success result))
-      (is (some? (:artifact result)))
-      (is (map? (:metrics result)))
-      (is (= :gates-passed (get-in result [:termination :reason]))))))
-
 (deftest step-by-step-control-test
   (testing "manual step execution"
     (let [loop-state (loop/create-inner-loop test-task {})

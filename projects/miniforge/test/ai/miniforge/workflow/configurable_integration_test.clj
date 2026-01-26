@@ -17,6 +17,8 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.configurable :as configurable]
+   [ai.miniforge.workflow.loader :as loader]
+   [ai.miniforge.workflow.state :as state]
    [ai.miniforge.agent.interface :as agent]))
 
 ;------------------------------------------------------------------------------ Test fixtures
@@ -263,3 +265,17 @@
           "Should have :errors key")
       (is (contains? result :metrics)
           "Should have :metrics key"))))
+
+(deftest run-configurable-workflow-integration-test
+  (testing "Run loaded workflow config"
+    (let [mock-llm (agent/create-mock-llm {:content "(defn hello [] \"world\")"})
+          workflow-result (loader/load-workflow :simple-test-v1 "1.0.0" {})
+          workflow (:workflow workflow-result)
+          input {:task "Integration test task"}
+          exec-state (configurable/run-configurable-workflow workflow input {:llm-backend mock-llm})]
+      (is (state/completed? exec-state))
+      (is (state/has-phase-result? exec-state :plan))
+      (is (state/has-phase-result? exec-state :implement))
+      (is (pos? (count (:execution/artifacts exec-state))))
+      (is (seq (:execution/history exec-state)))
+      (is (empty? (:execution/errors exec-state))))))

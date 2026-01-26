@@ -1,4 +1,4 @@
-{:paths []
+{:paths ["test"]
 
  :deps {ai.miniforge/cli {:local/root "../../bases/cli"}
         ;; Workflow and all its transitive dependencies
@@ -11,6 +11,7 @@
         ai.miniforge/agent {:local/root "../../components/agent"}
         ai.miniforge/task {:local/root "../../components/task"}
         ai.miniforge/loop {:local/root "../../components/loop"}
+        ai.miniforge/observer {:local/root "../../components/observer"}
         ai.miniforge/knowledge {:local/root "../../components/knowledge"}
         ai.miniforge/policy {:local/root "../../components/policy"}
         ai.miniforge/heuristic {:local/root "../../components/heuristic"}
