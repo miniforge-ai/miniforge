@@ -1,0 +1,74 @@
+---
+description: Apply Polylith architecture conventions for component organization and test placement
+globs:
+  - components/**/*.clj
+  - bases/**/*.clj
+  - projects/**/*.clj
+  - test/**/*.clj
+---
+
+# Polylith Architecture Best Practices
+
+## Component Structure
+
+- **Bases** - Entry points (CLI, servers, API gateways)
+- **Components** - Reusable building blocks with clear interfaces
+- **Projects** - Deployable artifacts that compose bases + components
+- **Development** - Dev-time utilities, not deployed
+
+## Test Placement by Runtime ⏱️
+
+<critical>
+Tests MUST be placed based on their runtime characteristics:
+
+- **< 100ms runtime** → Place in `components/<name>/test/` (unit tests)
+- **≥ 100ms runtime** → Place in `projects/<name>/test/` (integration tests)
+
+This boundary typically aligns with:
+- Unit tests = fast, isolated, no I/O → bricks
+- Integration tests = slow, with I/O, dependencies → projects
+</critical>
+
+### Rationale
+
+- Pre-commit hooks run brick (component) tests only → must stay fast
+- CI runs full suite (`bb test:all`) → includes integration tests
+- Fast unit tests enable rapid local feedback loops
+- Integration tests verify cross-component behavior without slowing commits
+
+## Test Naming Conventions
+
+```clojure
+;; Unit tests (in components)
+(ns ai.miniforge.workflow.core-test)
+
+;; Integration tests (in projects)
+(ns ai.miniforge.workflow.configurable-integration-test)
+```
+
+<example>
+**Good**: Git operations test taking 300ms → `projects/miniforge/test/ai/miniforge/git_integration_test.clj`
+
+**Good**: Pure function validation taking 5ms → `components/workflow/test/ai/miniforge/workflow/core_test.clj`
+</example>
+
+<example type="invalid">
+**Bad**: Datalevin database test in brick → causes pre-commit failures
+
+**Bad**: 200ms test in component → slows down every commit
+</example>
+
+## Interface-Driven Design
+
+- Each component exposes public API via `interface.clj`
+- Internal implementation in `core.clj` or domain-specific namespaces
+- Tests should primarily target the interface contract
+- Components depend only on other component interfaces, never internals
+
+## Build Tasks
+
+```bash
+bb test             # Unit tests only (bricks)
+bb test:integration # Project integration tests
+bb test:all         # Full suite (unit + integration)
+```
