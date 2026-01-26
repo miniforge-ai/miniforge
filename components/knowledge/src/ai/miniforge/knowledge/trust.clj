@@ -127,45 +127,60 @@
    - {:valid? true :graph {...}} if valid
    - {:valid? false :error \"...\"} if invalid (circular deps, etc.)"
   [pack-graph]
-  (let [visited (atom #{})
-        visiting (atom #{})]
+  ;; Use loop/recur with immutable data structures for DFS
+  (letfn [(visit-pack [pack-id path visited visiting]
+            (cond
+              ;; Already fully visited - skip
+              (contains? visited pack-id)
+              {:visited visited :visiting visiting :error nil}
 
-    ;; Detect circular dependencies via depth-first search
-    (letfn [(visit [pack-id path]
-              (cond
-                ;; Already fully visited - no issue
-                (contains? @visited pack-id)
-                nil
+              ;; Currently visiting - circular dependency!
+              (contains? visiting pack-id)
+              {:visited visited
+               :visiting visiting
+               :error {:valid? false
+                       :error (str "Circular dependency detected: "
+                                   (clojure.string/join " -> " (conj path pack-id)))}}
 
-                ;; Currently visiting - circular dependency!
-                (contains? @visiting pack-id)
-                {:valid? false
-                 :error (str "Circular dependency detected: "
-                            (clojure.string/join " -> " (conj path pack-id)))}
+              ;; Visit this node
+              :else
+              (let [pack-ref (get pack-graph pack-id)]
+                (if-not pack-ref
+                  {:visited visited
+                   :visiting visiting
+                   :error {:valid? false
+                           :error (str "Missing dependency: " pack-id)}}
+                  ;; Process dependencies using loop/recur
+                  (loop [deps (:dependencies pack-ref)
+                         v visited
+                         ing (conj visiting pack-id)]
+                    (if (empty? deps)
+                      ;; All dependencies processed - mark as visited
+                      {:visited (conj v pack-id)
+                       :visiting (disj ing pack-id)
+                       :error nil}
+                      ;; Process next dependency
+                      (let [dep (first deps)
+                            result (visit-pack dep (conj path pack-id) v ing)]
+                        (if (:error result)
+                          result  ; Error found, propagate
+                          ;; Continue with updated visited/visiting sets
+                          (recur (rest deps)
+                                 (:visited result)
+                                 (:visiting result))))))))))]
 
-                ;; Visit this node
-                :else
-                (let [pack-ref (get pack-graph pack-id)]
-                  (if-not pack-ref
-                    {:valid? false
-                     :error (str "Missing dependency: " pack-id)}
-                    (do
-                      ;; Mark as currently visiting BEFORE checking dependencies
-                      (swap! visiting conj pack-id)
-                      ;; Check all dependencies - return first error or nil
-                      (let [error (some #(visit % (conj path pack-id))
-                                       (:dependencies pack-ref))]
-                        ;; Mark as done visiting only if no error found
-                        (when-not error
-                          (swap! visiting disj pack-id)
-                          (swap! visited conj pack-id))
-                        ;; Return error if found
-                        error))))))]
-
-      ;; Check all packs - return first error found
-      (if-let [error (some #(visit % []) (keys pack-graph))]
-        error  ; Already has :valid? false
-        {:valid? true :graph pack-graph}))))
+    ;; Process all packs
+    (loop [packs (keys pack-graph)
+           visited #{}
+           visiting #{}]
+      (if (empty? packs)
+        {:valid? true :graph pack-graph}
+        (let [result (visit-pack (first packs) [] visited visiting)]
+          (if (:error result)
+            (:error result)  ; Return error immediately
+            (recur (rest packs)
+                   (:visited result)
+                   (:visiting result))))))))
 
 (defn validate-tainted-isolation
   "Rule 4: Tainted isolation.
@@ -181,34 +196,42 @@
    - {:valid? true} if no tainted content in instruction chain
    - {:valid? false :error \"...\" :tainted-path [...]} if tainted found"
   [pack-id pack-graph]
-  (let [visited (atom #{})]
-    (letfn [(has-tainted? [current-id path]
-              (when-not (contains? @visited current-id)
-                (swap! visited conj current-id)
-                (let [pack-ref (get pack-graph current-id)]
-                  (cond
-                    ;; Pack not found
-                    (not pack-ref)
-                    nil
+  (let [pack-ref (get pack-graph pack-id)]
+    (if (not= :authority/instruction (:authority pack-ref))
+      {:valid? true}  ; Rule only applies to instruction packs
+      ;; Use loop/recur for DFS to find tainted content
+      (letfn [(check-tainted [current-id path visited]
+                (if (contains? visited current-id)
+                  {:visited visited :tainted nil}  ; Already visited
+                  (let [pack-ref (get pack-graph current-id)]
+                    (cond
+                      ;; Pack not found
+                      (not pack-ref)
+                      {:visited (conj visited current-id) :tainted nil}
 
-                    ;; Found tainted content
-                    (= :tainted (:trust-level pack-ref))
-                    {:tainted-id current-id
-                     :path (conj path current-id)}
+                      ;; Found tainted content
+                      (= :tainted (:trust-level pack-ref))
+                      {:visited visited
+                       :tainted {:tainted-id current-id
+                                 :path (conj path current-id)}}
 
-                    ;; Check dependencies
-                    :else
-                    (some #(has-tainted? % (conj path current-id))
-                          (:dependencies pack-ref))))))]
+                      ;; Check dependencies
+                      :else
+                      (loop [deps (:dependencies pack-ref)
+                             v (conj visited current-id)]
+                        (if (empty? deps)
+                          {:visited v :tainted nil}
+                          (let [result (check-tainted (first deps) (conj path current-id) v)]
+                            (if (:tainted result)
+                              result  ; Tainted found, propagate
+                              (recur (rest deps) (:visited result))))))))))]
 
-      (let [pack-ref (get pack-graph pack-id)]
-        (if (not= :authority/instruction (:authority pack-ref))
-          {:valid? true}  ; Rule only applies to instruction packs
-          (if-let [tainted-result (has-tainted? pack-id [])]
+        (let [result (check-tainted pack-id [] #{})]
+          (if-let [tainted-result (:tainted result)]
             {:valid? false
              :error (str "Pack " pack-id " has :authority/instruction but "
-                        "transitively includes tainted content from "
-                        (:tainted-id tainted-result))
+                         "transitively includes tainted content from "
+                         (:tainted-id tainted-result))
              :tainted-path (:path tainted-result)}
             {:valid? true}))))))
 
@@ -231,37 +254,38 @@
    - {:valid? true :packs [...]} if all rules pass
    - {:valid? false :errors [...]} if any rule fails"
   [pack-graph]
-  (let [;; Rule 3: Validate cross-trust references first
-        graph-validation (validate-cross-trust-references pack-graph)
+  ;; Rule 3: Validate cross-trust references first
+  (let [graph-validation (validate-cross-trust-references pack-graph)]
+    (when-not (:valid? graph-validation)
+      (throw (ex-info "Invalid pack graph" graph-validation)))
 
-        ;; If graph is invalid, return early
-        _ (when-not (:valid? graph-validation)
-            (throw (ex-info "Invalid pack graph" graph-validation)))
+    ;; Collect validation errors using functional style
+    (let [;; Rule 1: Check instruction authority transitivity
+          authority-errors
+          (->> (vals pack-graph)
+               (mapcat (fn [pack-ref]
+                         (->> (:dependencies pack-ref)
+                              (keep (fn [dep-id]
+                                      (when-let [dep-ref (get pack-graph dep-id)]
+                                        (let [result (validate-instruction-authority-not-transitive pack-ref dep-ref)]
+                                          (when-not (:valid? result)
+                                            (:error result))))))))))
 
-        ;; Collect validation errors
-        errors (atom [])
+          ;; Rule 4: Check tainted isolation for instruction packs
+          tainted-errors
+          (->> pack-graph
+               (keep (fn [[pack-id pack-ref]]
+                       (when (= :authority/instruction (:authority pack-ref))
+                         (let [result (validate-tainted-isolation pack-id pack-graph)]
+                           (when-not (:valid? result)
+                             (:error result)))))))]
 
-        ;; Rule 1: Check instruction authority transitivity
-        _ (doseq [pack-ref (vals pack-graph)
-                  dep-id (:dependencies pack-ref)]
-            (let [dep-ref (get pack-graph dep-id)
-                  result (when dep-ref
-                          (validate-instruction-authority-not-transitive pack-ref dep-ref))]
-              (when (and result (not (:valid? result)))
-                (swap! errors conj (:error result)))))
-
-        ;; Rule 4: Check tainted isolation for instruction packs
-        _ (doseq [[pack-id pack-ref] pack-graph]
-            (when (= :authority/instruction (:authority pack-ref))
-              (let [result (validate-tainted-isolation pack-id pack-graph)]
-                (when-not (:valid? result)
-                  (swap! errors conj (:error result))))))]
-
-    (if (empty? @errors)
-      {:valid? true
-       :packs (keys pack-graph)}
-      {:valid? false
-       :errors @errors})))
+      (let [errors (concat authority-errors tainted-errors)]
+        (if (empty? errors)
+          {:valid? true
+           :packs (keys pack-graph)}
+          {:valid? false
+           :errors (vec errors)})))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
