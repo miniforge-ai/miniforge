@@ -185,13 +185,31 @@
    [:pack-id string?]
    [:version-constraint {:optional true} string?]])
 
+(def TrustLevel
+  "Schema for pack trust levels (N1 §2.10.2).
+   - :tainted   - Flagged by scanners; MUST NOT be used for instruction
+   - :untrusted - Repo-derived or external; data-only unless promoted
+   - :trusted   - Platform-validated and/or user-promoted"
+  [:enum :tainted :untrusted :trusted])
+
+(def AuthorityChannel
+  "Schema for pack authority channels (N1 §2.10.2).
+   - :authority/instruction - May shape agent plans (requires :trusted)
+   - :authority/data        - Reference material only (any trust level)"
+  [:enum :authority/instruction :authority/data])
+
 (def PackManifest
   "Schema for a policy pack manifest.
 
    Packs are versioned collections of rules that can be:
    - Authored and shared
    - Extended from other packs
-   - Signed for trust (paid feature)"
+   - Signed for trust (paid feature)
+
+   Trust model (N1 §2.10.2):
+   - Trust level determines if content can be used for instruction
+   - Authority channel determines how content may be used
+   - Transitive trust rules prevent trust escalation"
   [:map
    ;; Identity
    [:pack/id string?]
@@ -209,6 +227,10 @@
    [:pack/signature {:optional true} string?]
    [:pack/signed-by {:optional true} string?]
    [:pack/signed-at {:optional true} inst?]
+
+   ;; Trust and authority (N1 §2.10.2)
+   [:pack/trust-level {:optional true} TrustLevel]
+   [:pack/authority {:optional true} AuthorityChannel]
 
    ;; Dependencies
    [:pack/extends {:optional true} [:vector PackDependency]]
