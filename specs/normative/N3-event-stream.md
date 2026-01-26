@@ -409,6 +409,139 @@ Implementations SHOULD emit milestone events for:
 
 ---
 
+### 3.4 ETL and Pack Events
+
+ETL workflows and pack promotion MUST emit the following additional events.
+
+#### etl/started
+
+```clojure
+{:event/type :etl/started
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :workflow/id uuid
+ :etl/source {:repo/path string}
+ :etl/output {:pack-root string :report-root string}
+
+ :message "ETL started"}
+```
+
+#### etl/sources-classified
+
+```clojure
+{:event/type :etl/sources-classified
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :workflow/id uuid
+ :etl/classification-summary
+ {:candidates long
+  :feature-sources long
+  :policy-sources long}
+
+ :message "ETL classification complete"}
+```
+
+#### etl/safety-scan-completed
+
+```clojure
+{:event/type :etl/safety-scan-completed
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :workflow/id uuid
+ :etl/risk-summary
+ {:high long :medium long :low long}
+
+ :message "ETL safety scan completed"}
+```
+
+#### pack/generated
+
+```clojure
+{:event/type :pack/generated
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :workflow/id uuid
+ :pack/id string
+ :pack/type keyword                    ; :feature-pack | :policy-pack | :agent-profile-pack | :pack-index
+ :pack/content-hash string
+ :pack/trust-level keyword             ; :untrusted by default
+
+ :message "Pack generated"}
+```
+
+#### pack/promoted
+
+```clojure
+{:event/type :pack/promoted
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :pack/id string
+ :pack/type keyword
+ :from-trust keyword
+ :to-trust keyword
+ :promotion/policy-pack string
+ :pack/content-hash string
+ :pack/signature string                ; OPTIONAL
+
+ :message "Pack promoted"}
+```
+
+#### etl/completed
+
+```clojure
+{:event/type :etl/completed
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :workflow/id uuid
+ :etl/duration-ms long
+ :etl/summary
+ {:packs-generated long
+  :packs-promoted long
+  :high-risk-findings long
+  :sources-processed long}
+
+ :message "ETL workflow completed successfully"}
+```
+
+ETL workflows MUST emit this event after all pack generation and promotion activities complete.
+
+#### etl/failed
+
+```clojure
+{:event/type :etl/failed
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :workflow/id uuid
+ :etl/failure-stage keyword           ; :classification | :scanning | :extraction | :validation
+ :etl/failure-reason string
+ :etl/error-details {...}             ; OPTIONAL: structured error information
+
+ :message "ETL workflow failed: {reason}"}
+```
+
+ETL workflows MUST emit this event if any critical failure prevents completion. Implementations SHOULD include enough detail in `:etl/error-details` to enable debugging without log diving.
+
 ## 4. Event Emission Requirements
 
 ### 4.1 Emission Points

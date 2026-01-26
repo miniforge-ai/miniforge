@@ -89,15 +89,15 @@ A **phase** is a logical stage in the Software Development Lifecycle (SDLC).
 
 Implementations MUST support these phases:
 
-| Phase | Purpose | Primary Agent | Required Gates |
-|-------|---------|---------------|----------------|
-| **Plan** | Decompose intent into tasks | Planner | None |
-| **Design** | Create architecture/approach | Designer | Architecture review |
-| **Implement** | Write code/config | Implementer | Policy validation, semantic intent |
-| **Verify** | Test implementation | Tester | Test pass/fail |
-| **Review** | Code review | Reviewer | Review approval |
-| **Release** | Deploy to production | Releaser | Deployment validation |
-| **Observe** | Capture learnings | Observer | None |
+| Phase         | Purpose                      | Primary Agent | Required Gates                     |
+| ------------- | ---------------------------- | ------------- | ---------------------------------- |
+| **Plan**      | Decompose intent into tasks  | Planner       | None                               |
+| **Design**    | Create architecture/approach | Designer      | Architecture review                |
+| **Implement** | Write code/config            | Implementer   | Policy validation, semantic intent |
+| **Verify**    | Test implementation          | Tester        | Test pass/fail                     |
+| **Review**    | Code review                  | Reviewer      | Review approval                    |
+| **Release**   | Deploy to production         | Releaser      | Deployment validation              |
+| **Observe**   | Capture learnings            | Observer      | None                               |
 
 Implementations MAY support additional custom phases.
 
@@ -330,6 +330,173 @@ A **knowledge base** is a structured repository of learnings from workflow execu
  :knowledge-unit/source-workflow-id uuid} ; OPTIONAL: If derived from workflow
 ```
 
+#### 2.10.2 Knowledge Trust and Authority
+
+Knowledge units MUST be labeled with an explicit trust model so the system can safely incorporate information from user repositories and external sources.
+
+- **Trust levels**
+  - `:trusted` — authoritative, platform-validated and/or user-promoted content
+  - `:untrusted` — repo-derived or externally sourced content; usable as *data* only
+  - `:tainted` — content flagged by scanners; MUST NOT be used as instruction
+
+- **Authority channels**
+  - `:authority/instruction` — may shape agent plans and execution (MUST be `:trusted`)
+  - `:authority/data` — reference material only (may be `:untrusted` or `:trusted`)
+
+Knowledge units SHOULD include a content hash and MAY include a cryptographic signature.
+
+##### Transitive Trust Rules
+
+Implementations MUST enforce these transitive trust rules:
+
+1. **Instruction authority is not transitive:** If pack A (`:trusted`, `:authority/instruction`) references pack B (`:untrusted`), pack B MUST remain `:authority/data` and MUST NOT gain instruction authority through the reference.
+
+2. **Trust level inheritance:** When pack A includes content from pack B, the resulting combined content MUST be assigned the lower trust level (`:tainted` < `:untrusted` < `:trusted`).
+
+3. **Cross-trust references:** Packs MAY reference other packs of any trust level, but implementations MUST track and validate the transitive trust graph before allowing execution.
+
+4. **Tainted isolation:** Content marked `:tainted` MUST NOT be included in any pack used for instruction authority, even transitively.
+
+##### Trust Promotion and Revocation
+
+**Trust promotion is one-way for a given pack version:** Once a pack version is promoted from `:untrusted` to `:trusted`, that specific version MUST NOT be demoted back to `:untrusted`. This prevents accidental trust downgrades and ensures immutability of trust decisions.
+
+**Revocation mechanisms:** If a vulnerability or malicious content is discovered in a promoted pack:
+
+1. **Pack removal:** The pack MAY be removed from local registries and remote distribution.
+2. **Key revocation:** If the pack was signed, the signing key MAY be revoked via key revocation lists (KRLs).
+3. **Version deprecation:** The pack version MAY be marked as deprecated, warning users but not forcibly removing it.
+4. **New version:** A corrected pack SHOULD be released as a new version, which starts at `:untrusted` and must be promoted separately.
+
+Implementations SHOULD provide mechanisms to check for revoked packs and deprecated versions during pack loading and workflow execution.
+
+##### Expanded Knowledge Unit Schema
+
+```clojure
+{:knowledge-unit/id uuid
+ :knowledge-unit/type keyword              ; :pattern, :learning, :heuristic, :feature-pack, :policy-pack, :agent-profile-pack
+ :knowledge-unit/title string
+ :knowledge-unit/content {...}
+
+ :knowledge-unit/tags [...]
+ :knowledge-unit/links [...]
+
+ :knowledge-unit/trust-level keyword       ; REQUIRED: :trusted | :untrusted | :tainted
+ :knowledge-unit/authority keyword         ; REQUIRED: :authority/instruction | :authority/data
+
+ :knowledge-unit/content-hash string       ; OPTIONAL: sha256 over canonical representation
+ :knowledge-unit/signature string          ; OPTIONAL: signature over content-hash
+
+ :knowledge-unit/created-at inst
+ :knowledge-unit/source-workflow-id uuid}  ; OPTIONAL: if derived from a workflow (including ETL)
+```
+
+#### 2.10.3 Pack Types
+
+miniforge treats structured "packs" as first-class knowledge units and artifacts. Packs are EDN-serialized and schema-validated.
+
+- **Feature Pack** (`:feature-pack`) — normalized feature intent, acceptance criteria, constraints, and references
+- **Policy Pack** (`:policy-pack`) — deterministic validation rules and scanners (see N4)
+- **Agent Profile Pack** (`:agent-profile-pack`) — agent routing, allowed capabilities, and scopes
+- **Pack Index** (`:pack-index`) — manifest of generated packs, hashes, trust labels, and provenance
+
+Packs MUST be machine-readable and MUST NOT embed freeform prose as executable instruction.
+
+##### Pack Versioning and Identity
+
+All packs MUST include versioning information following this schema:
+
+```clojure
+{:pack/id string                      ; REQUIRED: unique identifier (e.g., "com.example/feature-auth")
+ :pack/version string                 ; REQUIRED: semantic version (e.g., "1.2.3")
+ :pack/type keyword                   ; REQUIRED: :feature-pack | :policy-pack | :agent-profile-pack
+ :pack/created-at inst                ; REQUIRED: creation timestamp
+ :pack/content-hash string            ; REQUIRED: sha256 over canonical EDN representation
+
+ :pack/dependencies                   ; OPTIONAL: dependencies on other packs
+ [{:pack/id string
+   :pack/version-constraint string    ; e.g., ">=1.0.0,<2.0.0"
+   :pack/content-hash string}]        ; OPTIONAL: pin to specific content hash
+
+ :pack/trust-level keyword            ; REQUIRED: :trusted | :untrusted | :tainted
+ :pack/authority keyword              ; REQUIRED: :authority/instruction | :authority/data
+ :pack/signature string               ; OPTIONAL: cryptographic signature over content-hash
+
+ :pack/content {...}}                 ; Pack-specific content
+```
+
+Implementations MUST validate pack dependencies before loading and MUST reject circular dependencies.
+
+#### 2.10.4 Pack Registry Roots and Loading
+
+Implementations MUST support loading packs from a declared set of registry roots (e.g., a local directory, a central repo checkout, or a remote registry in enterprise mode).
+
+- Registry roots MUST be explicitly configured.
+- Implementations MUST NOT implicitly ingest arbitrary repository markdown as instruction authority.
+- Untrusted documents MAY be referenced by packs, but MUST be ingested only as `:authority/data`.
+
+##### Signature Key Management
+
+Implementations that support pack signing MUST provide:
+
+1. **Key configuration:** Signing keys MUST be explicitly configured, not auto-generated or inferred from environment.
+
+2. **Key storage:** Private keys MUST be stored securely (e.g., system keychain, HSM, or encrypted file with passphrase).
+
+3. **Key verification:** Public keys for signature verification MUST be distributed through a trusted channel (e.g., configuration file, registry manifest).
+
+4. **Key rotation:** Implementations SHOULD support key rotation with backward compatibility for previously signed packs.
+
+5. **Revocation:** Implementations SHOULD support key revocation lists (KRLs) or revocation checking.
+
+Minimal key configuration schema:
+
+```clojure
+{:pack-signing
+ {:private-key-path string           ; Path to private key (PEM or keychain reference)
+  :public-keys                        ; Trusted public keys for verification
+  [{:key-id string
+    :public-key string                ; PEM-encoded public key
+    :valid-from inst                  ; Key validity period
+    :valid-until inst                 ; OPTIONAL: expiration
+    :revoked? boolean}]}}
+```
+
+Implementations MUST validate signatures using the `ed25519` algorithm (RECOMMENDED) or `rsa-sha256` (acceptable).
+
+#### 2.10.5 ETL Pipelines (Repository → Packs)
+
+miniforge SHOULD provide an ETL pipeline that converts existing repositories (docs/specs/rules) into sanitized, schema-valid packs for immediate workflow use.
+
+An ETL pipeline MUST:
+
+1. Inventory candidate sources (by path/type/metadata)
+2. Classify sources into candidate pack inputs
+3. **Run deterministic sanitization and static scanners BEFORE extraction** (see N4 "knowledge-safety") — scanners MUST NOT execute or evaluate untrusted content
+4. Extract normalized EDN packs
+5. Validate packs against schemas
+6. Emit a pack index with content hashes and trust labels
+
+ETL output packs MUST default to `:untrusted` until promoted or signed under an approved policy.
+
+##### Incremental ETL
+
+Implementations SHOULD support incremental ETL to avoid re-processing unchanged sources.
+
+Incremental ETL MUST:
+
+1. **Track source content hashes:** Compute and store content hashes for each source file processed.
+
+2. **Skip unchanged sources:** If source file hash matches previously processed hash, skip re-extraction unless forced.
+
+3. **Detect deletions:** If a previously processed source is no longer present, mark corresponding packs as stale or remove them from the index.
+
+4. **Handle dependencies:** If source A depends on source B, and B changes, both MUST be re-processed.
+
+5. **Maintain pack index:** Update pack index incrementally, preserving provenance of unchanged packs.
+
+Implementations MAY cache intermediate classification and scanner results for performance.
+
 ---
 
 ## 3. Three-Layer Architecture
@@ -466,6 +633,40 @@ projects/
 └── oss-cli/             # OSS build configuration
 ```
 
+### 4.1.1 Distribution Profiles (OSS vs Enterprise)
+
+miniforge supports multiple distribution profiles built from the same core architecture.
+
+#### OSS Profile (miniforge OSS)
+
+OSS builds MUST include:
+
+- Workflow engine + standard phases
+- Policy pack runtime (deterministic gates)
+- Evidence bundle generation (N6)
+- Local knowledge base
+- **ETL core**: repository → sanitized packs (`feature-pack`, `policy-pack`, `agent-profile-pack`)
+- Static “knowledge-safety” scanners (deterministic)
+- Pack validation, hashing, and local promotion workflow
+
+OSS builds SHOULD exclude:
+
+- Hosted pack registry services
+- Organization-wide RBAC/SSO integrations
+- Multi-tenant fleet orchestration
+
+#### Enterprise Profile (miniforge Enterprise)
+
+Enterprise builds MAY add:
+
+- Central pack registry + approval workflows
+- Continuous ETL across org repositories and external systems (Jira/Confluence/Notion, etc.)
+- Fleet orchestration and scheduling
+- SSO/RBAC enforcement and policy-managed trust promotion
+- Advanced compliance controls (retention, audit exports, DLP integrations)
+
+Enterprise extensions MUST NOT weaken the OSS trust model. Instruction authority MUST remain gated by pack trust and policy.
+
 ### 4.2 Component Interface Requirements
 
 All components MUST:
@@ -588,10 +789,13 @@ OSS implementations MUST support:
 - **Single workflow execution** at a time (simple)
 - **Sequential phase execution** within workflow
 - **Parallel tool invocations** within agent (where safe)
+- **Single developer/user model** - OSS is focused on the individual developer use case
 
 OSS implementations MAY support:
 
 - Multiple concurrent workflows (resource management required)
+
+**Integration point for Team+ plans:** OSS implementations SHOULD support event streaming to aggregation sinks (see N3 event stream API). The value proposition for multi-user scenarios is in what you do with the aggregated event data (analytics, coordination, visibility), not merely having the events.
 
 #### 5.4.2 Enterprise Concurrency
 

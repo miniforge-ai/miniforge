@@ -49,6 +49,31 @@ This specification defines the **evidence bundle** and **artifact provenance** c
  :evidence/semantic-validation {...}
  :evidence/policy-checks [...]
 
+
+ ;; Knowledge Inputs and Trust
+ :evidence/knowledge-inputs
+ [{:knowledge/id uuid
+   :knowledge/type keyword                ; :feature-pack | :policy-pack | :agent-profile-pack | :doc
+   :knowledge/trust-level keyword         ; :trusted | :untrusted | :tainted
+   :knowledge/authority keyword           ; :authority/instruction | :authority/data
+   :knowledge/source string               ; path/uri/registry id
+   :knowledge/content-hash string         ; sha256
+   :knowledge/signature string}]          ; OPTIONAL
+
+ ;; Pack Promotion / Signing (optional)
+ :evidence/pack-promotions
+ [{:pack/id string
+   :pack/type keyword
+   :from-trust keyword
+   :to-trust keyword
+   :promoted-by string
+   :promoted-at inst
+   :promotion-policy string
+   :promotion-justification string       ; REQUIRED: why pack was promoted (e.g., "passed knowledge-safety scans", "manual review approved")
+   :pack-hash string
+   :pack-signature string}]
+
+
  ;; Outcome
  :evidence/outcome {...}
 
@@ -129,13 +154,13 @@ Each workflow phase MUST produce phase evidence:
 Implementations MUST validate:
 
 | Intent Type | Allowed Creates | Allowed Updates | Allowed Destroys |
-|------------|----------------|----------------|-----------------|
-| `:import` | 0 | 0 (state-only) | 0 |
-| `:create` | >0 | Any | 0 |
-| `:update` | 0 | >0 | 0 |
-| `:destroy` | 0 | 0 | >0 |
-| `:refactor` | 0 | 0 | 0 (code-only) |
-| `:migrate` | >0 | 0 | >0 (balanced) |
+| ----------- | --------------- | --------------- | ---------------- |
+| `:import`   | 0               | 0 (state-only)  | 0                |
+| `:create`   | >0              | Any             | 0                |
+| `:update`   | 0               | >0              | 0                |
+| `:destroy`  | 0               | 0               | >0               |
+| `:refactor` | 0               | 0               | 0 (code-only)    |
+| `:migrate`  | >0              | 0               | >0 (balanced)    |
 
 ### 2.5 Policy Check Evidence
 
@@ -206,6 +231,19 @@ Implementations MUST support:
 - `:plan-document` - Implementation plan
 - `:architecture-diagram` - Design artifacts
 - `:evidence-bundle` - Evidence bundle itself (meta)
+
+- `:feature-pack` - Normalized feature pack (EDN)
+- `:policy-pack` - Policy pack (EDN)
+- `:agent-profile-pack` - Agent profile pack (EDN)
+- `:pack-index` - Pack manifest (EDN)
+- `:etl-report` - ETL run report (classifications, coverage)
+- `:risk-report` - Static scanner findings (knowledge-safety)
+
+Artifacts of type `:feature-pack`, `:policy-pack`, and `:agent-profile-pack` MUST include:
+
+- `:artifact/metadata {:trust-level ... :authority ...}`
+- `:artifact/content-hash` computed over canonical EDN
+- Optional `:artifact/metadata {:signature ...}` if promoted/signed
 
 ### 3.2 Provenance Schema
 
