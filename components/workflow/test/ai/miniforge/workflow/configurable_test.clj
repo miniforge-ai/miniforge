@@ -16,7 +16,6 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.configurable :as configurable]
-   [ai.miniforge.workflow.loader :as loader]
    [ai.miniforge.workflow.state :as state]
    [ai.miniforge.agent.interface :as agent]))
 
@@ -198,46 +197,6 @@
   ;; Note: Removed test for workflow with no phases as it triggers invalid FSM transition
   ;; (workflow would be in :pending state when trying to fail, but FSM requires :running -> :failed)
   )
-
-(deftest run-configurable-workflow-integration-test
-  (testing "Run loaded workflow config"
-    ;; Load actual workflow from resources
-    (let [mock-llm (agent/create-mock-llm {:content "(defn hello [] \"world\")"})
-          workflow-result (loader/load-workflow :simple-test-v1 "1.0.0" {})
-          workflow (:workflow workflow-result)
-          input {:task "Integration test task"}
-          exec-state (configurable/run-configurable-workflow workflow input {:llm-backend mock-llm})]
-
-      ;; Verify execution completed
-      (is (state/completed? exec-state)
-          "Workflow should complete successfully")
-
-      ;; Verify phase results
-      (is (state/has-phase-result? exec-state :plan)
-          "Should have plan phase result")
-      (is (state/has-phase-result? exec-state :implement)
-          "Should have implement phase result")
-
-      ;; Verify artifacts produced
-      (is (pos? (count (:execution/artifacts exec-state)))
-          "Should have produced artifacts")
-
-      ;; Verify metrics accumulated
-      (let [metrics (:execution/metrics exec-state)]
-        (is (>= (:tokens metrics 0) 0)
-            "Should have accumulated tokens (0 for mock LLM)")
-        (is (>= (:cost-usd metrics) 0)
-            "Should have accumulated cost")
-        (is (>= (:duration-ms metrics) 0)
-            "Should have accumulated duration"))
-
-      ;; Verify history tracked
-      (is (seq (:execution/history exec-state))
-          "Should have transition history")
-
-      ;; Verify no errors
-      (is (empty? (:execution/errors exec-state))
-          "Should have no errors"))))
 
 (deftest workflow-execution-flow-test
   (testing "Complete workflow execution with phase transitions"

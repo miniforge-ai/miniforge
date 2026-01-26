@@ -103,7 +103,7 @@ jobs:
       - name: Run tests
         run: |
           echo "::group::Running Tests"
-          bb test 2>&1 | tee test-output.log
+          bb test:all 2>&1 | tee test-output.log
           echo "::endgroup::"
 
       - name: Upload test logs

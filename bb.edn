@@ -101,7 +101,7 @@
   ;; ──────────────────────────────────────────────────────────────────────────
 
   test
-  {:doc  "Run unit tests via Polylith"
+  {:doc  "Run unit (brick) tests via Polylith"
    :task (do
            (println "🧪 Running tests via poly test...")
            (println "Command: clojure -M:poly test")
@@ -113,18 +113,36 @@
                (println "❌ Tests failed with exit code:" exit)
                (System/exit exit))))}
 
-  test:all
-  {:doc  "Run all tests including integration via Polylith"
+  test:integration
+  {:doc  "Run project-level integration tests"
    :task (do
-           (println "🧪 Running all tests via poly test :all...")
-           (println "Command: clojure -M:poly test :all")
-           (let [{:keys [exit out err]} (p/sh {:out :string :err :string}
-                                              "clojure" "-M:poly" "test" ":all")]
+           (println "🧪 Running project integration tests...")
+           (let [deps (slurp "projects/miniforge/deps.edn")
+                 test-nses ["ai.miniforge.workflow.release-integration-test"
+                            "ai.miniforge.workflow.loader-integration-test"
+                            "ai.miniforge.workflow.configurable-integration-test"
+                            "ai.miniforge.artifact.interface-integration-test"
+                            "ai.miniforge.loop.interface-integration-test"
+                            "ai.miniforge.observer.interface-integration-test"
+                            "ai.miniforge.task.interface-integration-test"]
+                 require-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
+                 run-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
+                 expr (str "(require 'clojure.test" require-expr ") "
+                           "(clojure.test/run-tests" run-expr ")")
+                 {:keys [exit out err]}
+                 (p/sh {:out :string :err :string :dir "projects/miniforge"}
+                       "clojure" "-Sdeps" deps "-M" "-e" expr)]
              (when-not (str/blank? out) (println out))
              (when-not (str/blank? err) (binding [*out* *err*] (println err)))
              (when-not (zero? exit)
-               (println "❌ Tests failed with exit code:" exit)
+               (println "❌ Integration tests failed with exit code:" exit)
                (System/exit exit))))}
+
+  test:all
+  {:doc  "Run full suite (unit bricks + project integration tests)"
+   :task (do
+           (run 'test)
+           (run 'test:integration))}
 
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Pre-commit
