@@ -127,22 +127,20 @@
 
    Returns {:valid? bool :errors [string...]}"
   [promotion-record]
-  (let [errors (atom [])]
-    (when-not (valid-promotion? (:from-trust promotion-record)
-                                (:to-trust promotion-record))
-      (swap! errors conj
-             (str "Invalid promotion path: "
-                  (:from-trust promotion-record) " -> "
-                  (:to-trust promotion-record))))
+  (let [errors (cond-> []
+                 (not (valid-promotion? (:from-trust promotion-record)
+                                        (:to-trust promotion-record)))
+                 (conj (str "Invalid promotion path: "
+                            (:from-trust promotion-record) " -> "
+                            (:to-trust promotion-record)))
 
-    (when-not (seq (:promotion-justification promotion-record))
-      (swap! errors conj "promotion-justification is required and cannot be empty"))
+                 (not (seq (:promotion-justification promotion-record)))
+                 (conj "promotion-justification is required and cannot be empty")
 
-    (when-not (string? (:pack/id promotion-record))
-      (swap! errors conj "pack/id must be a string"))
-
-    {:valid? (empty? @errors)
-     :errors @errors}))
+                 (not (string? (:pack/id promotion-record)))
+                 (conj "pack/id must be a string"))]
+    {:valid? (empty? errors)
+     :errors errors}))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Promotion Execution
