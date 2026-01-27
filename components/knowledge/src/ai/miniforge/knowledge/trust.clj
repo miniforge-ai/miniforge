@@ -76,8 +76,67 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Generic DFS utilities
 
+(defn ^:private dfs-traverse
+  "Canonical DFS traversal with pluggable visit function.
+
+  Arguments:
+  - graph       - Map of node-id -> node
+  - start-nodes - Collection of starting node IDs (or single ID)
+  - get-deps-fn - Function (node) -> [dependency-ids]
+  - visit-fn    - Function (node-id, node, path, state) -> updated state
+                  State map has :visited, :visiting (optional), :result keys
+                  visit-fn should return updated state or state with :halt? true to stop
+
+  Returns final state map."
+  [graph start-nodes get-deps-fn visit-fn]
+  (let [start-nodes (if (coll? start-nodes) start-nodes [start-nodes])
+        initial-state {:visited #{} :visiting #{} :result nil}]
+
+    (letfn [(visit-node [node-id path state]
+              (let [{:keys [visited visiting]} state]
+                (cond
+                  ;; Already visited - skip
+                  (contains? visited node-id)
+                  state
+
+                  ;; Currently visiting - call visit-fn with cycle context
+                  (contains? visiting node-id)
+                  (visit-fn node-id nil (conj path node-id)
+                            (assoc state :cycle? true))
+
+                  ;; Visit this node
+                  :else
+                  (let [node (get graph node-id)]
+                    (if-not node
+                      ;; Missing node - call visit-fn
+                      (visit-fn node-id nil path (assoc state :missing? true))
+                      ;; Process node and dependencies
+                      (let [state' (visit-fn node-id node path
+                                             (update state :visiting conj node-id))]
+                        (if (:halt? state')
+                          state'
+                          ;; Visit dependencies
+                          (let [deps (get-deps-fn node)
+                                final-state (reduce (fn [s dep-id]
+                                                      (if (:halt? s)
+                                                        s
+                                                        (visit-node dep-id (conj path node-id) s)))
+                                                    state'
+                                                    deps)]
+                            (-> final-state
+                                (update :visited conj node-id)
+                                (update :visiting disj node-id))))))))))]
+
+      ;; Process all start nodes
+      (reduce (fn [state node-id]
+                (if (:halt? state)
+                  state
+                  (visit-node node-id [] state)))
+              initial-state
+              start-nodes))))
+
 (defn ^:private dfs-find
-  "Generic DFS to find nodes matching a predicate.
+  "Find first node matching a predicate using DFS.
 
   Arguments:
   - graph        - Map of node-id -> node
@@ -89,36 +148,26 @@
   - nil if not found
   - {:found-id node-id :path [...]} if found"
   [graph start-id get-deps-fn found-fn]
-  (letfn [(search [node-id path visited]
-            (if (contains? visited node-id)
-              {:visited visited :found nil}
-              (let [node (get graph node-id)]
-                (cond
-                  ;; Node not in graph
-                  (not node)
-                  {:visited (conj visited node-id) :found nil}
+  (let [visit-fn (fn [node-id node path state]
+                   (cond
+                     ;; Missing or cycle - continue
+                     (or (:missing? state) (:cycle? state))
+                     (dissoc state :missing? :cycle?)
 
-                  ;; Found matching node
-                  (found-fn node-id node path)
-                  {:visited visited :found {:found-id node-id :path (conj path node-id)}}
+                     ;; Check if this node matches
+                     (and node (found-fn node-id node path))
+                     (assoc state
+                            :result {:found-id node-id :path (conj path node-id)}
+                            :halt? true)
 
-                  ;; Search dependencies
-                  :else
-                  (let [deps (get-deps-fn node)]
-                    (loop [remaining-deps deps
-                           v (conj visited node-id)]
-                      (if (empty? remaining-deps)
-                        {:visited v :found nil}
-                        (let [result (search (first remaining-deps) (conj path node-id) v)]
-                          (if (:found result)
-                            result
-                            (recur (rest remaining-deps) (:visited result)))))))))))]
-
-    (let [result (search start-id [] #{})]
-      (:found result))))
+                     ;; Continue traversal
+                     :else
+                     state))
+        final-state (dfs-traverse graph start-id get-deps-fn visit-fn)]
+    (:result final-state)))
 
 (defn ^:private dfs-validate-graph
-  "Generic DFS to validate graph structure (cycles, missing nodes).
+  "Validate graph structure (cycles, missing nodes) using DFS.
 
   Arguments:
   - graph        - Map of node-id -> node
@@ -131,44 +180,25 @@
   - {:valid? true :graph graph} if valid
   - {:valid? false :error ...} if invalid"
   [graph start-nodes get-deps-fn validate-fn]
-  (letfn [(visit [node-id path visited visiting]
-            (cond
-              (contains? visited node-id)
-              {:visited visited :visiting visiting :error nil}
+  (let [visit-fn (fn [node-id node path state]
+                   (let [context (cond
+                                   (:cycle? state)
+                                   {:cycle? true :path path}
 
-              (contains? visiting node-id)
-              (let [error (validate-fn node-id nil {:cycle? true :path (conj path node-id)})]
-                {:visited visited :visiting visiting :error error})
+                                   (:missing? state)
+                                   {:missing? true}
 
-              :else
-              (let [node (get graph node-id)]
-                (if-not node
-                  (let [error (validate-fn node-id nil {:missing? true})]
-                    {:visited visited :visiting visiting :error error})
-                  (let [deps (get-deps-fn node)]
-                    (loop [remaining-deps deps
-                           v visited
-                           ing (conj visiting node-id)]
-                      (if (empty? remaining-deps)
-                        {:visited (conj v node-id) :visiting (disj ing node-id) :error nil}
-                        (let [result (visit (first remaining-deps) (conj path node-id) v ing)]
-                          (if (:error result)
-                            result
-                            (recur (rest remaining-deps)
-                                   (:visited result)
-                                   (:visiting result)))))))))))]
-
-    (loop [nodes start-nodes
-           visited #{}
-           visiting #{}]
-      (if (empty? nodes)
-        {:valid? true :graph graph}
-        (let [result (visit (first nodes) [] visited visiting)]
-          (if (:error result)
-            (:error result)
-            (recur (rest nodes)
-                   (:visited result)
-                   (:visiting result))))))))
+                                   :else
+                                   {})
+                         error (when (or (:cycle? state) (:missing? state))
+                                 (validate-fn node-id node context))]
+                     (if error
+                       (assoc state :result error :halt? true)
+                       (dissoc state :cycle? :missing?))))
+        final-state (dfs-traverse graph start-nodes get-deps-fn visit-fn)]
+    (if-let [error (:result final-state)]
+      error
+      {:valid? true :graph graph})))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Transitive trust rule validation
