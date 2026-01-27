@@ -14,7 +14,8 @@
 
    Authority channels:
    - :authority/instruction - May shape agent plans (requires :trusted)
-   - :authority/data        - Reference material only (any trust level)")
+   - :authority/data        - Reference material only (any trust level)"
+  (:require [clojure.string]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Trust level ordering
@@ -262,7 +263,7 @@
                       pack-graph
                       pack-id
                       (fn [pack-ref] (:dependencies pack-ref))
-                      (fn [node-id node _path]
+                      (fn [_node-id node _path]
                         (= :tainted (:trust-level node))))]
         {:valid? false
          :error (str "Pack " pack-id " has :authority/instruction but "
@@ -272,7 +273,32 @@
         {:valid? true}))))
 
 ;------------------------------------------------------------------------------ Layer 4
-;; Combined validation
+;; Combined validation helpers
+
+(defn ^:private valid?
+  "Check if a validation result is valid."
+  [result]
+  (:valid? result))
+
+(defn ^:private error-from
+  "Extract error from validation result if invalid, otherwise nil."
+  [result]
+  (when-not (valid? result)
+    (:error result)))
+
+(defn ^:private check-dependency-authority
+  "Check if a dependency violates authority transitivity rules.
+   Returns error string or nil."
+  [pack-ref dep-id pack-graph]
+  (when-let [dep-ref (get pack-graph dep-id)]
+    (error-from (validate-instruction-authority-not-transitive pack-ref dep-ref))))
+
+(defn ^:private check-pack-tainted-isolation
+  "Check if an instruction pack transitively includes tainted content.
+   Returns error string or nil."
+  [pack-id pack-ref pack-graph]
+  (when (= :authority/instruction (:authority pack-ref))
+    (error-from (validate-tainted-isolation pack-id pack-graph))))
 
 (defn ^:private collect-authority-errors
   "Check Rule 1: Instruction authority is not transitive.
@@ -286,14 +312,11 @@
    Returns:
    - Sequence of error strings (empty if no errors)"
   [pack-graph]
-  (->> (vals pack-graph)
-       (mapcat (fn [pack-ref]
-                 (->> (:dependencies pack-ref)
-                      (keep (fn [dep-id]
-                              (when-let [dep-ref (get pack-graph dep-id)]
-                                (let [result (validate-instruction-authority-not-transitive pack-ref dep-ref)]
-                                  (when-not (:valid? result)
-                                    (:error result)))))))))))
+  (for [pack-ref (vals pack-graph)
+        dep-id (:dependencies pack-ref)
+        :let [error (check-dependency-authority pack-ref dep-id pack-graph)]
+        :when error]
+    error))
 
 (defn ^:private collect-tainted-errors
   "Check Rule 4: Tainted isolation from instruction authority.
@@ -307,12 +330,10 @@
    Returns:
    - Sequence of error strings (empty if no errors)"
   [pack-graph]
-  (->> pack-graph
-       (keep (fn [[pack-id pack-ref]]
-               (when (= :authority/instruction (:authority pack-ref))
-                 (let [result (validate-tainted-isolation pack-id pack-graph)]
-                   (when-not (:valid? result)
-                     (:error result))))))))
+  (for [[pack-id pack-ref] pack-graph
+        :let [error (check-pack-tainted-isolation pack-id pack-ref pack-graph)]
+        :when error]
+    error))
 
 (defn validate-transitive-trust
   "Validate all transitive trust rules for a pack graph.
@@ -332,7 +353,7 @@
   [pack-graph]
   ;; Rule 3: Validate cross-trust references first (graph structure)
   (let [graph-validation (validate-cross-trust-references pack-graph)]
-    (when-not (:valid? graph-validation)
+    (when-not (valid? graph-validation)
       (throw (ex-info "Invalid pack graph" graph-validation)))
 
     ;; Collect all validation errors
