@@ -28,7 +28,6 @@
    Layer 2: Validation rules
    Layer 3: Public API"
   (:require
-   [clojure.set :as set]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -165,20 +164,6 @@
                     packs)
      :by-id by-id
      :versions versions}))
-
-(defn- get-transitive-deps
-  "Get all transitive dependencies for a pack.
-   Returns set of pack-ids."
-  [graph pack-id visited]
-  (if (contains? visited pack-id)
-    visited
-    (let [node (get graph pack-id)
-          deps (map :pack-id (:deps node))
-          new-visited (conj visited pack-id)]
-      (reduce (fn [v dep-id]
-                (get-transitive-deps graph dep-id v))
-              new-visited
-              deps))))
 
 ;; Generic DFS utilities
 
@@ -385,7 +370,7 @@
      :pack-id string
      :dependency string
      :message string}]"
-  [graph by-id]
+  [_graph _by-id]
   ;; Placeholder - trust levels not yet implemented (PR14)
   ;; When PR14 is merged, check:
   ;; 1. If pack has :pack/trust-level :untrusted
