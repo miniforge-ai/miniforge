@@ -180,6 +180,103 @@
               new-visited
               deps))))
 
+;; Generic DFS utilities
+
+(defn ^:private dfs
+  "Simple canonical DFS traversal for dependency graphs.
+
+  Arguments:
+  - graph       - Map of pack-id -> {:pack ... :deps [...]}
+  - start-ids   - Collection of starting pack IDs (or single ID)
+  - get-deps-fn - Function (node) -> [dependency-pack-ids]
+  - on-visit-fn - Function (pack-id node path visited visiting) -> result or nil
+                  Called when visiting a node (not in visited yet)
+                  Return non-nil to halt and return that value
+  - on-cycle-fn - Function (pack-id path visited visiting) -> result or nil
+                  Called when cycle detected (node in visiting set)
+                  Return non-nil to halt and return that value
+  - on-missing-fn - Function (pack-id visited visiting) -> result or nil
+                    Called when node not found in graph
+                    Return non-nil to halt and return that value
+
+  Returns [final-visited final-result] where result is:
+  - nil if traversal completed without halting
+  - value returned by on-visit-fn/on-cycle-fn/on-missing-fn if halted"
+  [graph start-ids get-deps-fn on-visit-fn on-cycle-fn on-missing-fn]
+  (let [start-ids (if (coll? start-ids) start-ids [start-ids])]
+    (letfn [(traverse [pack-id path visited visiting]
+              (cond
+                ;; Already visited - continue
+                (contains? visited pack-id)
+                [visited nil]
+
+                ;; Currently visiting - cycle detected
+                (contains? visiting pack-id)
+                (let [result (on-cycle-fn pack-id (conj path pack-id) visited visiting)]
+                  [visited result])
+
+                ;; Visit this node
+                :else
+                (let [node (get graph pack-id)]
+                  (if-not node
+                    ;; Node not in graph
+                    (let [result (on-missing-fn pack-id visited visiting)]
+                      [visited result])
+                    ;; Process node
+                    (let [result (on-visit-fn pack-id node path visited visiting)]
+                      (if result
+                        ;; Halt with result
+                        [visited result]
+                        ;; Continue with dependencies
+                        (let [deps (get-deps-fn node)
+                              visiting' (conj visiting pack-id)]
+                          (loop [remaining-deps deps
+                                 v visited
+                                 result nil]
+                            (if (or result (empty? remaining-deps))
+                              [(conj v pack-id) result]
+                              (let [[v' result'] (traverse (first remaining-deps)
+                                                           (conj path pack-id)
+                                                           v
+                                                           visiting')]
+                                (recur (rest remaining-deps) v' result')))))))))))]
+
+      ;; Process all start nodes
+      (loop [remaining-starts start-ids
+             visited #{}
+             result nil]
+        (if (or result (empty? remaining-starts))
+          [visited result]
+          (let [[visited' result'] (traverse (first remaining-starts) [] visited #{})]
+            (recur (rest remaining-starts) visited' result')))))))
+
+(defn ^:private dfs-collect-all
+  "Collect all values from DFS traversal where predicate returns non-nil.
+
+  Arguments:
+  - graph        - Map of pack-id -> {:pack ... :deps [...]}
+  - start-ids    - Collection of starting pack IDs
+  - get-deps-fn  - Function (node) -> [dependency-pack-ids]
+  - collect-fn   - Function (pack-id path visited visiting) -> value or nil
+                   Called on each cycle detection. Return value to collect.
+
+  Returns vector of all collected non-nil values."
+  [graph start-ids get-deps-fn collect-fn]
+  (let [collected (atom [])]
+    (dfs graph
+         start-ids
+         get-deps-fn
+         ;; on-visit: continue (no collection on normal visit)
+         (fn [_pack-id _node _path _visited _visiting] nil)
+         ;; on-cycle: collect value
+         (fn [pack-id path visited visiting]
+           (when-let [value (collect-fn pack-id path visited visiting)]
+             (swap! collected conj value))
+           nil)  ; Continue traversal
+         ;; on-missing: ignore
+         (fn [_pack-id _visited _visiting] nil))
+    @collected))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Validation rules
 
@@ -191,32 +288,25 @@
      :message string}]"
   [graph]
   (let [pack-ids (keys graph)
-        find-cycle (fn find-cycle [current path visited]
-                     (cond
-                       ;; Found a cycle
-                       (contains? visited current)
-                       (let [cycle-start-idx (.indexOf (vec path) current)
-                             cycle (if (>= cycle-start-idx 0)
-                                    (conj (vec (drop cycle-start-idx path)) current)
-                                    [current])]
-                         [cycle])
-
-                       ;; Continue exploring
-                       :else
-                       (let [node (get graph current)
-                             deps (map :pack-id (:deps node))
-                             new-path (conj path current)
-                             new-visited (conj visited current)]
-                         (mapcat #(find-cycle % new-path new-visited) deps))))]
-
-    (->> pack-ids
-         (mapcat #(find-cycle % [] #{}))
+        cycles (dfs-collect-all
+                graph
+                pack-ids
+                (fn [node] (map :pack-id (:deps node)))
+                ;; Collect cycle when detected
+                (fn [pack-id path _visited _visiting]
+                  (let [cycle-start-idx (.indexOf (vec path) pack-id)
+                        cycle (if (>= cycle-start-idx 0)
+                                (conj (vec (drop cycle-start-idx path)) pack-id)
+                                [pack-id])]
+                    cycle)))]
+    (->> cycles
          (distinct)
          (map (fn [cycle]
                 {:type :circular-dependency
                  :cycle cycle
                  :message (str "Circular dependency detected: "
-                              (str/join " → " cycle))})))))
+                              (str/join " → " cycle))}))
+         vec)))
 
 (defn- detect-missing-dependencies
   "Detect missing dependencies in the graph.
@@ -306,6 +396,49 @@
   ;; For now, return empty vector
   [])
 
+(defn ^:private calculate-pack-depths
+  "Calculate maximum depth for each pack using bottom-up traversal.
+   Returns map of pack-id -> {:depth int :chain [pack-ids]}."
+  [graph]
+  (letfn [(calc-depth [pack-id visited depths]
+            (cond
+              ;; Already calculated
+              (contains? depths pack-id)
+              [depths (get depths pack-id)]
+
+              ;; Cycle detected
+              (contains? visited pack-id)
+              [depths {:depth 0 :chain []}]
+
+              ;; Calculate depth
+              :else
+              (let [node (get graph pack-id)
+                    deps (map :pack-id (:deps node))
+                    new-visited (conj visited pack-id)]
+                (if (empty? deps)
+                  (let [result {:depth 1 :chain [pack-id]}]
+                    [(assoc depths pack-id result) result])
+                  (loop [remaining-deps deps
+                         d depths
+                         child-results []]
+                    (if (empty? remaining-deps)
+                      (let [max-child (apply max-key :depth child-results)
+                            depth (inc (:depth max-child))
+                            chain (cons pack-id (:chain max-child))
+                            result {:depth depth :chain chain}]
+                        [(assoc d pack-id result) result])
+                      (let [[d' child-result] (calc-depth (first remaining-deps) new-visited d)]
+                        (recur (rest remaining-deps)
+                               d'
+                               (conj child-results child-result)))))))))]
+    ;; Calculate depths for all packs
+    (loop [remaining-packs (keys graph)
+           depths {}]
+      (if (empty? remaining-packs)
+        depths
+        (let [[depths' _] (calc-depth (first remaining-packs) #{} depths)]
+          (recur (rest remaining-packs) depths'))))))
+
 (defn- detect-depth-violations
   "Detect dependency chains that exceed the depth limit.
    Returns vector of violation maps:
@@ -315,36 +448,18 @@
      :chain [pack-id...]
      :message string}]"
   [graph max-depth]
-  (let [find-max-depth (fn find-max-depth [pack-id visited]
-                         (if (contains? visited pack-id)
-                           {:depth 0 :chain []}
-                           (let [node (get graph pack-id)
-                                 deps (map :pack-id (:deps node))
-                                 new-visited (conj visited pack-id)]
-                             (if (empty? deps)
-                               {:depth 1 :chain [pack-id]}
-                               (let [max-child (apply max-key
-                                                     :depth
-                                                     (map #(find-max-depth % new-visited) deps))
-                                     depth (inc (:depth max-child))
-                                     chain (cons pack-id (:chain max-child))]
-                                 {:depth depth :chain chain})))))
-
-        all-depths (map (fn [pack-id]
-                         (assoc (find-max-depth pack-id #{})
-                                :pack-id pack-id))
-                       (keys graph))]
-
-    (->> all-depths
-         (filter #(> (:depth %) max-depth))
-         (map (fn [{:keys [pack-id depth chain]}]
-                {:type :depth-limit
-                 :pack-id pack-id
-                 :depth depth
-                 :chain chain
-                 :message (str "Pack '" pack-id "' has dependency chain of depth "
-                              depth " (exceeds limit of " max-depth "): "
-                              (str/join " → " chain))})))))
+  (let [depths (calculate-pack-depths graph)]
+    (->> depths
+         (keep (fn [[pack-id {:keys [depth chain]}]]
+                 (when (> depth max-depth)
+                   {:type :depth-limit
+                    :pack-id pack-id
+                    :depth depth
+                    :chain chain
+                    :message (str "Pack '" pack-id "' has dependency chain of depth "
+                                 depth " (exceeds limit of " max-depth "): "
+                                 (str/join " → " chain))})))
+         vec)))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Public API
