@@ -261,7 +261,7 @@
                ;; Create wrapper script
                (spit script-target
                      (str "#!/usr/bin/env bash\n"
-                          "exec bb -jar \"" jar-target "\" \"$@\"\n"))
+                          "exec java -jar \"" jar-target "\" \"$@\"\n"))
                (p/shell "chmod" "+x" script-target)
                (println "✅ Installed successfully")
                (println "   Ensure ~/.local/bin is in your PATH")
