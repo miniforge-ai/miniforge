@@ -4,6 +4,7 @@
         ;; Workflow and all its transitive dependencies
         ai.miniforge/workflow {:local/root "../../components/workflow"}
         ai.miniforge/schema {:local/root "../../components/schema"}
+        ai.miniforge/algorithms {:local/root "../../components/algorithms"}
         ai.miniforge/logging {:local/root "../../components/logging"}
         ai.miniforge/llm {:local/root "../../components/llm"}
         ai.miniforge/tool {:local/root "../../components/tool"}

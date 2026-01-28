@@ -28,6 +28,7 @@
    Layer 2: Validation rules
    Layer 3: Public API"
   (:require
+   [ai.miniforge.algorithms.interface :as alg]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -165,103 +166,6 @@
      :by-id by-id
      :versions versions}))
 
-;; Generic DFS utilities
-
-(defn ^:private dfs
-  "Simple canonical DFS traversal for dependency graphs.
-
-  Arguments:
-  - graph       - Map of pack-id -> {:pack ... :deps [...]}
-  - start-ids   - Collection of starting pack IDs (or single ID)
-  - get-deps-fn - Function (node) -> [dependency-pack-ids]
-  - on-visit-fn - Function (pack-id node path visited visiting) -> result or nil
-                  Called when visiting a node (not in visited yet)
-                  Return non-nil to halt and return that value
-  - on-cycle-fn - Function (pack-id path visited visiting) -> result or nil
-                  Called when cycle detected (node in visiting set)
-                  Return non-nil to halt and return that value
-  - on-missing-fn - Function (pack-id visited visiting) -> result or nil
-                    Called when node not found in graph
-                    Return non-nil to halt and return that value
-
-  Returns [final-visited final-result] where result is:
-  - nil if traversal completed without halting
-  - value returned by on-visit-fn/on-cycle-fn/on-missing-fn if halted"
-  [graph start-ids get-deps-fn on-visit-fn on-cycle-fn on-missing-fn]
-  (let [start-ids (if (coll? start-ids) start-ids [start-ids])]
-    (letfn [(traverse [pack-id path visited visiting]
-              (cond
-                ;; Already visited - continue
-                (contains? visited pack-id)
-                [visited nil]
-
-                ;; Currently visiting - cycle detected
-                (contains? visiting pack-id)
-                (let [result (on-cycle-fn pack-id (conj path pack-id) visited visiting)]
-                  [visited result])
-
-                ;; Visit this node
-                :else
-                (let [node (get graph pack-id)]
-                  (if-not node
-                    ;; Node not in graph
-                    (let [result (on-missing-fn pack-id visited visiting)]
-                      [visited result])
-                    ;; Process node
-                    (let [result (on-visit-fn pack-id node path visited visiting)]
-                      (if result
-                        ;; Halt with result
-                        [visited result]
-                        ;; Continue with dependencies
-                        (let [deps (get-deps-fn node)
-                              visiting' (conj visiting pack-id)]
-                          (loop [remaining-deps deps
-                                 v visited
-                                 result nil]
-                            (if (or result (empty? remaining-deps))
-                              [(conj v pack-id) result]
-                              (let [[v' result'] (traverse (first remaining-deps)
-                                                           (conj path pack-id)
-                                                           v
-                                                           visiting')]
-                                (recur (rest remaining-deps) v' result')))))))))))]
-
-      ;; Process all start nodes
-      (loop [remaining-starts start-ids
-             visited #{}
-             result nil]
-        (if (or result (empty? remaining-starts))
-          [visited result]
-          (let [[visited' result'] (traverse (first remaining-starts) [] visited #{})]
-            (recur (rest remaining-starts) visited' result')))))))
-
-(defn ^:private dfs-collect-all
-  "Collect all values from DFS traversal where predicate returns non-nil.
-
-  Arguments:
-  - graph        - Map of pack-id -> {:pack ... :deps [...]}
-  - start-ids    - Collection of starting pack IDs
-  - get-deps-fn  - Function (node) -> [dependency-pack-ids]
-  - collect-fn   - Function (pack-id path visited visiting) -> value or nil
-                   Called on each cycle detection. Return value to collect.
-
-  Returns vector of all collected non-nil values."
-  [graph start-ids get-deps-fn collect-fn]
-  (let [collected (atom [])]
-    (dfs graph
-         start-ids
-         get-deps-fn
-         ;; on-visit: continue (no collection on normal visit)
-         (fn [_pack-id _node _path _visited _visiting] nil)
-         ;; on-cycle: collect value
-         (fn [pack-id path visited visiting]
-           (when-let [value (collect-fn pack-id path visited visiting)]
-             (swap! collected conj value))
-           nil)  ; Continue traversal
-         ;; on-missing: ignore
-         (fn [_pack-id _visited _visiting] nil))
-    @collected))
-
 ;------------------------------------------------------------------------------ Layer 2
 ;; Validation rules
 
@@ -273,7 +177,7 @@
      :message string}]"
   [graph]
   (let [pack-ids (keys graph)
-        cycles (dfs-collect-all
+        cycles (alg/dfs-collect
                 graph
                 pack-ids
                 (fn [node] (map :pack-id (:deps node)))
@@ -283,7 +187,8 @@
                         cycle (if (>= cycle-start-idx 0)
                                 (conj (vec (drop cycle-start-idx path)) pack-id)
                                 [pack-id])]
-                    cycle)))]
+                    cycle))
+                :cycle)]
     (->> cycles
          (distinct)
          (map (fn [cycle]

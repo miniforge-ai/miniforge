@@ -6,6 +6,8 @@
  {:dev  {:extra-paths ["development/src"
                        "components/schema/src"
                        "components/schema/resources"
+                       "components/algorithms/src"
+                       "components/algorithms/resources"
                        "components/logging/src"
                        "components/logging/resources"
                        "components/llm/src"
@@ -44,6 +46,7 @@
                        "components/reporting/src"
                        "components/reporting/resources"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
+                      ai.miniforge/algorithms {:local/root "components/algorithms"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
                       ai.miniforge/tool {:local/root "components/tool"}
@@ -66,6 +69,7 @@
 
   :test {:extra-paths ["development/test"
                        "components/schema/test"
+                       "components/algorithms/test"
                        "components/response/test"
                        "components/fsm/test"
                        "components/logging/test"
@@ -86,6 +90,7 @@
                        "components/orchestrator/test"
                        "components/reporting/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
+                      ai.miniforge/algorithms {:local/root "components/algorithms"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
                       ai.miniforge/tool {:local/root "components/tool"}
@@ -110,6 +115,8 @@
                               "tests/conformance"
                               "components/schema/src"
                               "components/schema/test"
+                              "components/algorithms/src"
+                              "components/algorithms/test"
                               "components/logging/src"
                               "components/logging/test"
                               "components/llm/src"
@@ -151,6 +158,7 @@
                               "components/evidence-bundle/src"
                               "components/evidence-bundle/test"]
                 :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
+                             ai.miniforge/algorithms {:local/root "components/algorithms"}
                              ai.miniforge/logging {:local/root "components/logging"}
                              ai.miniforge/llm {:local/root "components/llm"}
                              ai.miniforge/tool {:local/root "components/tool"}
