@@ -9,7 +9,8 @@
 
    Emits lifecycle events per N3 §3.4."
   (:require
-   [ai.miniforge.logging.interface :as logging]))
+   [ai.miniforge.logging.interface :as logging]
+   [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; ETL workflow state
@@ -42,15 +43,12 @@
     (let [classified sources]
       (logging/debug logger :etl :etl.classification/completed
                      {:data {:classified-count (count classified)}})
-      {:success? true
-       :classified classified})
+      (schema/success :classified classified))
     (catch Exception e
       (logging/error logger :etl :etl.classification/failed
                      {:message (ex-message e)
                       :data {:error-type (type e)}})
-      {:success? false
-       :error {:message (ex-message e)
-               :stage :classification}})))
+      (schema/exception-failure :classified e {:stage :classification}))))
 
 (defn- scan-sources
   "Stage 2: Run security and policy scanners.
@@ -66,16 +64,12 @@
       (logging/debug logger :etl :etl.scanning/completed
                      {:data {:scanned-count (count scanned)
                              :findings-count (count findings)}})
-      {:success? true
-       :scanned scanned
-       :findings findings})
+      (schema/success :scanned scanned {:findings findings}))
     (catch Exception e
       (logging/error logger :etl :etl.scanning/failed
                      {:message (ex-message e)
                       :data {:error-type (type e)}})
-      {:success? false
-       :error {:message (ex-message e)
-               :stage :scanning}})))
+      (schema/exception-failure :scanned e {:stage :scanning}))))
 
 (defn- extract-knowledge
   "Stage 3: Extract structured knowledge from sources.
@@ -89,15 +83,12 @@
     (let [packs []]
       (logging/debug logger :etl :etl.extraction/completed
                      {:data {:pack-count (count packs)}})
-      {:success? true
-       :packs packs})
+      (schema/success :packs packs))
     (catch Exception e
       (logging/error logger :etl :etl.extraction/failed
                      {:message (ex-message e)
                       :data {:error-type (type e)}})
-      {:success? false
-       :error {:message (ex-message e)
-               :stage :extraction}})))
+      (schema/exception-failure :packs e {:stage :extraction}))))
 
 (defn- validate-packs
   "Stage 4: Validate pack integrity and schemas.
@@ -111,15 +102,12 @@
     (let [validated packs]
       (logging/debug logger :etl :etl.validation/completed
                      {:data {:validated-count (count validated)}})
-      {:success? true
-       :validated validated})
+      (schema/success :validated validated))
     (catch Exception e
       (logging/error logger :etl :etl.validation/failed
                      {:message (ex-message e)
                       :data {:error-type (type e)}})
-      {:success? false
-       :error {:message (ex-message e)
-               :stage :validation}})))
+      (schema/exception-failure :validated e {:stage :validation}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; ETL workflow execution
@@ -161,10 +149,8 @@
                                    (:stage error)
                                    (:message error)
                                    {:duration-ms duration})
-          {:success? false
-           :error error
-           :duration-ms duration
-           :stats (:etl/stats state)})
+          (schema/failure nil error {:duration-ms duration
+                                      :stats (:etl/stats state)}))
 
         ;; Continue to scanning
         (let [scanning-result (scan-sources logger (:classified classification-result))]
@@ -177,12 +163,10 @@
                                        (:message error)
                                        {:duration-ms duration
                                         :findings (:findings scanning-result [])})
-              {:success? false
-               :error error
-               :duration-ms duration
-               :stats (update (:etl/stats state) :high-risk-findings
-                             + (count (filter #(= :high (:severity %))
-                                             (:findings scanning-result []))))})
+              (schema/failure nil error {:duration-ms duration
+                                          :stats (update (:etl/stats state) :high-risk-findings
+                                                        + (count (filter #(= :high (:severity %))
+                                                                        (:findings scanning-result []))))}))
 
             ;; Continue to extraction
             (let [extraction-result (extract-knowledge logger (:scanned scanning-result))]
@@ -194,10 +178,8 @@
                                            (:stage error)
                                            (:message error)
                                            {:duration-ms duration})
-                  {:success? false
-                   :error error
-                   :duration-ms duration
-                   :stats (:etl/stats state)})
+                  (schema/failure nil error {:duration-ms duration
+                                              :stats (:etl/stats state)}))
 
                 ;; Continue to validation
                 (let [validation-result (validate-packs logger (:packs extraction-result))]
@@ -209,10 +191,8 @@
                                                (:stage error)
                                                (:message error)
                                                {:duration-ms duration})
-                      {:success? false
-                       :error error
-                       :duration-ms duration
-                       :stats (:etl/stats state)})
+                      (schema/failure nil error {:duration-ms duration
+                                                  :stats (:etl/stats state)}))
 
                     ;; Success! Emit etl/completed event
                     (let [duration (- (System/currentTimeMillis) start-time)
@@ -224,10 +204,9 @@
                                       :high-risk-findings high-risk-count
                                       :sources-processed (count sources)}]
                       (logging/emit-etl-completed logger workflow-id duration final-stats)
-                      {:success? true
-                       :packs validated-packs
-                       :stats final-stats
-                       :duration-ms duration})))))))))))
+                      (schema/success :packs validated-packs
+                                      {:stats final-stats
+                                       :duration-ms duration}))))))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
