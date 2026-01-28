@@ -2,7 +2,9 @@
 
 ## Overview
 
-Implements N1 §2.10.2 transitive trust rules to prevent trust escalation attacks in knowledge packs. Ensures that packs maintain proper trust boundaries and cannot maliciously escalate privileges through dependency chains.
+Implements N1 §2.10.2 transitive trust rules to prevent trust escalation attacks in knowledge packs.
+Ensures that packs maintain proper trust boundaries and cannot maliciously escalate privileges through
+dependency chains.
 
 ## Motivation
 
@@ -59,7 +61,8 @@ This PR implements the 4 core transitive trust rules defined in N1 §2.10.2.
 ## The 4 Transitive Trust Rules
 
 1. **Instruction authority is not transitive**
-   - If Pack A (`:trusted`, `:authority/instruction`) references Pack B (`:untrusted`), Pack B MUST remain `:authority/data` and MUST NOT gain instruction authority through the reference
+   - If Pack A (`:trusted`, `:authority/instruction`) references Pack B (`:untrusted`), Pack B MUST remain
+     `:authority/data` and MUST NOT gain instruction authority through the reference
    - Prevents privilege escalation through dependency chains
 
 2. **Trust level inheritance**

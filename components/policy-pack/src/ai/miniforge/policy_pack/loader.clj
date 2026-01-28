@@ -32,9 +32,11 @@
    - Tainted content is isolated from instruction authority"
   (:require
    [ai.miniforge.policy-pack.schema :as schema]
+   [ai.miniforge.policy-pack.rules.pack-dependency-validation :as dep-validation]
    [ai.miniforge.knowledge.interface :as knowledge]
    [clojure.java.io :as io]
    [clojure.edn :as edn]
+   [clojure.pprint :as pprint]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -288,20 +290,79 @@
 
    Arguments:
    - packs-dir - Directory containing packs
+   - opts      - Optional configuration map:
+                 :validate-dependencies? - Run dependency validation (default: true)
+                 :max-dependency-depth   - Maximum dependency depth (default: 5)
 
    Returns:
-   - {:loaded [PackManifest...] :failed [{:path :errors}...]}
+   - {:loaded [PackManifest...]
+      :failed [{:path :errors}...]
+      :dependency-validation {:valid? bool :violations [...] :warnings [...]}}
 
    Example:
-     (load-all-packs \".miniforge/packs\")"
-  [packs-dir]
-  (let [discovered (discover-packs packs-dir)
-        results (map (fn [{:keys [path]}]
-                       (assoc (load-pack path) :path path))
-                     discovered)]
-    {:loaded (vec (keep :pack (filter :success? results)))
-     :failed (vec (map #(select-keys % [:path :errors])
-                       (remove :success? results)))}))
+     (load-all-packs \".miniforge/packs\")
+     (load-all-packs \".miniforge/packs\" {:max-dependency-depth 3})"
+  ([packs-dir]
+   (load-all-packs packs-dir {}))
+  ([packs-dir opts]
+   (let [validate-deps? (get opts :validate-dependencies? true)
+         max-depth (get opts :max-dependency-depth 5)
+         discovered (discover-packs packs-dir)
+         results (map (fn [{:keys [path]}]
+                        (assoc (load-pack path) :path path))
+                      discovered)
+         loaded-packs (vec (keep :pack (filter :success? results)))
+         failed (vec (map #(select-keys % [:path :errors])
+                         (remove :success? results)))
+
+         ;; Run dependency validation if requested
+         dep-validation-result (when (and validate-deps? (seq loaded-packs))
+                                (dep-validation/validate-pack-dependencies
+                                 loaded-packs
+                                 {:max-depth max-depth
+                                  :check-trust? false}))]  ;; Enable when PR14 merged
+
+     (cond-> {:loaded loaded-packs
+              :failed failed}
+       dep-validation-result
+       (assoc :dependency-validation dep-validation-result)))))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Dependency validation
+
+(defn validate-pack-dependencies
+  "Validate pack dependencies before loading.
+
+   Per N4 §2.4.2, validates:
+   1. No circular dependencies
+   2. All dependencies available
+   3. Version constraints satisfied
+   4. Trust level constraints (when PR14 merged)
+   5. Dependency depth within limits
+
+   Arguments:
+   - packs - Vector of pack manifests to validate
+   - opts  - Options map:
+             :max-dependency-depth - Maximum depth (default: 5)
+             :check-trust?        - Enable trust validation (default: false)
+
+   Returns:
+   - {:valid? boolean
+      :violations [{:type keyword :message string ...}]
+      :warnings [{:type keyword :message string ...}]}
+
+   Example:
+     (validate-pack-dependencies [pack-a pack-b pack-c])
+     (validate-pack-dependencies [pack-a] {:max-dependency-depth 3})"
+  ([packs]
+   (validate-pack-dependencies packs {}))
+  ([packs opts]
+   (let [max-depth (get opts :max-dependency-depth 5)
+         check-trust? (get opts :check-trust? false)]
+     (dep-validation/validate-pack-dependencies
+      packs
+      {:max-depth max-depth
+       :check-trust? check-trust?}))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Pack writing
@@ -318,7 +379,7 @@
   [pack file-path]
   (try
     (let [content (with-out-str
-                    (clojure.pprint/pprint pack))]
+                    (pprint/pprint pack))]
       (spit file-path content)
       {:success? true :error nil})
     (catch Exception e

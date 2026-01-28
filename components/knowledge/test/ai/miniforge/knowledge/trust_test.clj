@@ -8,6 +8,7 @@
    4. Tainted isolation from instruction authority"
   (:require
    [clojure.test :refer [deftest is testing]]
+   [clojure.string :as str]
    [ai.miniforge.knowledge.trust :as trust]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -93,7 +94,7 @@
       (is (not (:valid? result)))
       (is (string? (:error result)))
       (is (re-find #"instruction authority cannot be granted transitively"
-                   (clojure.string/lower-case (:error result))))))
+                   (str/lower-case (:error result))))))
 
   (testing "Data-only packs don't trigger rule"
     (let [data-pack-a (trust/make-pack-ref "pack-a" :trusted :authority/data)
