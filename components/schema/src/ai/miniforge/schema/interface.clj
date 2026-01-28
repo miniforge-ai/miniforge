@@ -178,6 +178,68 @@
                      (ex-data ex) (assoc :data (ex-data ex)))]
      (merge {:success? false data-key nil :error error-map} opts))))
 
+;------------------------------------------------------------------------------ Layer 3
+;; Validation response helpers
+
+(defn valid
+  "Create a valid validation response.
+
+   Arguments:
+   - opts - Optional map with additional fields (e.g., :graph, :packs)
+
+   Returns:
+   - {:valid? true ...opts}
+
+   Example:
+     (valid)
+     ;; => {:valid? true}
+
+     (valid {:packs [\"pack-a\" \"pack-b\"]})
+     ;; => {:valid? true :packs [\"pack-a\" \"pack-b\"]}"
+  ([]
+   (valid nil))
+  ([opts]
+   (merge {:valid? true} opts)))
+
+(defn invalid
+  "Create an invalid validation response with error.
+
+   Arguments:
+   - error - Error message string or error map
+   - opts  - Optional map with additional fields (e.g., :tainted-path)
+
+   Returns:
+   - {:valid? false :error error ...opts}
+
+   Example:
+     (invalid \"Circular dependency detected\")
+     ;; => {:valid? false :error \"Circular dependency detected\"}
+
+     (invalid \"Tainted content\" {:tainted-path [\"a\" \"b\"]})
+     ;; => {:valid? false :error \"Tainted content\" :tainted-path [\"a\" \"b\"]}"
+  ([error]
+   (invalid error nil))
+  ([error opts]
+   (merge {:valid? false :error error} opts)))
+
+(defn invalid-with-errors
+  "Create an invalid validation response with multiple errors.
+
+   Arguments:
+   - errors - Vector of error strings or error maps
+   - opts   - Optional map with additional fields
+
+   Returns:
+   - {:valid? false :errors errors ...opts}
+
+   Example:
+     (invalid-with-errors [\"Error 1\" \"Error 2\"])
+     ;; => {:valid? false :errors [\"Error 1\" \"Error 2\"]}"
+  ([errors]
+   (invalid-with-errors errors nil))
+  ([errors opts]
+   (merge {:valid? false :errors errors} opts)))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Validate an agent
