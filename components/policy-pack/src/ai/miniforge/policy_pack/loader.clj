@@ -67,9 +67,9 @@
   (try
     (let [content (slurp file)
           data (edn/read-string content)]
-      {:success? true :data data :error nil})
+      (schema/success :data data {:error nil}))
     (catch Exception e
-      {:success? false :data nil :error (.getMessage e)})))
+      (schema/failure :data (.getMessage e)))))
 
 (defn- ensure-instant
   "Convert various timestamp representations to Instant."
@@ -131,10 +131,10 @@
           (let [pack (normalize-pack data)
                 {:keys [valid? errors]} (schema/validate-pack pack)]
             (if valid?
-              {:success? true :pack pack :errors nil}
-              {:success? false :pack nil :errors errors}))
-          {:success? false :pack nil :errors [{:file file-path :error error}]}))
-      {:success? false :pack nil :errors [{:file file-path :error "File not found"}]})))
+              (schema/success :pack pack {:errors nil})
+              (schema/failure-with-errors :pack errors)))
+          (schema/failure-with-errors :pack [{:file file-path :error error}])))
+      (schema/failure-with-errors :pack [{:file file-path :error "File not found"}]))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Directory structure loader
@@ -144,8 +144,8 @@
   [file]
   (let [{:keys [success? data error]} (safe-read-edn file)]
     (if success?
-      {:success? true :rule (normalize-rule data) :error nil}
-      {:success? false :rule nil :error error})))
+      (schema/success :rule (normalize-rule data) {:error nil})
+      (schema/failure :rule error))))
 
 (defn load-pack-from-directory
   "Load a policy pack from a directory structure.
@@ -179,15 +179,15 @@
 
     (cond
       (not (.exists dir))
-      {:success? false :pack nil :errors [{:dir dir-path :error "Directory not found"}]}
+      (schema/failure-with-errors :pack [{:dir dir-path :error "Directory not found"}])
 
       (not (.exists manifest-file))
-      {:success? false :pack nil :errors [{:file "pack.edn" :error "Manifest not found in directory"}]}
+      (schema/failure-with-errors :pack [{:file "pack.edn" :error "Manifest not found in directory"}])
 
       :else
       (let [{:keys [success? data error]} (safe-read-edn manifest-file)]
         (if-not success?
-          {:success? false :pack nil :errors [{:file "pack.edn" :error error}]}
+          (schema/failure-with-errors :pack [{:file "pack.edn" :error error}])
 
           ;; Load rules from rules/ directory if it exists
           (let [rule-files (when (.exists rules-dir)
@@ -213,12 +213,8 @@
                 {:keys [valid? errors]} (schema/validate-pack pack)]
 
             (if valid?
-              {:success? true
-               :pack pack
-               :errors (when (seq rule-errors) rule-errors)}
-              {:success? false
-               :pack nil
-               :errors (concat errors rule-errors)})))))))
+              (schema/success :pack pack {:errors (when (seq rule-errors) rule-errors)})
+              (schema/failure-with-errors :pack (concat errors rule-errors)))))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Auto-detect and load
@@ -243,7 +239,7 @@
   (let [file (io/file path)]
     (cond
       (not (.exists file))
-      {:success? false :pack nil :errors [{:path path :error "Path not found"}]}
+      (schema/failure-with-errors :pack [{:path path :error "Path not found"}])
 
       (.isFile file)
       (load-pack-from-file path)
@@ -252,7 +248,7 @@
       (load-pack-from-directory path)
 
       :else
-      {:success? false :pack nil :errors [{:path path :error "Unknown path type"}]})))
+      (schema/failure-with-errors :pack [{:path path :error "Unknown path type"}]))))
 
 (defn discover-packs
   "Discover all packs in a directory.
@@ -383,7 +379,7 @@
       (spit file-path content)
       {:success? true :error nil})
     (catch Exception e
-      {:success? false :error (.getMessage e)})))
+      (schema/failure nil (.getMessage e)))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Trust validation (N1 §2.10.2)

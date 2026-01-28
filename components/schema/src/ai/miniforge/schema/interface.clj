@@ -88,6 +88,96 @@
   [value]
   (valid? Scenario value))
 
+;------------------------------------------------------------------------------ Layer 2
+;; Response helpers
+
+(defn success
+  "Create a success response.
+
+   Arguments:
+   - data-key - Keyword for the data field (e.g., :pack, :rule, :artifact)
+   - data     - The successful result data
+   - opts     - Optional map with additional fields
+
+   Returns:
+   - {:success? true data-key data ...opts}
+
+   Example:
+     (success :pack my-pack)
+     ;; => {:success? true :pack my-pack}
+
+     (success :pack my-pack {:errors nil})
+     ;; => {:success? true :pack my-pack :errors nil}"
+  ([data-key data]
+   (success data-key data nil))
+  ([data-key data opts]
+   (merge {:success? true data-key data} opts)))
+
+(defn failure
+  "Create a failure response with a single error.
+
+   Arguments:
+   - data-key   - Keyword for the data field (e.g., :pack, :rule, :artifact)
+   - error      - Error message string or error map
+   - opts       - Optional map with additional fields
+
+   Returns:
+   - {:success? false data-key nil :error error ...opts}
+
+   Example:
+     (failure :pack \"File not found\")
+     ;; => {:success? false :pack nil :error \"File not found\"}
+
+     (failure :pack {:message \"Invalid\" :stage :parsing})
+     ;; => {:success? false :pack nil :error {:message \"Invalid\" :stage :parsing}}"
+  ([data-key error]
+   (failure data-key error nil))
+  ([data-key error opts]
+   (merge {:success? false data-key nil :error error} opts)))
+
+(defn failure-with-errors
+  "Create a failure response with multiple errors.
+
+   Arguments:
+   - data-key - Keyword for the data field (e.g., :pack, :rule)
+   - errors   - Vector of error maps
+   - opts     - Optional map with additional fields
+
+   Returns:
+   - {:success? false data-key nil :errors errors ...opts}
+
+   Example:
+     (failure-with-errors :pack [{:file \"pack.edn\" :error \"Not found\"}])
+     ;; => {:success? false :pack nil :errors [{:file \"pack.edn\" :error \"Not found\"}]}"
+  ([data-key errors]
+   (failure-with-errors data-key errors nil))
+  ([data-key errors opts]
+   (merge {:success? false data-key nil :errors errors} opts)))
+
+(defn exception-failure
+  "Create a failure response from an exception.
+
+   Arguments:
+   - data-key - Keyword for the data field (e.g., :pack, :rule)
+   - ex       - Exception object
+   - opts     - Optional map with additional fields (e.g., :stage)
+
+   Returns:
+   - {:success? false data-key nil :error {:message ... :data ...} ...opts}
+
+   Example:
+     (exception-failure :pack (Exception. \"IO error\"))
+     ;; => {:success? false :pack nil :error {:message \"IO error\"}}
+
+     (exception-failure :pack ex {:stage :extraction})
+     ;; => {:success? false :pack nil :error {:message ... :stage :extraction}}"
+  ([data-key ex]
+   (exception-failure data-key ex nil))
+  ([data-key ex opts]
+   (let [error-map (cond-> {:message (ex-message ex)}
+                     (ex-data ex) (assoc :data (ex-data ex)))]
+     (merge {:success? false data-key nil :error error-map} opts))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Validate an agent
