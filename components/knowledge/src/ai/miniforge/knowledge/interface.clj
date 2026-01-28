@@ -18,7 +18,8 @@
    [ai.miniforge.knowledge.zettel :as zettel]
    [ai.miniforge.knowledge.store :as store]
    [ai.miniforge.knowledge.learning :as learning]
-   [ai.miniforge.knowledge.loader :as loader]))
+   [ai.miniforge.knowledge.loader :as loader]
+   [ai.miniforge.knowledge.trust]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
@@ -308,6 +309,65 @@
      (initialize-knowledge-store! store)
      (initialize-knowledge-store! store {:rules-dir \"custom/rules\"})"
   loader/initialize-knowledge-store!)
+
+;------------------------------------------------------------------------------ Layer 9
+;; Trust validation (N1 §2.10.2)
+
+(defn make-pack-ref
+  "Create a pack reference with trust information.
+
+   Arguments:
+   - pack-id       - Unique identifier for the pack
+   - trust-level   - :trusted, :untrusted, or :tainted
+   - authority     - :authority/instruction or :authority/data
+
+   Options:
+   - :dependencies - Vector of pack-ids this pack depends on
+
+   Returns pack reference map.
+
+   Example:
+     (make-pack-ref \"my-pack\" :trusted :authority/instruction
+                    :dependencies [\"base-pack\"])"
+  [pack-id trust-level authority & {:keys [dependencies]}]
+  (ai.miniforge.knowledge.trust/make-pack-ref
+   pack-id trust-level authority :dependencies dependencies))
+
+(def validate-transitive-trust
+  "Validate all transitive trust rules for a pack graph.
+
+   Checks:
+   1. Instruction authority is not transitive
+   2. Trust level inheritance is correct
+   3. Cross-trust references are valid (no cycles, missing deps)
+   4. Tainted content is isolated from instruction authority
+
+   Arguments:
+   - pack-graph - Map of pack-id -> pack-ref
+
+   Returns:
+   - {:valid? true :packs [...]} if all rules pass
+   - {:valid? false :errors [...]} if any rule fails
+
+   Example:
+     (validate-transitive-trust {\"pack-a\" pack-ref-a \"pack-b\" pack-ref-b})"
+  ai.miniforge.knowledge.trust/validate-transitive-trust)
+
+(def compute-inherited-trust-level
+  "Compute the inherited trust level from a collection of packs.
+
+   Rule 2: When pack A includes content from pack B, the combined content
+   MUST be assigned the lower trust level.
+
+   Arguments:
+   - pack-refs - Collection of pack references being combined
+
+   Returns the lowest trust level from all packs.
+
+   Example:
+     (compute-inherited-trust-level [trusted-pack untrusted-pack])
+     ;; => :untrusted"
+  ai.miniforge.knowledge.trust/compute-inherited-trust-level)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
