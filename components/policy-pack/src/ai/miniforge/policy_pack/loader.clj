@@ -19,15 +19,24 @@
    Layer 1: EDN parsing and validation
    Layer 2: Single file and directory loaders
    Layer 3: Pack loading orchestration
+   Layer 4: Trust validation (N1 §2.10.2)
 
    Supports two formats:
    - Single EDN file: pack.edn or *.pack.edn
-   - Directory structure with pack.edn manifest and rules/ subdirectory"
+   - Directory structure with pack.edn manifest and rules/ subdirectory
+
+   Trust validation ensures:
+   - Instruction authority is not transitive
+   - Trust level inheritance (lowest wins)
+   - Cross-trust references are validated
+   - Tainted content is isolated from instruction authority"
   (:require
    [ai.miniforge.policy-pack.schema :as schema]
    [ai.miniforge.policy-pack.rules.pack-dependency-validation :as dep-validation]
+   [ai.miniforge.knowledge.interface :as knowledge]
    [clojure.java.io :as io]
    [clojure.edn :as edn]
+   [clojure.pprint :as pprint]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -92,7 +101,11 @@
       (update :pack/rules #(mapv normalize-rule (or % [])))
       (update :pack/categories #(or % []))
       (update :pack/created-at ensure-instant)
-      (update :pack/updated-at ensure-instant)))
+      (update :pack/updated-at ensure-instant)
+      ;; Default trust metadata
+      (update :pack/trust-level #(or % :untrusted))
+      (update :pack/authority #(or % :authority/data))
+      (update :pack/dependencies #(or % []))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Single file loader
@@ -366,11 +379,119 @@
   [pack file-path]
   (try
     (let [content (with-out-str
-                    (clojure.pprint/pprint pack))]
+                    (pprint/pprint pack))]
       (spit file-path content)
       {:success? true :error nil})
     (catch Exception e
       {:success? false :error (.getMessage e)})))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Trust validation (N1 §2.10.2)
+
+(defn- pack->trust-ref
+  "Convert a pack manifest to a trust reference for validation."
+  [pack]
+  (knowledge/make-pack-ref
+   (:pack/id pack)
+   (:pack/trust-level pack :untrusted)
+   (:pack/authority pack :authority/data)
+   :dependencies (mapv :pack-id (:pack/extends pack []))))
+
+(defn validate-pack-trust
+  "Validate transitive trust rules for a pack.
+
+   Arguments:
+   - pack        - PackManifest to validate
+   - pack-store  - Map of pack-id -> PackManifest for dependency resolution
+
+   Returns:
+   - {:valid? true} if all trust rules pass
+   - {:valid? false :errors [...]} if any rule fails
+
+   Validates:
+   1. Instruction authority is not transitive
+   2. Trust level inheritance
+   3. Cross-trust references (no cycles, missing deps)
+   4. Tainted isolation
+
+   Example:
+     (validate-pack-trust pack {\"dep-pack\" dep-pack-manifest})"
+  [pack pack-store]
+  (let [pack-id (:pack/id pack)
+        pack-ref (pack->trust-ref pack)
+
+        ;; Build trust graph: pack + all dependencies
+        dep-refs (reduce
+                  (fn [acc dep]
+                    (let [dep-id (:pack-id dep)
+                          dep-pack (get pack-store dep-id)]
+                      (if dep-pack
+                        (assoc acc dep-id (pack->trust-ref dep-pack))
+                        acc)))
+                  {}
+                  (:pack/extends pack []))
+
+        trust-graph (assoc dep-refs pack-id pack-ref)]
+
+    ;; Validate all transitive trust rules
+    (try
+      (let [result (knowledge/validate-transitive-trust trust-graph)]
+        (if (:valid? result)
+          {:valid? true}
+          {:valid? false
+           :errors (:errors result)}))
+      (catch Exception e
+        {:valid? false
+         :errors [(str "Trust validation error: " (.getMessage e))]}))))
+
+(defn load-pack-with-trust-validation
+  "Load a pack and validate trust rules.
+
+   This is the recommended entry point for loading packs with trust enforcement.
+
+   Arguments:
+   - path        - File or directory path
+   - pack-store  - Map of pack-id -> PackManifest for dependency resolution
+   - options     - Optional map:
+     - :skip-trust-validation? - Skip trust validation (default: false)
+     - :trust-level            - Override trust level
+     - :authority              - Override authority channel
+
+   Returns:
+   - {:success? bool :pack PackManifest :errors [...] :trust-result {...}}
+
+   Example:
+     (load-pack-with-trust-validation \"./packs/my-pack\" loaded-packs-map)"
+  [path pack-store & [options]]
+  (let [load-result (load-pack path)
+        skip-trust? (:skip-trust-validation? options false)]
+
+    (if-not (:success? load-result)
+      load-result  ; Return load errors immediately
+
+      ;; Apply overrides if provided
+      (let [pack (cond-> (:pack load-result)
+                   (:trust-level options)
+                   (assoc :pack/trust-level (:trust-level options))
+
+                   (:authority options)
+                   (assoc :pack/authority (:authority options)))
+
+            ;; Validate trust rules
+            trust-result (if skip-trust?
+                          {:valid? true :skipped? true}
+                          (validate-pack-trust pack pack-store))]
+
+        (if (:valid? trust-result)
+          {:success? true
+           :pack pack
+           :errors (:errors load-result)  ; Non-fatal load warnings
+           :trust-result trust-result}
+          {:success? false
+           :pack nil
+           :errors (concat (:errors load-result [])
+                          (:errors trust-result))
+           :trust-result trust-result})))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
@@ -402,5 +523,51 @@
                    :rule/applies-to {:task-types [:import]}  ; vector, not set
                    :rule/detection {:type :content-scan}
                    :rule/enforcement {:action :warn :message "Warning"}})
+
+  ;; Trust validation examples
+  (def base-pack
+    {:pack/id "base-pack"
+     :pack/name "Base Pack"
+     :pack/version "1.0.0"
+     :pack/description "Base rules"
+     :pack/author "system"
+     :pack/trust-level :trusted
+     :pack/authority :authority/instruction
+     :pack/categories []
+     :pack/rules []
+     :pack/created-at (java.time.Instant/now)
+     :pack/updated-at (java.time.Instant/now)})
+
+  (def untrusted-pack
+    {:pack/id "untrusted-pack"
+     :pack/name "Untrusted Pack"
+     :pack/version "1.0.0"
+     :pack/description "External rules"
+     :pack/author "external"
+     :pack/trust-level :untrusted
+     :pack/authority :authority/data  ; Must be data-only
+     :pack/extends [{:pack-id "base-pack"}]
+     :pack/categories []
+     :pack/rules []
+     :pack/created-at (java.time.Instant/now)
+     :pack/updated-at (java.time.Instant/now)})
+
+  ;; Validate trust rules (should pass)
+  (validate-pack-trust untrusted-pack {"base-pack" base-pack})
+  ;; => {:valid? true}
+
+  ;; Invalid: untrusted pack with instruction authority
+  (def invalid-pack
+    (assoc untrusted-pack :pack/authority :authority/instruction))
+
+  (validate-pack-trust invalid-pack {"base-pack" base-pack})
+  ;; => {:valid? false :errors [...]}
+
+  ;; Load with trust validation
+  (load-pack-with-trust-validation
+   "./packs/my-pack"
+   {"base-pack" base-pack}
+   {:trust-level :trusted
+    :authority :authority/instruction})
 
   :leave-this-here)
