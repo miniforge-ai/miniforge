@@ -240,11 +240,18 @@
   ;; ──────────────────────────────────────────────────────────────────────────
 
   install:local
-  {:doc  "Install built CLI to ~/.local/bin/mf"
+  {:doc  "Build and install CLI to ~/.local/bin/mf (cleans old build first)"
    :task (let [jar-source "dist/miniforge.jar"
                bin-dir (str (System/getProperty "user.home") "/.local/bin")
                jar-target (str bin-dir "/miniforge.jar")
                script-target (str bin-dir "/mf")]
+           ;; Clean old build
+           (when (fs/exists? jar-source)
+             (println "🗑️  Removing old build:" jar-source)
+             (fs/delete jar-source))
+           ;; Build fresh
+           (run 'build:cli)
+           ;; Install
            (if (fs/exists? jar-source)
              (do
                (println "📦 Installing miniforge CLI to" bin-dir)
