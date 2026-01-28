@@ -31,7 +31,8 @@
    [ai.miniforge.gate.test]
    [ai.miniforge.gate.policy]
    [ai.miniforge.gate.registry :as registry]
-   [ai.miniforge.response.interface :as response]))
+   [ai.miniforge.response.interface :as response]
+   [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Re-export registry functions
@@ -96,15 +97,9 @@
         (let [result (repair artifact errors ctx)]
           (assoc result :gate gate-kw))
         (catch Exception ex
-          {:success? false
-           :gate gate-kw
-           :artifact artifact
-           :error {:message (ex-message ex)
-                   :data (ex-data ex)}}))
-      {:success? false
-       :gate gate-kw
-       :artifact artifact
-       :error {:message "No repair function for gate"}})))
+          (schema/exception-failure :artifact ex {:gate gate-kw :artifact artifact})))
+      (schema/failure :artifact {:message "No repair function for gate"}
+                      {:gate gate-kw :artifact artifact}))))
 
 (defn check-gates
   "Run multiple gates on an artifact.
