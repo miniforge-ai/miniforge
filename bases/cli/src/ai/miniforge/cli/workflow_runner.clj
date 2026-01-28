@@ -333,3 +333,59 @@
     (catch Exception e
       (println (colorize :red (str "Failed to list workflows: " (ex-message e))))
       (throw e))))
+
+(defn run-workflow-from-spec!
+  "Execute a workflow from an arbitrary spec (not from catalog).
+
+   Arguments:
+   - spec - Normalized spec map from spec-parser
+            {:spec/title \"...\"
+             :spec/description \"...\"
+             :spec/intent {...}
+             :spec/constraints [...]}
+   - opts - Execution options
+            {:output :pretty|:json|:edn
+             :quiet boolean}
+
+   This function bridges user-provided spec files to the workflow engine.
+   It creates an ad-hoc workflow definition and executes it."
+  [spec {:keys [output quiet] :or {output :pretty quiet false} :as opts}]
+  (try
+    (let [{:keys [load-workflow run-pipeline]} (resolve-workflow-interface)]
+
+      (when-not quiet
+        (print-workflow-header
+         (keyword (str "adhoc-" (hash spec)))
+         "adhoc"
+         quiet))
+
+      ;; For now, we use the canonical SDLC workflow as the base
+      ;; and pass the spec as input context
+      ;; In future, we can support custom workflow definitions in the spec
+      (let [workflow (load-and-validate-workflow
+                      load-workflow
+                      :canonical-sdlc-v1
+                      "latest")
+
+            ;; Convert spec to workflow input
+            workflow-input {:title (:spec/title spec)
+                           :description (:spec/description spec)
+                           :intent (:spec/intent spec)
+                           :constraints (:spec/constraints spec)}
+
+            artifact-store (create-artifact-store quiet)
+            callbacks (create-phase-callbacks quiet)
+            result (execute-workflow-pipeline
+                    run-pipeline
+                    workflow
+                    workflow-input
+                    callbacks
+                    artifact-store)]
+
+        (close-artifact-store artifact-store)
+        (print-result result opts)
+        result))
+    (catch Exception e
+      (when-not quiet
+        (println (colorize :red (str "\n❌ Workflow execution failed: " (ex-message e)))))
+      (throw e))))
