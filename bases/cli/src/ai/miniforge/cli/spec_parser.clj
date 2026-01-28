@@ -18,6 +18,7 @@
    Converts user-provided workflow specs into the canonical workflow format
    expected by the workflow engine."
   (:require
+   [ai.miniforge.knowledge.interface :as knowledge]
    [babashka.fs :as fs]
    [cheshire.core :as json]
    [clojure.edn :as edn]
@@ -35,6 +36,7 @@
       "yml"  :yaml
       "edn"  :edn
       "json" :json
+      "md"   :markdown
       (throw (ex-info (str "Unsupported file format: " ext)
                       {:path path :extension ext})))))
 
@@ -43,7 +45,7 @@
 
 (defn- parse-yaml
   "Parse YAML file content."
-  [content]
+  [_content]
   ;; For now, use basic parsing that works in Babashka
   ;; In future, can add full YAML parser when needed
   (throw (ex-info "YAML support coming soon - use EDN or JSON for now"
@@ -67,6 +69,22 @@
     (catch Exception e
       (throw (ex-info "Failed to parse JSON file"
                       {:error (ex-message e)} e)))))
+
+(defn- parse-markdown
+  "Parse Markdown file with YAML frontmatter.
+   Frontmatter contains structured spec data, body is optional context."
+  [content]
+  (let [parsed (knowledge/split-frontmatter content)]
+    (when-not parsed
+      (throw (ex-info "Markdown file must have YAML frontmatter (---)"
+                      {:hint "Add frontmatter with title, description, etc."})))
+    (let [frontmatter (knowledge/parse-yaml-frontmatter (:frontmatter parsed))
+          body (:body parsed)]
+      ;; If there's body content beyond title, use it to extend description
+      (cond-> frontmatter
+        (and body (not (str/blank? body)))
+        (update :description
+                #(str % "\n\n" (str/trim body)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Spec normalization
@@ -112,11 +130,13 @@
   "Parse a workflow specification file and normalize to canonical format.
 
    Supported formats:
-   - .edn  - Clojure EDN (recommended)
-   - .json - JSON
-   - .yaml - YAML (coming soon)
+   - .edn      - Clojure EDN (recommended)
+   - .json     - JSON
+   - .md       - Markdown with YAML frontmatter
+   - .yaml/.yml - YAML (coming soon)
 
-   Returns normalized spec map ready for workflow engine.
+   Returns normalized spec map ready for workflow engine, decorated with:
+   - :spec/provenance - Source file metadata (Layer 0 decoration)
 
    Example EDN spec:
      {:title \"Refactor logging component\"
@@ -126,11 +146,15 @@
       :constraints [\"no-breaking-changes\"
                     \"maintain-test-coverage\"]}
 
-   Example JSON spec:
-     {\"title\": \"Add feature\",
-      \"description\": \"...\",
-      \"intent\": {\"type\": \"feature\"},
-      \"constraints\": [\"...\"]}
+   Example Markdown spec:
+     ---
+     title: Refactor logging component
+     description: Extract structured logging to separate component
+     intent:
+       type: refactor
+       scope: [components/logging/src]
+     constraints: [no-breaking-changes, maintain-test-coverage]
+     ---
 
    Throws ex-info on:
    - File not found
@@ -145,11 +169,19 @@
   (let [format (detect-format path)
         content (slurp path)
         parsed (case format
-                 :yaml (parse-yaml content)
-                 :edn  (parse-edn content)
-                 :json (parse-json content))]
+                 :yaml     (parse-yaml content)
+                 :edn      (parse-edn content)
+                 :json     (parse-json content)
+                 :markdown (parse-markdown content))
+        normalized (normalize-spec parsed)]
 
-    (normalize-spec parsed)))
+    ;; Layer 0 decoration: Add provenance at parse time
+    (assoc normalized
+           :spec/provenance
+           {:source-file (str path)
+            :source-format format
+            :loaded-at (java.util.Date.)
+            :file-size (.length (fs/file path))})))
 
 (defn validate-spec
   "Validate that a spec has all required fields.

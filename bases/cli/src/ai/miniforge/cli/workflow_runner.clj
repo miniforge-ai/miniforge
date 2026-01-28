@@ -6,6 +6,7 @@
    [clojure.java.io :as io]
    [clojure.pprint]
    [babashka.fs :as fs]
+   [babashka.process :as p]
    [cheshire.core :as json]))
 
 ;; Input Processing
@@ -224,7 +225,66 @@
                   artifact-store (assoc :artifact-store artifact-store))]
     (run-pipeline workflow input context)))
 
-;; Layer 3: Orchestration
+;; Layer 3: Runtime decoration
+
+(defn- get-git-info
+  "Get current git branch and commit. Returns nil if not in git repo or git unavailable."
+  []
+  (try
+    (let [branch-result (p/shell {:out :string :err :string :continue true}
+                                  "git" "rev-parse" "--abbrev-ref" "HEAD")
+          commit-result (p/shell {:out :string :err :string :continue true}
+                                 "git" "rev-parse" "--short" "HEAD")]
+      (when (and (zero? (:exit branch-result))
+                 (zero? (:exit commit-result)))
+        {:git-branch (str/trim (:out branch-result))
+         :git-commit (str/trim (:out commit-result))}))
+    (catch Exception _ nil)))
+
+(defn- get-files-in-scope
+  "Extract files from intent scope, resolving glob patterns."
+  [intent]
+  (let [scope-paths (get intent :scope [])]
+    (vec
+     (mapcat
+      (fn [path]
+        (try
+          (if (fs/exists? path)
+            (if (fs/directory? path)
+              ;; Directory: return as-is, workflow can explore
+              [path]
+              ;; File: return file path
+              [path])
+            ;; Might be a glob or doesn't exist yet
+            [path])
+          (catch Exception _ [path])))
+      scope-paths))))
+
+(defn- decorate-spec-with-runtime-context
+  "Layer 1 decoration: Add runtime context and metadata to spec.
+
+   Adds:
+   - :spec/context   - Runtime environment (cwd, git, files-in-scope)
+   - :spec/metadata  - Execution tracking (submitted-at, session-id, iteration)
+
+   This follows the interceptor pattern where each layer adds what it knows."
+  [spec {:keys [iteration parent-task-id] :or {iteration 1}}]
+  (let [git-info (get-git-info)
+        files-in-scope (get-files-in-scope (:spec/intent spec))]
+    (assoc spec
+           :spec/context
+           (cond-> {:cwd (str (fs/cwd))
+                    :files-in-scope files-in-scope
+                    :environment :development}
+             git-info (merge git-info))
+
+           :spec/metadata
+           (cond-> {:submitted-at (java.util.Date.)
+                    :session-id (random-uuid)
+                    :iteration iteration}
+             parent-task-id (assoc :parent-task-id parent-task-id)))))
+
+;; Layer 4: Orchestration
 
 (defn run-workflow!
   "Main entry point - load, execute, and display workflow results.
@@ -349,7 +409,7 @@
 
    This function bridges user-provided spec files to the workflow engine.
    It creates an ad-hoc workflow definition and executes it."
-  [spec {:keys [output quiet] :or {output :pretty quiet false} :as opts}]
+  [spec {:keys [quiet] :or {quiet false} :as opts}]
   (try
     (let [{:keys [load-workflow run-pipeline]} (resolve-workflow-interface)]
 
@@ -367,11 +427,18 @@
                       :canonical-sdlc-v1
                       "latest")
 
-            ;; Convert spec to workflow input
-            workflow-input {:title (:spec/title spec)
-                           :description (:spec/description spec)
-                           :intent (:spec/intent spec)
-                           :constraints (:spec/constraints spec)}
+            ;; Layer 1 decoration: Add runtime context and metadata
+            enriched-spec (decorate-spec-with-runtime-context spec opts)
+
+            ;; Convert enriched spec to workflow input
+            ;; The workflow engine receives the full decorated spec
+            workflow-input {:title (:spec/title enriched-spec)
+                           :description (:spec/description enriched-spec)
+                           :intent (:spec/intent enriched-spec)
+                           :constraints (:spec/constraints enriched-spec)
+                           :context (:spec/context enriched-spec)
+                           :metadata (:spec/metadata enriched-spec)
+                           :provenance (:spec/provenance enriched-spec)}
 
             artifact-store (create-artifact-store quiet)
             callbacks (create-phase-callbacks quiet)
