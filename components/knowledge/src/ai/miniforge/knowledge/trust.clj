@@ -17,6 +17,7 @@
    - :authority/data        - Reference material only (any trust level)"
   (:require
    [ai.miniforge.algorithms.interface :as alg]
+   [ai.miniforge.schema.interface :as schema]
    [clojure.string]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -93,15 +94,15 @@
    - {:valid? false :error \"...\"} if rule fails"
   [source-pack target-pack]
   (if (not= :authority/instruction (:authority source-pack))
-    {:valid? true}  ; Rule only applies to instruction-authority packs
+    (schema/valid)  ; Rule only applies to instruction-authority packs
     (if (and (= :authority/instruction (:authority target-pack))
              (not= :trusted (:trust-level target-pack)))
-      {:valid? false
-       :error (str "Instruction authority cannot be granted transitively: "
-                   "Pack " (:pack-id target-pack) " is " (:trust-level target-pack)
-                   " but has :authority/instruction. "
-                   "Only :trusted packs may have instruction authority.")}
-      {:valid? true})))
+      (schema/invalid
+       (str "Instruction authority cannot be granted transitively: "
+            "Pack " (:pack-id target-pack) " is " (:trust-level target-pack)
+            " but has :authority/instruction. "
+            "Only :trusted packs may have instruction authority."))
+      (schema/valid))))
 
 (defn compute-inherited-trust-level
   "Rule 2: Trust level inheritance.
@@ -137,13 +138,12 @@
    (fn [pack-id _node context]
      (cond
        (:cycle? context)
-       {:valid? false
-        :error (str "Circular dependency detected: "
-                    (clojure.string/join " -> " (:path context)))}
+       (schema/invalid
+        (str "Circular dependency detected: "
+             (clojure.string/join " -> " (:path context))))
 
        (:missing? context)
-       {:valid? false
-        :error (str "Missing dependency: " pack-id)}
+       (schema/invalid (str "Missing dependency: " pack-id))
 
        :else nil))))
 
@@ -163,19 +163,19 @@
   [pack-id pack-graph]
   (let [pack-ref (get pack-graph pack-id)]
     (if (not= :authority/instruction (:authority pack-ref))
-      {:valid? true}  ; Rule only applies to instruction packs
+      (schema/valid)  ; Rule only applies to instruction packs
       (if-let [found (alg/dfs-find
                       pack-graph
                       pack-id
                       (fn [pack-ref] (:dependencies pack-ref))
                       (fn [_node-id node _path]
                         (= :tainted (:trust-level node))))]
-        {:valid? false
-         :error (str "Pack " pack-id " has :authority/instruction but "
-                     "transitively includes tainted content from "
-                     (:found-id found))
-         :tainted-path (:path found)}
-        {:valid? true}))))
+        (schema/invalid
+         (str "Pack " pack-id " has :authority/instruction but "
+              "transitively includes tainted content from "
+              (:found-id found))
+         {:tainted-path (:path found)})
+        (schema/valid)))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Combined validation helpers
@@ -265,10 +265,8 @@
     (let [errors (concat (collect-authority-errors pack-graph)
                          (collect-tainted-errors pack-graph))]
       (if (empty? errors)
-        {:valid? true
-         :packs (keys pack-graph)}
-        {:valid? false
-         :errors (vec errors)}))))
+        (schema/valid {:packs (keys pack-graph)})
+        (schema/invalid-with-errors (vec errors))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
