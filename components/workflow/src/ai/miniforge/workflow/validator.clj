@@ -37,13 +37,15 @@
 (defn validate-schema
   "Validate workflow config against Malli schema.
 
-   For now, this performs basic structural validation without full Malli.
+   Supports both old (:workflow/phases) and new (:workflow/pipeline) formats.
 
    Returns:
    {:valid? boolean
     :errors [string]}"
   [config]
-  (let [errors (atom [])]
+  (let [errors (atom [])
+        has-phases? (:workflow/phases config)
+        has-pipeline? (:workflow/pipeline config)]
 
     ;; Check required top-level keys
     (when-not (:workflow/id config)
@@ -54,14 +56,14 @@
       (swap! errors conj "Missing required key: :workflow/name"))
     (when-not (:workflow/description config)
       (swap! errors conj "Missing required key: :workflow/description"))
-    (when-not (:workflow/created-at config)
-      (swap! errors conj "Missing required key: :workflow/created-at"))
-    (when-not (:workflow/task-types config)
-      (swap! errors conj "Missing required key: :workflow/task-types"))
-    (when-not (:workflow/phases config)
-      (swap! errors conj "Missing required key: :workflow/phases"))
 
-    ;; Check phases is a vector
+    ;; created-at and task-types are optional (new pipeline format doesn't require them)
+
+    ;; Must have either phases or pipeline
+    (when-not (or has-phases? has-pipeline?)
+      (swap! errors conj "Missing required key: :workflow/phases or :workflow/pipeline"))
+
+    ;; Validate phases format (old format)
     (when-let [phases (:workflow/phases config)]
       (when-not (vector? phases)
         (swap! errors conj ":workflow/phases must be a vector"))
@@ -77,7 +79,19 @@
         (when-not (:phase/next phase)
           (swap! errors conj (str "Phase " idx " missing :phase/next")))))
 
-    ;; Check task-types is a vector
+    ;; Validate pipeline format (new format)
+    (when-let [pipeline (:workflow/pipeline config)]
+      (when-not (vector? pipeline)
+        (swap! errors conj ":workflow/pipeline must be a vector"))
+
+      ;; Check each pipeline entry
+      (doseq [[idx entry] (map-indexed vector pipeline)]
+        (when-not (map? entry)
+          (swap! errors conj (str "Pipeline entry " idx " must be a map")))
+        (when-not (:phase entry)
+          (swap! errors conj (str "Pipeline entry " idx " missing :phase keyword")))))
+
+    ;; Check task-types is a vector if present
     (when-let [task-types (:workflow/task-types config)]
       (when-not (vector? task-types)
         (swap! errors conj ":workflow/task-types must be a vector")))
@@ -121,10 +135,11 @@
   "Validate workflow DAG structure.
    Checks:
    - At least one phase exists
-   - All phases referenced in transitions exist
-   - All phases are reachable from entry phase (first phase)
+   - All phases referenced in transitions exist (old format only)
+   - All phases are reachable from entry phase (old format only)
 
-   Note: Cycles are allowed (for retry/rollback patterns)
+   Note: Pipeline format is linear by default, so DAG validation is simpler.
+   Cycles are allowed in old format (for retry/rollback patterns).
 
    Returns:
    {:valid? boolean
@@ -132,33 +147,42 @@
   [config]
   (let [errors (atom [])
         phases (:workflow/phases config)
-        phase-ids (set (map :phase/id phases))
-        entry-phase (when (seq phases) (:phase/id (first phases)))
-        graph (build-phase-graph phases)]
+        pipeline (:workflow/pipeline config)]
 
-    ;; Check we have at least one phase
-    (when (empty? phases)
-      (swap! errors conj "Workflow must have at least one phase"))
+    ;; Pipeline format validation (new format)
+    (when pipeline
+      (when (empty? pipeline)
+        (swap! errors conj "Workflow must have at least one phase")))
 
-    ;; Check all transition targets exist
-    (doseq [phase phases]
-      (let [phase-id (:phase/id phase)
-            next-transitions (:phase/next phase [])]
-        (doseq [transition next-transitions]
-          (when-let [target (:target transition)]
-            (when-not (contains? phase-ids target)
-              (swap! errors conj (str "Phase " phase-id " references non-existent phase: " target)))))))
+    ;; Phases format validation (old format)
+    (when phases
+      (let [phase-ids (set (map :phase/id phases))
+            entry-phase (when (seq phases) (:phase/id (first phases)))
+            graph (build-phase-graph phases)]
 
-    ;; Note: We don't check for cycles because workflows commonly have
-    ;; intentional cycles for retry/rollback logic (e.g., verify -> implement on failure)
-    ;; Cycles are a valid workflow pattern
+        ;; Check we have at least one phase
+        (when (empty? phases)
+          (swap! errors conj "Workflow must have at least one phase"))
 
-    ;; Check reachability (only if no errors so far)
-    (when (and entry-phase (empty? @errors))
-      (let [reachable (reachable-phases graph entry-phase)
-            unreachable (set/difference phase-ids reachable)]
-        (when (seq unreachable)
-          (swap! errors conj (str "Unreachable phases: " (vec unreachable))))))
+        ;; Check all transition targets exist
+        (doseq [phase phases]
+          (let [phase-id (:phase/id phase)
+                next-transitions (:phase/next phase [])]
+            (doseq [transition next-transitions]
+              (when-let [target (:target transition)]
+                (when-not (contains? phase-ids target)
+                  (swap! errors conj (str "Phase " phase-id " references non-existent phase: " target)))))))
+
+        ;; Note: We don't check for cycles because workflows commonly have
+        ;; intentional cycles for retry/rollback logic (e.g., verify -> implement on failure)
+        ;; Cycles are a valid workflow pattern
+
+        ;; Check reachability (only if no errors so far)
+        (when (and entry-phase (empty? @errors))
+          (let [reachable (reachable-phases graph entry-phase)
+                unreachable (set/difference phase-ids reachable)]
+            (when (seq unreachable)
+              (swap! errors conj (str "Unreachable phases: " (vec unreachable))))))))
 
     {:valid? (empty? @errors)
      :errors @errors}))

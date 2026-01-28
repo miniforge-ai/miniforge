@@ -419,12 +419,12 @@
          "adhoc"
          quiet))
 
-      ;; For now, we use the canonical SDLC workflow as the base
-      ;; and pass the spec as input context
+      ;; Try new pipeline format first (simple-v2), fall back to old format
+      ;; Pipeline format: :workflow/pipeline [{:phase :plan} {:phase :implement}]
       ;; In future, we can support custom workflow definitions in the spec
       (let [workflow (load-and-validate-workflow
                       load-workflow
-                      :canonical-sdlc-v1
+                      :simple
                       "latest")
 
             ;; Layer 1 decoration: Add runtime context and metadata

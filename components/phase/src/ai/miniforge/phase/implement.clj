@@ -18,7 +18,8 @@
    Generates code artifacts from plans.
    Agent: :implementer
    Default gates: [:syntax :lint]"
-  (:require [ai.miniforge.phase.registry :as registry]))
+  (:require [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.agent.interface :as agent]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
@@ -43,15 +44,40 @@
    runs through inner loop with syntax/lint gates."
   [ctx]
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
-        {:keys [agent gates budget]} config
-        start-time (System/currentTimeMillis)]
+        {:keys [gates budget]} config
+        start-time (System/currentTimeMillis)
+
+        ;; Create implementer agent
+        implementer (agent/create-agent :implementer {})
+
+        ;; Build task from workflow input and plan result
+        input (get-in ctx [:execution/input])
+        plan-result (get-in ctx [:phase :result]) ; From plan phase
+        task {:task/id (random-uuid)
+              :task/type :implement
+              :task/description (:description input)
+              :task/title (:title input)
+              :task/intent (:intent input)
+              :task/constraints (:constraints input)
+              :task/plan plan-result} ; Pass plan output to implementer
+
+        ;; Invoke agent
+        result (try
+                 (agent/invoke implementer task ctx)
+                 (catch Exception e
+                   {:success false
+                    :error {:message (ex-message e)
+                            :data (ex-data e)}
+                    :metrics {:tokens 0 :duration-ms 0}}))]
+
     (-> ctx
         (assoc-in [:phase :name] :implement)
-        (assoc-in [:phase :agent] agent)
+        (assoc-in [:phase :agent] :implementer)
         (assoc-in [:phase :gates] gates)
         (assoc-in [:phase :budget] budget)
         (assoc-in [:phase :started-at] start-time)
-        (assoc-in [:phase :status] :running))))
+        (assoc-in [:phase :status] :running)
+        (assoc-in [:phase :result] result))))
 
 (defn- leave-implement
   "Post-processing for implementation phase.
@@ -61,14 +87,20 @@
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
         duration-ms (- end-time start-time)
+        result (get-in ctx [:phase :result])
+        metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
         iterations (get-in ctx [:phase :iterations] 1)]
     (-> ctx
         (assoc-in [:phase :ended-at] end-time)
         (assoc-in [:phase :duration-ms] duration-ms)
         (assoc-in [:phase :status] :completed)
+        (assoc-in [:phase :metrics] metrics)
         (assoc-in [:metrics :implementation :duration-ms] duration-ms)
         (assoc-in [:metrics :implementation :repair-cycles] (dec iterations))
-        (update-in [:execution :phases-completed] (fnil conj []) :implement))))
+        (update-in [:execution :phases-completed] (fnil conj []) :implement)
+        ;; Merge agent metrics into execution metrics
+        (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
+        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))))
 
 (defn- error-implement
   "Handle implementation phase errors.

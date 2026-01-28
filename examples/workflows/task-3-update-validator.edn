@@ -1,0 +1,33 @@
+{:title "Update workflow validator for pipeline format"
+ :description "Update workflow validator to support new :workflow/pipeline format instead of old :workflow/phases format.
+
+Current problem:
+- Validator (components/workflow/src/ai/miniforge/workflow/validator.clj) requires :workflow/phases
+- New workflows use :workflow/pipeline format
+- This blocks loading modern workflows like simple-v2.0.0.edn
+
+Required changes:
+1. Accept :workflow/pipeline as valid alternative to :workflow/phases
+2. Validate pipeline entries have :phase keyword
+3. Remove requirement for :workflow/entry-phase (infer from first pipeline entry)
+4. Update validation error messages to mention both formats
+5. Ensure backward compatibility - both formats should work
+
+Test workflows:
+- simple-v2.0.0.edn (new format) should validate
+- simple-test-v1.0.0.edn (old format) should still validate
+
+Reference spec: specs/normative/N2-workflows.md"
+
+ :intent {:type :feature
+          :scope ["components/workflow/src/ai/miniforge/workflow/validator.clj"
+                  "components/workflow/test/ai/miniforge/workflow/validator_test.clj"]}
+
+ :constraints ["maintain-backward-compatibility"
+               "validate-both-formats"
+               "include-tests"
+               "follow-existing-validation-pattern"]
+
+ :tags [:workflow :validation :migration :task-3]
+
+ :context "Part of interceptor-based workflow migration. This is blocking the other migration tasks - must complete first."}
