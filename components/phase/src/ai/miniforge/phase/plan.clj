@@ -20,7 +20,7 @@
    Default gates: [:plan-complete]"
   (:require [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.agent.interface :as agent]
-            [ai.miniforge.agent.planner :as planner]))
+            [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
@@ -49,7 +49,7 @@
         start-time (System/currentTimeMillis)
 
         ;; Create planner agent (specialized implementation uses llm/chat directly)
-        planner-agent (planner/create-planner {})
+        planner-agent (agent/create-planner {})
 
         ;; Build task from workflow input
         input (get-in ctx [:execution/input])
@@ -64,10 +64,7 @@
         result (try
                  (agent/invoke planner-agent task ctx)
                  (catch Exception e
-                   {:success false
-                    :error {:message (ex-message e)
-                            :data (ex-data e)}
-                    :metrics {:tokens 0 :duration-ms 0}}))]
+                   (response/failure e)))]
 
     (-> ctx
         (assoc-in [:phase :name] :plan)

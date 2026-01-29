@@ -26,7 +26,8 @@
    4. Get summary:    (summarize chain)"
   (:require
    [ai.miniforge.response.chain :as chain]
-   [ai.miniforge.response.anomaly :as anomaly]))
+   [ai.miniforge.response.anomaly :as anomaly]
+   [ai.miniforge.response.builder :as builder]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Chain creation
@@ -251,6 +252,50 @@
 
    Returns :general, :phase, :gate, :agent, :workflow, or nil."
   anomaly/anomaly-category)
+
+;------------------------------------------------------------------------------ Layer 6
+;; Response Builders
+
+(def success
+  "Create a canonical success response.
+
+   Arguments:
+   - output: The main result data
+   - opts: Optional map with :metrics, :artifact, :tokens, :duration-ms
+
+   Example:
+     (success test-artifact {:tokens 100 :duration-ms 500})"
+  builder/success)
+
+(def error
+  "Create a canonical error response.
+
+   Arguments:
+   - message: Error message string or Exception
+   - opts: Optional map with :data, :metrics, :output, :tokens, :duration-ms
+
+   Example:
+     (error \"Test failed\" {:tokens 50 :duration-ms 200})
+     (error ex {:data (ex-data ex)})"
+  builder/error)
+
+(def failure
+  "Create a canonical failure response (alias for error with :success false).
+
+   Example:
+     (failure \"Agent timeout\" {:tokens 0 :duration-ms 5000})"
+  builder/failure)
+
+(def validation-result
+  "Create validation result map.
+
+   Arguments:
+   - errors: Vector of error strings (empty = valid)
+
+   Example:
+     (validation-result [])
+     (validation-result [\"Missing field\" \"Invalid format\"])"
+  builder/validation-result)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

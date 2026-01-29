@@ -3,23 +3,35 @@
    Handles writing code artifacts to disk."
   (:require
    [clojure.java.io :as io]
-   [clojure.edn :as edn]))
+   [clojure.edn :as edn]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; File Operations
 
 (defn- write-file
   "Write content to a file path.
-   Creates parent directories if needed."
-  [path content]
-  (io/make-parents path)
-  (spit path content))
+   Creates parent directories if needed.
 
-(defn- delete-file
+   Returns: {:path path :action action :success true/false :error optional}"
+  [path content action]
+  (try
+    (io/make-parents path)
+    (spit path content)
+    {:path path :action action :success true}
+    (catch Exception e
+      {:path path :action action :success false :error (.getMessage e)})))
+
+(defn- delete-file-safe
   "Delete a file if it exists.
-   Returns true if deleted, false if file didn't exist."
+
+   Returns: {:path path :action :delete :success true/false :error optional}"
   [path]
-  (io/delete-file path true))
+  (try
+    (io/delete-file path true)
+    {:path path :action :delete :success true}
+    (catch Exception e
+      {:path path :action :delete :success false :error (.getMessage e)})))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Artifact File Extraction
@@ -46,34 +58,11 @@
      (extract-file {:path \"src/old.clj\"
                     :action :delete})"
   [{:keys [path content action]}]
-  (try
-    (case action
-      :create
-      (do
-        (write-file path content)
-        {:path path :action :create :success true})
-
-      :modify
-      (do
-        (write-file path content)
-        {:path path :action :modify :success true})
-
-      :delete
-      (do
-        (delete-file path)
-        {:path path :action :delete :success true})
-
-      ;; Unknown action
-      {:path path
-       :action action
-       :success false
-       :error (str "Unknown action: " action)})
-
-    (catch Exception e
-      {:path path
-       :action action
-       :success false
-       :error (.getMessage e)})))
+  (case action
+    (:create :modify) (write-file path content action)
+    :delete (delete-file-safe path)
+    {:path path :action action :success false
+     :error (str "Unknown action: " action)}))
 
 (defn extract-files
   "Extract multiple files from artifact and write to disk.
@@ -142,6 +131,13 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation
 
+(defn- add-error
+  "Add an error to the errors vector if condition is true."
+  [errors condition message]
+  (if condition
+    (conj errors message)
+    errors))
+
 (defn validate-artifact
   "Validate that an artifact has the required structure for extraction.
 
@@ -157,22 +153,17 @@
      => {:valid? false
          :errors [\"Missing :code/files\"]}"
   [artifact]
-  (let [errors (cond-> []
-                 (not (map? artifact))
-                 (conj "Artifact must be a map")
-
-                 (and (map? artifact)
-                      (not (contains? artifact :code/files)))
-                 (conj "Missing :code/files")
-
-                 (and (map? artifact)
-                      (contains? artifact :code/files)
-                      (not (vector? (:code/files artifact))))
-                 (conj ":code/files must be a vector"))]
-    (if (empty? errors)
-      {:valid? true}
-      {:valid? false
-       :errors errors})))
+  (let [errors (-> []
+                   (add-error (not (map? artifact))
+                             "Artifact must be a map")
+                   (add-error (and (map? artifact)
+                                   (not (contains? artifact :code/files)))
+                             "Missing :code/files")
+                   (add-error (and (map? artifact)
+                                   (contains? artifact :code/files)
+                                   (not (vector? (:code/files artifact))))
+                             ":code/files must be a vector"))]
+    (response/validation-result errors)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 

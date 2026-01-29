@@ -20,7 +20,9 @@
    Default gates: [:tests-pass :coverage]"
   (:require [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.agent.interface :as agent]
-            [ai.miniforge.agent.tester :as tester]))
+            [ai.miniforge.agent.tester :as tester]
+            [ai.miniforge.task.interface :as task]
+            [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
@@ -60,26 +62,14 @@
         code-artifact (or implement-result
                          (:task/code-artifact input)
                          (:code-artifact input))
-        ;; CRITICAL FIX: Pass task in format expected by tester agent
-        ;; The tester agent expects {:code <artifact> :spec <metadata>}
-        ;; NOT {:task/code <artifact>}
-        task {:task/id (random-uuid)
-              :task/type :verify
-              :code code-artifact  ; Pass code artifact in expected format
-              :spec {:description (:description input)
-                     :title (:title input)
-                     :intent (:intent input)
-                     :constraints (:constraints input)
-                     :task/acceptance-criteria (:task/acceptance-criteria input)}}
+        ;; Build task using canonical builder
+        task (task/verify-task code-artifact input)
 
         ;; Invoke agent
         result (try
                  (agent/invoke tester-agent task ctx)
                  (catch Exception e
-                   {:success false
-                    :error {:message (ex-message e)
-                            :data (ex-data e)}
-                    :metrics {:tokens 0 :duration-ms 0}}))]
+                   (response/failure e)))]
 
     (-> ctx
         (assoc-in [:phase :name] :verify)

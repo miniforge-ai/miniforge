@@ -20,7 +20,7 @@
    Default gates: [:review-approved :quality-check]"
   (:require [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.agent.interface :as agent]
-            [ai.miniforge.agent.reviewer :as reviewer]))
+            [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
@@ -48,7 +48,7 @@
         start-time (System/currentTimeMillis)
 
         ;; Create reviewer agent (does not use LLM - runs gates)
-        reviewer-agent (reviewer/create-reviewer {:gates (map (fn [gate-name]
+        reviewer-agent (agent/create-reviewer {:gates (map (fn [gate-name]
                                                                  ;; This is simplified - in real implementation
                                                                  ;; would resolve gate-name to actual gate impl
                                                                  {:gate/id gate-name
@@ -73,10 +73,7 @@
         result (try
                  (agent/invoke reviewer-agent task ctx)
                  (catch Exception e
-                   {:success false
-                    :error {:message (ex-message e)
-                            :data (ex-data e)}
-                    :metrics {:tokens 0 :duration-ms 0}}))]
+                   (response/failure e)))]
 
     (-> ctx
         (assoc-in [:phase :name] :review)

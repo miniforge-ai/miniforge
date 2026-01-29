@@ -20,7 +20,7 @@
    Default gates: [:syntax :lint]"
   (:require [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.agent.interface :as agent]
-            [ai.miniforge.agent.implementer :as implementer]))
+            [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
@@ -49,7 +49,7 @@
         start-time (System/currentTimeMillis)
 
         ;; Create implementer agent (specialized implementation uses llm/chat directly)
-        implementer-agent (implementer/create-implementer {})
+        implementer-agent (agent/create-implementer {})
 
         ;; Build task from workflow input and plan result
         input (get-in ctx [:execution/input])
@@ -66,10 +66,7 @@
         result (try
                  (agent/invoke implementer-agent task ctx)
                  (catch Exception e
-                   {:success false
-                    :error {:message (ex-message e)
-                            :data (ex-data e)}
-                    :metrics {:tokens 0 :duration-ms 0}}))]
+                   (response/failure e)))]
 
     (-> ctx
         (assoc-in [:phase :name] :implement)

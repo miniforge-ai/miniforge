@@ -18,7 +18,8 @@
    Prepares release artifacts and creates PRs.
    Agent: :releaser (simplified - no LLM agent yet)
    Default gates: [:release-ready]"
-  (:require [ai.miniforge.phase.registry :as registry]))
+  (:require [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
@@ -76,16 +77,9 @@
         ;; - Handles versioning
         result (try
                  (let [artifact (create-release-artifact ctx)]
-                   {:status :success
-                    :output artifact
-                    :artifact artifact
-                    :metrics {:tokens 0
-                              :duration-ms 0}})
+                   (response/success artifact))
                  (catch Exception e
-                   {:success false
-                    :error {:message (ex-message e)
-                            :data (ex-data e)}
-                    :metrics {:tokens 0 :duration-ms 0}}))]
+                   (response/failure e)))]
 
     (-> ctx
         (assoc-in [:phase :name] :release)

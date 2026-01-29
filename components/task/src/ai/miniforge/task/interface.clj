@@ -4,7 +4,8 @@
   (:require
    [ai.miniforge.task.core :as core]
    [ai.miniforge.task.queue :as queue]
-   [ai.miniforge.task.graph :as graph]))
+   [ai.miniforge.task.graph :as graph]
+   [ai.miniforge.task.builder :as builder]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Task CRUD operations
@@ -397,6 +398,52 @@
   "Return the current state of the task store."
   []
   (core/get-store))
+
+;------------------------------------------------------------------------------ Layer 7
+;; Task Builders
+
+(def task
+  "Create a canonical task map.
+
+   Arguments:
+   - type: Task type keyword (:verify, :implement, etc.)
+   - opts: Map with optional keys (see builder/task for details)
+
+   Example:
+     (task :verify {:code artifact :spec {:title \"Test generation\"}})"
+  builder/task)
+
+(def verify-task
+  "Create a verification task.
+
+   Arguments:
+   - code-artifact: Code to generate tests for
+   - spec: Spec map with metadata
+
+   Example:
+     (verify-task code-artifact {:title \"Generate tests\"})"
+  builder/verify-task)
+
+(def review-task
+  "Create a review task.
+
+   Arguments:
+   - artifact: Code artifact to review
+   - opts: Map with :tests, :spec, etc.
+
+   Example:
+     (review-task code-artifact {:tests test-results})"
+  builder/review-task)
+
+(def implement-task
+  "Create an implementation task.
+
+   Arguments:
+   - spec: Implementation spec with requirements
+
+   Example:
+     (implement-task {:title \"Add login\" :constraints [...]})"
+  builder/implement-task)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
