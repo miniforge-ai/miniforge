@@ -20,7 +20,6 @@
    Default gates: [:tests-pass :coverage]"
   (:require [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.agent.interface :as agent]
-            [ai.miniforge.agent.tester :as tester]
             [ai.miniforge.task.interface :as task]
             [ai.miniforge.response.interface :as response]))
 
@@ -51,7 +50,7 @@
         start-time (System/currentTimeMillis)
 
         ;; Create tester agent (specialized implementation uses llm/chat directly)
-        tester-agent (tester/create-tester {})
+        tester-agent (agent/create-tester {})
 
         ;; Build task from workflow input and implementation result
         input (get-in ctx [:execution/input])
