@@ -53,14 +53,24 @@
 
         ;; Build task from workflow input and implementation result
         input (get-in ctx [:execution/input])
-        implement-result (get-in ctx [:phase :result]) ; From implement phase
+        ;; Code can come from:
+        ;; 1. Previous implement phase result (in multi-phase workflows)
+        ;; 2. Direct input as :task/code-artifact (in test-only workflows)
+        implement-result (get-in ctx [:phase :result])
+        code-artifact (or implement-result
+                         (:task/code-artifact input)
+                         (:code-artifact input))
+        ;; CRITICAL FIX: Pass task in format expected by tester agent
+        ;; The tester agent expects {:code <artifact> :spec <metadata>}
+        ;; NOT {:task/code <artifact>}
         task {:task/id (random-uuid)
               :task/type :verify
-              :task/description (:description input)
-              :task/title (:title input)
-              :task/intent (:intent input)
-              :task/constraints (:constraints input)
-              :task/code implement-result} ; Pass implementation output to tester
+              :code code-artifact  ; Pass code artifact in expected format
+              :spec {:description (:description input)
+                     :title (:title input)
+                     :intent (:intent input)
+                     :constraints (:constraints input)
+                     :task/acceptance-criteria (:task/acceptance-criteria input)}}
 
         ;; Invoke agent
         result (try

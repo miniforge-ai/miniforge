@@ -121,7 +121,12 @@
    :spec/description (:description spec)
    :spec/intent (or (:intent spec) {:type :general})
    :spec/constraints (or (:constraints spec) [])
-   :spec/tags (or (:tags spec) [])})
+   :spec/tags (or (:tags spec) [])
+   ;; Preserve workflow metadata for custom workflow selection
+   :spec/workflow-type (or (:workflow/type spec) :simple)
+   :spec/workflow-version (or (:workflow/version spec) "latest")
+   ;; Pass through all other spec keys (like :task/*)
+   :spec/raw-data spec})
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Public API

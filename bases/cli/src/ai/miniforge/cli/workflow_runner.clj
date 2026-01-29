@@ -450,26 +450,41 @@
          "adhoc"
          quiet))
 
-      ;; Try new pipeline format first (simple-v2), fall back to old format
-      ;; Pipeline format: :workflow/pipeline [{:phase :plan} {:phase :implement}]
-      ;; In future, we can support custom workflow definitions in the spec
-      (let [workflow (load-and-validate-workflow
-                      load-workflow
-                      :simple
-                      "latest")
+      ;; Load workflow specified in spec, or create inline for special cases
+      (let [workflow-type (or (:spec/workflow-type spec) :simple)
+            workflow-version (or (:spec/workflow-version spec) "latest")
+            ;; Try to load workflow, but create inline test-only if it fails and type is :test-only
+            workflow (try
+                       (load-and-validate-workflow
+                        load-workflow
+                        workflow-type
+                        workflow-version)
+                       (catch Exception e
+                         (if (= workflow-type :test-only)
+                           ;; Create inline test-only workflow (verify -> done)
+                           {:workflow/id :test-only
+                            :workflow/version "inline"
+                            :workflow/name "Test Generation"
+                            :workflow/pipeline [{:phase :verify} {:phase :done}]
+                            :workflow/config {:max-tokens 20000 :max-iterations 10}}
+                           ;; Re-throw for other workflow types
+                           (throw e))))
 
             ;; Layer 1 decoration: Add runtime context and metadata
             enriched-spec (decorate-spec-with-runtime-context spec opts)
 
             ;; Convert enriched spec to workflow input
             ;; The workflow engine receives the full decorated spec
-            workflow-input {:title (:spec/title enriched-spec)
-                           :description (:spec/description enriched-spec)
-                           :intent (:spec/intent enriched-spec)
-                           :constraints (:spec/constraints enriched-spec)
-                           :context (:spec/context enriched-spec)
-                           :metadata (:spec/metadata enriched-spec)
-                           :provenance (:spec/provenance enriched-spec)}
+            ;; Merge in raw spec data to pass through any custom fields (task/*, etc.)
+            workflow-input (merge
+                            (:spec/raw-data enriched-spec)
+                            {:title (:spec/title enriched-spec)
+                             :description (:spec/description enriched-spec)
+                             :intent (:spec/intent enriched-spec)
+                             :constraints (:spec/constraints enriched-spec)
+                             :context (:spec/context enriched-spec)
+                             :metadata (:spec/metadata enriched-spec)
+                             :provenance (:spec/provenance enriched-spec)})
 
             artifact-store (create-artifact-store quiet)
             callbacks (create-phase-callbacks quiet)
