@@ -9,6 +9,37 @@
    [babashka.process :as p]
    [cheshire.core :as json]))
 
+;; Forward declare LLM interface - will be resolved at runtime via requiring-resolve
+;; This avoids compile-time dependency on JVM-only code when running in Babashka
+
+;; LLM Backend Adapter
+;; ===================
+;; Adapts LLM component's LLMClient to Agent component's LLMBackend protocol
+
+(defn create-llm-backend-adapter
+  "Create adapter that wraps LLMClient to implement agent's LLMBackend protocol.
+
+   The agent expects: (complete [backend messages opts])
+   The LLM provides: (complete* [client request])
+
+   This adapter bridges the two interfaces."
+  [llm-client]
+  (when llm-client
+    (let [complete-fn (requiring-resolve 'ai.miniforge.llm.interface/complete)]
+      (reify
+        ;; Implement the complete method expected by agents
+        clojure.lang.IFn
+        (invoke [_this messages opts]
+          ;; Convert agent format to LLM format
+          (let [request (merge opts {:messages messages})
+                result (complete-fn llm-client request)]
+            ;; Convert LLM response to agent format
+            (if (:success result)
+              {:content (:content result)
+               :usage (:usage result)
+               :model (get-in result [:usage :model] "unknown")}
+              {:error (:error result)})))))))
+
 ;; Input Processing
 ;; ================
 
@@ -442,11 +473,27 @@
 
             artifact-store (create-artifact-store quiet)
             callbacks (create-phase-callbacks quiet)
+
+            ;; Create LLM client for agent execution
+            ;; Agents use llm/chat from ai.miniforge.llm.interface directly
+            llm-client (try
+                         (when-let [create-client (requiring-resolve 'ai.miniforge.llm.interface/create-client)]
+                           (create-client {:backend :claude}))
+                         (catch Exception e
+                           (when-not quiet
+                             (println (colorize :yellow (str "Warning: Could not create LLM client (" (ex-message e) "), agents will use fallback mode"))))
+                           nil))
+
+            ;; Add LLM client to context (agents expect it as :llm-backend)
+            context-with-llm (cond-> callbacks
+                               llm-client (assoc :llm-backend llm-client)
+                               artifact-store (assoc :artifact-store artifact-store))
+
             result (execute-workflow-pipeline
                     run-pipeline
                     workflow
                     workflow-input
-                    callbacks
+                    context-with-llm
                     artifact-store)]
 
         (close-artifact-store artifact-store)
