@@ -41,28 +41,31 @@
    Arguments:
    - workflow: Workflow configuration
    - input: Input data for the workflow
-   - opts: Execution options
+   - opts: Execution options (including :llm-backend, :artifact-store, callbacks)
 
    Returns execution context map with FSM state initialized."
   [workflow input opts]
   (let [;; Initialize FSM and transition to running state
         fsm-state (-> (fsm/initialize)
                       (fsm/transition-fsm :start))]
-    {:execution/id (random-uuid)
-     :execution/workflow-id (:workflow/id workflow)
-     :execution/workflow-version (:workflow/version workflow)
-     :execution/status (fsm/current-state fsm-state)  ; Use FSM state
-     :execution/fsm-state fsm-state                   ; Track FSM state
-     :execution/input input
-     :execution/artifacts []
-     :execution/errors []  ; DEPRECATED: Use :execution/response-chain instead
-     :execution/response-chain (response/create (:workflow/id workflow))
-     :execution/phase-results {}
-     :execution/current-phase nil
-     :execution/phase-index 0
-     :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
-     :execution/started-at (System/currentTimeMillis)
-     :execution/opts opts}))
+    (merge
+     {:execution/id (random-uuid)
+      :execution/workflow-id (:workflow/id workflow)
+      :execution/workflow-version (:workflow/version workflow)
+      :execution/status (fsm/current-state fsm-state)  ; Use FSM state
+      :execution/fsm-state fsm-state                   ; Track FSM state
+      :execution/input input
+      :execution/artifacts []
+      :execution/errors []  ; DEPRECATED: Use :execution/response-chain instead
+      :execution/response-chain (response/create (:workflow/id workflow))
+      :execution/phase-results {}
+      :execution/current-phase nil
+      :execution/phase-index 0
+      :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
+      :execution/started-at (System/currentTimeMillis)
+      :execution/opts opts}
+     ;; Merge opts into top-level context so :llm-backend is accessible to agents
+     (select-keys opts [:llm-backend :artifact-store :on-phase-start :on-phase-complete]))))
 
 (defn- merge-metrics
   "Merge phase metrics into execution metrics."

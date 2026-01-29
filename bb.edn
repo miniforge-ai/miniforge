@@ -240,11 +240,18 @@
   ;; ──────────────────────────────────────────────────────────────────────────
 
   install:local
-  {:doc  "Install built CLI to ~/.local/bin/mf"
+  {:doc  "Build and install CLI to ~/.local/bin/mf (cleans old build first)"
    :task (let [jar-source "dist/miniforge.jar"
                bin-dir (str (System/getProperty "user.home") "/.local/bin")
                jar-target (str bin-dir "/miniforge.jar")
                script-target (str bin-dir "/mf")]
+           ;; Clean old build
+           (when (fs/exists? jar-source)
+             (println "🗑️  Removing old build:" jar-source)
+             (fs/delete jar-source))
+           ;; Build fresh
+           (run 'build:cli)
+           ;; Install
            (if (fs/exists? jar-source)
              (do
                (println "📦 Installing miniforge CLI to" bin-dir)
@@ -254,7 +261,7 @@
                ;; Create wrapper script
                (spit script-target
                      (str "#!/usr/bin/env bash\n"
-                          "exec bb -jar \"" jar-target "\" \"$@\"\n"))
+                          "exec bb --jar \"" jar-target "\" -m ai.miniforge.cli.main \"$@\"\n"))
                (p/shell "chmod" "+x" script-target)
                (println "✅ Installed successfully")
                (println "   Ensure ~/.local/bin is in your PATH")
@@ -384,12 +391,44 @@
            (println "✅ Git hooks reset to default (.git/hooks/)"))}
 
   ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Artifact Utilities
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  extract:artifact
+  {:doc "Extract files from a code artifact EDN file and write them to disk"
+   :extra-paths ["components/evidence-bundle/src"]
+   :requires ([ai.miniforge.evidence-bundle.extraction :as extraction])
+   :task (if-let [artifact-file (first *command-line-args*)]
+           (let [result (extraction/extract-artifact-from-file artifact-file)]
+             (doseq [r (:results result)]
+               (if (:success r)
+                 (println (case (:action r)
+                           :create "✓ Created:"
+                           :modify "✓ Modified:"
+                           :delete "✓ Deleted:")
+                         (:path r))
+                 (println "✗ Failed:" (:path r) "-" (:error r))))
+             (println)
+             (when-let [summary (:summary result)]
+               (println "Summary:" summary))
+             (println "Files processed:" (:total result)
+                     "(" (:successful result) "successful," (:failed result) "failed)")
+             (when (> (:failed result) 0)
+               (System/exit 1)))
+           (do
+             (println "Usage: bb extract:artifact <artifact-file>")
+             (println)
+             (println "Extract files from an EDN artifact file containing :code/files")
+             (System/exit 1)))}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
   ;; CLI Development
   ;; ──────────────────────────────────────────────────────────────────────────
 
   miniforge
   {:doc     "Run miniforge CLI in development mode"
    :extra-paths ["bases/cli/src"
+                 "components/algorithms/src"
                  "components/schema/src"
                  "components/logging/src"
                  "components/llm/src"

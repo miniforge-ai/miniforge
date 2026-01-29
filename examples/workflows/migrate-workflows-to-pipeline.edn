@@ -1,0 +1,67 @@
+{:title "Migrate all workflows to pipeline format"
+ :description "Migrate remaining workflows from old :workflow/phases format to new :workflow/pipeline format.
+
+Current state:
+- Validator accepts both formats (just completed)
+- simple-v2.0.0.edn already uses pipeline format (reference)
+- simple-test-v1.0.0.edn uses old format (needs migration)
+
+Old format:
+```clojure
+{:workflow/phases
+ [{:phase/id :plan
+   :phase/name \"Planning\"
+   :phase/agent :planner
+   :phase/actions [...]
+   :phase/gates [...]
+   :phase/budget {...}
+   :phase/next [{:target :implement}]}]}
+```
+
+New format:
+```clojure
+{:workflow/pipeline
+ [{:phase :plan}      ;; Registry provides defaults
+  {:phase :implement
+   :budget {:tokens 50000}}  ;; Can override
+  {:phase :done}]}
+```
+
+Workflows to migrate:
+1. canonical-sdlc-v1.0.0.edn (complex, many phases)
+2. lean-sdlc-v1.0.0.edn
+3. standard-sdlc-v2.0.0.edn
+4. simple-test-v1.0.0.edn
+5. minimal-test-v1.0.0.edn
+6. quick-fix-v2.0.0.edn
+
+Migration process:
+1. Read old workflow
+2. Extract phase IDs from :workflow/phases
+3. Create pipeline entries (keep just :phase keyword + overrides)
+4. Remove :workflow/entry-phase (infer from first pipeline entry)
+5. Test that workflow loads and validates
+6. Compare execution behavior
+
+Success criteria:
+- All 6 workflows migrated
+- All validate successfully
+- Workflow execution behavior unchanged
+- Old :workflow/phases key removed
+- Documentation updated
+
+Complexity note: canonical-sdlc has :input, :design, :test-planning phases that aren't registered yet.
+Either:
+- Skip migration until those phases are implemented, OR
+- Create stub phase implementations, OR
+- Simplify canonical-sdlc to use only registered phases"
+
+ :intent {:type :refactor
+          :scope ["components/workflow/resources/workflows/*.edn"]}
+
+ :constraints ["maintain-backward-compatibility"
+               "validate-all-workflows"
+               "test-execution-equivalence"
+               "update-documentation"]
+
+ :tags [:workflow :migration :refactor]}

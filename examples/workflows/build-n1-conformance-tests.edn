@@ -1,0 +1,37 @@
+{:title "Build N1 conformance test suite"
+ :description "Implement complete N1 architecture conformance tests per spec §8.2. This is CRITICAL for verifying miniforge conforms to N1 requirements before we can claim spec compliance.
+
+Required test coverage:
+1. End-to-end workflow execution test (spec → PR with evidence bundle)
+2. Event stream completeness verification (all required events emitted)
+3. Agent context handoff validation (context preserved between phases)
+4. Protocol conformance tests (Agent.abort, Tool.validate-args/get-schema, Gate.repair)
+5. Gate enforcement integration test (gates block phase completion on failure)
+
+Success criteria:
+- All N1 §8.2 requirements verified
+- Tests run in CI successfully
+- 100% test pass rate
+- Evidence bundle generated for test workflow"
+
+ :intent {:type :feature
+          :scope ["tests/conformance/conformance/"
+                  "tests/conformance/fixtures/"]}
+
+ :constraints ["follow-n1-spec-section-8.2"
+               "comprehensive-test-coverage"
+               "all-tests-must-pass"
+               "use-existing-test-framework"
+               "include-golden-file-examples"]
+
+ :tags [:n1-conformance :testing :critical :pr-9 :blocking]
+
+ :context "Branch feat/n1-conformance-tests-v2 already exists with basic protocol tests. Need to add the 5 critical integration tests listed in docs/N1-remaining-work-dag.md PR9 section.
+
+Reference documents:
+- specs/normative/N1-architecture.md §8 (Conformance & Testing)
+- docs/N1-remaining-work-dag.md (PR9 details)
+- docs/N1-implementation-status.md (current status)
+- tests/conformance/conformance/n1_basic_conformance_test.clj (existing tests)
+
+Estimated: ~600 lines of test code across 5 new test files"}

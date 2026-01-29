@@ -98,6 +98,33 @@ Then create `~/path/to/miniforge-repos/.gitconfig`:
 
 ## Development
 
+### Local Development (Without Homebrew)
+
+For rapid development iteration, build and install locally:
+
+```bash
+# Build and install in one step (cleans old build automatically)
+bb install:local
+
+# Now you can run miniforge locally
+mf version
+mf help
+mf fleet web
+```
+
+The `bb install:local` task:
+
+1. Removes old build (`rm -f dist/miniforge.jar`)
+2. Builds fresh uberjar (`bb build:cli`)
+3. Installs to `~/.local/bin/mf`
+
+**Note:** Make sure `~/.local/bin` is in your PATH:
+
+```bash
+# Add to ~/.zshrc or ~/.bashrc
+export PATH="$HOME/.local/bin:$PATH"
+```
+
 ### Available Tasks
 
 Run `bb` to see all available tasks:
@@ -133,7 +160,7 @@ bb hooks:uninstall  # Reset git hooks to default
 
 ### Project Structure (Polylith)
 
-```
+```text
 miniforge/
 ├── bases/          # Entry points (CLI, servers)
 ├── components/     # Reusable building blocks

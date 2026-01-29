@@ -35,6 +35,7 @@
    [clojure.edn :as edn]
    [cheshire.core :as json]
    [ai.miniforge.cli.web :as web]
+   [ai.miniforge.cli.spec-parser :as spec-parser]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -213,7 +214,7 @@
         (print-success (str "Set " key " = " (pr-str new-value)))))))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
-;; Run command (stub - will integrate with orchestrator)
+;; Run command - Execute workflow from spec file
 
 (defn run-cmd
   "Execute a workflow from a spec file."
@@ -232,9 +233,27 @@
       (print-error (str "Spec file not found: " spec))
 
       :else
-      (do
-        (print-info (str "Running workflow from: " spec))
-        (println "TODO: Integrate with orchestrator component")))))
+      (try
+        (print-info (str "Parsing workflow spec: " spec))
+        (let [parsed-spec (spec-parser/parse-spec-file spec)
+              validation (spec-parser/validate-spec parsed-spec)]
+
+          (if-not (:valid? validation)
+            (do
+              (print-error "Invalid workflow spec:")
+              (doseq [error (:errors validation)]
+                (println (str "  - " error))))
+
+            (do
+              (print-info (str "Running workflow: " (:spec/title parsed-spec)))
+              (workflow-runner/run-workflow-from-spec!
+               parsed-spec
+               {:output :pretty
+                :quiet false}))))
+        (catch Exception e
+          (print-error (str "Failed to run workflow: " (ex-message e)))
+          (when-let [data (ex-data e)]
+            (println (str "  Details: " (pr-str data)))))))))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Status command (stub)

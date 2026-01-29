@@ -3,6 +3,7 @@
    Handles evidence collection, storage, and provenance tracing per N6 spec."
   (:require
    [ai.miniforge.evidence-bundle.collector :as collector]
+   [ai.miniforge.evidence-bundle.extraction :as extraction]
    [ai.miniforge.evidence-bundle.schema :as schema]
    [ai.miniforge.evidence-bundle.interface.protocols.evidence-bundle :as p]
    [ai.miniforge.evidence-bundle.protocols.records.evidence-bundle :as records]))
@@ -266,6 +267,85 @@
    Useful for testing or manual bundle construction."
   []
   (schema/create-evidence-bundle-template))
+
+;------------------------------------------------------------------------------ Layer 7
+;; Artifact Extraction
+
+(defn extract-file
+  "Extract a single file from artifact and write to disk.
+
+   File map should contain:
+   - :path - File path to write
+   - :content - File content
+   - :action - One of :create, :modify, or :delete
+
+   Returns map with operation result.
+
+   Example:
+     (extract-file {:path \"src/foo.clj\"
+                    :content \"(ns foo)\"
+                    :action :create})"
+  [file-map]
+  (extraction/extract-file file-map))
+
+(defn extract-files
+  "Extract multiple files from artifact and write to disk.
+
+   Artifact should be a map containing:
+   - :code/files - Vector of file maps
+
+   Returns map with extraction results including:
+   - :total - Total files processed
+   - :successful - Successful operations
+   - :failed - Failed operations
+   - :results - Vector of individual results
+
+   Example:
+     (extract-files {:code/files [{:path \"src/foo.clj\"
+                                   :content \"(ns foo)\"
+                                   :action :create}]})"
+  [artifact]
+  (extraction/extract-files artifact))
+
+(defn load-artifact
+  "Load artifact from an EDN file.
+
+   Arguments:
+   - artifact-path: Path to EDN file
+
+   Returns artifact map.
+
+   Example:
+     (load-artifact \"/tmp/artifact.edn\")"
+  [artifact-path]
+  (extraction/load-artifact artifact-path))
+
+(defn extract-artifact-from-file
+  "Load artifact from file and extract all files to disk.
+
+   Convenience function combining load-artifact and extract-files.
+
+   Arguments:
+   - artifact-path: Path to EDN file
+
+   Returns extraction results.
+
+   Example:
+     (extract-artifact-from-file \"/tmp/artifact.edn\")"
+  [artifact-path]
+  (extraction/extract-artifact-from-file artifact-path))
+
+(defn validate-artifact
+  "Validate artifact structure for extraction.
+
+   Returns map with:
+   - :valid? - true if valid
+   - :errors - Error messages if invalid
+
+   Example:
+     (validate-artifact {:code/files [...]})"
+  [artifact]
+  (extraction/validate-artifact artifact))
 
 ;------------------------------------------------------------------------------ Rich Comment
 

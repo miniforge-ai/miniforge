@@ -1,0 +1,8 @@
+{:title "Refactor logging component"
+ :description "Extract structured logging helpers to a separate module for better reusability"
+ :intent {:type :refactor
+          :scope ["components/logging/src"]}
+ :constraints ["no-breaking-changes"
+               "maintain-test-coverage"
+               "preserve-existing-api"]
+ :tags [:refactoring :code-quality]}

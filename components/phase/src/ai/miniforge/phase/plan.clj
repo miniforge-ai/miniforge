@@ -18,7 +18,9 @@
    Creates implementation plans from specifications.
    Agent: :planner
    Default gates: [:plan-complete]"
-  (:require [ai.miniforge.phase.registry :as registry]))
+  (:require [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.agent.interface :as agent]
+            [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
@@ -43,15 +45,35 @@
    runs through inner loop with gates."
   [ctx]
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
-        {:keys [agent gates budget]} config
-        start-time (System/currentTimeMillis)]
+        {:keys [gates budget]} config
+        start-time (System/currentTimeMillis)
+
+        ;; Create planner agent (specialized implementation uses llm/chat directly)
+        planner-agent (agent/create-planner {})
+
+        ;; Build task from workflow input
+        input (get-in ctx [:execution/input])
+        task {:task/id (random-uuid)
+              :task/type :plan
+              :task/description (:description input)
+              :task/title (:title input)
+              :task/intent (:intent input)
+              :task/constraints (:constraints input)}
+
+        ;; Invoke agent (this will call LLM and do actual work)
+        result (try
+                 (agent/invoke planner-agent task ctx)
+                 (catch Exception e
+                   (response/failure e)))]
+
     (-> ctx
         (assoc-in [:phase :name] :plan)
-        (assoc-in [:phase :agent] agent)
+        (assoc-in [:phase :agent] :planner)
         (assoc-in [:phase :gates] gates)
         (assoc-in [:phase :budget] budget)
         (assoc-in [:phase :started-at] start-time)
-        (assoc-in [:phase :status] :running))))
+        (assoc-in [:phase :status] :running)
+        (assoc-in [:phase :result] result))))
 
 (defn- leave-plan
   "Post-processing for planning phase.
@@ -60,12 +82,18 @@
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
-        duration-ms (- end-time start-time)]
+        duration-ms (- end-time start-time)
+        result (get-in ctx [:phase :result])
+        metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})]
     (-> ctx
         (assoc-in [:phase :ended-at] end-time)
         (assoc-in [:phase :duration-ms] duration-ms)
         (assoc-in [:phase :status] :completed)
-        (update-in [:execution :phases-completed] (fnil conj []) :plan))))
+        (assoc-in [:phase :metrics] metrics)
+        (update-in [:execution :phases-completed] (fnil conj []) :plan)
+        ;; Merge agent metrics into execution metrics
+        (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
+        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))))
 
 (defn- error-plan
   "Handle planning phase errors.

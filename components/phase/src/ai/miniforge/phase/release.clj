@@ -16,9 +16,10 @@
   "Release phase interceptor.
 
    Prepares release artifacts and creates PRs.
-   Agent: :releaser
+   Agent: :releaser (simplified - no LLM agent yet)
    Default gates: [:release-ready]"
-  (:require [ai.miniforge.phase.registry :as registry]))
+  (:require [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
@@ -42,21 +43,52 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
+(defn- create-release-artifact
+  "Create a simple release artifact from previous phase outputs.
+   This is a simplified implementation until a full releaser agent is created."
+  [ctx]
+  (let [implement-result (get-in ctx [:phases :implement :result])
+        verify-result (get-in ctx [:phases :verify :result])
+        review-result (get-in ctx [:phases :review :result])
+        input (get-in ctx [:execution/input])]
+    {:release/id (random-uuid)
+     :release/status :ready
+     :release/artifacts {:code implement-result
+                         :tests verify-result
+                         :review review-result}
+     :release/title (or (:title input) "Release")
+     :release/description (or (:description input) "")
+     :release/created-at (java.util.Date.)}))
+
 (defn- enter-release
   "Execute release phase.
 
    Prepares release artifacts, creates PR if configured."
   [ctx]
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
-        {:keys [agent gates budget]} config
-        start-time (System/currentTimeMillis)]
+        {:keys [gates budget]} config
+        start-time (System/currentTimeMillis)
+
+        ;; Create release artifact (simplified - no agent yet)
+        ;; In the future, this would invoke a releaser agent that:
+        ;; - Generates changelog
+        ;; - Creates git commits
+        ;; - Prepares PR description
+        ;; - Handles versioning
+        result (try
+                 (let [artifact (create-release-artifact ctx)]
+                   (response/success artifact))
+                 (catch Exception e
+                   (response/failure e)))]
+
     (-> ctx
         (assoc-in [:phase :name] :release)
-        (assoc-in [:phase :agent] agent)
+        (assoc-in [:phase :agent] :releaser)
         (assoc-in [:phase :gates] gates)
         (assoc-in [:phase :budget] budget)
         (assoc-in [:phase :started-at] start-time)
-        (assoc-in [:phase :status] :running))))
+        (assoc-in [:phase :status] :running)
+        (assoc-in [:phase :result] result))))
 
 (defn- leave-release
   "Post-processing for release phase.
@@ -65,23 +97,46 @@
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
-        duration-ms (- end-time start-time)]
+        duration-ms (- end-time start-time)
+        result (get-in ctx [:phase :result])
+        metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
+        iterations (get-in ctx [:phase :iterations] 1)]
     (-> ctx
         (assoc-in [:phase :ended-at] end-time)
         (assoc-in [:phase :duration-ms] duration-ms)
         (assoc-in [:phase :status] :completed)
-        (update-in [:execution :phases-completed] (fnil conj []) :release))))
+        (assoc-in [:phase :metrics] metrics)
+        (assoc-in [:metrics :release :duration-ms] duration-ms)
+        (assoc-in [:metrics :release :repair-cycles] (dec iterations))
+        (update-in [:execution :phases-completed] (fnil conj []) :release)
+        ;; Merge agent metrics into execution metrics
+        (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
+        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))))
 
 (defn- error-release
   "Handle release phase errors."
   [ctx ex]
   (let [iterations (get-in ctx [:phase :iterations] 0)
-        max-iterations (get-in ctx [:phase :budget :iterations] 2)]
-    (if (< iterations max-iterations)
+        max-iterations (get-in ctx [:phase :budget :iterations] 2)
+        on-fail (get-in ctx [:phase-config :on-fail])]
+    (cond
+      ;; Within budget - retry
+      (< iterations max-iterations)
       (-> ctx
           (update-in [:phase :iterations] (fnil inc 0))
           (assoc-in [:phase :last-error] (ex-message ex))
           (assoc-in [:phase :status] :retrying))
+
+      ;; Has on-fail transition - redirect
+      on-fail
+      (-> ctx
+          (assoc-in [:phase :status] :failed)
+          (assoc-in [:phase :redirect-to] on-fail)
+          (assoc-in [:phase :error] {:message (ex-message ex)
+                                     :data (ex-data ex)}))
+
+      ;; No recovery - propagate
+      :else
       (-> ctx
           (assoc-in [:phase :status] :failed)
           (assoc-in [:phase :error] {:message (ex-message ex)

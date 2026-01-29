@@ -1,0 +1,60 @@
+{:title "Wire up remaining phase interceptors (verify, review, release)"
+ :description "Complete the phase interceptor migration by wiring up agent invocation in the remaining 3 phases.
+
+We successfully wired plan.clj and implement.clj - now need to apply the same pattern to:
+- verify.clj
+- review.clj
+- release.clj
+
+Pattern established (from plan.clj):
+```clojure
+(ns ai.miniforge.phase.plan
+  (:require [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.agent.interface :as agent]
+            [ai.miniforge.agent.planner :as planner]))
+
+(defn- enter-plan [ctx]
+  (let [planner-agent (planner/create-planner {})
+        task {...}
+        result (agent/invoke planner-agent task ctx)]
+    (assoc-in ctx [:phase :result] result)))
+
+(defn- leave-plan [ctx]
+  (let [metrics (get-in ctx [:phase :result :metrics])]
+    (-> ctx
+        (assoc-in [:phase :metrics] metrics)
+        (update-in [:execution/metrics :tokens] + (:tokens metrics 0)))))
+```
+
+For each phase:
+1. Import specialized agent (tester for verify, reviewer for review, releaser for release)
+2. Update enter-* to create specialized agent and invoke it
+3. Update leave-* to extract and merge metrics
+4. Build appropriate task context from previous phase outputs
+
+Success criteria:
+- All 3 phases wire up agent invocation
+- verify uses create-tester
+- review uses create-reviewer
+- release uses appropriate agent
+- Metrics properly tracked
+- Pattern matches plan/implement
+
+Reference:
+- components/phase/src/ai/miniforge/phase/plan.clj (completed example)
+- components/phase/src/ai/miniforge/phase/implement.clj (completed example)
+- components/agent/src/ai/miniforge/agent/tester.clj (has create-tester)
+- components/agent/src/ai/miniforge/agent/reviewer.clj (has create-reviewer)"
+
+ :intent {:type :feature
+          :scope ["components/phase/src/ai/miniforge/phase/verify.clj"
+                  "components/phase/src/ai/miniforge/phase/review.clj"
+                  "components/phase/src/ai/miniforge/phase/release.clj"]}
+
+ :constraints ["follow-established-pattern"
+               "use-specialized-agents"
+               "track-metrics-properly"
+               "no-breaking-changes"
+               "test-each-phase"]
+
+ :tags [:phase :agents :migration :critical]}

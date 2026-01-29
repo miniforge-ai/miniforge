@@ -6,7 +6,39 @@
    [clojure.java.io :as io]
    [clojure.pprint]
    [babashka.fs :as fs]
+   [babashka.process :as p]
    [cheshire.core :as json]))
+
+;; Forward declare LLM interface - will be resolved at runtime via requiring-resolve
+;; This avoids compile-time dependency on JVM-only code when running in Babashka
+
+;; LLM Backend Adapter
+;; ===================
+;; Adapts LLM component's LLMClient to Agent component's LLMBackend protocol
+
+(defn create-llm-backend-adapter
+  "Create adapter that wraps LLMClient to implement agent's LLMBackend protocol.
+
+   The agent expects: (complete [backend messages opts])
+   The LLM provides: (complete* [client request])
+
+   This adapter bridges the two interfaces."
+  [llm-client]
+  (when llm-client
+    (let [complete-fn (requiring-resolve 'ai.miniforge.llm.interface/complete)]
+      (reify
+        ;; Implement the complete method expected by agents
+        clojure.lang.IFn
+        (invoke [_this messages opts]
+          ;; Convert agent format to LLM format
+          (let [request (merge opts {:messages messages})
+                result (complete-fn llm-client request)]
+            ;; Convert LLM response to agent format
+            (if (:success result)
+              {:content (:content result)
+               :usage (:usage result)
+               :model (get-in result [:usage :model] "unknown")}
+              {:error (:error result)})))))))
 
 ;; Input Processing
 ;; ================
@@ -224,7 +256,66 @@
                   artifact-store (assoc :artifact-store artifact-store))]
     (run-pipeline workflow input context)))
 
-;; Layer 3: Orchestration
+;; Layer 3: Runtime decoration
+
+(defn- get-git-info
+  "Get current git branch and commit. Returns nil if not in git repo or git unavailable."
+  []
+  (try
+    (let [branch-result (p/shell {:out :string :err :string :continue true}
+                                  "git" "rev-parse" "--abbrev-ref" "HEAD")
+          commit-result (p/shell {:out :string :err :string :continue true}
+                                 "git" "rev-parse" "--short" "HEAD")]
+      (when (and (zero? (:exit branch-result))
+                 (zero? (:exit commit-result)))
+        {:git-branch (str/trim (:out branch-result))
+         :git-commit (str/trim (:out commit-result))}))
+    (catch Exception _ nil)))
+
+(defn- get-files-in-scope
+  "Extract files from intent scope, resolving glob patterns."
+  [intent]
+  (let [scope-paths (get intent :scope [])]
+    (vec
+     (mapcat
+      (fn [path]
+        (try
+          (if (fs/exists? path)
+            (if (fs/directory? path)
+              ;; Directory: return as-is, workflow can explore
+              [path]
+              ;; File: return file path
+              [path])
+            ;; Might be a glob or doesn't exist yet
+            [path])
+          (catch Exception _ [path])))
+      scope-paths))))
+
+(defn- decorate-spec-with-runtime-context
+  "Layer 1 decoration: Add runtime context and metadata to spec.
+
+   Adds:
+   - :spec/context   - Runtime environment (cwd, git, files-in-scope)
+   - :spec/metadata  - Execution tracking (submitted-at, session-id, iteration)
+
+   This follows the interceptor pattern where each layer adds what it knows."
+  [spec {:keys [iteration parent-task-id] :or {iteration 1}}]
+  (let [git-info (get-git-info)
+        files-in-scope (get-files-in-scope (:spec/intent spec))]
+    (assoc spec
+           :spec/context
+           (cond-> {:cwd (str (fs/cwd))
+                    :files-in-scope files-in-scope
+                    :environment :development}
+             git-info (merge git-info))
+
+           :spec/metadata
+           (cond-> {:submitted-at (java.util.Date.)
+                    :session-id (random-uuid)
+                    :iteration iteration}
+             parent-task-id (assoc :parent-task-id parent-task-id)))))
+
+;; Layer 4: Orchestration
 
 (defn run-workflow!
   "Main entry point - load, execute, and display workflow results.
@@ -332,4 +423,98 @@
 
     (catch Exception e
       (println (colorize :red (str "Failed to list workflows: " (ex-message e))))
+      (throw e))))
+
+(defn run-workflow-from-spec!
+  "Execute a workflow from an arbitrary spec (not from catalog).
+
+   Arguments:
+   - spec - Normalized spec map from spec-parser
+            {:spec/title \"...\"
+             :spec/description \"...\"
+             :spec/intent {...}
+             :spec/constraints [...]}
+   - opts - Execution options
+            {:output :pretty|:json|:edn
+             :quiet boolean}
+
+   This function bridges user-provided spec files to the workflow engine.
+   It creates an ad-hoc workflow definition and executes it."
+  [spec {:keys [quiet] :or {quiet false} :as opts}]
+  (try
+    (let [{:keys [load-workflow run-pipeline]} (resolve-workflow-interface)]
+
+      (when-not quiet
+        (print-workflow-header
+         (keyword (str "adhoc-" (hash spec)))
+         "adhoc"
+         quiet))
+
+      ;; Load workflow specified in spec, or create inline for special cases
+      (let [workflow-type (or (:spec/workflow-type spec) :simple)
+            workflow-version (or (:spec/workflow-version spec) "latest")
+            ;; Try to load workflow, but create inline test-only if it fails and type is :test-only
+            workflow (try
+                       (load-and-validate-workflow
+                        load-workflow
+                        workflow-type
+                        workflow-version)
+                       (catch Exception e
+                         (if (= workflow-type :test-only)
+                           ;; Create inline test-only workflow (verify -> done)
+                           {:workflow/id :test-only
+                            :workflow/version "inline"
+                            :workflow/name "Test Generation"
+                            :workflow/pipeline [{:phase :verify} {:phase :done}]
+                            :workflow/config {:max-tokens 20000 :max-iterations 10}}
+                           ;; Re-throw for other workflow types
+                           (throw e))))
+
+            ;; Layer 1 decoration: Add runtime context and metadata
+            enriched-spec (decorate-spec-with-runtime-context spec opts)
+
+            ;; Convert enriched spec to workflow input
+            ;; The workflow engine receives the full decorated spec
+            ;; Merge in raw spec data to pass through any custom fields (task/*, etc.)
+            workflow-input (merge
+                            (:spec/raw-data enriched-spec)
+                            {:title (:spec/title enriched-spec)
+                             :description (:spec/description enriched-spec)
+                             :intent (:spec/intent enriched-spec)
+                             :constraints (:spec/constraints enriched-spec)
+                             :context (:spec/context enriched-spec)
+                             :metadata (:spec/metadata enriched-spec)
+                             :provenance (:spec/provenance enriched-spec)})
+
+            artifact-store (create-artifact-store quiet)
+            callbacks (create-phase-callbacks quiet)
+
+            ;; Create LLM client for agent execution
+            ;; Agents use llm/chat from ai.miniforge.llm.interface directly
+            llm-client (try
+                         (when-let [create-client (requiring-resolve 'ai.miniforge.llm.interface/create-client)]
+                           (create-client {:backend :claude}))
+                         (catch Exception e
+                           (when-not quiet
+                             (println (colorize :yellow (str "Warning: Could not create LLM client (" (ex-message e) "), agents will use fallback mode"))))
+                           nil))
+
+            ;; Add LLM client to context (agents expect it as :llm-backend)
+            context-with-llm (cond-> callbacks
+                               llm-client (assoc :llm-backend llm-client)
+                               artifact-store (assoc :artifact-store artifact-store))
+
+            result (execute-workflow-pipeline
+                    run-pipeline
+                    workflow
+                    workflow-input
+                    context-with-llm
+                    artifact-store)]
+
+        (close-artifact-store artifact-store)
+        (print-result result opts)
+        result))
+    (catch Exception e
+      (when-not quiet
+        (println (colorize :red (str "\n❌ Workflow execution failed: " (ex-message e)))))
       (throw e))))
