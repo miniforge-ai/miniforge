@@ -18,7 +18,9 @@
    Performs code review and quality checks.
    Agent: :reviewer
    Default gates: [:review-approved :quality-check]"
-  (:require [ai.miniforge.phase.registry :as registry]))
+  (:require [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.agent.interface :as agent]
+            [ai.miniforge.agent.reviewer :as reviewer]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
@@ -42,15 +44,48 @@
    Runs code review, quality checks, and policy validation."
   [ctx]
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
-        {:keys [agent gates budget]} config
-        start-time (System/currentTimeMillis)]
+        {:keys [gates budget]} config
+        start-time (System/currentTimeMillis)
+
+        ;; Create reviewer agent (does not use LLM - runs gates)
+        reviewer-agent (reviewer/create-reviewer {:gates (map (fn [gate-name]
+                                                                 ;; This is simplified - in real implementation
+                                                                 ;; would resolve gate-name to actual gate impl
+                                                                 {:gate/id gate-name
+                                                                  :gate/type gate-name})
+                                                               gates)})
+
+        ;; Build task from workflow input and previous phase results
+        input (get-in ctx [:execution/input])
+        implement-result (get-in ctx [:phase :result]) ; From implement phase
+        verify-result (or (get-in ctx [:phases :verify :result])
+                          (get-in ctx [:previous-phase :result]))
+        task {:task/id (random-uuid)
+              :task/type :review
+              :task/description (:description input)
+              :task/title (:title input)
+              :task/intent (:intent input)
+              :task/constraints (:constraints input)
+              :task/artifact implement-result ; Code to review
+              :task/tests verify-result} ; Test results if available
+
+        ;; Invoke agent
+        result (try
+                 (agent/invoke reviewer-agent task ctx)
+                 (catch Exception e
+                   {:success false
+                    :error {:message (ex-message e)
+                            :data (ex-data e)}
+                    :metrics {:tokens 0 :duration-ms 0}}))]
+
     (-> ctx
         (assoc-in [:phase :name] :review)
-        (assoc-in [:phase :agent] agent)
+        (assoc-in [:phase :agent] :reviewer)
         (assoc-in [:phase :gates] gates)
         (assoc-in [:phase :budget] budget)
         (assoc-in [:phase :started-at] start-time)
-        (assoc-in [:phase :status] :running))))
+        (assoc-in [:phase :status] :running)
+        (assoc-in [:phase :result] result))))
 
 (defn- leave-review
   "Post-processing for review phase.
@@ -59,12 +94,21 @@
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
-        duration-ms (- end-time start-time)]
+        duration-ms (- end-time start-time)
+        result (get-in ctx [:phase :result])
+        metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
+        iterations (get-in ctx [:phase :iterations] 1)]
     (-> ctx
         (assoc-in [:phase :ended-at] end-time)
         (assoc-in [:phase :duration-ms] duration-ms)
         (assoc-in [:phase :status] :completed)
-        (update-in [:execution :phases-completed] (fnil conj []) :review))))
+        (assoc-in [:phase :metrics] metrics)
+        (assoc-in [:metrics :review :duration-ms] duration-ms)
+        (assoc-in [:metrics :review :repair-cycles] (dec iterations))
+        (update-in [:execution :phases-completed] (fnil conj []) :review)
+        ;; Merge agent metrics into execution metrics
+        (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
+        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))))
 
 (defn- error-review
   "Handle review phase errors.
@@ -75,12 +119,14 @@
         max-iterations (get-in ctx [:phase :budget :iterations] 2)
         on-fail (get-in ctx [:phase-config :on-fail])]
     (cond
+      ;; Within budget - retry
       (< iterations max-iterations)
       (-> ctx
           (update-in [:phase :iterations] (fnil inc 0))
           (assoc-in [:phase :last-error] (ex-message ex))
           (assoc-in [:phase :status] :retrying))
 
+      ;; Has on-fail transition - redirect
       on-fail
       (-> ctx
           (assoc-in [:phase :status] :failed)
@@ -88,6 +134,7 @@
           (assoc-in [:phase :error] {:message (ex-message ex)
                                      :data (ex-data ex)}))
 
+      ;; No recovery - propagate
       :else
       (-> ctx
           (assoc-in [:phase :status] :failed)
