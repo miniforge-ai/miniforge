@@ -11,6 +11,9 @@
   (complete* [this request]
     (impl/complete-impl this request))
 
+  (complete-stream* [this request on-chunk]
+    (impl/complete-stream-impl this request on-chunk))
+
   (get-config [this]
     (impl/get-config-impl this)))
 

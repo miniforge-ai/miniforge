@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
  :deps {babashka/process {:mvn/version "0.5.22"}
+        org.clojure/data.json {:mvn/version "2.5.0"}
         ai.miniforge/logging {:local/root "../logging"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}
