@@ -1,8 +1,42 @@
-{:title "Refactor logging component"
- :description "Extract structured logging helpers to a separate module for better reusability"
- :intent {:type :refactor
-          :scope ["components/logging/src"]}
- :constraints ["no-breaking-changes"
-               "maintain-test-coverage"
-               "preserve-existing-api"]
- :tags [:refactoring :code-quality]}
+;; Example: Simple refactoring task
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; This workflow spec demonstrates a simple refactoring task using the full
+;; SDLC workflow: plan → implement → verify → review → release.
+;;
+;; Usage:
+;;   mf run examples/workflows/simple-refactor.edn
+
+{:workflow/spec-version "1.0.0"
+ :workflow/type :full-sdlc
+ :workflow/version "2.0.0"
+
+ :task/title "Refactor logging component"
+ :task/description
+ "Extract structured logging helpers to a separate module for better reusability
+  across the codebase. Currently, logging utilities are scattered across multiple
+  components, leading to inconsistent logging patterns and code duplication."
+
+ :task/intent
+ "Improve code organization and reusability by:
+  - Consolidating scattered logging utilities into a single module
+  - Creating a clean, consistent API for structured logging
+  - Reducing code duplication across components
+  - Maintaining all existing functionality and log output format"
+
+ :task/constraints
+ ["No breaking changes to existing public API"
+  "Maintain 100% test coverage for logging component"
+  "Preserve existing log output format and structure"
+  "All existing tests must continue to pass"
+  "Update documentation to reflect new module structure"
+  "Follow polylith architecture rules (use interface namespace only)"]
+
+ :task/acceptance-criteria
+ ["Logging utilities are consolidated in components/logging/src"
+  "All components use the new logging module (no duplicated code)"
+  "Existing tests pass without modification"
+  "Test coverage remains at 100% for logging component"
+  "Public API remains unchanged (backward compatible)"
+  "Documentation updated to reflect refactored structure"
+  "Polylith validation passes (poly test)"]}
