@@ -4,7 +4,7 @@
    These functions implement the logic for the CLIClient record."
   (:require
    [clojure.string :as str]
-   [clojure.data.json :as json]
+   [cheshire.core :as json]
    [babashka.process :as p]
    [ai.miniforge.logging.interface :as log]))
 
@@ -34,7 +34,7 @@
                             ;; Format: {"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"..."}}}
                             (try
                               (when-not (str/blank? line)
-                                (let [data (json/read-str line :key-fn keyword)]
+                                (let [data (json/parse-string line true)]
                                   (when (= "stream_event" (:type data))
                                     (when-let [delta-text (get-in data [:event :delta :text])]
                                       {:delta delta-text :done? false}))))

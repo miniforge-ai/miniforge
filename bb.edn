@@ -166,13 +166,33 @@
                (println "❌ Conformance tests failed with exit code:" exit)
                (System/exit exit))))}
 
+  test:graalvm
+  {:doc  "Test GraalVM/Babashka compatibility"
+   :task (do
+           (println "🧪 Testing GraalVM/Babashka compatibility...")
+           (let [;; Use :dev alias to get full component classpath
+                 cp (-> (p/sh {:out :string} "clojure" "-A:dev" "-Spath")
+                       :out
+                       str/trim)
+                 ;; Add tests directory to classpath
+                 full-cp (str cp ":tests")
+                 expr "(require 'graalvm-compatibility-test) (graalvm-compatibility-test/-main)"
+                 {:keys [exit out err]}
+                 (p/sh {:out :string :err :string}
+                       "bb" "-cp" full-cp "-e" expr)]
+             (when-not (str/blank? out) (println out))
+             (when-not (str/blank? err) (binding [*out* *err*] (println err)))
+             (when-not (zero? exit)
+               (println "❌ GraalVM compatibility tests failed with exit code:" exit)
+               (System/exit exit))))}
+
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Pre-commit
   ;; ──────────────────────────────────────────────────────────────────────────
 
   pre-commit
-  {:doc     "Run all pre-commit checks (lint, format, test)"
-   :depends [lint:clj fmt:md test]
+  {:doc     "Run all pre-commit checks (lint, format, test, graalvm)"
+   :depends [lint:clj fmt:md test test:graalvm]
    :task    (println "\n✅ ALL PRE-COMMIT CHECKS PASSED\n")}
 
   ;; ──────────────────────────────────────────────────────────────────────────
