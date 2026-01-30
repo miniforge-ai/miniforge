@@ -16,11 +16,12 @@
   "Skip integration tests if env var is set."
   (= "true" (System/getenv "MINIFORGE_SKIP_LLM_INTEGRATION")))
 
-(def claude-available?
+(defn claude-available?
   "Check if claude CLI is available."
+  []
   (try
-    (let [result (llm/create-client {:backend :claude})]
-      (some? result))
+    ;; Just check if the client can be created, don't call it
+    (some? (llm/create-client {:backend :claude}))
     (catch Exception _e false)))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -76,7 +77,7 @@
 ;; Claude CLI streaming tests (only run if claude is available)
 
 (deftest claude-streaming-integration-test
-  (when (and (not skip-integration-tests?) claude-available?)
+  (when (and (not skip-integration-tests?) (claude-available?))
     (testing "claude CLI supports actual streaming"
       (let [chunks (atom [])
             client (llm/create-client {:backend :claude})
