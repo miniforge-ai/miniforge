@@ -39,15 +39,24 @@
 
 (defn load-from-resource
   "Load workflow config from classpath resources.
-   Looks for workflows/<workflow-id>.edn
+   Looks for workflows/<workflow-id>-v<version>.edn first,
+   then falls back to workflows/<workflow-id>.edn
 
    Arguments:
    - workflow-id: Workflow identifier (keyword)
-   - version: Version string (currently ignored, uses latest from resource)
+   - version: Version string (e.g., \"2.0.0\" or \"latest\")
 
    Returns workflow config map or nil if not found."
-  [workflow-id _version]
-  (let [resource-path (str "workflows/" (name workflow-id) ".edn")]
+  [workflow-id version]
+  (let [;; Try versioned filename first: workflows/standard-sdlc-v2.0.0.edn
+        versioned-path (str "workflows/" (name workflow-id) "-v" version ".edn")
+        ;; Fallback to non-versioned: workflows/standard-sdlc.edn
+        base-path (str "workflows/" (name workflow-id) ".edn")
+        ;; Try versioned first, then base
+        resource-path (or (when (and version (not= version "latest"))
+                           (when (io/resource versioned-path)
+                             versioned-path))
+                         base-path)]
     (when-let [resource (io/resource resource-path)]
       (try
         (with-open [rdr (io/reader resource)]

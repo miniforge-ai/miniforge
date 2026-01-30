@@ -1,6 +1,8 @@
 (ns ai.miniforge.llm.interface-test
   (:require [clojure.test :as test :refer [deftest testing is]]
-            [ai.miniforge.llm.interface :as llm]))
+            [ai.miniforge.llm.interface :as llm]
+            [ai.miniforge.llm.protocols.records.llm-client]
+            [ai.miniforge.llm.protocols.impl.llm-client]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures
@@ -118,6 +120,134 @@
   (testing "backends contains expected keys"
     (is (contains? llm/backends :claude))
     (is (contains? llm/backends :echo))))
+
+;; Streaming tests
+
+(deftest complete-stream-test
+  (testing "streams chunks with mock streaming client"
+    (let [chunks (atom [])
+          client (llm/mock-client {:output "Hello World"})
+          resp (llm/complete-stream
+                client
+                {:prompt "test"}
+                (fn [chunk]
+                  (swap! chunks conj chunk)))]
+      (is (llm/success? resp))
+      (is (= "Hello World" (llm/get-content resp)))
+      ;; Non-streaming backend should call callback once with full content
+      (is (= 1 (count @chunks)))
+      (is (:done? (first @chunks)))
+      (is (= "Hello World" (:content (first @chunks))))))
+
+  (testing "handles streaming chunks in sequence"
+    (let [chunks (atom [])
+          ;; Create a mock exec-fn that simulates streaming output
+          mock-stream-exec (fn [_cmd]
+                            {:out (str "{\"type\":\"stream_event\",\"event\":{\"delta\":{\"text\":\"Hello\"}}}\n"
+                                       "{\"type\":\"stream_event\",\"event\":{\"delta\":{\"text\":\" \"}}}\n"
+                                       "{\"type\":\"stream_event\",\"event\":{\"delta\":{\"text\":\"World\"}}}")
+                             :err ""
+                             :exit 0})
+          client (#'ai.miniforge.llm.protocols.records.llm-client/create-client
+                  {:backend :claude :exec-fn mock-stream-exec})
+          resp (llm/complete-stream
+                client
+                {:prompt "test"}
+                (fn [chunk]
+                  (swap! chunks conj chunk)))]
+      ;; With actual streaming, we get chunks + final
+      (is (llm/success? resp))
+      (is (= "Hello World" (llm/get-content resp)))
+      (is (> (count @chunks) 1))
+      ;; Last chunk should be done
+      (is (:done? (last @chunks)))
+      ;; Content should accumulate
+      (is (= "Hello World" (:content (last @chunks))))))
+
+  (testing "handles stream errors gracefully"
+    (let [chunks (atom [])
+          client (llm/mock-client {:output "error" :exit 1})
+          resp (llm/complete-stream
+                client
+                {:prompt "test"}
+                (fn [chunk]
+                  (swap! chunks conj chunk)))]
+      (is (not (llm/success? resp)))
+      (is (some? (llm/get-error resp))))))
+
+(deftest chat-stream-test
+  (testing "chat-stream works with simple prompt"
+    (let [chunks (atom [])
+          client (llm/mock-client {:output "Response"})
+          resp (llm/chat-stream
+                client
+                "Hello"
+                (fn [chunk]
+                  (swap! chunks conj chunk)))]
+      (is (llm/success? resp))
+      (is (= "Response" (llm/get-content resp)))
+      (is (pos? (count @chunks)))))
+
+  (testing "chat-stream with options"
+    (let [chunks (atom [])
+          client (llm/mock-client {:output "Brief response"})
+          resp (llm/chat-stream
+                client
+                "Explain"
+                (fn [chunk]
+                  (swap! chunks conj chunk))
+                {:system "Be brief"})]
+      (is (llm/success? resp))
+      (is (= "Brief response" (llm/get-content resp))))))
+
+(deftest stream-accumulation-test
+  (testing "content accumulates correctly during streaming"
+    (let [chunks (atom [])
+          ;; Simulate multiple stream chunks
+          mock-exec (fn [_cmd]
+                      {:out (str "{\"type\":\"stream_event\",\"event\":{\"delta\":{\"text\":\"A\"}}}\n"
+                                 "{\"type\":\"stream_event\",\"event\":{\"delta\":{\"text\":\"B\"}}}\n"
+                                 "{\"type\":\"stream_event\",\"event\":{\"delta\":{\"text\":\"C\"}}}")
+                       :err ""
+                       :exit 0})
+          client (#'ai.miniforge.llm.protocols.records.llm-client/create-client
+                  {:backend :claude :exec-fn mock-exec})
+          _resp (llm/complete-stream
+                 client
+                 {:prompt "test"}
+                 (fn [chunk]
+                   (swap! chunks conj chunk)))
+          non-final-chunks (drop-last @chunks)]
+      ;; Verify content accumulates
+      (when (seq non-final-chunks)
+        (is (= "A" (:content (first non-final-chunks))))
+        (when (> (count non-final-chunks) 1)
+          (is (= "AB" (:content (second non-final-chunks))))))
+      ;; Final chunk has all content
+      (is (= "ABC" (:content (last @chunks)))))))
+
+  (deftest stream-parser-test
+    (testing "claude stream parser handles valid JSON"
+      (let [parser (#'ai.miniforge.llm.protocols.impl.llm-client/backends :claude)
+            stream-parser (:stream-parser parser)
+            valid-line "{\"type\":\"stream_event\",\"event\":{\"delta\":{\"text\":\"Hello\"}}}"
+            result (stream-parser valid-line)]
+        (is (some? result))
+        (is (= "Hello" (:delta result)))
+        (is (false? (:done? result)))))
+
+    (testing "claude stream parser ignores non-stream events"
+      (let [parser (#'ai.miniforge.llm.protocols.impl.llm-client/backends :claude)
+            stream-parser (:stream-parser parser)
+            non-stream "{\"type\":\"other_event\",\"data\":\"something\"}"
+            result (stream-parser non-stream)]
+        (is (nil? result))))
+
+    (testing "claude stream parser handles malformed JSON gracefully"
+      (let [parser (#'ai.miniforge.llm.protocols.impl.llm-client/backends :claude)
+            stream-parser (:stream-parser parser)
+            result (stream-parser "not json")]
+        (is (nil? result)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

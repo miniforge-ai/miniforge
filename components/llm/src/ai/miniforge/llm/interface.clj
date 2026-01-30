@@ -93,6 +93,48 @@
   ([client prompt opts]
    (complete client (assoc opts :prompt prompt))))
 
+(defn complete-stream
+  "Send a streaming completion request to the LLM.
+
+   Arguments:
+   - client   - Client created by create-client
+   - request  - Request map (same as complete)
+   - on-chunk - Callback function (fn [chunk-data])
+                Called with {:delta \"...\" :done? false :content \"accumulated\"} for each chunk
+                Called with {:delta \"\" :done? true :content \"full text\"} when complete
+
+   Returns: Same format as complete (final result)
+
+   Note: Falls back to non-streaming for backends that don't support it.
+
+   Example:
+     (complete-stream client
+                      {:prompt \"Write a story\"}
+                      (fn [{:keys [delta done? content]}]
+                        (when-not done?
+                          (print delta)
+                          (flush))))"
+  [client request on-chunk]
+  (p/complete-stream* client request on-chunk))
+
+(defn chat-stream
+  "Convenience function for streaming single-turn chat.
+
+   Arguments:
+   - client   - Client created by create-client
+   - prompt   - User message string
+   - on-chunk - Callback for streaming chunks
+   - opts     - Optional map with :system, :max-tokens
+
+   Example:
+     (chat-stream client
+                  \"Tell me a story\"
+                  (fn [{:keys [delta]}] (print delta)))"
+  ([client prompt on-chunk]
+   (chat-stream client prompt on-chunk {}))
+  ([client prompt on-chunk opts]
+   (complete-stream client (assoc opts :prompt prompt) on-chunk)))
+
 ;; Response helpers
 
 (defn success?

@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
  :deps {babashka/process {:mvn/version "0.5.22"}
+        cheshire/cheshire {:mvn/version "5.13.0"}
         ai.miniforge/logging {:local/root "../logging"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}
