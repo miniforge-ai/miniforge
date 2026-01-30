@@ -313,18 +313,24 @@ Write code that is easy to understand, test, and maintain.")
       :invoke-fn
       (fn [context input]
         (let [llm-client (or (:llm-backend opts) (:llm-backend context))
+              on-chunk (:on-chunk context)
               task-text (task->text input)
               user-prompt (str "Implement the following task:\n\n"
                                task-text
                                "\n\nOutput your code as a Clojure map following the format in your system prompt. "
                                "Include full file contents, not placeholders.")]
           (if llm-client
-            ;; Use the real LLM
-            (let [response (llm/chat llm-client user-prompt {:system implementer-system-prompt})
+            ;; Use the real LLM with streaming if callback provided
+            (let [response (if on-chunk
+                             (llm/chat-stream llm-client user-prompt on-chunk
+                                              {:system implementer-system-prompt})
+                             (llm/chat llm-client user-prompt
+                                       {:system implementer-system-prompt}))
                   tokens (or (:tokens response) 0)]
               (log/info logger :implementer :implementer/llm-called
                         {:data {:success (llm/success? response)
-                                :tokens tokens}})
+                                :tokens tokens
+                                :streaming? (boolean on-chunk)}})
               (if (llm/success? response)
                 (let [content (llm/get-content response)
                       parsed (parse-code-response content)

@@ -379,6 +379,7 @@ and what behavior is expected. Make tests readable and maintainable.")
       :invoke-fn
       (fn [context input]
         (let [llm-client (or (:llm-backend opts) (:llm-backend context))
+              on-chunk (:on-chunk context)
               ;; Input can be a code artifact or a map with :code and :spec
               code-artifact (or (:code input) input)
               spec (or (:spec input) {})
@@ -394,12 +395,17 @@ and what behavior is expected. Make tests readable and maintainable.")
                                "\n\nOutput your tests as a Clojure map following the format in your system prompt. "
                                "Include complete test code, not placeholders.")]
           (if llm-client
-            ;; Use the real LLM
-            (let [response (llm/chat llm-client user-prompt {:system tester-system-prompt})
+            ;; Use the real LLM with streaming if callback provided
+            (let [response (if on-chunk
+                             (llm/chat-stream llm-client user-prompt on-chunk
+                                              {:system tester-system-prompt})
+                             (llm/chat llm-client user-prompt
+                                       {:system tester-system-prompt}))
                   tokens (or (:tokens response) 0)]
               (log/info logger :tester :tester/llm-called
                         {:data {:success (llm/success? response)
-                                :tokens tokens}})
+                                :tokens tokens
+                                :streaming? (boolean on-chunk)}})
               (if (llm/success? response)
                 (let [content (llm/get-content response)
                       parsed (parse-test-response content)

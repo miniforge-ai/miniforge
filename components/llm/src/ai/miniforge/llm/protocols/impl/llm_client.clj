@@ -110,8 +110,9 @@
         (swap! out-lines conj line)
         (on-line line)
         (recur)))
-    ;; Wait for process to complete
-    (let [result @process]
+    ;; Wait for process to complete (with timeout to prevent hanging)
+    (let [timeout-ms 300000  ; 5 minutes
+          result (deref process timeout-ms {:exit -1 :err "Process timed out after 5 minutes"})]
       {:out (str/join "\n" @out-lines)
        :err (:err result)
        :exit (:exit result)})))
