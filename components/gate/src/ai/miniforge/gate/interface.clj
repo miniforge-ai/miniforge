@@ -30,11 +30,12 @@
    [ai.miniforge.gate.lint]
    [ai.miniforge.gate.test]
    [ai.miniforge.gate.policy]
+   [ai.miniforge.gate.precommit-discipline]
    [ai.miniforge.gate.registry :as registry]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]))
 
-;------------------------------------------------------------------------------ Layer 0
+;;------------------------------------------------------------------------------ Layer 0
 ;; Re-export registry functions
 
 (def get-gate
@@ -54,7 +55,7 @@
      Set of gate keywords"
   registry/list-gates)
 
-;------------------------------------------------------------------------------ Layer 1
+;;------------------------------------------------------------------------------ Layer 1
 ;; Gate operations
 
 (defn check-gate
@@ -118,7 +119,7 @@
      :results results
      :failed-gates (filterv (complement :passed?) results)}))
 
-;------------------------------------------------------------------------------ Layer 2
+;;------------------------------------------------------------------------------ Layer 2
 ;; Response chain support
 
 (defn check-gates-chain
@@ -159,11 +160,11 @@
    (response/create :gates)
    gate-kws))
 
-;------------------------------------------------------------------------------ Rich Comment
+;;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; List available gates
   (list-gates)
-  ;; => #{:syntax :lint :tests-pass :coverage :no-secrets ...}
+  ;; => #{:syntax :lint :tests-pass :coverage :no-secrets :precommit-discipline ...}
 
   ;; Get a gate
   (get-gate :syntax)

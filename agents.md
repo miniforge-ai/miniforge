@@ -1,6 +1,6 @@
 # Miniforge Agent Knowledge Base
 
-This document serves as the entry point for AI agents working in this repository. 
+This document serves as the entry point for AI agents working in this repository.
 It provides quick access to all rules, conventions, and expert knowledge encoded in the system.
 
 ## Quick Reference
@@ -12,6 +12,7 @@ It provides quick access to all rules, conventions, and expert knowledge encoded
 | Write Python code | `220-python` |
 | Work with Kubernetes | `320-kubernetes` |
 | Create a branch | `710-git-branch-management` |
+| **Commit code** | **`715-pre-commit-discipline`** (CRITICAL) |
 | Plan a PR | `720-pr-layering` |
 | Document a PR | `721-pr-documentation` |
 | Create a new rule | `900-rule-format` |
@@ -64,6 +65,7 @@ Rules are organized in `.cursor/rules/` with Dewey-style folders and numeric pre
 | ID | File | Description |
 |----|------|-------------|
 | 710 | `710-git-branch-management` | Always branch from main; verify before branching; single-purpose PRs |
+| 715 | `715-pre-commit-discipline` | **NEVER** bypass pre-commit hooks; investigate failures; fix root cause |
 | 720 | `720-pr-layering` | Decompose PRs by stratum; merge bottom-up; <400 lines per PR |
 | 721 | `721-pr-documentation` | Create `docs/pull-requests/YYYY-MM-DD-branch.md` for each feature branch |
 
@@ -75,7 +77,7 @@ Rules are organized in `.cursor/rules/` with Dewey-style folders and numeric pre
 
 ## Dewey Classification Quick Reference
 
-```
+```text
 000-099  Foundations     Architecture, design philosophy
 100-199  Tools           Linters, formatters, build tools
 200-299  Languages       Clojure, Python, JS/TS, Go, Rust
@@ -110,7 +112,7 @@ Rules are organized in `.cursor/rules/` with Dewey-style folders and numeric pre
 
 ## Project Structure
 
-```
+```text
 miniforge/
 ├── .cursor/rules/     # AI agent rules (this knowledge base)
 ├── bases/             # Polylith bases (entry points)
