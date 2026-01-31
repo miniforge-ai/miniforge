@@ -334,18 +334,24 @@ necessary dependencies. Optimize for clarity and testability.")
       :invoke-fn
       (fn [context input]
         (let [llm-client (or (:llm-backend opts) (:llm-backend context))
+              on-chunk (:on-chunk context)
               spec-text (spec->text input)
               user-prompt (str "Create an implementation plan for the following specification:\n\n"
                                spec-text
                                "\n\nOutput your plan as a Clojure map following the format in your system prompt. "
                                "Use (random-uuid) for all IDs - just write #uuid \"<any-uuid>\" placeholders that I'll fill in.")]
           (if llm-client
-            ;; Use the real LLM
-            (let [response (llm/chat llm-client user-prompt {:system planner-system-prompt})
+            ;; Use the real LLM with streaming if callback provided
+            (let [response (if on-chunk
+                             (llm/chat-stream llm-client user-prompt on-chunk
+                                              {:system planner-system-prompt})
+                             (llm/chat llm-client user-prompt
+                                       {:system planner-system-prompt}))
                   tokens (or (:tokens response) 0)]
               (log/info logger :planner :planner/llm-called
                         {:data {:success (llm/success? response)
-                                :tokens tokens}})
+                                :tokens tokens
+                                :streaming? (boolean on-chunk)}})
               (if (llm/success? response)
                 (let [content (llm/get-content response)
                       plan (or (parse-plan-response content)

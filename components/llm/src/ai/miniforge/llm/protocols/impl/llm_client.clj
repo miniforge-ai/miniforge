@@ -110,8 +110,9 @@
         (swap! out-lines conj line)
         (on-line line)
         (recur)))
-    ;; Wait for process to complete
-    (let [result @process]
+    ;; Wait for process to complete (with timeout to prevent hanging)
+    (let [timeout-ms 300000  ; 5 minutes
+          result (deref process timeout-ms {:exit -1 :err "Process timed out after 5 minutes"})]
       {:out (str/join "\n" @out-lines)
        :err (:err result)
        :exit (:exit result)})))
@@ -213,9 +214,13 @@
 ;; Execution functions
 
 (defn default-exec-fn
-  "Default execution function using babashka.process."
+  "Default execution function using babashka.process with timeout protection."
   [cmd]
-  (let [result (apply p/shell {:out :string :err :string :continue true} cmd)]
+  ;; p/shell returns a process object that we need to deref
+  ;; Add timeout to prevent hanging forever
+  (let [timeout-ms 300000  ; 5 minutes
+        process (apply p/process {:out :string :err :string} cmd)
+        result (deref process timeout-ms {:exit -1 :out "" :err "Process timed out after 5 minutes"})]
     {:out (:out result)
      :err (:err result)
      :exit (:exit result)}))
