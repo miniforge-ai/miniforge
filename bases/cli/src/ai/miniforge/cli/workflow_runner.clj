@@ -491,9 +491,13 @@
 
             ;; Create LLM client for agent execution
             ;; Agents use llm/chat from ai.miniforge.llm.interface directly
+            ;; Backend is configurable via workflow config or spec
+            llm-backend-type (or (get-in workflow [:workflow/config :llm-backend])
+                                 (get-in spec [:spec/raw-data :llm-backend])
+                                 :claude)  ; default to claude
             llm-client (try
                          (when-let [create-client (requiring-resolve 'ai.miniforge.llm.interface/create-client)]
-                           (create-client {:backend :claude}))
+                           (create-client {:backend llm-backend-type}))
                          (catch Exception e
                            (when-not quiet
                              (println (colorize :yellow (str "Warning: Could not create LLM client (" (ex-message e) "), agents will use fallback mode"))))
