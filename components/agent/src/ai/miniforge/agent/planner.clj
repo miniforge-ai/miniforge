@@ -173,14 +173,17 @@ necessary dependencies. Optimize for clarity and testability.")
 
 (defn- parse-plan-response
   "Parse the LLM response to extract a plan.
-   Handles both EDN in code blocks and plain EDN."
+   Handles both EDN in code blocks and plain EDN.
+   Returns nil if the parsed result is not a map."
   [response-content]
   (try
-    ;; Try to extract EDN from ```clojure or ```edn block
-    (if-let [match (re-find #"```(?:clojure|edn)?\s*\n([\s\S]*?)\n```" response-content)]
-      (edn/read-string (second match))
-      ;; Try to parse the whole response as EDN
-      (edn/read-string response-content))
+    (let [parsed (if-let [match (re-find #"```(?:clojure|edn)?\s*\n([\s\S]*?)\n```" response-content)]
+                   (edn/read-string (second match))
+                   ;; Try to parse the whole response as EDN
+                   (edn/read-string response-content))]
+      ;; Validate that the parsed result is a map (plan should be a map)
+      (when (map? parsed)
+        parsed))
     (catch Exception _
       ;; Return nil if parsing fails
       nil)))
