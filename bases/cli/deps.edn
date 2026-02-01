@@ -8,6 +8,9 @@
         babashka/fs      {:mvn/version "0.5.22"}
         babashka/process {:mvn/version "0.5.22"}
 
+        ;; Configuration management (BB-compatible)
+        aero/aero        {:mvn/version "1.1.6"}
+
         ;; TUI/CLI interaction library (BB-compatible)
         io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}
 
