@@ -4,12 +4,11 @@ This directory contains true end-to-end tests that exercise the complete system 
 
 ## Characteristics
 
-- **Real LLM backends** - Uses actual Claude API, not mocks
+- **Real CLI backends** - Uses actual claude CLI (wraps `claude` command), not mocks
 - **Complete workflows** - Runs full workflow execution end-to-end
 - **Real I/O** - File operations, git operations, network calls
-- **Requires credentials** - Needs API keys and environment setup
-- **Not run in CI** - Runs separately due to cost, time, and
-  credential requirements
+- **Requires CLI tools** - Needs claude CLI installed and configured
+- **Not run in CI** - Runs separately due to time and CLI tool requirements
 
 ## vs Integration Tests
 
