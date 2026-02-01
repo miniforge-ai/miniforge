@@ -109,11 +109,11 @@
           completed (atom [])
           result (runner/run-pipeline workflow {:task "Test"}
                                        {:on-phase-start
-                                        (fn [ctx ic]
+                                        (fn [_ctx ic]
                                           (swap! started conj
                                                  (get-in ic [:config :phase])))
                                         :on-phase-complete
-                                        (fn [ctx ic res]
+                                        (fn [_ctx ic _res]
                                           (swap! completed conj
                                                  (get-in ic [:config :phase])))})]
       (is (= :completed (:execution/status result)))
