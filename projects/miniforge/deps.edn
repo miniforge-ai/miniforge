@@ -1,4 +1,4 @@
-{:paths ["test"]
+{:paths ["test" "integration"]
 
  :deps {ai.miniforge/cli {:local/root "../../bases/cli"}
         ;; Workflow and all its transitive dependencies
