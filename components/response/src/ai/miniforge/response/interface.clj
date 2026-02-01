@@ -297,6 +297,23 @@
      (validation-result [\"Missing field\" \"Invalid format\"])"
   builder/validation-result)
 
+(def status-check
+  "Create a timestamped status check response.
+
+   Use for point-in-time observations like health checks, monitoring, polling.
+   Always includes :checked-at timestamp. For immediate operation results without
+   timestamps, use success/error instead.
+
+   Arguments:
+   - status - Status keyword (:healthy, :warning, :halt, or custom)
+   - opts - Optional map with :message, :data, :agent/id, or other context
+
+   Example:
+     (status-check :healthy {:agent/id :progress-monitor
+                             :message \"Making progress\"
+                             :data {:chunks 5}})"
+  builder/status-check)
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Create and build a chain

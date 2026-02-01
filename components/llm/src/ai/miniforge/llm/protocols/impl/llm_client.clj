@@ -75,18 +75,27 @@
        (str/join "\n\n")))
 
 (defn parse-cli-output
-  "Parse CLI output into a response map."
-  [output exit-code]
-  (if (zero? exit-code)
-    {:success true
-     :content (str/trim output)
-     :usage {:input-tokens nil
-             :output-tokens nil}
-     :exit-code exit-code}
-    {:success false
-     :error {:type "cli_error"
-             :message output}
-     :exit-code exit-code}))
+  "Parse CLI output into a response map.
+
+   For errors, uses stderr if stdout is empty to provide better error context."
+  ([output exit-code]
+   (parse-cli-output output exit-code nil))
+  ([output exit-code stderr]
+   (if (zero? exit-code)
+     {:success true
+      :content (str/trim output)
+      :usage {:input-tokens nil
+              :output-tokens nil}
+      :exit-code exit-code}
+     (let [error-message (if (and stderr (str/blank? output))
+                           stderr  ; Use stderr if stdout is empty
+                           output)]
+       {:success false
+        :error {:type "cli_error"
+                :message (str/trim error-message)
+                :stderr stderr
+                :stdout output}
+        :exit-code exit-code}))))
 
 ;------------------------------------------------------------------------------ Layer 1.5
 ;; Execution helper functions
@@ -149,7 +158,7 @@
                  {:data {:backend backend
                          :prompt-length (count prompt)}}))
     (let [result (exec-fn full-cmd)
-          response (parse-cli-output (:out result) (:exit result))]
+          response (parse-cli-output (:out result) (:exit result) (:err result))]
       (when logger
         (if (:success response)
           (log/debug logger :system :agent/response-received
@@ -211,10 +220,16 @@
              :usage {:input-tokens nil
                      :output-tokens nil}
              :exit-code exit-code}
-            {:success false
-             :error {:type "cli_error"
-                     :message (:err result)}
-             :exit-code exit-code}))))))
+            (let [error-message (or (:err result)
+                                    (when (str/blank? @accumulated-content)
+                                      "Process failed with no output")
+                                    "Process failed")]
+              {:success false
+               :error {:type "cli_error"
+                       :message (str/trim error-message)
+                       :stderr (:err result)
+                       :stdout @accumulated-content}
+               :exit-code exit-code})))))))
 
 (defn get-config-impl
   "Implementation of get-config protocol method."
