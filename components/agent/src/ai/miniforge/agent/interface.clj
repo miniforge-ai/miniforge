@@ -16,7 +16,9 @@
    [ai.miniforge.agent.planner :as planner]
    [ai.miniforge.agent.implementer :as implementer]
    [ai.miniforge.agent.tester :as tester]
-   [ai.miniforge.agent.reviewer :as reviewer]))
+   [ai.miniforge.agent.reviewer :as reviewer]
+   [ai.miniforge.agent.meta-coordinator :as meta-coord]
+   [ai.miniforge.agent.meta.progress-monitor :as progress-monitor]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol re-exports (allow other components to reference protocols)
@@ -595,6 +597,33 @@
 (def validate-review-artifact
   "Validate a review artifact against the schema."
   reviewer/validate-review-artifact)
+
+;------------------------------------------------------------------------------ Layer 12
+;; Meta-agent operations
+
+(def create-progress-monitor-agent
+  "Create a Progress Monitor meta-agent for workflow health monitoring."
+  progress-monitor/create-progress-monitor-agent)
+
+(def create-meta-coordinator
+  "Create a meta-agent coordinator for managing multiple meta-agents."
+  meta-coord/create-coordinator)
+
+(def check-all-meta-agents
+  "Check health of all meta-agents in the coordinator."
+  meta-coord/check-all-agents)
+
+(def reset-all-meta-agents!
+  "Reset state of all meta-agents in the coordinator."
+  meta-coord/reset-all-agents!)
+
+(def get-meta-check-history
+  "Get health check history from the coordinator."
+  meta-coord/get-check-history)
+
+(def get-meta-agent-stats
+  "Get statistics for all meta-agents."
+  meta-coord/get-agent-stats)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

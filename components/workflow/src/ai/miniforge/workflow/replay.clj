@@ -5,8 +5,7 @@
    Layer 0: Pure functions for event filtering and sorting
    Layer 1: State reconstruction from events
    Layer 2: Replay execution and verification"
-  (:require
-   [ai.miniforge.workflow.state :as state]))
+  )
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event filtering and sorting

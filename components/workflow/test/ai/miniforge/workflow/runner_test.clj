@@ -3,6 +3,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.runner :as runner]
+   [ai.miniforge.workflow.context :as ctx]
    ;; Require phase implementations
    [ai.miniforge.phase.plan]
    [ai.miniforge.phase.implement]
@@ -23,7 +24,7 @@
   (testing "create-context initializes execution state"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"}
-          ctx (runner/create-context workflow {:task "Test"} {})]
+          ctx (ctx/create-context workflow {:task "Test"} {})]
       (is (uuid? (:execution/id ctx)))
       (is (= :test (:execution/workflow-id ctx)))
       (is (= :running (:execution/status ctx)))
@@ -170,7 +171,7 @@
   (testing "response chain is initialized in context"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"}
-          ctx (runner/create-context workflow {:task "Test"} {})]
+          ctx (ctx/create-context workflow {:task "Test"} {})]
       (is (contains? ctx :execution/response-chain))
       (is (= :test (:operation (:execution/response-chain ctx))))
       (is (true? (:succeeded? (:execution/response-chain ctx)))))))
@@ -195,7 +196,7 @@
   (testing "FSM state is tracked in context"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"}
-          ctx (runner/create-context workflow {:task "Test"} {})]
+          ctx (ctx/create-context workflow {:task "Test"} {})]
       (is (contains? ctx :execution/fsm-state))
       (is (map? (:execution/fsm-state ctx)))
       (is (= :running (:_state (:execution/fsm-state ctx))))))
