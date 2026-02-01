@@ -103,16 +103,27 @@
   (let [process (apply p/process {:err :string} cmd)
         out-lines (atom [])
         out-reader (java.io.BufferedReader.
-                    (java.io.InputStreamReader. (:out process)))]
-    ;; Read and callback each line
+                    (java.io.InputStreamReader. (:out process)))
+        timeout-ms 300000  ; 5 minutes total timeout
+        line-timeout-ms 60000  ; 1 minute per line timeout
+        start-time (System/currentTimeMillis)]
+    ;; Read and callback each line with timeout protection
     (loop []
-      (when-let [line (.readLine out-reader)]
-        (swap! out-lines conj line)
-        (on-line line)
-        (recur)))
+      (let [elapsed (- (System/currentTimeMillis) start-time)]
+        (when (< elapsed timeout-ms)
+          ;; Use Future with timeout for each readLine call to prevent indefinite blocking
+          (let [read-future (future (.readLine out-reader))
+                line (try
+                       (deref read-future line-timeout-ms nil)
+                       (catch java.util.concurrent.TimeoutException _
+                         ;; Line read timed out, stop reading
+                         nil))]
+            (when line
+              (swap! out-lines conj line)
+              (on-line line)
+              (recur))))))
     ;; Wait for process to complete (with timeout to prevent hanging)
-    (let [timeout-ms 300000  ; 5 minutes
-          result (deref process timeout-ms {:exit -1 :err "Process timed out after 5 minutes"})]
+    (let [result (deref process timeout-ms {:exit -1 :err "Process timed out after 5 minutes"})]
       {:out (str/join "\n" @out-lines)
        :err (:err result)
        :exit (:exit result)})))
