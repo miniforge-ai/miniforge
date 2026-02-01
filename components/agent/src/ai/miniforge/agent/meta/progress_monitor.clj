@@ -3,7 +3,7 @@
 
    Watches streaming activity and file writes to detect stagnation."
   (:require [ai.miniforge.agent.meta-protocol :as mp]
-            [ai.miniforge.llm.progress-monitor :as pm]))
+            [ai.miniforge.llm.interface :as llm]))
 
 (defrecord ProgressMonitorMetaAgent [monitor-state config]
   mp/MetaAgent
@@ -11,14 +11,14 @@
   (check-health [_ workflow-state]
     (let [;; Record any new streaming chunks
           _ (doseq [chunk (:workflow/streaming-activity workflow-state)]
-              (pm/record-chunk! monitor-state chunk))
+              (llm/record-chunk! monitor-state chunk))
 
           ;; Record any new file writes
           _ (doseq [file (:workflow/files-written workflow-state)]
-              (pm/record-file-write! monitor-state file))
+              (llm/record-file-write! monitor-state file))
 
           ;; Check for timeout
-          timeout-check (pm/check-timeout monitor-state)]
+          timeout-check (llm/check-timeout monitor-state)]
 
       (if timeout-check
         ;; Timeout detected - halt workflow
@@ -31,7 +31,7 @@
                  :elapsed-ms (:elapsed-ms timeout-check)}))
 
         ;; Still healthy - provide current stats
-        (let [stats (pm/get-stats monitor-state)]
+        (let [stats (llm/get-stats monitor-state)]
           (if (:is-active? stats)
             (mp/create-health-check
              :progress-monitor
@@ -53,7 +53,7 @@
 
   (reset-state! [_]
     (reset! monitor-state
-            (pm/create-progress-monitor
+            (llm/create-progress-monitor
              (or (:monitor-options config)
                  {:stagnation-threshold-ms 120000  ; 2 minutes
                   :max-total-ms 600000})))))       ; 10 minutes
@@ -84,7 +84,7 @@
                   :enabled? true
                   :monitor-options monitor-options})]
      (->ProgressMonitorMetaAgent
-      (atom (pm/create-progress-monitor monitor-options))
+      (atom (llm/create-progress-monitor monitor-options))
       config))))
 
 (comment

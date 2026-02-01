@@ -1,10 +1,12 @@
 # Meta-Agent Architecture
 
-Miniforge uses a **team of specialized meta-agents** to monitor and control workflow execution. This is analogous to how the main workflow uses specialized agents (Planner, Implementer, Tester, Reviewer), but applied at the meta level.
+Miniforge uses a **team of specialized meta-agents** to monitor and control workflow execution. This is
+analogous to how the main workflow uses specialized agents (Planner, Implementer, Tester, Reviewer), but
+applied at the meta level.
 
 ## Philosophy
 
-**Distributed Authority, Not Centralized Control**
+### Distributed Authority, Not Centralized Control
 
 - Any meta-agent can halt the factory floor
 - Coordinator is a lightweight message router, not a controller
@@ -325,7 +327,8 @@ Workflow runner integrates coordinator:
 
 ### Why Any Agent Can Halt?
 
-This is a **safety mechanism**. If the progress monitor detects stagnation, it doesn't matter that tests look good - the workflow is stuck. Any critical issue should stop the factory floor.
+This is a **safety mechanism**. If the progress monitor detects stagnation, it doesn't matter that tests
+look good - the workflow is stuck. Any critical issue should stop the factory floor.
 
 ## Future Extensions
 
@@ -349,7 +352,8 @@ This is a **safety mechanism**. If the progress monitor detects stagnation, it d
 
 **Agent Communication:**
 
-Future enhancement: Meta-agents could communicate through coordinator to share context (e.g., progress monitor tells resource manager that workflow is stalled, so stop counting tokens).
+Future enhancement: Meta-agents could communicate through coordinator to share context (e.g., progress
+monitor tells resource manager that workflow is stalled, so stop counting tokens).
 
 ## See Also
 

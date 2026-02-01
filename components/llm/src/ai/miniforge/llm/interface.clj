@@ -4,7 +4,8 @@
   (:require
    [ai.miniforge.llm.interface.protocols.llm-client :as p]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
-   [ai.miniforge.llm.protocols.records.llm-client :as records]))
+   [ai.miniforge.llm.protocols.records.llm-client :as records]
+   [ai.miniforge.llm.progress-monitor :as pm]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Backend information
@@ -151,6 +152,90 @@
   "Extract error details from a failed response."
   [response]
   (:error response))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Progress Monitoring
+
+(defn create-progress-monitor
+  "Create a progress monitor for tracking workflow activity.
+
+   Options:
+   - :stagnation-threshold-ms - Time without progress before stagnation (default: 120000ms)
+   - :max-total-ms - Hard timeout limit (default: 600000ms)
+   - :min-activity-interval-ms - Minimum time between activities (default: 5000ms)
+
+   Returns: Atom containing monitor state.
+
+   Example:
+     (create-progress-monitor {:stagnation-threshold-ms 60000
+                               :max-total-ms 300000})"
+  [opts]
+  (pm/create-progress-monitor opts))
+
+(defn record-chunk!
+  "Record a streaming chunk as activity.
+
+   Arguments:
+   - monitor - Progress monitor atom (from create-progress-monitor)
+   - chunk-content - String content of the chunk
+
+   Returns: Boolean indicating if this was meaningful progress.
+
+   Example:
+     (record-chunk! monitor \"Analyzing code...\")"
+  [monitor chunk-content]
+  (pm/record-chunk! monitor chunk-content))
+
+(defn record-file-write!
+  "Record a file write as activity.
+
+   Arguments:
+   - monitor - Progress monitor atom
+   - file-path - Path of file that was written
+
+   Example:
+     (record-file-write! monitor \"src/foo.clj\")"
+  [monitor file-path]
+  (pm/record-file-write! monitor file-path))
+
+(defn check-timeout
+  "Check if monitor has timed out.
+
+   Arguments:
+   - monitor - Progress monitor atom
+
+   Returns:
+   - nil if still making progress
+   - {:type :stagnation|:hard-limit
+      :message \"...\"
+      :elapsed-ms ...
+      :stats {...}} if timed out
+
+   Example:
+     (when-let [timeout (check-timeout monitor)]
+       (println \"Timeout:\" (:message timeout)))"
+  [monitor]
+  (pm/check-timeout monitor))
+
+(defn get-stats
+  "Get current progress monitor statistics.
+
+   Arguments:
+   - monitor - Progress monitor atom
+
+   Returns:
+   - {:chunks int
+      :unique-chunks int
+      :files-written int
+      :is-active? boolean
+      :time-since-activity-ms int
+      :elapsed-ms int}
+
+   Example:
+     (let [stats (get-stats monitor)]
+       (println \"Chunks:\" (:chunks stats)))"
+  [monitor]
+  (pm/get-stats monitor))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
