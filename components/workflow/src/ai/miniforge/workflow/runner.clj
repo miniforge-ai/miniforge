@@ -13,197 +13,21 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.workflow.runner
-  "Interceptor-based workflow pipeline execution.
+  "Workflow pipeline orchestration.
 
-   Executes workflows as chains of phase interceptors.
-   Each phase interceptor has :enter, :leave, and :error functions.
+   Top-level runner that orchestrates workflow execution by composing:
+   - Context management (context namespace)
+   - Phase execution (execution namespace)
+   - Health monitoring (monitoring namespace)
 
-   - :enter - Execute the phase
-   - :leave - Post-processing and metrics
-   - :error - Handle failures and transitions
-
-   Uses the workflow FSM for explicit state transitions:
-   - pending -> running (on start)
-   - running -> completed (all phases done)
-   - running -> failed (phase failure with no recovery)
-   - running -> paused (human intervention needed)"
+   Provides the main run-pipeline entry point."
   (:require [ai.miniforge.phase.interface :as phase]
-            [ai.miniforge.gate.interface :as gate]
             [ai.miniforge.response.interface :as response]
-            [ai.miniforge.workflow.fsm :as fsm]))
+            [ai.miniforge.workflow.context :as ctx]
+            [ai.miniforge.workflow.execution :as exec]
+            [ai.miniforge.workflow.monitoring :as monitoring]))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Execution context
-
-(defn create-context
-  "Create initial execution context.
-
-   Arguments:
-   - workflow: Workflow configuration
-   - input: Input data for the workflow
-   - opts: Execution options (including :llm-backend, :artifact-store, callbacks)
-
-   Returns execution context map with FSM state initialized."
-  [workflow input opts]
-  (let [;; Initialize FSM and transition to running state
-        fsm-state (-> (fsm/initialize)
-                      (fsm/transition-fsm :start))]
-    (merge
-     {:execution/id (random-uuid)
-      :execution/workflow-id (:workflow/id workflow)
-      :execution/workflow-version (:workflow/version workflow)
-      :execution/status (fsm/current-state fsm-state)  ; Use FSM state
-      :execution/fsm-state fsm-state                   ; Track FSM state
-      :execution/input input
-      :execution/artifacts []
-      :execution/errors []  ; DEPRECATED: Use :execution/response-chain instead
-      :execution/response-chain (response/create (:workflow/id workflow))
-      :execution/phase-results {}
-      :execution/current-phase nil
-      :execution/phase-index 0
-      :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
-      :execution/started-at (System/currentTimeMillis)
-      :execution/opts opts}
-     ;; Merge opts into top-level context so :llm-backend is accessible to agents
-     (select-keys opts [:llm-backend :artifact-store :on-phase-start :on-phase-complete]))))
-
-(defn- merge-metrics
-  "Merge phase metrics into execution metrics."
-  [exec-metrics phase-metrics]
-  (merge-with + exec-metrics
-              (select-keys phase-metrics [:tokens :cost-usd :duration-ms])))
-
-(defn- transition-to-completed
-  "Transition workflow to completed state using FSM."
-  [ctx]
-  (let [fsm-state (:execution/fsm-state ctx)
-        new-fsm-state (fsm/transition-fsm fsm-state :complete)]
-    (-> ctx
-        (assoc :execution/fsm-state new-fsm-state)
-        (assoc :execution/status (fsm/current-state new-fsm-state))
-        (assoc :execution/ended-at (System/currentTimeMillis)))))
-
-(defn- transition-to-failed
-  "Transition workflow to failed state using FSM."
-  [ctx]
-  (let [fsm-state (:execution/fsm-state ctx)
-        new-fsm-state (fsm/transition-fsm fsm-state :fail)]
-    (-> ctx
-        (assoc :execution/fsm-state new-fsm-state)
-        (assoc :execution/status (fsm/current-state new-fsm-state))
-        (assoc :execution/ended-at (System/currentTimeMillis)))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Phase transition logic
-
-(defn- determine-next-index
-  "Determine next phase index based on result and config.
-
-   Arguments:
-   - pipeline: Vector of phase interceptors
-   - current-index: Current phase index
-   - phase-config: Current phase configuration
-   - phase-result: Result from phase execution
-
-   Returns next index or :done."
-  [pipeline current-index phase-config phase-result]
-  ;; Check both :status and :phase/status for compatibility
-  (let [status (or (:status phase-result) (:phase/status phase-result))
-        on-fail (:on-fail phase-config)
-        on-success (:on-success phase-config)]
-    (cond
-      ;; Phase completed successfully
-      (= :completed status)
-      (if on-success
-        ;; Find target phase by name
-        (let [target-index (->> pipeline
-                                (map-indexed vector)
-                                (filter #(= on-success (get-in (second %) [:config :phase])))
-                                (first))]
-          (if target-index (first target-index) (inc current-index)))
-        ;; Default: next phase
-        (let [next-idx (inc current-index)]
-          (if (< next-idx (count pipeline))
-            next-idx
-            :done)))
-
-      ;; Phase failed
-      (= :failed status)
-      (if on-fail
-        ;; Find target phase by name
-        (let [target-index (->> pipeline
-                                (map-indexed vector)
-                                (filter #(= on-fail (get-in (second %) [:config :phase])))
-                                (first))]
-          (if target-index
-            (first target-index)
-            ;; Target not found, fail the workflow
-            :error))
-        ;; No retry target, fail the workflow
-        :error)
-
-      ;; Default: move to next
-      :else (inc current-index))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Interceptor execution
-
-(defn- execute-enter
-  "Execute the :enter function of an interceptor.
-
-   Returns updated context."
-  [interceptor ctx]
-  (let [phase-name (get-in interceptor [:config :phase])]
-    (if-let [enter-fn (:enter interceptor)]
-      (try
-        (enter-fn ctx)
-        (catch Exception ex
-          (if-let [error-fn (:error interceptor)]
-            (error-fn ctx ex)
-            (-> ctx
-                (assoc :execution/status :failed)
-                (update :execution/errors conj
-                        {:type :phase-error
-                         :phase phase-name
-                         :message (ex-message ex)
-                         :data (ex-data ex)})
-                (update :execution/response-chain
-                        response/add-failure phase-name
-                        :anomalies.phase/enter-failed
-                        {:error (ex-message ex)
-                         :data (ex-data ex)})))))
-      ctx)))
-
-(defn- execute-leave
-  "Execute the :leave function of an interceptor.
-
-   Returns updated context."
-  [interceptor ctx]
-  (let [phase-name (get-in interceptor [:config :phase])]
-    (if-let [leave-fn (:leave interceptor)]
-      (try
-        (leave-fn ctx)
-        (catch Exception ex
-          (-> ctx
-              (update :execution/errors conj
-                      {:type :leave-error
-                       :phase phase-name
-                       :message (ex-message ex)})
-              (update :execution/response-chain
-                      response/add-failure phase-name
-                      :anomalies.phase/leave-failed
-                      {:error (ex-message ex)}))))
-      ctx)))
-
-(defn- run-gates
-  "Run gates for a phase and return result.
-
-   Returns {:passed? bool :errors []}."
-  [gate-keywords artifact ctx]
-  (gate/check-gates gate-keywords artifact ctx))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Pipeline execution
+;------------------------------------------------------------------------------ Layer 0: Pipeline helpers
 
 (defn build-pipeline
   "Build interceptor pipeline from workflow config.
@@ -232,113 +56,62 @@
   [workflow]
   (phase/validate-pipeline workflow))
 
-(defn- execute-phase-step
-  "Execute a single phase step and return updated context.
+;------------------------------------------------------------------------------ Layer 1: Orchestration helpers
 
-   Arguments:
-   - pipeline: Vector of interceptors
-   - ctx: Current execution context
-   - callbacks: Map with :on-phase-start, :on-phase-complete
+(defn- handle-empty-pipeline
+  "Handle error case of empty pipeline."
+  [context]
+  (-> context
+      (update :execution/errors conj
+              {:type :empty-pipeline
+               :message "Workflow has no phases"})
+      (update :execution/response-chain
+              response/add-failure :pipeline
+              :anomalies.workflow/empty-pipeline
+              {:error "Workflow has no phases"})
+      (ctx/transition-to-failed)))
 
-   Returns updated context or nil if done."
-  [pipeline ctx callbacks]
-  (let [phase-index (:execution/phase-index ctx)
-        interceptor (get pipeline phase-index)
-        phase-name (get-in interceptor [:config :phase])
-        {:keys [on-phase-start on-phase-complete]} callbacks]
+(defn- handle-max-phases-exceeded
+  "Handle error case of max phases exceeded."
+  [context max-phases]
+  (-> context
+      (update :execution/errors conj
+              {:type :max-phases-exceeded
+               :message (str "Exceeded maximum phase count: " max-phases)})
+      (update :execution/response-chain
+              response/add-failure :pipeline
+              :anomalies.workflow/max-phases
+              {:error (str "Exceeded maximum phase count: " max-phases)
+               :max-phases max-phases})
+      (ctx/transition-to-failed)))
 
-    ;; Update current phase
-    (let [ctx' (assoc ctx :execution/current-phase phase-name)]
+(defn- terminal-state?
+  "Check if workflow is in terminal state."
+  [context]
+  (#{:completed :failed} (:execution/status context)))
 
-      ;; Callback: phase start
-      (when on-phase-start
-        (on-phase-start ctx' interceptor))
+(defn- execute-single-iteration
+  "Execute single pipeline iteration: health check -> phase execution -> cleanup.
 
-      ;; Execute :enter
-      (let [ctx-entered (execute-enter interceptor ctx')
-            phase-result (get-in ctx-entered [:phase])
+   Returns updated context."
+  [pipeline context callbacks iteration]
+  (let [;; Check workflow health via meta-agents
+        coordinator (:execution/meta-coordinator context)
+        workflow-state (monitoring/build-workflow-state context iteration)
+        health-check (monitoring/check-workflow-health coordinator workflow-state)]
 
-            ;; Run gates if phase has them
-            gate-keywords (get-in interceptor [:config :gates] [])
-            artifact (:artifact phase-result)
-            gate-result (when (and (seq gate-keywords) artifact)
-                          (run-gates gate-keywords artifact ctx-entered))
+    (if (= :halt (:status health-check))
+      ;; Meta-agent signaled halt - stop workflow
+      (monitoring/handle-meta-agent-halt context health-check ctx/transition-to-failed)
 
-            ;; Update phase result with gate status
-            phase-result' (if gate-result
-                            (if (:passed? gate-result)
-                              phase-result
-                              (assoc phase-result
-                                     :phase/status :failed
-                                     :phase/gate-errors (:errors gate-result)))
-                            phase-result)
+      ;; Healthy or warning - continue execution
+      (-> (exec/execute-phase-step pipeline context callbacks
+                                   ctx/merge-metrics
+                                   ctx/transition-to-completed
+                                   ctx/transition-to-failed)
+          (monitoring/clear-transient-state)))))
 
-            ;; Execute :leave
-            ctx-left (execute-leave interceptor
-                                    (assoc ctx-entered :phase phase-result'))
-
-            ;; Get final phase result after :leave (may have updated status)
-            final-phase-result (get-in ctx-left [:phase])
-
-            ;; Record phase result in response chain
-            ;; Check both :status and :phase/status for compatibility
-            phase-succeeded? (or (= :completed (:status final-phase-result))
-                                 (= :completed (:phase/status final-phase-result)))
-            ctx-with-response (if phase-succeeded?
-                                (update ctx-left :execution/response-chain
-                                        response/add-success phase-name final-phase-result)
-                                (update ctx-left :execution/response-chain
-                                        response/add-failure phase-name
-                                        (if (:phase/gate-errors final-phase-result)
-                                          :anomalies.gate/validation-failed
-                                          :anomalies.phase/agent-failed)
-                                        final-phase-result))
-
-            ;; Record phase result (legacy format)
-            ctx-recorded (-> ctx-with-response
-                             (assoc-in [:execution/phase-results phase-name] final-phase-result)
-                             (update :execution/metrics merge-metrics
-                                     (or (:metrics final-phase-result) {}))
-                             (update :execution/artifacts into
-                                     (or (:artifacts final-phase-result) [])))]
-
-        ;; Callback: phase complete
-        (when on-phase-complete
-          (on-phase-complete ctx-recorded interceptor final-phase-result))
-
-        ;; Determine next phase
-        (let [next-index (determine-next-index
-                          pipeline phase-index
-                          (:config interceptor)
-                          final-phase-result)]
-          (cond
-            ;; Workflow complete - use FSM transition
-            (= :done next-index)
-            (transition-to-completed ctx-recorded)
-
-            ;; Error - workflow failed - use FSM transition
-            (= :error next-index)
-            (transition-to-failed ctx-recorded)
-
-            ;; Continue to next phase
-            (number? next-index)
-            (if (< next-index (count pipeline))
-              (assoc ctx-recorded :execution/phase-index next-index)
-              ;; Past end of pipeline - complete via FSM
-              (transition-to-completed ctx-recorded))
-
-            ;; Unknown - shouldn't happen - fail via FSM
-            :else
-            (-> ctx-recorded
-                (update :execution/errors conj
-                        {:type :invalid-transition
-                         :message (str "Invalid next index: " next-index)})
-                (update :execution/response-chain
-                        response/add-failure :pipeline
-                        :anomalies.workflow/invalid-transition
-                        {:error (str "Invalid next index: " next-index)
-                         :next-index next-index})
-                (transition-to-failed))))))))
+;------------------------------------------------------------------------------ Layer 2: Main entry point
 
 (defn run-pipeline
   "Execute a workflow pipeline.
@@ -359,43 +132,26 @@
          max-phases (or (:max-phases opts) 50)
          callbacks {:on-phase-start (:on-phase-start opts)
                     :on-phase-complete (:on-phase-complete opts)}
-         initial-ctx (create-context workflow input opts)]
+         initial-ctx (ctx/create-context workflow input opts)]
 
      (if (empty? pipeline)
-       (-> initial-ctx
-           (update :execution/errors conj
-                   {:type :empty-pipeline
-                    :message "Workflow has no phases"})
-           (update :execution/response-chain
-                   response/add-failure :pipeline
-                   :anomalies.workflow/empty-pipeline
-                   {:error "Workflow has no phases"})
-           (transition-to-failed))
+       (handle-empty-pipeline initial-ctx)
 
        ;; Execute pipeline loop
-       (loop [ctx initial-ctx
+       (loop [context initial-ctx
               iteration 0]
          (cond
-           ;; Terminal state
-           (#{:completed :failed} (:execution/status ctx))
-           ctx
+           ;; Terminal state reached
+           (terminal-state? context)
+           context
 
-           ;; Max phases exceeded - use FSM transition
+           ;; Max iterations exceeded
            (>= iteration max-phases)
-           (-> ctx
-               (update :execution/errors conj
-                       {:type :max-phases-exceeded
-                        :message (str "Exceeded maximum phase count: " max-phases)})
-               (update :execution/response-chain
-                       response/add-failure :pipeline
-                       :anomalies.workflow/max-phases
-                       {:error (str "Exceeded maximum phase count: " max-phases)
-                        :max-phases max-phases})
-               (transition-to-failed))
+           (handle-max-phases-exceeded context max-phases)
 
-           ;; Execute next phase
+           ;; Execute next iteration: health check -> phase -> cleanup
            :else
-           (recur (execute-phase-step pipeline ctx callbacks)
+           (recur (execute-single-iteration pipeline context callbacks iteration)
                   (inc iteration))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
@@ -425,9 +181,9 @@
   (def result
     (run-pipeline simple-workflow
                   {:task "Test task"}
-                  {:on-phase-start (fn [ctx ic]
+                  {:on-phase-start (fn [_ctx ic]
                                      (println "Starting:" (get-in ic [:config :phase])))
-                   :on-phase-complete (fn [ctx ic result]
+                   :on-phase-complete (fn [_ctx ic result]
                                         (println "Completed:" (get-in ic [:config :phase])
                                                  "Status:" (:phase/status result)))}))
 

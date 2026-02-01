@@ -54,3 +54,6 @@ projects/**/pom.xml
 /example/example/**
 artifacts
 dist/
+
+# Checkpoints (local development snapshots)
+docs/checkpoints/

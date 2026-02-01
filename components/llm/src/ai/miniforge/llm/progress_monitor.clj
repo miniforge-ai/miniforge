@@ -1,12 +1,12 @@
 (ns ai.miniforge.llm.progress-monitor
-  "Adaptive timeout monitoring based on actual progress detection.
+   "Adaptive timeout monitoring based on actual progress detection.
 
    Instead of fixed timeouts, monitors streaming activity and file system
    changes to detect when an agent is stuck vs actively working."
-  (:require [clojure.string :as str]))
+   )
 
-(defn create-progress-monitor
-  "Create a progress monitor for adaptive timeout.
+ (defn create-progress-monitor
+   "Create a progress monitor for adaptive timeout.
 
    Options:
    - :stagnation-threshold-ms - Time without progress before considering stuck (default: 120000 = 2min)
@@ -14,62 +14,60 @@
    - :min-activity-interval-ms - Minimum time between progress signals (default: 5000 = 5sec)
 
    Returns monitor state atom."
-  [{:keys [stagnation-threshold-ms max-total-ms min-activity-interval-ms]
-    :or {stagnation-threshold-ms 120000  ; 2 minutes
-         max-total-ms 600000              ; 10 minutes
-         min-activity-interval-ms 5000}}] ; 5 seconds
-  (atom {:started-at (System/currentTimeMillis)
-         :last-activity-at (System/currentTimeMillis)
-         :last-chunk-content nil
-         :chunk-count 0
-         :unique-chunks #{}
-         :file-writes #{}
-         :stagnation-threshold-ms stagnation-threshold-ms
-         :max-total-ms max-total-ms
-         :min-activity-interval-ms min-activity-interval-ms
-         :stagnant-cycles 0}))
+   [{:keys [stagnation-threshold-ms max-total-ms min-activity-interval-ms]
+     :or {stagnation-threshold-ms 120000  ; 2 minutes
+          max-total-ms 600000              ; 10 minutes
+          min-activity-interval-ms 5000}}] ; 5 seconds
+   (atom {:started-at (System/currentTimeMillis)
+          :last-activity-at (System/currentTimeMillis)
+          :last-chunk-content nil
+          :chunk-count 0
+          :unique-chunks #{}
+          :file-writes #{}
+          :stagnation-threshold-ms stagnation-threshold-ms
+          :max-total-ms max-total-ms
+          :min-activity-interval-ms min-activity-interval-ms
+          :stagnant-cycles 0}))
 
-(defn record-chunk!
-  "Record a streaming chunk as activity.
+ (defn record-chunk!
+   "Record a streaming chunk as activity.
 
    Returns true if this represents meaningful progress, false if stagnant."
-  [monitor chunk-content]
-  (let [now (System/currentTimeMillis)
-        state @monitor
-        last-content (:last-chunk-content state)
-        last-activity (:last-activity-at state)
-        min-interval (:min-activity-interval-ms state)]
+   [monitor chunk-content]
+   (let [now (System/currentTimeMillis)
+         state @monitor
+         last-content (:last-chunk-content state)
+         last-activity (:last-activity-at state)
+         min-interval (:min-activity-interval-ms state)
+         is-different? (not= chunk-content last-content)
+         is-not-just-thinking? (and chunk-content
+                                    (not (re-find #"(?i)^(thinking|analyzing|considering)" chunk-content)))
+         is-substantive? (and chunk-content (> (count chunk-content) 10))
+         time-since-activity (- now last-activity)
+         ;; First chunk always counts as progress (last-content will be nil)
+         is-first-chunk? (nil? last-content)
+         sufficient-interval? (or is-first-chunk?
+                                  (> time-since-activity min-interval))
 
-    ;; Detect if this is meaningful progress
-    (let [is-different? (not= chunk-content last-content)
-          is-not-just-thinking? (and chunk-content
-                                     (not (re-find #"(?i)^(thinking|analyzing|considering)" chunk-content)))
-          is-substantive? (and chunk-content (> (count chunk-content) 10))
-          time-since-activity (- now last-activity)
-          ;; First chunk always counts as progress (last-content will be nil)
-          is-first-chunk? (nil? last-content)
-          sufficient-interval? (or is-first-chunk?
-                                   (> time-since-activity min-interval))
+         meaningful-progress? (and is-different?
+                                   is-not-just-thinking?
+                                   is-substantive?
+                                   sufficient-interval?)]
 
-          meaningful-progress? (and is-different?
-                                    is-not-just-thinking?
-                                    is-substantive?
-                                    sufficient-interval?)]
-
-      (swap! monitor
-             (fn [state]
-               (cond-> (assoc state
+     (swap! monitor
+            (fn [state]
+              (cond-> (assoc state
                              :last-chunk-content chunk-content
                              :chunk-count (inc (:chunk-count state)))
-                 meaningful-progress?
-                 (assoc :last-activity-at now
-                        :stagnant-cycles 0
-                        :unique-chunks (conj (:unique-chunks state) chunk-content))
+                meaningful-progress?
+                (assoc :last-activity-at now
+                       :stagnant-cycles 0
+                       :unique-chunks (conj (:unique-chunks state) chunk-content))
 
-                 (not meaningful-progress?)
-                 (update :stagnant-cycles inc))))
+                (not meaningful-progress?)
+                (update :stagnant-cycles inc))))
 
-      meaningful-progress?)))
+     meaningful-progress?))
 
 (defn record-file-write!
   "Record a file write as significant progress."

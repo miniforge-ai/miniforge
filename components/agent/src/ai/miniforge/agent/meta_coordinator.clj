@@ -5,8 +5,7 @@
    It routes workflow state to meta-agents and aggregates their decisions.
    Any meta-agent can halt the workflow - coordinator just enforces it."
   (:require [ai.miniforge.agent.meta-protocol :as mp]
-            [ai.miniforge.response.interface :as response]
-            [clojure.tools.logging :as log]))
+            [ai.miniforge.response.interface :as response]))
 
 (defrecord MetaCoordinator
   [agents           ; Vector of MetaAgent instances
@@ -78,7 +77,7 @@
                      (record-check! coordinator (:id config) result)
                      result)
                    (catch Exception e
-                     (log/error e "Meta-agent check failed" {:agent (:id config)})
+                     ;; Return warning status on error - logging handled by caller if needed
                      (mp/create-health-check
                       (:id config)
                       :warning
@@ -110,8 +109,8 @@
     (try
       (mp/reset-state! agent)
       (catch Exception e
-        (log/error e "Failed to reset meta-agent"
-                   {:agent (-> agent mp/get-meta-config :id)}))))
+        ;; Silently continue on reset errors - caller can check if needed
+        nil)))
   (reset! (:last-checks coordinator) {})
   coordinator)
 
