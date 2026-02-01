@@ -9,7 +9,8 @@
    - Any meta-agent can stop the workflow (distributed authority)
    - Each meta-agent has focused domain expertise
    - Decisions are observable and logged
-   - Lightweight coordinator routes information, doesn't control")
+   - Lightweight coordinator routes information, doesn't control"
+  (:require [ai.miniforge.response.interface :as response]))
 
 (defprotocol MetaAgent
   "Protocol for meta-agents that monitor workflow execution.
@@ -73,17 +74,18 @@
 (defn create-health-check
   "Helper to create a health check result.
 
+   Delegates to response/status-check for consistent timestamped responses.
+
    Usage:
    (create-health-check :progress-monitor :healthy \"Making progress\")
    (create-health-check :test-quality :halt \"No tests found\" {:files-checked 10})"
   ([agent-id status message]
    (create-health-check agent-id status message nil))
   ([agent-id status message data]
-   {:status status
-    :agent/id agent-id
-    :message message
-    :data data
-    :checked-at (java.time.Instant/now)}))
+   (response/status-check status
+                          (cond-> {:agent/id agent-id
+                                   :message message}
+                            data (assoc :data data)))))
 
 (defrecord MetaAgentConfig
   [id                    ; Keyword ID (:progress-monitor, :test-quality, etc.)

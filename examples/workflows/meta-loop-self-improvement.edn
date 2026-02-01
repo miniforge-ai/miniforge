@@ -1,0 +1,95 @@
+;; Meta-Loop Self-Improvement Workflow
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; This workflow spec directs miniforge to improve ITSELF, testing:
+;; - Full autonomous SDLC execution
+;; - PR creation with docs following knowledge base rulesets
+;; - PR comment listening and response
+;; - Meta-loop error detection, pause, self-repair, and checkpoint restart
+;; - Evidence bundle generation and provenance tracking
+;;
+;; Usage:
+;;   mf run examples/workflows/meta-loop-self-improvement.edn
+
+{:workflow/spec-version "1.0.0"
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ ;; Required fields for spec parser
+ :title "Complete N1 Agent Protocol Implementation"
+ :description
+ "Implement the missing agent protocol methods per N1 spec §2.3:
+  - Agent abort() method for graceful termination
+  - Tool validate-args and get-schema methods for runtime validation
+  - Enhanced subagent orchestration support
+
+  This is a META-LOOP TEST: miniforge will improve its own core capabilities
+  while we monitor its autonomous decision-making, error handling, and
+  self-repair mechanisms."
+
+ :intent
+ {:type "feature"
+  :description "Complete the N1 Core Architecture specification implementation by adding
+  the missing agent protocol methods. This will:
+  - Enable agents to abort gracefully when unrecoverable errors occur
+  - Allow runtime validation of tool arguments before invocation
+  - Provide schema introspection for tools
+  - Improve subagent lifecycle management
+
+  META-LOOP TESTING OBJECTIVES:
+  - Verify miniforge can autonomously plan, implement, test, and release
+  - Confirm PR documentation follows knowledge base rulesets (agents.md)
+  - Test PR comment monitoring and autonomous response generation
+  - Validate error detection → pause → self-repair → checkpoint restart flow
+  - Ensure evidence bundles capture full provenance and audit trail"}
+
+ :constraints
+ ["Follow N1 spec §2.3 agent protocol requirements EXACTLY"
+  "Maintain backward compatibility with existing agent implementations"
+  "Add comprehensive unit tests for all new protocol methods"
+  "Add integration tests demonstrating abort and validation flows"
+  "Document all protocol methods with docstrings and examples"
+  "Follow PR documentation standards from agents.md knowledge base"
+  "Include evidence bundle with full implementation provenance"
+  "Use semantic versioning for agent protocol changes"
+  "Ensure all gates pass before advancing phases"
+  "Generate PR description following miniforge standards"]
+
+ :acceptance-criteria
+ ["Agent protocol includes abort() method with graceful shutdown"
+  "Tool protocol includes validate-args and get-schema methods"
+  "Subagent orchestration supports full lifecycle management"
+  "Unit tests cover all new protocol methods (>90% coverage)"
+  "Integration tests demonstrate abort flow with cleanup"
+  "Integration tests demonstrate tool validation catching invalid args"
+  "All existing tests continue to pass (no regressions)"
+  "PR documentation includes context, changes, testing, and evidence"
+  "Evidence bundle includes full artifact provenance"
+  "Code follows existing component interface patterns"
+  "Documentation updated in N1 spec and component READMEs"]
+
+ :meta-loop-monitoring
+ {:test-checkpoints
+  ["Phase transitions logged with full context"
+   "Agent decisions captured in event stream"
+   "Gate violations trigger repair attempts"
+   "Failed repairs escalate to human review"
+   "Checkpoint state enables restart from last valid phase"]
+
+  :expected-behaviors
+  ["Creates PR with comprehensive documentation"
+   "PR follows agents.md ruleset (structure, evidence, context)"
+   "Monitors PR for comments/review feedback"
+   "Responds to PR comments autonomously"
+   "Detects test failures and pauses workflow"
+   "Attempts repair when gates fail"
+   "Restarts from checkpoint after successful repair"
+   "Escalates to human if repair fails after N attempts"]
+
+  :abort-conditions
+  ["Unable to parse N1 specification after multiple attempts"
+   "Cannot locate agent protocol component files"
+   "Build fails after 3 repair attempts"
+   "Tests fail after 3 repair attempts"
+   "Gate violations persist after max repair cycles"
+   "Human intervention explicitly requested"]}}

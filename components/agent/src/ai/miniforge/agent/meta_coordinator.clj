@@ -5,6 +5,7 @@
    It routes workflow state to meta-agents and aggregates their decisions.
    Any meta-agent can halt the workflow - coordinator just enforces it."
   (:require [ai.miniforge.agent.meta-protocol :as mp]
+            [ai.miniforge.response.interface :as response]
             [clojure.tools.logging :as log]))
 
 (defrecord MetaCoordinator
@@ -96,12 +97,11 @@
                          (seq warning-checks) :warning
                          :else :healthy)]
 
-    {:status overall-status
-     :checks checks
-     :halt-reason (when halt-check (:message halt-check))
-     :halting-agent (when halt-check (:agent/id halt-check))
-     :warnings (mapv :message warning-checks)
-     :checked-at (java.time.Instant/now)}))
+    (response/status-check overall-status
+                           (cond-> {:checks checks}
+                             halt-check (assoc :halt-reason (:message halt-check)
+                                               :halting-agent (:agent/id halt-check))
+                             (seq warning-checks) (assoc :warnings (mapv :message warning-checks))))))
 
 (defn reset-all-agents!
   "Reset state of all meta-agents. Called when workflow restarts."

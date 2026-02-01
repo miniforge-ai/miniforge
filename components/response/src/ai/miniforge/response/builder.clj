@@ -106,6 +106,40 @@
        (assoc :success false))))
 
 ;------------------------------------------------------------------------------ Layer 2
+;; Status checks (timestamped observations)
+
+(defn status-check
+  "Create a timestamped status check response.
+
+   Use for point-in-time observations like health checks, monitoring, polling.
+   Always includes :checked-at timestamp. For immediate operation results without
+   timestamps, use success/error instead.
+
+   Arguments:
+   - status - Status keyword (:healthy, :warning, :halt, or custom)
+   - opts - Optional map with :message, :data, :agent/id, or other context
+
+   Returns:
+   {:status status
+    :checked-at java.time.Instant
+    ...opts}
+
+   Examples:
+     (status-check :healthy
+                   {:agent/id :progress-monitor
+                    :message \"Workflow active: 10 chunks\"
+                    :data {:chunks 10}})
+
+     (status-check :halt
+                   {:halting-agent :test-quality
+                    :halt-reason \"Coverage too low\"
+                    :checks [...]})"
+  [status opts]
+  (merge {:status status
+          :checked-at (java.time.Instant/now)}
+         opts))
+
+;------------------------------------------------------------------------------ Layer 3
 ;; Validation errors
 
 (defn validation-error
@@ -169,5 +203,15 @@
 
   (validation-result ["Missing field" "Invalid email"])
   ;; => {:valid? false :errors ["Missing field" "Invalid email"]}
+
+  ;; Status checks (timestamped)
+  (status-check :healthy {:agent/id :progress-monitor
+                          :message "Making progress"
+                          :data {:chunks 5}})
+  ;; => {:status :healthy
+  ;;     :checked-at #inst "2026-01-31T..."
+  ;;     :agent/id :progress-monitor
+  ;;     :message "Making progress"
+  ;;     :data {:chunks 5}}
 
   :end)
