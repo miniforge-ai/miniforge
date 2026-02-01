@@ -7,7 +7,8 @@
    [clojure.pprint]
    [babashka.fs :as fs]
    [babashka.process :as p]
-   [cheshire.core :as json]))
+   [cheshire.core :as json]
+   [ai.miniforge.cli.config :as config]))
 
 ;; Forward declare LLM interface - will be resolved at runtime via requiring-resolve
 ;; This avoids compile-time dependency on JVM-only code when running in Babashka
@@ -489,15 +490,20 @@
             artifact-store (create-artifact-store quiet)
             callbacks (create-phase-callbacks quiet)
 
+            ;; Load configuration with environment overrides
+            cfg (config/load-config)
+
+            ;; Determine LLM backend: workflow override > config > default
+            llm-backend (config/get-llm-backend
+                         cfg
+                         (or (get-in workflow [:workflow/config :llm-backend])
+                             (get-in spec [:spec/raw-data :llm-backend])))
+
             ;; Create LLM client for agent execution
             ;; Agents use llm/chat from ai.miniforge.llm.interface directly
-            ;; Backend is configurable via workflow config or spec
-            llm-backend-type (or (get-in workflow [:workflow/config :llm-backend])
-                                 (get-in spec [:spec/raw-data :llm-backend])
-                                 :claude)  ; default to claude
             llm-client (try
                          (when-let [create-client (requiring-resolve 'ai.miniforge.llm.interface/create-client)]
-                           (create-client {:backend llm-backend-type}))
+                           (create-client {:backend llm-backend}))
                          (catch Exception e
                            (when-not quiet
                              (println (colorize :yellow (str "Warning: Could not create LLM client (" (ex-message e) "), agents will use fallback mode"))))
