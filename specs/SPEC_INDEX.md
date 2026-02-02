@@ -1,26 +1,38 @@
 # miniforge Specification Index
 
-**Version:** 0.1.0-draft
-**Date:** 2026-01-23
+**Version:** 0.2.0-draft
+**Date:** 2026-02-01
 **Status:** Living specification during OSS development
 
 ---
 
 ## What miniforge Is (Canonical Description)
 
-**miniforge** executes a **workflow DAG** (planner → implementer → tester → reviewer → release manager) with an **inner validate/repair loop** and **explicit gates** (lint/coverage/stratification/docs/policy/etc). It produces **evidence bundles** and **artifacts with provenance**, while emitting an **append-only event stream** (agent status, tool use, subagents, LLM calls, messages) so the CLI/TUI can show live progress and drill-down without scraping logs.
+**miniforge** executes a **workflow DAG** (planner → implementer → tester → reviewer → release
+manager) with an **inner validate/repair loop** and **explicit gates**
+(lint/coverage/stratification/docs/policy/etc). It produces **evidence bundles** and
+**artifacts with provenance**, while emitting an **append-only event stream** (agent status,
+tool use, subagents, LLM calls, messages) so the CLI/TUI can show live progress and
+drill-down without scraping logs.
 
 **The interesting parts for experts:**
 
-* **Event stream as product surface area** (not just logging): it powers UX, replay/debuggability, and later learning/analytics.
-* **Evidence bundles + semantic intent validation** as the primitive that makes "autonomous" credible to platform/security teams.
+* **Event stream as product surface area** (not just logging): it powers UX,
+  replay/debuggability, and later learning/analytics.
+* **Evidence bundles + semantic intent validation** as the primitive that makes "autonomous"
+  credible to platform/security teams.
 * **High-throughput triage UI** optimized for 100+ PR/day (email-triage model + batch operations).
 
 ---
 
 ## Normative Specifications (MUST/SHALL)
 
-These six specifications define contractual requirements for miniforge implementations. They use RFC 2119 terminology (MUST, SHALL, SHOULD, MAY).
+These specifications define contractual requirements for miniforge implementations.
+They use RFC 2119 terminology (MUST, SHALL, SHOULD, MAY).
+
+**Core specs (N1-N6):** Fundamental contracts for architecture, workflows, events, policy, UI, and evidence.
+
+**Extension specs (N7+):** Cross-cutting capabilities that extend core specs (Fleet Mode, Control Interface).
 
 ### N1 — Core Architecture & Concepts ✅
 
@@ -107,6 +119,38 @@ Defines:
 * Queryable provenance API: trace artifact chains, find intent mismatches
 * Compliance metadata: sensitive data handling, audit requirements (SOCII/FedRAMP)
 
+### N7 — Operational Policy Synthesis With Verification ✅
+
+**File:** [normative/N7-Operational-Policy-Synthesis.md](normative/N7-Operational-Policy-Synthesis.md)
+**Status:** Complete
+**Purpose:** Fleet Mode capability for governed experiments and policy synthesis
+
+Defines:
+
+* Experiment Pack schema: workload models, guardrails, convergence strategies
+* Operational Policy schema: scaling signals, resource sizing, runtime guardrails
+* OPSV workflow family: DISCOVER → PLAN → EXECUTE → CONVERGE → SYNTHESIZE → VERIFY → ACTUATE
+* Verification requirements: pass/fail semantics, success criteria evaluation
+* Fleet Mode integration: per-service policy state, experiment governance
+* Risk scoring and actuation modes (RECOMMEND_ONLY, PR_ONLY, APPLY_ALLOWED)
+
+### N8 — Observability Control Interface 🆕
+
+**File:** [normative/N8-observability-control-interface.md](normative/N8-observability-control-interface.md)
+**Status:** Draft
+**Purpose:** Transform event stream into active control plane for agent fleets
+
+Defines:
+
+* Listener capability model: OBSERVE, ADVISE, CONTROL levels with RBAC
+* Control action surface: pause, resume, rollback, quarantine, approve, emergency-stop
+* Advisory annotation system: non-blocking recommendations and warnings
+* Privacy and redaction: metadata-only, redacted, full privacy levels
+* OpenTelemetry interoperability: GenAI span mapping, OTLP export
+* Cost and volume controls: sampling rules, aggregation boundaries
+* Fleet and enterprise extensions: multi-tenancy, pattern detection
+* CLI/TUI extensions: listener commands, control palette, approval queue
+
 ---
 
 ## Informative Documentation (Non-Normative)
@@ -176,7 +220,7 @@ Documents superseded by normative specs. Retained for reference during migration
 
 ### Language Rules
 
-**Normative specs (N1-N6):**
+**Normative specs (N1-N8):**
 
 * MUST use RFC 2119 keywords: MUST, SHALL, SHOULD, MAY, MUST NOT, SHALL NOT
 * MUST define versioning and compatibility expectations
@@ -196,13 +240,24 @@ Documents superseded by normative specs. Retained for reference during migration
 2. Runtime data MUST land in N3 (events) or N6 (evidence/artifacts)
 3. UX features MUST point to a contract in N3/N5/N6
 
+**Extension specs (N7+):**
+
+Extension specs define capabilities that span multiple core specs (N1-N6).
+They MUST:
+
+1. Explicitly define relationship to N1-N6 (what they extend)
+2. Reference core specs rather than duplicate contracts
+3. Add event types to N3, evidence to N6, commands to N5 as extensions
+4. Define a Minimal Compliant Implementation (MCI)
+
 **Rules to prevent spec explosion:**
 
-1. **No new normative spec files** - only amend N1-N6
-2. **Every new concept must land in N1** or it's not real
-3. **Every new runtime datum must land in N3 or N6** or it's unobservable
-4. **Every UX feature must point to a contract** or it's just a mock
-5. **Roadmaps never contain contracts** - they link to specs
+1. **Core specs (N1-N6)** define fundamental contracts
+2. **Extension specs (N7+)** define cross-cutting capabilities
+3. **Every new concept must land in N1** or it's not real
+4. **Every new runtime datum must land in N3 or N6** or it's unobservable
+5. **Every UX feature must point to a contract** or it's just a mock
+6. **Roadmaps never contain contracts** - they link to specs
 
 ### Conformance
 
@@ -238,4 +293,5 @@ Normative specs are enforced by:
 
 ## Version History
 
+* **0.2.0-draft** (2026-02-01) - Added N7 (OPSV) and N8 (OCI), updated governance for extension specs
 * **0.1.0-draft** (2026-01-23) - Initial spec index, normative spec structure established
