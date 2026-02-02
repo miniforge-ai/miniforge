@@ -15,10 +15,11 @@
 (ns ai.miniforge.phase.release
   "Release phase interceptor.
 
-   Prepares release artifacts and creates PRs.
-   Agent: :releaser (simplified - no LLM agent yet)
+   Prepares release artifacts and creates PRs using the release-executor component.
+   Agent: :releaser
    Default gates: [:release-ready]"
   (:require [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.release-executor.interface :as release-executor]
             [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -43,41 +44,82 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
-(defn- create-release-artifact
-  "Create a simple release artifact from previous phase outputs.
-   This is a simplified implementation until a full releaser agent is created."
+(defn- build-workflow-state
+  "Build workflow state from phase context for the release executor."
   [ctx]
   (let [implement-result (get-in ctx [:phases :implement :result])
-        verify-result (get-in ctx [:phases :verify :result])
-        review-result (get-in ctx [:phases :review :result])
+        code-artifacts (if-let [artifacts (:artifacts implement-result)]
+                         (map (fn [a] {:artifact/type :code
+                                       :artifact/content a})
+                              artifacts)
+                         ;; Fallback: wrap result directly
+                         [{:artifact/type :code
+                           :artifact/content implement-result}])
         input (get-in ctx [:execution/input])]
-    {:release/id (random-uuid)
-     :release/status :ready
-     :release/artifacts {:code implement-result
-                         :tests verify-result
-                         :review review-result}
-     :release/title (or (:title input) "Release")
-     :release/description (or (:description input) "")
-     :release/created-at (java.util.Date.)}))
+    {:workflow/id (or (get-in ctx [:execution/id]) (random-uuid))
+     :workflow/phase :release
+     :workflow/spec {:spec/description (or (:description input)
+                                           (:title input)
+                                           "implement changes")}
+     :workflow/artifacts code-artifacts}))
+
+(defn- build-executor-context
+  "Build context for the release executor from phase context."
+  [ctx config]
+  {:worktree-path (or (get-in ctx [:execution/worktree-path])
+                      (get-in ctx [:worktree-path])
+                      (get-in config [:worktree-path]))
+   :logger (get-in ctx [:execution/logger])
+   :llm-backend (get-in ctx [:execution/llm-backend])
+   :artifact-store (get-in ctx [:execution/artifact-store])
+   ;; Allow disabling PR creation via config
+   :create-pr? (get config :create-pr? true)})
 
 (defn- enter-release
   "Execute release phase.
 
-   Prepares release artifacts, creates PR if configured."
+   Uses the workflow release executor to:
+   - Generate release metadata (branch name, commit message, PR title/body)
+   - Create git branch
+   - Write files and stage them
+   - Commit changes
+   - Push branch and create PR (if enabled)"
   [ctx]
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
 
-        ;; Create release artifact (simplified - no agent yet)
-        ;; In the future, this would invoke a releaser agent that:
-        ;; - Generates changelog
-        ;; - Creates git commits
-        ;; - Prepares PR description
-        ;; - Handles versioning
+        ;; Build workflow state and context
+        workflow-state (build-workflow-state ctx)
+        exec-context (build-executor-context ctx config)
+        releaser-agent (get config :releaser-agent)
+
+        ;; Execute the release phase
         result (try
-                 (let [artifact (create-release-artifact ctx)]
-                   (response/success artifact))
+                 (let [exec-result (release-executor/execute-release-phase
+                                    workflow-state
+                                    exec-context
+                                    {:releaser releaser-agent})]
+                   (if (:success? exec-result)
+                     (let [release-artifact (first (:artifacts exec-result))
+                           content (:artifact/content release-artifact)]
+                       (response/success
+                        (merge
+                         {:release/id (or (:artifact/id release-artifact) (random-uuid))
+                          :release/status :completed
+                          :release/artifacts (:artifacts exec-result)}
+                         ;; Include PR info for evidence bundle
+                         (when (:pr-url content)
+                           {:workflow/pr-info {:pr-number (:pr-number content)
+                                               :pr-url (:pr-url content)
+                                               :branch (:branch content)
+                                               :commit-sha (:commit-sha content)}})
+                         {:release/metrics (:metrics exec-result)})))
+                     ;; Execution failed
+                     (response/failure
+                      (ex-info "Release phase failed"
+                               {:errors (:errors exec-result)
+                                :metrics (:metrics exec-result)}))))
                  (catch Exception e
                    (response/failure e)))]
 
@@ -88,19 +130,25 @@
         (assoc-in [:phase :budget] budget)
         (assoc-in [:phase :started-at] start-time)
         (assoc-in [:phase :status] :running)
-        (assoc-in [:phase :result] result))))
+        (assoc-in [:phase :result] result)
+        ;; Store PR info at top level for easy access
+        (cond-> (= :success (:status result))
+          (assoc-in [:workflow/pr-info] (get-in (:output result) [:workflow/pr-info]))))))
 
 (defn- leave-release
   "Post-processing for release phase.
 
-   Records release metrics."
+   Records release metrics and PR info."
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
-        metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
-        iterations (get-in ctx [:phase :iterations] 1)]
+        release-data (when (= :success (:status result)) (:output result))
+        release-metrics (or (:release/metrics release-data) {})
+        metrics (merge {:tokens 0 :duration-ms duration-ms} release-metrics)
+        iterations (get-in ctx [:phase :iterations] 1)
+        pr-info (get-in ctx [:workflow/pr-info])]
     (-> ctx
         (assoc-in [:phase :ended-at] end-time)
         (assoc-in [:phase :duration-ms] duration-ms)
@@ -108,6 +156,9 @@
         (assoc-in [:phase :metrics] metrics)
         (assoc-in [:metrics :release :duration-ms] duration-ms)
         (assoc-in [:metrics :release :repair-cycles] (dec iterations))
+        ;; Include PR info in metrics for evidence bundle
+        (cond-> pr-info
+          (assoc-in [:metrics :release :pr-info] pr-info))
         (update-in [:execution :phases-completed] (fnil conj []) :release)
         ;; Merge agent metrics into execution metrics
         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))

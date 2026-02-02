@@ -17,6 +17,7 @@
    [ai.miniforge.agent.implementer :as implementer]
    [ai.miniforge.agent.tester :as tester]
    [ai.miniforge.agent.reviewer :as reviewer]
+   [ai.miniforge.agent.releaser :as releaser]
    [ai.miniforge.agent.meta-coordinator :as meta-coord]
    [ai.miniforge.agent.meta.progress-monitor :as progress-monitor]))
 
@@ -495,6 +496,11 @@
    The Reviewer runs static analysis gates without using an LLM."
   reviewer/create-reviewer)
 
+(def create-releaser
+  "Create a Releaser agent with optional configuration overrides.
+   The Releaser generates branch names, commit messages, PR titles and descriptions."
+  releaser/create-releaser)
+
 ;------------------------------------------------------------------------------ Layer 10
 ;; Specialized agent schemas
 
@@ -514,6 +520,9 @@
 ;; Reviewer schemas
 (def ReviewArtifact reviewer/ReviewArtifact)
 (def GateFeedback reviewer/GateFeedback)
+
+;; Releaser schemas
+(def ReleaseArtifact releaser/ReleaseArtifact)
 
 ;------------------------------------------------------------------------------ Layer 11
 ;; Specialized agent utilities
@@ -597,6 +606,15 @@
 (def validate-review-artifact
   "Validate a review artifact against the schema."
   reviewer/validate-review-artifact)
+
+;; Releaser utilities
+(def release-summary
+  "Get a summary of a release artifact for logging/display."
+  releaser/release-summary)
+
+(def validate-release-artifact
+  "Validate a release artifact against the schema."
+  releaser/validate-release-artifact)
 
 ;------------------------------------------------------------------------------ Layer 12
 ;; Meta-agent operations

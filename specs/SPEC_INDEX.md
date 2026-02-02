@@ -17,11 +17,11 @@ drill-down without scraping logs.
 
 **The interesting parts for experts:**
 
-* **Event stream as product surface area** (not just logging): it powers UX,
+- **Event stream as product surface area** (not just logging): it powers UX,
   replay/debuggability, and later learning/analytics.
-* **Evidence bundles + semantic intent validation** as the primitive that makes "autonomous"
+- **Evidence bundles + semantic intent validation** as the primitive that makes "autonomous"
   credible to platform/security teams.
-* **High-throughput triage UI** optimized for 100+ PR/day (email-triage model + batch operations).
+- **High-throughput triage UI** optimized for 100+ PR/day (email-triage model + batch operations).
 
 ---
 
@@ -42,11 +42,11 @@ They use RFC 2119 terminology (MUST, SHALL, SHOULD, MAY).
 
 Defines:
 
-* Core nouns: workflow, phase, agent, subagent, tool, gate, policy pack, evidence bundle, artifact, provenance
-* Three-layer architecture: Control Plane, Agent Layer, Learning Layer
-* Polylith component boundaries (OSS component catalog)
-* Operational model: local-first execution, reproducibility, failure semantics
-* Agent protocols: communication patterns, context handoff, inter-agent messaging
+- Core nouns: workflow, phase, agent, subagent, tool, gate, policy pack, evidence bundle, artifact, provenance
+- Three-layer architecture: Control Plane, Agent Layer, Learning Layer
+- Polylith component boundaries (OSS component catalog)
+- Operational model: local-first execution, reproducibility, failure semantics
+- Agent protocols: communication patterns, context handoff, inter-agent messaging
 
 ### N2 — Workflow Execution Model ✅
 
@@ -56,12 +56,12 @@ Defines:
 
 Defines:
 
-* Phase graph: Plan → Design → Implement → Verify → Review → Release → Observe
-* Phase responsibilities: detailed requirements for each phase (inputs, outputs, gates)
-* Inner loop: validate → feedback → repair → re-validate with multi-strategy repair
-* Outer loop: phase transition state machine with prerequisites and failure handling
-* Gate contract: check/repair function signatures, violation schema, enforcement rules
-* Context handoff: protocol for passing context between phases
+- Phase graph: Plan → Design → Implement → Verify → Review → Release → Observe
+- Phase responsibilities: detailed requirements for each phase (inputs, outputs, gates)
+- Inner loop: validate → feedback → repair → re-validate with multi-strategy repair
+- Outer loop: phase transition state machine with prerequisites and failure handling
+- Gate contract: check/repair function signatures, violation schema, enforcement rules
+- Context handoff: protocol for passing context between phases
 
 ### N3 — Event Stream & Observability Contract ✅
 
@@ -71,11 +71,11 @@ Defines:
 
 Defines:
 
-* Event envelope fields; required event types (workflow, agent, status, subagent, tool, LLM, messages, milestone, gate)
-* Ordering guarantees (per-workflow sequence, causal ordering, replay determinism)
-* Streaming API (SSE/WebSocket) with subscription protocol
-* Throttling and performance requirements
-* Minimal fields needed to render "live" progress and drill-down
+- Event envelope fields; required event types (workflow, agent, status, subagent, tool, LLM, messages, milestone, gate)
+- Ordering guarantees (per-workflow sequence, causal ordering, replay determinism)
+- Streaming API (SSE/WebSocket) with subscription protocol
+- Throttling and performance requirements
+- Minimal fields needed to render "live" progress and drill-down
 
 ### N4 — Policy Packs & Gates Standard ✅
 
@@ -85,11 +85,11 @@ Defines:
 
 Defines:
 
-* Pack structure: schema, versioning, signature requirements, rule definitions
-* Gate execution contract: check/repair function interfaces with complete protocols
-* Semantic intent validation: IMPORT/CREATE/UPDATE/DESTROY/REFACTOR/MIGRATE rules
-* Violation schema: severity levels, remediation templates, auto-fix capabilities
-* Terraform/Kubernetes-specific validation rules
+- Pack structure: schema, versioning, signature requirements, rule definitions
+- Gate execution contract: check/repair function interfaces with complete protocols
+- Semantic intent validation: IMPORT/CREATE/UPDATE/DESTROY/REFACTOR/MIGRATE rules
+- Violation schema: severity levels, remediation templates, auto-fix capabilities
+- Terraform/Kubernetes-specific validation rules
 
 ### N5 — Interface Standard: CLI/TUI/API ✅
 
@@ -99,11 +99,11 @@ Defines:
 
 Defines:
 
-* CLI command taxonomy: six namespaces (init, workflow, fleet, policy, evidence, artifact)
-* TUI primitives: workflow list, detail view, evidence viewer, artifact browser
-* API surface: minimal REST endpoints for workflow control, event streaming, evidence/artifact access
-* Operations console purpose: monitoring autonomous factory (NOT PR management)
-* Manual override mechanisms: plan approval, gate handling, budget escalation
+- CLI command taxonomy: six namespaces (init, workflow, fleet, policy, evidence, artifact)
+- TUI primitives: workflow list, detail view, evidence viewer, artifact browser
+- API surface: minimal REST endpoints for workflow control, event streaming, evidence/artifact access
+- Operations console purpose: monitoring autonomous factory (NOT PR management)
+- Manual override mechanisms: plan approval, gate handling, budget escalation
 
 ### N6 — Evidence & Provenance Standard ✅
 
@@ -113,11 +113,11 @@ Defines:
 
 Defines:
 
-* Evidence bundle schema: intent → phases → validation → outcome
-* Artifact provenance: source inputs, tool executions, content hashes, timestamps
-* Semantic intent validation rules with Terraform/Kubernetes specifics
-* Queryable provenance API: trace artifact chains, find intent mismatches
-* Compliance metadata: sensitive data handling, audit requirements (SOCII/FedRAMP)
+- Evidence bundle schema: intent → phases → validation → outcome
+- Artifact provenance: source inputs, tool executions, content hashes, timestamps
+- Semantic intent validation rules with Terraform/Kubernetes specifics
+- Queryable provenance API: trace artifact chains, find intent mismatches
+- Compliance metadata: sensitive data handling, audit requirements (SOCII/FedRAMP)
 
 ### N7 — Operational Policy Synthesis With Verification ✅
 
@@ -127,12 +127,12 @@ Defines:
 
 Defines:
 
-* Experiment Pack schema: workload models, guardrails, convergence strategies
-* Operational Policy schema: scaling signals, resource sizing, runtime guardrails
-* OPSV workflow family: DISCOVER → PLAN → EXECUTE → CONVERGE → SYNTHESIZE → VERIFY → ACTUATE
-* Verification requirements: pass/fail semantics, success criteria evaluation
-* Fleet Mode integration: per-service policy state, experiment governance
-* Risk scoring and actuation modes (RECOMMEND_ONLY, PR_ONLY, APPLY_ALLOWED)
+- Experiment Pack schema: workload models, guardrails, convergence strategies
+- Operational Policy schema: scaling signals, resource sizing, runtime guardrails
+- OPSV workflow family: DISCOVER → PLAN → EXECUTE → CONVERGE → SYNTHESIZE → VERIFY → ACTUATE
+- Verification requirements: pass/fail semantics, success criteria evaluation
+- Fleet Mode integration: per-service policy state, experiment governance
+- Risk scoring and actuation modes (RECOMMEND_ONLY, PR_ONLY, APPLY_ALLOWED)
 
 ### N8 — Observability Control Interface 🆕
 
@@ -142,14 +142,14 @@ Defines:
 
 Defines:
 
-* Listener capability model: OBSERVE, ADVISE, CONTROL levels with RBAC
-* Control action surface: pause, resume, rollback, quarantine, approve, emergency-stop
-* Advisory annotation system: non-blocking recommendations and warnings
-* Privacy and redaction: metadata-only, redacted, full privacy levels
-* OpenTelemetry interoperability: GenAI span mapping, OTLP export
-* Cost and volume controls: sampling rules, aggregation boundaries
-* Fleet and enterprise extensions: multi-tenancy, pattern detection
-* CLI/TUI extensions: listener commands, control palette, approval queue
+- Listener capability model: OBSERVE, ADVISE, CONTROL levels with RBAC
+- Control action surface: pause, resume, rollback, quarantine, approve, emergency-stop
+- Advisory annotation system: non-blocking recommendations and warnings
+- Privacy and redaction: metadata-only, redacted, full privacy levels
+- OpenTelemetry interoperability: GenAI span mapping, OTLP export
+- Cost and volume controls: sampling rules, aggregation boundaries
+- Fleet and enterprise extensions: multi-tenancy, pattern detection
+- CLI/TUI extensions: listener commands, control palette, approval queue
 
 ---
 
@@ -159,25 +159,29 @@ These documents provide guidance, examples, and context but do NOT define contra
 
 ### UX References
 
-* [informative/ux-tui-mockups.md](informative/ux-tui-mockups.md) - Visual design for CLI/TUI (informs N5)
-* [informative/ai-ux-flows.md](informative/ai-ux-flows.md) - AI-powered features (informs N3, N5)
+- [informative/ux-tui-mockups.md](informative/ux-tui-mockups.md) - Visual design for CLI/TUI (informs N5)
+- [informative/ai-ux-flows.md](informative/ai-ux-flows.md) - AI-powered features (informs N3, N5)
 
 ### Guides (How-To)
 
-* [informative/getting-started.md](informative/getting-started.md) - First workflow guide
-* [informative/authoring-policies.md](informative/authoring-policies.md) - Policy pack development
-* [informative/writing-workflows.md](informative/writing-workflows.md) - Workflow spec authoring
-* [informative/building-scanners.md](informative/building-scanners.md) - Scanner development
+- [informative/getting-started.md](informative/getting-started.md) - First workflow guide
+- [informative/authoring-policies.md](informative/authoring-policies.md) - Policy pack development
+- [informative/writing-workflows.md](informative/writing-workflows.md) - Workflow spec authoring
+- [informative/building-scanners.md](informative/building-scanners.md) - Scanner development
 
 ### Vision & Positioning
 
-* [informative/software-factory-vision.md](informative/software-factory-vision.md) - Product vision and differentiation
-* [informative/operational-modes.md](informative/operational-modes.md) - OSS vs Paid operational differences
+- [informative/software-factory-vision.md](informative/software-factory-vision.md) - Product vision and differentiation
+- [informative/operational-modes.md](informative/operational-modes.md) - OSS vs Paid operational differences
+
+### Future Workflows
+
+- [informative/pr-monitoring-workflow.md](informative/pr-monitoring-workflow.md) - PR monitoring and conflict resolution
 
 ### Roadmaps (Experimental/Future)
 
-* [informative/learning-meta-loop.md](informative/learning-meta-loop.md) - Future learning system (post-OSS)
-* [informative/oss-paid-roadmap.md](informative/oss-paid-roadmap.md) - Product roadmap and go-to-market
+- [informative/learning-meta-loop.md](informative/learning-meta-loop.md) - Future learning system (post-OSS)
+- [informative/oss-paid-roadmap.md](informative/oss-paid-roadmap.md) - Product roadmap and go-to-market
 
 ---
 
@@ -187,20 +191,20 @@ Concrete examples that demonstrate compliance with normative specs.
 
 ### Workflow Examples
 
-* [examples/workflows/rds-import.edn](examples/workflows/rds-import.edn) - Import existing RDS to Terraform
-* [examples/workflows/k8s-deployment.edn](examples/workflows/k8s-deployment.edn) - Deploy to Kubernetes
-* [examples/workflows/vpc-network-changes.edn](examples/workflows/vpc-network-changes.edn) - Network infrastructure
+- [examples/workflows/rds-import.edn](examples/workflows/rds-import.edn) - Import existing RDS to Terraform
+- [examples/workflows/k8s-deployment.edn](examples/workflows/k8s-deployment.edn) - Deploy to Kubernetes
+- [examples/workflows/vpc-network-changes.edn](examples/workflows/vpc-network-changes.edn) - Network infrastructure
 
 ### Evidence Bundle Examples
 
-* [examples/evidence/rds-import-bundle.edn](examples/evidence/rds-import-bundle.edn) - Complete evidence bundle
-* [examples/evidence/semantic-validation.edn](examples/evidence/semantic-validation.edn) - Intent validation example
+- [examples/evidence/rds-import-bundle.edn](examples/evidence/rds-import-bundle.edn) - Complete evidence bundle
+- [examples/evidence/semantic-validation.edn](examples/evidence/semantic-validation.edn) - Intent validation example
 
 ### Policy Pack Examples
 
-* [examples/policy-packs/terraform-aws/](examples/policy-packs/terraform-aws/) - Terraform AWS safety checks
-* [examples/policy-packs/kubernetes/](examples/policy-packs/kubernetes/) - K8s manifest validation
-* [examples/policy-packs/foundations/](examples/policy-packs/foundations/) - General code quality
+- [examples/policy-packs/terraform-aws/](examples/policy-packs/terraform-aws/) - Terraform AWS safety checks
+- [examples/policy-packs/kubernetes/](examples/policy-packs/kubernetes/) - K8s manifest validation
+- [examples/policy-packs/foundations/](examples/policy-packs/foundations/) - General code quality
 
 ---
 
@@ -208,11 +212,11 @@ Concrete examples that demonstrate compliance with normative specs.
 
 Documents superseded by normative specs. Retained for reference during migration.
 
-* [deprecated/BUILD_PLAN.md](deprecated/BUILD_PLAN.md) - Superseded by informative roadmap
-* [deprecated/BUILD_PLAN_REVISED.md](deprecated/BUILD_PLAN_REVISED.md) - Content extracted to N2, N3, N6
-* [deprecated/OSS_PAID_ROADMAP.md](deprecated/OSS_PAID_ROADMAP.md) - Superseded by informative/oss-paid-roadmap.md
-* [deprecated/REVISED_TIMELINE.md](deprecated/REVISED_TIMELINE.md) - Merged into roadmap
-* [deprecated/AGENT_STATUS_STREAMING.md](deprecated/AGENT_STATUS_STREAMING.md) - Content extracted to N3
+- [deprecated/BUILD_PLAN.md](deprecated/BUILD_PLAN.md) - Superseded by informative roadmap
+- [deprecated/BUILD_PLAN_REVISED.md](deprecated/BUILD_PLAN_REVISED.md) - Content extracted to N2, N3, N6
+- [deprecated/OSS_PAID_ROADMAP.md](deprecated/OSS_PAID_ROADMAP.md) - Superseded by informative/oss-paid-roadmap.md
+- [deprecated/REVISED_TIMELINE.md](deprecated/REVISED_TIMELINE.md) - Merged into roadmap
+- [deprecated/AGENT_STATUS_STREAMING.md](deprecated/AGENT_STATUS_STREAMING.md) - Content extracted to N3
 
 ---
 
@@ -222,15 +226,15 @@ Documents superseded by normative specs. Retained for reference during migration
 
 **Normative specs (N1-N8):**
 
-* MUST use RFC 2119 keywords: MUST, SHALL, SHOULD, MAY, MUST NOT, SHALL NOT
-* MUST define versioning and compatibility expectations
-* Breaking changes require version bump
+- MUST use RFC 2119 keywords: MUST, SHALL, SHOULD, MAY, MUST NOT, SHALL NOT
+- MUST define versioning and compatibility expectations
+- Breaking changes require version bump
 
 **Informative docs:**
 
-* MUST NOT use RFC 2119 keywords
-* Use descriptive language
-* Can change without version bump
+- MUST NOT use RFC 2119 keywords
+- Use descriptive language
+- Can change without version bump
 
 ### Amendment Process
 
@@ -263,10 +267,10 @@ They MUST:
 
 Normative specs are enforced by:
 
-* Schema validation tests (events/evidence/policy packs)
-* Golden-file examples
-* CLI contract tests
-* Gate validation (specs enforced by gates)
+- Schema validation tests (events/evidence/policy packs)
+- Golden-file examples
+- CLI contract tests
+- Gate validation (specs enforced by gates)
 
 ---
 
@@ -276,9 +280,9 @@ Normative specs are enforced by:
 
 **Why start with N3 & N6?**
 
-* Event stream powers UX, replay, debugging, and future learning
-* Evidence bundles enable credibility and compliance
-* These two specs force clarity across workflow engine, TUI, policy gates, and learning
+- Event stream powers UX, replay, debugging, and future learning
+- Evidence bundles enable credibility and compliance
+- These two specs force clarity across workflow engine, TUI, policy gates, and learning
 
 **Implementation priority:**
 
@@ -293,5 +297,5 @@ Normative specs are enforced by:
 
 ## Version History
 
-* **0.2.0-draft** (2026-02-01) - Added N7 (OPSV) and N8 (OCI), updated governance for extension specs
-* **0.1.0-draft** (2026-01-23) - Initial spec index, normative spec structure established
+- **0.2.0-draft** (2026-02-01) - Added N7 (OPSV) and N8 (OCI), updated governance for extension specs
+- **0.1.0-draft** (2026-01-23) - Initial spec index, normative spec structure established

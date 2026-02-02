@@ -1,0 +1,6 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge/workflow {:local/root "../workflow"}
+        ai.miniforge/artifact {:local/root "../artifact"}
+        ai.miniforge/logging {:local/root "../logging"}
+        babashka/fs {:mvn/version "0.5.22"}
+        babashka/process {:mvn/version "0.5.22"}}}
