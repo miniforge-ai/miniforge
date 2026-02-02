@@ -418,6 +418,200 @@
      :release/created-at (java.util.Date.)}))
 
 ;------------------------------------------------------------------------------ Layer 5
+;; Pipeline step functions
+;; Each step takes pipeline state, returns updated state or adds :failure
+
+(defn- failed?
+  "Check if pipeline has failed."
+  [state]
+  (contains? state :failure))
+
+(defn- fail
+  "Mark pipeline as failed with error info."
+  [state error-type error-msg & {:keys [hint]}]
+  (let [logger (:logger state)]
+    (when logger
+      (log/error logger :release-executor error-type {:message error-msg}))
+    (assoc state :failure
+           (cond-> {:type error-type :message error-msg}
+             hint (assoc :hint hint)))))
+
+(defn- step-validate-inputs
+  "Validate required inputs are present."
+  [state]
+  (cond
+    (failed? state) state
+    (not (:worktree-path state))
+    (fail state :missing-worktree-path "Context must include :worktree-path for release phase")
+    (empty? (:code-artifacts state))
+    (do
+      (when-let [logger (:logger state)]
+        (log/warn logger :release-executor :no-code-artifacts
+                  {:message "No code artifacts found to release"}))
+      (fail state :no-code-artifacts "No code artifacts found in workflow state"))
+    :else state))
+
+(defn- step-check-gh-auth
+  "Check GitHub CLI authentication if creating PR."
+  [state]
+  (cond
+    (failed? state) state
+    (not (:create-pr? state)) state
+    :else
+    (let [gh-auth (check-gh-auth!)]
+      (if (:authenticated? gh-auth)
+        state
+        (fail state :gh-auth-failed (:error gh-auth)
+              :hint (if (:available? gh-auth)
+                      "Run: gh auth login"
+                      "Install: brew install gh"))))))
+
+(defn- step-generate-metadata
+  "Generate release metadata using releaser agent or fallback."
+  [state]
+  (if (failed? state)
+    state
+    (let [{:keys [releaser code-artifacts task-description context logger]} state
+          release-meta (or (invoke-releaser releaser code-artifacts task-description context logger)
+                           (make-fallback-release-metadata code-artifacts task-description))]
+      (assoc state :release-meta release-meta))))
+
+(defn- step-create-branch
+  "Create git branch for the release."
+  [state]
+  (if (failed? state)
+    state
+    (let [{:keys [worktree-path release-meta]} state
+          branch-name (:release/branch-name release-meta)
+          result (create-branch! worktree-path branch-name)]
+      (if (:success? result)
+        (assoc state
+               :branch (:branch result)
+               :base-branch (:base-branch result))
+        (fail state :branch-create-failed (:error result))))))
+
+(defn- step-write-and-stage
+  "Write files to worktree and stage them."
+  [state]
+  (if (failed? state)
+    state
+    (let [{:keys [worktree-path code-artifacts logger]} state
+          result (write-and-stage-files! worktree-path code-artifacts logger)]
+      (if (:success? result)
+        (assoc state :write-metrics (:metrics result))
+        (do
+          (when logger
+            (log/error logger :release-executor :write-stage-failed
+                       {:data {:errors (:errors result)}}))
+          (assoc state
+                 :failure {:type :write-stage-failed :errors (:errors result)}
+                 :write-metrics (:metrics result)))))))
+
+(defn- step-commit
+  "Commit the staged changes."
+  [state]
+  (if (failed? state)
+    state
+    (let [{:keys [worktree-path release-meta]} state
+          result (commit-changes! worktree-path (:release/commit-message release-meta))]
+      (if (:success? result)
+        (assoc state :commit-sha (:commit-sha result))
+        (fail state :commit-failed (:error result))))))
+
+(defn- step-push
+  "Push branch to origin if creating PR."
+  [state]
+  (cond
+    (failed? state) state
+    (not (:create-pr? state)) state
+    :else
+    (let [{:keys [worktree-path branch]} state
+          result (push-branch! worktree-path branch)]
+      (if (:success? result)
+        state
+        (fail state :push-failed (:error result))))))
+
+(defn- step-create-pr
+  "Create pull request if enabled."
+  [state]
+  (cond
+    (failed? state) state
+    (not (:create-pr? state)) state
+    :else
+    (let [{:keys [worktree-path release-meta base-branch]} state
+          result (create-pr! worktree-path
+                             {:title (:release/pr-title release-meta)
+                              :body (:release/pr-description release-meta)
+                              :base-branch base-branch})]
+      (if (:success? result)
+        (assoc state
+               :pr-number (:pr-number result)
+               :pr-url (:pr-url result))
+        (fail state :pr-create-failed (:error result))))))
+
+(defn- step-build-artifact
+  "Build the release artifact."
+  [state]
+  (if (failed? state)
+    state
+    (let [{:keys [worktree-path branch base-branch commit-sha create-pr?
+                  pr-number pr-url release-meta write-metrics code-artifacts]} state
+          release-content (merge write-metrics
+                                 {:git-staged? true
+                                  :worktree-path (str worktree-path)
+                                  :branch branch
+                                  :base-branch base-branch
+                                  :commit-sha commit-sha
+                                  :pr-created? (boolean create-pr?)
+                                  :pr-number pr-number
+                                  :pr-url pr-url
+                                  :release-metadata release-meta})
+          release-artifact (artifact/build-artifact
+                            {:id (random-uuid)
+                             :type :release
+                             :version "1.0.0"
+                             :content release-content
+                             :metadata {:phase :release
+                                        :code-artifacts-count (count code-artifacts)}})]
+      (assoc state :release-artifact release-artifact))))
+
+(defn- step-save-artifact
+  "Save artifact to store if available."
+  [state]
+  (if (failed? state)
+    state
+    (do
+      (when-let [artifact-store (:artifact-store state)]
+        (try
+          (artifact/save! artifact-store (:release-artifact state))
+          (catch Exception _e nil)))
+      state)))
+
+(defn- pipeline->result
+  "Convert pipeline state to phase result."
+  [state]
+  (let [{:keys [logger failure release-artifact write-metrics
+                branch commit-sha pr-number pr-url]} state]
+    (if failure
+      (phase-failure (:type failure) (:message failure)
+                     {:hint (:hint failure)
+                      :metrics (or write-metrics {})})
+      (do
+        (when logger
+          (log/info logger :release-executor :phase-completed
+                    {:data {:branch branch
+                            :commit commit-sha
+                            :pr-url pr-url
+                            :files-written (:files-written write-metrics)}}))
+        (phase-success
+         [release-artifact]
+         (merge write-metrics
+                {:pr-number pr-number
+                 :pr-url pr-url
+                 :commit-sha commit-sha
+                 :branch branch}))))))
+
+;------------------------------------------------------------------------------ Layer 6
 ;; Main execute function
 
 (defn execute-release-phase
@@ -435,140 +629,29 @@
     :metrics {...}}"
   [workflow-state context opts]
   (let [logger (:logger context)
-        worktree-path (:worktree-path context)
-        artifact-store (:artifact-store context)
-        task-description (get-in workflow-state [:workflow/spec :spec/description])
-        create-pr? (get context :create-pr? true)
-        releaser (:releaser opts)]
+        initial-state {:logger logger
+                       :worktree-path (:worktree-path context)
+                       :artifact-store (:artifact-store context)
+                       :context context
+                       :create-pr? (get context :create-pr? true)
+                       :releaser (:releaser opts)
+                       :task-description (get-in workflow-state [:workflow/spec :spec/description])
+                       :code-artifacts (extract-code-artifacts (:workflow/artifacts workflow-state))}]
 
     (when logger
       (log/info logger :release-executor :phase-started
-                {:data {:worktree-path worktree-path :create-pr? create-pr?}}))
+                {:data {:worktree-path (:worktree-path initial-state)
+                        :create-pr? (:create-pr? initial-state)}}))
 
-    (if-not worktree-path
-      (do
-        (when logger
-          (log/error logger :release-executor :missing-worktree-path
-                     {:message "Context must include :worktree-path"}))
-        (phase-failure :missing-worktree-path
-                       "Context must include :worktree-path for release phase"))
-
-      (let [code-artifacts (extract-code-artifacts (:workflow/artifacts workflow-state))]
-
-        (if (empty? code-artifacts)
-          (do
-            (when logger
-              (log/warn logger :release-executor :no-code-artifacts
-                        {:message "No code artifacts found to release"}))
-            (phase-failure :no-code-artifacts
-                           "No code artifacts found in workflow state"))
-
-          (let [gh-auth (when create-pr? (check-gh-auth!))
-                gh-ok? (or (not create-pr?) (:authenticated? gh-auth))]
-
-            (if (and create-pr? (not gh-ok?))
-              (do
-                (when logger
-                  (log/error logger :release-executor :gh-auth-failed
-                             {:message (:error gh-auth)}))
-                (phase-failure :gh-auth-failed (:error gh-auth)
-                               {:hint (if (:available? gh-auth)
-                                        "Run: gh auth login"
-                                        "Install: brew install gh")}))
-
-              (let [release-meta (or (invoke-releaser releaser code-artifacts task-description context logger)
-                                     (make-fallback-release-metadata code-artifacts task-description))
-                    branch-name (:release/branch-name release-meta)
-                    branch-result (create-branch! worktree-path branch-name)]
-                (if-not (:success? branch-result)
-                  (do
-                    (when logger
-                      (log/error logger :release-executor :branch-failed
-                                 {:message (:error branch-result)}))
-                    (phase-failure :branch-create-failed (:error branch-result)))
-
-                  (let [actual-branch (:branch branch-result)
-                        base-branch (:base-branch branch-result)
-                        write-result (write-and-stage-files! worktree-path code-artifacts logger)]
-
-                    (if-not (:success? write-result)
-                      (do
-                        (when logger
-                          (log/error logger :release-executor :write-stage-failed
-                                     {:data {:errors (:errors write-result)}}))
-                        {:success? false
-                         :artifacts []
-                         :errors (:errors write-result)
-                         :metrics (:metrics write-result)})
-
-                      (let [commit-result (commit-changes! worktree-path (:release/commit-message release-meta))]
-                        (if-not (:success? commit-result)
-                          (do
-                            (when logger
-                              (log/error logger :release-executor :commit-failed
-                                         {:message (:error commit-result)}))
-                            (phase-failure :commit-failed (:error commit-result)
-                                           {:metrics (:metrics write-result)}))
-
-                          (let [push-result (when create-pr?
-                                              (push-branch! worktree-path actual-branch))]
-                            (if (and create-pr? (not (:success? push-result)))
-                              (do
-                                (when logger
-                                  (log/error logger :release-executor :push-failed
-                                             {:message (:error push-result)}))
-                                (phase-failure :push-failed (:error push-result)
-                                               {:metrics (:metrics write-result)}))
-
-                              (let [pr-result (when create-pr?
-                                                (create-pr! worktree-path
-                                                            {:title (:release/pr-title release-meta)
-                                                             :body (:release/pr-description release-meta)
-                                                             :base-branch base-branch}))]
-
-                                (if (and create-pr? (not (:success? pr-result)))
-                                  (do
-                                    (when logger
-                                      (log/error logger :release-executor :pr-failed
-                                                 {:message (:error pr-result)}))
-                                    (phase-failure :pr-create-failed (:error pr-result)
-                                                   {:metrics (:metrics write-result)}))
-
-                                  (let [release-content (merge
-                                                         (:metrics write-result)
-                                                         {:git-staged? true
-                                                          :worktree-path (str worktree-path)
-                                                          :branch actual-branch
-                                                          :base-branch base-branch
-                                                          :commit-sha (:commit-sha commit-result)
-                                                          :pr-created? (boolean create-pr?)
-                                                          :pr-number (:pr-number pr-result)
-                                                          :pr-url (:pr-url pr-result)
-                                                          :release-metadata release-meta})
-                                        release-artifact (artifact/build-artifact
-                                                          {:id (random-uuid)
-                                                           :type :release
-                                                           :version "1.0.0"
-                                                           :content release-content
-                                                           :metadata {:phase :release
-                                                                      :code-artifacts-count (count code-artifacts)}})]
-
-                                    (when artifact-store
-                                      (try
-                                        (artifact/save! artifact-store release-artifact)
-                                        (catch Exception _e nil)))
-
-                                    (when logger
-                                      (log/info logger :release-executor :phase-completed
-                                                {:data {:branch actual-branch
-                                                        :commit (:commit-sha commit-result)
-                                                        :pr-url (:pr-url pr-result)
-                                                        :files-written (get-in write-result [:metrics :files-written])}}))
-
-                                    (phase-success
-                                     [release-artifact]
-                                     (merge (:metrics write-result)
-                                            {:pr-number (:pr-number pr-result)
-                                             :pr-url (:pr-url pr-result)
-                                             :commit-sha (:commit-sha commit-result)
-                                             :branch actual-branch}))))))))))))))))))))
+    (-> initial-state
+        step-validate-inputs
+        step-check-gh-auth
+        step-generate-metadata
+        step-create-branch
+        step-write-and-stage
+        step-commit
+        step-push
+        step-create-pr
+        step-build-artifact
+        step-save-artifact
+        pipeline->result)))
