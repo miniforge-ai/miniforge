@@ -45,6 +45,32 @@
       true)
     false))
 
+;------------------------------------------------------------------------------ Layer 0.5
+;; String utilities
+
+(defn- slugify
+  "Convert a string to a URL-safe slug.
+   Handles basic ASCII transliteration and normalizes spacing."
+  [s]
+  (let [input (or s "change")
+        ;; Basic ASCII transliteration for common characters
+        transliterated (-> input
+                           (str/replace #"[àáâãäå]" "a")
+                           (str/replace #"[èéêë]" "e")
+                           (str/replace #"[ìíîï]" "i")
+                           (str/replace #"[òóôõö]" "o")
+                           (str/replace #"[ùúûü]" "u")
+                           (str/replace #"[ñ]" "n")
+                           (str/replace #"[ç]" "c")
+                           (str/replace #"[ß]" "ss"))
+        slug (-> transliterated
+                 str/lower-case
+                 (str/replace #"[^a-z0-9\s-]" "")
+                 (str/replace #"\s+" "-")
+                 (str/replace #"-+" "-")
+                 (str/replace #"^-|-$" ""))]
+    (subs slug 0 (min 40 (count slug)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Git operations
 
@@ -366,11 +392,7 @@
         files (:code/files first-artifact)
         summary (or (:code/summary first-artifact) "code changes")
         task-desc (or task-description summary)
-        slug-raw (-> task-desc
-                     str/lower-case
-                     (str/replace #"[^a-z0-9\s-]" "")
-                     (str/replace #"\s+" "-"))
-        slug (subs slug-raw 0 (min 40 (count slug-raw)))]
+        slug (slugify task-desc)]
     {:release/id (random-uuid)
      :release/branch-name (str "feature/" slug)
      :release/commit-message (str "feat: " task-desc)

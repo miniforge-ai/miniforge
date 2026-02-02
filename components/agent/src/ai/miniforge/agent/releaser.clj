@@ -3,10 +3,12 @@
    Generates branch names, commit messages, PR titles and descriptions
    for the release phase."
   (:require
+   [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
+   [ai.miniforge.response.interface :as response]
    [clojure.string :as str]
    [clojure.edn :as edn]
    [malli.core :as m]))
@@ -25,85 +27,12 @@
    [:release/files-summary {:optional true} [:string {:min 1}]]
    [:release/created-at {:optional true} inst?]])
 
-;; System Prompt
+;; System Prompt - loaded from resources/prompts/releaser.edn
 
 (def releaser-system-prompt
-  "You are a Release Agent for an autonomous software development team.
-
-Your role is to generate high-quality release metadata: branch names, commit messages,
-PR titles, and PR descriptions that clearly communicate what changes are being made.
-
-## Input Format
-
-You receive:
-1. A summary of code changes:
-   - Files created, modified, and deleted
-   - Description of what was implemented
-   - Task or spec that was completed
-
-2. Context including:
-   - Repository and project information
-   - Code artifact details
-   - Any review feedback that was addressed
-
-## Output Format
-
-You must output a structured release artifact as a Clojure map:
-
-```clojure
-{:release/id <uuid>
- :release/branch-name \"feature/descriptive-name\"
- :release/commit-message \"feat: clear description of changes
-
-Detailed explanation of what was done and why.\"
- :release/pr-title \"feat: short summary (max 70 chars)\"
- :release/pr-description \"## Summary
-Clear description of what this PR does.
-
-## Changes
-- Change 1
-- Change 2
-
-## Testing
-How this was tested.\"
- :release/files-summary \"3 files created, 1 modified\"}
-```
-
-## Guidelines
-
-1. **Branch Names**:
-   - Use conventional prefixes: feature/, fix/, refactor/, docs/, chore/
-   - Use kebab-case for the description
-   - Keep it under 50 characters when possible
-   - Make it descriptive but concise
-   - Examples: feature/add-user-auth, fix/null-pointer-in-parser
-
-2. **Commit Messages**:
-   - Use conventional commits format: type(scope): description
-   - Types: feat, fix, refactor, docs, test, chore, style, perf
-   - First line should be under 72 characters
-   - Add blank line then detailed body if needed
-   - Reference issue numbers if available
-
-3. **PR Titles**:
-   - Follow same format as commit first line
-   - Maximum 70 characters
-   - Should be clear and actionable
-   - Don't end with period
-
-4. **PR Descriptions**:
-   - Start with a clear Summary section
-   - List key Changes as bullet points
-   - Include Testing section describing how changes were verified
-   - Add any relevant context or notes
-   - Use markdown formatting
-
-5. **Files Summary**:
-   - Brief count of files affected
-   - Example: \"2 files created, 1 modified, 1 deleted\"
-
-Remember: Your release metadata will be used for git commits and GitHub PRs.
-Write messages that help reviewers understand the changes at a glance.")
+  "System prompt for the releaser agent.
+   Loaded from EDN resource for configurability."
+  (delay (prompts/load-prompt :releaser)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Releaser functions
@@ -187,14 +116,27 @@ Write messages that help reviewers understand the changes at a glance.")
       nil)))
 
 (defn- slugify
-  "Convert a string to a URL-safe slug."
+  "Convert a string to a URL-safe slug.
+   Handles basic ASCII transliteration and normalizes spacing."
   [s]
-  (-> (or s "change")
-      str/lower-case
-      (str/replace #"[^a-z0-9\s-]" "")
-      (str/replace #"\s+" "-")
-      (str/replace #"-+" "-")
-      (subs 0 (min 40 (count s)))))
+  (let [input (or s "change")
+        ;; Basic ASCII transliteration for common characters
+        transliterated (-> input
+                           (str/replace #"[àáâãäå]" "a")
+                           (str/replace #"[èéêë]" "e")
+                           (str/replace #"[ìíîï]" "i")
+                           (str/replace #"[òóôõö]" "o")
+                           (str/replace #"[ùúûü]" "u")
+                           (str/replace #"[ñ]" "n")
+                           (str/replace #"[ç]" "c")
+                           (str/replace #"[ß]" "ss"))
+        slug (-> transliterated
+                 str/lower-case
+                 (str/replace #"[^a-z0-9\s-]" "")
+                 (str/replace #"\s+" "-")
+                 (str/replace #"-+" "-")
+                 (str/replace #"^-|-$" ""))]
+    (subs slug 0 (min 40 (count slug)))))
 
 (defn- make-fallback-artifact
   "Create a fallback release artifact when LLM response cannot be parsed."
@@ -270,7 +212,7 @@ Write messages that help reviewers understand the changes at a glance.")
                    (log/create-logger {:min-level :info :output (fn [_])}))]
     (specialized/create-base-agent
      {:role :releaser
-      :system-prompt releaser-system-prompt
+      :system-prompt @releaser-system-prompt
       :config (merge {:model "claude-sonnet-4"
                       :temperature 0.3
                       :max-tokens 2000}
@@ -284,45 +226,35 @@ Write messages that help reviewers understand the changes at a glance.")
               user-prompt (input->text input context)]
           (if llm-client
             ;; Use the real LLM with streaming if callback provided
-            (let [response (if on-chunk
-                             (llm/chat-stream llm-client user-prompt on-chunk
-                                              {:system releaser-system-prompt})
-                             (llm/chat llm-client user-prompt
-                                       {:system releaser-system-prompt}))
-                  tokens (or (:tokens response) 0)]
+            (let [llm-response (if on-chunk
+                                 (llm/chat-stream llm-client user-prompt on-chunk
+                                                  {:system @releaser-system-prompt})
+                                 (llm/chat llm-client user-prompt
+                                           {:system @releaser-system-prompt}))
+                  tokens (or (:tokens llm-response) 0)]
               (log/info logger :releaser :releaser/llm-called
-                        {:data {:success (llm/success? response)
+                        {:data {:success (llm/success? llm-response)
                                 :tokens tokens
                                 :streaming? (boolean on-chunk)}})
-              (if (llm/success? response)
-                (let [content (llm/get-content response)
+              (if (llm/success? llm-response)
+                (let [content (llm/get-content llm-response)
                       parsed (parse-release-response content)
                       release (or parsed (make-fallback-artifact input))
                       ;; Ensure proper ID and timestamp
                       release-with-meta (-> release
                                             (update :release/id #(or % (random-uuid)))
                                             (assoc :release/created-at (java.util.Date.)))]
-                  {:status :success
-                   :output release-with-meta
-                   :artifact release-with-meta
-                   :tokens tokens
-                   :metrics {:tokens tokens}})
+                  (response/success release-with-meta {:tokens tokens}))
                 ;; LLM call failed
-                (let [fallback (make-fallback-artifact input)]
-                  {:status :error
-                   :error (llm/get-error response)
-                   :output fallback
-                   :artifact fallback
-                   :metrics {:tokens 0}})))
+                (let [fallback (make-fallback-artifact input)
+                      error-msg (or (:message (llm/get-error llm-response))
+                                    "LLM call failed")]
+                  (response/error error-msg {:output fallback}))))
             ;; No LLM client - use fallback (for testing)
             (do
               (log/warn logger :releaser :releaser/no-llm-backend
                         {:message "No LLM backend provided, using fallback release metadata"})
-              (let [release (make-fallback-artifact input)]
-                {:status :success
-                 :output release
-                 :artifact release
-                 :metrics {:tokens 0}})))))
+              (response/success (make-fallback-artifact input))))))
 
       :validate-fn validate-release-artifact
 
