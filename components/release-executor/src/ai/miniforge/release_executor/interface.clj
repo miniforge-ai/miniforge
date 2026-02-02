@@ -4,7 +4,9 @@
    Provides release phase execution for creating PRs from code artifacts.
    This component is extracted to avoid circular dependencies between
    workflow and phase components."
-  (:require [ai.miniforge.release-executor.core :as core]))
+  (:require
+   [ai.miniforge.release-executor.core :as core]
+   [ai.miniforge.release-executor.git :as git]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Main execution function
@@ -36,24 +38,24 @@
 (def check-gh-auth!
   "Check if GitHub CLI is available and authenticated.
    Returns {:available? bool :authenticated? bool :error string}"
-  core/check-gh-auth!)
+  git/check-gh-auth!)
 
 (def create-branch!
   "Create a new git branch from main.
    Returns {:success? bool :branch string :base-branch string :error string}"
-  core/create-branch!)
+  git/create-branch!)
 
 (def commit-changes!
   "Commit staged changes.
    Returns {:success? bool :commit-sha string :error string}"
-  core/commit-changes!)
+  git/commit-changes!)
 
 (def push-branch!
   "Push branch to remote.
    Returns {:success? bool :error string}"
-  core/push-branch!)
+  git/push-branch!)
 
 (def create-pr!
   "Create a PR using gh CLI.
    Returns {:success? bool :pr-number int :pr-url string :error string}"
-  core/create-pr!)
+  git/create-pr!)
