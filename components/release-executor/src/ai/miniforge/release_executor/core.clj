@@ -46,6 +46,40 @@
     false))
 
 ;------------------------------------------------------------------------------ Layer 0.5
+;; Result helpers
+
+(defn- shell-success
+  "Create a shell operation success result."
+  [data]
+  (merge {:success? true} data))
+
+(defn- shell-failure
+  "Create a shell operation failure result."
+  ([error-msg]
+   (shell-failure error-msg {}))
+  ([error-msg data]
+   (merge {:success? false :error error-msg} data)))
+
+(defn- phase-success
+  "Create a release phase success result."
+  [artifacts metrics]
+  {:success? true
+   :artifacts artifacts
+   :errors []
+   :metrics metrics})
+
+(defn- phase-failure
+  "Create a release phase failure result."
+  ([error-type error-msg]
+   (phase-failure error-type error-msg {}))
+  ([error-type error-msg opts]
+   {:success? false
+    :artifacts []
+    :errors [(merge {:type error-type :message error-msg}
+                    (select-keys opts [:hint :data]))]
+    :metrics (or (:metrics opts) {})}))
+
+;------------------------------------------------------------------------------ Layer 0.6
 ;; String utilities
 
 (defn- slugify
@@ -87,13 +121,26 @@
                          :err :string
                          :continue true}
                         git-args)]
-      {:success? (zero? (:exit result))
-       :output (:out result "")
-       :error (:err result "")})
+      (if (zero? (:exit result))
+        (shell-success {:output (:out result "")})
+        (shell-failure (:err result "") {:output (:out result "")})))
     (catch Exception e
-      {:success? false
-       :output ""
-       :error (.getMessage e)})))
+      (shell-failure (.getMessage e)))))
+
+(defn- gh-unavailable
+  "Create result for gh CLI not available."
+  [error-msg]
+  {:available? false :authenticated? false :error error-msg})
+
+(defn- gh-available-unauthenticated
+  "Create result for gh CLI available but not authenticated."
+  [error-msg]
+  {:available? true :authenticated? false :error error-msg})
+
+(defn- gh-authenticated
+  "Create result for gh CLI available and authenticated."
+  [user]
+  {:available? true :authenticated? true :user user})
 
 (defn check-gh-auth!
   "Check if gh CLI is available and authenticated.
@@ -105,26 +152,18 @@
                         {:out :string :err :string :continue true}
                         "which" "gh")]
       (if-not (zero? (:exit which-result))
-        {:available? false
-         :authenticated? false
-         :error "gh CLI not found. Install with: brew install gh"}
-
+        (gh-unavailable "gh CLI not found. Install with: brew install gh")
         (let [auth-result (process/shell
-                          {:out :string :err :string :continue true}
-                          "gh" "auth" "status")]
+                           {:out :string :err :string :continue true}
+                           "gh" "auth" "status")]
           (if (zero? (:exit auth-result))
             (let [output (:out auth-result "")
                   user-match (re-find #"Logged in to [^\s]+ account (\S+)" output)]
-              {:available? true
-               :authenticated? true
-               :user (or (second user-match) "unknown")})
-            {:available? true
-             :authenticated? false
-             :error (str "gh not authenticated. Run: gh auth login\n" (:err auth-result))}))))
+              (gh-authenticated (or (second user-match) "unknown")))
+            (gh-available-unauthenticated
+             (str "gh not authenticated. Run: gh auth login\n" (:err auth-result)))))))
     (catch Exception e
-      {:available? false
-       :authenticated? false
-       :error (.getMessage e)})))
+      (gh-unavailable (.getMessage e)))))
 
 (defn create-branch!
   "Create a new git branch from main/master.
@@ -147,32 +186,22 @@
           fetch-result (process/shell dir-opts "git" "fetch" "origin" default-branch)]
 
       (if-not (zero? (:exit fetch-result))
-        {:success? false
-         :branch nil
-         :error (str "Failed to fetch: " (:err fetch-result))}
-
+        (shell-failure (str "Failed to fetch: " (:err fetch-result)) {:branch nil})
         (let [checkout-result (process/shell dir-opts
                                              "git" "checkout" "-b" branch-name
                                              (str "origin/" default-branch))]
           (if (zero? (:exit checkout-result))
-            {:success? true
-             :branch branch-name
-             :base-branch default-branch}
+            (shell-success {:branch branch-name :base-branch default-branch})
             (let [timestamped-name (str branch-name "-" (System/currentTimeMillis))
                   retry-result (process/shell dir-opts
                                               "git" "checkout" "-b" timestamped-name
                                               (str "origin/" default-branch))]
               (if (zero? (:exit retry-result))
-                {:success? true
-                 :branch timestamped-name
-                 :base-branch default-branch}
-                {:success? false
-                 :branch nil
-                 :error (str "Failed to create branch: " (:err retry-result))}))))))
+                (shell-success {:branch timestamped-name :base-branch default-branch})
+                (shell-failure (str "Failed to create branch: " (:err retry-result))
+                               {:branch nil})))))))
     (catch Exception e
-      {:success? false
-       :branch nil
-       :error (.getMessage e)})))
+      (shell-failure (.getMessage e) {:branch nil}))))
 
 (defn commit-changes!
   "Commit staged changes with the given message.
@@ -187,16 +216,11 @@
         (let [sha-result (process/shell
                           {:dir (str worktree-path) :out :string :err :string :continue true}
                           "git" "rev-parse" "HEAD")]
-          {:success? true
-           :commit-sha (str/trim (:out sha-result ""))
-           :output (:out result)})
-        {:success? false
-         :commit-sha nil
-         :error (:err result)}))
+          (shell-success {:commit-sha (str/trim (:out sha-result ""))
+                          :output (:out result)}))
+        (shell-failure (:err result) {:commit-sha nil})))
     (catch Exception e
-      {:success? false
-       :commit-sha nil
-       :error (.getMessage e)})))
+      (shell-failure (.getMessage e) {:commit-sha nil}))))
 
 (defn push-branch!
   "Push the current branch to origin.
@@ -208,13 +232,10 @@
                   {:dir (str worktree-path) :out :string :err :string :continue true}
                   "git" "push" "-u" "origin" branch-name)]
       (if (zero? (:exit result))
-        {:success? true
-         :output (:out result)}
-        {:success? false
-         :error (:err result)}))
+        (shell-success {:output (:out result)})
+        (shell-failure (:err result))))
     (catch Exception e
-      {:success? false
-       :error (.getMessage e)})))
+      (shell-failure (.getMessage e)))))
 
 (defn create-pr!
   "Create a pull request using gh CLI.
@@ -234,18 +255,10 @@
         (let [pr-url (str/trim (:out result ""))
               pr-num (when-let [match (re-find #"/pull/(\d+)" pr-url)]
                        (parse-long (second match)))]
-          {:success? true
-           :pr-url pr-url
-           :pr-number pr-num})
-        {:success? false
-         :pr-url nil
-         :pr-number nil
-         :error (:err result)}))
+          (shell-success {:pr-url pr-url :pr-number pr-num}))
+        (shell-failure (:err result) {:pr-url nil :pr-number nil})))
     (catch Exception e
-      {:success? false
-       :pr-url nil
-       :pr-number nil
-       :error (.getMessage e)})))
+      (shell-failure (.getMessage e) {:pr-url nil :pr-number nil}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; File action processing
@@ -437,11 +450,8 @@
         (when logger
           (log/error logger :release-executor :missing-worktree-path
                      {:message "Context must include :worktree-path"}))
-        {:success? false
-         :artifacts []
-         :errors [{:type :missing-worktree-path
-                   :message "Context must include :worktree-path for release phase"}]
-         :metrics {}})
+        (phase-failure :missing-worktree-path
+                       "Context must include :worktree-path for release phase"))
 
       (let [code-artifacts (extract-code-artifacts (:workflow/artifacts workflow-state))]
 
@@ -450,11 +460,8 @@
             (when logger
               (log/warn logger :release-executor :no-code-artifacts
                         {:message "No code artifacts found to release"}))
-            {:success? false
-             :artifacts []
-             :errors [{:type :no-code-artifacts
-                       :message "No code artifacts found in workflow state"}]
-             :metrics {}})
+            (phase-failure :no-code-artifacts
+                           "No code artifacts found in workflow state"))
 
           (let [gh-auth (when create-pr? (check-gh-auth!))
                 gh-ok? (or (not create-pr?) (:authenticated? gh-auth))]
@@ -464,14 +471,10 @@
                 (when logger
                   (log/error logger :release-executor :gh-auth-failed
                              {:message (:error gh-auth)}))
-                {:success? false
-                 :artifacts []
-                 :errors [{:type :gh-auth-failed
-                           :message (:error gh-auth)
-                           :hint (if (:available? gh-auth)
-                                   "Run: gh auth login"
-                                   "Install: brew install gh")}]
-                 :metrics {}})
+                (phase-failure :gh-auth-failed (:error gh-auth)
+                               {:hint (if (:available? gh-auth)
+                                        "Run: gh auth login"
+                                        "Install: brew install gh")}))
 
               (let [release-meta (or (invoke-releaser releaser code-artifacts task-description context logger)
                                      (make-fallback-release-metadata code-artifacts task-description))
@@ -482,11 +485,7 @@
                     (when logger
                       (log/error logger :release-executor :branch-failed
                                  {:message (:error branch-result)}))
-                    {:success? false
-                     :artifacts []
-                     :errors [{:type :branch-create-failed
-                               :message (:error branch-result)}]
-                     :metrics {}})
+                    (phase-failure :branch-create-failed (:error branch-result)))
 
                   (let [actual-branch (:branch branch-result)
                         base-branch (:base-branch branch-result)
@@ -508,11 +507,8 @@
                             (when logger
                               (log/error logger :release-executor :commit-failed
                                          {:message (:error commit-result)}))
-                            {:success? false
-                             :artifacts []
-                             :errors [{:type :commit-failed
-                                       :message (:error commit-result)}]
-                             :metrics (:metrics write-result)})
+                            (phase-failure :commit-failed (:error commit-result)
+                                           {:metrics (:metrics write-result)}))
 
                           (let [push-result (when create-pr?
                                               (push-branch! worktree-path actual-branch))]
@@ -521,11 +517,8 @@
                                 (when logger
                                   (log/error logger :release-executor :push-failed
                                              {:message (:error push-result)}))
-                                {:success? false
-                                 :artifacts []
-                                 :errors [{:type :push-failed
-                                           :message (:error push-result)}]
-                                 :metrics (:metrics write-result)})
+                                (phase-failure :push-failed (:error push-result)
+                                               {:metrics (:metrics write-result)}))
 
                               (let [pr-result (when create-pr?
                                                 (create-pr! worktree-path
@@ -538,11 +531,8 @@
                                     (when logger
                                       (log/error logger :release-executor :pr-failed
                                                  {:message (:error pr-result)}))
-                                    {:success? false
-                                     :artifacts []
-                                     :errors [{:type :pr-create-failed
-                                               :message (:error pr-result)}]
-                                     :metrics (:metrics write-result)})
+                                    (phase-failure :pr-create-failed (:error pr-result)
+                                                   {:metrics (:metrics write-result)}))
 
                                   (let [release-content (merge
                                                          (:metrics write-result)
@@ -575,11 +565,10 @@
                                                         :pr-url (:pr-url pr-result)
                                                         :files-written (get-in write-result [:metrics :files-written])}}))
 
-                                    {:success? true
-                                     :artifacts [release-artifact]
-                                     :errors []
-                                     :metrics (merge (:metrics write-result)
-                                                     {:pr-number (:pr-number pr-result)
-                                                      :pr-url (:pr-url pr-result)
-                                                      :commit-sha (:commit-sha commit-result)
-                                                      :branch actual-branch})}))))))))))))))))))
+                                    (phase-success
+                                     [release-artifact]
+                                     (merge (:metrics write-result)
+                                            {:pr-number (:pr-number pr-result)
+                                             :pr-url (:pr-url pr-result)
+                                             :commit-sha (:commit-sha commit-result)
+                                             :branch actual-branch}))))))))))))))))))))
