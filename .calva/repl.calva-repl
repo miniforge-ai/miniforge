@@ -1,0 +1,44 @@
+; Jacking in...
+; Connecting using "miniforge" project type.
+; Starting Jack-in: (cd /Users/chris/Local/miniforge.ai/miniforge; clojure -Sdeps '{:deps {nrepl/nrepl {:mvn/version,"1.5.1"},cider/cider-nrepl {:mvn/version,"0.58.0"}}}' -M:dev:test:+default -m nrepl.cmdline --middleware "[cider.nrepl/cider-middleware]")
+; Using host:port localhost:53420 ...
+; Hooking up nREPL sessions on port 53420...
+; Connected session: clj, port: 53420
+; Evaluating code from settings: 'calva.autoEvaluateCode.onConnect.clj'
+nil
+clj꞉user꞉> 
+"Please see https://calva.io/output/#about-stdout-in-the-repl-window
+about why stdout printed to this file is prepended with `;` to be line comments."
+clj꞉user꞉> 
+; Jack-in done.
+clj꞉user꞉> 
+; Evaluating file: runner_test.clj
+#'ai.miniforge.workflow.runner-test/fsm-state-tracked-test
+clj꞉ai.miniforge.workflow.runner-test꞉> 
+; Running tests for the following namespaces:
+;   ai.miniforge.workflow.runner-test
+;   ai.miniforge.workflow.runner
+
+; ERROR in ai.miniforge.workflow.runner-test/fsm-state-tracked-test (APersistentVector.java:208):
+; Uncaught exception, not in assertion
+; error: java.lang.IllegalArgumentException: Key must be integer (APersistentVector.java:208)
+; ERROR in ai.miniforge.workflow.runner-test/metrics-accumulated-test (APersistentVector.java:162):
+; Uncaught exception, not in assertion
+; error: java.lang.IllegalArgumentException: Key must be integer (APersistentVector.java:162)
+; ERROR in ai.miniforge.workflow.runner-test/phase-results-recorded-test (APersistentVector.java:150):
+; Uncaught exception, not in assertion
+; error: java.lang.IllegalArgumentException: Key must be integer (APersistentVector.java:150)
+; ERROR in ai.miniforge.workflow.runner-test/response-chain-records-phases-test (APersistentVector.java:185):
+; Uncaught exception, not in assertion
+; error: java.lang.IllegalArgumentException: Key must be integer (APersistentVector.java:185)
+; ERROR in ai.miniforge.workflow.runner-test/run-pipeline-callbacks-test (APersistentVector.java:110):
+; Uncaught exception, not in assertion
+; error: java.lang.IllegalArgumentException: Key must be integer (APersistentVector.java:110)
+; ERROR in ai.miniforge.workflow.runner-test/run-pipeline-done-only-test (APersistentVector.java:99):
+; Uncaught exception, not in assertion
+; error: java.lang.IllegalArgumentException: Key must be integer (APersistentVector.java:99)
+; ERROR in ai.miniforge.workflow.runner-test/run-pipeline-max-phases-test (APersistentVector.java:137):
+; Uncaught exception, not in assertion
+; error: java.lang.IllegalArgumentException: Key must be integer (APersistentVector.java:137)
+; 28 tests finished, problems found. 😭 errors: 7, failures: 0, ns: 1, vars: 15
+clj꞉ai.miniforge.workflow.runner-test꞉> 
