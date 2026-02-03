@@ -20,6 +20,7 @@
         ai.miniforge/fsm {:local/root "../../components/fsm"}
         ai.miniforge/phase {:local/root "../../components/phase"}
         ai.miniforge/gate {:local/root "../../components/gate"}
+        ai.miniforge/release-executor {:local/root "../../components/release-executor"}
         ai.miniforge/evidence-bundle {:local/root "../../components/evidence-bundle"}}
 
  :aliases

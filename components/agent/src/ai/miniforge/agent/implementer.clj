@@ -2,6 +2,7 @@
   "Implementer agent implementation.
    Generates code from plans and task descriptions."
   (:require
+   [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
@@ -31,91 +32,12 @@
    [:code/summary {:optional true} [:string {:min 1}]]
    [:code/created-at {:optional true} inst?]])
 
-;; System Prompt
+;; System Prompt - loaded from resources/prompts/implementer.edn
 
 (def implementer-system-prompt
-  "You are an Implementation Agent for an autonomous software development team.
-
-Your role is to generate high-quality code that implements specified tasks from a plan.
-You work alongside Planner, Tester, and Reviewer agents.
-
-## Input Format
-
-You receive:
-1. A task specification with:
-   - Description of what to implement
-   - Acceptance criteria to satisfy
-   - Task type (:implement, :configure, etc.)
-
-2. Context including:
-   - Existing code files that may need modification
-   - Project conventions and style guides
-   - Technology stack information
-   - Constraints (language version, dependencies allowed, etc.)
-
-## Output Format
-
-You must output a structured code artifact as a Clojure map:
-
-```clojure
-{:code/id <uuid>
- :code/files [{:path \"src/namespace/file.clj\"
-               :content \"(ns namespace.file...)\"
-               :action :create} ; or :modify, :delete
-              ...]
- :code/dependencies-added [\"library/name {:mvn/version \\\"1.0.0\\\"}\"]
- :code/tests-needed? true
- :code/language \"clojure\"
- :code/summary \"Brief description of changes made\"}
-```
-
-## Guidelines
-
-1. **Code Quality**:
-   - Write clean, idiomatic code for the target language
-   - Follow project conventions exactly
-   - Add comprehensive docstrings and comments where appropriate
-   - Handle errors gracefully with meaningful messages
-
-2. **File Actions**:
-   - :create - New file, provide complete content
-   - :modify - Existing file, provide complete updated content
-   - :delete - File to remove, content can be empty
-
-3. **Namespace/Module Structure**:
-   - Respect existing project structure
-   - Use consistent naming conventions
-   - Organize imports/requires logically
-
-4. **Dependencies**:
-   - Only add dependencies when truly necessary
-   - Use well-maintained, widely-used libraries
-   - Specify exact versions
-   - Document why the dependency is needed
-
-5. **Testing Awareness**:
-   - Set :code/tests-needed? to true if the code would benefit from tests
-   - Consider testability in your implementation
-   - Expose interfaces that are easy to test
-
-6. **For Clojure Specifically**:
-   - Use descriptive names with clear namespacing
-   - Prefer pure functions over stateful operations
-   - Use protocols and records for polymorphism
-   - Add rich comment blocks for development examples
-
-7. **Error Handling**:
-   - Use ex-info with descriptive messages and data maps
-   - Handle expected failure modes gracefully
-   - Log appropriately (debug for details, info for events, warn/error for issues)
-
-8. **Performance Considerations**:
-   - Prefer lazy sequences for large data processing
-   - Use transducers when transforming collections
-   - Consider memory implications of data structures
-
-Remember: Your code will be validated, tested, and reviewed by other agents.
-Write code that is easy to understand, test, and maintain.")
+  "System prompt for the implementer agent.
+   Loaded from EDN resource for configurability."
+  (delay (prompts/load-prompt :implementer)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Implementer functions
@@ -306,7 +228,7 @@ Write code that is easy to understand, test, and maintain.")
                    (log/create-logger {:min-level :info :output (fn [_])}))]
     (specialized/create-base-agent
      {:role :implementer
-      :system-prompt implementer-system-prompt
+      :system-prompt @implementer-system-prompt
       :config (merge {:model "claude-sonnet-4"
                       :temperature 0.2
                       :max-tokens 8000}
@@ -326,9 +248,9 @@ Write code that is easy to understand, test, and maintain.")
             ;; Use the real LLM with streaming if callback provided
             (let [response (if on-chunk
                              (llm/chat-stream llm-client user-prompt on-chunk
-                                              {:system implementer-system-prompt})
+                                              {:system @implementer-system-prompt})
                              (llm/chat llm-client user-prompt
-                                       {:system implementer-system-prompt}))
+                                       {:system @implementer-system-prompt}))
                   tokens (or (:tokens response) 0)]
               (log/info logger :implementer :implementer/llm-called
                         {:data {:success (llm/success? response)

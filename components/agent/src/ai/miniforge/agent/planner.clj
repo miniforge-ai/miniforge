@@ -2,6 +2,7 @@
   "Planner agent implementation.
    Analyzes specifications and creates detailed implementation plans."
   (:require
+   [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
@@ -33,85 +34,12 @@
    [:plan/assumptions {:optional true} [:vector [:string {:min 1}]]]
    [:plan/created-at {:optional true} inst?]])
 
-;; System Prompt
+;; System Prompt - loaded from resources/prompts/planner.edn
 
 (def planner-system-prompt
-  "You are a Planning Agent for an autonomous software development team.
-
-Your role is to analyze requirements and create detailed implementation plans that can be
-executed by other specialized agents (Implementer, Tester, Reviewer).
-
-## Input Format
-
-You receive specifications in one of these formats:
-1. User story: \"As a <role>, I want <feature> so that <benefit>\"
-2. Technical requirement: A description of functionality needed
-3. Bug report: Description of an issue to fix
-4. Feature request: High-level description of desired capability
-
-You also receive context about:
-- Existing codebase structure
-- Technology stack and conventions
-- Constraints (time, budget, dependencies)
-
-## Output Format
-
-You must output a structured plan as a Clojure map with:
-
-```clojure
-{:plan/id <uuid>
- :plan/name \"descriptive-name\"
- :plan/tasks [{:task/id <uuid>
-               :task/description \"Clear description of what to do\"
-               :task/type :implement ; or :test, :review, :design, :deploy, :configure
-               :task/dependencies [<uuid>...] ; IDs of tasks that must complete first
-               :task/acceptance-criteria [\"Criterion 1\" \"Criterion 2\"...]
-               :task/estimated-effort :small} ; :small, :medium, :large, :xlarge
-              ...]
- :plan/estimated-complexity :medium ; :low, :medium, :high
- :plan/risks [\"Risk description\"...]
- :plan/assumptions [\"Assumption made\"...]}
-```
-
-## Guidelines
-
-1. **Task Granularity**: Break down work into small, testable units. Each task should be
-   completable in a single focused session.
-
-2. **Dependencies**: Clearly identify which tasks depend on others. Build a DAG (directed
-   acyclic graph) - no circular dependencies.
-
-3. **Acceptance Criteria**: Every task must have clear, verifiable acceptance criteria.
-   Prefer criteria that can be automatically tested.
-
-4. **Task Types**:
-   - :implement - Write production code
-   - :test - Write or update tests
-   - :review - Code review checkpoint
-   - :design - Design decisions or documentation
-   - :deploy - Deployment-related tasks
-   - :configure - Configuration changes
-
-5. **Risk Assessment**: Identify potential blockers, unknowns, and dependencies on
-   external systems or decisions.
-
-6. **Assumptions**: Document any assumptions you're making about requirements,
-   technology choices, or constraints.
-
-7. **Effort Estimation**:
-   - :small - Less than 1 hour of work
-   - :medium - 1-4 hours of work
-   - :large - Half day to full day
-   - :xlarge - Multiple days, consider breaking down further
-
-8. **Testing Strategy**: Include appropriate test tasks. Every :implement task should
-   have a corresponding :test task or explicit justification for skipping.
-
-9. **Review Points**: Include :review tasks at natural checkpoints, especially after
-   significant implementation milestones.
-
-Remember: A good plan enables parallel execution where possible while respecting
-necessary dependencies. Optimize for clarity and testability.")
+  "System prompt for the planner agent.
+   Loaded from EDN resource for configurability."
+  (delay (prompts/load-prompt :planner)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Planner functions
@@ -327,7 +255,7 @@ necessary dependencies. Optimize for clarity and testability.")
                    (log/create-logger {:min-level :info :output (fn [_])}))]
     (specialized/create-base-agent
      {:role :planner
-      :system-prompt planner-system-prompt
+      :system-prompt @planner-system-prompt
       :config (merge {:model "claude-sonnet-4"
                       :temperature 0.3
                       :max-tokens 4000}
@@ -347,9 +275,9 @@ necessary dependencies. Optimize for clarity and testability.")
             ;; Use the real LLM with streaming if callback provided
             (let [response (if on-chunk
                              (llm/chat-stream llm-client user-prompt on-chunk
-                                              {:system planner-system-prompt})
+                                              {:system @planner-system-prompt})
                              (llm/chat llm-client user-prompt
-                                       {:system planner-system-prompt}))
+                                       {:system @planner-system-prompt}))
                   tokens (or (:tokens response) 0)]
               (log/info logger :planner :planner/llm-called
                         {:data {:success (llm/success? response)
