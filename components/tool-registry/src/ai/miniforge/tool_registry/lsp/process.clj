@@ -20,6 +20,7 @@
    Layer 2: Health checking
    Layer 3: Process info and cleanup"
   (:require
+   [ai.miniforge.tool-registry.schema :as schema]
    [clojure.java.io :as io]
    [clojure.string :as str])
   (:import
@@ -76,19 +77,17 @@
           stdin (.getOutputStream process)   ; We write to process stdin
           stdout (.getInputStream process)   ; We read from process stdout
           state-atom (atom :starting)]
-      {:success? true
-       :process (->LSPProcess process
-                              stdout  ; LSP messages come from process stdout
-                              stdin   ; We send to process stdin
-                              tool-id
-                              command
-                              (System/currentTimeMillis)
-                              state-atom
-                              env
-                              working-dir)})
+      (schema/ok :process (->LSPProcess process
+                                        stdout  ; LSP messages come from process stdout
+                                        stdin   ; We send to process stdin
+                                        tool-id
+                                        command
+                                        (System/currentTimeMillis)
+                                        state-atom
+                                        env
+                                        working-dir)))
     (catch Exception e
-      {:success? false
-       :error (str "Failed to start process: " (.getMessage e))})))
+      (schema/err "Failed to start process: " (.getMessage e)))))
 
 (defn stop-process
   "Stop an LSP server process.
@@ -118,10 +117,9 @@
             (.destroyForcibly process))))
 
       (reset! state-atom :stopped)
-      {:success? true})
+      (schema/ok))
     (catch Exception e
-      {:success? false
-       :error (str "Failed to stop process: " (.getMessage e))})))
+      (schema/err "Failed to stop process: " (.getMessage e)))))
 
 (defn process-alive?
   "Check if a process is still alive."

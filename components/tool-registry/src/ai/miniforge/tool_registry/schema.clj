@@ -236,12 +236,12 @@
 ;; Result builders and normalization
 
 (defn success
-  "Build a success result."
+  "Build a success result with a keyed value."
   [key value & {:as extras}]
   (merge {:success? true key value} extras))
 
 (defn failure
-  "Build a failure result."
+  "Build a failure result with a keyed nil."
   [key error]
   {:success? false key nil :error error})
 
@@ -249,6 +249,35 @@
   "Build a failure result with multiple errors."
   [key errors]
   {:success? false key nil :errors errors})
+
+;; Simple result builders (no keyed value)
+
+(defn ok
+  "Build a simple success result.
+
+   Examples:
+     (ok)                        ;; => {:success? true}
+     (ok :client lsp-client)     ;; => {:success? true :client lsp-client}
+     (ok :a 1 :b 2)              ;; => {:success? true :a 1 :b 2}"
+  [& {:as kvs}]
+  (merge {:success? true} kvs))
+
+(defn err
+  "Build a simple error result.
+
+   Examples:
+     (err \"Something failed\")
+     (err \"Tool not found: \" tool-id)
+     (err :code -1 \"Parse error\")"
+  ([message]
+   {:success? false :error message})
+  ([message-or-key & args]
+   (if (keyword? message-or-key)
+     ;; (err :code -1 "message")
+     (let [[code message] args]
+       {:success? false :error message :code code})
+     ;; (err "Tool not found: " tool-id)
+     {:success? false :error (apply str message-or-key args)})))
 
 (defn normalize-tool
   "Normalize a tool configuration, ensuring defaults.

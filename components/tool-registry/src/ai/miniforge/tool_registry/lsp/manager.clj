@@ -64,21 +64,21 @@
     (cond
       ;; Tool not found
       (nil? tool)
-      {:success? false :error (str "Tool not found: " tool-id)}
+      (schema/err "Tool not found: " tool-id)
 
       ;; Not an LSP tool
       (not (schema/lsp-tool? tool))
-      {:success? false :error (str "Not an LSP tool: " tool-id)}
+      (schema/err "Not an LSP tool: " tool-id)
 
       ;; Tool disabled
       (not (schema/enabled? tool))
-      {:success? false :error (str "Tool is disabled: " tool-id)}
+      (schema/err "Tool is disabled: " tool-id)
 
       ;; Already running
       (get @servers tool-id)
       (let [entry (get @servers tool-id)]
         (if (process/process-alive? (:process entry))
-          {:success? true :client (:client entry)}
+          (schema/ok :client (:client entry))
           ;; Process died, clean up and restart
           (do
             (swap! servers dissoc tool-id)
@@ -100,7 +100,7 @@
               (when logger
                 (log/error logger :system :lsp/start-failed
                            {:data {:tool-id tool-id :error error}}))
-              {:success? false :error error})
+              (schema/err error))
 
             ;; Create client and initialize
             (let [notification-handler (fn [msg]
@@ -124,7 +124,7 @@
                   (when logger
                     (log/info logger :system :lsp/started
                               {:data {:tool-id tool-id}}))
-                  {:success? true :client lsp-client})
+                  (schema/ok :client lsp-client))
 
                 ;; Initialization failed, clean up
                 (do
@@ -132,7 +132,7 @@
                   (when logger
                     (log/error logger :system :lsp/init-failed
                                {:data {:tool-id tool-id :error error}}))
-                  {:success? false :error (str "Initialization failed: " error)})))))))))
+                  (schema/err "Initialization failed: " error))))))))))
 
 (defn stop-server
   "Stop an LSP server.
@@ -150,7 +150,7 @@
         entry (get @servers tool-id)]
 
     (if-not entry
-      {:success? false :error (str "Server not running: " tool-id)}
+      (schema/err "Server not running: " tool-id)
 
       (do
         (when logger
@@ -171,7 +171,7 @@
           (log/info logger :system :lsp/stopped
                     {:data {:tool-id tool-id}}))
 
-        {:success? true}))))
+        (schema/ok)))))
 
 (defn restart-server
   "Restart an LSP server.

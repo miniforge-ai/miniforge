@@ -22,6 +22,7 @@
   (:require
    [ai.miniforge.tool-registry.lsp.protocol :as proto]
    [ai.miniforge.tool-registry.lsp.process :as process]
+   [ai.miniforge.tool-registry.schema :as schema]
    [cheshire.core :as json]
    [clojure.core.async :as async :refer [go go-loop <! >! chan close!]]
    [clojure.string :as str])
@@ -148,15 +149,14 @@
          result (deref p timeout-ms ::timeout)]
      (cond
        (= result ::timeout)
-       {:success? false :error "Request timed out"}
+       (schema/err "Request timed out")
 
        (proto/error? result)
-       {:success? false
-        :error (get-in result [:error :message] "Unknown error")
-        :code (get-in result [:error :code])}
+       (schema/err :code (get-in result [:error :code])
+                   (get-in result [:error :message] "Unknown error"))
 
        :else
-       {:success? true :result (:result result)}))))
+       (schema/ok :result (:result result))))))
 
 (defn send-notification
   "Send a notification (no response expected).
@@ -218,8 +218,8 @@
         (send-notification client (proto/initialized-notification))
         (reset! (:initialized? client) true)
         (process/mark-running! (:process client))
-        {:success? true :capabilities (:capabilities result)})
-      {:success? false :error error})))
+        (schema/ok :capabilities (:capabilities result)))
+      (schema/err error))))
 
 (defn shutdown
   "Shutdown the LSP server gracefully.
@@ -233,8 +233,8 @@
       (do
         (send-notification client (proto/exit-notification))
         (reset! (:initialized? client) false)
-        {:success? true})
-      {:success? false :error error})))
+        (schema/ok))
+      (schema/err error))))
 
 (defn initialized?
   "Check if the client has been initialized."
