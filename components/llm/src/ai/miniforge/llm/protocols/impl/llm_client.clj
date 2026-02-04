@@ -6,7 +6,9 @@
    [clojure.string :as str]
    [cheshire.core :as json]
    [babashka.process :as p]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log])
+  (:import
+   [java.io ByteArrayInputStream]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Backend configuration
@@ -109,7 +111,9 @@
 
    Returns: Same format as default-exec-fn when complete"
   [cmd on-line]
-  (let [process (apply p/process {:err :string} cmd)
+  ;; Use empty ByteArrayInputStream for stdin to prevent CLI from waiting on input
+  (let [empty-stdin (ByteArrayInputStream. (byte-array 0))
+        process (apply p/process {:err :string :in empty-stdin} cmd)
         out-lines (atom [])
         out-reader (java.io.BufferedReader.
                     (java.io.InputStreamReader. (:out process)))
@@ -240,13 +244,13 @@
 ;; Execution functions
 
 (defn default-exec-fn
-  "Default execution function using babashka.process with timeout protection."
+  "Default execution function using babashka.process/shell.
+   Uses shell instead of process to avoid stdin hanging issues."
   [cmd]
-  ;; p/shell returns a process object that we need to deref
-  ;; Add timeout to prevent hanging forever
+  ;; p/shell handles stdin properly for non-interactive commands
+  ;; :continue true prevents throwing on non-zero exit
   (let [timeout-ms 300000  ; 5 minutes
-        process (apply p/process {:out :string :err :string} cmd)
-        result (deref process timeout-ms {:exit -1 :out "" :err "Process timed out after 5 minutes"})]
+        result (apply p/shell {:out :string :err :string :continue true :timeout timeout-ms} cmd)]
     {:out (:out result)
      :err (:err result)
      :exit (:exit result)}))
