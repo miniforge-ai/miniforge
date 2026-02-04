@@ -45,7 +45,7 @@ This specification builds upon core concepts defined in N1 (Architecture).
 
 ### 2.2 State Transition Diagram
 
-```
+```text
 pending ──[start]──► executing ──[complete all phases]──► completed
                          │
                          │ [gate failure, agent error]
@@ -75,7 +75,7 @@ Implementations MUST emit these events (see N3):
 
 ### 3.1 Standard Phase Sequence
 
-```
+```text
 Plan → Design → Implement → Verify → Review → Release → Observe
 ```
 
@@ -542,7 +542,9 @@ Phase context MUST explicitly separate **instruction authority** from **untruste
 - `:instructions` are platform-authored or policy-approved and MAY shape plans and execution.
 - `:data` is repo- or user-derived content and MUST be treated as reference material only.
 
-Implementations MUST ensure that untrusted documents (e.g., markdown specs, READMEs, `agents.md`) are never elevated into instruction authority unless first normalized into schema-valid packs and promoted to `:trusted` under policy.
+Implementations MUST ensure that untrusted documents (e.g., markdown specs, READMEs,
+`agents.md`) are never elevated into instruction authority unless first normalized into
+schema-valid packs and promoted to `:trusted` under policy.
 
 Recommended context shape:
 
@@ -566,7 +568,10 @@ Recommended context shape:
   :scanner-findings [...]}}          ; Associated scanner findings for transparency
 ```
 
-The `:data/trust-verified` subchannel MAY be used to provide richer context for agent reasoning without elevating content to instruction authority. Content in this channel MUST have passed deterministic safety scanners (see N4 "knowledge-safety") but retains `:untrusted` trust level.
+The `:data/trust-verified` subchannel MAY be used to provide richer context for agent
+reasoning without elevating content to instruction authority. Content in this channel
+MUST have passed deterministic safety scanners (see N4 "knowledge-safety") but retains
+`:untrusted` trust level.
 
 Each phase MUST produce a next context:
 
@@ -587,7 +592,7 @@ The **inner loop** validates agent output and repairs it if validation fails, wi
 
 ### 5.2 Inner Loop Flow
 
-```
+```text
 1. Agent generates output
      ↓
 2. Validate output against constraints
@@ -960,7 +965,12 @@ ETL workflows SHOULD emit:
 
 ETL workflows MUST default generated packs to `:untrusted` unless explicitly promoted under policy.
 
-**Custom Phase Sequence:** ETL workflows use a fundamentally different process than standard infrastructure change workflows. While the standard phase sequence is (Plan → Design → Implement → Verify → Review → Release → Observe), ETL workflows MAY define custom phases appropriate to the ingestion and normalization process (e.g., Inventory → Classify → Scan → Extract → Validate → Index). The workflow extensibility model treats ETL as just another workflow type with its own phase graph.
+**Custom Phase Sequence:** ETL workflows use a fundamentally different process than
+standard infrastructure change workflows. While the standard phase sequence is
+(Plan → Design → Implement → Verify → Review → Release → Observe), ETL workflows
+MAY define custom phases appropriate to the ingestion and normalization process
+(e.g., Inventory → Classify → Scan → Extract → Validate → Index). The workflow
+extensibility model treats ETL as just another workflow type with its own phase graph.
 
 Recommended `:workflow/context` for ETL:
 
@@ -1122,9 +1132,115 @@ This is **unique to miniforge** - no other system validates intent vs. behavior.
 
 ---
 
-## 13. Future Extensions
+## 13. DAG-Based Multi-Task Execution
 
-### 13.1 Parallel Phase Execution (Post-OSS)
+### 13.1 Task Completion Definition
+
+For DAG-based multi-task execution, **task completion is defined by integration terminal state**, not code generation.
+
+The default terminal state is `:merged` — a task is not complete until its PR has been merged into the target branch.
+
+```clojure
+;; Task workflow terminal states
+:merged    ; TERMINAL SUCCESS - PR merged into target branch
+:failed    ; TERMINAL FAILURE - unrecoverable error or max retries exceeded
+:skipped   ; TERMINAL SKIP - dependency failed or policy skip
+```
+
+Implementations MUST:
+
+1. **Track task status through PR lifecycle** — not just code generation
+2. **Consider dependencies satisfied** only when dependent tasks reach `:merged`
+3. **Support partial completion** — some tasks merged, others failed/skipped
+
+### 13.2 Task Workflow State Machine
+
+Tasks progress through an extended state machine that encompasses the full PR lifecycle:
+
+```text
+:pending → :ready → :implementing → :pr-opening → :ci-running
+                                                      ↓
+                    :responding ← :review-pending ← ─┴─ (CI passed)
+                         ↓                ↓
+                    (fix pushed)    :ready-to-merge
+                         ↓                ↓
+                    :ci-running      :merging
+                                          ↓
+                                      :merged
+```
+
+Implementations MUST support these transitions:
+
+| From State | To State | Trigger |
+|------------|----------|---------|
+| `:pending` | `:ready` | All dependencies merged |
+| `:ready` | `:implementing` | Task dispatched |
+| `:implementing` | `:pr-opening` | Inner loop complete |
+| `:pr-opening` | `:ci-running` | PR created |
+| `:ci-running` | `:review-pending` | CI passed |
+| `:ci-running` | `:responding` | CI failed |
+| `:review-pending` | `:ready-to-merge` | Approvals received |
+| `:review-pending` | `:responding` | Changes requested |
+| `:responding` | `:ci-running` | Fix pushed |
+| `:ready-to-merge` | `:merging` | Merge initiated |
+| `:merging` | `:merged` | Merge successful |
+| Any non-terminal | `:failed` | Max retries exceeded, unrecoverable error |
+
+### 13.3 Automated CI/Review Fix Iteration
+
+Implementations MUST support automated fix loops for CI failures and review feedback:
+
+1. **On CI failure:**
+   - Parse CI logs to identify failing tests/lint errors
+   - Build fix context with failure details
+   - Invoke inner loop with "fix" intent
+   - Push fix commit and re-run CI
+
+2. **On "changes requested" review:**
+   - Triage comments as actionable vs non-actionable
+   - Build fix context with actionable comments
+   - Invoke inner loop with "fix" intent
+   - Push fix commit and request re-review
+
+Implementations MUST:
+
+- Limit fix iterations (RECOMMENDED: max 5 per task)
+- Limit CI retries (RECOMMENDED: max 3 per task)
+- Escalate to human when limits exceeded
+- Record all fix attempts in task evidence
+
+### 13.4 Concurrency and Resource Constraints
+
+For safe parallel execution of multiple tasks:
+
+1. **Dependency constraints:** Task is ready only when all `:task/deps` are `:merged`
+
+2. **Resource locks:**
+   - `:repo-write` — Exclusive lock for repository writes (default: serialize)
+   - `:exclusive-files` — Lock specific file paths to prevent conflicts
+
+3. **Worktree isolation:** Each task SHOULD run in an isolated git worktree
+
+Implementations MUST:
+
+- Prevent concurrent modification of same files by different tasks
+- Support configurable parallelism limits
+- Release all locks on task completion or failure
+
+### 13.5 Rebase and Conflict Handling
+
+When the base branch moves during task execution:
+
+1. **Auto-rebase:** Attempt automatic rebase onto new base
+2. **Conflict detection:** If rebase fails, detect conflicting files
+3. **Conflict repair:** Invoke fix loop to resolve conflicts (per policy)
+4. **Restart:** If API changes affect task, may restart from `:implementing`
+
+---
+
+## 14. Future Extensions
+
+### 14.1 Parallel Phase Execution (Post-OSS)
 
 Future versions will support:
 
@@ -1132,7 +1248,7 @@ Future versions will support:
 - Conditional phase branching (if-then-else)
 - Phase retry with backoff
 
-### 13.2 Custom Phase Plugins (Enterprise)
+### 14.2 Custom Phase Plugins (Enterprise)
 
 Enterprise features will add:
 
@@ -1140,7 +1256,7 @@ Enterprise features will add:
 - Phase plugin marketplace
 - Phase composition (nested phases)
 
-### 13.3 Cross-Workflow Dependencies (Enterprise)
+### 14.3 Cross-Workflow Dependencies (Enterprise)
 
 PR train orchestration will enable:
 
@@ -1150,7 +1266,7 @@ PR train orchestration will enable:
 
 ---
 
-## 14. References
+## 15. References
 
 - RFC 2119: Key words for use in RFCs to Indicate Requirement Levels
 - N1 (Architecture): Defines core concepts (workflow, phase, agent, gate)
@@ -1162,4 +1278,5 @@ PR train orchestration will enable:
 
 **Version History:**
 
+- 0.2.0-draft (2026-02-03): Added DAG-based multi-task execution model (Section 13)
 - 0.1.0-draft (2026-01-23): Initial workflow execution model specification
