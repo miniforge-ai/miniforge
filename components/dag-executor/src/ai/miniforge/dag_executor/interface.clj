@@ -6,6 +6,7 @@
    - Task workflow state machine
    - Budget and checkpoint management
    - Integration with PR lifecycle events
+   - Pluggable execution backends (K8s, Docker, worktree)
 
    A DAG node is not 'generate code once' - it's a task workflow that runs
    until it reaches a terminal integration state (:merged)."
@@ -13,7 +14,8 @@
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.state :as state]
    [ai.miniforge.dag-executor.parallel :as parallel]
-   [ai.miniforge.dag-executor.scheduler :as scheduler]))
+   [ai.miniforge.dag-executor.scheduler :as scheduler]
+   [ai.miniforge.dag-executor.executor :as executor]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Result helpers (re-exports)
@@ -310,6 +312,103 @@
   scheduler/schedule-iteration)
 
 ;------------------------------------------------------------------------------ Layer 6
+;; Execution backends (K8s, Docker, Worktree)
+
+(def TaskExecutor
+  "Protocol for pluggable task execution backends.
+   Implementations: KubernetesExecutor, DockerExecutor, WorktreeExecutor"
+  executor/TaskExecutor)
+
+(def create-executor-registry
+  "Create a registry of available executors.
+
+   Arguments:
+   - config: Configuration map with executor-specific settings
+     {:kubernetes {:namespace string :image string}
+      :docker {:image string :network string}
+      :worktree {:base-path string :max-concurrent int}}
+
+   Returns map of executor-type -> executor instance."
+  executor/create-executor-registry)
+
+(def select-executor
+  "Select the best available executor from a registry.
+   Tries: kubernetes -> docker -> worktree (fallback).
+
+   Options:
+   - :preferred - Preferred executor type to try first"
+  executor/select-executor)
+
+(def create-kubernetes-executor
+  "Create a Kubernetes executor for task isolation via K8s Jobs."
+  executor/create-kubernetes-executor)
+
+(def create-docker-executor
+  "Create a Docker executor for task isolation via containers."
+  executor/create-docker-executor)
+
+(def create-worktree-executor
+  "Create a worktree executor (fallback, no container isolation)."
+  executor/create-worktree-executor)
+
+(defn executor-type
+  "Get the type of an executor (:kubernetes, :docker, :worktree)."
+  [exec]
+  (executor/executor-type exec))
+
+(defn executor-available?
+  "Check if an executor backend is available.
+   Returns result with {:available? bool :reason string}"
+  [exec]
+  (executor/available? exec))
+
+(defn acquire-environment!
+  "Acquire an isolated execution environment for a task.
+
+   Arguments:
+   - executor: TaskExecutor instance
+   - task-id: UUID identifying the task
+   - config: Environment configuration
+     {:repo-url string :branch string :env map :resources map}
+
+   Returns result with environment record."
+  [exec task-id config]
+  (executor/acquire-environment! exec task-id config))
+
+(defn release-environment!
+  "Release and cleanup an execution environment."
+  [exec environment-id]
+  (executor/release-environment! exec environment-id))
+
+(defn executor-execute!
+  "Execute a command in an environment.
+
+   Arguments:
+   - executor: TaskExecutor instance
+   - environment-id: ID from acquire-environment!
+   - command: Command to execute (string or vector)
+   - opts: {:timeout-ms long :env map :capture-output? bool}
+
+   Returns result with {:exit-code int :stdout string :stderr string}"
+  [exec environment-id command opts]
+  (executor/execute! exec environment-id command opts))
+
+(def with-environment
+  "Execute a function within an acquired environment.
+   Automatically acquires and releases the environment.
+
+   Example:
+     (with-environment executor task-id {:branch \"main\"}
+       (fn [env]
+         (executor-execute! executor (:environment-id env)
+                            \"make test\" {})))"
+  executor/with-environment)
+
+(def clone-and-checkout!
+  "Clone a repository and checkout a branch in the environment."
+  executor/clone-and-checkout!)
+
+;------------------------------------------------------------------------------ Layer 7
 ;; Convenience functions
 
 (defn create-dag-from-tasks
@@ -406,5 +505,12 @@
   ;; (execute-dag dag-id task-defs
   ;;              {:logger logger :execute-task-fn my-impl}
   ;;              {:poll-interval-ms 1000})
+
+  ;; Executor usage:
+  ;; (def executors (create-executor-registry
+  ;;                 {:docker {:image "miniforge/runner:latest"}}))
+  ;; (def exec (select-executor executors))
+  ;; (with-environment exec task-id {:branch "main"}
+  ;;   (fn [env] (executor-execute! exec (:environment-id env) "make test" {})))
 
   :leave-this-here)
