@@ -2,7 +2,7 @@
 
 **Status:** Informative
 **Date:** 2026-02-03
-**Version:** 1.0.0
+**Version:** 1.1.0
 
 Specifies implementation for executing multi-task plans as a DAG where
 **task completion is defined by merge**, including automated PR lifecycle handling.
@@ -56,6 +56,7 @@ components/dag-executor/
 │   ├── scheduler.clj       ; DAG scheduling loop
 │   ├── state.clj           ; Run + task state management
 │   ├── parallel.clj        ; Concurrency control + resource locks
+│   ├── executor.clj        ; Pluggable execution backends
 │   └── result.clj          ; ok/err helpers
 
 components/pr-lifecycle/
@@ -203,9 +204,69 @@ Task is ready when all `:task/deps` are in `:run/merged`.
 * Allow parallel analysis/test-only tasks that don't write
 * Use resource locks: `:repo-write` exclusive, `:exclusive-files [...]`
 
-### 10.3 Branch Isolation
+### 10.3 Task Isolation via Pluggable Executors
 
-Each task runs in isolated workspace (git worktree) to prevent interference.
+Each task runs in an isolated environment to prevent interference. The `TaskExecutor`
+protocol provides a pluggable backend system with automatic fallback:
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│                    TaskExecutor Protocol                     │
+├─────────────────────────────────────────────────────────────┤
+│  acquire-environment!  - Get isolated env for task          │
+│  execute!              - Run command in environment         │
+│  copy-to! / copy-from! - Transfer files                     │
+│  release-environment!  - Cleanup when done                  │
+│  available?            - Check if backend works             │
+└─────────────────────────────────────────────────────────────┘
+                              │
+          ┌───────────────────┼───────────────────┐
+          ▼                   ▼                   ▼
+   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+   │ Kubernetes  │     │   Docker    │     │  Worktree   │
+   │  Executor   │     │  Executor   │     │  Executor   │
+   ├─────────────┤     ├─────────────┤     ├─────────────┤
+   │ K8s Jobs    │     │ Containers  │     │ git worktree│
+   │ Full isolate│     │ Full isolate│     │ + semaphores│
+   │ Production  │     │ Local dev   │     │ Fallback    │
+   └─────────────┘     └─────────────┘     └─────────────┘
+```
+
+**Executor Selection Priority:** Kubernetes → Docker → Worktree (fallback)
+
+| Executor | Isolation Level | Use Case |
+|----------|-----------------|----------|
+| `KubernetesExecutor` | Full (K8s Job) | Production, cloud environments |
+| `DockerExecutor` | Full (container) | Local development with Docker |
+| `WorktreeExecutor` | Partial (worktree + semaphores) | Fallback when no containers |
+
+**Configuration:**
+
+```clojure
+(def executors
+  (create-executor-registry
+    {:kubernetes {:namespace "miniforge"
+                  :image "miniforge/task-runner:latest"}
+     :docker {:image "miniforge/task-runner:latest"
+              :network "miniforge-net"}
+     :worktree {:base-path "/tmp/miniforge-worktrees"
+                :max-concurrent 4}}))
+
+;; Auto-select best available
+(def executor (select-executor executors))
+
+;; Use with automatic cleanup
+(with-environment executor task-id {:branch "feat/task-123"}
+  (fn [env]
+    (executor-execute! executor (:environment-id env) "make test" {})))
+```
+
+**Implementation Status:**
+
+* ✅ Protocol and interface defined
+* ✅ WorktreeExecutor implemented (fallback)
+* ⏳ DockerExecutor shell implemented, needs integration testing
+* ⏳ KubernetesExecutor shell implemented, needs integration testing
 
 ---
 
@@ -259,7 +320,11 @@ When upstream merges move `main`:
 
 | File | Purpose |
 |------|---------|
-| `components/dag-executor/` | DAG scheduling, state management |
+| `components/dag-executor/interface.clj` | Public API for DAG execution |
+| `components/dag-executor/executor.clj` | Pluggable execution backends |
+| `components/dag-executor/state.clj` | Run + task state management |
+| `components/dag-executor/scheduler.clj` | DAG scheduling loop |
+| `components/dag-executor/parallel.clj` | Concurrency control + locks |
 | `components/pr-lifecycle/` | PR lifecycle management |
 | `projects/miniforge/deps.edn` | Component dependencies |
 
@@ -299,11 +364,28 @@ Integration tests:
 
 ## 17. Implementation Order (Minimal Path to "Works")
 
+### Phase 1: Foundation (✅ Complete)
+
+1. ✅ **DAG state management** - `state.clj` with task workflow states
+2. ✅ **Result monad** - `result.clj` with ok/err helpers
+3. ✅ **Parallelism control** - `parallel.clj` with resource locks
+4. ✅ **Scheduler core** - `scheduler.clj` with event handling
+5. ✅ **Executor protocol** - `executor.clj` with pluggable backends
+6. ✅ **WorktreeExecutor** - Fallback isolation via git worktrees
+
+### Phase 2: Container Isolation (⏳ Next PR)
+
+1. ⏳ **DockerExecutor integration testing** - Validate container lifecycle
+2. ⏳ **KubernetesExecutor integration testing** - Validate K8s Job lifecycle
+3. ⏳ **Executor selection logic** - Auto-detect best available backend
+
+### Phase 3: PR Lifecycle (Pending)
+
 1. **Task Workflow state machine + PR controller** with polling, emitting events
 2. **Fix loop on CI failures** (highest ROI)
 3. **Fix loop on "changes requested" reviews**
 4. **Comment triage + targeted fixes**
 5. **Auto-rebase + conflict repair**
-6. **Resource locks + safe parallelism**
 
-This produces merged PRs with minimal manual intervention while preserving DAG execution semantics.
+This produces merged PRs with minimal manual intervention while preserving
+DAG execution semantics.
