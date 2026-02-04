@@ -9,7 +9,9 @@
 
 ## 1. Purpose & Scope
 
-This specification defines the **event stream contract** for miniforge workflows. The event stream is a **product surface area**, not merely logging infrastructure. It powers:
+This specification defines the **event stream contract** for miniforge workflows.
+The event stream is a **product surface area**, not merely logging infrastructure.
+It powers:
 
 - Real-time UI updates (CLI/TUI/Web)
 - Workflow replay and debugging
@@ -409,7 +411,177 @@ Implementations SHOULD emit milestone events for:
 
 ---
 
-### 3.4 ETL and Pack Events
+### 3.10 PR Lifecycle Events (DAG Orchestration)
+
+For DAG-based multi-task execution (see N2 Section 13), implementations MUST emit
+PR lifecycle events. These events correlate DAG execution, task workflow, and PR
+integration states.
+
+#### Common Correlation Fields
+
+All PR lifecycle events MUST include these correlation fields:
+
+```clojure
+{:dag/id uuid                    ; REQUIRED: DAG run ID
+ :run/id uuid                    ; REQUIRED: Run instance ID
+ :plan/id uuid                   ; OPTIONAL: Plan ID (if applicable)
+ :task/id uuid                   ; REQUIRED: Task workflow ID
+ :pr/id string                   ; REQUIRED: PR number/identifier
+ :pr/url string                  ; OPTIONAL: Full PR URL
+ :sha string                     ; REQUIRED: Commit SHA
+ :timestamp inst}                ; REQUIRED: Event timestamp
+```
+
+#### pr/opened
+
+```clojure
+{:event/type :pr/opened
+ :dag/id uuid
+ :run/id uuid
+ :task/id uuid
+ :pr/id string
+ :pr/url string
+ :pr/branch string
+ :pr/base-sha string
+ :sha string
+ :timestamp inst
+
+ :message "PR #123 opened for task"}
+```
+
+#### pr/ci-passed
+
+```clojure
+{:event/type :pr/ci-passed
+ :dag/id uuid
+ :run/id uuid
+ :task/id uuid
+ :pr/id string
+ :sha string
+ :ci/checks [{:name string :status :success :duration-ms long}]
+ :timestamp inst
+
+ :message "CI passed for PR #123"}
+```
+
+#### pr/ci-failed
+
+```clojure
+{:event/type :pr/ci-failed
+ :dag/id uuid
+ :run/id uuid
+ :task/id uuid
+ :pr/id string
+ :sha string
+ :ci/checks [{:name string :status :failure :output string}]
+ :ci/failure-summary string
+ :timestamp inst
+
+ :message "CI failed for PR #123: 2 tests failing"}
+```
+
+#### pr/review-approved
+
+```clojure
+{:event/type :pr/review-approved
+ :dag/id uuid
+ :run/id uuid
+ :task/id uuid
+ :pr/id string
+ :sha string
+ :review/approvers [string ...]
+ :review/approval-count long
+ :timestamp inst
+
+ :message "PR #123 approved by alice, bob"}
+```
+
+#### pr/review-changes-requested
+
+```clojure
+{:event/type :pr/review-changes-requested
+ :dag/id uuid
+ :run/id uuid
+ :task/id uuid
+ :pr/id string
+ :sha string
+ :review/requesters [string ...]
+ :review/comments [{:file string :line long :body string}]
+ :timestamp inst
+
+ :message "Changes requested on PR #123"}
+```
+
+#### pr/comment-actionable
+
+```clojure
+{:event/type :pr/comment-actionable
+ :dag/id uuid
+ :run/id uuid
+ :task/id uuid
+ :pr/id string
+ :sha string
+ :comment/id string
+ :comment/author string
+ :comment/body string
+ :comment/file string            ; OPTIONAL: if inline comment
+ :comment/line long              ; OPTIONAL: if inline comment
+ :comment/classification keyword ; :code-change, :bug-report, :test-failure, :constraint-violation
+ :timestamp inst
+
+ :message "Actionable comment on PR #123: fix null check"}
+```
+
+#### pr/fix-pushed
+
+```clojure
+{:event/type :pr/fix-pushed
+ :dag/id uuid
+ :run/id uuid
+ :task/id uuid
+ :pr/id string
+ :sha string                     ; New commit SHA
+ :fix/type keyword               ; :ci-failure, :review-changes, :conflict
+ :fix/iteration long             ; Fix attempt number
+ :fix/files-modified [string ...]
+ :timestamp inst
+
+ :message "Fix pushed for PR #123 (attempt 2)"}
+```
+
+#### pr/merged
+
+```clojure
+{:event/type :pr/merged
+ :dag/id uuid
+ :run/id uuid
+ :task/id uuid
+ :pr/id string
+ :sha string                     ; Merge commit SHA
+ :pr/merge-method keyword        ; :merge, :squash, :rebase
+ :timestamp inst
+
+ :message "PR #123 merged"}
+```
+
+#### pr/closed
+
+```clojure
+{:event/type :pr/closed
+ :dag/id uuid
+ :run/id uuid
+ :task/id uuid
+ :pr/id string
+ :sha string
+ :close/reason keyword           ; :abandoned, :superseded, :failed
+ :timestamp inst
+
+ :message "PR #123 closed: max fix iterations exceeded"}
+```
+
+---
+
+### 3.11 ETL and Pack Events
 
 ETL workflows and pack promotion MUST emit the following additional events.
 
@@ -540,7 +712,9 @@ ETL workflows MUST emit this event after all pack generation and promotion activ
  :message "ETL workflow failed: {reason}"}
 ```
 
-ETL workflows MUST emit this event if any critical failure prevents completion. Implementations SHOULD include enough detail in `:etl/error-details` to enable debugging without log diving.
+ETL workflows MUST emit this event if any critical failure prevents completion.
+Implementations SHOULD include enough detail in `:etl/error-details` to enable
+debugging without log diving.
 
 ## 4. Event Emission Requirements
 
@@ -616,13 +790,13 @@ Implementations MUST support:
 
 Implementations MUST provide Server-Sent Events (SSE) endpoint:
 
-```
+```http
 GET /api/workflows/:id/stream
 ```
 
 Response format:
 
-```
+```text
 event: agent-status
 data: {"event/type":"agent/status","workflow/id":"...","message":"..."}
 
@@ -756,7 +930,8 @@ Complete event sequence for simple workflow:
 
 ### 8.1 Why Event Stream is Product Surface
 
-Traditional logging is optimized for debugging after-the-fact. miniforge's event stream is **real-time product infrastructure** because:
+Traditional logging is optimized for debugging after-the-fact. miniforge's event
+stream is **real-time product infrastructure** because:
 
 1. **UI depends on it** - TUI/Web render live progress from events
 2. **Replay enables debugging** - Reproduce exact workflow state
@@ -808,9 +983,11 @@ Event stream will extend to:
 - N6 (Evidence & Provenance): Evidence bundles reference event streams
 - N5 (CLI/TUI/API): UI consumes event stream via subscription API
 - N2 (Workflow Execution): Workflow engine emits lifecycle events
+- I-DAG-ORCHESTRATION: DAG executor with PR lifecycle (Section 12: PR Lifecycle Events)
 
 ---
 
 **Version History:**
 
+- 0.2.0-draft (2026-02-03): Add PR lifecycle events for DAG orchestration (Section 3.10)
 - 0.1.0-draft (2026-01-23): Initial event stream specification

@@ -9,7 +9,8 @@
 
 ## 1. Purpose & Scope
 
-This specification defines the **evidence bundle** and **artifact provenance** contracts that make autonomous workflows credible to platform and security teams.
+This specification defines the **evidence bundle** and **artifact provenance**
+contracts that make autonomous workflows credible to platform and security teams.
 
 **Evidence bundles** provide a complete audit trail from **intent** → **plan** → **implementation** → **validation** → **outcome**.
 
@@ -198,6 +199,102 @@ Implementations MUST validate:
  :outcome/error-message string     ; OPTIONAL: If failed
  :outcome/error-phase keyword      ; OPTIONAL: Which phase failed
  :outcome/error-details {...}}     ; OPTIONAL
+```
+
+### 2.7 DAG Orchestration Evidence
+
+For DAG-based multi-task execution (see N2 Section 13, I-DAG-ORCHESTRATION), evidence
+bundles MUST include DAG and PR lifecycle linkage.
+
+#### 2.7.1 DAG Run Evidence
+
+```clojure
+{:evidence/dag-run
+ {:dag/id uuid                     ; REQUIRED: DAG definition ID
+  :run/id uuid                     ; REQUIRED: Run instance ID
+  :run/status keyword              ; :completed, :failed, :partial
+  :run/task-count long             ; Total tasks in DAG
+  :run/merged-count long           ; Tasks reaching :merged
+  :run/failed-count long           ; Tasks reaching :failed
+  :run/skipped-count long          ; Tasks skipped due to dependency failure
+  :run/metrics {:total-tokens long
+                :total-cost-usd decimal
+                :total-duration-ms long}
+  :run/checkpoint {:ref string}}}  ; OPTIONAL: Resume checkpoint
+```
+
+#### 2.7.2 Task Workflow Evidence
+
+Each task in a DAG run MUST produce task workflow evidence:
+
+```clojure
+{:evidence/task-workflows
+ [{:task/id uuid
+   :task/status keyword            ; Terminal status: :merged, :failed, :skipped
+   :task/dependencies [uuid ...]   ; IDs of dependency tasks
+
+   ;; PR lifecycle evidence
+   :task/pr-lifecycle
+   {:pr/id string
+    :pr/url string
+    :pr/branch string
+    :pr/base-sha string
+    :pr/head-sha string            ; Final commit SHA
+    :pr/opened-at inst
+    :pr/merged-at inst             ; OPTIONAL: If merged
+    :pr/closed-at inst}            ; OPTIONAL: If closed without merge
+
+   ;; CI evidence
+   :task/ci-results
+   [{:ci/sha string                ; Commit SHA checked
+     :ci/status keyword            ; :success, :failure
+     :ci/checks [{:name string :status keyword :duration-ms long}]
+     :ci/checked-at inst}]
+
+   ;; Review evidence
+   :task/review-results
+   [{:review/sha string            ; Commit SHA reviewed
+     :review/status keyword        ; :approved, :changes-requested
+     :review/approvers [string ...]
+     :review/changes-requested-by [string ...]
+     :review/reviewed-at inst}]
+
+   ;; Fix iteration evidence
+   :task/fix-iterations
+   [{:fix/iteration long           ; 1-indexed
+     :fix/type keyword             ; :ci-failure, :review-changes, :conflict
+     :fix/trigger-sha string       ; SHA that triggered fix
+     :fix/result-sha string        ; SHA after fix pushed
+     :fix/files-modified [string ...]
+     :fix/success? boolean
+     :fix/metrics {:tokens long :cost-usd decimal :duration-ms long}
+     :fix/attempted-at inst}]
+
+   ;; Task metrics
+   :task/metrics
+   {:total-attempts long           ; Implementation + fix attempts
+    :fix-iterations long           ; Fix loop count
+    :ci-retries long               ; CI re-runs
+    :tokens long
+    :cost-usd decimal
+    :duration-ms long}}]}
+```
+
+#### 2.7.3 Merge Evidence
+
+For tasks reaching `:merged` terminal state:
+
+```clojure
+{:evidence/merge
+ {:merge/pr-id string
+  :merge/sha string                ; Merge commit SHA
+  :merge/method keyword            ; :merge, :squash, :rebase
+  :merge/merged-by string          ; User/bot that triggered merge
+  :merge/merged-at inst
+  :merge/required-approvals-met? boolean
+  :merge/ci-green? boolean
+  :merge/no-unresolved-threads? boolean
+  :merge/branch-up-to-date? boolean}}
 ```
 
 ---
@@ -695,9 +792,11 @@ Fleet-wide evidence will enable:
 - N3 (Event Stream): Evidence bundles link to event streams via sequence ranges
 - N2 (Workflow Execution): Workflows produce evidence bundles
 - N4 (Policy Packs): Policy check results stored in evidence
+- I-DAG-ORCHESTRATION: DAG executor with PR lifecycle evidence requirements
 
 ---
 
 **Version History:**
 
+- 0.2.0-draft (2026-02-03): Add DAG orchestration evidence (Section 2.7: DAG Run, Task Workflow, Merge Evidence)
 - 0.1.0-draft (2026-01-23): Initial evidence & provenance specification
