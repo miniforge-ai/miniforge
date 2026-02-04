@@ -1,0 +1,88 @@
+# Kubernetes Job Template for Task Execution
+# This template is used by KubernetesExecutor to create isolated task environments
+#
+# Placeholders (replaced at runtime):
+# - {{JOB_NAME}} - Unique job name (e.g., miniforge-task-abc12345)
+# - {{NAMESPACE}} - Kubernetes namespace
+# - {{IMAGE}} - Container image to use
+# - {{TASK_ID}} - UUID of the task
+# - {{WORKDIR}} - Working directory inside container
+# - {{ENV_VARS}} - Environment variables (injected as array)
+# - {{RESOURCES}} - Resource limits/requests
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "{{JOB_NAME}}"
+  namespace: "{{NAMESPACE}}"
+  labels:
+    app: miniforge
+    component: task-executor
+    task-id: "{{TASK_ID}}"
+  annotations:
+    miniforge.ai/task-id: "{{TASK_ID}}"
+    miniforge.ai/created-by: dag-executor
+spec:
+  # Cleanup completed jobs after 5 minutes
+  ttlSecondsAfterFinished: 300
+  # No retries - we handle retries at the DAG scheduler level
+  backoffLimit: 0
+  # Parallelism settings
+  completions: 1
+  parallelism: 1
+  template:
+    metadata:
+      labels:
+        app: miniforge
+        component: task-executor
+        job-name: "{{JOB_NAME}}"
+    spec:
+      # Don't restart on failure - let scheduler handle it
+      restartPolicy: Never
+      # Terminate quickly on deletion
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: task
+          image: "{{IMAGE}}"
+          imagePullPolicy: IfNotPresent
+          workingDir: "{{WORKDIR}}"
+          # Keep container alive for interactive execution
+          command:
+            - sh
+            - -c
+            - "trap 'exit 0' TERM; sleep infinity & wait"
+          env: []
+          # {{ENV_VARS}} - injected at runtime
+          resources:
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+          # {{RESOURCES}} - can override at runtime
+          # Security context for non-root execution
+          securityContext:
+            runAsNonRoot: false
+            readOnlyRootFilesystem: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          # Volume mounts for workspace persistence
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+      volumes:
+        - name: workspace
+          emptyDir:
+            sizeLimit: 1Gi
+      # Node selection (optional - can be customized)
+      # nodeSelector:
+      #   miniforge.ai/task-runner: "true"
+      # Tolerations for dedicated nodes (optional)
+      # tolerations:
+      #   - key: "miniforge.ai/task-runner"
+      #     operator: "Equal"
+      #     value: "true"
+      #     effect: "NoSchedule"

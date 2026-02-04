@@ -1,0 +1,52 @@
+# Task Runner Container Image
+# Used by DockerExecutor and KubernetesExecutor for isolated task execution
+#
+# This image provides the minimal environment for:
+# - Git operations (clone, checkout, commit, push)
+# - Shell command execution
+# - File manipulation
+#
+# Build: docker build -t miniforge/task-runner:latest -f Dockerfile.task-runner .
+# Usage: docker run -d --name task-123 miniforge/task-runner:latest
+
+FROM alpine:3.19
+
+# Install essential tools
+RUN apk add --no-cache \
+    # Git for repo operations
+    git \
+    # SSH for git operations over SSH
+    openssh-client \
+    # Shell utilities
+    bash \
+    coreutils \
+    # Build essentials (for compilation tasks)
+    build-base \
+    # Curl for API calls
+    curl \
+    # jq for JSON processing
+    jq \
+    # ca-certificates for HTTPS
+    ca-certificates
+
+# Configure git
+RUN git config --global user.email "miniforge@miniforge.ai" && \
+    git config --global user.name "Miniforge Task Runner" && \
+    git config --global init.defaultBranch main
+
+# Create workspace directory
+RUN mkdir -p /workspace
+WORKDIR /workspace
+
+# Default command: keep container alive for exec
+# Uses trap to handle SIGTERM gracefully
+CMD ["sh", "-c", "trap 'exit 0' TERM; sleep infinity & wait"]
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD pgrep -f "sleep infinity" > /dev/null || exit 1
+
+# Labels
+LABEL maintainer="miniforge@miniforge.ai"
+LABEL description="Task runner container for Miniforge DAG executor"
+LABEL version="1.0.0"
