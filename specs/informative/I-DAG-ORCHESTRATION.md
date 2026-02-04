@@ -2,7 +2,7 @@
 
 **Status:** Informative
 **Date:** 2026-02-03
-**Version:** 1.1.0
+**Version:** 1.2.0
 
 Specifies implementation for executing multi-task plans as a DAG where
 **task completion is defined by merge**, including automated PR lifecycle handling.
@@ -265,8 +265,8 @@ protocol provides a pluggable backend system with automatic fallback:
 
 * ✅ Protocol and interface defined
 * ✅ WorktreeExecutor implemented (fallback)
-* ⏳ DockerExecutor shell implemented, needs integration testing
-* ⏳ KubernetesExecutor shell implemented, needs integration testing
+* ✅ DockerExecutor implemented with integration tests
+* ✅ KubernetesExecutor implemented (tests skip if K8s unavailable)
 
 ---
 
@@ -373,13 +373,14 @@ Integration tests:
 5. ✅ **Executor protocol** - `executor.clj` with pluggable backends
 6. ✅ **WorktreeExecutor** - Fallback isolation via git worktrees
 
-### Phase 2: Container Isolation (⏳ Next PR)
+### Phase 2: Container Isolation (✅ Complete)
 
-1. ⏳ **DockerExecutor integration testing** - Validate container lifecycle
-2. ⏳ **KubernetesExecutor integration testing** - Validate K8s Job lifecycle
-3. ⏳ **Executor selection logic** - Auto-detect best available backend
+1. ✅ **DockerExecutor integration testing** - Full lifecycle, file ops, concurrency
+2. ✅ **KubernetesExecutor integration testing** - Availability + lifecycle (skips if unavailable)
+3. ✅ **Executor selection logic** - Auto-detect best available backend
+4. ✅ **Result module tests** - ok/err helpers, transforms, chaining
 
-### Phase 3: PR Lifecycle (Pending)
+### Phase 3: PR Lifecycle (⏳ Next)
 
 1. **Task Workflow state machine + PR controller** with polling, emitting events
 2. **Fix loop on CI failures** (highest ROI)
