@@ -18,9 +18,11 @@
    Manages starting, stopping, and accessing LSP servers for registered tools.
 
    Layer 0: Manager state
-   Layer 1: Server lifecycle (start/stop)
-   Layer 2: Client access
-   Layer 3: Status and listing"
+   Layer 1: Pipeline helpers
+   Layer 2: Pipeline steps
+   Layer 3: Server lifecycle (start/stop)
+   Layer 4: Client access
+   Layer 5: Status and listing"
   (:require
    [ai.miniforge.tool-registry.lsp.process :as process]
    [ai.miniforge.tool-registry.lsp.client :as client]
@@ -44,6 +46,149 @@
   (:logger @(:state registry)))
 
 ;------------------------------------------------------------------------------ Layer 1
+;; Pipeline helpers
+
+(defn- failed?
+  "Check if pipeline has failed."
+  [state]
+  (contains? state :failure))
+
+(defn- fail
+  "Mark pipeline as failed with error."
+  [state error-msg]
+  (when-let [logger (:logger state)]
+    (log/error logger :system :lsp/error
+               {:data {:tool-id (:tool-id state) :error error-msg}}))
+  (assoc state :failure {:error error-msg}))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Pipeline steps
+
+(defn- step-validate-tool
+  "Validate tool exists, is LSP type, and is enabled."
+  [state]
+  (if (failed? state) state
+      (let [{:keys [tool tool-id]} state]
+        (cond
+          (nil? tool)
+          (fail state (str "Tool not found: " tool-id))
+
+          (not (schema/lsp-tool? tool))
+          (fail state (str "Not an LSP tool: " tool-id))
+
+          (not (schema/enabled? tool))
+          (fail state (str "Tool is disabled: " tool-id))
+
+          :else state))))
+
+(defn- step-check-existing
+  "Check if server already running; return early or clean up dead process."
+  [state]
+  (if (failed? state) state
+      (let [{:keys [servers tool-id]} state
+            entry (get @servers tool-id)]
+        (cond
+          ;; Not running
+          (nil? entry)
+          state
+
+          ;; Running and alive - short circuit with success
+          (process/process-alive? (:process entry))
+          (assoc state :early-return (schema/ok :client (:client entry)))
+
+          ;; Dead process - clean up and continue
+          :else
+          (do
+            (swap! servers dissoc tool-id)
+            state)))))
+
+(defn- step-start-process
+  "Start the LSP server process."
+  [state]
+  (cond
+    (failed? state) state
+    (:early-return state) state
+    :else
+    (let [{:keys [tool tool-id logger]} state
+          config (:tool/config tool)
+          command (:lsp/command config)
+          opts {:env (:lsp/env config)
+                :working-dir (:lsp/working-dir config)}]
+
+      (when logger
+        (log/info logger :system :lsp/starting
+                  {:data {:tool-id tool-id :command command}}))
+
+      (let [{:keys [success? process error]} (process/start-process tool-id command opts)]
+        (if success?
+          (assoc state :process process :config config)
+          (fail state error))))))
+
+(defn- step-create-client
+  "Create LSP client from running process."
+  [state]
+  (cond
+    (failed? state) state
+    (:early-return state) state
+    :else
+    (let [{:keys [process tool-id logger]} state
+          notification-handler (fn [msg]
+                                 (when logger
+                                   (log/debug logger :system :lsp/notification
+                                              {:data {:tool-id tool-id
+                                                      :method (:method msg)}})))
+          lsp-client (client/create-client process notification-handler)]
+      (assoc state :client lsp-client))))
+
+(defn- step-initialize
+  "Initialize LSP server connection."
+  [state]
+  (cond
+    (failed? state) state
+    (:early-return state) state
+    :else
+    (let [{:keys [client config process]} state
+          root-uri (str "file://" (or (:lsp/working-dir config)
+                                      (System/getProperty "user.dir")))
+          init-opts (:lsp/init-options config {})
+          {:keys [success? capabilities error]} (client/initialize client root-uri init-opts)]
+      (if success?
+        (assoc state :capabilities capabilities)
+        (do
+          (process/stop-process process)
+          (fail state (str "Initialization failed: " error)))))))
+
+(defn- step-register
+  "Register running server in servers atom."
+  [state]
+  (cond
+    (failed? state) state
+    (:early-return state) state
+    :else
+    (let [{:keys [servers tool-id process client capabilities logger]} state]
+      (swap! servers assoc tool-id {:process process
+                                    :client client
+                                    :started-at (System/currentTimeMillis)
+                                    :capabilities capabilities})
+      (when logger
+        (log/info logger :system :lsp/started
+                  {:data {:tool-id tool-id}}))
+      state)))
+
+(defn- pipeline->result
+  "Convert pipeline state to result."
+  [state]
+  (cond
+    (:early-return state)
+    (:early-return state)
+
+    (:failure state)
+    (schema/err (get-in state [:failure :error]))
+
+    :else
+    (schema/ok :client (:client state))))
+
+;------------------------------------------------------------------------------ Layer 3
 ;; Server lifecycle
 
 (defn start-server
@@ -59,80 +204,20 @@
   [registry tool-id]
   (let [servers (get-servers-atom registry)
         logger (get-logger registry)
-        tool ((:get-tool-fn @(:state registry)) tool-id)]
+        tool ((:get-tool-fn @(:state registry)) tool-id)
+        initial-state {:servers servers
+                       :logger logger
+                       :tool tool
+                       :tool-id tool-id}]
 
-    (cond
-      ;; Tool not found
-      (nil? tool)
-      (schema/err "Tool not found: " tool-id)
-
-      ;; Not an LSP tool
-      (not (schema/lsp-tool? tool))
-      (schema/err "Not an LSP tool: " tool-id)
-
-      ;; Tool disabled
-      (not (schema/enabled? tool))
-      (schema/err "Tool is disabled: " tool-id)
-
-      ;; Already running
-      (get @servers tool-id)
-      (let [entry (get @servers tool-id)]
-        (if (process/process-alive? (:process entry))
-          (schema/ok :client (:client entry))
-          ;; Process died, clean up and restart
-          (do
-            (swap! servers dissoc tool-id)
-            (start-server registry tool-id))))
-
-      :else
-      (let [config (:tool/config tool)
-            command (:lsp/command config)
-            opts {:env (:lsp/env config)
-                  :working-dir (:lsp/working-dir config)}]
-
-        (when logger
-          (log/info logger :system :lsp/starting
-                    {:data {:tool-id tool-id :command command}}))
-
-        (let [{:keys [success? process error]} (process/start-process tool-id command opts)]
-          (if-not success?
-            (do
-              (when logger
-                (log/error logger :system :lsp/start-failed
-                           {:data {:tool-id tool-id :error error}}))
-              (schema/err error))
-
-            ;; Create client and initialize
-            (let [notification-handler (fn [msg]
-                                         (when logger
-                                           (log/debug logger :system :lsp/notification
-                                                      {:data {:tool-id tool-id
-                                                              :method (:method msg)}})))
-                  lsp-client (client/create-client process notification-handler)
-                  ;; Initialize with workspace root
-                  root-uri (str "file://" (or (:lsp/working-dir config)
-                                              (System/getProperty "user.dir")))
-                  init-opts (:lsp/init-options config {})
-                  {:keys [success? capabilities error]} (client/initialize lsp-client root-uri init-opts)]
-
-              (if success?
-                (do
-                  (swap! servers assoc tool-id {:process process
-                                                :client lsp-client
-                                                :started-at (System/currentTimeMillis)
-                                                :capabilities capabilities})
-                  (when logger
-                    (log/info logger :system :lsp/started
-                              {:data {:tool-id tool-id}}))
-                  (schema/ok :client lsp-client))
-
-                ;; Initialization failed, clean up
-                (do
-                  (process/stop-process process)
-                  (when logger
-                    (log/error logger :system :lsp/init-failed
-                               {:data {:tool-id tool-id :error error}}))
-                  (schema/err "Initialization failed: " error))))))))))
+    (-> initial-state
+        step-validate-tool
+        step-check-existing
+        step-start-process
+        step-create-client
+        step-initialize
+        step-register
+        pipeline->result)))
 
 (defn stop-server
   "Stop an LSP server.
@@ -185,7 +270,7 @@
   (stop-server registry tool-id)
   (start-server registry tool-id))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 4
 ;; Client access
 
 (defn get-client
@@ -219,7 +304,7 @@
     (when entry
       (:capabilities entry))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 5
 ;; Status and listing
 
 (defn server-status
