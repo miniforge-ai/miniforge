@@ -21,11 +21,10 @@
    Layer 3: Process info and cleanup"
   (:require
    [ai.miniforge.tool-registry.schema :as schema]
-   [clojure.java.io :as io]
-   [clojure.string :as str])
+   [clojure.java.io :as io])
   (:import
    [java.lang ProcessBuilder ProcessBuilder$Redirect]
-   [java.io InputStream OutputStream BufferedReader InputStreamReader]))
+   [java.io InputStream OutputStream]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Process state definitions

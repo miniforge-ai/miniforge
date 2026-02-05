@@ -1,6 +1,7 @@
 (ns ai.miniforge.policy-pack.detection-test
   "Tests for the policy-pack detection logic."
   (:require
+   [clojure.string]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.policy-pack.detection :as detection]))
 
@@ -45,12 +46,12 @@
                                  :pattern "ERROR"
                                  :context-lines 2}
                 :rule/enforcement {:action :warn :message "Error"}}
-          artifact {:artifact/content "line1\nline2\nERROR here\nline4\nline5"}]
-      (let [result (detection/detect-content-scan rule artifact {})
-            match (first (:matches result))]
-        (is (= 3 (:line match)))
-        (is (clojure.string/includes? (:context match) "line2"))
-        (is (clojure.string/includes? (:context match) "line4"))))))
+          artifact {:artifact/content "line1\nline2\nERROR here\nline4\nline5"}
+          result (detection/detect-content-scan rule artifact {})
+          match (first (:matches result))]
+      (is (= 3 (:line match)))
+      (is (clojure.string/includes? (:context match) "line2"))
+      (is (clojure.string/includes? (:context match) "line4")))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Diff analysis detection tests
@@ -64,21 +65,21 @@
                 :rule/enforcement {:action :hard-halt
                                    :message "Cannot remove import blocks"}}
           artifact {:artifact/diff "- import {\n-   to = aws_s3_bucket.example\n- }"
-                    :artifact/path "main.tf"}]
-      (let [result (detection/detect-diff-analysis rule artifact {})]
-        (is (some? result))
-        (is (= :diff-analysis (:type result)))
-        (is (= :import-removal (:rule-id result))))))
+                    :artifact/path "main.tf"}
+          result (detection/detect-diff-analysis rule artifact {})]
+      (is (some? result))
+      (is (= :diff-analysis (:type result)))
+      (is (= :import-removal (:rule-id result)))))
 
   (testing "Uses context diff if artifact diff absent"
     (let [rule {:rule/id :test
                 :rule/detection {:type :diff-analysis
-                                 :pattern "^-"}}]
-      (let [result (detection/detect-diff-analysis
+                                 :pattern "^-"}}
+          result (detection/detect-diff-analysis
                     rule
                     {:artifact/path "test.tf"}
                     {:diff "- removed line\n+ added line"})]
-        (is (some? result)))))
+      (is (some? result))))
 
   (testing "No match in diff"
     (let [rule {:rule/id :test
@@ -98,28 +99,28 @@
                 :rule/applies-to {:resource-patterns ["aws_route"]}
                 :rule/enforcement {:action :require-approval
                                    :message "Network resource recreation"}}
-          context {:terraform-plan "# aws_route.main will be replaced\n  -/+ aws_route.main (tainted)"}]
-      (let [result (detection/detect-plan-output rule {} context)]
-        (is (some? result))
-        (is (= :plan-output (:type result)))
-        (is (seq (:resource-violations result))))))
+          context {:terraform-plan "# aws_route.main will be replaced\n  -/+ aws_route.main (tainted)"}
+          result (detection/detect-plan-output rule {} context)]
+      (is (some? result))
+      (is (= :plan-output (:type result)))
+      (is (seq (:resource-violations result)))))
 
   (testing "Parses resource changes from plan"
     (let [rule {:rule/id :destruction
                 :rule/detection {:type :plan-output}
                 :rule/applies-to {:resource-patterns ["aws_vpc" "aws_subnet"]}
                 :rule/enforcement {:action :require-approval :message "Destruction"}}
-          context {:terraform-plan "# aws_vpc.main will be destroyed\n# aws_subnet.private[0] must be replaced"}]
-      (let [result (detection/detect-plan-output rule {} context)]
-        (is (some? result))
-        (is (= 2 (count (:resource-violations result)))))))
+          context {:terraform-plan "# aws_vpc.main will be destroyed\n# aws_subnet.private[0] must be replaced"}
+          result (detection/detect-plan-output rule {} context)]
+      (is (some? result))
+      (is (= 2 (count (:resource-violations result)))))))
 
   (testing "No violations when no matching resources"
     (let [rule {:rule/id :test
                 :rule/detection {:type :plan-output}
                 :rule/applies-to {:resource-patterns ["aws_vpc"]}}
           context {:terraform-plan "# aws_s3_bucket.example will be created"}]
-      (is (nil? (detection/detect-plan-output rule {} context))))))
+      (is (nil? (detection/detect-plan-output rule {} context)))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Unified detection tests

@@ -133,7 +133,7 @@
     :summary string
     :suggested-action string
     :reasons [string]}"
-  [{:keys [title additions deletions changedFiles] :as pr}]
+  [{:keys [title additions deletions changedFiles] :as _pr}]
   (let [;; Size-based heuristics
         total-changes (+ (or additions 0) (or deletions 0))
         file-count (or changedFiles 0)
@@ -308,7 +308,7 @@
 
 (defn render-pr-detail
   "Render detailed view of a PR for the right pane."
-  [{:keys [number title author state url repo] :as pr} analysis]
+  [{:keys [number title author state repo] :as _pr} analysis]
   (let [{:keys [risk complexity summary suggested-action reasons]} analysis]
     {:title (str "PR #" number " " (truncate repo 30))
      :sections

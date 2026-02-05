@@ -16,8 +16,7 @@
   "Lint validation gate.
 
    Checks that code passes linting rules."
-  (:require [ai.miniforge.gate.registry :as registry]
-            [clojure.string :as str]))
+  (:require [ai.miniforge.gate.registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Lint checking (simplified - real impl would call clj-kondo)
@@ -25,7 +24,7 @@
 (defn- check-unused-vars
   "Check for obvious unused variable patterns."
   [code-str]
-  (let [let-bindings (re-seq #"\[([a-z_][a-z0-9_-]*)\s+" code-str)]
+  (let [_bindings (re-seq #"\[([a-z_][a-z0-9_-]*)\s+" code-str)]
     ;; Simplified: just check if binding is used after definition
     []))
 
@@ -38,7 +37,7 @@
 
    Returns:
      {:passed? bool :errors [] :warnings []}"
-  [artifact ctx]
+  [artifact _ctx]
   (let [content (or (:content artifact)
                     (get-in artifact [:artifact/content])
                     "")

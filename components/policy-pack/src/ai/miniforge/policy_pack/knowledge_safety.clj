@@ -201,7 +201,7 @@
 (defn validate-pack-dependencies-wrapper
   "Wrapper for pack dependency validation.
    Delegates to dep-validation namespace."
-  [artifact context]
+  [_artifact context]
   (when-let [packs (:packs context)]
     (let [result (dep-validation/validate-pack-dependencies
                   packs

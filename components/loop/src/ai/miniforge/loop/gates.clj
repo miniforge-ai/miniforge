@@ -10,7 +10,8 @@
    Layer 2: Gate runner and composition"
   (:require
    [ai.miniforge.loop.interface.protocols.gate :as p]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [clojure.string]))
 
 ;; Re-export protocol for backward compatibility
 (def Gate p/Gate)

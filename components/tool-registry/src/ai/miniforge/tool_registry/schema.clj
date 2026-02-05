@@ -22,8 +22,7 @@
    Layer 4: Result builders"
   (:require
    [malli.core :as m]
-   [malli.error :as me]
-   [malli.util :as mu]))
+   [malli.error :as me]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Enums and base types

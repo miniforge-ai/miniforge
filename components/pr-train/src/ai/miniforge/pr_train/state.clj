@@ -1,8 +1,6 @@
 (ns ai.miniforge.pr-train.state
   "State machine for PR trains and individual PRs.
-   Manages valid transitions and state computations."
-  (:require
-   [ai.miniforge.pr-train.schema :as schema]))
+   Manages valid transitions and state computations.")
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; State machine definitions
@@ -294,7 +292,7 @@
    Returns updated train."
   [train]
   (let [prs (:train/prs train)
-        pr-numbers (set (map :pr/number prs))
+        _pr-numbers (set (map :pr/number prs))
         linked-prs (mapv (fn [pr]
                            (let [order (:pr/merge-order pr)
                                  deps (->> prs

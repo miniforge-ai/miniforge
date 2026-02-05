@@ -23,8 +23,7 @@
    Layer 2: Message parsers
    Layer 3: Standard LSP methods"
   (:require
-   [cheshire.core :as json]
-   [clojure.string :as str]))
+   [cheshire.core :as json]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants and message IDs
@@ -132,19 +131,6 @@
         length (count (.getBytes body "UTF-8"))]
     (str "Content-Length: " length "\r\n\r\n" body)))
 
-(defn- parse-headers
-  "Parse LSP headers from a string.
-   Returns {:content-length int} or nil if invalid."
-  [header-str]
-  (let [lines (str/split header-str #"\r\n")]
-    (reduce (fn [acc line]
-              (when-let [[_ key value] (re-matches #"([^:]+):\s*(.+)" line)]
-                (case (str/lower-case key)
-                  "content-length" (assoc acc :content-length (parse-long value))
-                  "content-type" (assoc acc :content-type value)
-                  acc)))
-            {}
-            lines)))
 
 (defn decode-message
   "Decode a JSON-RPC message from JSON string.

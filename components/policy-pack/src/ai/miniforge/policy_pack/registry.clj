@@ -145,7 +145,7 @@
    - :repo - Repository with :repo/type
    - :phase - Current workflow phase keyword"
   [rule context]
-  (let [{:keys [task-types file-globs resource-patterns repo-types phases]}
+  (let [{:keys [task-types file-globs repo-types phases]}
         (:rule/applies-to rule)]
     (and
      ;; Task type filter

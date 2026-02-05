@@ -2,7 +2,6 @@
   "Core implementation of PR Train management.
    Provides PRTrainManager protocol and in-memory implementation."
   (:require
-   [ai.miniforge.pr-train.schema :as schema]
    [ai.miniforge.pr-train.state :as state]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -226,7 +225,7 @@
           (swap! trains assoc train-id final)
           final))))
 
-  (fail-merge [_this train-id pr-number reason]
+  (fail-merge [_this train-id pr-number _reason]
     (when-let [train (get @trains train-id)]
       (let [updated (-> train
                         (state/update-pr pr-number

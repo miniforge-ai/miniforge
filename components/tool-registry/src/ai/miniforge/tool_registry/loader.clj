@@ -77,7 +77,7 @@
    - tools/function/*.edn -> :function
    - tools/custom/*.edn -> :external"
   [file]
-  (let [path (.getPath file)
+  (let [_path (.getPath file)
         parent-name (some-> file .getParentFile .getName)]
     (case parent-name
       "lsp" :lsp

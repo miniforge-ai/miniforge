@@ -20,8 +20,7 @@
    - :review-approved - Review approval check
    - :release-ready - Release readiness check
    - :plan-complete - Plan completeness check"
-  (:require [ai.miniforge.gate.registry :as registry]
-            [clojure.string :as str]))
+  (:require [ai.miniforge.gate.registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Policy checks
