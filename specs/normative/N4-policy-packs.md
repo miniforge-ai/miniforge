@@ -604,6 +604,31 @@ Rules:
 - Require liveness/readiness probes
 - No host network mode
 
+#### 5.1.4 Task Scope Pack
+
+**ID:** `task-scope`
+**Purpose:** Enforce node capability contracts during DAG execution (see N2 §13.6)
+
+Rules:
+
+- `require-capability-declaration` (severity: medium)
+  - WARN if a task node in a DAG has no `:task/capabilities` declared
+  - Tasks without contracts run with full archetype defaults (less safe)
+- `enforce-tool-scope` (severity: critical)
+  - FAIL if agent invokes a tool not listed in `:cap/tools`
+  - Implementations MUST intercept tool calls and validate against contract
+- `enforce-path-scope` (severity: critical)
+  - FAIL if agent writes/reads files outside `:cap/paths` glob patterns
+  - Implementations MUST validate file operations against contract
+- `enforce-knowledge-scope` (severity: high)
+  - FAIL if agent accesses knowledge packs not listed in `:cap/knowledge`
+- `enforce-timeout` (severity: high)
+  - FAIL if agent execution exceeds `:cap/timeout-ms`
+  - Implementations MUST terminate agent and transition task to `:failed`
+
+This pack is OPTIONAL for single-task workflows but RECOMMENDED for DAG execution
+with multiple concurrent agents.
+
 ### 5.2 Pack Discovery & Installation
 
 Implementations SHOULD support:
@@ -972,4 +997,5 @@ Research directions:
 
 **Version History:**
 
+- 0.2.0-draft (2026-02-04): Added task-scope policy pack for capability enforcement (§5.1.4)
 - 0.1.0-draft (2026-01-23): Initial policy packs and gates specification

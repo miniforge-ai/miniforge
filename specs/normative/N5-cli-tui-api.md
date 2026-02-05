@@ -125,6 +125,13 @@ Flags:
   --limit N           Show last N workflows (default: 10)
   --json              Output as JSON
 
+# Show DAG kanban board (TUI)
+miniforge workflow kanban DAG_ID [flags]
+
+Flags:
+  --refresh SECONDS   Refresh interval (default: 5)
+  --json              Output task states as JSON (non-interactive)
+
 # Cancel workflow
 miniforge workflow cancel WORKFLOW_ID [flags]
 
@@ -683,6 +690,49 @@ Implementations MUST provide these views:
 - MUST allow viewing artifact provenance
 - MUST support syntax highlighting for code artifacts
 
+#### 3.2.5 DAG Kanban View
+
+For DAG-based multi-task execution, implementations SHOULD provide a Kanban board
+view derived as a **projection** of the DAG state and event stream.
+
+The Kanban view is NOT a separate data model — it is computed from task states.
+
+```text
+╭────────────────────────────────────────────────────────────────────────────────╮
+│ DAG: feature-auth-overhaul (5 tasks)                             ⟳ 5s ago     │
+├──────────┬───────────┬───────────┬───────────┬───────────┬──────────────────┤
+│ BLOCKED  │ READY     │ ACTIVE    │ IN REVIEW │ MERGING   │ DONE             │
+├──────────┼───────────┼───────────┼───────────┼───────────┼──────────────────┤
+│ ○ models │ ◉ routes  │ ● auth-svc│           │           │ ✓ schema-migrate │
+│   └ auth │           │   impl    │           │           │                  │
+│   └ svc  │           │   ⏱ 2m30s │           │           │                  │
+│          │           │           │           │           │                  │
+│ ○ tests  │           │           │           │           │                  │
+│   └ auth │           │           │           │           │                  │
+│   └ svc  │           │           │           │           │                  │
+╰──────────┴───────────┴───────────┴───────────┴───────────┴──────────────────╯
+[j/k] Navigate  [Enter] Task detail  [d] Dependency graph  [Esc] Back
+```
+
+**Column Mapping:**
+
+| Column    | Task Statuses                                |
+|-----------|----------------------------------------------|
+| BLOCKED   | `:pending` with unmet dependencies            |
+| READY     | `:pending` with all deps `:merged` (frontier) |
+| ACTIVE    | `:implementing`, `:pr-opening`, `:responding` |
+| IN REVIEW | `:ci-running`, `:review-pending`              |
+| MERGING   | `:ready-to-merge`, `:merging`                 |
+| DONE      | `:merged`, `:failed`, `:skipped`              |
+
+**Requirements:**
+
+- MUST derive columns from task state machine (N2 §13.2), NOT from separate state
+- MUST show dependency edges for blocked tasks (which tasks they're waiting on)
+- MUST update in real-time via event stream subscription
+- SHOULD show elapsed time for active tasks
+- SHOULD show `:failed` and `:skipped` tasks distinctly in DONE column (✗ vs ○)
+
 ### 3.3 TUI Keyboard Navigation
 
 Implementations MUST support:
@@ -700,6 +750,7 @@ Implementations MUST support:
 | `c`       | Cancel workflow                 |
 | `q`       | Quit TUI                        |
 | `r`       | Refresh now                     |
+| `b`       | Kanban board (DAG view)         |
 | `?`       | Show help                       |
 
 ### 3.4 TUI Real-Time Updates
@@ -1174,4 +1225,5 @@ Research directions:
 
 **Version History:**
 
+- 0.2.0-draft (2026-02-04): Added DAG Kanban view and task lifecycle CLI command (§3.2.5)
 - 0.1.0-draft (2026-01-23): Initial CLI/TUI/API specification
