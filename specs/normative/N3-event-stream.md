@@ -716,6 +716,110 @@ ETL workflows MUST emit this event if any critical failure prevents completion.
 Implementations SHOULD include enough detail in `:etl/error-details` to enable
 debugging without log diving.
 
+### 3.12 Task Lifecycle Events (DAG Orchestration)
+
+For DAG-based multi-task execution (see N2 Section 13), implementations MUST emit
+task lifecycle events that track frontier computation, agent dispatch, and capability
+binding. These events enable Kanban projections and capability audit trails.
+
+#### Common Correlation Fields
+
+All task lifecycle events MUST include:
+
+```clojure
+{:dag/id uuid                    ; REQUIRED: DAG run ID
+ :run/id uuid                    ; REQUIRED: Run instance ID
+ :task/id uuid                   ; REQUIRED: Task ID
+ :timestamp inst}                ; REQUIRED: Event timestamp
+```
+
+#### task/frontier-entered
+
+Emitted when a task's dependencies are all satisfied and it becomes eligible for dispatch.
+
+```clojure
+{:event/type :task/frontier-entered
+ :dag/id uuid
+ :run/id uuid
+ :task/id uuid
+ :frontier/size long             ; Current frontier size after this task entered
+ :frontier/trigger-task uuid     ; Task whose terminal state caused this entry
+ :timestamp inst
+
+ :message "Task entered frontier (frontier size: 3)"}
+```
+
+#### task/claimed
+
+Emitted when a task is dispatched to an agent for execution.
+
+```clojure
+{:event/type :task/claimed
+ :dag/id uuid
+ :run/id uuid
+ :task/id uuid
+ :agent/archetype keyword        ; e.g., :implementer
+ :agent/instance-id uuid         ; Unique agent instance
+ :claim/lease-ms long            ; OPTIONAL: Lease duration if time-boxed
+ :timestamp inst
+
+ :message "Task claimed by implementer agent"}
+```
+
+#### task/capability-bound
+
+Emitted when an agent is scoped to a task's capability contract.
+
+```clojure
+{:event/type :task/capability-bound
+ :dag/id uuid
+ :run/id uuid
+ :task/id uuid
+ :agent/instance-id uuid
+ :cap/tools [keyword ...]        ; Tools granted
+ :cap/paths [string ...]         ; File paths granted
+ :cap/knowledge [string ...]     ; Knowledge packs granted
+ :cap/source keyword             ; :task-contract, :archetype-default, :dag-default
+ :timestamp inst
+
+ :message "Agent capabilities bound: 4 tools, 2 path patterns"}
+```
+
+#### task/scope-violation
+
+Emitted when an agent attempts an operation outside its capability contract.
+This is a WARN-level event; the operation MUST be blocked.
+
+```clojure
+{:event/type :task/scope-violation
+ :dag/id uuid
+ :run/id uuid
+ :task/id uuid
+ :agent/instance-id uuid
+ :violation/type keyword          ; :tool-denied, :path-denied, :knowledge-denied
+ :violation/requested string      ; What was requested (e.g., tool name, file path)
+ :violation/allowed [string ...]  ; What was allowed
+ :timestamp inst
+
+ :message "Scope violation: agent requested :delete-branch but allowed tools are [:write-file :run-cmd]"}
+```
+
+#### task/skip-propagated
+
+Emitted when a task is skipped due to a dependency failure.
+
+```clojure
+{:event/type :task/skip-propagated
+ :dag/id uuid
+ :run/id uuid
+ :task/id uuid
+ :skip/cause-task uuid            ; The task whose failure triggered the skip
+ :skip/cause-chain [uuid ...]     ; Full chain from root failure to this task
+ :timestamp inst
+
+ :message "Task skipped: dependency task-abc failed"}
+```
+
 ## 4. Event Emission Requirements
 
 ### 4.1 Emission Points
@@ -730,6 +834,7 @@ Implementations MUST emit events at these points:
 6. **Gate execution** - start, pass, fail
 7. **Inter-agent messages** - all communications
 8. **Milestones** - significant progress points
+9. **Task lifecycle** - frontier entry, claims, capability binding, scope violations
 
 ### 4.2 Throttling
 
@@ -989,5 +1094,6 @@ Event stream will extend to:
 
 **Version History:**
 
+- 0.3.0-draft (2026-02-04): Added task lifecycle events for DAG orchestration (§3.12)
 - 0.2.0-draft (2026-02-03): Add PR lifecycle events for DAG orchestration (Section 3.10)
 - 0.1.0-draft (2026-01-23): Initial event stream specification

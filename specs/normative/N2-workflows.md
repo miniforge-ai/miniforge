@@ -1227,6 +1227,22 @@ Implementations MUST:
 - Support configurable parallelism limits
 - Release all locks on task completion or failure
 
+#### 13.4.1 Frontier Computation
+
+The **frontier** is the set of tasks eligible for dispatch at any point in time.
+
+Implementations MUST compute the frontier as:
+
+```text
+frontier(run) = { t ∈ tasks | status(t) = :pending ∧ ∀d ∈ deps(t): status(d) = :merged }
+```
+
+Implementations MUST:
+
+1. **Recompute frontier** after every task terminal transition (:merged, :failed, :skipped)
+2. **Skip-propagate** — when a task reaches :failed, all transitive dependents MUST transition to :skipped
+3. **Emit frontier events** — see N3 §3.12 for required event schemas
+
 ### 13.5 Rebase and Conflict Handling
 
 When the base branch moves during task execution:
@@ -1235,6 +1251,50 @@ When the base branch moves during task execution:
 2. **Conflict detection:** If rebase fails, detect conflicting files
 3. **Conflict repair:** Invoke fix loop to resolve conflicts (per policy)
 4. **Restart:** If API changes affect task, may restart from `:implementing`
+
+### 13.6 Node Capability Contracts
+
+Each task node in a DAG MAY declare a **capability contract** specifying required tools,
+allowed file paths, and knowledge scope. When present, the contract constrains the agent
+instance dispatched to execute the task.
+
+#### 13.6.1 Capability Contract Schema
+
+```clojure
+{:task/capabilities
+ {:cap/tools [keyword ...]          ; Tools agent may invoke (e.g., :write-file, :run-cmd, :gh-pr-create)
+  :cap/paths [string ...]           ; Glob patterns for allowed file paths (e.g., "src/auth/**")
+  :cap/knowledge [string ...]       ; Knowledge pack IDs available to agent
+  :cap/archetype keyword            ; Agent archetype (e.g., :implementer, :tester, :reviewer)
+  :cap/timeout-ms long              ; Max wall-clock time for task execution
+  :cap/resource-locks [keyword ...] ; Resource locks required (from §13.4)
+  }}
+```
+
+Fields are OPTIONAL. When omitted, the agent receives default capabilities for its archetype.
+
+#### 13.6.2 Agent Scoping Rules
+
+When a task declares capabilities, implementations MUST:
+
+1. **Select archetype** — dispatch agent matching `:cap/archetype` (default: `:implementer`)
+2. **Restrict tool set** — agent MUST only have access to tools listed in `:cap/tools`
+3. **Restrict file scope** — file operations MUST be validated against `:cap/paths` globs
+4. **Restrict knowledge** — agent context MUST only include packs listed in `:cap/knowledge`
+5. **Enforce timeout** — kill agent if `:cap/timeout-ms` exceeded
+
+When a task does NOT declare capabilities, the agent receives the full default tool set
+for its archetype as defined in agent profile packs.
+
+#### 13.6.3 Capability Inheritance
+
+For tasks that share common requirements, implementations MAY support:
+
+- **DAG-level defaults** — capabilities declared at DAG level apply to all tasks unless overridden
+- **Task override** — task-level capabilities merge with (and override) DAG-level defaults
+- **Archetype defaults** — agent profile packs define baseline capabilities per archetype
+
+Merge order: archetype defaults → DAG defaults → task overrides.
 
 ---
 
@@ -1273,10 +1333,12 @@ PR train orchestration will enable:
 - N3 (Event Stream): Defines phase lifecycle events
 - N4 (Policy Packs): Defines policy validation gates
 - N6 (Evidence & Provenance): Defines evidence bundle generation
+- N4 (Policy Packs): Capability enforcement via policy rules
 
 ---
 
 **Version History:**
 
+- 0.3.0-draft (2026-02-04): Added node capability contracts (§13.6) and frontier semantics (§13.4.1)
 - 0.2.0-draft (2026-02-03): Added DAG-based multi-task execution model (Section 13)
 - 0.1.0-draft (2026-01-23): Initial workflow execution model specification
