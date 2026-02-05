@@ -408,6 +408,20 @@
   "Clone a repository and checkout a branch in the environment."
   executor/clone-and-checkout!)
 
+(def prepare-docker-executor!
+  "Create a Docker executor with images ensured to exist.
+   Returns {:executor DockerExecutor :image-result Result} or error Result."
+  executor/prepare-docker-executor!)
+
+(def ensure-image!
+  "Ensure a task runner image exists, building if necessary.
+   (ensure-image! docker-path :minimal) -> Result"
+  executor/ensure-image!)
+
+(def task-runner-images
+  "Pre-defined task runner images (:minimal :clojure)."
+  executor/task-runner-images)
+
 ;------------------------------------------------------------------------------ Layer 7
 ;; Convenience functions
 
