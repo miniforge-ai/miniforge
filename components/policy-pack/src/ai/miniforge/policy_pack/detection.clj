@@ -160,11 +160,15 @@
           [{:pattern #"#\s+(\S+)\s+will be (created|destroyed|updated)"
             :extractor (fn [[_ resource action]]
                          {:resource resource
-                          :action (keyword action)})}
+                          :action (case action
+                                    "created" :create
+                                    "destroyed" :destroy
+                                    "updated" :update
+                                    (keyword action))})}
            {:pattern #"#\s+(\S+)\s+must be (replaced)"
-            :extractor (fn [[_ resource action]]
+            :extractor (fn [[_ resource _action]]
                          {:resource resource
-                          :action (keyword action)})}
+                          :action :replace})}
            {:pattern #"^\s*(-/\+|~|\+|-)\s+(\S+)"
             :extractor (fn [[_ symbol resource]]
                          {:resource resource
