@@ -163,6 +163,109 @@
       (result/ok {:status :unknown :error (:err result)}))))
 
 ;; ============================================================================
+;; Image Management
+;; ============================================================================
+
+(def task-runner-images
+  "Pre-defined task runner images that can be built from bundled Dockerfiles."
+  {:minimal {:image "miniforge/task-runner:latest"
+             :dockerfile "executor/docker/Dockerfile.task-runner"
+             :description "Minimal Alpine image with git, bash, curl, jq"}
+   :clojure {:image "miniforge/task-runner-clojure:latest"
+             :dockerfile "executor/docker/Dockerfile.task-runner-clojure"
+             :description "Full Clojure image with clj, bb, clj-kondo, node"}})
+
+(defn image-exists?
+  "Check if a Docker image exists locally."
+  [docker-path image]
+  (let [result (run-docker docker-path "image" "inspect" image)]
+    (zero? (:exit result))))
+
+(defn- find-dockerfile-path
+  "Find the Dockerfile resource on the classpath or filesystem.
+   Returns absolute path to the Dockerfile."
+  [resource-path]
+  (let [resource (clojure.java.io/resource resource-path)]
+    (cond
+      ;; Direct file on classpath
+      (and resource (= "file" (.getScheme (.toURI resource))))
+      (.getAbsolutePath (clojure.java.io/file (.toURI resource)))
+
+      ;; Resource in JAR — extract to temp file
+      resource
+      (let [temp-file (java.io.File/createTempFile "Dockerfile" ".tmp")]
+        (.deleteOnExit temp-file)
+        (with-open [in (clojure.java.io/input-stream resource)]
+          (clojure.java.io/copy in temp-file))
+        (.getAbsolutePath temp-file))
+
+      ;; Try as direct filesystem path
+      :else
+      (let [f (clojure.java.io/file resource-path)]
+        (when (.exists f)
+          (.getAbsolutePath f))))))
+
+(defn build-image!
+  "Build a Docker image from a Dockerfile.
+
+   Arguments:
+   - docker-path: Path to docker binary (nil for default)
+   - image-name: Name:tag for the image
+   - dockerfile-path: Resource path to Dockerfile
+
+   Returns result monad with build info or error."
+  [docker-path image-name dockerfile-path]
+  (if-let [abs-path (find-dockerfile-path dockerfile-path)]
+    (let [context-dir (.getParent (clojure.java.io/file abs-path))
+          dockerfile-name (.getName (clojure.java.io/file abs-path))
+          result (run-docker docker-path "build"
+                             "-t" image-name
+                             "-f" abs-path
+                             context-dir)]
+      (if (zero? (:exit result))
+        (result/ok {:image image-name
+                    :dockerfile dockerfile-path
+                    :built? true})
+        (result/err :build-failed {:image image-name
+                                   :dockerfile dockerfile-path
+                                   :error (:err result)})))
+    (result/err :dockerfile-not-found {:path dockerfile-path})))
+
+(defn ensure-image!
+  "Ensure a Docker image exists, building if necessary.
+
+   Arguments:
+   - docker-path: Path to docker binary
+   - image-key: Key from task-runner-images (:minimal or :clojure)
+   - opts: {:force? bool} - force rebuild even if exists
+
+   Returns result monad with image info."
+  [docker-path image-key & {:keys [force?] :or {force? false}}]
+  (if-let [image-spec (get task-runner-images image-key)]
+    (let [{:keys [image dockerfile]} image-spec]
+      (if (and (not force?) (image-exists? docker-path image))
+        (result/ok {:image image
+                    :dockerfile dockerfile
+                    :built? false
+                    :existed? true})
+        (build-image! docker-path image dockerfile)))
+    (result/err :unknown-image-key {:key image-key
+                                    :available (keys task-runner-images)})))
+
+(defn ensure-all-images!
+  "Ensure all task runner images are available.
+
+   Arguments:
+   - docker-path: Path to docker binary
+   - opts: {:force? bool} - force rebuild all
+
+   Returns map of image-key -> result."
+  [docker-path & {:keys [force?] :or {force? false}}]
+  (into {}
+        (for [image-key (keys task-runner-images)]
+          [image-key (ensure-image! docker-path image-key :force? force?)])))
+
+;; ============================================================================
 ;; DockerExecutor Record
 ;; ============================================================================
 

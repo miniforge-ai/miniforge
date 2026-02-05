@@ -73,6 +73,37 @@
   worktree/create-worktree-executor)
 
 ;; ============================================================================
+;; Docker Image Management
+;; ============================================================================
+
+(def task-runner-images
+  "Pre-defined task runner images that can be built from bundled Dockerfiles.
+   Keys: :minimal (Alpine), :clojure (full tooling)"
+  docker/task-runner-images)
+
+(def image-exists?
+  "Check if a Docker image exists locally.
+   (image-exists? docker-path image-name) -> boolean"
+  docker/image-exists?)
+
+(def build-image!
+  "Build a Docker image from a Dockerfile resource.
+   (build-image! docker-path image-name dockerfile-resource-path) -> Result"
+  docker/build-image!)
+
+(def ensure-image!
+  "Ensure a task runner image exists, building if necessary.
+   (ensure-image! docker-path :minimal) -> Result
+   (ensure-image! docker-path :clojure :force? true) -> Result"
+  docker/ensure-image!)
+
+(def ensure-all-images!
+  "Ensure all task runner images are available.
+   (ensure-all-images! docker-path) -> {:minimal Result :clojure Result}
+   (ensure-all-images! docker-path :force? true) -> rebuilds all"
+  docker/ensure-all-images!)
+
+;; ============================================================================
 ;; Executor Selection
 ;; ============================================================================
 
@@ -121,6 +152,36 @@
     ;; Worktree is always available as fallback
     true
     (assoc :worktree (create-worktree-executor (or (:worktree config) {})))))
+
+(defn prepare-docker-executor!
+  "Create a Docker executor with images ensured to exist.
+
+   This is the recommended way to set up Docker execution for deployments.
+   It ensures the required task runner images are built before returning.
+
+   Arguments:
+   - config: Docker executor config
+     {:image - image to use for tasks (default: miniforge/task-runner:latest)
+      :image-type - which bundled image to ensure (:minimal or :clojure)
+      :ensure-image? - whether to build image if missing (default: true)
+      :docker-path - path to docker binary}
+
+   Returns {:executor DockerExecutor :image-result Result} or error Result."
+  [config]
+  (let [docker-path (:docker-path config)
+        image-type (or (:image-type config) :minimal)
+        ensure? (get config :ensure-image? true)
+        default-image (get-in task-runner-images [image-type :image])
+        image (or (:image config) default-image)]
+    ;; Ensure image exists if requested
+    (if ensure?
+      (let [image-result (ensure-image! docker-path image-type)]
+        (if (result/ok? image-result)
+          (result/ok {:executor (create-docker-executor (assoc config :image image))
+                      :image-result image-result})
+          image-result))
+      (result/ok {:executor (create-docker-executor (assoc config :image image))
+                  :image-result nil}))))
 
 ;; ============================================================================
 ;; High-level Helpers
@@ -183,9 +244,44 @@
 ;; ============================================================================
 
 (comment
+  ;; -------------------------------------------------------------------------
+  ;; Image Management (prep step for Docker executor)
+  ;; -------------------------------------------------------------------------
+
+  ;; Check what images are available to build
+  task-runner-images
+  ;; => {:minimal {:image "miniforge/task-runner:latest" ...}
+  ;;     :clojure {:image "miniforge/task-runner-clojure:latest" ...}}
+
+  ;; Check if an image exists locally
+  (image-exists? nil "miniforge/task-runner:latest")
+
+  ;; Ensure a specific image (builds if missing)
+  (ensure-image! nil :minimal)
+  (ensure-image! nil :clojure)
+
+  ;; Force rebuild even if exists
+  (ensure-image! nil :clojure :force? true)
+
+  ;; Ensure all images
+  (ensure-all-images! nil)
+  ;; => {:minimal {:ok? true ...} :clojure {:ok? true ...}}
+
+  ;; -------------------------------------------------------------------------
+  ;; Recommended: prepare-docker-executor! (handles image + executor setup)
+  ;; -------------------------------------------------------------------------
+
+  ;; Create executor with image automatically ensured
+  (def prep-result (prepare-docker-executor! {:image-type :clojure}))
+  (def executor (:executor (:data prep-result)))
+
+  ;; -------------------------------------------------------------------------
+  ;; Manual executor setup
+  ;; -------------------------------------------------------------------------
+
   ;; Create executor registry
   (def executors (create-executor-registry
-                  {:docker {:image "ubuntu:22.04"}
+                  {:docker {:image "miniforge/task-runner-clojure:latest"}
                    :worktree {:base-path "/tmp/mf-worktrees"}}))
 
   ;; Select best available

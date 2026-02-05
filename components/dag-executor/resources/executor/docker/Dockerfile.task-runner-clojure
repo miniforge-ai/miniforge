@@ -2,11 +2,14 @@
 # Extended image with Clojure tooling for Clojure/ClojureScript projects
 #
 # Build: docker build -t miniforge/task-runner-clojure:latest -f Dockerfile.task-runner-clojure .
+#
+# Note: Uses Debian-based image (not Alpine) for glibc compatibility with
+# babashka and clj-kondo native binaries on ARM64.
 
-FROM eclipse-temurin:21-jdk-alpine
+FROM eclipse-temurin:21-jdk
 
 # Install essential tools
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     openssh-client \
     bash \
@@ -14,11 +17,13 @@ RUN apk add --no-cache \
     curl \
     jq \
     ca-certificates \
+    unzip \
     # For native compilation
-    build-base \
-    # Node.js for ClojureScript
-    nodejs \
-    npm
+    build-essential \
+    # Node.js for ClojureScript (use NodeSource for newer version)
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Clojure CLI tools
 RUN curl -L -O https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh && \
@@ -37,6 +42,14 @@ RUN curl -sLO https://raw.githubusercontent.com/clj-kondo/clj-kondo/master/scrip
     chmod +x install-clj-kondo && \
     ./install-clj-kondo && \
     rm install-clj-kondo
+
+# Install GitHub CLI (for PR creation inside container)
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
+    apt-get update && apt-get install -y --no-install-recommends gh && \
+    rm -rf /var/lib/apt/lists/*
 
 # Configure git
 RUN git config --global user.email "miniforge@miniforge.ai" && \
