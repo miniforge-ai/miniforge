@@ -185,22 +185,25 @@
   "Find the Dockerfile resource on the classpath or filesystem.
    Returns absolute path to the Dockerfile."
   [resource-path]
-  (if-let [resource (clojure.java.io/resource resource-path)]
-    ;; Resource found on classpath
-    (let [uri (.toURI resource)]
-      (if (= "file" (.getScheme uri))
-        ;; Direct file reference
-        (.getAbsolutePath (clojure.java.io/file uri))
-        ;; Resource in JAR - extract to temp
-        (let [temp-file (java.io.File/createTempFile "Dockerfile" ".tmp")]
-          (.deleteOnExit temp-file)
-          (with-open [in (clojure.java.io/input-stream resource)]
-            (clojure.java.io/copy in temp-file))
-          (.getAbsolutePath temp-file))))
-    ;; Try as direct filesystem path
-    (let [f (clojure.java.io/file resource-path)]
-      (when (.exists f)
-        (.getAbsolutePath f)))))
+  (let [resource (clojure.java.io/resource resource-path)]
+    (cond
+      ;; Direct file on classpath
+      (and resource (= "file" (.getScheme (.toURI resource))))
+      (.getAbsolutePath (clojure.java.io/file (.toURI resource)))
+
+      ;; Resource in JAR — extract to temp file
+      resource
+      (let [temp-file (java.io.File/createTempFile "Dockerfile" ".tmp")]
+        (.deleteOnExit temp-file)
+        (with-open [in (clojure.java.io/input-stream resource)]
+          (clojure.java.io/copy in temp-file))
+        (.getAbsolutePath temp-file))
+
+      ;; Try as direct filesystem path
+      :else
+      (let [f (clojure.java.io/file resource-path)]
+        (when (.exists f)
+          (.getAbsolutePath f))))))
 
 (defn build-image!
   "Build a Docker image from a Dockerfile.

@@ -8,10 +8,11 @@
    [babashka.fs :as fs]
    [babashka.process :as p]
    [cheshire.core :as json]
-   [ai.miniforge.cli.config :as config]))
+   [ai.miniforge.cli.config :as config]
+   [ai.miniforge.dag-executor.interface :as dag]))
 
-;; Forward declare LLM interface - will be resolved at runtime via requiring-resolve
-;; This avoids compile-time dependency on JVM-only code when running in Babashka
+;; LLM interface resolved at runtime via requiring-resolve (Babashka compatibility).
+;; DAG executor uses normal requires (JVM-only, no Babashka concern).
 
 ;; LLM Backend Adapter
 ;; ===================
@@ -426,6 +427,84 @@
       (println (colorize :red (str "Failed to list workflows: " (ex-message e))))
       (throw e))))
 
+;; ============================================================================
+;; Sandbox lifecycle
+;; ============================================================================
+
+(defn- sandbox-release-fn
+  "Create a cleanup function that releases the sandbox container.
+   Returns a zero-arg fn. Babashka-compatible (no java.io.Closeable)."
+  [executor environment-id]
+  (fn []
+    (try
+      (dag/release-environment! executor environment-id)
+      (catch Exception _ nil))))
+
+(defn- infer-repo-url
+  "Infer the repository URL from spec, enriched spec, or local git remote."
+  [spec enriched-spec]
+  (or (get-in spec [:spec/raw-data :repo-url])
+      (get-in enriched-spec [:spec/context :repo-url])
+      (try
+        (str/trim (:out (p/shell {:out :string :err :string :continue true}
+                                 "git" "remote" "get-url" "origin")))
+        (catch Exception _ nil))))
+
+(defn- infer-branch
+  "Infer the branch from spec or enriched spec, defaulting to main."
+  [spec enriched-spec]
+  (or (get-in spec [:spec/raw-data :branch])
+      (get-in enriched-spec [:spec/context :git-branch])
+      "main"))
+
+(defn- prepare-sandbox
+  "Prepare Docker executor and acquire container environment.
+   Returns dag-result with {:executor ... :environment-id ... :sandbox-workdir ...}."
+  [spec enriched-spec]
+  (let [prep-result (dag/prepare-docker-executor! {:image-type :clojure})]
+    (if-not (dag/ok? prep-result)
+      prep-result
+      (let [executor (:executor (dag/unwrap prep-result))
+            gh-token (System/getenv "GH_TOKEN")
+            env-config (cond-> {} gh-token (assoc :env {:GH_TOKEN gh-token}))
+            env-result (dag/acquire-environment! executor (random-uuid) env-config)]
+        (if-not (dag/ok? env-result)
+          env-result
+          (let [env-id (:environment-id (dag/unwrap env-result))
+                repo-url (infer-repo-url spec enriched-spec)
+                branch (infer-branch spec enriched-spec)]
+            (when repo-url
+              (dag/clone-and-checkout! executor env-id repo-url branch {}))
+            (dag/ok {:executor executor
+                            :environment-id env-id
+                            :sandbox-workdir "/workspace"})))))))
+
+(defn- setup-sandbox-context
+  "Set up sandbox context if requested. Returns [context cleanup-fn] where
+   cleanup-fn releases the container (or nil if no sandbox). On setup failure,
+   returns an error marker in context and nil cleanup-fn."
+  [base-context sandbox? spec enriched-spec quiet]
+  (if-not sandbox?
+    [base-context nil]
+    (do
+      (when-not quiet
+        (println (colorize :yellow "🐳 Setting up sandbox container...")))
+      (let [result (prepare-sandbox spec enriched-spec)]
+        (if-not (dag/ok? result)
+          [(assoc base-context :sandbox-error result) nil]
+          (let [{:keys [executor environment-id sandbox-workdir]} (dag/unwrap result)]
+            (when-not quiet
+              (println (colorize :green "  ✓ Sandbox container ready")))
+            [(assoc base-context
+                    :executor executor
+                    :environment-id environment-id
+                    :sandbox-workdir sandbox-workdir)
+             (sandbox-release-fn executor environment-id)]))))))
+
+;; ============================================================================
+;; Workflow execution
+;; ============================================================================
+
 (defn run-workflow-from-spec!
   "Execute a workflow from an arbitrary spec (not from catalog).
 
@@ -517,101 +596,35 @@
             ;; Sandbox mode: optionally spin up a Docker container for isolated execution
             sandbox? (or (:sandbox opts)
                          (get-in spec [:spec/raw-data :sandbox]))
-            sandbox-state (atom nil)]
+            [context sandbox-cleanup] (setup-sandbox-context
+                                      context-with-llm sandbox?
+                                      spec enriched-spec quiet)]
 
         (try
-          (let [context (if sandbox?
-                          ;; Acquire Docker container for sandbox execution
-                          (let [_ (when-not quiet
-                                    (println (colorize :yellow "🐳 Setting up sandbox container...")))
-                                prepare-fn (requiring-resolve
-                                            'ai.miniforge.dag-executor.interface/prepare-docker-executor!)
-                                acquire-fn (requiring-resolve
-                                            'ai.miniforge.dag-executor.interface/acquire-environment!)
-                                clone-fn (requiring-resolve
-                                          'ai.miniforge.dag-executor.interface/clone-and-checkout!)
-                                ok?-fn (requiring-resolve
-                                        'ai.miniforge.dag-executor.interface/ok?)
-                                unwrap-fn (requiring-resolve
-                                           'ai.miniforge.dag-executor.interface/unwrap)
+          (if-let [sandbox-error (:sandbox-error context)]
+            ;; Sandbox setup failed — return error result (no exceptions)
+            (let [result {:success? false
+                          :errors [{:type :sandbox-setup-failed
+                                    :message (str (:error sandbox-error))}]}]
+              (print-result result opts)
+              result)
 
-                                ;; Prepare Docker executor with Clojure image
-                                prep-result (prepare-fn {:image-type :clojure})
-                                _ (when-not (ok?-fn prep-result)
-                                    (throw (ex-info "Failed to prepare Docker executor"
-                                                    {:result prep-result})))
-                                executor (:executor (unwrap-fn prep-result))
-
-                                ;; Acquire container environment
-                                task-id (random-uuid)
-                                gh-token (System/getenv "GH_TOKEN")
-                                env-config (cond-> {}
-                                             gh-token (assoc :env {:GH_TOKEN gh-token}))
-                                env-result (acquire-fn executor task-id env-config)
-                                _ (when-not (ok?-fn env-result)
-                                    (throw (ex-info "Failed to acquire sandbox environment"
-                                                    {:result env-result})))
-                                env-record (unwrap-fn env-result)
-                                env-id (:environment-id env-record)
-
-                                ;; Store for cleanup in finally block
-                                _ (reset! sandbox-state {:executor executor :environment-id env-id})
-
-                                ;; Clone repo into container
-                                repo-url (or (get-in spec [:spec/raw-data :repo-url])
-                                             (get-in enriched-spec [:spec/context :repo-url])
-                                             ;; Infer from git remote
-                                             (try
-                                               (str/trim
-                                                (:out (p/shell {:out :string :err :string :continue true}
-                                                               "git" "remote" "get-url" "origin")))
-                                               (catch Exception _ nil)))
-                                branch (or (get-in spec [:spec/raw-data :branch])
-                                           (get-in enriched-spec [:spec/context :git-branch])
-                                           "main")]
-                            (when repo-url
-                              (let [clone-result (clone-fn executor env-id repo-url branch {})]
-                                (when-not (ok?-fn clone-result)
-                                  (when-not quiet
-                                    (println (colorize :yellow
-                                                       (str "Warning: Clone failed, continuing with empty workspace")))))))
-
-                            (when-not quiet
-                              (println (colorize :green "  ✓ Sandbox container ready")))
-
-                            (assoc context-with-llm
-                                   :executor executor
-                                   :environment-id env-id
-                                   :sandbox-workdir "/workspace"))
-
-                          ;; No sandbox - pass context through unchanged
-                          context-with-llm)
-
-                result (execute-workflow-pipeline
-                        run-pipeline
-                        workflow
-                        workflow-input
-                        context
-                        artifact-store)]
-
-            (close-artifact-store artifact-store)
-            (print-result result opts)
-            result)
+            ;; Normal flow
+            (let [result (execute-workflow-pipeline
+                          run-pipeline
+                          workflow
+                          workflow-input
+                          context
+                          artifact-store)]
+              (close-artifact-store artifact-store)
+              (print-result result opts)
+              result))
 
           (finally
-            ;; Release sandbox container if one was acquired
-            (when-let [{:keys [executor environment-id]} @sandbox-state]
-              (try
-                (let [release-fn (requiring-resolve
-                                  'ai.miniforge.dag-executor.interface/release-environment!)]
-                  (release-fn executor environment-id)
-                  (when-not quiet
-                    (println (colorize :yellow "🐳 Sandbox container released"))))
-                (catch Exception e
-                  (when-not quiet
-                    (println (colorize :yellow
-                                       (str "Warning: Failed to release sandbox container: "
-                                            (ex-message e))))))))))))
+            (when sandbox-cleanup
+              (sandbox-cleanup)
+              (when-not quiet
+                (println (colorize :yellow "🐳 Sandbox container released"))))))))
     (catch Exception e
       (when-not quiet
         (println (colorize :red (str "\n❌ Workflow execution failed: " (ex-message e)))))
