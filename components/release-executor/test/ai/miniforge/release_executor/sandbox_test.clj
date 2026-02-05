@@ -4,6 +4,8 @@
    Uses a mock executor to verify correct command generation
    without requiring Docker."
   (:require
+   [ai.miniforge.dag-executor.protocols.executor]
+   [clojure.string]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.release-executor.sandbox :as sandbox]
    [ai.miniforge.dag-executor.result :as dag-result]))
@@ -50,18 +52,18 @@
 (deftest check-gh-auth-success-test
   (testing "check-gh-auth! returns authenticated when gh auth status succeeds"
     (let [[exec _cmds] (create-mock-executor
-                        :responses {"gh auth status" {:exit-code 0 :stdout "Logged in" :stderr ""}})]
-      (let [result (sandbox/check-gh-auth! exec "env-1")]
-        (is (:available? result))
-        (is (:authenticated? result))))))
+                        :responses {"gh auth status" {:exit-code 0 :stdout "Logged in" :stderr ""}})
+          result (sandbox/check-gh-auth! exec "env-1")]
+      (is (:available? result))
+      (is (:authenticated? result)))))
 
 (deftest check-gh-auth-failure-test
   (testing "check-gh-auth! returns unauthenticated when gh auth status fails"
     (let [[exec _cmds] (create-mock-executor
-                        :responses {"gh auth status" {:exit-code 1 :stdout "" :stderr "not logged in"}})]
-      (let [result (sandbox/check-gh-auth! exec "env-1")]
-        (is (:available? result))
-        (is (not (:authenticated? result)))))))
+                        :responses {"gh auth status" {:exit-code 1 :stdout "" :stderr "not logged in"}})
+          result (sandbox/check-gh-auth! exec "env-1")]
+      (is (:available? result))
+      (is (not (:authenticated? result))))))
 
 ;; ============================================================================
 ;; create-branch! tests
@@ -72,23 +74,23 @@
     (let [[exec cmds] (create-mock-executor
                        :responses {"git symbolic-ref" {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""}
                                    "git fetch" {:exit-code 0 :stdout "" :stderr ""}
-                                   "git checkout" {:exit-code 0 :stdout "" :stderr ""}})]
-      (let [result (sandbox/create-branch! exec "env-1" "feat/my-branch")]
-        (is (:success? result))
-        (is (= "feat/my-branch" (:branch result)))
-        (is (= "main" (:base-branch result)))
-        ;; Verify commands were issued
-        (is (some #(clojure.string/includes? % "git fetch origin main") @cmds))
-        (is (some #(clojure.string/includes? % "git checkout -b feat/my-branch") @cmds))))))
+                                   "git checkout" {:exit-code 0 :stdout "" :stderr ""}})
+          result (sandbox/create-branch! exec "env-1" "feat/my-branch")]
+      (is (:success? result))
+      (is (= "feat/my-branch" (:branch result)))
+      (is (= "main" (:base-branch result)))
+      ;; Verify commands were issued
+      (is (some #(clojure.string/includes? % "git fetch origin main") @cmds))
+      (is (some #(clojure.string/includes? % "git checkout -b feat/my-branch") @cmds)))))
 
 (deftest create-branch-fetch-failure-test
   (testing "create-branch! fails when fetch fails"
     (let [[exec _cmds] (create-mock-executor
                         :responses {"git symbolic-ref" {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""}
-                                    "git fetch" {:exit-code 1 :stdout "" :stderr "fatal: fetch failed"}})]
-      (let [result (sandbox/create-branch! exec "env-1" "feat/branch")]
-        (is (not (:success? result)))
-        (is (clojure.string/includes? (:error result) "fetch"))))))
+                                    "git fetch" {:exit-code 1 :stdout "" :stderr "fatal: fetch failed"}})
+          result (sandbox/create-branch! exec "env-1" "feat/branch")]
+      (is (not (:success? result)))
+      (is (clojure.string/includes? (:error result) "fetch")))))
 
 ;; ============================================================================
 ;; write-file! tests
@@ -96,14 +98,14 @@
 
 (deftest write-file-generates-base64-command-test
   (testing "write-file! encodes content as base64 and creates parent dirs"
-    (let [[exec cmds] (create-mock-executor)]
-      (let [result (sandbox/write-file! exec "env-1" "src/foo.clj" "(ns foo)")]
-        (is (:success? result))
-        (let [cmd (first @cmds)]
-          ;; Should contain mkdir -p for parent dir
-          (is (clojure.string/includes? cmd "mkdir -p"))
-          ;; Should contain base64 decode
-          (is (clojure.string/includes? cmd "base64 -d")))))))
+    (let [[exec cmds] (create-mock-executor)
+          result (sandbox/write-file! exec "env-1" "src/foo.clj" "(ns foo)")]
+      (is (:success? result))
+      (let [cmd (first @cmds)]
+        ;; Should contain mkdir -p for parent dir
+        (is (clojure.string/includes? cmd "mkdir -p"))
+        ;; Should contain base64 decode
+        (is (clojure.string/includes? cmd "base64 -d"))))))
 
 (deftest write-file-roundtrip-base64-test
   (testing "write-file! base64 encoding is valid"
@@ -151,11 +153,11 @@
   (testing "commit-changes! commits and returns sha"
     (let [[exec cmds] (create-mock-executor
                        :responses {"git commit" {:exit-code 0 :stdout "1 file changed" :stderr ""}
-                                   "git rev-parse" {:exit-code 0 :stdout "abc1234\n" :stderr ""}})]
-      (let [result (sandbox/commit-changes! exec "env-1" "feat: add feature")]
-        (is (:success? result))
-        (is (= "abc1234" (:commit-sha result)))
-        (is (some #(clojure.string/includes? % "git commit") @cmds))))))
+                                   "git rev-parse" {:exit-code 0 :stdout "abc1234\n" :stderr ""}})
+          result (sandbox/commit-changes! exec "env-1" "feat: add feature")]
+      (is (:success? result))
+      (is (= "abc1234" (:commit-sha result)))
+      (is (some #(clojure.string/includes? % "git commit") @cmds)))))
 
 (deftest commit-changes-escapes-quotes-test
   (testing "commit-changes! escapes single quotes in commit message"
@@ -173,10 +175,10 @@
 
 (deftest push-branch-command-test
   (testing "push-branch! issues git push -u origin"
-    (let [[exec cmds] (create-mock-executor)]
-      (let [result (sandbox/push-branch! exec "env-1" "feat/branch")]
-        (is (:success? result))
-        (is (clojure.string/includes? (first @cmds) "git push -u origin feat/branch"))))))
+    (let [[exec cmds] (create-mock-executor)
+          result (sandbox/push-branch! exec "env-1" "feat/branch")]
+      (is (:success? result))
+      (is (clojure.string/includes? (first @cmds) "git push -u origin feat/branch")))))
 
 ;; ============================================================================
 ;; create-pr! tests
@@ -187,29 +189,29 @@
     (let [[exec cmds] (create-mock-executor
                        :responses {"gh pr create" {:exit-code 0
                                                    :stdout "https://github.com/org/repo/pull/42\n"
-                                                   :stderr ""}})]
-      (let [result (sandbox/create-pr! exec "env-1"
-                                       {:title "Add feature"
-                                        :body "Description here"
-                                        :base-branch "main"})]
-        (is (:success? result))
-        (is (= 42 (:pr-number result)))
-        (is (= "https://github.com/org/repo/pull/42" (:pr-url result)))
-        (let [cmd (first @cmds)]
-          (is (clojure.string/includes? cmd "gh pr create"))
-          (is (clojure.string/includes? cmd "--title"))
-          (is (clojure.string/includes? cmd "--base main")))))))
+                                                   :stderr ""}})
+          result (sandbox/create-pr! exec "env-1"
+                                     {:title "Add feature"
+                                      :body "Description here"
+                                      :base-branch "main"})]
+      (is (:success? result))
+      (is (= 42 (:pr-number result)))
+      (is (= "https://github.com/org/repo/pull/42" (:pr-url result)))
+      (let [cmd (first @cmds)]
+        (is (clojure.string/includes? cmd "gh pr create"))
+        (is (clojure.string/includes? cmd "--title"))
+        (is (clojure.string/includes? cmd "--base main"))))))
 
 (deftest create-pr-failure-test
   (testing "create-pr! returns failure when gh pr create fails"
     (let [[exec _cmds] (create-mock-executor
                         :responses {"gh pr create" {:exit-code 1
                                                     :stdout ""
-                                                    :stderr "not authenticated"}})]
-      (let [result (sandbox/create-pr! exec "env-1"
-                                       {:title "PR" :body "" :base-branch "main"})]
-        (is (not (:success? result)))
-        (is (some? (:error result)))))))
+                                                    :stderr "not authenticated"}})
+          result (sandbox/create-pr! exec "env-1"
+                                     {:title "PR" :body "" :base-branch "main"})]
+      (is (not (:success? result)))
+      (is (some? (:error result))))))
 
 ;; ============================================================================
 ;; write-and-stage-files! tests

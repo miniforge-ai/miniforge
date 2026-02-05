@@ -5,6 +5,8 @@
    operations when :executor and :environment-id are present in context,
    and falls back to git operations when they are absent."
   (:require
+   [ai.miniforge.dag-executor.protocols.executor]
+   [clojure.string]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.release-executor.core :as core]
    [ai.miniforge.dag-executor.result :as dag-result]))

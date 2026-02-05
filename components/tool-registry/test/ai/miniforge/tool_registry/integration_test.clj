@@ -122,34 +122,32 @@
 
         ;; Write a file with mismatched parens
         (let [bad-code "(ns bad.code)\n\n(defn broken [x]\n  (+ x 1))"  ; Missing closing paren
-              file (write-clj-file "src/bad/code.clj" bad-code)]
+              file (write-clj-file "src/bad/code.clj" bad-code)
+              ;; Collect diagnostics from notifications
+              diagnostics-atom (atom nil)
+              _notification-handler (fn [msg]
+                                      (when (= "textDocument/publishDiagnostics" (:method msg))
+                                        (reset! diagnostics-atom (get-in msg [:params :diagnostics]))))
+              ;; Start LSP with custom notification handler
+              {:keys [success? error client]} (tool-registry/start-lsp *registry* :lsp/clojure)]
+          (is success? (str "Failed to start LSP: " error))
 
-          ;; Collect diagnostics from notifications
-          (let [diagnostics-atom (atom nil)
-                notification-handler (fn [msg]
-                                       (when (= "textDocument/publishDiagnostics" (:method msg))
-                                         (reset! diagnostics-atom (get-in msg [:params :diagnostics]))))]
+          (when success?
+            ;; Open the document
+            (lsp-client/open-document client
+                                      (file-uri file)
+                                      "clojure"
+                                      (slurp file))
 
-            ;; Start LSP with custom notification handler
-            (let [{:keys [success? error client]} (tool-registry/start-lsp *registry* :lsp/clojure)]
-              (is success? (str "Failed to start LSP: " error))
+            ;; Wait for diagnostics (clojure-lsp sends them after analysis)
+            (Thread/sleep 3000)
 
+            ;; Get document symbols to verify LSP is responding
+            (let [{:keys [success? result]} (lsp-client/document-symbols client (file-uri file))]
+              (is success? "document-symbols request failed")
+              ;; Should find at least the namespace and function
               (when success?
-                ;; Open the document
-                (lsp-client/open-document client
-                                          (file-uri file)
-                                          "clojure"
-                                          (slurp file))
-
-                ;; Wait for diagnostics (clojure-lsp sends them after analysis)
-                (Thread/sleep 3000)
-
-                ;; Get document symbols to verify LSP is responding
-                (let [{:keys [success? result]} (lsp-client/document-symbols client (file-uri file))]
-                  (is success? "document-symbols request failed")
-                  ;; Should find at least the namespace and function
-                  (when success?
-                    (println "Document symbols found:" (count result))))))))))))
+                (println "Document symbols found:" (count result))))))))))
 
 (deftest ^:integration lsp-hover-test
   (if-not (clojure-lsp-available?)
@@ -162,10 +160,9 @@
 
         ;; Write a valid Clojure file
         (let [code "(ns hover.test)\n\n(defn my-function\n  \"A test function that adds numbers.\"\n  [x y]\n  (+ x y))"
-              file (write-clj-file "src/hover/test.clj" code)]
-
-          ;; Start LSP
-          (let [{:keys [success? client]} (tool-registry/start-lsp *registry* :lsp/clojure)]
+              file (write-clj-file "src/hover/test.clj" code)
+              ;; Start LSP
+              {:keys [success? client]} (tool-registry/start-lsp *registry* :lsp/clojure)]
             (when success?
               ;; Open the document
               (lsp-client/open-document client
@@ -181,7 +178,7 @@
                 (is success? "hover request failed")
                 (when (and success? result)
                   (println "Hover result:" (pr-str (take 100 (str result))))
-                  (is (some? result) "Expected hover info for defn"))))))))))
+                  (is (some? result) "Expected hover info for defn")))))))))
 
 (deftest ^:integration lsp-format-test
   (if-not (clojure-lsp-available?)
@@ -194,10 +191,9 @@
 
         ;; Write poorly formatted code
         (let [ugly-code "(ns format.test)\n(defn   ugly   [x    y]\n(+   x    y))"
-              file (write-clj-file "src/format/test.clj" ugly-code)]
-
-          ;; Start LSP
-          (let [{:keys [success? client]} (tool-registry/start-lsp *registry* :lsp/clojure)]
+              file (write-clj-file "src/format/test.clj" ugly-code)
+              ;; Start LSP
+              {:keys [success? client]} (tool-registry/start-lsp *registry* :lsp/clojure)]
             (when success?
               ;; Open the document
               (lsp-client/open-document client
@@ -214,7 +210,7 @@
                 (when success?
                   (println "Format edits:" (count result))
                   ;; Should return text edits to fix formatting
-                  (is (or (nil? result) (seq result)) "Expected format edits or nil for already-formatted"))))))))))
+                  (is (or (nil? result) (seq result)) "Expected format edits or nil for already-formatted")))))))))
 
 ;------------------------------------------------------------------------------ Tool discovery E2E test
 

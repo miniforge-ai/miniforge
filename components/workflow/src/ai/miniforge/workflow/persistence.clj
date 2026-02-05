@@ -36,7 +36,7 @@
   (let [config-dir (ensure-config-dir)
         events-dir (str config-dir "/events")]
     (.mkdirs (java.io.File. events-dir))
-    (str events-dir "/" (str workflow-id) ".edn")))
+    (str events-dir "/" workflow-id ".edn")))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; File I/O operations

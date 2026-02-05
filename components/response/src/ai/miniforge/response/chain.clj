@@ -37,7 +37,7 @@
          (add-response :step-2 nil {:result \"done\"})
          (succeeded?))
      ;; => true"
-  (:require [ai.miniforge.response.anomaly :as anomaly]))
+)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Chain creation

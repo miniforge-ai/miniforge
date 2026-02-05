@@ -10,6 +10,7 @@
   (:require
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
+   [clojure.java.io]
    [clojure.java.shell :as shell]
    [clojure.string :as str]))
 
@@ -217,7 +218,7 @@
   [docker-path image-name dockerfile-path]
   (if-let [abs-path (find-dockerfile-path dockerfile-path)]
     (let [context-dir (.getParent (clojure.java.io/file abs-path))
-          dockerfile-name (.getName (clojure.java.io/file abs-path))
+          _dockerfile-name (.getName (clojure.java.io/file abs-path))
           result (run-docker docker-path "build"
                              "-t" image-name
                              "-f" abs-path

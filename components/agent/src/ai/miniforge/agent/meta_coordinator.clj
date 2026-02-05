@@ -108,7 +108,7 @@
   (doseq [agent (:agents coordinator)]
     (try
       (mp/reset-state! agent)
-      (catch Exception e
+      (catch Exception _e
         ;; Silently continue on reset errors - caller can check if needed
         nil)))
   (reset! (:last-checks coordinator) {})

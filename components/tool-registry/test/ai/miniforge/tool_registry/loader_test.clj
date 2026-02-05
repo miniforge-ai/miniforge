@@ -104,7 +104,7 @@
                         :tool/type :lsp
                         :tool/name "Test 2"
                         :tool/config {:lsp/command ["test2"]}})
-      (let [{:keys [loaded failed]} (loader/load-all-tools *registry*)]
+      (let [{:keys [loaded]} (loader/load-all-tools *registry*)]
         ;; Should load the two project tools (may also include built-in)
         (is (>= (count loaded) 2))
         (is (contains? (set loaded) :lsp/test1))

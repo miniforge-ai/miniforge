@@ -99,7 +99,7 @@
       (swap! errors conj {:error :empty-pipeline
                           :message "Workflow pipeline is empty"}))
 
-    (doseq [{:keys [phase on-fail on-success] :as config} pipeline]
+    (doseq [{:keys [phase on-fail on-success] :as _config} pipeline]
       (when-not (contains? known-phases phase)
         (swap! errors conj {:error :unknown-phase
                             :phase phase

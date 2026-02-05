@@ -6,7 +6,6 @@
    or transit store is needed (Babashka compatibility)."
   (:require
    [datalevin.core :as d]
-   [ai.miniforge.artifact.core :as core]
    [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
    [ai.miniforge.logging.interface :as log]))
 

@@ -320,11 +320,10 @@
 (deftest abandon-train-test
   (testing "abandon-train marks train as abandoned"
     (let [mgr (train/create-manager)
-          train-id (train/create-train mgr "Test" (random-uuid) nil)]
-
-      (let [abandoned (train/abandon-train mgr train-id "Project cancelled")]
-        (is (= :abandoned (:train/status abandoned)))
-        (is (= "Project cancelled" (:train/abandon-reason abandoned)))))))
+          train-id (train/create-train mgr "Test" (random-uuid) nil)
+          abandoned (train/abandon-train mgr train-id "Project cancelled")]
+      (is (= :abandoned (:train/status abandoned)))
+      (is (= "Project cancelled" (:train/abandon-reason abandoned))))))
 
 ;; ============================================================================
 ;; Evidence tests
@@ -385,7 +384,7 @@
   (testing "find-trains-by-status filters by status"
     (let [mgr (train/create-manager)
           t1 (train/create-train mgr "Train 1" (random-uuid) nil)
-          t2 (train/create-train mgr "Train 2" (random-uuid) nil)]
+          _t2 (train/create-train mgr "Train 2" (random-uuid) nil)]
 
       (is (= 2 (count (train/find-trains-by-status mgr :drafting))))
 

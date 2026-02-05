@@ -197,7 +197,7 @@
      
    Returns:
      {:passed? bool :errors [...] :warnings [...]}"
-  [artifact ctx]
+  [_artifact ctx]
   (let [config (or (:config ctx) {})
         commits-to-check (get config :commits-to-check 50)
         branch (get config :branch "HEAD")

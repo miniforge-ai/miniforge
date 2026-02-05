@@ -23,8 +23,7 @@
    [ai.miniforge.tool-registry.lsp.protocol :as proto]
    [ai.miniforge.tool-registry.lsp.process :as process]
    [ai.miniforge.tool-registry.schema :as schema]
-   [cheshire.core :as json]
-   [clojure.core.async :as async :refer [go go-loop <! >! chan close!]]
+   [clojure.core.async :as async :refer [go-loop]]
    [clojure.string :as str])
   (:import
    [java.io BufferedReader InputStreamReader BufferedWriter OutputStreamWriter]))

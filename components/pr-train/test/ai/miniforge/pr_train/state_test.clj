@@ -328,17 +328,16 @@
           pr3 (state/create-pr-state "acme/c" 300 "url" "branch" "PR 3" 3)
           train (-> (state/create-train-state (random-uuid) "Test" (random-uuid))
                     (assoc :train/prs [pr1 pr2 pr3]))
-          linked (state/link-pr-dependencies train)]
-
-      (let [p1 (state/find-pr linked 100)
-            p2 (state/find-pr linked 200)
-            p3 (state/find-pr linked 300)]
-        (is (= [] (:pr/depends-on p1)))
-        (is (= [200 300] (:pr/blocks p1)))
-        (is (= [100] (:pr/depends-on p2)))
-        (is (= [300] (:pr/blocks p2)))
-        (is (= [100 200] (:pr/depends-on p3)))
-        (is (= [] (:pr/blocks p3)))))))
+          linked (state/link-pr-dependencies train)
+          p1 (state/find-pr linked 100)
+          p2 (state/find-pr linked 200)
+          p3 (state/find-pr linked 300)]
+      (is (= [] (:pr/depends-on p1)))
+      (is (= [200 300] (:pr/blocks p1)))
+      (is (= [100] (:pr/depends-on p2)))
+      (is (= [300] (:pr/blocks p2)))
+      (is (= [100 200] (:pr/depends-on p3)))
+      (is (= [] (:pr/blocks p3))))))
 
 ;; ============================================================================
 ;; Rollback planning tests
@@ -354,13 +353,12 @@
                   (assoc :pr/status :failed))
           train (-> (state/create-train-state (random-uuid) "Test" (random-uuid))
                     (assoc :train/prs [pr1 pr2 pr3]))
-          planned (state/compute-rollback-plan train :ci-failure :revert-all)]
-
-      (let [plan (:train/rollback-plan planned)]
-        (is (= :ci-failure (:trigger plan)))
-        (is (= :revert-all (:action plan)))
-        (is (= 100 (:checkpoint plan)))
-        (is (= [200 100] (:prs-to-revert plan)))))))
+          planned (state/compute-rollback-plan train :ci-failure :revert-all)
+          plan (:train/rollback-plan planned)]
+      (is (= :ci-failure (:trigger plan)))
+      (is (= :revert-all (:action plan)))
+      (is (= 100 (:checkpoint plan)))
+      (is (= [200 100] (:prs-to-revert plan))))))
 
 ;; ============================================================================
 ;; Auto-transition tests

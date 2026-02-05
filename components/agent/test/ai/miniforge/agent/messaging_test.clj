@@ -330,13 +330,13 @@
                        :planner
                        test-planner-id
                        test-workflow-id
-                       router)]
-      ;; Implementer sends clarification request
-      (let [request-result (agent/send-clarification-request
-                            implementer-msg
-                            :planner
-                            "How should we handle X?")
-            original-msg (:message request-result)]
+                       router)
+          ;; Implementer sends clarification request
+          request-result (agent/send-clarification-request
+                          implementer-msg
+                          :planner
+                          "How should we handle X?")
+          original-msg (:message request-result)]
 
         ;; Planner responds
         (let [response-result (agent/respond-to-message
@@ -353,7 +353,7 @@
         ;; Implementer receives response
         (let [received (agent/receive-messages implementer-msg)]
           (is (= 1 (count received)))
-          (is (= :clarification-response (:message/type (first received)))))))))
+          (is (= :clarification-response (:message/type (first received))))))))
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Convenience Function Tests

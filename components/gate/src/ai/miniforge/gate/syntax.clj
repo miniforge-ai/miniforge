@@ -16,8 +16,7 @@
   "Syntax validation gate.
 
    Checks that code artifacts parse without errors."
-  (:require [ai.miniforge.gate.registry :as registry]
-            [clojure.edn :as edn]))
+  (:require [ai.miniforge.gate.registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Syntax checking
@@ -29,8 +28,8 @@
      {:valid? bool :error string?}"
   [code-str]
   (try
-    (read-string code-str)
-    {:valid? true}
+    (let [_ (read-string code-str)]
+      {:valid? true})
     (catch Exception ex
       {:valid? false
        :error (ex-message ex)})))
