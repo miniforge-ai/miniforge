@@ -289,6 +289,27 @@
   [value]
   (validate PackManifest value))
 
+;------------------------------------------------------------------------------ Layer 2
+;; Result helpers (used by loader.clj)
+
+(defn success
+  "Create a success result.
+   (success :pack pack {:errors nil}) => {:success? true :pack pack :errors nil}"
+  [key value extras]
+  (merge {:success? true key value} extras))
+
+(defn failure
+  "Create a failure result.
+   (failure :data \"error msg\") => {:success? false :error \"error msg\"}"
+  [_key message]
+  {:success? false :error message})
+
+(defn failure-with-errors
+  "Create a failure result with error list.
+   (failure-with-errors :pack [...]) => {:success? false :errors [...]}"
+  [_key errors]
+  {:success? false :errors errors})
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Validate a rule
