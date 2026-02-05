@@ -35,6 +35,34 @@
                                            [(symbol (str "ai.miniforge." brick-name ".interface"))])))))]
     (sort-by str interface-files)))
 
+(defn- path->namespace
+  "Convert a .clj file path (relative to src/) to a namespace symbol.
+   e.g. ai/miniforge/cli/main.clj -> ai.miniforge.cli.main"
+  [src-root clj-file]
+  (let [src-path (.getPath src-root)
+        file-path (.getPath clj-file)
+        relative (subs file-path (inc (count src-path)))]
+    (-> relative
+        (str/replace #"\.clj$" "")
+        (str/replace "/" ".")
+        (str/replace "_" "-")
+        symbol)))
+
+(defn- discover-base-namespaces
+  "Scan bases/ for all .clj source files and derive namespace symbols.
+   Returns a sorted seq of namespace symbols."
+  []
+  (let [base-dirs (-> (io/file "bases") .listFiles seq)]
+    (->> base-dirs
+         (filter #(.isDirectory %))
+         (mapcat (fn [dir]
+                   (let [src-dir (io/file dir "src")]
+                     (when (.exists src-dir)
+                       (->> (file-seq src-dir)
+                            (filter #(str/ends-with? (.getName %) ".clj"))
+                            (map #(path->namespace src-dir %)))))))
+         (sort-by str))))
+
 ;; ============================================================================
 ;; Helpers
 ;; ============================================================================
@@ -103,12 +131,39 @@
             :else
             (is false (str "Failed to load " ns-sym ":\n" error-msg))))))))
 
+(deftest test-all-bases-load-in-babashka
+  (testing "All base namespaces should load in Babashka/GraalVM"
+    (let [all-ns (discover-base-namespaces)]
+      ;; Ensure we actually found base namespaces (sanity check)
+      (is (>= (count all-ns) 3)
+          (str "Expected 3+ base namespaces, found " (count all-ns)
+               ". Is the test running from the repo root?"))
+
+      (doseq [ns-sym all-ns]
+        (let [[success? error-msg] (require-namespace ns-sym)]
+          (cond
+            success?
+            (is true (str ns-sym " loaded"))
+
+            (classpath-error? error-msg)
+            (println "  WARN:" ns-sym "- not on :dev classpath (add to deps.edn :dev alias)")
+
+            (jvm-only-error? error-msg)
+            (is false (str "JVM-ONLY DEPENDENCY DETECTED in " ns-sym ":\n"
+                           error-msg
+                           "\n\nThis blocks GraalVM native compilation."
+                           "\nFix: use Babashka-compatible alternatives."))
+
+            :else
+            (is false (str "Failed to load " ns-sym ":\n" error-msg))))))))
+
 (deftest test-no-forbidden-dependencies
   (testing "Forbidden JVM-only dependencies should not be present"
     (let [forbidden-deps {"org.clojure/data.json" "Use cheshire.core instead (bundled in Babashka)"
                           "org.clojure/java.jdbc" "Use next.jdbc instead"}
-          component-dirs (file-seq (io/file "components"))
-          deps-files (->> component-dirs
+          all-dirs (concat (file-seq (io/file "components"))
+                           (file-seq (io/file "bases")))
+          deps-files (->> all-dirs
                           (filter #(= "deps.edn" (.getName %)))
                           (map slurp))]
       (doseq [[dep replacement] forbidden-deps
@@ -120,7 +175,8 @@
 
 (deftest test-no-java-interface-in-defrecord
   (testing "No defrecord should implement Java interfaces (Babashka limitation)"
-    (let [src-files (->> (file-seq (io/file "components"))
+    (let [src-files (->> (concat (file-seq (io/file "components"))
+                                 (file-seq (io/file "bases")))
                          (filter #(str/ends-with? (.getName %) ".clj"))
                          (filter #(str/includes? (.getPath %) "/src/")))]
       (doseq [f src-files]
@@ -160,6 +216,9 @@
 
   ;; Discover all brick interfaces
   (discover-interface-namespaces)
+
+  ;; Discover all base namespaces
+  (discover-base-namespaces)
 
   ;; Test a specific namespace
   (require-namespace 'ai.miniforge.dag-executor.interface)

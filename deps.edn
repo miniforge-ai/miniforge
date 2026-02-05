@@ -54,7 +54,15 @@
                        "components/pr-lifecycle/src"
                        "components/pr-lifecycle/resources"
                        "components/evidence-bundle/src"
-                       "components/evidence-bundle/resources"]
+                       "components/evidence-bundle/resources"
+                       "components/policy-pack/src"
+                       "components/policy-pack/resources"
+                       "components/pr-train/src"
+                       "components/pr-train/resources"
+                       "components/repo-dag/src"
+                       "components/repo-dag/resources"
+                       "bases/cli/src"
+                       "bases/cli/resources"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
                       ai.miniforge/logging {:local/root "components/logging"}
@@ -80,7 +88,11 @@
                       ai.miniforge/tool-registry {:local/root "components/tool-registry"}
                      ai.miniforge/dag-executor {:local/root "components/dag-executor"}
                      ai.miniforge/pr-lifecycle {:local/root "components/pr-lifecycle"}
-                     ai.miniforge/evidence-bundle {:local/root "components/evidence-bundle"}}}
+                     ai.miniforge/evidence-bundle {:local/root "components/evidence-bundle"}
+                     ai.miniforge/policy-pack {:local/root "components/policy-pack"}
+                     ai.miniforge/pr-train {:local/root "components/pr-train"}
+                     ai.miniforge/repo-dag {:local/root "components/repo-dag"}
+                     ai.miniforge/cli {:local/root "bases/cli"}}}
 
   :test {:extra-paths ["development/test"
                        "components/schema/test"
@@ -108,7 +120,10 @@
                        "components/dag-executor/test"
                        "components/pr-lifecycle/test"
                        "components/release-executor/test"
-                       "components/evidence-bundle/test"]
+                       "components/evidence-bundle/test"
+                       "components/policy-pack/test"
+                       "components/pr-train/test"
+                       "components/repo-dag/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
                       ai.miniforge/logging {:local/root "components/logging"}
@@ -134,7 +149,10 @@
                       ai.miniforge/tool-registry {:local/root "components/tool-registry"}
                       ai.miniforge/dag-executor {:local/root "components/dag-executor"}
                       ai.miniforge/pr-lifecycle {:local/root "components/pr-lifecycle"}
-                      ai.miniforge/evidence-bundle {:local/root "components/evidence-bundle"}}}
+                      ai.miniforge/evidence-bundle {:local/root "components/evidence-bundle"}
+                      ai.miniforge/policy-pack {:local/root "components/policy-pack"}
+                      ai.miniforge/pr-train {:local/root "components/pr-train"}
+                      ai.miniforge/repo-dag {:local/root "components/repo-dag"}}}
 
   :conformance {:extra-paths ["development/test"
                               "tests/conformance"
