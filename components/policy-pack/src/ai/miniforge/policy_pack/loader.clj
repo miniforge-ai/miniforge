@@ -85,14 +85,18 @@
 (defn- normalize-rule
   "Normalize a rule, ensuring required fields and types."
   [rule]
-  (-> rule
-      (update :rule/applies-to #(or % {}))
-      (update-in [:rule/applies-to :task-types]
-                 #(when % (if (set? %) % (set %))))
-      (update-in [:rule/applies-to :repo-types]
-                 #(when % (if (set? %) % (set %))))
-      (update-in [:rule/applies-to :phases]
-                 #(when % (if (set? %) % (set %))))))
+  (cond-> rule
+    (not (:rule/applies-to rule))
+    (assoc :rule/applies-to {})
+
+    (get-in rule [:rule/applies-to :task-types])
+    (update-in [:rule/applies-to :task-types] #(if (set? %) % (set %)))
+
+    (get-in rule [:rule/applies-to :repo-types])
+    (update-in [:rule/applies-to :repo-types] #(if (set? %) % (set %)))
+
+    (get-in rule [:rule/applies-to :phases])
+    (update-in [:rule/applies-to :phases] #(if (set? %) % (set %)))))
 
 (defn- normalize-pack
   "Normalize a pack, ensuring required fields and types."

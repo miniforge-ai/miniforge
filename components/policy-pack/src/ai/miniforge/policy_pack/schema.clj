@@ -85,7 +85,7 @@
   [:map
    [:task-types {:optional true} [:set TaskType]]
    [:file-globs {:optional true} [:vector string?]]
-   [:resource-patterns {:optional true} [:vector [:or string? [:re {:error/message "should be a regex pattern"}]]]]
+   [:resource-patterns {:optional true} [:vector [:or string? [:fn {:error/message "should be a regex pattern"} #(instance? java.util.regex.Pattern %)]]]]
    [:repo-types {:optional true} [:set RepoType]]
    [:phases {:optional true} [:set keyword?]]])
 
@@ -102,8 +102,8 @@
    - :custom-fn - Symbol for custom detection function"
   [:map
    [:type DetectionType]
-   [:pattern {:optional true} [:or string? [:re {:error/message "should be a regex pattern"}]]]
-   [:patterns {:optional true} [:vector [:or string? [:re {:error/message "should be a regex pattern"}]]]]
+   [:pattern {:optional true} [:or string? [:fn {:error/message "should be a regex pattern"} #(instance? java.util.regex.Pattern %)]]]
+   [:patterns {:optional true} [:vector [:or string? [:fn {:error/message "should be a regex pattern"} #(instance? java.util.regex.Pattern %)]]]]
    [:context-lines {:optional true} pos-int?]
    [:custom-fn {:optional true} symbol?]])
 

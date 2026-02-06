@@ -125,12 +125,15 @@
   "Simple glob pattern matching.
    Supports * (any within segment) and ** (any path segments)."
   [pattern path]
-  (let [regex-pattern (-> pattern
-                          (str/replace "." "\\.")
-                          (str/replace "**" "<<<GLOBSTAR>>>")
-                          (str/replace "*" "[^/]*")
-                          (str/replace "<<<GLOBSTAR>>>" ".*")
-                          (str "^" "$"))]
+  (let [regex-pattern (str "^"
+                          (-> pattern
+                              (str/replace "." "\\.")
+                              (str/replace "**/" "<<<GLOBSTAR_SLASH>>>")
+                              (str/replace "**" "<<<GLOBSTAR>>>")
+                              (str/replace "*" "[^/]*")
+                              (str/replace "<<<GLOBSTAR_SLASH>>>" "(.*/)?")
+                              (str/replace "<<<GLOBSTAR>>>" ".*"))
+                          "$")]
     (try
       (boolean (re-matches (re-pattern regex-pattern) path))
       (catch Exception _

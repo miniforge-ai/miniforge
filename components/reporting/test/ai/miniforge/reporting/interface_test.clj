@@ -73,7 +73,7 @@
       (is (contains? status :alerts))
       
       ;; Check workflow counts
-      (is (= 1 (get-in status [:workflows :running])))
+      (is (= 1 (get-in status [:workflows :active])))
       (is (= 1 (get-in status [:workflows :completed])))
       (is (= 1 (get-in status [:workflows :failed])))
       
@@ -206,13 +206,13 @@
       (is (uuid? sub-id))
       
       ;; Check subscription logged
-      (is (some #(= :reporting/subscription-created (:event %)) @entries))
+      (is (some #(= :reporting/subscription-created (:log/event %)) @entries))
       
       ;; Unsubscribe
       (is (true? (reporting/unsubscribe reporting sub-id)))
       
       ;; Check unsubscribe logged
-      (is (some #(= :reporting/subscription-removed (:event %)) @entries)))))
+      (is (some #(= :reporting/subscription-removed (:log/event %)) @entries)))))
 
 (deftest test-poll-events
   (testing "poll-events returns empty for new subscription"

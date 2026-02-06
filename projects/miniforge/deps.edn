@@ -24,7 +24,17 @@
         ai.miniforge/evidence-bundle {:local/root "../../components/evidence-bundle"}
         ;; DAG orchestration components
         ai.miniforge/dag-executor {:local/root "../../components/dag-executor"}
-        ai.miniforge/pr-lifecycle {:local/root "../../components/pr-lifecycle"}}
+        ai.miniforge/pr-lifecycle {:local/root "../../components/pr-lifecycle"}
+        ;; Multi-repo PR management
+        ai.miniforge/repo-dag {:local/root "../../components/repo-dag"}
+        ai.miniforge/pr-train {:local/root "../../components/pr-train"}
+        ai.miniforge/policy-pack {:local/root "../../components/policy-pack"}
+        ;; Tool registry with LSP support
+        ai.miniforge/tool-registry {:local/root "../../components/tool-registry"}
+        ;; Meta-loop orchestration
+        ai.miniforge/operator {:local/root "../../components/operator"}
+        ai.miniforge/orchestrator {:local/root "../../components/orchestrator"}
+        ai.miniforge/reporting {:local/root "../../components/reporting"}}
 
  :aliases
  {:uberjar

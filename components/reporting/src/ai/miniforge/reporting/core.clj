@@ -98,7 +98,7 @@
              :message (str (:failed workflow-stats) " failed workflow(s)")})
       
       (and operator-component
-           (> (safe-get op/get-proposals operator-component {:status :proposed}) 5))
+           (> (count (safe-get op/get-proposals operator-component {:status :proposed})) 5))
       (conj {:type :pending-improvements
              :severity :warning
              :message "Multiple pending improvements awaiting review"}))))
