@@ -63,7 +63,8 @@
       :execution/files-written #{}}
      ;; Merge opts into top-level context so :llm-backend is accessible to agents
      (select-keys opts [:llm-backend :artifact-store :on-phase-start :on-phase-complete
-                       :executor :environment-id :sandbox-workdir]))))
+                       :executor :environment-id :sandbox-workdir
+                       :on-chunk :event-stream :worktree-path]))))
 
 (defn merge-metrics
   "Merge phase metrics into execution metrics."

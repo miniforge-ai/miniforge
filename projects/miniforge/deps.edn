@@ -34,7 +34,9 @@
         ;; Meta-loop orchestration
         ai.miniforge/operator {:local/root "../../components/operator"}
         ai.miniforge/orchestrator {:local/root "../../components/orchestrator"}
-        ai.miniforge/reporting {:local/root "../../components/reporting"}}
+        ai.miniforge/reporting {:local/root "../../components/reporting"}
+        ;; Event streaming and observability
+        ai.miniforge/event-stream {:local/root "../../components/event-stream"}}
 
  :aliases
  {:uberjar
