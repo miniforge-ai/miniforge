@@ -13,18 +13,7 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.cli.web
-  "Web-based fleet dashboard using htmx.
-
-   Provides an elegant web UX for managing AI-generated PRs across
-   multiple repositories. Uses htmx for interactive updates without
-   full page reloads.
-
-   Features:
-   - Two-pane layout (repo tree + detail view)
-   - PR risk analysis and scoring
-   - Batch operations (approve safe PRs)
-   - Real-time updates via htmx polling
-   - Dark theme optimized for developers"
+  "Fleet dashboard web server with htmx."
   (:require
    [babashka.process :as process]
    [clojure.java.io :as io]
@@ -37,16 +26,23 @@
    [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Configuration
 
 (def ^:dynamic *port* 8787)
 (def ^:private server-atom (atom nil))
-
-;; Global event streams for workflow observability (keyed by workflow-id)
 (def ^:private workflow-streams (atom {}))
 
+(defn- html-response [body]
+  {:status 200
+   :headers {"Content-Type" "text/html; charset=utf-8"}
+   :body (str body)})
+
+(defn- not-found [msg]
+  {:status 404 :body msg})
+
+(defn- bad-request [msg]
+  {:status 400 :body msg})
+
 ;------------------------------------------------------------------------------ Layer 1
-;; Risk analysis (reused from tui.clj)
 
 (def risk-colors
   {:low "#22c55e"      ; green-500
@@ -58,9 +54,7 @@
    :medium "rgba(234, 179, 8, 0.1)"
    :high "rgba(239, 68, 68, 0.1)"})
 
-(defn analyze-pr-risk
-  "Analyze a PR and return risk assessment."
-  [{:keys [title additions deletions changedFiles]}]
+(defn analyze-pr-risk [{:keys [title additions deletions changedFiles]}]
   (let [total-changes (+ (or additions 0) (or deletions 0))
         file-count (or changedFiles 0)
         title-lower (str/lower-case (or title ""))
@@ -118,11 +112,8 @@
      :file-count file-count}))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; GitHub integration
 
-(defn fetch-prs-for-repo
-  "Fetch PRs for a single repository."
-  [repo]
+(defn fetch-prs-for-repo [repo]
   (let [result (process/sh "gh" "pr" "list" "--repo" repo
                            "--json" "number,title,state,author,url,additions,deletions,changedFiles,createdAt,labels"
                            "--limit" "50")]
@@ -135,18 +126,14 @@
                         :analysis (analyze-pr-risk pr)))))
         (catch Exception _ [])))))
 
-(defn fetch-all-prs
-  "Fetch PRs for all configured repos."
-  [repos]
+(defn fetch-all-prs [repos]
   (vec (for [repo repos
              :let [prs (fetch-prs-for-repo repo)]
              :when prs]
          {:repo repo
           :prs prs})))
 
-(defn approve-pr!
-  "Approve a PR via gh CLI."
-  [repo number]
+(defn approve-pr! [repo number]
   (let [result (process/sh "gh" "pr" "review" (str number)
                            "--repo" repo "--approve")]
     {:success (zero? (:exit result))
@@ -154,9 +141,7 @@
                 (str "✓ PR #" number " approved successfully")
                 (str "❌ Failed to approve PR #" number ": " (str/trim (or (:err result) (:out result) "Unknown error. Check gh CLI authentication."))))}))
 
-(defn request-changes!
-  "Request changes on a PR."
-  [repo number reason]
+(defn request-changes! [repo number reason]
   (let [result (process/sh "gh" "pr" "review" (str number)
                            "--repo" repo
                            "--request-changes"
@@ -166,31 +151,23 @@
                 (str "✓ Changes requested on PR #" number)
                 (str "❌ Failed to request changes: " (str/trim (or (:err result) (:out result) "Unknown error. Check gh CLI authentication."))))}))
 
-(defn fetch-pr-diff
-  "Fetch the diff for a PR."
-  [repo number]
+(defn fetch-pr-diff [repo number]
   (let [result (process/sh "gh" "pr" "diff" (str number) "--repo" repo)]
     (when (zero? (:exit result))
       (:out result))))
 
-(defn fetch-pr-body
-  "Fetch the PR description/body."
-  [repo number]
+(defn fetch-pr-body [repo number]
   (let [result (process/sh "gh" "pr" "view" (str number) "--repo" repo "--json" "body,title,labels")]
     (when (zero? (:exit result))
       (try
         (json/parse-string (:out result) true)
         (catch Exception _ nil)))))
 
-(defn check-claude-cli
-  "Check if Claude CLI is available."
-  []
+(defn check-claude-cli []
   (let [result (process/sh "which" "claude")]
     (zero? (:exit result))))
 
-(defn generate-pr-summary
-  "Generate an AI summary of a PR for quick decision making."
-  [repo number]
+(defn generate-pr-summary [repo number]
   (if-not (check-claude-cli)
     {:success false
      :summary "Claude CLI not available. Install from https://claude.ai/download or run: brew install anthropics/claude/claude"}
@@ -215,9 +192,7 @@
             {:success false
              :summary (str "Claude CLI error: " (str/trim (or (:err result) (:out result) "Unknown error")))}))))))
 
-(defn chat-with-claude
-  "Send a chat message to Claude about a PR."
-  [repo number question diff-context]
+(defn chat-with-claude [repo number question diff-context]
   (if-not (check-claude-cli)
     {:success false
      :response "❌ Claude CLI not available. Install from https://claude.ai/download or run: brew install anthropics/claude/claude"}
@@ -233,20 +208,15 @@
          :response (str "❌ Claude CLI error: " (str/trim (or (:err result) (:out result) "Unknown error. Ensure Claude CLI is properly configured.")))}))))
 
 ;------------------------------------------------------------------------------ Layer 2.5
-;; Fleet Health/Status
 
-(defn check-gh-cli-status
-  "Check if gh CLI is available and authenticated."
-  []
+(defn check-gh-cli-status []
   (let [result (process/sh "gh" "auth" "status")]
     {:available (zero? (:exit result))
      :message (if (zero? (:exit result))
                 "Authenticated"
                 "Not authenticated")}))
 
-(defn fetch-workflow-runs
-  "Fetch recent workflow runs for a repo."
-  [repo]
+(defn fetch-workflow-runs [repo]
   (let [result (process/sh "gh" "run" "list" "--repo" repo
                            "--json" "workflowName,status,conclusion,createdAt,databaseId"
                            "--limit" "10")]
@@ -256,9 +226,7 @@
         (catch Exception _ []))
       [])))
 
-(defn get-workflow-status
-  "Get aggregated workflow status across repos."
-  [repos]
+(defn get-workflow-status [repos]
   (let [all-runs (mapcat #(map (fn [run] (assoc run :repo %))
                                (fetch-workflow-runs %)) repos)
         running (filter #(= "in_progress" (:status %)) all-runs)
@@ -277,9 +245,7 @@
      :succeeded (count succeeded)
      :runs recent-runs}))
 
-(defn format-time-ago
-  "Convert ISO timestamp to human-readable relative time."
-  [iso-timestamp]
+(defn format-time-ago [iso-timestamp]
   (try
     (let [then (java.time.Instant/parse iso-timestamp)
           now (java.time.Instant/now)
@@ -294,16 +260,12 @@
         :else (str days "d ago")))
     (catch Exception _ "unknown")))
 
-(defn check-repo-status
-  "Check if a repo is accessible."
-  [repo]
+(defn check-repo-status [repo]
   (let [result (process/sh "gh" "repo" "view" repo "--json" "name")]
     {:accessible (zero? (:exit result))
      :repo repo}))
 
-(defn get-fleet-status
-  "Get overall fleet health status."
-  [repos]
+(defn get-fleet-status [repos]
   (let [gh-status (check-gh-cli-status)
         repo-statuses (when (:available gh-status)
                         (map check-repo-status repos))
@@ -320,9 +282,7 @@
                 :else :healthy)
      :last-check (java.time.Instant/now)}))
 
-(defn generate-fleet-summary
-  "Generate an executive summary of the fleet PR status."
-  [repos-with-prs]
+(defn generate-fleet-summary [repos-with-prs]
   (let [all-prs (mapcat :prs repos-with-prs)
         high-risk (filter #(= :high (get-in % [:analysis :risk])) all-prs)
         medium-risk (filter #(= :medium (get-in % [:analysis :risk])) all-prs)
@@ -351,14 +311,11 @@
                        (str "Mixed risk levels - review " (count high-risk) " high, " (count medium-risk) " medium risk PRs"))}))
 
 ;------------------------------------------------------------------------------ Layer 3
-;; HTML Components
 
 (def css-styles
   (slurp (io/file "bases/cli/resources/dashboard.css")))
 
-(defn render-page
-  "Render the main HTML page."
-  [body]
+(defn render-page [body]
   (str
    "<!DOCTYPE html>"
    (h/html
@@ -394,9 +351,7 @@
         });
       ")]]])))
 
-(defn render-workflow-status
-  "Render the workflow status widget."
-  [repos]
+(defn render-workflow-status [repos]
   (let [status (get-workflow-status repos)
         {:keys [running failed succeeded runs]} status
         status-icon (fn [run]
@@ -431,9 +386,7 @@
          [:div {:style "color: var(--text-muted); font-size: 12px; text-align: center;"}
           "No recent workflows"])]])))
 
-(defn render-repo-tree
-  "Render the repository tree sidebar."
-  [repos-with-prs selected-pr]
+(defn render-repo-tree [repos-with-prs selected-pr]
   (h/html
    [:div.sidebar
     [:div.sidebar-header
@@ -467,9 +420,7 @@
      ;; Workflow status widget
      (render-workflow-status (map :repo repos-with-prs))]]))
 
-(defn render-ai-summary
-  "Render the AI-generated summary section."
-  [summary]
+(defn render-ai-summary [summary]
   (h/html
    [:div.ai-summary
     [:div.ai-summary-header
@@ -477,9 +428,7 @@
      [:span "AI Analysis"]]
     [:div.ai-summary-content (:summary summary)]]))
 
-(defn render-ai-summary-placeholder
-  "Render placeholder to generate AI summary with auto-trigger."
-  [repo number]
+(defn render-ai-summary-placeholder [repo number]
   (h/html
    [:div
     {:hx-post (str "/api/pr/" (java.net.URLEncoder/encode repo "UTF-8") "/" number "/summary")
@@ -489,9 +438,7 @@
     [:div {:style "color: var(--text-muted); font-style: italic; padding: 12px;"}
      "🤖 Generating AI summary..."]]))
 
-(defn render-pr-detail
-  "Render the PR detail panel."
-  [{:keys [number title author url repo additions deletions analysis]}]
+(defn render-pr-detail [{:keys [number title author url repo additions deletions analysis]}]
   (let [{:keys [risk complexity summary suggested-action reasons total-changes file-count]} analysis]
     (h/html
      [:div
@@ -603,18 +550,14 @@
            :autocomplete "off"}]
          [:button.btn.btn-primary {:type "submit"} "Ask"]]]]])))
 
-(defn render-chat-message
-  "Render a chat message exchange."
-  [question response]
+(defn render-chat-message [question response]
   (h/html
    [:div
     [:div.chat-message.user question]
     [:div.chat-message.assistant
      [:pre {:style "white-space: pre-wrap; word-wrap: break-word;"} response]]]))
 
-(defn render-status-indicator
-  "Render the fleet status indicator."
-  [status]
+(defn render-status-indicator [status]
   (let [status-class (name (:overall status))
         status-text (case (:overall status)
                       :healthy "All systems operational"
@@ -630,9 +573,7 @@
       [:span.status-dot]
       [:span status-text]])))
 
-(defn render-fleet-summary
-  "Render the fleet summary banner with actionable recommendation."
-  [summary]
+(defn render-fleet-summary [summary]
   (let [{:keys [total recommendation high-risk medium-risk low-risk]} summary
         icon (cond
                (pos? (:count high-risk)) "🚨"
@@ -662,9 +603,7 @@
     [:p {:style "margin-top: 8px;"}
      "Choose a pull request from the list to see AI analysis and take actions."]]))
 
-(defn render-dashboard
-  "Render the full dashboard."
-  [repos-with-prs selected-pr fleet-status]
+(defn render-dashboard [repos-with-prs selected-pr fleet-status]
   (let [all-prs (mapcat :prs repos-with-prs)
         pr-counts {:total (count all-prs)
                    :low (count (filter #(= :low (get-in % [:analysis :risk])) all-prs))
@@ -710,9 +649,7 @@
 
       [:div#toast-container]])))
 
-(defn render-toast
-  "Render a toast notification."
-  [message success?]
+(defn render-toast [message success?]
   (h/html
    [:div.toast {:class (if success? "toast-success" "toast-error")
                 :hx-swap-oob "true"
@@ -720,241 +657,203 @@
     message]))
 
 ;------------------------------------------------------------------------------ Layer 4
-;; HTTP handlers
 
 (defn- parse-repos-from-config []
-  (let [config-path (str (System/getProperty "user.home") "/.miniforge/config.edn")]
-    (if (.exists (java.io.File. config-path))
-      (-> (slurp config-path)
-          (edn/read-string)
-          (get-in [:fleet :repos] []))
-      [])))
+  (-> (str (System/getProperty "user.home") "/.miniforge/config.edn")
+      java.io.File.
+      (as-> f (when (.exists f) (slurp f)))
+      (some-> edn/read-string (get-in [:fleet :repos]))
+      (or [])))
 
-(defn handler
-  "Main HTTP request handler."
-  [{:keys [uri request-method] :as req}]
+(defn- parse-pr-path [uri]
+  (let [path-parts (str/split (subs uri 8) #"/")]
+    {:repo (java.net.URLDecoder/decode (first path-parts) "UTF-8")
+     :number (Integer/parseInt (second path-parts))}))
+
+(defn- parse-body-question [req]
+  (when-let [body-str (some-> req :body slurp)]
+    (cond
+      (str/starts-with? (str/trim body-str) "{")
+      (get (json/parse-string body-str) "question")
+
+      (str/includes? body-str "=")
+      (->> (str/split body-str #"&")
+           (keep (fn [pair]
+                   (let [[k v] (str/split pair #"=" 2)]
+                     (when (and k v (= k "question"))
+                       (java.net.URLDecoder/decode v "UTF-8")))))
+           first))))
+
+(defn- handle-index [repos]
+  (->> (render-dashboard (fetch-all-prs repos) nil (get-fleet-status repos))
+       render-page
+       html-response))
+
+(defn- handle-refresh [repos]
+  (let [repos-with-prs (fetch-all-prs repos)]
+    (->> (str (render-repo-tree repos-with-prs nil)
+              (h/html [:div#detail-panel.detail-panel (render-empty-detail)]))
+         html-response)))
+
+(defn- handle-pr-detail [uri]
+  (let [{:keys [repo number]} (parse-pr-path uri)
+        pr (->> (fetch-prs-for-repo repo)
+                (filter #(= (:number %) number))
+                first)]
+    (if pr
+      (html-response (render-pr-detail pr))
+      (not-found "PR not found"))))
+
+(defn- handle-approve [uri]
+  (let [{:keys [repo number]} (parse-pr-path uri)
+        result (approve-pr! repo number)]
+    (html-response (render-toast (:message result) (:success result)))))
+
+(defn- handle-reject [uri req]
+  (let [{:keys [repo number]} (parse-pr-path uri)
+        reason (get-in req [:headers "hx-prompt"] "Changes requested")
+        result (request-changes! repo number reason)]
+    (html-response (render-toast (:message result) (:success result)))))
+
+(defn- handle-batch-approve [repos]
+  (let [safe-prs (->> (fetch-all-prs repos)
+                      (mapcat :prs)
+                      (filter #(= :low (get-in % [:analysis :risk]))))
+        results (doall (for [{:keys [repo number]} safe-prs]
+                         (approve-pr! repo number)))
+        success-count (count (filter :success results))]
+    (html-response (render-toast (str "Approved " success-count " of " (count safe-prs) " PRs")
+                                 (= success-count (count safe-prs))))))
+
+(defn- handle-chat [uri req]
+  (let [{:keys [repo number]} (parse-pr-path uri)
+        question (or (parse-body-question req) "What are the key changes in this PR?")
+        diff (fetch-pr-diff repo number)
+        response (if diff
+                   (:response (chat-with-claude repo number question diff))
+                   "Could not fetch PR diff. Make sure you have access to this repository.")]
+    (html-response (render-chat-message question response))))
+
+(defn- handle-status [repos]
+  (->> (get-fleet-status repos)
+       render-status-indicator
+       html-response))
+
+(defn- handle-summary [uri]
+  (let [{:keys [repo number]} (parse-pr-path uri)
+        result (generate-pr-summary repo number)]
+    (html-response
+     (if (:success result)
+       (render-ai-summary result)
+       (h/html [:div.ai-summary
+                [:div.ai-summary-header [:span "⚠️"] [:span "Summary Unavailable"]]
+                [:div.ai-summary-content {:style "color: var(--text-muted)"}
+                 (:summary result)]])))))
+
+(defn- handle-workflows [repos]
+  (html-response (render-workflow-status repos)))
+
+(defn- get-or-create-stream [workflow-id]
+  (or (get @workflow-streams workflow-id)
+      (let [stream (es/create-event-stream)]
+        (swap! workflow-streams assoc workflow-id stream)
+        stream)))
+
+(defn- sse-on-open [workflow-id channel]
+  (let [event-stream (get-or-create-stream workflow-id)
+        sub-id (random-uuid)]
+    (swap! workflow-streams assoc-in [workflow-id :subscribers channel] sub-id)
+    (http/send! channel
+                {:status 200
+                 :headers {"Content-Type" "text/event-stream"
+                           "Cache-Control" "no-cache"
+                           "Connection" "keep-alive"
+                           "Access-Control-Allow-Origin" "*"}}
+                false)
+    (es/subscribe! event-stream sub-id
+                   (fn [event]
+                     (http/send! channel
+                                 (str "event: " (name (:event/type event)) "\n"
+                                      "data: " (json/generate-string event) "\n\n")
+                                 false)))))
+
+(defn- sse-on-close [workflow-id channel]
+  (when-let [sub-id (get-in @workflow-streams [workflow-id :subscribers channel])]
+    (when-let [event-stream (get @workflow-streams workflow-id)]
+      (es/unsubscribe! event-stream sub-id))
+    (swap! workflow-streams update-in [workflow-id :subscribers] dissoc channel)))
+
+(defn- handle-workflow-stream [uri req]
+  (let [workflow-id-str (second (re-find #"/api/workflows/([^/]+)/stream" uri))
+        workflow-id (try (java.util.UUID/fromString workflow-id-str)
+                         (catch Exception _ nil))]
+    (if-not workflow-id
+      (bad-request "Invalid workflow ID")
+      (http/as-channel req
+        {:on-open (partial sse-on-open workflow-id)
+         :on-close (partial sse-on-close workflow-id)}))))
+
+(defn handler [{:keys [uri request-method] :as req}]
   (let [repos (parse-repos-from-config)]
     (cond
-      ;; Main page
       (and (= uri "/") (= request-method :get))
-      (let [repos-with-prs (fetch-all-prs repos)
-            fleet-status (get-fleet-status repos)]
-        {:status 200
-         :headers {"Content-Type" "text/html; charset=utf-8"}
-         :body (render-page (render-dashboard repos-with-prs nil fleet-status))})
+      (handle-index repos)
 
-      ;; Refresh data
       (and (= uri "/api/refresh") (= request-method :get))
-      (let [repos-with-prs (fetch-all-prs repos)]
-        {:status 200
-         :headers {"Content-Type" "text/html; charset=utf-8"}
-         :body (str (render-repo-tree repos-with-prs nil)
-                    (h/html [:div#detail-panel.detail-panel (render-empty-detail)]))})
+      (handle-refresh repos)
 
-      ;; Get PR detail
-      (and (str/starts-with? uri "/api/pr/") (= request-method :get))
-      (let [path-parts (str/split (subs uri 8) #"/")
-            repo (java.net.URLDecoder/decode (first path-parts) "UTF-8")
-            number (Integer/parseInt (second path-parts))
-            prs (fetch-prs-for-repo repo)
-            pr (first (filter #(= (:number %) number) prs))]
-        (if pr
-          {:status 200
-           :headers {"Content-Type" "text/html; charset=utf-8"}
-           :body (str (render-pr-detail pr))}
-          {:status 404
-           :body "PR not found"}))
-
-      ;; Approve PR
-      (and (str/starts-with? uri "/api/pr/") (str/ends-with? uri "/approve") (= request-method :post))
-      (let [path-parts (str/split (subs uri 8) #"/")
-            repo (java.net.URLDecoder/decode (first path-parts) "UTF-8")
-            number (Integer/parseInt (second path-parts))
-            result (approve-pr! repo number)]
-        {:status 200
-         :headers {"Content-Type" "text/html; charset=utf-8"}
-         :body (str (render-toast (:message result) (:success result)))})
-
-      ;; Request changes on PR
-      (and (str/starts-with? uri "/api/pr/") (str/ends-with? uri "/reject") (= request-method :post))
-      (let [path-parts (str/split (subs uri 8) #"/")
-            repo (java.net.URLDecoder/decode (first path-parts) "UTF-8")
-            number (Integer/parseInt (second path-parts))
-            ;; Get reason from hx-prompt header
-            reason (get-in req [:headers "hx-prompt"] "Changes requested")
-            result (request-changes! repo number reason)]
-        {:status 200
-         :headers {"Content-Type" "text/html; charset=utf-8"}
-         :body (str (render-toast (:message result) (:success result)))})
-
-      ;; Batch approve safe PRs
-      (and (= uri "/api/batch-approve") (= request-method :post))
-      (let [repos-with-prs (fetch-all-prs repos)
-            safe-prs (filter #(= :low (get-in % [:analysis :risk]))
-                             (mapcat :prs repos-with-prs))
-            results (for [{:keys [repo number]} safe-prs]
-                      (approve-pr! repo number))
-            success-count (count (filter :success results))]
-        {:status 200
-         :headers {"Content-Type" "text/html; charset=utf-8"}
-         :body (str (render-toast (str "Approved " success-count " of " (count safe-prs) " PRs")
-                                  (= success-count (count safe-prs))))})
-
-      ;; Chat with AI about PR
-      (and (str/starts-with? uri "/api/pr/") (str/ends-with? uri "/chat") (= request-method :post))
-      (let [path-parts (str/split (subs uri 8) #"/")
-            repo (java.net.URLDecoder/decode (first path-parts) "UTF-8")
-            number (Integer/parseInt (second path-parts))
-            ;; Parse form body - could be URL-encoded or JSON
-            body-str (when-let [body (:body req)]
-                       (slurp body))
-            ;; Try to parse as JSON first (from hx-vals), then URL-encoded
-            question (cond
-                       ;; JSON body from hx-vals
-                       (and body-str (str/starts-with? (str/trim body-str) "{"))
-                       (get (json/parse-string body-str) "question" "What are the key changes?")
-
-                       ;; URL-encoded form data
-                       (and body-str (str/includes? body-str "="))
-                       (let [params (into {} (for [pair (str/split body-str #"&")
-                                                   :let [[k v] (str/split pair #"=" 2)]
-                                                   :when (and k v)]
-                                               [(keyword k) (java.net.URLDecoder/decode v "UTF-8")]))]
-                         (or (:question params) "What are the key changes?"))
-
-                       :else "What are the key changes in this PR?")
-            _ (println "Chat request for PR #" number "in" repo "- Question:" question)
-            diff (fetch-pr-diff repo number)]
-        (if diff
-          (let [result (chat-with-claude repo number question diff)]
-            {:status 200
-             :headers {"Content-Type" "text/html; charset=utf-8"}
-             :body (str (render-chat-message question (:response result)))})
-          {:status 200
-           :headers {"Content-Type" "text/html; charset=utf-8"}
-           :body (str (render-chat-message question "Could not fetch PR diff. Make sure you have access to this repository."))}))
-
-      ;; Get fleet status
       (and (= uri "/api/status") (= request-method :get))
-      (let [fleet-status (get-fleet-status repos)]
-        {:status 200
-         :headers {"Content-Type" "text/html; charset=utf-8"}
-         :body (str (render-status-indicator fleet-status))})
+      (handle-status repos)
 
-      ;; Generate AI summary for PR
-      (and (str/starts-with? uri "/api/pr/") (str/ends-with? uri "/summary") (= request-method :post))
-      (let [path-parts (str/split (subs uri 8) #"/")
-            repo (java.net.URLDecoder/decode (first path-parts) "UTF-8")
-            number (Integer/parseInt (second path-parts))
-            _ (println "Generating AI summary for PR #" number "in" repo)
-            result (generate-pr-summary repo number)]
-        {:status 200
-         :headers {"Content-Type" "text/html; charset=utf-8"}
-         :body (str (if (:success result)
-                      (render-ai-summary result)
-                      (h/html [:div.ai-summary
-                               [:div.ai-summary-header [:span "⚠️"] [:span "Summary Unavailable"]]
-                               [:div.ai-summary-content {:style "color: var(--text-muted)"}
-                                (:summary result)]])))})
-
-      ;; Get workflow status
       (and (= uri "/api/workflows") (= request-method :get))
-      {:status 200
-       :headers {"Content-Type" "text/html; charset=utf-8"}
-       :body (str (render-workflow-status repos))}
+      (handle-workflows repos)
 
-      ;; SSE endpoint for workflow event streaming
-      ;; GET /api/workflows/:id/stream
+      (and (= uri "/api/batch-approve") (= request-method :post))
+      (handle-batch-approve repos)
+
       (and (re-matches #"/api/workflows/[^/]+/stream" uri) (= request-method :get))
-      (let [workflow-id-str (second (re-find #"/api/workflows/([^/]+)/stream" uri))
-            workflow-id (try (java.util.UUID/fromString workflow-id-str)
-                             (catch Exception _ nil))]
-        (if-not workflow-id
-          {:status 400
-           :body "Invalid workflow ID"}
-          ;; Use http-kit's as-channel for SSE (with-channel is deprecated)
-          (http/as-channel req
-            {:on-open
-             (fn [channel]
-               (let [;; Get or create event stream for this workflow
-                     event-stream (or (get @workflow-streams workflow-id)
-                                      (let [stream (es/create-event-stream)]
-                                        (swap! workflow-streams assoc workflow-id stream)
-                                        stream))
-                     ;; Create unique subscriber ID
-                     sub-id (random-uuid)]
-                 ;; Store sub-id in channel for cleanup
-                 (swap! workflow-streams assoc-in [workflow-id :subscribers channel] sub-id)
-                 ;; Send SSE headers
-                 (http/send! channel
-                             {:status 200
-                              :headers {"Content-Type" "text/event-stream"
-                                        "Cache-Control" "no-cache"
-                                        "Connection" "keep-alive"
-                                        "Access-Control-Allow-Origin" "*"}}
-                             false)
-                 ;; Subscribe to events
-                 (es/subscribe! event-stream sub-id
-                                (fn [event]
-                                  (let [event-type (name (:event/type event))
-                                        event-data (json/generate-string event)]
-                                    (http/send! channel
-                                                (str "event: " event-type "\n"
-                                                     "data: " event-data "\n\n")
-                                                false))))))
-             :on-close
-             (fn [channel _status]
-               ;; Cleanup subscription
-               (when-let [sub-id (get-in @workflow-streams [workflow-id :subscribers channel])]
-                 (when-let [event-stream (get @workflow-streams workflow-id)]
-                   (es/unsubscribe! event-stream sub-id))
-                 (swap! workflow-streams update-in [workflow-id :subscribers] dissoc channel)))})))
+      (handle-workflow-stream uri req)
 
-      ;; 404
+      (and (str/starts-with? uri "/api/pr/") (str/ends-with? uri "/approve") (= request-method :post))
+      (handle-approve uri)
+
+      (and (str/starts-with? uri "/api/pr/") (str/ends-with? uri "/reject") (= request-method :post))
+      (handle-reject uri req)
+
+      (and (str/starts-with? uri "/api/pr/") (str/ends-with? uri "/chat") (= request-method :post))
+      (handle-chat uri req)
+
+      (and (str/starts-with? uri "/api/pr/") (str/ends-with? uri "/summary") (= request-method :post))
+      (handle-summary uri)
+
+      (and (str/starts-with? uri "/api/pr/") (= request-method :get))
+      (handle-pr-detail uri)
+
       :else
-      {:status 404
-       :body "Not found"})))
+      (not-found "Not found"))))
 
 ;------------------------------------------------------------------------------ Layer 4.5
-;; Workflow stream management
 
-(defn register-workflow-stream!
-  "Register an event stream for a workflow so it can be streamed via SSE.
-
-   Arguments:
-   - workflow-id: UUID of the workflow
-   - event-stream: Event stream atom from es/create-event-stream
-
-   Call this from workflow_runner.clj to enable SSE streaming for a workflow."
-  [workflow-id event-stream]
+(defn register-workflow-stream! [workflow-id event-stream]
   (swap! workflow-streams assoc workflow-id event-stream)
   workflow-id)
 
-(defn unregister-workflow-stream!
-  "Unregister an event stream when workflow completes."
-  [workflow-id]
+(defn unregister-workflow-stream! [workflow-id]
   (swap! workflow-streams dissoc workflow-id)
   nil)
 
-(defn get-workflow-stream
-  "Get the event stream for a workflow, if registered."
-  [workflow-id]
+(defn get-workflow-stream [workflow-id]
   (get @workflow-streams workflow-id))
 
 ;------------------------------------------------------------------------------ Layer 5
-;; Server lifecycle
 
-(defn stop-server!
-  "Stop the web server."
-  []
+(defn stop-server! []
   (when-let [server @server-atom]
     (server)
     (reset! server-atom nil)
     (println "Server stopped.")))
 
-(defn start-server!
-  "Start the web server."
-  [& {:keys [port] :or {port *port*}}]
+(defn start-server! [& {:keys [port] :or {port *port*}}]
   (when @server-atom
     (stop-server!))
   (println (str "Starting fleet dashboard at http://localhost:" port))
