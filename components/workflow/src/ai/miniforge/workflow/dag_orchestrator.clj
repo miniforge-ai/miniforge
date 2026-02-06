@@ -31,6 +31,42 @@
    [ai.miniforge.task.interface :as task]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Result constructors
+
+(defn- workflow-success
+  "Construct a successful workflow result."
+  [artifact metrics]
+  {:success? true
+   :artifact artifact
+   :metrics (or metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0})})
+
+(defn- workflow-failure
+  "Construct a failed workflow result."
+  [error metrics]
+  {:success? false
+   :error error
+   :metrics (or metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0})})
+
+(defn- dag-execution-result
+  "Construct a DAG execution result."
+  [completed failed artifacts total-tokens]
+  {:success? (zero? failed)
+   :tasks-completed completed
+   :tasks-failed failed
+   :artifacts (vec artifacts)
+   :metrics {:tokens total-tokens}})
+
+(defn- dag-execution-error
+  "Construct a DAG execution error result."
+  [completed failed error]
+  {:success? false
+   :tasks-completed completed
+   :tasks-failed failed
+   :artifacts []
+   :metrics {}
+   :error error})
+
+;------------------------------------------------------------------------------ Layer 0
 ;; Plan analysis
 
 (defn- compute-max-level-width
@@ -181,14 +217,11 @@
         loop-result (loop/run-simple inner-task generate-fn loop-context)]
 
     (if (:success loop-result)
-      {:success? true
-       :artifact (:artifact loop-result)
-       :metrics (:metrics loop-result {:tokens 0 :cost-usd 0.0 :duration-ms 0})}
-      {:success? false
-       :error (or (:error loop-result)
-                  (get-in loop-result [:termination :message])
-                  "Inner loop failed")
-       :metrics (:metrics loop-result {:tokens 0 :cost-usd 0.0 :duration-ms 0})})))
+      (workflow-success (:artifact loop-result) (:metrics loop-result))
+      (workflow-failure (or (:error loop-result)
+                            (get-in loop-result [:termination :message])
+                            "Inner loop failed")
+                        (:metrics loop-result)))))
 
 (defn- workflow-result->dag-result
   "Convert mini-workflow result to DAG result format."
@@ -330,20 +363,13 @@
                               :failed failed
                               :iterations iteration}})
 
-            {:success? (zero? failed)
-             :tasks-completed completed
-             :tasks-failed failed
-             :artifacts (vec artifacts)
-             :metrics {:tokens total-tokens}})
+            (dag-execution-result completed failed artifacts total-tokens))
 
           ;; Safety limit
           (> iteration 100)
-          {:success? false
-           :tasks-completed (count completed-ids)
-           :tasks-failed (count failed-ids)
-           :artifacts []
-           :metrics {}
-           :error "Max iterations exceeded"}
+          (dag-execution-error (count completed-ids)
+                               (count failed-ids)
+                               "Max iterations exceeded")
 
           ;; Execute ready tasks
           :else
