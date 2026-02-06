@@ -256,7 +256,10 @@
             ;; Dispatch selected tasks
             dispatch-results (doall
                               (for [task-id tasks-to-dispatch]
-                                (dispatch-task-start run-atom task-id context)))]
+                                (let [result (dispatch-task-start run-atom task-id context)]
+                                  (when (and (result/ok? result) (:execute-task-fn context))
+                                    ((:execute-task-fn context) task-id context))
+                                  result)))]
 
         (when (and logger (seq tasks-to-dispatch))
           (log/info logger :dag-executor :scheduler/dispatched

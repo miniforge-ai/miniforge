@@ -25,6 +25,7 @@
         ;; DAG orchestration components
         ai.miniforge/dag-executor {:local/root "../../components/dag-executor"}
         ai.miniforge/pr-lifecycle {:local/root "../../components/pr-lifecycle"}
+        ai.miniforge/task-executor {:local/root "../../components/task-executor"}
         ;; Multi-repo PR management
         ai.miniforge/repo-dag {:local/root "../../components/repo-dag"}
         ai.miniforge/pr-train {:local/root "../../components/pr-train"}
