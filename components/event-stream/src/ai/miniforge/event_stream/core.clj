@@ -13,12 +13,7 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.event-stream.core
-  "Event bus and event constructors for workflow observability.
-
-   Implements the N3 Event Stream specification with:
-   - Pub/sub event bus with filtering
-   - N3-compliant event envelope constructors
-   - Per-workflow event sequencing"
+  "Event bus and event constructors for workflow observability."
   (:require
    [ai.miniforge.logging.interface :as log]))
 
@@ -30,19 +25,8 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event envelope constructor
 
-(defn- create-envelope
-  "Create base event envelope with required N3 fields.
-
-   Arguments:
-   - stream: Event stream atom (for sequence number)
-   - event-type: Keyword event type (e.g., :workflow/started)
-   - workflow-id: UUID of the workflow
-   - message: Human-readable message
-
-   Returns: Base event map with all required envelope fields."
-  [stream event-type workflow-id message]
+(defn- create-envelope [stream event-type workflow-id message]
   (let [seq-num (get-in @stream [:sequence-numbers workflow-id] 0)]
-    ;; Increment sequence number for this workflow
     (swap! stream assoc-in [:sequence-numbers workflow-id] (inc seq-num))
     {:event/type event-type
      :event/id (random-uuid)
@@ -55,40 +39,16 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Event bus operations
 
-(defn create-event-stream
-  "Create an event stream for publishing and subscribing to workflow events.
-
-   Options:
-   - :logger - Optional logger instance for debugging
-
-   Returns: Atom containing:
-   - :events - Vector of all events (append-only log)
-   - :subscribers - Map of subscriber-id -> callback fn
-   - :filters - Map of subscriber-id -> filter fn
-   - :sequence-numbers - Map of workflow-id -> current sequence number
-   - :logger - Optional logger"
-  [& [opts]]
+(defn create-event-stream [& [opts]]
   (atom {:events []
          :subscribers {}
          :filters {}
          :sequence-numbers {}
          :logger (:logger opts)}))
 
-(defn publish!
-  "Publish an event to the event stream.
-
-   Arguments:
-   - stream: Event stream atom
-   - event: Event map (must have :event/type and :workflow/id)
-
-   Notifies all subscribers whose filters match the event.
-   Returns the event."
-  [stream event]
+(defn publish! [stream event]
   (let [{:keys [subscribers filters logger]} @stream]
-    ;; Add to event log (append-only)
     (swap! stream update :events conj event)
-
-    ;; Notify matching subscribers
     (doseq [[sub-id callback] subscribers]
       (let [filter-fn (get filters sub-id (constantly true))]
         (when (filter-fn event)
@@ -101,7 +61,6 @@
                             :data {:subscriber-id sub-id
                                    :event-type (:event/type event)
                                    :error (.getMessage e)}})))))))
-
     (when logger
       (log/debug logger :event-stream :event/published
                  {:message "Event published"
@@ -111,15 +70,6 @@
     event))
 
 (defn subscribe!
-  "Subscribe to events on the event stream.
-
-   Arguments:
-   - stream: Event stream atom
-   - subscriber-id: Unique identifier for this subscriber
-   - callback: Function (fn [event] ...) called for matching events
-   - filter-fn: Optional predicate (fn [event] bool) to filter events
-
-   Returns subscriber-id."
   ([stream subscriber-id callback]
    (subscribe! stream subscriber-id callback (constantly true)))
   ([stream subscriber-id callback filter-fn]
@@ -130,9 +80,7 @@
                 (assoc-in [:filters subscriber-id] filter-fn))))
    subscriber-id))
 
-(defn unsubscribe!
-  "Unsubscribe from events."
-  [stream subscriber-id]
+(defn unsubscribe! [stream subscriber-id]
   (swap! stream
          (fn [s]
            (-> s
@@ -143,19 +91,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Query API
 
-(defn get-events
-  "Get events from the stream, optionally filtered.
-
-   Arguments:
-   - stream: Event stream atom
-   - opts: Options map with:
-     - :workflow-id - Filter by workflow
-     - :event-type - Filter by event type
-     - :offset - Skip first N events
-     - :limit - Return at most N events
-
-   Returns: Vector of events."
-  [stream & [opts]]
+(defn get-events [stream & [opts]]
   (let [{:keys [workflow-id event-type offset limit]} opts
         events (:events @stream)]
     (cond->> events
@@ -165,16 +101,7 @@
       limit (take limit)
       true vec)))
 
-(defn get-latest-status
-  "Get the most recent agent/status event for a workflow.
-
-   Arguments:
-   - stream: Event stream atom
-   - workflow-id: UUID of the workflow
-   - agent-id: Optional keyword agent ID
-
-   Returns: Most recent status event or nil."
-  [stream workflow-id & [agent-id]]
+(defn get-latest-status [stream workflow-id & [agent-id]]
   (->> (:events @stream)
        (filter #(= :agent/status (:event/type %)))
        (filter #(= workflow-id (:workflow/id %)))
@@ -184,40 +111,17 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Event constructors (N3 compliant)
 
-(defn workflow-started
-  "Create a workflow/started event.
-
-   Arguments:
-   - stream: Event stream atom
-   - workflow-id: UUID of the workflow
-   - spec: Optional workflow specification map"
-  [stream workflow-id & [spec]]
+(defn workflow-started [stream workflow-id & [spec]]
   (-> (create-envelope stream :workflow/started workflow-id "Workflow started")
       (cond-> spec (assoc :workflow/spec spec))))
 
-(defn phase-started
-  "Create a workflow/phase-started event.
-
-   Arguments:
-   - stream: Event stream atom
-   - workflow-id: UUID of the workflow
-   - phase: Keyword phase name (:plan, :implement, etc.)
-   - context: Optional phase context map"
-  [stream workflow-id phase & [context]]
+(defn phase-started [stream workflow-id phase & [context]]
   (-> (create-envelope stream :workflow/phase-started workflow-id
                        (str (name phase) " phase started"))
       (assoc :workflow/phase phase)
       (cond-> context (assoc :phase/context context))))
 
-(defn phase-completed
-  "Create a workflow/phase-completed event.
-
-   Arguments:
-   - stream: Event stream atom
-   - workflow-id: UUID of the workflow
-   - phase: Keyword phase name
-   - result: Phase result map with optional :outcome, :duration-ms, :artifacts"
-  [stream workflow-id phase & [result]]
+(defn phase-completed [stream workflow-id phase & [result]]
   (let [outcome (or (:outcome result) :success)]
     (-> (create-envelope stream :workflow/phase-completed workflow-id
                          (str (name phase) " phase " (name outcome)))
@@ -227,58 +131,25 @@
           (:duration-ms result) (assoc :phase/duration-ms (:duration-ms result))
           (:artifacts result) (assoc :phase/artifacts (:artifacts result))))))
 
-(defn agent-chunk
-  "Create an agent/chunk event for streaming output.
-
-   Arguments:
-   - stream: Event stream atom
-   - workflow-id: UUID of the workflow
-   - agent-id: Keyword agent ID
-   - delta: String chunk of output
-   - done?: Optional boolean indicating stream completion"
-  [stream workflow-id agent-id delta & [done?]]
+(defn agent-chunk [stream workflow-id agent-id delta & [done?]]
   (-> (create-envelope stream :agent/chunk workflow-id
                        (if done? "Agent stream completed" "Agent streaming"))
       (assoc :agent/id agent-id
              :chunk/delta delta)
       (cond-> done? (assoc :chunk/done? true))))
 
-(defn agent-status
-  "Create an agent/status event for real-time progress.
-
-   Arguments:
-   - stream: Event stream atom
-   - workflow-id: UUID of the workflow
-   - agent-id: Keyword agent ID
-   - status-type: Keyword status type (:reading, :thinking, :generating, etc.)
-   - message: Human-readable status message"
-  [stream workflow-id agent-id status-type message]
+(defn agent-status [stream workflow-id agent-id status-type message]
   (-> (create-envelope stream :agent/status workflow-id message)
       (assoc :agent/id agent-id
              :status/type status-type)))
 
-(defn workflow-completed
-  "Create a workflow/completed event.
-
-   Arguments:
-   - stream: Event stream atom
-   - workflow-id: UUID of the workflow
-   - status: Keyword status (:success, :failure, :cancelled)
-   - duration-ms: Optional total duration in milliseconds"
-  [stream workflow-id status & [duration-ms]]
+(defn workflow-completed [stream workflow-id status & [duration-ms]]
   (-> (create-envelope stream :workflow/completed workflow-id
                        (str "Workflow " (name status)))
       (assoc :workflow/status status)
       (cond-> duration-ms (assoc :workflow/duration-ms duration-ms))))
 
-(defn workflow-failed
-  "Create a workflow/failed event.
-
-   Arguments:
-   - stream: Event stream atom
-   - workflow-id: UUID of the workflow
-   - error: Error map or exception"
-  [stream workflow-id error]
+(defn workflow-failed [stream workflow-id error]
   (let [error-map (if (instance? Throwable error)
                     {:message (.getMessage ^Throwable error)
                      :type (str (type error))}
@@ -288,16 +159,7 @@
         (assoc :workflow/failure-reason (:message error-map)
                :workflow/error-details error-map))))
 
-(defn llm-request
-  "Create an llm/request event.
-
-   Arguments:
-   - stream: Event stream atom
-   - workflow-id: UUID of the workflow
-   - agent-id: Keyword agent ID
-   - model: String model name
-   - prompt-tokens: Optional token count"
-  [stream workflow-id agent-id model & [prompt-tokens]]
+(defn llm-request [stream workflow-id agent-id model & [prompt-tokens]]
   (-> (create-envelope stream :llm/request workflow-id
                        (str "Calling " model (when prompt-tokens (str " (" prompt-tokens " tokens)"))))
       (assoc :agent/id agent-id
@@ -305,17 +167,7 @@
              :llm/request-id (random-uuid))
       (cond-> prompt-tokens (assoc :llm/prompt-tokens prompt-tokens))))
 
-(defn llm-response
-  "Create an llm/response event.
-
-   Arguments:
-   - stream: Event stream atom
-   - workflow-id: UUID of the workflow
-   - agent-id: Keyword agent ID
-   - model: String model name
-   - request-id: UUID of the original request
-   - metrics: Map with :completion-tokens, :duration-ms, etc."
-  [stream workflow-id agent-id model request-id & [metrics]]
+(defn llm-response [stream workflow-id agent-id model request-id & [metrics]]
   (-> (create-envelope stream :llm/response workflow-id
                        (str "Response from " model
                             (when (:completion-tokens metrics)

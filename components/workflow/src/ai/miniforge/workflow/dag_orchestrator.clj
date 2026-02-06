@@ -13,16 +13,7 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.workflow.dag-orchestrator
-  "Orchestrates multi-task execution via DAG when plan has parallelizable tasks.
-
-   When the planner produces a plan with multiple tasks, this orchestrator:
-   1. Analyzes task dependencies to identify parallelization opportunities
-   2. Creates a DAG structure for the dag-executor
-   3. Dispatches each task as a mini-workflow (implement → verify)
-   4. Aggregates results for the parent workflow to continue
-
-   This enables miniforge to automatically decompose large tasks and
-   execute independent subtasks in parallel."
+  "Orchestrates parallel task execution via DAG scheduling."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
@@ -30,35 +21,26 @@
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.task.interface :as task]))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Result constructors
+;--- Layer 0: Result Constructors
 
-(defn- workflow-success
-  "Construct a successful workflow result."
-  [artifact metrics]
+(defn- workflow-success [artifact metrics]
   {:success? true
    :artifact artifact
    :metrics (or metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0})})
 
-(defn- workflow-failure
-  "Construct a failed workflow result."
-  [error metrics]
+(defn- workflow-failure [error metrics]
   {:success? false
    :error error
    :metrics (or metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0})})
 
-(defn- dag-execution-result
-  "Construct a DAG execution result."
-  [completed failed artifacts total-tokens]
+(defn- dag-execution-result [completed failed artifacts total-tokens]
   {:success? (zero? failed)
    :tasks-completed completed
    :tasks-failed failed
    :artifacts (vec artifacts)
    :metrics {:tokens total-tokens}})
 
-(defn- dag-execution-error
-  "Construct a DAG execution error result."
-  [completed failed error]
+(defn- dag-execution-error [completed failed error]
   {:success? false
    :tasks-completed completed
    :tasks-failed failed
@@ -66,156 +48,99 @@
    :metrics {}
    :error error})
 
-;------------------------------------------------------------------------------ Layer 0
-;; Plan analysis
+;--- Layer 0: Level Traversal
 
-(defn- compute-max-level-width
-  "Compute the maximum number of tasks that can run in parallel at any level.
+(defn- build-deps-map [tasks]
+  (->> tasks
+       (map (fn [t] [(:task/id t) (set (:task/dependencies t []))]))
+       (into {})))
 
-   Uses a level-by-level traversal of the dependency graph to find the widest level."
-  [tasks]
-  (let [deps-map (into {}
-                       (map (fn [t]
-                              [(:task/id t) (set (:task/dependencies t []))])
-                            tasks))]
-    (loop [remaining (set (map :task/id tasks))
-           completed #{}
-           max-width 0]
-      (if (empty? remaining)
-        max-width
-        (let [ready (filter (fn [id]
-                              (every? completed (get deps-map id #{})))
-                            remaining)
-              width (count ready)]
-          (recur (apply disj remaining ready)
-                 (into completed ready)
-                 (max max-width width)))))))
+(defn- traverse-levels [task-ids deps-map]
+  (loop [remaining (set task-ids)
+         completed #{}
+         level-count 0
+         max-width 0]
+    (if (empty? remaining)
+      {:levels level-count :max-width max-width}
+      (let [ready (->> remaining
+                       (filter #(every? completed (get deps-map % #{}))))
+            width (count ready)]
+        (recur (apply disj remaining ready)
+               (into completed ready)
+               (inc level-count)
+               (max max-width width))))))
 
-(defn parallelizable-plan?
-  "Check if a plan should be executed via DAG rather than sequentially.
+(defn- compute-max-level-width [tasks]
+  (-> tasks
+      ((juxt #(map :task/id %) build-deps-map))
+      ((fn [[ids deps]] (traverse-levels ids deps)))
+      :max-width))
 
-   A plan is parallelizable when at any level of the dependency graph,
-   more than one task can run concurrently.
+;--- Layer 0: Plan Analysis
 
-   Arguments:
-   - plan: Plan map from planner with :plan/tasks
-
-   Returns: boolean"
-  [plan]
+(defn parallelizable-plan? [plan]
   (let [tasks (:plan/tasks plan [])]
     (when (> (count tasks) 1)
       (> (compute-max-level-width tasks) 1))))
 
-(defn estimate-parallel-speedup
-  "Estimate the speedup factor from parallel execution.
-
-   Arguments:
-   - plan: Plan map with :plan/tasks
-
-   Returns: {:parallelizable? bool :max-parallel int :estimated-speedup float}"
-  [plan]
+(defn estimate-parallel-speedup [plan]
   (let [tasks (:plan/tasks plan [])
         task-count (count tasks)
-        deps-map (into {}
-                       (map (fn [t]
-                              [(:task/id t) (set (:task/dependencies t []))])
-                            tasks))
-        ;; Compute levels (tasks at same level can run in parallel)
-        levels (loop [remaining (set (map :task/id tasks))
-                      completed #{}
-                      level-count 0
-                      max-width 0]
-                 (if (empty? remaining)
-                   {:levels level-count :max-width max-width}
-                   (let [ready (filter (fn [id]
-                                         (every? completed (get deps-map id #{})))
-                                       remaining)
-                         width (count ready)]
-                     (recur (apply disj remaining ready)
-                            (into completed ready)
-                            (inc level-count)
-                            (max max-width width)))))]
-    {:parallelizable? (> (:max-width levels) 1)
+        deps-map (build-deps-map tasks)
+        {:keys [levels max-width]} (traverse-levels (map :task/id tasks) deps-map)]
+    {:parallelizable? (> max-width 1)
      :task-count task-count
-     :max-parallel (:max-width levels)
-     :levels (:levels levels)
-     :estimated-speedup (if (> (:levels levels) 0)
-                          (float (/ task-count (:levels levels)))
-                          1.0)}))
+     :max-parallel max-width
+     :levels levels
+     :estimated-speedup (if (pos? levels) (float (/ task-count levels)) 1.0)}))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Plan to DAG conversion
+;--- Layer 1: Plan to DAG Conversion
 
-(defn plan->dag-tasks
-  "Convert plan tasks to DAG task definitions.
+(defn plan->dag-tasks [plan context]
+  (->> (:plan/tasks plan [])
+       (mapv (fn [t]
+               {:task/id (:task/id t)
+                :task/deps (set (:task/dependencies t []))
+                :task/description (:task/description t)
+                :task/type (:task/type t :implement)
+                :task/acceptance-criteria (:task/acceptance-criteria t [])
+                :task/context (merge {:parent-plan-id (:plan/id plan)
+                                      :parent-workflow-id (:workflow-id context)}
+                                     (select-keys context [:llm-backend :artifact-store]))}))))
 
-   Arguments:
-   - plan: Plan map with :plan/tasks
-   - context: Execution context for task metadata
+;--- Layer 1: Mini-Workflow Execution
 
-   Returns: Vector of DAG task definitions for dag-executor"
-  [plan context]
-  (let [tasks (:plan/tasks plan [])]
-    (mapv (fn [task]
-            {:task/id (:task/id task)
-             :task/deps (set (:task/dependencies task []))
-             :task/description (:task/description task)
-             :task/type (:task/type task :implement)
-             :task/acceptance-criteria (:task/acceptance-criteria task [])
-             :task/context (merge
-                            {:parent-plan-id (:plan/id plan)
-                             :parent-workflow-id (:workflow-id context)}
-                            (select-keys context [:llm-backend :artifact-store]))})
-          tasks)))
+(defn- create-inner-task [task-def]
+  (task/create-task
+   {:task/id (random-uuid)
+    :task/type :implement
+    :task/title (:task/description task-def "Implement task")
+    :task/description (:task/description task-def "Implement task")
+    :task/status :pending
+    :task/metadata {:dag-task-id (:task/id task-def)
+                    :parent-plan-id (get-in task-def [:task/context :parent-plan-id])}}))
 
-(defn- run-mini-workflow
-  "Run a mini-workflow for a single DAG task.
+(defn- create-generate-fn [impl-agent context]
+  (fn [t _ctx]
+    (let [result (agent/invoke impl-agent t context)]
+      {:artifact (:artifact result)
+       :tokens (or (get-in result [:metrics :tokens]) 0)})))
 
-   This executes:
-   1. Create implementer agent
-   2. Run inner loop with generate/validate/repair
-   3. Return result with artifact and metrics
+(defn- create-repair-fn [impl-agent context]
+  (fn [old-artifact errors _ctx]
+    (let [result (agent/repair impl-agent old-artifact errors context)]
+      {:success? (:success result)
+       :artifact (:repaired result old-artifact)
+       :tokens-used (or (get-in result [:metrics :tokens]) 0)})))
 
-   Arguments:
-   - task-def: DAG task definition with :task/description, :task/context
-   - context: Execution context with :llm-backend
-
-   Returns: {:success? bool :artifact map :metrics map :error string}"
-  [task-def context]
-  (let [llm-backend (:llm-backend context)
-        task-context (:task/context task-def {})
-        description (:task/description task-def "Implement task")
-
-        ;; Create implementer agent
-        impl-agent (agent/create-implementer {:llm-backend llm-backend})
-
-        ;; Create task for inner loop
-        inner-task (task/create-task
-                    {:task/id (random-uuid)
-                     :task/type :implement
-                     :task/title description
-                     :task/description description
-                     :task/status :pending
-                     :task/metadata {:dag-task-id (:task/id task-def)
-                                     :parent-plan-id (:parent-plan-id task-context)}})
-
-        ;; Create generate function using agent
-        generate-fn (fn [t _ctx]
-                      (let [result (agent/invoke impl-agent t context)]
-                        {:artifact (:artifact result)
-                         :tokens (or (get-in result [:metrics :tokens]) 0)}))
-
-        ;; Run inner loop with minimal gates (syntax only for speed)
-        loop-context (merge context
-                            {:max-iterations 3
-                             :repair-fn (fn [old-artifact errors _ctx]
-                                          (let [result (agent/repair impl-agent old-artifact errors context)]
-                                            {:success? (:success result)
-                                             :artifact (:repaired result old-artifact)
-                                             :tokens-used (or (get-in result [:metrics :tokens]) 0)}))})
-
+(defn- run-mini-workflow [task-def context]
+  (let [impl-agent (agent/create-implementer {:llm-backend (:llm-backend context)})
+        inner-task (create-inner-task task-def)
+        generate-fn (create-generate-fn impl-agent context)
+        loop-context (assoc context
+                            :max-iterations 3
+                            :repair-fn (create-repair-fn impl-agent context))
         loop-result (loop/run-simple inner-task generate-fn loop-context)]
-
     (if (:success loop-result)
       (workflow-success (:artifact loop-result) (:metrics loop-result))
       (workflow-failure (or (:error loop-result)
@@ -223,9 +148,7 @@
                             "Inner loop failed")
                         (:metrics loop-result)))))
 
-(defn- workflow-result->dag-result
-  "Convert mini-workflow result to DAG result format."
-  [task-id description wf-result]
+(defn- workflow-result->dag-result [task-id description wf-result]
   (if (:success? wf-result)
     (dag/ok {:task-id task-id
              :description description
@@ -234,183 +157,111 @@
              :metrics (:metrics wf-result)})
     (dag/err :task-execution-failed
              (:error wf-result)
-             {:task-id task-id
-              :metrics (:metrics wf-result)})))
+             {:task-id task-id :metrics (:metrics wf-result)})))
 
-(defn- placeholder-result
-  "Create placeholder success result for testing DAG flow without LLM."
-  [task-id description]
+(defn- placeholder-result [task-id description]
   (dag/ok {:task-id task-id
            :description description
            :status :implemented
            :artifacts []
            :metrics {:tokens 0 :cost-usd 0.0}}))
 
-(defn execute-single-task
-  "Execute a single DAG task, returning a DAG result.
-
-   Arguments:
-   - task-def: Task definition from DAG run state
-   - context: Execution context with optional :llm-backend
-
-   Returns: dag/ok or dag/err result"
-  [task-def context]
+(defn execute-single-task [task-def context]
   (let [task-id (:task/id task-def)
-        description (:task/description task-def "Implement task")
-        llm-backend (:llm-backend context)]
+        description (:task/description task-def "Implement task")]
     (try
-      (if llm-backend
-        (workflow-result->dag-result task-id description
-                                     (run-mini-workflow task-def context))
+      (if (:llm-backend context)
+        (workflow-result->dag-result task-id description (run-mini-workflow task-def context))
         (placeholder-result task-id description))
       (catch Exception e
         (dag/err :task-execution-failed
                  (str "Task failed: " (.getMessage e))
                  {:task-id task-id})))))
 
-(defn create-task-executor-fn
-  "Create the execute-task-fn for the DAG scheduler.
-
-   This function is called for each task and runs a mini-workflow:
-   implement → verify (→ PR → merge in full mode)
-
-   Arguments:
-   - context: Execution context with :llm-backend, :artifact-store
-   - opts: Options
-     - :on-task-start - Callback (fn [task-id])
-     - :on-task-complete - Callback (fn [task-id result])
-
-   Returns: (fn [task-id dag-context] -> result)"
-  [context opts]
+(defn create-task-executor-fn [context opts]
   (let [{:keys [on-task-start on-task-complete]} opts]
     (fn [task-id dag-context]
-      (when on-task-start
-        (on-task-start task-id))
+      (when on-task-start (on-task-start task-id))
       (let [task-def (get-in dag-context [:run-state :run/tasks task-id])
             result (execute-single-task task-def context)]
-        (when on-task-complete
-          (on-task-complete task-id result))
+        (when on-task-complete (on-task-complete task-id result))
         result))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Synchronous DAG execution
+;--- Layer 2: Synchronous DAG Execution
 
-(defn- compute-ready-tasks
-  "Find tasks that are ready to execute (all deps completed)."
-  [tasks-map completed-ids]
-  (filter (fn [[task-id task]]
-            (and (not (contains? completed-ids task-id))
-                 (every? #(contains? completed-ids %) (:task/deps task #{}))))
-          tasks-map))
+(defn- compute-ready-tasks [tasks-map completed-ids]
+  (->> tasks-map
+       (filter (fn [[task-id task]]
+                 (and (not (contains? completed-ids task-id))
+                      (every? #(contains? completed-ids %) (:task/deps task #{})))))))
 
-(defn- execute-tasks-batch
-  "Execute a batch of tasks in parallel, return results."
-  [tasks execute-fn context]
-  (let [futures (doall
-                 (for [[task-id task] tasks]
-                   [task-id (future (execute-fn task context))]))]
-    (into {} (for [[task-id f] futures]
-               [task-id @f]))))
+(defn- execute-tasks-batch [tasks execute-fn context]
+  (->> tasks
+       (map (fn [[task-id task]] [task-id (future (execute-fn task context))]))
+       doall
+       (map (fn [[task-id f]] [task-id @f]))
+       (into {})))
 
-(defn execute-plan-as-dag
-  "Execute a plan using parallel task execution.
+(defn- notify-batch-start [batch on-task-start]
+  (when on-task-start
+    (doseq [[task-id _] batch] (on-task-start task-id))))
 
-   Arguments:
-   - plan: Plan map from planner
-   - context: Execution context
-     - :llm-backend - LLM client (required for real execution)
-     - :artifact-store - Artifact store (optional)
-     - :logger - Logger instance (optional)
-     - :max-parallel - Max parallel tasks (default 4)
-     - :on-task-start - Callback for task start
-     - :on-task-complete - Callback for task completion
+(defn- notify-batch-complete [results on-task-complete]
+  (when on-task-complete
+    (doseq [[task-id result] results] (on-task-complete task-id result))))
 
-   Returns:
-   {:success? boolean
-    :tasks-completed int
-    :tasks-failed int
-    :artifacts []
-    :metrics {}}"
-  [plan context]
-  (let [logger (or (:logger context) (log/create-logger {:min-level :info}))
-        max-parallel (or (:max-parallel context) 4)
-        task-defs (plan->dag-tasks plan context)
-        tasks-map (into {} (map (fn [t] [(:task/id t) t]) task-defs))
-        on-task-start (:on-task-start context)
-        on-task-complete (:on-task-complete context)]
+(defn- partition-results [results]
+  (let [ok-results (->> results (filter #(dag/ok? (second %))) (map first))
+        err-results (->> results (filter #(not (dag/ok? (second %)))) (map first))]
+    {:completed ok-results :failed err-results}))
 
-    (log/info logger :dag-orchestrator :dag/starting
-              {:data {:plan-id (:plan/id plan)
-                      :task-count (count task-defs)}})
+(defn- aggregate-results [all-results]
+  (let [artifacts (->> (vals all-results) (mapcat #(get-in % [:data :artifacts] [])))
+        total-tokens (->> (vals all-results) (map #(get-in % [:data :metrics :tokens] 0)) (reduce + 0))]
+    {:artifacts artifacts :total-tokens total-tokens}))
 
-    ;; Execute tasks level by level
+(defn- execute-dag-loop [tasks-map context logger]
+  (let [{:keys [on-task-start on-task-complete]} context
+        max-parallel (or (:max-parallel context) 4)]
     (loop [completed-ids #{}
            failed-ids #{}
            all-results {}
            iteration 0]
-
       (let [ready-tasks (compute-ready-tasks tasks-map completed-ids)]
         (cond
-          ;; All done
           (empty? ready-tasks)
-          (let [completed (count completed-ids)
-                failed (count failed-ids)
-                artifacts (mapcat #(get-in % [:data :artifacts] []) (vals all-results))
-                total-tokens (reduce + 0 (map #(get-in % [:data :metrics :tokens] 0) (vals all-results)))]
-
+          (let [{:keys [artifacts total-tokens]} (aggregate-results all-results)]
             (log/info logger :dag-orchestrator :dag/completed
-                      {:data {:completed completed
-                              :failed failed
+                      {:data {:completed (count completed-ids)
+                              :failed (count failed-ids)
                               :iterations iteration}})
+            (dag-execution-result (count completed-ids) (count failed-ids) artifacts total-tokens))
 
-            (dag-execution-result completed failed artifacts total-tokens))
-
-          ;; Safety limit
           (> iteration 100)
-          (dag-execution-error (count completed-ids)
-                               (count failed-ids)
-                               "Max iterations exceeded")
+          (dag-execution-error (count completed-ids) (count failed-ids) "Max iterations exceeded")
 
-          ;; Execute ready tasks
           :else
           (let [batch (take max-parallel ready-tasks)
-                _ (doseq [[task-id _] batch]
-                    (when on-task-start (on-task-start task-id)))
-
-                batch-results (execute-tasks-batch batch execute-single-task context)
-
-                _ (doseq [[task-id result] batch-results]
-                    (when on-task-complete (on-task-complete task-id result)))
-
-                new-completed (into completed-ids
-                                    (map first (filter #(dag/ok? (second %)) batch-results)))
-                new-failed (into failed-ids
-                                 (map first (filter #(not (dag/ok? (second %))) batch-results)))]
-
-            (recur new-completed
-                   new-failed
-                   (merge all-results batch-results)
+                _ (notify-batch-start batch on-task-start)
+                results (execute-tasks-batch batch execute-single-task context)
+                _ (notify-batch-complete results on-task-complete)
+                {:keys [completed failed]} (partition-results results)]
+            (recur (into completed-ids completed)
+                   (into failed-ids failed)
+                   (merge all-results results)
                    (inc iteration))))))))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Integration with workflow
+(defn execute-plan-as-dag [plan context]
+  (let [logger (or (:logger context) (log/create-logger {:min-level :info}))
+        task-defs (plan->dag-tasks plan context)
+        tasks-map (->> task-defs (map (fn [t] [(:task/id t) t])) (into {}))]
+    (log/info logger :dag-orchestrator :dag/starting
+              {:data {:plan-id (:plan/id plan) :task-count (count task-defs)}})
+    (execute-dag-loop tasks-map context logger)))
 
-(defn maybe-parallelize-plan
-  "Check if plan should be parallelized and execute accordingly.
+;--- Layer 3: Workflow Integration
 
-   This is the main entry point for workflow integration. After the plan phase,
-   call this function to either:
-   - Execute via DAG if parallelizable (returns aggregated result)
-   - Return nil if plan should be executed sequentially
-
-   Arguments:
-   - plan: Plan from planner phase
-   - context: Execution context
-
-   Returns:
-   - DAG execution result if parallelized
-   - nil if plan should be executed sequentially"
-  [plan context]
+(defn maybe-parallelize-plan [plan context]
   (let [estimate (estimate-parallel-speedup plan)]
     (when (:parallelizable? estimate)
       (let [logger (or (:logger context) (log/create-logger {:min-level :info}))]
@@ -421,9 +272,8 @@
                           :estimated-speedup (:estimated-speedup estimate)}}))
       (execute-plan-as-dag plan context))))
 
-;------------------------------------------------------------------------------ Rich Comment
+;--- Rich Comment
 (comment
-  ;; Test plan analysis
   (def sample-plan
     {:plan/id (random-uuid)
      :plan/name "test-plan"
@@ -431,31 +281,13 @@
      (let [a (random-uuid)
            b (random-uuid)
            c (random-uuid)]
-       [{:task/id a
-         :task/description "Task A"
-         :task/type :implement
-         :task/dependencies []}
-        {:task/id b
-         :task/description "Task B"
-         :task/type :implement
-         :task/dependencies []}
-        {:task/id c
-         :task/description "Task C"
-         :task/type :test
-         :task/dependencies [a b]}])})
+       [{:task/id a :task/description "Task A" :task/type :implement :task/dependencies []}
+        {:task/id b :task/description "Task B" :task/type :implement :task/dependencies []}
+        {:task/id c :task/description "Task C" :task/type :test :task/dependencies [a b]}])})
 
   (parallelizable-plan? sample-plan)
-  ;; => true (A and B can run in parallel)
-
   (estimate-parallel-speedup sample-plan)
-  ;; => {:parallelizable? true, :task-count 3, :max-parallel 2, :levels 2, :estimated-speedup 1.5}
-
-  ;; Single task plan
-  (parallelizable-plan?
-   {:plan/tasks [{:task/id (random-uuid) :task/description "Only task"}]})
-  ;; => nil (not parallelizable)
-
-  ;; Execute plan as DAG
+  (parallelizable-plan? {:plan/tasks [{:task/id (random-uuid) :task/description "Only task"}]})
   (execute-plan-as-dag sample-plan {:logger (log/create-logger {:min-level :debug})})
 
   :leave-this-here)
