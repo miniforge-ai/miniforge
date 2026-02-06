@@ -9,7 +9,8 @@
    [babashka.process :as p]
    [cheshire.core :as json]
    [ai.miniforge.cli.config :as config]
-   [ai.miniforge.dag-executor.interface :as dag]))
+   [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.event-stream.interface :as es]))
 
 ;; LLM interface resolved at runtime via requiring-resolve (Babashka compatibility).
 ;; DAG executor uses normal requires (JVM-only, no Babashka concern).
@@ -569,6 +570,21 @@
             artifact-store (create-artifact-store quiet)
             callbacks (create-phase-callbacks quiet)
 
+            ;; Create event stream for workflow observability
+            event-stream (es/create-event-stream)
+            workflow-id (or (get-in enriched-spec [:spec/metadata :session-id])
+                            (random-uuid))
+
+            ;; Publish workflow started event
+            _ (es/publish! event-stream (es/workflow-started event-stream workflow-id
+                                                             {:name (name workflow-type)
+                                                              :version workflow-version}))
+
+            ;; Create streaming callback that prints to console and publishes events
+            on-chunk (es/create-streaming-callback event-stream workflow-id :agent
+                                                   {:print? (not quiet)
+                                                    :quiet? quiet})
+
             ;; Load configuration with environment overrides
             cfg (config/load-config)
 
@@ -588,10 +604,12 @@
                              (println (colorize :yellow (str "Warning: Could not create LLM client (" (ex-message e) "), agents will use fallback mode"))))
                            nil))
 
-            ;; Add LLM client to context (agents expect it as :llm-backend)
+            ;; Add LLM client and streaming to context (agents expect :llm-backend and :on-chunk)
             context-with-llm (cond-> callbacks
                                llm-client (assoc :llm-backend llm-client)
-                               artifact-store (assoc :artifact-store artifact-store))
+                               artifact-store (assoc :artifact-store artifact-store)
+                               on-chunk (assoc :on-chunk on-chunk)
+                               event-stream (assoc :event-stream event-stream))
 
             ;; Sandbox mode: optionally spin up a Docker container for isolated execution
             sandbox? (or (:sandbox opts)
@@ -615,7 +633,16 @@
                           workflow
                           workflow-input
                           context
-                          artifact-store)]
+                          artifact-store)
+                  status (if (= :completed (:execution/status result)) :success :failure)
+                  duration-ms (get-in result [:execution/metrics :duration-ms])]
+              ;; Publish workflow completion event
+              (es/publish! event-stream
+                           (if (= status :success)
+                             (es/workflow-completed event-stream workflow-id status duration-ms)
+                             (es/workflow-failed event-stream workflow-id
+                                                 {:message (str (first (:execution/errors result)))
+                                                  :errors (:execution/errors result)})))
               (close-artifact-store artifact-store)
               (print-result result opts)
               result))

@@ -23,6 +23,30 @@
             [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Event stream helpers (optional dependency)
+
+(defn- emit-phase-started!
+  "Emit phase-started event if event-stream is available in context."
+  [ctx phase]
+  (when-let [event-stream (:event-stream ctx)]
+    (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
+      (when-let [phase-started (requiring-resolve 'ai.miniforge.event-stream.interface/phase-started)]
+        (let [workflow-id (:execution/id ctx)]
+          (publish! event-stream (phase-started event-stream workflow-id phase)))))))
+
+(defn- emit-phase-completed!
+  "Emit phase-completed event if event-stream is available in context."
+  [ctx phase _result]
+  (when-let [event-stream (:event-stream ctx)]
+    (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
+      (when-let [phase-completed (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
+        (let [workflow-id (:execution/id ctx)
+              outcome (if (= :completed (get-in ctx [:phase :status])) :success :failure)
+              duration-ms (get-in ctx [:phase :duration-ms])]
+          (publish! event-stream (phase-completed event-stream workflow-id phase
+                                                   {:outcome outcome :duration-ms duration-ms})))))))
+
+;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
 
 (def default-config
@@ -44,6 +68,8 @@
    Reads plan from context, invokes implementer agent,
    runs through inner loop with syntax/lint gates."
   [ctx]
+  ;; Emit phase started event
+  (emit-phase-started! ctx :implement)
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
@@ -87,18 +113,21 @@
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
         metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
-        iterations (get-in ctx [:phase :iterations] 1)]
-    (-> ctx
-        (assoc-in [:phase :ended-at] end-time)
-        (assoc-in [:phase :duration-ms] duration-ms)
-        (assoc-in [:phase :status] :completed)
-        (assoc-in [:phase :metrics] metrics)
-        (assoc-in [:metrics :implementation :duration-ms] duration-ms)
-        (assoc-in [:metrics :implementation :repair-cycles] (dec iterations))
-        (update-in [:execution :phases-completed] (fnil conj []) :implement)
-        ;; Merge agent metrics into execution metrics
-        (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
-        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))))
+        iterations (get-in ctx [:phase :iterations] 1)
+        updated-ctx (-> ctx
+                        (assoc-in [:phase :ended-at] end-time)
+                        (assoc-in [:phase :duration-ms] duration-ms)
+                        (assoc-in [:phase :status] :completed)
+                        (assoc-in [:phase :metrics] metrics)
+                        (assoc-in [:metrics :implementation :duration-ms] duration-ms)
+                        (assoc-in [:metrics :implementation :repair-cycles] (dec iterations))
+                        (update-in [:execution :phases-completed] (fnil conj []) :implement)
+                        ;; Merge agent metrics into execution metrics
+                        (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
+                        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
+    ;; Emit phase completed event
+    (emit-phase-completed! updated-ctx :implement result)
+    updated-ctx))
 
 (defn- error-implement
   "Handle implementation phase errors.

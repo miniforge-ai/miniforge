@@ -33,13 +33,17 @@
    [cheshire.core :as json]
    [org.httpkit.server :as http]
    [hiccup2.core :as h]
-   [hiccup.util :refer [raw-string]]))
+   [hiccup.util :refer [raw-string]]
+   [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration
 
 (def ^:dynamic *port* 8787)
 (def ^:private server-atom (atom nil))
+
+;; Global event streams for workflow observability (keyed by workflow-id)
+(def ^:private workflow-streams (atom {}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Risk analysis (reused from tui.clj)
@@ -859,10 +863,83 @@
        :headers {"Content-Type" "text/html; charset=utf-8"}
        :body (str (render-workflow-status repos))}
 
+      ;; SSE endpoint for workflow event streaming
+      ;; GET /api/workflows/:id/stream
+      (and (re-matches #"/api/workflows/[^/]+/stream" uri) (= request-method :get))
+      (let [workflow-id-str (second (re-find #"/api/workflows/([^/]+)/stream" uri))
+            workflow-id (try (java.util.UUID/fromString workflow-id-str)
+                             (catch Exception _ nil))]
+        (if-not workflow-id
+          {:status 400
+           :body "Invalid workflow ID"}
+          ;; Use http-kit's as-channel for SSE (with-channel is deprecated)
+          (http/as-channel req
+            {:on-open
+             (fn [channel]
+               (let [;; Get or create event stream for this workflow
+                     event-stream (or (get @workflow-streams workflow-id)
+                                      (let [stream (es/create-event-stream)]
+                                        (swap! workflow-streams assoc workflow-id stream)
+                                        stream))
+                     ;; Create unique subscriber ID
+                     sub-id (random-uuid)]
+                 ;; Store sub-id in channel for cleanup
+                 (swap! workflow-streams assoc-in [workflow-id :subscribers channel] sub-id)
+                 ;; Send SSE headers
+                 (http/send! channel
+                             {:status 200
+                              :headers {"Content-Type" "text/event-stream"
+                                        "Cache-Control" "no-cache"
+                                        "Connection" "keep-alive"
+                                        "Access-Control-Allow-Origin" "*"}}
+                             false)
+                 ;; Subscribe to events
+                 (es/subscribe! event-stream sub-id
+                                (fn [event]
+                                  (let [event-type (name (:event/type event))
+                                        event-data (json/generate-string event)]
+                                    (http/send! channel
+                                                (str "event: " event-type "\n"
+                                                     "data: " event-data "\n\n")
+                                                false))))))
+             :on-close
+             (fn [channel _status]
+               ;; Cleanup subscription
+               (when-let [sub-id (get-in @workflow-streams [workflow-id :subscribers channel])]
+                 (when-let [event-stream (get @workflow-streams workflow-id)]
+                   (es/unsubscribe! event-stream sub-id))
+                 (swap! workflow-streams update-in [workflow-id :subscribers] dissoc channel)))})))
+
       ;; 404
       :else
       {:status 404
        :body "Not found"})))
+
+;------------------------------------------------------------------------------ Layer 4.5
+;; Workflow stream management
+
+(defn register-workflow-stream!
+  "Register an event stream for a workflow so it can be streamed via SSE.
+
+   Arguments:
+   - workflow-id: UUID of the workflow
+   - event-stream: Event stream atom from es/create-event-stream
+
+   Call this from workflow_runner.clj to enable SSE streaming for a workflow."
+  [workflow-id event-stream]
+  (swap! workflow-streams assoc workflow-id event-stream)
+  workflow-id)
+
+(defn unregister-workflow-stream!
+  "Unregister an event stream when workflow completes."
+  [workflow-id]
+  (swap! workflow-streams dissoc workflow-id)
+  nil)
+
+(defn get-workflow-stream
+  "Get the event stream for a workflow, if registered."
+  [workflow-id]
+  (get @workflow-streams workflow-id))
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Server lifecycle
