@@ -605,11 +605,13 @@
                            nil))
 
             ;; Add LLM client and streaming to context (agents expect :llm-backend and :on-chunk)
+            ;; Also add worktree-path for release phase to write files
             context-with-llm (cond-> callbacks
                                llm-client (assoc :llm-backend llm-client)
                                artifact-store (assoc :artifact-store artifact-store)
                                on-chunk (assoc :on-chunk on-chunk)
-                               event-stream (assoc :event-stream event-stream))
+                               event-stream (assoc :event-stream event-stream)
+                               true (assoc :worktree-path (System/getProperty "user.dir")))
 
             ;; Sandbox mode: optionally spin up a Docker container for isolated execution
             sandbox? (or (:sandbox opts)
