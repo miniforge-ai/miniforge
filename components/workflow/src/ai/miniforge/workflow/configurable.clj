@@ -14,10 +14,16 @@
 
 (ns ai.miniforge.workflow.configurable
   "DAG-based workflow execution using configurable workflows.
-   Executes workflows based on EDN configurations."
+   Executes workflows based on EDN configurations.
+
+   Supports automatic task parallelization:
+   When the plan phase produces multiple parallelizable tasks,
+   the workflow automatically delegates to the DAG executor
+   for parallel execution."
   (:require
    [ai.miniforge.workflow.state :as state]
    [ai.miniforge.workflow.agent-factory :as factory]
+   [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
    [ai.miniforge.loop.interface :as loop]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -142,9 +148,49 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Workflow execution
 
+(defn- extract-plan-from-result
+  "Extract plan artifact from phase result if present."
+  [phase-result]
+  (when-let [artifacts (:artifacts phase-result)]
+    (first (filter #(or (:plan/id %)
+                        (= :plan (:artifact/type %)))
+                   artifacts))))
+
+(defn- execute-dag-for-plan
+  "Execute plan tasks via DAG orchestrator.
+   Returns updated exec-state with DAG results merged."
+  [exec-state plan context callbacks]
+  (let [{:keys [on-phase-start on-phase-complete]} callbacks
+        dag-context (merge context
+                           {:workflow-id (:execution/id exec-state)
+                            :on-task-start (fn [task-id]
+                                             (when on-phase-start
+                                               (on-phase-start exec-state
+                                                               {:phase/id :dag-task
+                                                                :task-id task-id})))
+                            :on-task-complete (fn [task-id result]
+                                                (when on-phase-complete
+                                                  (on-phase-complete exec-state
+                                                                     {:phase/id :dag-task
+                                                                      :task-id task-id}
+                                                                     result)))})
+        dag-result (dag-orch/execute-plan-as-dag plan dag-context)]
+
+    ;; Merge DAG results into execution state
+    (-> exec-state
+        (update :execution/artifacts into (:artifacts dag-result []))
+        (update :execution/metrics
+                (fn [m]
+                  (merge-with + m (:metrics dag-result {:tokens 0 :cost-usd 0.0}))))
+        (assoc-in [:execution/phase-results :dag-execution] dag-result)
+        (assoc :execution/dag-result dag-result))))
+
 (defn- execute-phase-step
   "Execute a single phase step in the workflow.
-   Returns updated execution state or [:continue new-state] to continue loop."
+   Returns updated execution state or [:continue new-state] to continue loop.
+
+   After plan phase, checks if the plan has parallelizable tasks and
+   automatically delegates to DAG executor if so."
   [workflow exec-state phase context callbacks]
   (let [{:keys [on-phase-start on-phase-complete]} callbacks
         current-phase-id (:execution/current-phase exec-state)]
@@ -161,22 +207,51 @@
       (when on-phase-complete
         (on-phase-complete exec-state' phase phase-result))
 
-      ;; Determine next phase
-      (let [next-phase-id (select-next-phase workflow exec-state' phase-result)]
-        (cond
-          ;; :done means workflow should complete
-          (= :done next-phase-id)
-          (state/mark-completed exec-state')
+      ;; After plan phase, check for parallelization opportunity
+      (let [is-plan-phase? (= :plan current-phase-id)
+            plan (when is-plan-phase? (extract-plan-from-result phase-result))
+            should-parallelize? (and plan
+                                     (:success? phase-result)
+                                     (dag-orch/parallelizable-plan? plan)
+                                     ;; Allow disabling via context
+                                     (not (:disable-dag-parallelization context)))]
 
-          ;; Valid next phase - continue
-          next-phase-id
-          [:continue (state/transition-to-phase exec-state' next-phase-id :advance)]
+        (if should-parallelize?
+          ;; Execute plan via DAG, then skip implement phase
+          (let [exec-state-with-dag (execute-dag-for-plan exec-state' plan context callbacks)
+                dag-success? (get-in exec-state-with-dag [:execution/dag-result :success?])]
+            (if dag-success?
+              ;; Skip to verify phase (or next phase after implement)
+              (let [implement-phase (find-phase workflow :implement)
+                    post-implement-transitions (:phase/next implement-phase [])
+                    next-after-implement (or (:target (first post-implement-transitions)) :done)]
+                (if (= :done next-after-implement)
+                  (state/mark-completed exec-state-with-dag)
+                  [:continue (state/transition-to-phase exec-state-with-dag
+                                                        next-after-implement
+                                                        :dag-complete)]))
+              ;; DAG failed
+              (state/mark-failed exec-state-with-dag
+                                 {:type :dag-execution-failed
+                                  :message "Parallel task execution failed"
+                                  :dag-result (:execution/dag-result exec-state-with-dag)})))
 
-          ;; No valid transition
-          :else
-          (state/mark-failed exec-state'
-                             {:type :no-valid-transition
-                              :message (str "No valid transition from phase: " current-phase-id)}))))))
+          ;; Normal flow - determine next phase
+          (let [next-phase-id (select-next-phase workflow exec-state' phase-result)]
+            (cond
+              ;; :done means workflow should complete
+              (= :done next-phase-id)
+              (state/mark-completed exec-state')
+
+              ;; Valid next phase - continue
+              next-phase-id
+              [:continue (state/transition-to-phase exec-state' next-phase-id :advance)]
+
+              ;; No valid transition
+              :else
+              (state/mark-failed exec-state'
+                                 {:type :no-valid-transition
+                                  :message (str "No valid transition from phase: " current-phase-id)}))))))))
 
 (defn run-configurable-workflow
   "Execute a complete configurable workflow.
