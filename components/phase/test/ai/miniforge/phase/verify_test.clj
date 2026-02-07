@@ -99,7 +99,10 @@
                                  :output mock-test-artifact
                                  :metrics {:tokens 200 :duration-ms 600}})]
       (let [ctx (-> (create-base-context)
-                    (assoc-in [:execution/phase-results :implement] mock-code-artifact)
+                    ;; Mock the phase result structure as stored by workflow runner
+                    (assoc-in [:execution/phase-results :implement]
+                              {:result {:status :success
+                                        :output mock-code-artifact}})
                     (assoc :phase-config {:phase :verify}))
             result (#'verify/enter-verify ctx)]
         (is (= mock-test-artifact (get-in result [:phase :result :output])))))))

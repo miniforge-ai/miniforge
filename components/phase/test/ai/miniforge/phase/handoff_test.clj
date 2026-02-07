@@ -118,11 +118,11 @@
   [phase-name ctx]
   (let [interceptor (registry/get-phase-interceptor {:phase phase-name})
         leave-fn (:leave interceptor)
-        result (get-in ctx [:phase :result])
         updated-ctx (leave-fn ctx)]
-    ;; Store phase result in execution context (mimics workflow runner)
+    ;; Store entire phase map in execution context (mimics workflow runner)
+    ;; The real workflow runner stores the full :phase map via extract-phase-result
     (assoc-in updated-ctx [:execution/phase-results phase-name]
-              (:output result))))
+              (:phase updated-ctx))))
 
 ;------------------------------------------------------------------------------ Tests
 
@@ -138,9 +138,12 @@
                      "Plan phase should succeed")
             ctx2 (execute-phase-leave :plan ctx1)
 
-            plan-result (get-in ctx2 [:execution/phase-results :plan])
+            plan-phase-result (get-in ctx2 [:execution/phase-results :plan])
+            plan-result (get-in plan-phase-result [:result :output])
+            _    (is (some? plan-phase-result)
+                     "Plan phase result should be stored in execution context")
             _    (is (some? plan-result)
-                     "Plan result should be stored in execution context")
+                     "Plan output should be present in phase result")
             _    (is (= (:plan/id mock-plan-result) (:plan/id plan-result))
                      "Stored plan should match mock data")]
 
@@ -164,9 +167,12 @@
                      "Implement phase should succeed")
             ctx2 (execute-phase-leave :implement ctx1)
 
-            impl-result (get-in ctx2 [:execution/phase-results :implement])
+            impl-phase-result (get-in ctx2 [:execution/phase-results :implement])
+            impl-result (get-in impl-phase-result [:result :output])
+            _    (is (some? impl-phase-result)
+                     "Implement phase result should be stored in execution context")
             _    (is (some? impl-result)
-                     "Implement result should be stored in execution context")
+                     "Implement output should be present in phase result")
             _    (is (= (:code/id mock-code-artifact) (:code/id impl-result))
                      "Stored code artifact should match mock data")]
 
