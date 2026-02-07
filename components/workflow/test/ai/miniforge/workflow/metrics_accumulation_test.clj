@@ -4,9 +4,7 @@
   Tests that metrics aggregate correctly through phases, handle parallel
   execution, and enforce budget limits without running full workflows."
   (:require
-   [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.workflow.execution :as execution]
-   [ai.miniforge.response.interface :as response]))
+   [clojure.test :refer [deftest testing is]]))
 
 ;------------------------------------------------------------------------------ Mock Data
 
@@ -232,11 +230,11 @@
 (deftest phase-specific-metrics-test
   (testing "Phase-specific metrics are preserved"
     (let [ctx (create-execution-context)
-          impl-result (mock-phase-result :implement mock-implement-metrics)
-          verify-result (mock-phase-result :verify mock-verify-metrics)
-          ctx-with-phases (-> ctx
-                              (assoc-in [:phase-metrics :implement] mock-implement-metrics)
-                              (assoc-in [:phase-metrics :verify] mock-verify-metrics))]
+          _impl-result (mock-phase-result :implement mock-implement-metrics)
+          _verify-result (mock-phase-result :verify mock-verify-metrics)
+          _ctx-with-phases (-> ctx
+                               (assoc-in [:phase-metrics :implement] mock-implement-metrics)
+                               (assoc-in [:phase-metrics :verify] mock-verify-metrics))]
 
       (is (= 3 (get-in mock-implement-metrics [:files-created]))
           "Should preserve files-created from implement")
