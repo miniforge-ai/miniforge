@@ -485,6 +485,7 @@
   miniforge
   {:doc     "Run miniforge CLI in development mode"
    :extra-paths ["bases/cli/src"
+                 "bases/cli/resources"
                  "components/algorithms/src"
                  "components/schema/src"
                  "components/logging/src"
@@ -502,6 +503,7 @@
                  "components/phase/src"
                  "components/gate/src"
                  "components/workflow/src"
+                 "components/workflow/resources"
                  "components/event-stream/src"
                  "components/dag-executor/src"
                  "components/task-executor/src"
