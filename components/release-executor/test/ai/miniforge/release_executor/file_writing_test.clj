@@ -315,7 +315,7 @@
         (let [files [{:path "file1.clj"
                       :content "(ns file1)"
                       :action :create}
-                     {:path "invalid/\0/file2.clj" ; Invalid filename
+                     {:path "invalid/\u0000/file2.clj" ; Invalid filename
                       :content "(ns file2)"
                       :action :create}]
               result (write-files! temp-dir files)]

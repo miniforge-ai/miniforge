@@ -324,5 +324,5 @@
           "Total cost should sum correctly")
       (is (> (:implement cost-percentages) (:plan cost-percentages))
           "Implement should be more expensive than plan")
-      (is (= 100.0 (reduce + (vals cost-percentages)))
-          "Percentages should sum to 100%"))))
+      (is (< (Math/abs (- 100.0 (reduce + (vals cost-percentages)))) 0.01)
+          "Percentages should sum to ~100%"))))
