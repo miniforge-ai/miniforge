@@ -27,15 +27,15 @@
   "Check if we have everything needed to run"
   []
   (println "\n🔍 Checking prerequisites...")
-  (let [github-token (System/getenv "GITHUB_TOKEN")
-        anthropic-key (System/getenv "ANTHROPIC_API_KEY")
-        checks {:github-token (some? github-token)
-                :anthropic-key (some? anthropic-key)
-                :git-repo (.exists (io/file ".git"))}]
+  (let [checks {:git-repo (.exists (io/file ".git"))}]
     (doseq [[check passed?] checks]
       (println (format "  %s %s"
                       (if passed? "✅" "❌")
                       (name check))))
+    (println "\n💡 Note: Using CLI backends (claude code, gh)")
+    (println "   Ensure you're authenticated:")
+    (println "   - gh auth status")
+    (println "   - claude --version")
     (every? val checks)))
 
 (defn print-monitoring-info
