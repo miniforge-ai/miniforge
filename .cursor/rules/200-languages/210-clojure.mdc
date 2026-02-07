@@ -19,6 +19,14 @@ globs:
 - `components` may depend on other components **only via** their `.interface` ns.
 - **Never** depend on `projects` from `bases` or `components`.
 
+## Polylith stability tagging (ALWAYS)
+
+- Create stable tags **only after verification** (E2E tests + dogfooding runs), **not on every merge**.
+- Tag format: `git tag -a stable-YYYYMMDD -m "Stable: <milestone description>"`
+- Stable tags tell `poly info` which components have changed since last verified state.
+- Without stable tags, `poly info` shows all components as changed (since initial commit).
+- See **N1-architecture.md § 4.2.2** for complete tagging guidelines and verification checklist.
+
 ## Per-file stratified design (ALWAYS)
 
 - Structure each ns with **labeled strata** as headings:
