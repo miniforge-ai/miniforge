@@ -80,7 +80,8 @@
         ;; Build task from workflow input and plan result
         input (get-in ctx [:execution/input])
         ;; Read from execution phase results where plan phase stored its output
-        plan-result (get-in ctx [:execution/phase-results :plan])
+        ;; Phase results contain the full phase map, so extract :result :output
+        plan-result (get-in ctx [:execution/phase-results :plan :result :output])
         task {:task/id (random-uuid)
               :task/type :implement
               :task/description (:description input)

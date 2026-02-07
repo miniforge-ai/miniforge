@@ -49,7 +49,8 @@
   [ctx]
   ;; Read implement result from execution phase results (not :phases)
   ;; This is the canonical location where workflow runner stores phase outputs
-  (let [implement-result (get-in ctx [:execution/phase-results :implement])
+  ;; Phase results contain the full phase map, so extract :result :output
+  (let [implement-result (get-in ctx [:execution/phase-results :implement :result :output])
         code-artifacts (if-let [artifacts (:artifacts implement-result)]
                          (map (fn [a] {:artifact/type :code
                                        :artifact/content a})

@@ -58,7 +58,8 @@
         ;; 1. Previous implement phase result (in multi-phase workflows)
         ;; 2. Direct input as :task/code-artifact (in test-only workflows)
         ;; Read from execution phase results where implement phase stored its output
-        implement-result (get-in ctx [:execution/phase-results :implement])
+        ;; Phase results contain the full phase map, so extract :result :output
+        implement-result (get-in ctx [:execution/phase-results :implement :result :output])
         code-artifact (or implement-result
                          (:task/code-artifact input)
                          (:code-artifact input))
