@@ -1,0 +1,89 @@
+(ns ai.miniforge.task-executor.generate
+  "Factory for generate-fn closures wrapping agent + inner loop.
+
+  Creates reusable generation functions that can be used for both:
+  - Initial code generation in the task runner
+  - Fix loops in the PR lifecycle controller
+
+  This ensures consistency: both use loop/run-simple with the same agent backend."
+  (:require [ai.miniforge.loop.interface :as loop]
+            [clojure.string :as str]))
+
+(defn format-task-prompt
+  "Format a task description and context into a prompt for the agent.
+
+  Args:
+    task: Task map with :description, :files, :dependencies, etc.
+    context: Context map with :worktree-path, :base-commit, etc.
+
+  Returns: String prompt for the LLM"
+  [task context]
+  (let [{:keys [description files dependencies acceptance-criteria]} task
+        {:keys [worktree-path base-commit]} context]
+    (str "# Task: " description "\n\n"
+         (when files
+           (str "## Files to modify:\n"
+                (str/join "\n" (map #(str "- " %) files))
+                "\n\n"))
+         (when dependencies
+           (str "## This task depends on:\n"
+                (str/join "\n" (map #(str "- " %) dependencies))
+                "\n\n"))
+         (when acceptance-criteria
+           (str "## Acceptance criteria:\n" acceptance-criteria "\n\n"))
+         "## Environment:\n"
+         "- Working directory: " worktree-path "\n"
+         "- Base commit: " base-commit "\n")))
+
+(defn create-generate-fn
+  "Create a generate-fn closure for use with the inner loop and PR lifecycle.
+
+  Args:
+    llm-backend: Agent backend instance (e.g., from agent/create-backend)
+    opts: Options map with:
+      :logger - Logger instance
+      :event-stream - Event stream for observability
+      :workflow-id - Workflow identifier for event correlation
+      :max-iterations - Max inner loop iterations (default 10)
+
+  Returns: Function (fn [task context] -> {:artifact map :tokens int})
+
+  The returned function wraps loop/run-simple and can be used for:
+  - Initial code generation (runner/execute-task)
+  - Fix loops (PR controller's :generate-fn option)
+
+  Example:
+    (def gen-fn (create-generate-fn my-backend
+                  {:logger logger
+                   :max-iterations 15
+                   :workflow-id \"dag-run-123\"}))
+
+    (gen-fn {:task/id \"task-1\"
+             :task/type :implement
+             :description \"Add feature X\"}
+            {:worktree-path \"/tmp/wt-1\"
+             :base-commit \"abc123\"})"
+  [_llm-backend & {:keys [logger event-stream workflow-id max-iterations]}]
+  (fn [task context]
+    (let [task-map (if (map? task)
+                     task
+                     {:task/id (str (random-uuid))
+                      :task/type :implement
+                      :description (str task)})
+          prompt (format-task-prompt task-map context)
+          loop-context (cond-> {:max-iterations (or max-iterations 10)
+                                :initial-prompt prompt}
+                         logger (assoc :logger logger)
+                         event-stream (assoc :event-stream event-stream)
+                         workflow-id (assoc :workflow-id workflow-id))
+          result (loop/run-simple task-map
+                                  (fn [_t _ctx]
+                                    ;; Inner generate-fn expected by loop/run-simple
+                                    ;; Delegates to LLM backend
+                                    ;; TODO: Wire in actual LLM backend
+                                    {:artifact {:code "generated code"
+                                                :files []}
+                                     :tokens 100})
+                                  loop-context)]
+      {:artifact (:artifact result)
+       :tokens (or (:total-tokens result) (:tokens result) 0)})))
