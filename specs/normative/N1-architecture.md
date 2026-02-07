@@ -336,7 +336,7 @@ Knowledge units MUST be labeled with an explicit trust model so the system can s
 
 - **Trust levels**
   - `:trusted` — authoritative, platform-validated and/or user-promoted content
-  - `:untrusted` — repo-derived or externally sourced content; usable as *data* only
+  - `:untrusted` — repo-derived or externally sourced content; usable as _data_ only
   - `:tainted` — content flagged by scanners; MUST NOT be used as instruction
 
 - **Authority channels**
@@ -699,6 +699,56 @@ All components MUST:
   [engine workflow-id]
   ...)
 ```
+
+#### 4.2.2 Polylith Stability Tagging
+
+Implementations MUST use git tags to mark stable points for Polylith test tracking.
+
+**When to create stable tags:**
+
+1. After **E2E test verification** - All integration tests pass
+2. After **dogfooding runs** - Core workflows tested in real usage
+3. Before **release candidates** - Preparing for production deployment
+4. After **major milestone completion** - Significant features fully functional
+
+**Stable tag format:**
+
+```bash
+git tag -a stable-YYYYMMDD -m "Stable: <milestone description>"
+git push --tags
+```
+
+Example:
+
+```bash
+git tag -a stable-20260206 -m "Stable: DAG orchestration + PR lifecycle integration"
+```
+
+**DO NOT tag on every merge:**
+
+- Stable tags represent verified production-ready snapshots
+- Tagging every merge defeats incremental test tracking
+- Between stable points, `poly info` shows which components have changed since last verification
+- This enables focused testing of changed components only
+
+**Verification checklist before tagging stable:**
+
+- [ ] All `poly test` runs pass (0 failures, 0 errors)
+- [ ] Pre-commit hooks pass on all changed files
+- [ ] E2E integration tests pass
+- [ ] Dogfooding: Core workflows execute successfully in real repository
+- [ ] No known P0/P1 bugs in changed components
+
+**Stable tag lifecycle:**
+
+```text
+[Initial Commit] → [Development] → [E2E Pass] → [Dogfood Success] → [Tag Stable]
+     stable-init      stx flags       verify         verify           stable-YYYYMMDD
+                      (tests marked)                               (tests unmarked)
+```
+
+After tagging stable, `poly info` will show `s--` (stable, has tests, not marked) for
+unchanged components and `stx` only for components modified since the tag.
 
 ### 4.3 OSS Component Boundaries
 
