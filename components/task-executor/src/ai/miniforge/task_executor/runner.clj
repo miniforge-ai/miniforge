@@ -173,13 +173,46 @@
         (log-event logger :release-locks-error task-id
                    {:error (ex-message e)})))))
 
+(defn- calculate-cost-usd
+  "Calculate estimated cost in USD based on tokens used.
+   Using Claude Sonnet pricing as baseline: ~$3/million input, ~$15/million output.
+   Assume 70% input / 30% output ratio for simplicity."
+  [total-tokens]
+  (let [input-tokens (* total-tokens 0.7)
+        output-tokens (* total-tokens 0.3)
+        input-cost-per-million 3.0
+        output-cost-per-million 15.0
+        cost (+ (/ (* input-tokens input-cost-per-million) 1000000.0)
+                (/ (* output-tokens output-cost-per-million) 1000000.0))]
+    (double cost)))
+
 (defn- update-task-metrics!
-  "Update task metrics in run-atom."
-  [run-atom task-id lifecycle-result]
-  (let [metrics {:tokens-used (or (:total-tokens lifecycle-result) 0)
+  "Update comprehensive task metrics in run-atom.
+
+   Collects:
+   - tokens-used: Total tokens consumed
+   - cost-usd: Estimated cost based on token usage
+   - iterations: Number of fix/retry cycles
+   - time-to-merge-ms: Duration from start to merge
+   - ci-runs: Number of CI executions
+   - review-cycles: Number of review iterations
+   - pr-url: GitHub PR URL
+   - status: Final status (:merged, :failed, etc.)"
+  [run-atom task-id lifecycle-result start-time]
+  (let [total-tokens (or (:total-tokens lifecycle-result) 0)
+        end-time (System/currentTimeMillis)
+        duration-ms (- end-time start-time)
+
+        metrics {:tokens-used total-tokens
+                 :cost-usd (calculate-cost-usd total-tokens)
+                 :iterations (or (:fix-iterations lifecycle-result) 0)
+                 :time-to-merge-ms duration-ms
+                 :ci-runs (or (:ci-runs lifecycle-result) 0)
+                 :review-cycles (or (:review-cycles lifecycle-result) 0)
                  :pr-url (:pr-url lifecycle-result)
                  :status (:status lifecycle-result)
-                 :iterations (:fix-iterations lifecycle-result 0)}]
+                 :start-time start-time
+                 :end-time end-time}]
     (dag/update-metrics! run-atom task-id metrics)))
 
 (defn execute-task
@@ -203,10 +236,12 @@
   Throws: None - catches all exceptions and marks task as failed"
   [task-id task run-context]
   (let [{:keys [run-atom executor logger lock-pool config]} run-context
-        task-context (create-task-context task-id task run-context)]
+        task-context (create-task-context task-id task run-context)
+        start-time (System/currentTimeMillis)]
 
     (log-event logger :task-execution-starting task-id
-               {:description (:description task)})
+               {:description (:description task)
+                :start-time start-time})
 
     (let [env-record (atom nil)]
       (try
@@ -225,12 +260,13 @@
                                                  (assoc task-context
                                                         :env-record @env-record))]
 
-          ;; Step 5: Update metrics
-          (update-task-metrics! run-atom task-id lifecycle-result)
+          ;; Step 5: Update metrics (with timing)
+          (update-task-metrics! run-atom task-id lifecycle-result start-time)
 
           (log-event logger :task-execution-completed task-id
                      {:status (:status lifecycle-result)
-                      :pr-url (:pr-url lifecycle-result)})
+                      :pr-url (:pr-url lifecycle-result)
+                      :duration-ms (- (System/currentTimeMillis) start-time)})
 
           {:ok? true
            :value lifecycle-result})
@@ -238,7 +274,8 @@
         (catch Exception e
           (log-event logger :task-execution-failed task-id
                      {:error (ex-message e)
-                      :cause (ex-cause e)})
+                      :cause (ex-cause e)
+                      :duration-ms (- (System/currentTimeMillis) start-time)})
 
           ;; Mark task as failed in DAG
           (dag/mark-failed! run-atom task-id e logger)
