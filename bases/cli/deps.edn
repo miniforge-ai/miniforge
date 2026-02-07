@@ -17,4 +17,7 @@
         ;; Web server dependencies (BB-compatible)
         ;; http-kit and hiccup are bundled with Babashka
         http-kit/http-kit {:mvn/version "2.8.0"}
-        hiccup/hiccup     {:mvn/version "2.0.0-RC3"}}}
+        hiccup/hiccup     {:mvn/version "2.0.0-RC3"}
+
+        ;; TUI rendering (Lanterna screen)
+        babashka/clojure-lanterna {:mvn/version "0.9.8"}}}

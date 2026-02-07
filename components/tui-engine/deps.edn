@@ -1,0 +1,3 @@
+{:paths ["src" "resources"]
+ :deps {babashka/clojure-lanterna {:mvn/version "0.9.8"}}
+ :aliases {:test {:extra-paths ["test"]}}}

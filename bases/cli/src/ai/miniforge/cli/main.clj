@@ -36,7 +36,9 @@
    [cheshire.core :as json]
    [ai.miniforge.cli.web :as web]
    [ai.miniforge.cli.spec-parser :as spec-parser]
-   [ai.miniforge.cli.workflow-runner :as workflow-runner]))
+   [ai.miniforge.cli.workflow-runner :as workflow-runner]
+   [ai.miniforge.tui-views.interface :as tui-views]
+   [ai.miniforge.event-stream.interface :as event-stream]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants and pure helpers
@@ -142,10 +144,10 @@
   (println "\n" (style "Miniforge System Check" :foreground :cyan :bold true) "\n")
 
   (let [checks [["bb" "Babashka" "Required for CLI"]
-                ["gum" "Charm Gum" "Required for TUI"]
                 ["git" "Git" "Required for version control"]
                 ["gh" "GitHub CLI" "Required for PR operations"]
-                ["claude" "Claude CLI" "Required for LLM backend"]]]
+                ["claude" "Claude CLI" "Required for LLM backend"]]
+        terminal-ok? (some? (System/getenv "TERM"))]
 
     (doseq [[cmd name desc] checks]
       (let [available? (check-command cmd)
@@ -154,6 +156,14 @@
                      (style "✗" :foreground :red))
             name-styled (if available? name (style name :foreground :red))]
         (println (format "  %s %-12s %s" status name-styled desc))))
+
+    (println)
+
+    ;; Terminal capability
+    (println (format "  %s %-12s %s"
+                     (if terminal-ok? (style "✓" :foreground :green) (style "✗" :foreground :red))
+                     (if terminal-ok? "Terminal" (style "Terminal" :foreground :red))
+                     "Required for TUI (fleet watch)"))
 
     (println)
 
@@ -306,20 +316,23 @@
     (println (str "  Failed: " (get-in state [:workflows :failed] 0)))
     (println)))
 
-;; Deprecated TUI dashboard functions removed - use web dashboard instead
+(defn fleet-watch-cmd
+  "Start interactive TUI dashboard for real-time workflow monitoring."
+  [_m]
+  (let [stream (event-stream/create-event-stream)]
+    (print-info "Starting TUI dashboard...")
+    (print-info "Press q to quit, ? for help")
+    (try
+      (tui-views/start-tui! stream {:throttle-ms 1000})
+      (catch Exception e
+        (print-error (str "TUI failed: " (ex-message e)))
+        (println "Ensure your terminal supports alternate screen mode.")
+        (println "Fallback: bb miniforge fleet web")))))
 
 (defn fleet-dashboard-cmd
-  "Open interactive two-pane TUI dashboard."
-  [_m]
-  (print-info "TUI dashboard is deprecated. Use the web dashboard instead:")
-  (println "  bb miniforge fleet web")
-  (println)
-  (println "The web dashboard offers:")
-  (println "  - Better UX with htmx-powered interactions")
-  (println "  - AI chat integration")
-  (println "  - PR risk analysis and batch operations")
-  (println "  - Accessible from any browser")
-  nil)
+  "Alias for fleet watch (TUI dashboard)."
+  [m]
+  (fleet-watch-cmd m))
 
 (defn fleet-web-cmd
   "Start web-based fleet dashboard."
@@ -482,7 +495,8 @@ Commands:
     start             Start fleet daemon
     stop              Stop fleet daemon
     status            Show fleet status
-    dashboard         Open TUI dashboard (deprecated - use web)
+    watch             Open interactive TUI dashboard
+    dashboard         Alias for watch
     web [--port N]    Start web dashboard (default port: 8787)
     add <repo>        Add repo to fleet
     remove <repo>     Remove repo from fleet
@@ -559,6 +573,7 @@ Examples:
    {:cmds ["fleet" "start"]     :fn fleet-start-cmd}
    {:cmds ["fleet" "stop"]      :fn fleet-stop-cmd}
    {:cmds ["fleet" "status"]    :fn fleet-status-cmd}
+   {:cmds ["fleet" "watch"]     :fn fleet-watch-cmd}
    {:cmds ["fleet" "dashboard"] :fn fleet-dashboard-cmd}
    {:cmds ["fleet" "web"]       :fn fleet-web-cmd
     :spec {:port {:coerce :int :alias :p :default 8787}}}
