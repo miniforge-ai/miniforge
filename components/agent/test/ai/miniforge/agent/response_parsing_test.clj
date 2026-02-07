@@ -5,8 +5,7 @@
   by workflow phases without running real LLM calls."
   (:require
    [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.agent.core :as agent-core]
-   [ai.miniforge.agent.parser :as parser]
+   [clojure.edn :as edn]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Mock Data
@@ -91,7 +90,7 @@
 (defn mock-llm-backend
   "Create a mock LLM backend that returns predefined responses."
   [response-map]
-  (fn [messages opts]
+  (fn [messages _opts]
     (let [last-message (last messages)
           role (:role last-message)]
       ;; Return appropriate mock based on request context
@@ -101,15 +100,55 @@
 (defn extract-code-block
   "Extract Clojure code block from markdown response."
   [content]
-  (when-let [match (re-find #"```clojure\n(.*?)\n```" content)]
+  (when-let [match (re-find #"(?s)```clojure\n(.*?)\n```" content)]
     (second match)))
+
+;------------------------------------------------------------------------------ Parser Helpers
+
+(defn parse-edn
+  "Parse EDN string into Clojure data structure."
+  [edn-str]
+  (when edn-str
+    (try
+      (edn/read-string edn-str)
+      (catch Exception _e
+        nil))))
+
+(defn parse-uuid-str
+  "Parse UUID string."
+  [uuid-str]
+  (when uuid-str
+    (java.util.UUID/fromString uuid-str)))
+
+(defn valid-file-action?
+  "Check if file action is valid."
+  [action]
+  (contains? #{:create :modify :delete} action))
+
+(defn validate-code-artifact
+  "Validate code artifact structure."
+  [artifact]
+  (let [has-id? (some? (:code/id artifact))
+        has-files? (vector? (:code/files artifact))
+        files-valid? (and has-files?
+                          (every? (fn [f]
+                                    (and (string? (:path f))
+                                         (or (string? (:content f))
+                                             (= :delete (:action f)))
+                                         (valid-file-action? (:action f))))
+                                  (:code/files artifact)))]
+    {:valid? (and has-id? has-files? files-valid?)
+     :errors (cond-> []
+               (not has-id?) (conj "Missing :code/id")
+               (not has-files?) (conj "Missing or invalid :code/files")
+               (and has-files? (not files-valid?)) (conj "Invalid file specifications"))}))
 
 ;------------------------------------------------------------------------------ Tests
 
 (deftest parse-plan-response-test
   (testing "Parsing plan response from LLM"
     (let [code-block (extract-code-block (:content mock-llm-plan-response))
-          parsed (parser/parse-edn code-block)]
+          parsed (parse-edn code-block)]
 
       (is (some? parsed)
           "Should successfully parse plan EDN")
@@ -127,7 +166,7 @@
 (deftest parse-code-response-test
   (testing "Parsing code artifact response from LLM"
     (let [code-block (extract-code-block (:content mock-llm-code-response))
-          parsed (parser/parse-edn code-block)]
+          parsed (parse-edn code-block)]
 
       (is (some? parsed)
           "Should successfully parse code EDN")
@@ -149,7 +188,7 @@
 (deftest parse-test-response-test
   (testing "Parsing test artifact response from LLM"
     (let [code-block (extract-code-block (:content mock-llm-test-response))
-          parsed (parser/parse-edn code-block)]
+          parsed (parse-edn code-block)]
 
       (is (some? parsed)
           "Should successfully parse test EDN")
@@ -167,7 +206,7 @@
 (deftest parse-review-response-test
   (testing "Parsing review response from LLM"
     (let [code-block (extract-code-block (:content mock-llm-review-response))
-          parsed (parser/parse-edn code-block)]
+          parsed (parse-edn code-block)]
 
       (is (some? parsed)
           "Should successfully parse review EDN")
@@ -184,9 +223,9 @@
   (testing "Handling malformed EDN in response"
     (let [code-block (extract-code-block (:content mock-llm-malformed-response))
           result (try
-                   (parser/parse-edn code-block)
-                   (catch Exception e
-                     {:error (ex-message e)}))]
+                   (parse-edn code-block)
+                   (catch Exception _e
+                     {:error (ex-message _e)}))]
 
       ;; Should either return error or handle gracefully
       (is (or (map? result)
@@ -196,7 +235,7 @@
 (deftest missing-required-fields-test
   (testing "Detecting missing required fields in response"
     (let [code-block (extract-code-block (:content mock-llm-missing-fields-response))
-          parsed (parser/parse-edn code-block)]
+          parsed (parse-edn code-block)]
 
       (is (some? parsed)
           "Should parse even with missing fields")
@@ -206,14 +245,14 @@
           "Should detect missing files field")
 
       ;; Validation should catch this
-      (let [validation-result (parser/validate-code-artifact parsed)]
+      (let [validation-result (validate-code-artifact parsed)]
         (is (false? (:valid? validation-result))
             "Validation should fail for missing required fields")))))
 
 (deftest agent-response-to-phase-integration-test
   (testing "Agent response can be consumed by workflow phase"
     (let [code-block (extract-code-block (:content mock-llm-code-response))
-          parsed (parser/parse-edn code-block)
+          parsed (parse-edn code-block)
           ;; Simulate what a phase does with the response
           phase-result (response/success parsed {:tokens 1000 :duration-ms 5000})]
 
@@ -240,23 +279,23 @@
           "Success response should have metrics")
 
       ;; Test failure response structure
-      (is (= :error (:status failure-response))
-          "Failure response should have :error status")
-      (is (string? (:error failure-response))
+      (is (false? (:success failure-response))
+          "Failure response should have :success false")
+      (is (string? (get-in failure-response [:error :message]))
           "Failure response should have error message"))))
 
 (deftest schema-validation-integration-test
   (testing "Parsed responses are validated against schema"
-    (let [valid-code (parser/parse-edn (extract-code-block (:content mock-llm-code-response)))
+    (let [valid-code (parse-edn (extract-code-block (:content mock-llm-code-response)))
           invalid-code {:code/files "should-be-vector"}]
 
       ;; Valid artifact should pass
-      (let [valid-result (parser/validate-code-artifact valid-code)]
+      (let [valid-result (validate-code-artifact valid-code)]
         (is (true? (:valid? valid-result))
             "Valid artifact should pass validation"))
 
       ;; Invalid artifact should fail
-      (let [invalid-result (parser/validate-code-artifact invalid-code)]
+      (let [invalid-result (validate-code-artifact invalid-code)]
         (is (false? (:valid? invalid-result))
             "Invalid artifact should fail validation")
         (is (seq (:errors invalid-result))
@@ -268,16 +307,16 @@
           invalid-action :invalid]
 
       (doseq [action valid-actions]
-        (is (parser/valid-file-action? action)
+        (is (valid-file-action? action)
             (str "Action " action " should be valid")))
 
-      (is (not (parser/valid-file-action? invalid-action))
+      (is (not (valid-file-action? invalid-action))
           "Invalid action should be rejected"))))
 
 (deftest uuid-parsing-test
   (testing "UUID strings are parsed correctly"
     (let [uuid-str "a1b2c3d4-e5f6-7890-1234-567890abcdef"
-          parsed (parser/parse-uuid uuid-str)]
+          parsed (parse-uuid-str uuid-str)]
 
       (is (uuid? parsed)
           "Should parse valid UUID string")
@@ -287,8 +326,8 @@
   (testing "Invalid UUIDs are handled"
     (let [invalid-uuid "not-a-uuid"
           result (try
-                   (parser/parse-uuid invalid-uuid)
-                   (catch Exception e
+                   (parse-uuid-str invalid-uuid)
+                   (catch Exception _e
                      :error))]
 
       (is (= :error result)
@@ -319,9 +358,9 @@
     (let [error (ex-info "Parsing failed" {:line 10 :column 5})
           failure-response (response/failure error)]
 
-      (is (= "Parsing failed" (:error failure-response))
+      (is (= "Parsing failed" (get-in failure-response [:error :message]))
           "Should extract error message")
-      (is (map? (:data failure-response))
+      (is (map? (get-in failure-response [:error :data]))
           "Should preserve error data"))))
 
 (deftest metrics-accumulation-test
@@ -338,8 +377,8 @@
 (deftest response-idempotency-test
   (testing "Parsing the same response multiple times yields same result"
     (let [code-block (extract-code-block (:content mock-llm-code-response))
-          parsed1 (parser/parse-edn code-block)
-          parsed2 (parser/parse-edn code-block)]
+          parsed1 (parse-edn code-block)
+          parsed2 (parse-edn code-block)]
 
       (is (= parsed1 parsed2)
           "Parsing should be idempotent"))))

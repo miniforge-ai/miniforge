@@ -5,7 +5,6 @@
   real linting or testing tools. Validates repair loops and escalation."
   (:require
    [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.gate.interface :as gate]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Mock Data
@@ -51,14 +50,14 @@
 (defn mock-syntax-gate
   "Mock syntax validation gate."
   [should-pass?]
-  (fn [artifact _context]
+  (fn [_artifact _context]
     (if should-pass?
       (response/success
        {:gate :syntax
         :passed? true
         :checks [{:name "syntax" :status :passed}]}
        {:duration-ms 100})
-      (response/failure
+      (response/error
        (ex-info "Syntax error"
                 {:gate :syntax
                  :errors [{:file "src/broken.clj"
@@ -68,7 +67,7 @@
 (defn mock-lint-gate
   "Mock linting gate."
   [warnings]
-  (fn [artifact _context]
+  (fn [_artifact _context]
     (if (empty? warnings)
       (response/success
        {:gate :lint
@@ -84,14 +83,14 @@
 (defn mock-test-gate
   "Mock testing gate."
   [tests-pass?]
-  (fn [artifact _context]
+  (fn [_artifact _context]
     (if tests-pass?
       (response/success
        {:gate :tests
         :passed? true
         :test-results {:total 10 :passed 10 :failed 0}}
        {:duration-ms 5000})
-      (response/failure
+      (response/error
        (ex-info "Tests failed"
                 {:gate :tests
                  :test-results {:total 10 :passed 7 :failed 3}
@@ -101,9 +100,9 @@
 (defn mock-security-gate
   "Mock security scanning gate."
   [has-secrets?]
-  (fn [artifact _context]
+  (fn [_artifact _context]
     (if has-secrets?
-      (response/failure
+      (response/error
        (ex-info "Security issues found"
                 {:gate :security
                  :issues [{:type :hardcoded-secret
@@ -120,14 +119,14 @@
 (defn mock-coverage-gate
   "Mock test coverage gate."
   [coverage-pct threshold]
-  (fn [artifact _context]
+  (fn [_artifact _context]
     (if (>= coverage-pct threshold)
       (response/success
        {:gate :coverage
         :passed? true
         :coverage coverage-pct}
        {:duration-ms 100})
-      (response/failure
+      (response/error
        (ex-info "Insufficient test coverage"
                 {:gate :coverage
                  :actual coverage-pct
@@ -181,9 +180,9 @@
 
       (is (= :error (:status result))
           "Gate should fail")
-      (is (string? (:error result))
+      (is (string? (get-in result [:error :message]))
           "Gate should provide error message")
-      (is (seq (get-in (:data result) [:errors]))
+      (is (seq (get-in result [:error :data :errors]))
           "Gate should provide error details"))))
 
 (deftest gate-chain-all-pass-test
@@ -242,9 +241,9 @@
 
       (is (= :error (:status result))
           "Should fail on secrets")
-      (is (seq (get-in (:data result) [:issues]))
+      (is (seq (get-in result [:error :data :issues]))
           "Should report security issues")
-      (is (= :critical (get-in (:data result) [:issues 0 :severity]))
+      (is (= :critical (get-in result [:error :data :issues 0 :severity]))
           "Should mark secrets as critical"))))
 
 (deftest coverage-gate-threshold-test
@@ -281,18 +280,16 @@
           repair-fn (fn [artifact error]
                       (swap! repair-history conj {:error error})
                       ;; Return "fixed" artifact
-                      (assoc artifact :repaired true))]
+                      (assoc artifact :repaired true))
+          ;; Simulate repair loop
+          initial-result (gate-fn mock-code-artifact-syntax-error {})
+          repaired-artifact (repair-fn mock-code-artifact-syntax-error
+                                       (:data initial-result))]
 
-      ;; Simulate repair loop
-      (let [initial-result (gate-fn mock-code-artifact-syntax-error {})
-            repaired-artifact (repair-fn mock-code-artifact-syntax-error
-                                         (:data initial-result))
-            recheck-result (gate-fn repaired-artifact {})]
-
-        (is (= 1 (count @repair-history))
-            "Should track repair iteration")
-        (is (contains? repaired-artifact :repaired)
-            "Artifact should be marked as repaired")))))
+      (is (= 1 (count @repair-history))
+          "Should track repair iteration")
+      (is (contains? repaired-artifact :repaired)
+          "Artifact should be marked as repaired"))))
 
 (deftest escalation-after-max-repairs-test
   (testing "Escalation triggers after max repair iterations"
@@ -301,7 +298,7 @@
           gate-fn (mock-syntax-gate false)]
 
       ;; Simulate repeated failures
-      (dotimes [i 5]
+      (dotimes [_i 5]
         (let [result (gate-fn mock-code-artifact-syntax-error {})]
           (when (and (= :error (:status result))
                      (< @repair-count max-iterations))
@@ -330,14 +327,13 @@
   (testing "Context is propagated through gate chain"
     (let [context {:workflow/id (random-uuid)
                    :phase :implement}
-          context-tracking-gate (fn [artifact ctx]
+          context-tracking-gate (fn [_artifact ctx]
                                   (is (= (:workflow/id context)
                                          (:workflow/id ctx))
                                       "Context should propagate")
-                                  (response/success {:passed? true} {}))
-          result (context-tracking-gate mock-code-artifact-valid context)]
+                                  (response/success {:passed? true} {}))]
 
-      (is (= :success (:status result))
+      (is (= :success (:status (context-tracking-gate mock-code-artifact-valid context)))
           "Gate should pass with context"))))
 
 (deftest conditional-gate-application-test
@@ -346,16 +342,15 @@
                          (mock-lint-gate [])]
           python-gates [(mock-syntax-gate true)]
           artifact-clj {:code/language "clojure"}
-          artifact-py {:code/language "python"}]
+          artifact-py {:code/language "python"}
+          ;; Apply language-specific gates
+          clj-result (apply-gate-chain artifact-clj clojure-gates {})
+          py-result (apply-gate-chain artifact-py python-gates {})]
 
-      ;; Apply language-specific gates
-      (let [clj-result (apply-gate-chain artifact-clj clojure-gates {})
-            py-result (apply-gate-chain artifact-py python-gates {})]
-
-        (is (= 2 (count (:results clj-result)))
-            "Clojure should run 2 gates")
-        (is (= 1 (count (:results py-result)))
-            "Python should run 1 gate"))))))
+      (is (= 2 (count (:results clj-result)))
+          "Clojure should run 2 gates")
+      (is (= 1 (count (:results py-result)))
+          "Python should run 1 gate"))))
 
 (deftest gate-failure-details-test
   (testing "Gate failures provide actionable details"
@@ -364,19 +359,19 @@
 
       (is (= :error (:status result))
           "Should fail")
-      (is (seq (get-in (:data result) [:errors]))
+      (is (seq (get-in result [:error :data :errors]))
           "Should provide error list")
-      (let [first-error (first (get-in (:data result) [:errors]))]
+      (let [first-error (first (get-in result [:error :data :errors]))]
         (is (contains? first-error :file)
             "Error should specify file")
         (is (contains? first-error :line)
             "Error should specify line")
         (is (contains? first-error :message)
-            "Error should have message"))))
+            "Error should have message")))))
 
 (deftest gate-timeout-handling-test
   (testing "Gates can timeout on slow operations"
-    (let [slow-gate (fn [artifact context]
+    (let [slow-gate (fn [_artifact _context]
                       (Thread/sleep 100) ; Simulate slow gate
                       (response/success {:passed? true} {:duration-ms 100}))
           start-time (System/currentTimeMillis)
