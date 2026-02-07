@@ -129,12 +129,41 @@
   (let [load-workflow (try
                         (requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)
                         (catch Exception e
-                          (println (colorize :red "\nWorkflow execution requires JVM-only dependencies."))
-                          (println (colorize :yellow "This feature is not available in the Babashka CLI build."))
-                          (println (colorize :cyan "\nTo run workflows, use the full JVM version:"))
-                          (println "  clojure -M:dev -m ai.miniforge.cli.main workflow run <workflow-id>")
-                          (throw (ex-info "Workflow execution not available in Babashka build"
-                                          {:reason "JVM-only dependencies required"} e))))
+                          (let [msg (ex-message e)
+                                data (ex-data e)
+                                cause (ex-cause e)]
+                            (println (colorize :red "\n✗ Failed to load workflow interface"))
+                            (println (str "  Error: " msg))
+                            (when data
+                              (println (str "  Details: " (pr-str data))))
+                            (when cause
+                              (println (str "  Cause: " (ex-message cause))))
+                            (println (colorize :yellow "\nPossible causes:"))
+                            (println "  - Missing dependency in deps.edn: ai.miniforge/workflow")
+                            (println "  - Namespace compilation error in workflow component")
+                            (println "  - Circular dependency issue")
+                            (cond
+                              (and msg (or (str/includes? msg "could not be resolved")
+                                           (str/includes? msg "class not found")
+                                           (str/includes? msg "No such namespace")))
+                              (do
+                                (println (colorize :cyan "\nIf the namespace doesn't exist:"))
+                                (println "  - Check that ai.miniforge/workflow is in your deps.edn")
+                                (println "  - Verify the component was built: clojure -M:poly test"))
+
+                              (and msg (str/includes? msg "Babashka"))
+                              (do
+                                (println (colorize :cyan "\nIf running with Babashka (bb):"))
+                                (println "  - Try the JVM version: clojure -M:dev -m ai.miniforge.cli.main workflow run <id>"))
+
+                              :else
+                              (do
+                                (println (colorize :cyan "\nFor debugging:"))
+                                (println "  - Run with verbose output: bb -e '(requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)'")))
+                            (throw (ex-info "Failed to resolve workflow interface"
+                                            {:namespace 'ai.miniforge.workflow.interface
+                                             :var 'load-workflow
+                                             :original-error msg} e)))))
         run-pipeline (requiring-resolve 'ai.miniforge.workflow.interface/run-pipeline)]
     (when-not load-workflow
       (throw (ex-info "Workflow interface not available" {})))
