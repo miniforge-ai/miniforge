@@ -57,3 +57,7 @@ dist/
 
 # Checkpoints (local development snapshots)
 docs/checkpoints/
+
+# Dogfooding (local task definitions)
+dogfood-tasks*.edn
+dogfood-session-*.edn

@@ -21,11 +21,37 @@ export MINIFORGE_MAX_COST_USD=100.0
 
 ### 2. Prepare Task DAG
 
-Tasks are defined in `dogfood-tasks.edn`. Current tasks:
+Create a local `dogfood-tasks.edn` file with your task definitions:
 
-- **task-1**: Wire in actual LLM backend to generate.clj
-- **task-2**: Add integration tests (depends on task-1)
-- **task-3**: Add metrics collection (depends on task-1)
+```clojure
+{:dag-id "dogfood-2026-02-06"
+ :description "Miniforge working on itself - task-executor improvements"
+ :tasks
+ [{:task/id "task-1"
+   :task/deps #{}
+   :description "Wire in actual LLM backend to generate.clj"
+   :files ["components/task-executor/src/ai/miniforge/task_executor/generate.clj"]
+   :acceptance-criteria "Replace mock implementation with actual loop/run-simple integration"
+   :context "Currently generate.clj has a TODO to wire in the actual LLM backend."}
+
+  {:task/id "task-2"
+   :task/deps #{"task-1"}
+   :description "Add integration tests for runner and orchestrator"
+   :files ["components/task-executor/test/ai/miniforge/task_executor/runner_test.clj"
+           "components/task-executor/test/ai/miniforge/task_executor/orchestrator_test.clj"]
+   :acceptance-criteria "Create working integration tests with proper mocking"
+   :context "Tests were removed due to mock setup issues. Need proper tests."}
+
+  {:task/id "task-3"
+   :task/deps #{"task-1"}
+   :description "Add task execution metrics collection"
+   :files ["components/task-executor/src/ai/miniforge/task_executor/runner.clj"]
+   :acceptance-criteria "Collect metrics: tokens, cost, iterations, time-to-merge"
+   :context "Runner has update-task-metrics! but needs comprehensive collection."}]}
+```
+
+**Note**: This file is local-only (in `.gitignore`). Each dogfooding session creates
+its own task list based on current needs
 
 ### 3. Run Dogfooding Session
 
