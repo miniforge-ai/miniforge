@@ -55,8 +55,7 @@
          :running?       false
          :input-thread   nil
          :unsub-fn       nil
-         :prev-buffer    nil
-         :render-pending (atom false)}))
+         :prev-buffer    nil}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Rendering

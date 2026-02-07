@@ -64,9 +64,9 @@
                                 :name (:name wf)
                                 :phase (some-> (:phase wf) name)
                                 :progress-str (str (:progress wf 0) "%")
-                                :agent-msg (some-> (first (vals (:agents wf)))
-                                                   :message
-                                                   (subs 0 (min 16 (count (or (:message (first (vals (:agents wf)))) "")))))})
+                                :agent-msg (when-let [agent (first (vals (:agents wf)))]
+                                             (when-let [msg (:message agent)]
+                                               (subs msg 0 (min 16 (count msg)))))})
                              workflows)
                  :selected-row selected})))
           ;; Footer

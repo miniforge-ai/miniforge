@@ -76,10 +76,10 @@
   (let [wf (model/make-workflow {:id workflow-id
                                   :name (or name (:name spec))
                                   :status :running
-                                  :started-at (java.time.Instant/now)})]
+})]
     (-> model
         (update :workflows conj wf)
-        (assoc :last-updated (java.time.Instant/now)))))
+)))
 
 (defn- handle-phase-changed [model {:keys [workflow-id phase]}]
   (let [idx (some (fn [[i wf]] (when (= (:id wf) workflow-id) i))
@@ -88,7 +88,7 @@
       idx (assoc-in [:workflows idx :phase] phase)
       (= workflow-id (get-in model [:detail :workflow-id]))
       (update-in [:detail :phases] conj {:phase phase :status :running})
-      true (assoc :last-updated (java.time.Instant/now)))))
+)))
 
 (defn- handle-phase-done [model {:keys [workflow-id]}]
   (let [idx (some (fn [[i wf]] (when (= (:id wf) workflow-id) i))
@@ -96,7 +96,7 @@
     (cond-> model
       idx (update-in [:workflows idx :progress]
                      #(min 100 (+ (or % 0) 20)))
-      true (assoc :last-updated (java.time.Instant/now)))))
+)))
 
 (defn- handle-agent-status [model {:keys [workflow-id agent status message]}]
   (let [idx (some (fn [[i wf]] (when (= (:id wf) workflow-id) i))
@@ -105,7 +105,7 @@
       idx (assoc-in [:workflows idx :agents agent] {:status status :message message})
       (= workflow-id (get-in model [:detail :workflow-id]))
       (assoc-in [:detail :current-agent] {:agent agent :status status :message message})
-      true (assoc :last-updated (java.time.Instant/now)))))
+)))
 
 (defn- handle-agent-output [model {:keys [workflow-id delta]}]
   (if (= workflow-id (get-in model [:detail :workflow-id]))
@@ -118,7 +118,7 @@
     (cond-> model
       idx (-> (assoc-in [:workflows idx :status] (or status :success))
               (assoc-in [:workflows idx :progress] 100))
-      true (assoc :last-updated (java.time.Instant/now)))))
+)))
 
 (defn- handle-workflow-failed [model {:keys [workflow-id error]}]
   (let [idx (some (fn [[i wf]] (when (= (:id wf) workflow-id) i))
@@ -126,10 +126,10 @@
     (cond-> model
       idx (-> (assoc-in [:workflows idx :status] :failed)
               (assoc-in [:workflows idx :error] error))
-      true (assoc :last-updated (java.time.Instant/now)))))
+)))
 
 (defn- handle-gate-result [model _payload]
-  (assoc model :last-updated (java.time.Instant/now)))
+  model)
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Mode switching
@@ -230,8 +230,8 @@
       :msg/workflow-failed  (handle-workflow-failed model payload)
       :msg/gate-result      (handle-gate-result model payload)
 
-      ;; Tick (for clock/timing updates)
-      :tick (assoc model :last-updated (java.time.Instant/now))
+      ;; Tick (for clock/timing updates, currently unused)
+      :tick model
 
       ;; Unknown message -- no-op
       model)))
