@@ -5,7 +5,8 @@
    [cheshire.core :as json]
    [babashka.process :as p]
    [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.llm.progress-monitor :as pm])
+   [ai.miniforge.llm.progress-monitor :as pm]
+   [ai.miniforge.response.interface :as response])
   (:import
    [java.io ByteArrayInputStream]))
 
@@ -60,6 +61,10 @@
              :message (str/trim error-message)
              :stderr stderr
              :stdout output}
+     :anomaly (response/make-anomaly
+               :anomalies.agent/llm-error
+               (str/trim error-message)
+               {:anomaly/operation :llm-complete})
      :exit-code exit-code}))
 
 (defn parse-cli-output
@@ -200,13 +205,18 @@
 (defn- streaming-error-response [content exit-code err-result timeout-info]
   (let [error-message (or err-result
                           (when (str/blank? content) "Process failed with no output")
-                          "Process failed")]
+                          "Process failed")
+        category (if timeout-info :anomalies/timeout :anomalies.agent/llm-error)]
     {:success false
      :error {:type (if timeout-info "adaptive_timeout" "cli_error")
              :message (str/trim error-message)
              :stderr err-result
              :stdout content
              :timeout timeout-info}
+     :anomaly (response/make-anomaly
+               category
+               (str/trim error-message)
+               {:anomaly/operation :llm-stream})
      :exit-code exit-code}))
 
 (defn- handle-streaming [client request on-chunk backend-config progress-monitor]

@@ -28,6 +28,7 @@
    Each chain entry structure:
    {:operation keyword        ; Operation name
     :anomaly keyword|nil      ; Anomaly code if failed, nil if succeeded
+    :anomaly-map map|nil      ; Full anomaly map when available
     :succeeded? boolean       ; True if this operation succeeded
     :response any}            ; Operation result data
 
@@ -37,7 +38,8 @@
          (add-response :step-2 nil {:result \"done\"})
          (succeeded?))
      ;; => true"
-)
+  (:require
+   [ai.miniforge.response.anomaly :as anomaly]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Chain creation
@@ -65,19 +67,31 @@
 
    Arguments:
      operation - Keyword identifying the operation
-     anomaly   - Anomaly keyword if failed, nil if succeeded
+     anomaly   - Anomaly keyword, anomaly map, or nil if succeeded
      response  - Operation result data
+
+   When anomaly is a map (anomaly map), both :anomaly (keyword) and
+   :anomaly-map (full map) are set. When anomaly is a keyword (legacy),
+   only :anomaly is set. This provides backward compatibility.
 
    Returns:
      {:operation operation
-      :anomaly anomaly
+      :anomaly keyword|nil       ; Always a keyword for backward compat
+      :anomaly-map map|nil       ; Full anomaly map when available
       :succeeded? (nil? anomaly)
       :response response}"
   [operation anomaly response]
-  {:operation operation
-   :anomaly anomaly
-   :succeeded? (nil? anomaly)
-   :response response})
+  (let [anomaly-map (when (map? anomaly) anomaly)
+        anomaly-kw (cond
+                     (nil? anomaly) nil
+                     (keyword? anomaly) anomaly
+                     (map? anomaly) (:anomaly/category anomaly)
+                     :else anomaly)]
+    {:operation operation
+     :anomaly anomaly-kw
+     :anomaly-map anomaly-map
+     :succeeded? (nil? anomaly)
+     :response response}))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Chain operations
@@ -174,21 +188,24 @@
    Returns a vector of error maps with:
    - :type - The operation name as a keyword prefixed with 'error-'
    - :operation - The original operation name
-   - :anomaly - The anomaly code
-   - :message - Error message from response
+   - :anomaly - The anomaly code (keyword)
+   - :anomaly-map - Full anomaly map when available (nil for legacy entries)
+   - :message - Error message from response or anomaly map
    - :data - Additional error data from response
 
    This provides a migration path from :execution/errors to response chains."
   [chain]
   (->> (all-failures chain)
-       (mapv (fn [{:keys [operation anomaly response]}]
-               {:type (keyword (str "error-" (name operation)))
-                :operation operation
-                :anomaly anomaly
-                :message (or (:error response)
-                             (:message response)
-                             (str "Operation " operation " failed"))
-                :data (dissoc response :error :message)}))))
+       (mapv (fn [{:keys [operation anomaly anomaly-map response]}]
+               (cond-> {:type (keyword (str "error-" (name operation)))
+                        :operation operation
+                        :anomaly anomaly
+                        :message (or (:anomaly/message anomaly-map)
+                                     (:error response)
+                                     (:message response)
+                                     (str "Operation " operation " failed"))
+                        :data (dissoc response :error :message)}
+                 anomaly-map (assoc :anomaly-map anomaly-map))))))
 
 (defn operations
   "Get the sequence of operation names in order."
@@ -258,7 +275,7 @@
   "Execute a function and add its result to the chain.
 
    On success: adds (operation, nil, result) to chain
-   On exception: adds (operation, anomaly, {:error message :data ex-data})
+   On exception: adds (operation, anomaly-map, {:error message :data ex-data})
 
    Arguments:
      chain      - Response chain
@@ -273,8 +290,9 @@
     (let [result (f)]
       (add-success chain operation result))
     (catch Exception ex
-      (let [anomaly (or (anomaly-fn ex) :anomalies/fault)]
-        (add-failure chain operation anomaly
+      (let [category (or (anomaly-fn ex) :anomalies/fault)
+            anom (anomaly/from-exception ex (constantly category))]
+        (add-failure chain operation anom
                      {:error (ex-message ex)
                       :data (ex-data ex)})))))
 

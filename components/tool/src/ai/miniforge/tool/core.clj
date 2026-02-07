@@ -6,6 +6,7 @@
    [clojure.set :as set]
    [clojure.string :as str]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.tool.tracking :as tracking]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -107,10 +108,15 @@
                      (catch Exception e
                        {:success false
                         :error {:type "execution_error"
-                                :message (.getMessage e)}}))
+                                :message (.getMessage e)}
+                        :anomaly (response/from-exception e)}))
                    {:success false
                     :error {:type "validation_error"
-                            :errors (:errors validation)}})
+                            :errors (:errors validation)}
+                    :anomaly (response/make-anomaly
+                              :anomalies/incorrect
+                              (str "Tool parameter validation failed: "
+                                   (first (:errors validation))))})
           end-ms (System/currentTimeMillis)
           invocation (tracking/build-invocation id params start-ms end-ms result)]
       (tracking/record-invocation context invocation)
@@ -191,7 +197,10 @@
     (execute tool params context)
     {:success false
      :error {:type "not_found"
-             :message (str "Tool not found: " tool-id)}}))
+             :message (str "Tool not found: " tool-id)}
+     :anomaly (response/make-anomaly
+               :anomalies/not-found
+               (str "Tool not found: " tool-id))}))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

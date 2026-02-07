@@ -5,7 +5,8 @@
    [malli.core :as m]
    [malli.error :as me]
    [ai.miniforge.schema.core :as core]
-   [ai.miniforge.schema.logging :as logging]))
+   [ai.miniforge.schema.logging :as logging]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports (allow other components to reference schemas)
@@ -122,18 +123,21 @@
    - opts       - Optional map with additional fields
 
    Returns:
-   - {:success? false data-key nil :error error ...opts}
+   - {:success? false data-key nil :error error :anomaly anomaly-map ...opts}
 
    Example:
      (failure :pack \"File not found\")
-     ;; => {:success? false :pack nil :error \"File not found\"}
+     ;; => {:success? false :pack nil :error \"File not found\" :anomaly {...}}
 
      (failure :pack {:message \"Invalid\" :stage :parsing})
-     ;; => {:success? false :pack nil :error {:message \"Invalid\" :stage :parsing}}"
+     ;; => {:success? false :pack nil :error {:message \"Invalid\" :stage :parsing} :anomaly {...}}"
   ([data-key error]
    (failure data-key error nil))
   ([data-key error opts]
-   (merge {:success? false data-key nil :error error} opts)))
+   (let [msg (if (string? error) error (or (:message error) (pr-str error)))]
+     (merge {:success? false data-key nil :error error
+             :anomaly (response/make-anomaly :anomalies/fault msg)}
+            opts))))
 
 (defn failure-with-errors
   "Create a failure response with multiple errors.
@@ -163,20 +167,22 @@
    - opts     - Optional map with additional fields (e.g., :stage)
 
    Returns:
-   - {:success? false data-key nil :error {:message ... :data ...} ...opts}
+   - {:success? false data-key nil :error {:message ... :data ...} :anomaly anomaly-map ...opts}
 
    Example:
      (exception-failure :pack (Exception. \"IO error\"))
-     ;; => {:success? false :pack nil :error {:message \"IO error\"}}
+     ;; => {:success? false :pack nil :error {:message \"IO error\"} :anomaly {...}}
 
      (exception-failure :pack ex {:stage :extraction})
-     ;; => {:success? false :pack nil :error {:message ... :stage :extraction}}"
+     ;; => {:success? false :pack nil :error {:message ... :stage :extraction} :anomaly {...}}"
   ([data-key ex]
    (exception-failure data-key ex nil))
   ([data-key ex opts]
    (let [error-map (cond-> {:message (ex-message ex)}
                      (ex-data ex) (assoc :data (ex-data ex)))]
-     (merge {:success? false data-key nil :error error-map} opts))))
+     (merge {:success? false data-key nil :error error-map
+             :anomaly (response/from-exception ex)}
+            opts))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation response helpers

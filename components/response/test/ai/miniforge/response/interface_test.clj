@@ -30,13 +30,26 @@
       (is (= {:result "ok"} (r/last-response chain))))))
 
 (deftest add-failure-test
-  (testing "add-failure adds entry with anomaly"
+  (testing "add-failure adds entry with anomaly keyword"
     (let [chain (-> (r/create :test)
                     (r/add-failure :step-1 :anomalies/fault {:error "boom"}))]
       (is (= 1 (r/entry-count chain)))
       (is (r/failed? chain))
       (is (= :anomalies/fault (r/last-anomaly chain)))
-      (is (= {:error "boom"} (r/last-response chain))))))
+      (is (= {:error "boom"} (r/last-response chain)))))
+
+  (testing "add-failure accepts anomaly map"
+    (let [anom (r/make-anomaly :anomalies.gate/validation-failed "Test failed"
+                               {:anomaly/phase :verify})
+          chain (-> (r/create :test)
+                    (r/add-failure :step-1 anom {:errors ["e1"]}))]
+      (is (r/failed? chain))
+      ;; :anomaly key still holds the keyword for backward compat
+      (is (= :anomalies.gate/validation-failed (r/last-anomaly chain)))
+      ;; :anomaly-map holds the full map
+      (let [entry (r/last-entry chain)]
+        (is (r/anomaly-map? (:anomaly-map entry)))
+        (is (= :verify (get-in entry [:anomaly-map :anomaly/phase])))))))
 
 (deftest add-response-test
   (testing "add-response with nil anomaly succeeds"
@@ -179,14 +192,18 @@
       (is (= {:result "ok"} (r/last-response chain))))))
 
 (deftest execute-with-handling-failure-test
-  (testing "exception adds failure entry"
+  (testing "exception adds failure entry with anomaly map"
     (let [chain (-> (r/create :test)
                     (r/execute-with-handling :step-1 r/default-anomaly-classifier
                                              #(throw (ex-info "boom" {:code 123}))))]
       (is (r/failed? chain))
       (is (= :anomalies/fault (r/last-anomaly chain)))
       (is (= "boom" (:error (r/last-response chain))))
-      (is (= {:code 123} (:data (r/last-response chain)))))))
+      (is (= {:code 123} (:data (r/last-response chain))))
+      ;; New: anomaly-map is present
+      (let [entry (r/last-entry chain)]
+        (is (r/anomaly-map? (:anomaly-map entry)))
+        (is (= "boom" (:anomaly/message (:anomaly-map entry))))))))
 
 (deftest execute-with-handling-custom-classifier-test
   (testing "custom classifier maps exceptions"
@@ -259,3 +276,245 @@
     (let [chain (-> (r/create :test)
                     (r/add-success :step-1 {}))]
       (is (= [] (r/errors chain))))))
+
+;; ============================================================================
+;; Anomaly map constructor tests
+;; ============================================================================
+
+(deftest make-anomaly-test
+  (testing "creates anomaly map with required keys"
+    (let [anom (r/make-anomaly :anomalies/fault "Something broke")]
+      (is (= :anomalies/fault (:anomaly/category anom)))
+      (is (= "Something broke" (:anomaly/message anom)))
+      (is (uuid? (:anomaly/id anom)))
+      (is (inst? (:anomaly/timestamp anom)))))
+
+  (testing "merges domain context"
+    (let [anom (r/make-anomaly :anomalies.gate/validation-failed "Test failed"
+                               {:anomaly/phase :verify
+                                :anomaly/operation :validate})]
+      (is (= :anomalies.gate/validation-failed (:anomaly/category anom)))
+      (is (= :verify (:anomaly/phase anom)))
+      (is (= :validate (:anomaly/operation anom)))))
+
+  (testing "context does not overwrite required keys"
+    (let [anom (r/make-anomaly :anomalies/fault "original"
+                               {:anomaly/category :anomalies/timeout
+                                :anomaly/message "overwritten"})]
+      ;; merge puts context first, then required keys, so required wins
+      (is (= :anomalies/fault (:anomaly/category anom)))
+      (is (= "original" (:anomaly/message anom))))))
+
+(deftest anomaly-map?-test
+  (testing "recognizes anomaly maps"
+    (is (r/anomaly-map? (r/make-anomaly :anomalies/fault "broken")))
+    (is (r/anomaly-map? {:anomaly/category :anomalies/fault})))
+
+  (testing "rejects non-anomaly values"
+    (is (not (r/anomaly-map? nil)))
+    (is (not (r/anomaly-map? :anomalies/fault)))
+    (is (not (r/anomaly-map? "error")))
+    (is (not (r/anomaly-map? {:error "not an anomaly"})))
+    (is (not (r/anomaly-map? 42)))))
+
+(deftest from-exception-test
+  (testing "converts ex-info to anomaly map"
+    (let [ex (ex-info "Timeout" {:phase :verify})
+          anom (r/from-exception ex)]
+      (is (r/anomaly-map? anom))
+      (is (= :anomalies/fault (:anomaly/category anom)))
+      (is (= "Timeout" (:anomaly/message anom)))
+      (is (= "Timeout" (:anomaly/ex-message anom)))
+      (is (= {:phase :verify} (:anomaly/ex-data anom)))))
+
+  (testing "uses :anomaly key from ex-data when present"
+    (let [ex (ex-info "oops" {:anomaly :anomalies/timeout})
+          anom (r/from-exception ex)]
+      (is (= :anomalies/timeout (:anomaly/category anom)))))
+
+  (testing "uses classifier-fn when provided"
+    (let [ex (ex-info "boom" {})
+          classifier (fn [_] :anomalies/busy)
+          anom (r/from-exception ex classifier)]
+      (is (= :anomalies/busy (:anomaly/category anom)))))
+
+  (testing "classifier-fn takes precedence over ex-data :anomaly"
+    (let [ex (ex-info "boom" {:anomaly :anomalies/timeout})
+          classifier (fn [_] :anomalies/busy)
+          anom (r/from-exception ex classifier)]
+      (is (= :anomalies/busy (:anomaly/category anom)))))
+
+  (testing "captures exception class"
+    (let [ex (java.util.concurrent.TimeoutException. "timed out")
+          anom (r/from-exception ex)]
+      (is (string? (:anomaly/ex-class anom))))))
+
+(deftest gate-anomaly-test
+  (testing "creates anomaly with gate errors"
+    (let [gate-errors [{:code :syntax-error
+                        :message "Parse error"
+                        :location {:file "foo.clj" :line 10 :column 5}}]
+          anom (r/gate-anomaly :anomalies.gate/validation-failed
+                               "Syntax gate failed"
+                               gate-errors)]
+      (is (r/anomaly-map? anom))
+      (is (= :anomalies.gate/validation-failed (:anomaly/category anom)))
+      (is (= gate-errors (:anomaly.gate/errors anom)))))
+
+  (testing "merges additional context"
+    (let [anom (r/gate-anomaly :anomalies.gate/check-failed
+                               "Gate threw"
+                               [{:code :test-failed :message "assertion"}]
+                               {:anomaly/phase :verify})]
+      (is (= :verify (:anomaly/phase anom))))))
+
+(deftest agent-anomaly-test
+  (testing "creates anomaly with agent role"
+    (let [anom (r/agent-anomaly :anomalies.agent/invoke-failed
+                                "Agent timed out"
+                                :implementer)]
+      (is (r/anomaly-map? anom))
+      (is (= :anomalies.agent/invoke-failed (:anomaly/category anom)))
+      (is (= :implementer (:anomaly.agent/role anom)))))
+
+  (testing "merges additional context"
+    (let [anom (r/agent-anomaly :anomalies.agent/llm-error
+                                "Model error"
+                                :planner
+                                {:anomaly.llm/model "claude-sonnet-4"})]
+      (is (= "claude-sonnet-4" (:anomaly.llm/model anom))))))
+
+;; ============================================================================
+;; Boundary translator tests
+;; ============================================================================
+
+(deftest anomaly->http-status-test
+  (testing "maps general anomalies to HTTP status codes"
+    (is (= 400 (r/anomaly->http-status :anomalies/incorrect)))
+    (is (= 403 (r/anomaly->http-status :anomalies/forbidden)))
+    (is (= 404 (r/anomaly->http-status :anomalies/not-found)))
+    (is (= 409 (r/anomaly->http-status :anomalies/conflict)))
+    (is (= 429 (r/anomaly->http-status :anomalies/busy)))
+    (is (= 500 (r/anomaly->http-status :anomalies/fault)))
+    (is (= 501 (r/anomaly->http-status :anomalies/unsupported)))
+    (is (= 503 (r/anomaly->http-status :anomalies/unavailable)))
+    (is (= 504 (r/anomaly->http-status :anomalies/timeout))))
+
+  (testing "maps domain anomalies"
+    (is (= 422 (r/anomaly->http-status :anomalies.gate/validation-failed)))
+    (is (= 502 (r/anomaly->http-status :anomalies.agent/llm-error)))
+    (is (= 429 (r/anomaly->http-status :anomalies.phase/budget-exceeded))))
+
+  (testing "defaults to 500 for unknown"
+    (is (= 500 (r/anomaly->http-status :unknown/anomaly)))))
+
+(deftest anomaly->http-response-test
+  (testing "produces Ring response map"
+    (let [anom (r/make-anomaly :anomalies/not-found "User 123 not found")
+          resp (r/anomaly->http-response anom)]
+      (is (= 404 (:status resp)))
+      (is (= "application/json" (get-in resp [:headers "Content-Type"])))
+      (is (= "not-found" (get-in resp [:body :error :code])))
+      (is (string? (get-in resp [:body :error :message]))))))
+
+(deftest anomaly->user-message-test
+  (testing "returns user-friendly message for known categories"
+    (let [anom (r/make-anomaly :anomalies/timeout "LLM call timed out after 30s")]
+      (is (= "The operation timed out. Please try again."
+             (r/anomaly->user-message anom)))))
+
+  (testing "never exposes internal message"
+    (let [anom (r/make-anomaly :anomalies/fault "NullPointerException at foo.clj:42")]
+      (is (not (clojure.string/includes? (r/anomaly->user-message anom) "NullPointer")))))
+
+  (testing "falls back to generic message for unknown categories"
+    (let [anom (r/make-anomaly :anomalies.custom/something "internal detail")]
+      (is (string? (r/anomaly->user-message anom))))))
+
+(deftest anomaly->log-data-test
+  (testing "extracts structured log data"
+    (let [anom (r/make-anomaly :anomalies.agent/llm-error "Model returned 500"
+                               {:anomaly/phase :implement
+                                :anomaly.agent/role :implementer})
+          log-data (r/anomaly->log-data anom)]
+      (is (= :anomalies.agent/llm-error (:anomaly/category log-data)))
+      (is (= "Model returned 500" (:anomaly/message log-data)))
+      (is (true? (:anomaly/retryable? log-data)))
+      (is (= :implement (:anomaly/phase log-data)))
+      (is (= :implementer (:anomaly.agent/role log-data)))))
+
+  (testing "omits nil optional fields"
+    (let [anom (r/make-anomaly :anomalies/fault "broke")
+          log-data (r/anomaly->log-data anom)]
+      (is (not (contains? log-data :anomaly/phase)))
+      (is (not (contains? log-data :anomaly.agent/role))))))
+
+(deftest anomaly->event-data-test
+  (testing "produces event-compatible map"
+    (let [anom (r/make-anomaly :anomalies/timeout "Phase timed out"
+                               {:anomaly/phase :verify})
+          event-data (r/anomaly->event-data anom)]
+      (is (= "Phase timed out" (:message event-data)))
+      (is (= :anomalies/timeout (:anomaly-code event-data)))
+      (is (true? (:retryable? event-data)))
+      (is (= :verify (:phase event-data))))))
+
+(deftest anomaly->outcome-evidence-test
+  (testing "produces evidence-bundle outcome fields"
+    (let [anom (r/make-anomaly :anomalies.gate/validation-failed "Test failed"
+                               {:anomaly/phase :verify
+                                :anomaly.gate/errors [{:code :test-failed}]})
+          outcome (r/anomaly->outcome-evidence anom)]
+      (is (false? (:outcome/success outcome)))
+      (is (= :anomalies.gate/validation-failed (:outcome/anomaly-code outcome)))
+      (is (= "Test failed" (:outcome/error-message outcome)))
+      (is (= :verify (:outcome/error-phase outcome)))
+      (is (= [{:code :test-failed}]
+             (get-in outcome [:outcome/error-details :anomaly.gate/errors]))))))
+
+(deftest coerce-test
+  (testing "passes through existing anomaly maps"
+    (let [anom (r/make-anomaly :anomalies/fault "already good")]
+      (is (identical? anom (r/coerce anom)))))
+
+  (testing "converts builder error shape"
+    (let [anom (r/coerce {:status :error
+                                          :error {:message "bad input"}})]
+      (is (r/anomaly-map? anom))
+      (is (= "bad input" (:anomaly/message anom)))))
+
+  (testing "converts gate result shape"
+    (let [anom (r/coerce {:gate/passed? false
+                                          :gate/id :syntax
+                                          :gate/errors [{:code :syntax-error
+                                                         :message "parse error"}]})]
+      (is (r/anomaly-map? anom))
+      (is (= :anomalies.gate/validation-failed (:anomaly/category anom)))
+      (is (= 1 (count (:anomaly.gate/errors anom))))))
+
+  (testing "converts success-false shape"
+    (let [anom (r/coerce {:success false :error "timeout"})]
+      (is (r/anomaly-map? anom))
+      (is (= "timeout" (:anomaly/message anom)))))
+
+  (testing "converts success?-false shape"
+    (let [anom (r/coerce {:success? false :error "nope"})]
+      (is (r/anomaly-map? anom))
+      (is (= "nope" (:anomaly/message anom)))))
+
+  (testing "converts ad-hoc code/message shape"
+    (let [anom (r/coerce {:code :generation-error
+                                          :message "LLM failed"})]
+      (is (r/anomaly-map? anom))
+      (is (= "LLM failed" (:anomaly/message anom)))
+      (is (= :generation-error (:anomaly/legacy-code anom)))))
+
+  (testing "accepts custom default category"
+    (let [anom (r/coerce {:success false :error "oops"}
+                                         :anomalies/timeout)]
+      (is (= :anomalies/timeout (:anomaly/category anom)))))
+
+  (testing "handles unknown shape as fallback"
+    (let [anom (r/coerce "just a string")]
+      (is (r/anomaly-map? anom))
+      (is (= :anomalies/fault (:anomaly/category anom))))))

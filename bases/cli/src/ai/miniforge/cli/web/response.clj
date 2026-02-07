@@ -1,5 +1,7 @@
 (ns ai.miniforge.cli.web.response
-  "HTTP response constructors.")
+  "HTTP response constructors."
+  (:require
+   [ai.miniforge.response.interface :as anomaly]))
 
 (defn html [body]
   {:status 200
@@ -11,6 +13,12 @@
 
 (defn bad-request [msg]
   {:status 400 :body msg})
+
+(defn from-anomaly
+  "Create an HTTP response from a canonical anomaly map.
+   Uses the boundary translator — only call at HTTP edges."
+  [anomaly-map]
+  (anomaly/anomaly->http-response anomaly-map))
 
 (defn sse-headers []
   {:status 200

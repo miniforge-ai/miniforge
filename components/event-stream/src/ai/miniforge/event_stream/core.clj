@@ -15,7 +15,8 @@
 (ns ai.miniforge.event-stream.core
   "Event bus and event constructors for workflow observability."
   (:require
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants
@@ -150,14 +151,29 @@
       (cond-> duration-ms (assoc :workflow/duration-ms duration-ms))))
 
 (defn workflow-failed [stream workflow-id error]
-  (let [error-map (if (instance? Throwable error)
+  (let [;; Handle anomaly maps, Throwables, and plain error maps
+        anomaly-map (cond
+                      (response/anomaly-map? error) error
+                      (instance? Throwable error) (response/from-exception error)
+                      (and (map? error) (:anomaly error)) (:anomaly error)
+                      :else nil)
+        error-map (cond
+                    (instance? Throwable error)
                     {:message (.getMessage ^Throwable error)
                      :type (str (type error))}
-                    error)]
+                    (response/anomaly-map? error)
+                    (response/anomaly->event-data error)
+                    :else error)
+        event-data (response/anomaly->event-data
+                    (or anomaly-map
+                        (response/make-anomaly :anomalies/fault
+                                               (or (:message error-map) "unknown error"))))]
     (-> (create-envelope stream :workflow/failed workflow-id
                          (str "Workflow failed: " (:message error-map "unknown error")))
-        (assoc :workflow/failure-reason (:message error-map)
-               :workflow/error-details error-map))))
+        (assoc :workflow/failure-reason (:message error-map (:message event-data))
+               :workflow/error-details error-map
+               :workflow/anomaly-code (:anomaly-code event-data)
+               :workflow/retryable? (:retryable? event-data false)))))
 
 (defn llm-request [stream workflow-id agent-id model & [prompt-tokens]]
   (-> (create-envelope stream :llm/request workflow-id

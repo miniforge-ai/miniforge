@@ -2,7 +2,8 @@
   "Utilities for collecting evidence during workflow execution.
    Provides helpers for gathering phase results, artifacts, and metadata."
   (:require
-   [ai.miniforge.evidence-bundle.schema :as schema]))
+   [ai.miniforge.evidence-bundle.schema :as schema]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Intent Collection
@@ -128,11 +129,17 @@
 
 (defn build-outcome-evidence
   "Build outcome evidence from workflow final state.
+   Uses anomaly->outcome-evidence when anomaly maps are available.
    Returns outcome evidence per N6 spec."
   [workflow-state]
   (let [status (:workflow/status workflow-state)
         pr-info (:workflow/pr-info workflow-state)
-        error-info (:workflow/error workflow-state)]
+        error-info (:workflow/error workflow-state)
+        ;; Check for anomaly map in error-info or workflow state
+        anomaly-map (cond
+                      (response/anomaly-map? error-info) error-info
+                      (response/anomaly-map? (:anomaly error-info)) (:anomaly error-info)
+                      :else nil)]
     (merge
      {:outcome/success (= status :completed)}
      (when pr-info
@@ -140,10 +147,14 @@
         :outcome/pr-url (:url pr-info)
         :outcome/pr-status (:status pr-info)
         :outcome/pr-merged-at (:merged-at pr-info)})
-     (when error-info
-       {:outcome/error-message (:message error-info)
-        :outcome/error-phase (:phase error-info)
-        :outcome/error-details error-info}))))
+     (if anomaly-map
+       ;; Use boundary translator for anomaly maps
+       (response/anomaly->outcome-evidence anomaly-map)
+       ;; Fall back to legacy error shape
+       (when error-info
+         {:outcome/error-message (:message error-info)
+          :outcome/error-phase (:phase error-info)
+          :outcome/error-details error-info})))))
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Complete Bundle Assembly

@@ -12,11 +12,17 @@
 ;; Prompt formatting (pure functions)
 
 (defn format-error-entry
-  "Format a single error entry for display."
+  "Format a single error entry for display.
+   Reads :anomaly/message and :anomaly/category when available,
+   falls back to :message and :code for legacy shapes."
   [idx err]
-  (str "  " (inc idx) ". " (:message err)
-       (when-let [code (:code err)]
-         (str " [" (name code) "]"))))
+  (let [anomaly (:anomaly err)
+        msg (or (when anomaly (:anomaly/message anomaly))
+                (:message err))
+        code (or (when anomaly (name (:anomaly/category anomaly)))
+                 (when-let [c (:code err)] (name c)))]
+    (str "  " (inc idx) ". " msg
+         (when code (str " [" code "]")))))
 
 (defn format-error-context
   "Format error context for user display.

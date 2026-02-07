@@ -8,7 +8,8 @@
    [ai.miniforge.cli.web.github :as github]
    [ai.miniforge.cli.web.fleet :as fleet]
    [ai.miniforge.cli.web.components :as c]
-   [ai.miniforge.cli.web.sse :as sse]))
+   [ai.miniforge.cli.web.sse :as sse]
+   [ai.miniforge.response.interface :as anomaly]))
 
 (defn- parse-pr-path [uri]
   (let [path-parts (str/split (subs uri 8) #"/")]
@@ -86,10 +87,12 @@
 (defn summary [uri]
   (let [{:keys [repo number]} (parse-pr-path uri)
         result (github/generate-pr-summary repo number)]
-    (response/html
-     (if (:success result)
-       (c/ai-summary result)
-       (c/ai-summary-error (:summary result))))))
+    (if (and (not (:success result)) (anomaly/anomaly-map? (:anomaly result)))
+      (response/from-anomaly (:anomaly result))
+      (response/html
+       (if (:success result)
+         (c/ai-summary result)
+         (c/ai-summary-error (:summary result)))))))
 
 (defn workflows [repos]
   (response/html (c/workflow-status repos)))

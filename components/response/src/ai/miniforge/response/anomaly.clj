@@ -13,15 +13,23 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.response.anomaly
-  "Anomaly taxonomy for miniforge operations.
+  "Anomaly taxonomy and canonical anomaly maps for miniforge operations.
 
-   Anomalies are keywords that categorize failures. They provide:
-   - Consistent error classification across components
-   - Mapping to appropriate responses (HTTP status, retry behavior, etc.)
-   - Clear semantics for error handling
+   Anomalies are the single internal error representation. They are plain data
+   maps that flow through the system as return values (never exceptions).
+   Conversion to HTTP responses, user messages, log entries, or events happens
+   only at system boundaries via the translate namespace.
+
+   An anomaly map has one required key:
+     :anomaly/category - keyword from the taxonomy below
+     :anomaly/message  - programmer-facing diagnostic string
+
+   Optional keys carry domain context via namespaced keys:
+     :anomaly/id, :anomaly/timestamp, :anomaly/phase, :anomaly/operation
+     :anomaly.gate/errors, :anomaly.agent/role, :anomaly.llm/model, etc.
 
    Categories:
-   - :anomalies/... - General errors
+   - :anomalies/... - General errors (Cognitect-compatible)
    - :anomalies.phase/... - Phase execution errors
    - :anomalies.gate/... - Gate validation errors
    - :anomalies.agent/... - Agent errors
@@ -118,6 +126,98 @@
     (contains? workflow-anomalies anomaly) :workflow
     :else nil))
 
+;------------------------------------------------------------------------------ Layer 3
+;; Anomaly map constructors
+
+(defn anomaly
+  "Create a canonical anomaly map.
+
+   Arguments:
+     category - Keyword from the anomaly taxonomy (e.g. :anomalies/fault)
+     message  - Programmer-facing diagnostic string
+     context  - Optional map of namespaced domain context keys
+
+   Returns:
+     {:anomaly/category category
+      :anomaly/message  message
+      :anomaly/id       uuid
+      :anomaly/timestamp inst
+      ...context}"
+  ([category message]
+   (anomaly category message {}))
+  ([category message context]
+   (merge context
+          {:anomaly/category category
+           :anomaly/message  message
+           :anomaly/id       (random-uuid)
+           :anomaly/timestamp (java.time.Instant/now)})))
+
+(defn from-exception
+  "Convert an exception to a canonical anomaly map.
+
+   Uses classifier-fn to determine the anomaly category. Falls back to
+   :anomaly key in ex-data, then to :anomalies/fault.
+
+   Arguments:
+     ex            - Exception to convert
+     classifier-fn - Optional (Exception -> anomaly-keyword)
+
+   Returns: Anomaly map with exception provenance keys."
+  ([ex]
+   (from-exception ex nil))
+  ([ex classifier-fn]
+   (let [category (or (when classifier-fn (classifier-fn ex))
+                      (:anomaly (ex-data ex))
+                      :anomalies/fault)]
+     (anomaly category
+              (or (ex-message ex) (str (type ex)))
+              (cond-> {:anomaly/ex-message (ex-message ex)
+                       :anomaly/ex-class   (str (type ex))}
+                (ex-data ex) (assoc :anomaly/ex-data (ex-data ex)))))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Anomaly map predicates
+
+(defn anomaly-map?
+  "Check if a value is a canonical anomaly map (has :anomaly/category)."
+  [x]
+  (and (map? x) (contains? x :anomaly/category)))
+
+;------------------------------------------------------------------------------ Layer 5
+;; Domain-specific anomaly constructors
+
+(defn gate-anomaly
+  "Create a gate-specific anomaly preserving gate error richness.
+
+   Arguments:
+     category    - Gate anomaly keyword (e.g. :anomalies.gate/validation-failed)
+     message     - Diagnostic message
+     gate-errors - Vector of gate error maps [{:code :message :location}]
+     context     - Optional additional context map
+
+   Returns: Anomaly map with :anomaly.gate/errors attached."
+  ([category message gate-errors]
+   (gate-anomaly category message gate-errors {}))
+  ([category message gate-errors context]
+   (anomaly category message
+            (merge {:anomaly.gate/errors gate-errors} context))))
+
+(defn agent-anomaly
+  "Create an agent-specific anomaly.
+
+   Arguments:
+     category   - Agent anomaly keyword (e.g. :anomalies.agent/invoke-failed)
+     message    - Diagnostic message
+     agent-role - Agent role keyword (:planner, :implementer, etc.)
+     context    - Optional additional context map
+
+   Returns: Anomaly map with :anomaly.agent/role attached."
+  ([category message agent-role]
+   (agent-anomaly category message agent-role {}))
+  ([category message agent-role context]
+   (anomaly category message
+            (merge {:anomaly.agent/role agent-role} context))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (anomaly? :anomalies/fault)
@@ -134,5 +234,40 @@
 
   (anomaly-category :anomalies.phase/enter-failed)
   ;; => :phase
+
+  ;; Anomaly maps
+  (anomaly :anomalies/fault "Something broke")
+  ;; => {:anomaly/category :anomalies/fault
+  ;;     :anomaly/message "Something broke"
+  ;;     :anomaly/id #uuid "..."
+  ;;     :anomaly/timestamp #inst "..."}
+
+  (anomaly :anomalies.gate/validation-failed "Test failed"
+           {:anomaly/phase :verify
+            :anomaly/operation :validate})
+
+  (anomaly-map? (anomaly :anomalies/fault "broken"))
+  ;; => true
+
+  (anomaly-map? {:not "an anomaly"})
+  ;; => false
+
+  ;; From exception
+  (from-exception (ex-info "Timeout" {:phase :verify}))
+  ;; => {:anomaly/category :anomalies/fault
+  ;;     :anomaly/message "Timeout"
+  ;;     :anomaly/ex-data {:phase :verify}
+  ;;     ...}
+
+  (from-exception (ex-info "oops" {:anomaly :anomalies/timeout}))
+  ;; => {:anomaly/category :anomalies/timeout ...}
+
+  ;; Gate anomaly
+  (gate-anomaly :anomalies.gate/validation-failed
+                "Syntax gate failed"
+                [{:code :syntax-error :message "Parse error" :location {:file "foo.clj" :line 10}}])
+
+  ;; Agent anomaly
+  (agent-anomaly :anomalies.agent/invoke-failed "Agent timed out" :implementer)
 
   :leave-this-here)
