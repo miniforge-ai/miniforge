@@ -125,6 +125,39 @@
     :pretty (when-not quiet (print-pretty-result result))
     (clojure.pprint/pprint result)))
 
+(defn- print-error-header
+  "Print error header with message, details, and cause."
+  [msg data cause]
+  (println (colorize :red "\n✗ Failed to load workflow interface"))
+  (println (str "  Error: " msg))
+  (when data
+    (println (str "  Details: " (pr-str data))))
+  (when cause
+    (println (str "  Cause: " (ex-message cause))))
+  (println (colorize :yellow "\nPossible causes:"))
+  (println "  - Missing dependency in deps.edn: ai.miniforge/workflow")
+  (println "  - Namespace compilation error in workflow component")
+  (println "  - Circular dependency issue"))
+
+(defn- print-namespace-resolution-help
+  "Print help for namespace resolution errors."
+  []
+  (println (colorize :cyan "\nIf the namespace doesn't exist:"))
+  (println "  - Check that ai.miniforge/workflow is in your deps.edn")
+  (println "  - Verify the component was built: clojure -M:poly test"))
+
+(defn- print-babashka-fallback-help
+  "Print help for Babashka compatibility issues."
+  []
+  (println (colorize :cyan "\nIf running with Babashka (bb):"))
+  (println "  - Try the JVM version: clojure -M:dev -m ai.miniforge.cli.main workflow run <id>"))
+
+(defn- print-general-debugging-help
+  "Print general debugging tips."
+  []
+  (println (colorize :cyan "\nFor debugging:"))
+  (println "  - Run with verbose output: bb -e '(requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)'"))
+
 (defn- resolve-workflow-interface []
   (let [load-workflow (try
                         (requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)
@@ -132,34 +165,18 @@
                           (let [msg (ex-message e)
                                 data (ex-data e)
                                 cause (ex-cause e)]
-                            (println (colorize :red "\n✗ Failed to load workflow interface"))
-                            (println (str "  Error: " msg))
-                            (when data
-                              (println (str "  Details: " (pr-str data))))
-                            (when cause
-                              (println (str "  Cause: " (ex-message cause))))
-                            (println (colorize :yellow "\nPossible causes:"))
-                            (println "  - Missing dependency in deps.edn: ai.miniforge/workflow")
-                            (println "  - Namespace compilation error in workflow component")
-                            (println "  - Circular dependency issue")
+                            (print-error-header msg data cause)
                             (cond
                               (and msg (or (str/includes? msg "could not be resolved")
                                            (str/includes? msg "class not found")
                                            (str/includes? msg "No such namespace")))
-                              (do
-                                (println (colorize :cyan "\nIf the namespace doesn't exist:"))
-                                (println "  - Check that ai.miniforge/workflow is in your deps.edn")
-                                (println "  - Verify the component was built: clojure -M:poly test"))
+                              (print-namespace-resolution-help)
 
                               (and msg (str/includes? msg "Babashka"))
-                              (do
-                                (println (colorize :cyan "\nIf running with Babashka (bb):"))
-                                (println "  - Try the JVM version: clojure -M:dev -m ai.miniforge.cli.main workflow run <id>"))
+                              (print-babashka-fallback-help)
 
                               :else
-                              (do
-                                (println (colorize :cyan "\nFor debugging:"))
-                                (println "  - Run with verbose output: bb -e '(requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)'")))
+                              (print-general-debugging-help))
                             (throw (ex-info "Failed to resolve workflow interface"
                                             {:namespace 'ai.miniforge.workflow.interface
                                              :var 'load-workflow
