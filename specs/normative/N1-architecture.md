@@ -9,7 +9,8 @@
 
 ## 1. Purpose & Scope
 
-This specification defines the **core architectural concepts** and **structural model** of miniforge.ai, the autonomous software factory. It establishes:
+This specification defines the **core architectural concepts** and **structural model** of
+miniforge.ai, the autonomous software factory. It establishes:
 
 - **Core domain nouns** and their precise definitions
 - **Three-layer architecture** that enables autonomous execution
@@ -332,11 +333,12 @@ A **knowledge base** is a structured repository of learnings from workflow execu
 
 #### 2.10.2 Knowledge Trust and Authority
 
-Knowledge units MUST be labeled with an explicit trust model so the system can safely incorporate information from user repositories and external sources.
+Knowledge units MUST be labeled with an explicit trust model so the system can safely
+incorporate information from user repositories and external sources.
 
 - **Trust levels**
   - `:trusted` — authoritative, platform-validated and/or user-promoted content
-  - `:untrusted` — repo-derived or externally sourced content; usable as *data* only
+  - `:untrusted` — repo-derived or externally sourced content; usable as _data_ only
   - `:tainted` — content flagged by scanners; MUST NOT be used as instruction
 
 - **Authority channels**
@@ -349,26 +351,38 @@ Knowledge units SHOULD include a content hash and MAY include a cryptographic si
 
 Implementations MUST enforce these transitive trust rules:
 
-1. **Instruction authority is not transitive:** If pack A (`:trusted`, `:authority/instruction`) references pack B (`:untrusted`), pack B MUST remain `:authority/data` and MUST NOT gain instruction authority through the reference.
+1. **Instruction authority is not transitive:** If pack A (`:trusted`, `:authority/instruction`)
+   references pack B (`:untrusted`), pack B MUST remain `:authority/data` and MUST NOT gain
+   instruction authority through the reference.
 
-2. **Trust level inheritance:** When pack A includes content from pack B, the resulting combined content MUST be assigned the lower trust level (`:tainted` < `:untrusted` < `:trusted`).
+2. **Trust level inheritance:** When pack A includes content from pack B, the resulting combined
+   content MUST be assigned the lower trust level (`:tainted` < `:untrusted` < `:trusted`).
 
-3. **Cross-trust references:** Packs MAY reference other packs of any trust level, but implementations MUST track and validate the transitive trust graph before allowing execution.
+3. **Cross-trust references:** Packs MAY reference other packs of any trust level, but
+   implementations MUST track and validate the transitive trust graph before allowing execution.
 
-4. **Tainted isolation:** Content marked `:tainted` MUST NOT be included in any pack used for instruction authority, even transitively.
+4. **Tainted isolation:** Content marked `:tainted` MUST NOT be included in any pack used for
+   instruction authority, even transitively.
 
 ##### Trust Promotion and Revocation
 
-**Trust promotion is one-way for a given pack version:** Once a pack version is promoted from `:untrusted` to `:trusted`, that specific version MUST NOT be demoted back to `:untrusted`. This prevents accidental trust downgrades and ensures immutability of trust decisions.
+**Trust promotion is one-way for a given pack version:** Once a pack version is promoted from
+`:untrusted` to `:trusted`, that specific version MUST NOT be demoted back to `:untrusted`. This
+prevents accidental trust downgrades and ensures immutability of trust decisions.
 
-**Revocation mechanisms:** If a vulnerability or malicious content is discovered in a promoted pack:
+**Revocation mechanisms:** If a vulnerability or malicious content is discovered in a promoted
+pack:
 
 1. **Pack removal:** The pack MAY be removed from local registries and remote distribution.
-2. **Key revocation:** If the pack was signed, the signing key MAY be revoked via key revocation lists (KRLs).
-3. **Version deprecation:** The pack version MAY be marked as deprecated, warning users but not forcibly removing it.
-4. **New version:** A corrected pack SHOULD be released as a new version, which starts at `:untrusted` and must be promoted separately.
+2. **Key revocation:** If the pack was signed, the signing key MAY be revoked via key revocation
+   lists (KRLs).
+3. **Version deprecation:** The pack version MAY be marked as deprecated, warning users but not
+   forcibly removing it.
+4. **New version:** A corrected pack SHOULD be released as a new version, which starts at
+   `:untrusted` and must be promoted separately.
 
-Implementations SHOULD provide mechanisms to check for revoked packs and deprecated versions during pack loading and workflow execution.
+Implementations SHOULD provide mechanisms to check for revoked packs and deprecated versions
+during pack loading and workflow execution.
 
 ##### Expanded Knowledge Unit Schema
 
@@ -429,7 +443,8 @@ Implementations MUST validate pack dependencies before loading and MUST reject c
 
 #### 2.10.4 Pack Registry Roots and Loading
 
-Implementations MUST support loading packs from a declared set of registry roots (e.g., a local directory, a central repo checkout, or a remote registry in enterprise mode).
+Implementations MUST support loading packs from a declared set of registry roots (e.g., a local
+directory, a central repo checkout, or a remote registry in enterprise mode).
 
 - Registry roots MUST be explicitly configured.
 - Implementations MUST NOT implicitly ingest arbitrary repository markdown as instruction authority.
@@ -443,7 +458,8 @@ Implementations that support pack signing MUST provide:
 
 2. **Key storage:** Private keys MUST be stored securely (e.g., system keychain, HSM, or encrypted file with passphrase).
 
-3. **Key verification:** Public keys for signature verification MUST be distributed through a trusted channel (e.g., configuration file, registry manifest).
+3. **Key verification:** Public keys for signature verification MUST be distributed through a
+   trusted channel (e.g., configuration file, registry manifest).
 
 4. **Key rotation:** Implementations SHOULD support key rotation with backward compatibility for previously signed packs.
 
@@ -466,13 +482,15 @@ Implementations MUST validate signatures using the `ed25519` algorithm (RECOMMEN
 
 #### 2.10.5 ETL Pipelines (Repository → Packs)
 
-miniforge SHOULD provide an ETL pipeline that converts existing repositories (docs/specs/rules) into sanitized, schema-valid packs for immediate workflow use.
+miniforge SHOULD provide an ETL pipeline that converts existing repositories (docs/specs/rules)
+into sanitized, schema-valid packs for immediate workflow use.
 
 An ETL pipeline MUST:
 
 1. Inventory candidate sources (by path/type/metadata)
 2. Classify sources into candidate pack inputs
-3. **Run deterministic sanitization and static scanners BEFORE extraction** (see N4 "knowledge-safety") — scanners MUST NOT execute or evaluate untrusted content
+3. **Run deterministic sanitization and static scanners BEFORE extraction** (see N4
+   "knowledge-safety") — scanners MUST NOT execute or evaluate untrusted content
 4. Extract normalized EDN packs
 5. Validate packs against schemas
 6. Emit a pack index with content hashes and trust labels
@@ -489,7 +507,8 @@ Incremental ETL MUST:
 
 2. **Skip unchanged sources:** If source file hash matches previously processed hash, skip re-extraction unless forced.
 
-3. **Detect deletions:** If a previously processed source is no longer present, mark corresponding packs as stale or remove them from the index.
+3. **Detect deletions:** If a previously processed source is no longer present, mark corresponding
+   packs as stale or remove them from the index.
 
 4. **Handle dependencies:** If source A depends on source B, and B changes, both MUST be re-processed.
 
@@ -503,7 +522,7 @@ Implementations MAY cache intermediate classification and scanner results for pe
 
 miniforge is structured as three cooperating layers:
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                    CONTROL PLANE                             │
 │  ┌────────────┐    ┌────────────┐    ┌────────────┐        │
@@ -607,7 +626,7 @@ miniforge uses **Polylith architecture** for component organization.
 
 ### 4.1 Component Structure
 
-```
+```text
 components/
 ├── schema/              # Domain types and schemas
 ├── logging/             # Structured logging (EDN)
@@ -699,6 +718,56 @@ All components MUST:
   [engine workflow-id]
   ...)
 ```
+
+#### 4.2.2 Polylith Stability Tagging
+
+Implementations MUST use git tags to mark stable points for Polylith test tracking.
+
+**When to create stable tags:**
+
+1. After **E2E test verification** - All integration tests pass
+2. After **dogfooding runs** - Core workflows tested in real usage
+3. Before **release candidates** - Preparing for production deployment
+4. After **major milestone completion** - Significant features fully functional
+
+**Stable tag format:**
+
+```bash
+git tag -a stable-YYYYMMDD -m "Stable: <milestone description>"
+git push --tags
+```
+
+Example:
+
+```bash
+git tag -a stable-20260206 -m "Stable: DAG orchestration + PR lifecycle integration"
+```
+
+**DO NOT tag on every merge:**
+
+- Stable tags represent verified production-ready snapshots
+- Tagging every merge defeats incremental test tracking
+- Between stable points, `poly info` shows which components have changed since last verification
+- This enables focused testing of changed components only
+
+**Verification checklist before tagging stable:**
+
+- [ ] All `poly test` runs pass (0 failures, 0 errors)
+- [ ] Pre-commit hooks pass on all changed files
+- [ ] E2E integration tests pass
+- [ ] Dogfooding: Core workflows execute successfully in real repository
+- [ ] No known P0/P1 bugs in changed components
+
+**Stable tag lifecycle:**
+
+```text
+[Initial Commit] → [Development] → [E2E Pass] → [Dogfood Success] → [Tag Stable]
+     stable-init      stx flags       verify         verify           stable-YYYYMMDD
+                      (tests marked)                               (tests unmarked)
+```
+
+After tagging stable, `poly info` will show `s--` (stable, has tests, not marked) for
+unchanged components and `stx` only for components modified since the tag.
 
 ### 4.3 OSS Component Boundaries
 
@@ -795,7 +864,10 @@ OSS implementations MAY support:
 
 - Multiple concurrent workflows (resource management required)
 
-**Integration point for Team+ plans:** OSS implementations SHOULD support event streaming to aggregation sinks (see N3 event stream API). The value proposition for multi-user scenarios is in what you do with the aggregated event data (analytics, coordination, visibility), not merely having the events.
+**Integration point for Team+ plans:** OSS implementations SHOULD support event streaming to
+aggregation sinks (see N3 event stream API). The value proposition for multi-user scenarios is in
+what you do with the aggregated event data (analytics, coordination, visibility), not merely having
+the events.
 
 #### 5.4.2 Enterprise Concurrency
 
@@ -897,7 +969,7 @@ Each phase MUST receive:
 
 The **outer loop** is the phase transition state machine (see N2).
 
-```
+```text
 Plan → Design → Implement → Verify → Review → Release → Observe
 ```
 
@@ -915,7 +987,7 @@ Implementations MUST:
 
 The **inner loop** is the validation and repair mechanism within a phase.
 
-```
+```text
 Generate → Validate → [Pass? Yes → Complete]
                   ↓ No
               Repair → Validate → ...
