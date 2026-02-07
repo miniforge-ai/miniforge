@@ -1,0 +1,121 @@
+{:title "Integrate DAG Orchestration into Workflow Runner"
+ :description
+ "The workflow runner and task-executor (DAG orchestration) are currently separate
+  systems, but they should be integrated. When a workflow's plan phase outputs
+  multiple tasks with dependencies (:plan/tasks), the implement phase should
+  automatically use task-executor's execute-dag! for parallel execution instead
+  of running tasks sequentially or one-at-a-time.
+
+  This enables true dogfooding where complex specs decompose into DAG tasks that
+  execute in parallel with proper dependency management, resource isolation, and
+  concurrent PR workflows."
+
+ :intent
+ {:type :refactor
+  :scope ["components/workflow/src/ai/miniforge/workflow/runner.clj"
+          "components/workflow/src/ai/miniforge/workflow/interface.clj"
+          "bases/cli/src/ai/miniforge/cli/workflow_runner.clj"]}
+
+ :constraints
+ ["Backward compatible - single task specs continue to work as before"
+  "Detect multiple tasks in :plan/tasks and route to DAG orchestration"
+  "Use task-executor/execute-dag! for multi-task execution"
+  "Preserve all workflow phase callbacks and event streams"
+  "Tests must pass: bb test"
+  "Pre-commit hooks must pass"]
+
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :plan/tasks
+ [{:task/id :detect-multi-task-plans
+   :task/description
+   "Update workflow runner to detect when :plan/tasks contains multiple tasks.
+
+    In components/workflow/src/ai/miniforge/workflow/runner.clj:
+    - After plan phase completes, check if plan result has multiple :plan/tasks
+    - If count(:plan/tasks) > 1, set a flag to use DAG orchestration
+    - Pass this flag through to implement phase
+
+    Keep single-task behavior as default for backward compatibility."
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :wire-task-executor-into-implement
+   :task/description
+   "Wire task-executor/execute-dag! into the implement phase for multi-task plans.
+
+    In components/workflow/src/ai/miniforge/workflow/runner.clj:
+    - Import ai.miniforge.task-executor.interface
+    - In implement phase, check if multi-task flag is set
+    - If multi-task: call task-executor/execute-dag! with :plan/tasks
+    - If single-task: use existing implement logic
+    - Convert :plan/tasks format to task-executor's expected format
+    - Map task IDs, dependencies, descriptions, files
+
+    Configuration to pass to execute-dag!:
+    - workflow-id from spec
+    - executor: worktree-based (may need to create wrapper)
+    - llm-backend: from workflow config
+    - logger: from workflow context
+    - max-parallel: from workflow config or default to 4
+    - event-stream: from workflow context
+
+    Context: task-executor/orchestrator.clj:execute-dag! expects:
+    - dag-id: string
+    - task-defs: sequence of {:task/id :task/deps :description :files ...}
+    - config: {:workflow-id :executor :llm-backend :logger :max-parallel}
+
+    The :plan/tasks format uses :task/dependencies (vector) vs :task/deps (set),
+    so convert during mapping."
+   :task/type :implement
+   :task/dependencies [:detect-multi-task-plans]}
+
+  {:task/id :create-executor-wrapper
+   :task/description
+   "Create a worktree-based executor wrapper for DAG execution.
+
+    The task-executor needs an executor that implements the environment protocol.
+    For local dogfooding, create a simple worktree-based executor in:
+    components/workflow/src/ai/miniforge/workflow/executor.clj
+
+    Implement:
+    - acquire-environment: create git worktree for task isolation
+    - release-environment: remove git worktree
+    - Returns {:env-id :session-id :worktree-path :base-commit}
+
+    This provides resource isolation for parallel task execution without
+    needing Docker or K8s infrastructure."
+   :task/type :implement
+   :task/dependencies [:detect-multi-task-plans]}
+
+  {:task/id :test-multi-task-workflow
+   :task/description
+   "Test the integration with a multi-task workflow spec.
+
+    Create test in components/workflow/test/ai/miniforge/workflow/dag_integration_test.clj:
+    - Test spec with 2 independent tasks (should run in parallel)
+    - Test spec with 3 tasks (A -> B, A -> C) diamond dependency
+    - Verify tasks execute in parallel where possible
+    - Verify task state transitions
+    - Verify PR creation for each task
+    - Mock the actual PR operations to avoid real GitHub interactions
+
+    Also test that single-task specs still work (backward compatibility)."
+   :task/type :test
+   :task/dependencies [:wire-task-executor-into-implement
+                       :create-executor-wrapper]}
+
+  {:task/id :update-dogfooding-docs
+   :task/description
+   "Update DOGFOODING.md to reflect the integrated architecture.
+
+    Changes:
+    - Remove mention of separate 'bb dogfood' command
+    - Explain that multi-task specs automatically use DAG orchestration
+    - Update example to show .spec.edn format (not separate DAG format)
+    - Show how planner decomposes work into multiple tasks
+    - Explain that 'miniforge run' handles both single and multi-task workflows
+    - Remove outdated references to separate systems"
+   :task/type :implement
+   :task/dependencies [:test-multi-task-workflow]}]}

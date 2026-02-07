@@ -58,6 +58,9 @@ dist/
 # Checkpoints (local development snapshots)
 docs/checkpoints/
 
-# Dogfooding (local task definitions)
-dogfood-tasks*.edn
-dogfood-session-*.edn
+# Work directory (ephemeral workflow specs and task definitions)
+# Individual files are tracked, but local variations should be gitignored
+work/dogfood-tasks*.edn
+work/dogfood-session-*.edn
+work/*-local.spec.edn
+work/*-wip.edn
