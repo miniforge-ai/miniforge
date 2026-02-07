@@ -7,6 +7,7 @@
 
   This ensures consistency: both use loop/run-simple with the same agent backend."
   (:require [ai.miniforge.loop.interface :as loop]
+            [ai.miniforge.agent.interface :as agent]
             [clojure.string :as str]))
 
 (defn format-task-prompt
@@ -63,7 +64,7 @@
              :description \"Add feature X\"}
             {:worktree-path \"/tmp/wt-1\"
              :base-commit \"abc123\"})"
-  [_llm-backend & {:keys [logger event-stream workflow-id max-iterations]}]
+  [llm-backend & {:keys [logger event-stream workflow-id max-iterations]}]
   (fn [task context]
     (let [task-map (if (map? task)
                      task
@@ -72,18 +73,20 @@
                       :description (str task)})
           prompt (format-task-prompt task-map context)
           loop-context (cond-> {:max-iterations (or max-iterations 10)
-                                :initial-prompt prompt}
+                                :initial-prompt prompt
+                                :llm-backend llm-backend}
                          logger (assoc :logger logger)
                          event-stream (assoc :event-stream event-stream)
                          workflow-id (assoc :workflow-id workflow-id))
+          ;; Create implementer agent with LLM backend
+          implementer (agent/create-implementer {:llm-backend llm-backend
+                                                  :logger logger})
           result (loop/run-simple task-map
-                                  (fn [_t _ctx]
-                                    ;; Inner generate-fn expected by loop/run-simple
-                                    ;; Delegates to LLM backend
-                                    ;; TODO: Wire in actual LLM backend
-                                    {:artifact {:code "generated code"
-                                                :files []}
-                                     :tokens 100})
+                                  (fn [t ctx]
+                                    ;; Inner generate-fn that invokes implementer agent
+                                    (let [agent-result (agent/invoke implementer ctx t)]
+                                      {:artifact (:artifact agent-result)
+                                       :tokens (or (:tokens agent-result) 0)}))
                                   loop-context)]
       {:artifact (:artifact result)
        :tokens (or (:total-tokens result) (:tokens result) 0)})))
