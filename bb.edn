@@ -501,7 +501,11 @@
                  "components/fsm/src"
                  "components/phase/src"
                  "components/gate/src"
-                 "components/workflow/src"]
+                 "components/workflow/src"
+                 "components/event-stream/src"
+                 "components/dag-executor/src"
+                 "components/task-executor/src"
+                 "components/pr-lifecycle/src"]
    :extra-deps {metosin/malli {:mvn/version "0.16.1"}
                 clj-statecharts/clj-statecharts {:mvn/version "0.1.5"}}
    :requires ([ai.miniforge.cli.main :as cli])
