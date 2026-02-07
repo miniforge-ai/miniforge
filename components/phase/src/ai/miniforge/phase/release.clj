@@ -47,7 +47,9 @@
 (defn- build-workflow-state
   "Build workflow state from phase context for the release executor."
   [ctx]
-  (let [implement-result (get-in ctx [:phases :implement :result])
+  ;; Read implement result from execution phase results (not :phases)
+  ;; This is the canonical location where workflow runner stores phase outputs
+  (let [implement-result (get-in ctx [:execution/phase-results :implement])
         code-artifacts (if-let [artifacts (:artifacts implement-result)]
                          (map (fn [a] {:artifact/type :code
                                        :artifact/content a})

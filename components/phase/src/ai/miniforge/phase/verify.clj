@@ -57,7 +57,8 @@
         ;; Code can come from:
         ;; 1. Previous implement phase result (in multi-phase workflows)
         ;; 2. Direct input as :task/code-artifact (in test-only workflows)
-        implement-result (get-in ctx [:phase :result])
+        ;; Read from execution phase results where implement phase stored its output
+        implement-result (get-in ctx [:execution/phase-results :implement])
         code-artifact (or implement-result
                          (:task/code-artifact input)
                          (:code-artifact input))
