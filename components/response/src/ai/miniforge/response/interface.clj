@@ -27,7 +27,8 @@
   (:require
    [ai.miniforge.response.chain :as chain]
    [ai.miniforge.response.anomaly :as anomaly]
-   [ai.miniforge.response.builder :as builder]))
+   [ai.miniforge.response.builder :as builder]
+   [ai.miniforge.response.translate :as translate]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Chain creation
@@ -237,7 +238,7 @@
   chain/default-anomaly-classifier)
 
 ;------------------------------------------------------------------------------ Layer 5
-;; Anomaly utilities
+;; Anomaly utilities (keyword-based)
 
 (def anomaly?
   "Check if a keyword is a known anomaly."
@@ -252,6 +253,82 @@
 
    Returns :general, :phase, :gate, :agent, :workflow, or nil."
   anomaly/anomaly-category)
+
+;------------------------------------------------------------------------------ Layer 5.1
+;; Anomaly map constructors
+
+(def make-anomaly
+  "Create a canonical anomaly map.
+
+   Arguments:
+     category - Keyword from the anomaly taxonomy (e.g. :anomalies/fault)
+     message  - Programmer-facing diagnostic string
+     context  - Optional map of namespaced domain context keys
+
+   Returns:
+     {:anomaly/category category
+      :anomaly/message  message
+      :anomaly/id       uuid
+      :anomaly/timestamp inst
+      ...context}
+
+   Example:
+     (make-anomaly :anomalies/fault \"Something broke\")
+     (make-anomaly :anomalies.gate/validation-failed \"Test failed\"
+                   {:anomaly/phase :verify})"
+  anomaly/anomaly)
+
+(def from-exception
+  "Convert an exception to a canonical anomaly map.
+
+   Uses classifier-fn to determine the anomaly category. Falls back to
+   :anomaly key in ex-data, then to :anomalies/fault.
+
+   Arguments:
+     ex            - Exception to convert
+     classifier-fn - Optional (Exception -> anomaly-keyword)
+
+   Returns: Anomaly map with exception provenance keys.
+
+   Example:
+     (from-exception (ex-info \"Timeout\" {:phase :verify}))
+     (from-exception ex my-classifier)"
+  anomaly/from-exception)
+
+(def anomaly-map?
+  "Check if a value is a canonical anomaly map (has :anomaly/category).
+
+   Example:
+     (anomaly-map? (make-anomaly :anomalies/fault \"broken\")) ;; => true
+     (anomaly-map? {:not \"an anomaly\"})                      ;; => false"
+  anomaly/anomaly-map?)
+
+(def gate-anomaly
+  "Create a gate-specific anomaly preserving gate error richness.
+
+   Arguments:
+     category    - Gate anomaly keyword (e.g. :anomalies.gate/validation-failed)
+     message     - Diagnostic message
+     gate-errors - Vector of gate error maps [{:code :message :location}]
+     context     - Optional additional context map
+
+   Example:
+     (gate-anomaly :anomalies.gate/validation-failed \"Syntax check failed\"
+                   [{:code :syntax-error :message \"Parse error\" :location {:file \"foo.clj\" :line 10}}])"
+  anomaly/gate-anomaly)
+
+(def agent-anomaly
+  "Create an agent-specific anomaly.
+
+   Arguments:
+     category   - Agent anomaly keyword (e.g. :anomalies.agent/invoke-failed)
+     message    - Diagnostic message
+     agent-role - Agent role keyword (:planner, :implementer, etc.)
+     context    - Optional additional context map
+
+   Example:
+     (agent-anomaly :anomalies.agent/invoke-failed \"Agent timed out\" :implementer)"
+  anomaly/agent-anomaly)
 
 ;------------------------------------------------------------------------------ Layer 6
 ;; Response Builders
@@ -313,6 +390,47 @@
                              :message \"Making progress\"
                              :data {:chunks 5}})"
   builder/status-check)
+
+;------------------------------------------------------------------------------ Layer 8
+;; Boundary translators
+
+(def anomaly->http-status
+  "Get the HTTP status code for an anomaly category keyword."
+  translate/anomaly->http-status)
+
+(def anomaly->http-response
+  "Translate an anomaly map to a Ring HTTP response.
+   BOUNDARY function — only call at HTTP edges.
+
+   Returns:
+     {:status int
+      :headers {\"Content-Type\" \"application/json\"}
+      :body {:error {:code string :message string}}}"
+  translate/anomaly->http-response)
+
+(def anomaly->user-message
+  "Get a user-facing message for an anomaly map.
+   Falls back to a generic message — never exposes internal details."
+  translate/anomaly->user-message)
+
+(def anomaly->log-data
+  "Translate an anomaly map to structured log entry data.
+   Returns a map suitable for the :data field in logging."
+  translate/anomaly->log-data)
+
+(def anomaly->event-data
+  "Translate an anomaly map to event-stream compatible failure data.
+   Returns {:message :anomaly-code :retryable? :phase}."
+  translate/anomaly->event-data)
+
+(def anomaly->outcome-evidence
+  "Translate an anomaly map to evidence-bundle outcome fields."
+  translate/anomaly->outcome-evidence)
+
+(def coerce
+  "Coerce any error shape to a canonical anomaly map.
+   Handles all known shapes. Passes through existing anomaly maps."
+  translate/coerce)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -11,6 +11,7 @@
   (:require
    [ai.miniforge.loop.interface.protocols.gate :as p]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.response.interface :as response]
    [clojure.string]))
 
 ;; Re-export protocol for backward compatibility
@@ -33,12 +34,17 @@
     duration-ms (assoc :gate/duration-ms duration-ms)))
 
 (defn fail-result
-  "Create a failing gate result."
+  "Create a failing gate result.
+   Includes :gate/anomaly — a canonical anomaly map preserving gate error richness."
   [gate-id gate-type errors & {:keys [warnings duration-ms]}]
   (cond-> {:gate/id gate-id
            :gate/type gate-type
            :gate/passed? false
-           :gate/errors errors}
+           :gate/errors errors
+           :gate/anomaly (response/gate-anomaly
+                          :anomalies.gate/validation-failed
+                          (str "Gate " (name gate-id) " (" (name gate-type) ") failed")
+                          errors)}
     warnings (assoc :gate/warnings warnings)
     duration-ms (assoc :gate/duration-ms duration-ms)))
 

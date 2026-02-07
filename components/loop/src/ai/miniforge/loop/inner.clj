@@ -9,7 +9,8 @@
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.loop.escalation :as escalation]
    [ai.miniforge.loop.gates :as gates]
-   [ai.miniforge.loop.repair :as repair]))
+   [ai.miniforge.loop.repair :as repair]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; State machine transitions (pure functions)
@@ -210,12 +211,14 @@
             (log/error logger :loop :inner/validation-failed
                        {:message "Generation failed"
                         :data {:error (.getMessage e)}}))
-          (-> loop-state
-              (set-errors [{:code :generation-error
-                            :message (.getMessage e)}])
-              (set-termination :unrecoverable-error
-                               :message (.getMessage e))
-              (transition :failed)))))))
+          (let [anom (response/from-exception e)]
+            (-> loop-state
+                (set-errors [{:code :generation-error
+                              :message (.getMessage e)
+                              :anomaly anom}])
+                (set-termination :unrecoverable-error
+                                 :message (.getMessage e))
+                (transition :failed))))))))
 
 (defn validate-step
   "Execute the validate step using provided gates.

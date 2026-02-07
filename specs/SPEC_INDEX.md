@@ -178,6 +178,12 @@ These documents provide guidance, examples, and context but do NOT define contra
 
 - [informative/pr-monitoring-workflow.md](informative/pr-monitoring-workflow.md) - PR monitoring and conflict resolution
 
+### Architecture & Internals
+
+- [informative/I-ANOMALY-SYSTEM.md](informative/I-ANOMALY-SYSTEM.md) - Canonical error representation and boundary translators
+- [informative/I-DAG-ORCHESTRATION.md](informative/I-DAG-ORCHESTRATION.md) - DAG executor with PR lifecycle
+- [informative/I-TASK-EXECUTOR.md](informative/I-TASK-EXECUTOR.md) - DAG-to-PR lifecycle integration
+
 ### Roadmaps (Experimental/Future)
 
 - [informative/learning-meta-loop.md](informative/learning-meta-loop.md) - Future learning system (post-OSS)

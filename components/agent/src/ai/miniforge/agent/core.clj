@@ -8,6 +8,7 @@
   (:require
    [ai.miniforge.agent.protocol :as protocol]
    [ai.miniforge.agent.memory :as memory]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.tool.interface :as tool]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -372,6 +373,7 @@ Output execution logs and status reports."})
                      {:success false
                       :error (.getMessage e)
                       :exception-type (type e)
+                      :anomaly (response/from-exception e)
                       :outputs []
                       :decisions [:execution-error]
                       :signals [:task-failed]

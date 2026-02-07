@@ -34,18 +34,21 @@
         (catch Exception ex
           (if-let [error-fn (:error interceptor)]
             (error-fn ctx ex)
-            (-> ctx
-                (assoc :execution/status :failed)
-                (update :execution/errors conj
-                        {:type :phase-error
-                         :phase phase-name
-                         :message (ex-message ex)
-                         :data (ex-data ex)})
-                (update :execution/response-chain
-                        response/add-failure phase-name
-                        :anomalies.phase/enter-failed
-                        {:error (ex-message ex)
-                         :data (ex-data ex)})))))
+            (let [anom (response/from-exception ex)]
+              (-> ctx
+                  (assoc :execution/status :failed)
+                  (update :execution/errors conj
+                          {:type :phase-error
+                           :phase phase-name
+                           :message (ex-message ex)
+                           :data (ex-data ex)
+                           :anomaly anom})
+                  (update :execution/response-chain
+                          response/add-failure phase-name
+                          (assoc anom :anomaly/category :anomalies.phase/enter-failed
+                                      :anomaly/phase phase-name)
+                          {:error (ex-message ex)
+                           :data (ex-data ex)}))))))
       ctx)))
 
 (defn- execute-leave
@@ -58,15 +61,18 @@
       (try
         (leave-fn ctx)
         (catch Exception ex
-          (-> ctx
-              (update :execution/errors conj
-                      {:type :leave-error
-                       :phase phase-name
-                       :message (ex-message ex)})
-              (update :execution/response-chain
-                      response/add-failure phase-name
-                      :anomalies.phase/leave-failed
-                      {:error (ex-message ex)}))))
+          (let [anom (response/from-exception ex)]
+            (-> ctx
+                (update :execution/errors conj
+                        {:type :leave-error
+                         :phase phase-name
+                         :message (ex-message ex)
+                         :anomaly anom})
+                (update :execution/response-chain
+                        response/add-failure phase-name
+                        (assoc anom :anomaly/category :anomalies.phase/leave-failed
+                                    :anomaly/phase phase-name)
+                        {:error (ex-message ex)})))))
       ctx)))
 
 (defn- extract-phase-result
@@ -102,12 +108,21 @@
   (if (phase-succeeded? phase-result)
     (update ctx :execution/response-chain
             response/add-success phase-name phase-result)
-    (update ctx :execution/response-chain
-            response/add-failure phase-name
-            (if (:phase/gate-errors phase-result)
-              :anomalies.gate/validation-failed
-              :anomalies.phase/agent-failed)
-            phase-result)))
+    (let [gate-errors (:phase/gate-errors phase-result)
+          anomaly (if gate-errors
+                    (response/gate-anomaly
+                     :anomalies.gate/validation-failed
+                     (str "Gate validation failed for phase " (name phase-name))
+                     gate-errors
+                     {:anomaly/phase phase-name})
+                    (response/make-anomaly
+                     :anomalies.phase/agent-failed
+                     (str "Agent failed in phase " (name phase-name))
+                     {:anomaly/phase phase-name}))]
+      (update ctx :execution/response-chain
+              response/add-failure phase-name
+              anomaly
+              phase-result))))
 
 (defn- record-phase-metrics
   "Record phase metrics in execution context."
@@ -218,16 +233,20 @@
       (transition-to-completed-fn ctx))
 
     :else
-    (-> ctx
-        (update :execution/errors conj
-                {:type :invalid-transition
-                 :message (str "Invalid next index: " next-index)})
-        (update :execution/response-chain
-                response/add-failure :pipeline
+    (let [anom (response/make-anomaly
                 :anomalies.workflow/invalid-transition
-                {:error (str "Invalid next index: " next-index)
-                 :next-index next-index})
-        (transition-to-failed-fn))))
+                (str "Invalid next index: " next-index))]
+      (-> ctx
+          (update :execution/errors conj
+                  {:type :invalid-transition
+                   :message (str "Invalid next index: " next-index)
+                   :anomaly anom})
+          (update :execution/response-chain
+                  response/add-failure :pipeline
+                  anom
+                  {:error (str "Invalid next index: " next-index)
+                   :next-index next-index})
+          (transition-to-failed-fn)))))
 
 ;------------------------------------------------------------------------------ Layer 2: Phase step execution
 
