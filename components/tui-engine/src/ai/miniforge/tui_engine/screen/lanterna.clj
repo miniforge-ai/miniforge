@@ -1,0 +1,125 @@
+;; Copyright 2025 miniforge.ai
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+(ns ai.miniforge.tui-engine.screen.lanterna
+  "Lanterna Screen implementation.
+
+   Loaded dynamically by screen/create-screen to avoid Java class loading
+   at namespace load time (required for Babashka/GraalVM compatibility)."
+  (:require
+   [ai.miniforge.tui-engine.screen :as screen])
+  (:import
+   [com.googlecode.lanterna TextCharacter TextColor$ANSI]
+   [com.googlecode.lanterna.screen TerminalScreen]
+   [com.googlecode.lanterna.terminal DefaultTerminalFactory]))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Color mapping
+
+(def ^:private color-map
+  "Map from keyword colors to Lanterna TextColor.ANSI constants."
+  {:black   TextColor$ANSI/BLACK
+   :red     TextColor$ANSI/RED
+   :green   TextColor$ANSI/GREEN
+   :yellow  TextColor$ANSI/YELLOW
+   :blue    TextColor$ANSI/BLUE
+   :magenta TextColor$ANSI/MAGENTA
+   :cyan    TextColor$ANSI/CYAN
+   :white   TextColor$ANSI/WHITE
+   :default TextColor$ANSI/DEFAULT})
+
+(defn- resolve-lanterna-color [kw]
+  (get color-map kw TextColor$ANSI/DEFAULT))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Lanterna implementation
+
+(defrecord LanternaScreen [^TerminalScreen screen]
+  screen/IScreen
+  (start-screen! [_]
+    (.startScreen screen))
+
+  (stop-screen! [_]
+    (.stopScreen screen))
+
+  (get-size [_]
+    (let [size (.getTerminalSize screen)]
+      [(.getColumns size) (.getRows size)]))
+
+  (put-string! [_ col row text fg bg bold?]
+    (let [fg-color (resolve-lanterna-color fg)
+          bg-color (resolve-lanterna-color bg)]
+      (doseq [i (range (count text))]
+        (let [ch (.charAt text i)
+              tc (if bold?
+                   (TextCharacter. ch fg-color bg-color
+                                   (into-array com.googlecode.lanterna.SGR
+                                               [com.googlecode.lanterna.SGR/BOLD]))
+                   (TextCharacter. ch fg-color bg-color
+                                   (into-array com.googlecode.lanterna.SGR [])))]
+          (.setCharacter screen (+ col i) row tc)))))
+
+  (clear! [_]
+    (.clear screen))
+
+  (refresh! [_]
+    (.refresh screen))
+
+  (poll-input [_]
+    (when-let [key (.pollInput screen)]
+      (let [kind (.getKeyType key)]
+        (cond
+          (= kind com.googlecode.lanterna.input.KeyType/Character)
+          {:type :character :char (.getCharacter key)}
+
+          (= kind com.googlecode.lanterna.input.KeyType/Enter)
+          {:type :enter}
+
+          (= kind com.googlecode.lanterna.input.KeyType/Escape)
+          {:type :escape}
+
+          (= kind com.googlecode.lanterna.input.KeyType/Backspace)
+          {:type :backspace}
+
+          (= kind com.googlecode.lanterna.input.KeyType/ArrowUp)
+          {:type :arrow-up}
+
+          (= kind com.googlecode.lanterna.input.KeyType/ArrowDown)
+          {:type :arrow-down}
+
+          (= kind com.googlecode.lanterna.input.KeyType/ArrowLeft)
+          {:type :arrow-left}
+
+          (= kind com.googlecode.lanterna.input.KeyType/ArrowRight)
+          {:type :arrow-right}
+
+          (= kind com.googlecode.lanterna.input.KeyType/Tab)
+          {:type :tab}
+
+          (= kind com.googlecode.lanterna.input.KeyType/EOF)
+          {:type :eof}
+
+          :else
+          {:type :unknown :raw (str kind)})))))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Factory
+
+(defn create-lanterna-screen
+  "Create a Lanterna terminal screen."
+  [_opts]
+  (let [factory (DefaultTerminalFactory.)
+        terminal (.createTerminal factory)
+        screen (TerminalScreen. terminal)]
+    (->LanternaScreen screen)))
