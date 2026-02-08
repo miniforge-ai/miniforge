@@ -23,10 +23,55 @@
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Widgets
 
-(def status-indicator widget/status-indicator)
-(def status-text widget/status-text)
-(def progress-bar widget/progress-bar)
-(def tree widget/tree)
-(def kanban widget/kanban)
-(def scrollable widget/scrollable)
-(def sparkline widget/sparkline)
+(def status-indicator
+  "Render a single status indicator character with color.
+   Signature: [status]
+   status: :running :success :failed :blocked :pending :skipped :spinning
+   Returns 1x1 cell buffer."
+  widget/status-indicator)
+
+(def status-text
+  "Render status indicator followed by label text.
+   Signature: [[cols rows] status label]
+   Returns cell buffer of [cols 1]."
+  widget/status-text)
+
+(def progress-bar
+  "Render a progress bar with optional percentage.
+   Signature: [[cols rows] opts]
+   opts: {:percent :fill-fg :empty-fg :show-pct?}
+   Returns cell buffer."
+  widget/progress-bar)
+
+(def tree
+  "Render a tree with expand/collapse navigation.
+   Signature: [[cols rows] opts]
+   opts: {:nodes :expanded :selected :fg :selected-fg :selected-bg}
+   nodes: [{:label :depth :expandable?}]
+   Returns cell buffer."
+  widget/tree)
+
+(def kanban
+  "Render kanban-style columns.
+   Signature: [[cols rows] opts]
+   opts: {:columns}
+   columns: [{:title :color :cards}]
+   cards: [{:label :status}]
+   Returns cell buffer."
+  widget/kanban)
+
+(def scrollable
+  "Render a scrollable viewport with scrollbar.
+   Signature: [[cols rows] opts]
+   opts: {:lines :offset :fg :bg}
+   lines: vector of strings
+   Returns cell buffer."
+  widget/scrollable)
+
+(def sparkline
+  "Render a braille-based mini sparkline chart.
+   Signature: [[cols rows] opts]
+   opts: {:values :fg}
+   values: vector of numbers
+   Returns cell buffer."
+  widget/sparkline)
