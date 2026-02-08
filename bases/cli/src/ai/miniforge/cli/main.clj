@@ -690,7 +690,38 @@ Examples:
 (defn -main
   "CLI entry point."
   [& args]
-  (cli/dispatch dispatch-table args))
+  (try
+    (cli/dispatch dispatch-table args)
+    (catch clojure.lang.ExceptionInfo e
+      (let [data (ex-data e)]
+        (if (and (= (:type data) :org.babashka/cli)
+                 (= (:cause data) :no-match))
+          (let [wrong-input (:wrong-input data)
+                dispatch (:dispatch data)
+                all-commands (:all-commands data)]
+            (print-error (str "Unknown command: " (str/join " " (conj (vec dispatch) wrong-input))))
+            (println)
+
+            ;; Special case: suggest alternatives for moved commands
+            (when (and (= (first dispatch) "fleet")
+                       (contains? #{"web" "dashboard" "tui"} wrong-input))
+              (println "Did you mean:")
+              (println (str "  miniforge " (if (= wrong-input "dashboard") "web" wrong-input)))
+              (println))
+
+            (when (seq all-commands)
+              (println (str "Available " (if (seq dispatch)
+                                           (str "'" (str/join " " dispatch) "' ")
+                                           "")
+                           "commands:"))
+              (doseq [cmd all-commands]
+                (println (str "  miniforge " (str/join " " (conj (vec dispatch) cmd)))))
+              (println))
+
+            (println "Run 'miniforge help' for more information.")
+            (System/exit 1))
+          ;; Re-throw if not a no-match error
+          (throw e))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
