@@ -1,7 +1,7 @@
 # N3 — Event Stream & Observability Contract
 
-**Version:** 0.1.0-draft
-**Date:** 2026-01-23
+**Version:** 0.4.0-draft
+**Date:** 2026-02-07
 **Status:** Draft
 **Conformance:** MUST
 
@@ -59,8 +59,20 @@ All events MUST conform to this base envelope:
 - **event/id** - MUST be globally unique UUID
 - **event/timestamp** - MUST be ISO-8601 instant
 - **event/version** - MUST be semantic version string
-- **workflow/id** - MUST reference a valid workflow
-- **event/sequence-number** - MUST be monotonically increasing per workflow
+- **workflow/id** - MUST reference a valid workflow. MAY be nil for external PR events (N9); see §2.3.
+- **event/sequence-number** - MUST be monotonically increasing per workflow (or per PR Work Item for external PR events)
+
+### 2.3 Scope Key for Non-Workflow Events
+
+Some event types originate outside a Miniforge workflow (e.g., external PR state changes
+from N9). For these events:
+
+- `:workflow/id` MAY be nil.
+- Events MUST instead include `:pr/id` (the PR Work Item UUID) as a correlation key.
+- Implementations MUST support subscribing to events by `:pr/id` in addition to `:workflow/id`.
+- Events MUST be ordered per PR Work Item when no workflow scope exists.
+- For Miniforge-originated PRs, `:workflow/id` MUST reference the originating workflow AND
+  `:pr/id` MAY also be present for cross-referencing.
 
 ### 2.2 Ordering Guarantees
 
@@ -820,6 +832,282 @@ Emitted when a task is skipped due to a dependency failure.
  :message "Task skipped: dependency task-abc failed"}
 ```
 
+### 3.13 OPSV Events (N7)
+
+For Operational Policy Synthesis workflows (see N7), implementations MUST emit these
+event types:
+
+#### opsv.experiment/planned
+
+```clojure
+{:event/type :opsv.experiment/planned
+ :workflow/id uuid
+ :opsv/pack-hash string              ; Experiment Pack content hash
+ :opsv/targets {:services [...] :environments [...]}
+ :opsv/risk-score {:level keyword :factors [...]}
+ :message "OPSV experiment planned: {pack-hash}"}
+```
+
+#### opsv.experiment/started
+
+```clojure
+{:event/type :opsv.experiment/started
+ :workflow/id uuid
+ :opsv/pack-hash string
+ :opsv/environment-fingerprint {...} ; Cluster, node pool, image digests, config
+ :message "OPSV experiment started in {environment}"}
+```
+
+#### opsv/load-step
+
+```clojure
+{:event/type :opsv/load-step
+ :workflow/id uuid
+ :opsv/step-id string
+ :opsv/intended-load {...}
+ :opsv/observed-load {...}
+ :message "OPSV load step {step-id}: {intended} → {observed}"}
+```
+
+#### opsv.guardrail/abort
+
+```clojure
+{:event/type :opsv.guardrail/abort
+ :workflow/id uuid
+ :opsv/trigger keyword               ; Abort trigger type
+ :opsv/threshold {...}
+ :opsv/observed {...}
+ :opsv/rollback-action keyword
+ :message "OPSV guardrail abort: {trigger}"}
+```
+
+#### opsv.convergence/iteration
+
+```clojure
+{:event/type :opsv.convergence/iteration
+ :workflow/id uuid
+ :opsv/iteration-id string
+ :opsv/params {...}
+ :opsv/observed-metrics-summary {...}
+ :message "OPSV convergence iteration {iteration-id}"}
+```
+
+#### opsv.policy/proposed
+
+```clojure
+{:event/type :opsv.policy/proposed
+ :workflow/id uuid
+ :opsv/policy-hash string
+ :opsv/diff-refs [uuid ...]          ; N6 artifact references
+ :opsv/confidence keyword
+ :message "OPSV policy proposed: {policy-hash}"}
+```
+
+#### opsv.verification/result
+
+```clojure
+{:event/type :opsv.verification/result
+ :workflow/id uuid
+ :opsv/passed? boolean
+ :opsv/criteria-evaluation [...]
+ :opsv/evidence-bundle-id uuid
+ :message "OPSV verification {passed?}: {summary}"}
+```
+
+#### opsv.actuation/emitted
+
+```clojure
+{:event/type :opsv.actuation/emitted
+ :workflow/id uuid
+ :opsv/actuation-mode keyword        ; :pr-only or :apply-allowed
+ :opsv/pr-refs [string ...]          ; PR URLs if PR_ONLY
+ :opsv/apply-refs [string ...]       ; Applied resource refs if APPLY_ALLOWED
+ :message "OPSV actuation emitted: {mode}"}
+```
+
+#### opsv.drift/detected
+
+```clojure
+{:event/type :opsv.drift/detected
+ :workflow/id uuid                   ; OPTIONAL: may be nil if detected by monitoring
+ :opsv/signal keyword
+ :opsv/deviation {...}
+ :opsv/suggested-rerun? boolean
+ :message "OPSV drift detected: {signal}"}
+```
+
+All OPSV events MUST link to the corresponding evidence bundle id per N6.
+
+### 3.14 Observability Control Interface Events (N8)
+
+For the Observability Control Interface (see N8), implementations MUST emit these
+event types:
+
+#### listener/attached
+
+```clojure
+{:event/type :listener/attached
+ :listener/id uuid
+ :listener/type keyword              ; :watcher, :dashboard, :fleet, :enterprise
+ :listener/capability keyword        ; :observe, :advise, :control
+ :workflow/id uuid
+ :message "Listener attached: {type} with {capability} capability"}
+```
+
+#### listener/detached
+
+```clojure
+{:event/type :listener/detached
+ :listener/id uuid
+ :workflow/id uuid
+ :listener/reason keyword            ; :disconnect, :timeout, :revoked
+ :message "Listener detached: {reason}"}
+```
+
+#### control-action/requested
+
+```clojure
+{:event/type :control-action/requested
+ :action/id uuid
+ :action/type keyword                ; See N8 §3.1
+ :action/target {:target-type keyword :target-id uuid}
+ :action/requester {:principal string :listener-id uuid}
+ :workflow/id uuid
+ :message "Control action requested: {type}"}
+```
+
+#### control-action/executed
+
+```clojure
+{:event/type :control-action/executed
+ :action/id uuid
+ :action/type keyword
+ :action/result {:status keyword :error {...}}
+ :workflow/id uuid
+ :message "Control action executed: {type} - {status}"}
+```
+
+#### control-action/approval-required
+
+```clojure
+{:event/type :control-action/approval-required
+ :action/id uuid
+ :action/type keyword
+ :approval/required-approvers int
+ :approval/timeout-at inst
+ :workflow/id uuid
+ :message "Approval required for {type}: {required} approvers needed"}
+```
+
+#### annotation/created
+
+```clojure
+{:event/type :annotation/created
+ :workflow/id uuid
+ :annotation/id uuid
+ :annotation/type keyword            ; :recommendation, :warning, :insight, :question
+ :annotation/source {:listener-id uuid :principal string}
+ :message "Advisory annotation: {title}"}
+```
+
+### 3.15 External PR Integration Events (N9)
+
+For external PR integration (see N9), implementations MUST emit these event types.
+These events MAY have nil `:workflow/id` — see §2.3 for scope key rules.
+
+#### provider/event-received
+
+Emitted when a provider event is received and normalized.
+
+```clojure
+{:event/type :provider/event-received
+ :pr/id uuid                         ; PR Work Item id (correlation key)
+ :provider/type keyword              ; :github, :gitlab
+ :provider/event-type keyword        ; Canonical type mapped from provider
+ :provider/repo string               ; "org/name"
+ :provider/pr-number long            ; OPTIONAL
+ :provider/head-sha string           ; OPTIONAL
+ :provider/dedupe-key string         ; For idempotency
+ :message "Provider event received: {type} for {repo}#{pr-number}"}
+```
+
+#### pr.readiness/changed
+
+Emitted when PR readiness state changes (derived-state-change event).
+
+```clojure
+{:event/type :pr.readiness/changed
+ :pr/id uuid
+ :pr/repo string
+ :pr/number long
+ :readiness/previous-state keyword
+ :readiness/new-state keyword
+ :readiness/blockers [...]
+ :message "PR {repo}#{number} readiness: {previous} → {new}"}
+```
+
+#### pr.risk/changed
+
+```clojure
+{:event/type :pr.risk/changed
+ :pr/id uuid
+ :pr/repo string
+ :pr/number long
+ :risk/previous-level keyword
+ :risk/new-level keyword
+ :risk/factors [...]
+ :risk/evidence-id uuid              ; N6 artifact id
+ :message "PR {repo}#{number} risk: {previous} → {new}"}
+```
+
+#### pr.policy/changed
+
+```clojure
+{:event/type :pr.policy/changed
+ :pr/id uuid
+ :pr/repo string
+ :pr/number long
+ :policy/previous-overall keyword
+ :policy/new-overall keyword
+ :policy/results [...]
+ :policy/evidence-id uuid            ; N6 artifact id
+ :message "PR {repo}#{number} policy: {previous} → {new}"}
+```
+
+#### pr.state/changed
+
+```clojure
+{:event/type :pr.state/changed
+ :pr/id uuid
+ :pr/repo string
+ :pr/number long
+ :pr/previous-state keyword          ; :open, :closed, :merged
+ :pr/new-state keyword
+ :pr/head-sha string
+ :message "PR {repo}#{number} state: {previous} → {new}"}
+```
+
+#### train/changed
+
+```clojure
+{:event/type :train/changed
+ :train/id uuid
+ :train/members [uuid ...]           ; Ordered PR Work Item ids
+ :train/change-type keyword          ; :member-added, :member-removed,
+                                     ; :order-changed, :member-merged
+ :message "Train {id}: {change-type}"}
+```
+
+#### N9 Event Ordering Rules
+
+- Provider ingestion events MUST be idempotent per `:provider/dedupe-key`.
+- Derived-state-change events (`:pr.readiness/changed`, etc.) MUST only fire when
+  computed state actually changes.
+- All events MUST conform to §2.2 ordering guarantees where a workflow scope exists.
+  For external PRs (no workflow), events MUST be ordered per PR Work Item (§2.3).
+
+---
+
 ## 4. Event Emission Requirements
 
 ### 4.1 Emission Points
@@ -835,6 +1123,9 @@ Implementations MUST emit events at these points:
 7. **Inter-agent messages** - all communications
 8. **Milestones** - significant progress points
 9. **Task lifecycle** - frontier entry, claims, capability binding, scope violations
+10. **OPSV lifecycle** - experiment plans, load steps, guardrail aborts, policy proposals, verification results (N7)
+11. **Listener lifecycle** - attach, detach, control actions, annotations (N8)
+12. **External PR lifecycle** - provider events, readiness/risk/policy changes, train changes (N9)
 
 ### 4.2 Throttling
 
@@ -1085,15 +1376,20 @@ Event stream will extend to:
 ## 10. References
 
 - RFC 2119: Key words for use in RFCs to Indicate Requirement Levels
-- N6 (Evidence & Provenance): Evidence bundles reference event streams
-- N5 (CLI/TUI/API): UI consumes event stream via subscription API
 - N2 (Workflow Execution): Workflow engine emits lifecycle events
+- N5 (CLI/TUI/API): UI consumes event stream via subscription API
+- N6 (Evidence & Provenance): Evidence bundles reference event streams
+- N7 (Operational Policy Synthesis): OPSV event types (§3.13)
+- N8 (Observability Control Interface): Listener/control action event types (§3.14)
+- N9 (External PR Integration): Provider/PR/train event types (§3.15)
 - I-DAG-ORCHESTRATION: DAG executor with PR lifecycle (Section 12: PR Lifecycle Events)
 
 ---
 
 **Version History:**
 
+- 0.4.0-draft (2026-02-07): Added extension spec events from N7, N8, N9
+  (§3.13–§3.15, §2.3 scope key)
 - 0.3.0-draft (2026-02-04): Added task lifecycle events for DAG orchestration (§3.12)
 - 0.2.0-draft (2026-02-03): Add PR lifecycle events for DAG orchestration (Section 3.10)
 - 0.1.0-draft (2026-01-23): Initial event stream specification

@@ -28,13 +28,18 @@ The OCI transforms the event stream (N3) from a passive observability layer into
 
 OCI is an extension of existing Miniforge normative contracts:
 
-- **N1**: introduces new *concepts* (Listener, Capability Level, Control Action) as
-          specializations of Agent/Observer/Policy.
+- **N1**: introduces new *concepts* (Listener, Capability Level, Control Action,
+          Advisory Annotation) as specializations of Agent/Observer/Policy.
+          Now landed in N1 §2.15–§2.18 and §12 (glossary).
 - **N3**: defines listener subscription mechanics, privacy hooks, and OTel interoperability
           as extensions to the event stream contract.
+          Now landed in N3 §3.14 (Observability Control Interface Events).
 - **N4**: defines RBAC rules and policy gates governing control actions.
+          Now landed in N4 §5.1.6 (Control Action Governance).
 - **N5**: defines control-plane commands for CLI/TUI/API.
+          Now landed in N5 §2.3.3 (Listener and Control Commands) and §3.2.7 (Listener and Control Panel).
 - **N6**: defines audit requirements for control actions in evidence bundles.
+          Now landed in N6 §2.9 (Control Action Evidence) and §3.1.1 (artifact types).
 - **N7**: OCI provides the listener infrastructure that OPSV uses for experiment monitoring.
 
 ### 0.3 Non-goals

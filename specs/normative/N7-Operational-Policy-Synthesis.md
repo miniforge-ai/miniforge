@@ -13,14 +13,19 @@ them against explicit acceptance criteria, and emits fixes as auditable artifact
 
 OPSV is an extension of existing Miniforge normative contracts:
 
-- **N1**: introduces new *concepts* (Experiment Pack, Operational Policy, Actuation Mode) as
-          specializations of Workflow/Policy Pack/Artifact/Evidence.
+- **N1**: introduces new *concepts* (Experiment Pack, Operational Policy, Actuation Mode,
+          Verification) as specializations of Workflow/Policy Pack/Artifact/Evidence.
+          Now landed in N1 §2.11–§2.14 and §12 (glossary).
 - **N2**: defines a new workflow family (`opsv.*`) and convergence loops as instances of the
           validate→feedback→repair→re-validate pattern.
-- **N3**: adds required event types and event payload fields for experiments and verification.
+- **N3**: adds required event types for experiments and verification.
+          Now landed in N3 §3.13 (OPSV Events).
 - **N4**: defines new gates and policy-pack controls for experiment governance, safety, and actuation.
+          Now landed in N4 §5.1.5 (OPSV Gates Pack).
 - **N5**: defines Fleet Mode command surfaces and navigation primitives for experiments and policy diffs.
-- **N6**: defines evidence bundle requirements for experiment provenance, reproducibility, and verification artifacts.
+          Now landed in N5 §2.3.3 (OPSV Commands) and §3.2.6 (OPSV Drill-Down View).
+- **N6**: defines evidence bundle requirements for experiment provenance, reproducibility, and
+          verification artifacts. Now landed in N6 §2.8 (OPSV Evidence) and §3.1.1 (artifact types).
 
 ### 0.3 Non-goals
 

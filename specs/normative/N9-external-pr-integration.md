@@ -27,19 +27,23 @@ N9 is an extension of existing Miniforge normative contracts:
 
 - **N1**: introduces new concepts (External PR, PR Work Item, Provider, PR Train,
           Readiness, Risk Assessment) as specializations of Workflow/Artifact/Evidence.
-          These MUST be added to N1 §2 and §12 (glossary).
+          Now landed in N1 §2.19–§2.23 and §12 (glossary).
 - **N2**: does NOT define new workflow phases; external PRs are not executed through
           the Plan→Implement→Verify pipeline. However, external PRs MAY be
           "adopted" into a Miniforge workflow (e.g., PR Monitoring), at which point
           N2 applies.
 - **N3**: adds required event types for provider ingestion and PR state changes
-          as extensions to the event stream contract (§7 of this spec).
+          as extensions to the event stream contract.
+          Now landed in N3 §3.15 (External PR Integration Events) and §2.3 (scope key).
 - **N4**: defines how existing policy packs evaluate external PR diffs and how
-          policy results are published as provider-native signals (§8).
+          policy results are published as provider-native signals.
+          Now landed in N4 §5.1.7 (External PR Evaluation).
 - **N5**: defines CLI/TUI/API extensions for multi-repo PR monitoring, readiness
-          views, and train management (§12).
+          views, and train management.
+          Now landed in N5 §2.3.3 (External PR Commands), §3.2.8–§3.2.10 (TUI views), §4.2.4 (API).
 - **N6**: defines how external PR assessments produce evidence artifacts using
-          the existing evidence bundle schema (§9).
+          the existing evidence bundle schema.
+          Now landed in N6 §2.10 (External PR Evidence) and §3.1.1 (artifact types).
 - **N7**: N7 defines OPSV (operational policy synthesis for service fleets at
           runtime). N9 defines SDLC governance across repository fleets at
           development time. Both operate under the Fleet control plane but address
@@ -85,7 +89,8 @@ operational policies. N9's domain is PRs, reviews, CI checks, and merge readines
 
 ## 1. Terminology (N1 Extension)
 
-The following concepts MUST be added to N1 §2 (Core Domain Model) and §12 (Glossary).
+The following concepts are defined in N1 §2.19–§2.23 and §12 (Glossary).
+Detailed semantics are specified below.
 
 ### 1.1 External PR
 

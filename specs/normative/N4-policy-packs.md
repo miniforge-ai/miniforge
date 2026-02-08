@@ -1,7 +1,7 @@
 # N4 — Policy Packs & Gates Standard
 
-**Version:** 0.1.0-draft
-**Date:** 2026-01-23
+**Version:** 0.3.0-draft
+**Date:** 2026-02-07
 **Status:** Draft
 **Conformance:** MUST
 
@@ -9,7 +9,8 @@
 
 ## 1. Purpose & Scope
 
-This specification defines the **policy pack** and **gate validation** contracts for miniforge autonomous software factory. It establishes:
+This specification defines the **policy pack** and **gate validation** contracts for miniforge
+autonomous software factory. It establishes:
 
 - **Policy pack structure** - Format, versioning, signature requirements
 - **Gate execution contract** - Check and repair function interfaces
@@ -127,13 +128,16 @@ Policy packs enable **policy-as-code** enforcement at workflow gates, preventing
 
 ### 2.4 Knowledge Safety and Pack Validation (Reference)
 
-miniforge MUST support deterministic policy packs that protect the system from prompt-injection and untrusted input escalation during ingestion and execution.
+miniforge MUST support deterministic policy packs that protect the system from prompt-injection
+and untrusted input escalation during ingestion and execution.
 
 A reference policy pack named `knowledge-safety` SHOULD be provided.
 
 #### 2.4.1 Threat Model
 
-Untrusted repository content (markdown, issues, wikis, etc.) may contain instructions that attempt to override agent behavior. The platform MUST treat such content as *data* unless it is normalized into schema-valid packs and promoted to `:trusted` under policy.
+Untrusted repository content (markdown, issues, wikis, etc.) may contain instructions that
+attempt to override agent behavior. The platform MUST treat such content as *data* unless it
+is normalized into schema-valid packs and promoted to `:trusted` under policy.
 
 #### 2.4.2 Reference Rules (knowledge-safety)
 
@@ -169,18 +173,32 @@ The `knowledge-safety` pack SHOULD include rules such as:
 
 #### 2.4.3 Deterministic Prompt Injection Tripwire Scanner
 
-The platform SHOULD ship a deterministic scanner that emits findings on suspicious directives, including (non-exhaustive):
+The platform SHOULD ship a deterministic scanner that emits findings on suspicious
+directives, including (non-exhaustive):
 
-- **Role and instruction overrides:** `SYSTEM:`, `DEVELOPER:`, "ignore previous instructions", "you are now", "disregard all prior"
-- **Tool invocation bait:** "run this command", "call tool", "execute the following", "invoke function"
-- **Data exfiltration attempts:** "send output to", "POST to", "curl http", "webhook", patterns suggesting data leakage to external endpoints
-- **Embedded execution patterns:** Unusual code blocks in documentation context (e.g., shell scripts, base64 blobs with `eval`, obfuscated JavaScript/Python)
-- **Time-based triggers:** Patterns suggesting delayed or conditional execution ("wait until", "after N days", "when timestamp", "cron-like expressions" in unexpected contexts)
-- **Obfuscation indicators:** Large base64 blobs, repeated encoding markers (multiple layers of encoding), hexadecimal or unicode escape sequences suggesting hidden content
-- **Authority escalation:** "this is the system prompt", "highest priority", "override all policies", "administrator mode", "root access"
-- **Context confusion:** Attempts to blur boundaries between documentation and instructions ("the following is a system message", "internal use only: execute")
+- **Role and instruction overrides:** `SYSTEM:`, `DEVELOPER:`,
+  "ignore previous instructions", "you are now", "disregard all prior"
+- **Tool invocation bait:** "run this command", "call tool",
+  "execute the following", "invoke function"
+- **Data exfiltration attempts:** "send output to", "POST to", "curl http",
+  "webhook", patterns suggesting data leakage to external endpoints
+- **Embedded execution patterns:** Unusual code blocks in documentation context
+  (e.g., shell scripts, base64 blobs with `eval`, obfuscated JavaScript/Python)
+- **Time-based triggers:** Patterns suggesting delayed or conditional execution
+  ("wait until", "after N days", "when timestamp", "cron-like expressions"
+  in unexpected contexts)
+- **Obfuscation indicators:** Large base64 blobs, repeated encoding markers
+  (multiple layers of encoding), hexadecimal or unicode escape sequences
+  suggesting hidden content
+- **Authority escalation:** "this is the system prompt", "highest priority",
+  "override all policies", "administrator mode", "root access"
+- **Context confusion:** Attempts to blur boundaries between documentation
+  and instructions ("the following is a system message",
+  "internal use only: execute")
 
-The scanner SHOULD use pattern matching (regex, keyword detection) combined with contextual heuristics (e.g., code blocks in markdown files that aren't in fenced code syntax).
+The scanner SHOULD use pattern matching (regex, keyword detection) combined with
+contextual heuristics (e.g., code blocks in markdown files that aren't in fenced
+code syntax).
 
 Implementations SHOULD tune sensitivity based on content type:
 
@@ -188,7 +206,9 @@ Implementations SHOULD tune sensitivity based on content type:
 - Code files with inline documentation → moderate sensitivity
 - Structured data files (JSON, YAML, EDN) → context-dependent
 
-This scanner MUST be treated as a *tripwire* rather than a complete security solution. The primary defense MUST remain trust labeling, schema validation, and instruction/data separation.
+This scanner MUST be treated as a *tripwire* rather than a complete security solution.
+The primary defense MUST remain trust labeling, schema validation, and
+instruction/data separation.
 
 ---
 
@@ -462,7 +482,7 @@ Semantic intent validation MUST enforce these rules:
 
 Implementations MUST parse Terraform plan output to categorize changes:
 
-```
+```text
 # Example Terraform plan output
 
 Terraform will perform the following actions:
@@ -629,6 +649,106 @@ Rules:
 This pack is OPTIONAL for single-task workflows but RECOMMENDED for DAG execution
 with multiple concurrent agents.
 
+#### 5.1.5 OPSV Gates Pack (N7)
+
+**ID:** `opsv-governance`
+**Purpose:** Govern operational policy synthesis experiments and actuation (see N7 §5)
+
+Gates:
+
+- `instrumentation-gate` (severity: critical)
+  - FAIL if required metric/trace signals do not exist or are unreliable
+  - MUST validate signal availability before experiment execution
+- `environment-gate` (severity: critical)
+  - FAIL if target environments are not in the allowed set or outside time windows
+  - Production targets MUST require explicit allowlisting
+- `blast-radius-gate` (severity: critical)
+  - FAIL if proposed changes exceed configured max replicas delta, max node delta, or namespace limits
+- `abort-gate` (severity: critical)
+  - FAIL if abort triggers are not configured before experiment execution
+  - MUST verify error budget burn, saturation, and tail latency thresholds are set
+- `actuation-gate` (severity: critical)
+  - FAIL if `APPLY_ALLOWED` is requested but not explicitly enabled in policy pack
+  - `APPLY_ALLOWED` MUST be disabled by default
+  - Apply requires explicit per-service allowlist
+- `evidence-completeness-gate` (severity: high)
+  - FAIL if evidence bundle is missing required fields before actuation
+  - MUST verify experiment pack hash, environment fingerprint, metric snapshots
+
+If any gate fails, OPSV MUST produce remediation guidance as machine-readable output
+and human-readable summary.
+
+#### 5.1.6 Control Action Governance (N8)
+
+**ID:** `control-action-governance`
+**Purpose:** RBAC and policy gates governing control actions (see N8 §2.3, §3)
+
+Rules:
+
+- `require-rbac-authorization` (severity: critical)
+  - FAIL if control action requester lacks required RBAC role for the action type
+  - MUST validate against RBAC schema (see N8 §2.3)
+- `require-multi-party-approval` (severity: critical)
+  - FAIL if High/Critical risk actions proceed without configured number of approvers
+  - Requester MUST NOT be their own approver (when `require-different-principal?` is true)
+- `control-action-audit` (severity: high)
+  - FAIL if control action is not audit-logged with pre-state, post-state, and justification
+- `control-action-risk-classification` (severity: medium)
+  - WARN if action risk level is not classified per N8 §3.1 risk levels
+  - MUST enforce justification requirement for High/Critical actions
+
+RBAC role schema for control action governance:
+
+```clojure
+{:rbac/role keyword
+ :rbac/permissions
+ {:workflows {:pause boolean :resume boolean :retry boolean
+              :cancel boolean :rollback boolean :force-complete boolean}
+  :agents {:quarantine boolean :adjust-budget boolean :inject-context boolean}
+  :fleet {:emergency-stop boolean :drain boolean :scale boolean}
+  :approvals {:gate-override boolean :budget-escalation boolean}}
+ :rbac/constraints
+ {:workflow-patterns [string ...]
+  :time-windows [{:start inst :end inst} ...]
+  :require-mfa? boolean}}
+```
+
+#### 5.1.7 External PR Evaluation (N9)
+
+**ID:** `external-pr-evaluation`
+**Purpose:** Policy evaluation for external PRs (see N9 §8)
+
+Rules:
+
+- `external-pr-policy-check` (severity: configurable)
+  - Evaluate existing policy pack rules against external PR diffs
+  - Context differs from workflow gate evaluation: artifacts are the PR diff and
+    metadata, context is PR author/repo/labels/base branch (not workflow spec)
+  - MUST NOT invoke repair functions (N4 §3.2) — external PRs are read-only unless adopted
+- `policy-evaluation-trigger` (severity: high)
+  - MUST run policy evaluation on: PR opened, PR synchronized (new commits),
+    check run completed, configuration changed
+- `provider-feedback-governance` (severity: medium)
+  - If `:policies/mode` is `:enforcing`, MAY publish outcomes as provider-native
+    signals (e.g., GitHub Check Runs) with stable check names per policy pack
+  - If `:policies/mode` is `:advisory`, MUST NOT publish enforcing checks
+  - MUST respect automation tier constraints (N9 §10)
+
+Policy result schema for external PR evaluation:
+
+```clojure
+{:policy/overall keyword              ; :pass, :fail, :unknown
+ :policy/results
+ [{:rule/id string                    ; From N4 policy pack rule
+   :rule/outcome keyword              ; :pass, :fail, :warn, :skip, :unknown
+   :rule/message string
+   :rule/evidence-id uuid}]           ; N6 artifact with full details
+ :policy/evaluated-at inst
+ :policy/packs-applied
+ [{:policy-pack/id string
+   :policy-pack/version string}]}
+```
+
 ### 5.2 Pack Discovery & Installation
 
 Implementations SHOULD support:
@@ -655,7 +775,7 @@ miniforge policy show terraform-aws
 
 All violations MUST provide remediation guidance in this format:
 
-```
+```text
 [SEVERITY] Rule: [RULE_NAME]
 
 Problem:
@@ -674,7 +794,7 @@ Docs: [DOCUMENTATION_URL]
 
 Example:
 
-```
+```text
 [CRITICAL] Rule: No Public S3 Buckets
 
 Problem:
@@ -992,10 +1112,15 @@ Research directions:
 - N2 (Workflow Execution): Defines gate execution in phases
 - N3 (Event Stream): Defines gate lifecycle events
 - N6 (Evidence & Provenance): Stores policy check results in evidence
+- N7 (Operational Policy Synthesis): OPSV gate requirements (§5.1.5)
+- N8 (Observability Control Interface): RBAC and control action governance (§5.1.6)
+- N9 (External PR Integration): External PR policy evaluation (§5.1.7)
 
 ---
 
 **Version History:**
 
+- 0.3.0-draft (2026-02-07): Added extension spec gates from N7, N8, N9
+  (§5.1.5–§5.1.7)
 - 0.2.0-draft (2026-02-04): Added task-scope policy pack for capability enforcement (§5.1.4)
 - 0.1.0-draft (2026-01-23): Initial policy packs and gates specification
