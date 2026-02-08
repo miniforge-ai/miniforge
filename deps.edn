@@ -66,8 +66,10 @@
                        "components/tui-engine/src"
                        "components/tui-engine/resources"
                        "bases/cli/src"
-                       "bases/cli/resources"]
+                       "bases/cli/resources"
+                       "bases/lsp-mcp-bridge/src"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
+                      ai.miniforge/lsp-mcp-bridge {:local/root "bases/lsp-mcp-bridge"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}

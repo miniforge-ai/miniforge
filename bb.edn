@@ -479,6 +479,17 @@
            (p/shell "bb" "dogfood:dry-run"))}
 
   ;; ──────────────────────────────────────────────────────────────────────────
+  ;; LSP-to-MCP Bridge
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  lsp-mcp-bridge
+  {:doc     "Run LSP-to-MCP bridge (for Claude Code integration)"
+   :extra-paths ["bases/lsp-mcp-bridge/src"
+                 "components/tool-registry/resources"]
+   :requires ([ai.miniforge.lsp-mcp-bridge.main :as bridge])
+   :task    (bridge/-main)}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
   ;; CLI Development
   ;; ──────────────────────────────────────────────────────────────────────────
 
@@ -486,6 +497,7 @@
   {:doc     "Run miniforge CLI in development mode"
    :extra-paths ["bases/cli/src"
                  "bases/cli/resources"
+                 "bases/lsp-mcp-bridge/src"
                  "components/algorithms/src"
                  "components/schema/src"
                  "components/schema/resources"

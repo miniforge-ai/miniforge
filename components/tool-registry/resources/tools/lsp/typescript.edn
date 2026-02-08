@@ -1,0 +1,26 @@
+;; TypeScript/JavaScript Language Server Protocol configuration
+;; https://github.com/typescript-language-server/typescript-language-server
+
+{:tool/id          :lsp/typescript
+ :tool/type        :lsp
+ :tool/name        "TypeScript Language Server"
+ :tool/description "Language server for TypeScript and JavaScript providing type checking, refactoring, and code intelligence"
+ :tool/version     "1.0.0"
+
+ :tool/config
+ {:lsp/command        ["typescript-language-server" "--stdio"]
+  :lsp/languages      #{"typescript" "javascript" "typescriptreact" "javascriptreact"}
+  :lsp/file-patterns  ["**/*.ts" "**/*.tsx" "**/*.js" "**/*.jsx" "**/*.mts" "**/*.mjs"]
+  :lsp/capabilities   #{:diagnostics :format :hover :completion
+                        :definition :references :rename
+                        :code-action :document-symbol}
+  :lsp/start-mode     :on-demand
+  :lsp/shutdown-after-ms 300000}
+
+ :tool/capabilities  #{:code/diagnostics :code/format :code/hover
+                       :code/completion :code/navigation :code/refactor
+                       :code/symbols}
+
+ :tool/requires      #{:subprocess/spawn}
+ :tool/enabled       true
+ :tool/tags          #{:language-server :typescript :javascript :web}}

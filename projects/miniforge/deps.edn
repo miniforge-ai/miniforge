@@ -37,7 +37,9 @@
         ai.miniforge/orchestrator {:local/root "../../components/orchestrator"}
         ai.miniforge/reporting {:local/root "../../components/reporting"}
         ;; Event streaming and observability
-        ai.miniforge/event-stream {:local/root "../../components/event-stream"}}
+        ai.miniforge/event-stream {:local/root "../../components/event-stream"}
+        ;; LSP-to-MCP bridge (separate entry point for Claude Code integration)
+        ai.miniforge/lsp-mcp-bridge {:local/root "../../bases/lsp-mcp-bridge"}}
 
  :aliases
  {:uberjar
