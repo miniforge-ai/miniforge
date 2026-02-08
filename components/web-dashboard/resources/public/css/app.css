@@ -191,13 +191,16 @@ body {
   display: grid;
   grid-template-columns: 250px 1fr;
   gap: 2rem;
-  height: calc(100vh - 200px);
+  max-height: calc(100vh - 180px);
+  min-height: 0;
 }
 
 .detail-sidebar {
   background: #2d2d2d;
   border-radius: 4px;
   padding: 1.5rem;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .detail-sidebar h3 {
@@ -234,6 +237,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow-y: auto;
 }
 
 .detail-main h3 {
