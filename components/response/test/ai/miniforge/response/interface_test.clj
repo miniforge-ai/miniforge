@@ -2,6 +2,7 @@
   "Tests for the response component."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [clojure.string :as str]
    [ai.miniforge.response.interface :as r]))
 
 ;; ============================================================================
@@ -425,7 +426,7 @@
 
   (testing "never exposes internal message"
     (let [anom (r/make-anomaly :anomalies/fault "NullPointerException at foo.clj:42")]
-      (is (not (clojure.string/includes? (r/anomaly->user-message anom) "NullPointer")))))
+      (is (not (str/includes? (r/anomaly->user-message anom) "NullPointer")))))
 
   (testing "falls back to generic message for unknown categories"
     (let [anom (r/make-anomaly :anomalies.custom/something "internal detail")]

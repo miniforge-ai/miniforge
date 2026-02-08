@@ -7,10 +7,15 @@
   Mocks all agent invocations to focus purely on the handoff plumbing."
   (:require
    [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.phase.plan :as plan]
-   [ai.miniforge.phase.implement :as implement]
-   [ai.miniforge.phase.verify :as verify]
-   [ai.miniforge.phase.release :as release]
+   ;; Required for defmethod side effects (register phase handlers)
+   #_{:clj-kondo/ignore [:unused-namespace]}
+   [ai.miniforge.phase.plan]
+   #_{:clj-kondo/ignore [:unused-namespace]}
+   [ai.miniforge.phase.implement]
+   #_{:clj-kondo/ignore [:unused-namespace]}
+   [ai.miniforge.phase.verify]
+   #_{:clj-kondo/ignore [:unused-namespace]}
+   [ai.miniforge.phase.release]
    [ai.miniforge.phase.registry :as registry]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.response.interface :as response]
@@ -214,14 +219,14 @@
             ctx2 (execute-phase-leave :implement ctx1)
 
             ;; Add worktree-path for release executor
-            ctx2-with-path (assoc ctx2 :worktree-path "/tmp/test-repo")]
+            ctx2-with-path (assoc ctx2 :worktree-path "/tmp/test-repo")
 
-        ;; Execute release phase - should read code from execution context
-        (let [ctx3 (execute-phase-enter :release ctx2-with-path)]
-          (is (= :success (get-in ctx3 [:phase :result :status]))
-              "Release phase should succeed")
-          (is (some? (get-in ctx3 [:phase :result :output]))
-              "Release phase should produce release artifact"))))))
+            ;; Execute release phase - should read code from execution context
+            ctx3 (execute-phase-enter :release ctx2-with-path)]
+        (is (= :success (get-in ctx3 [:phase :result :status]))
+            "Release phase should succeed")
+        (is (some? (get-in ctx3 [:phase :result :output]))
+            "Release phase should produce release artifact")))))
 
 (deftest full-pipeline-handoff-test
   (testing "Artifacts flow correctly through entire pipeline: plan → implement → verify → release"
@@ -289,7 +294,7 @@
   (testing "Verify phase handles missing implement artifact"
     (with-redefs [agent/create-tester (fn [_] {:type :mock-tester})
                   ;; Mock that doesn't assert on missing artifacts
-                  agent/invoke (fn [_agent task _ctx]
+                  agent/invoke (fn [_agent _task _ctx]
                                  ;; Just return success without assertions
                                  (response/success {:result :ok} {:tokens 0 :duration-ms 0}))]
 

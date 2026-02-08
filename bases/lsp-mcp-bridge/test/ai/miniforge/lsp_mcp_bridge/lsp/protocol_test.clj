@@ -2,8 +2,7 @@
   "Tests for LSP JSON-RPC protocol layer (Content-Length framing)."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.lsp-mcp-bridge.lsp.protocol :as proto]
-   [cheshire.core :as json])
+   [ai.miniforge.lsp-mcp-bridge.lsp.protocol :as proto])
   (:import
    [java.io BufferedReader BufferedWriter StringReader StringWriter]))
 

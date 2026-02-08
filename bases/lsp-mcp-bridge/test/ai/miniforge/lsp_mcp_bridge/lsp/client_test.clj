@@ -1,8 +1,7 @@
 (ns ai.miniforge.lsp-mcp-bridge.lsp.client-test
   "Tests for LSP client (promise-based, bb-compatible)."
   (:require
-   [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.lsp-mcp-bridge.lsp.protocol :as proto]))
+   [clojure.test :refer [deftest is testing]]))
 
 ;; Note: Full client tests require a running LSP server.
 ;; These tests verify the protocol layer and message building

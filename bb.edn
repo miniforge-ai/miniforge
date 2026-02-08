@@ -490,6 +490,30 @@
    :requires ([ai.miniforge.lsp-mcp-bridge.main :as bridge])
    :task    (bridge/-main)}
 
+  lsp:status
+  {:doc     "Show installed/available LSP servers"
+   :extra-paths ["bases/lsp-mcp-bridge/src"
+                 "components/tool-registry/resources"
+                 "components/response/src"]
+   :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
+   :task    (tasks/status)}
+
+  lsp:install
+  {:doc     "Install LSP servers (all or specific: bb lsp:install clojure typescript)"
+   :extra-paths ["bases/lsp-mcp-bridge/src"
+                 "components/tool-registry/resources"
+                 "components/response/src"]
+   :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
+   :task    (tasks/install *command-line-args*)}
+
+  lsp:setup
+  {:doc     "Generate MCP config for Claude Code/Desktop (--claude-code or --claude-desktop)"
+   :extra-paths ["bases/lsp-mcp-bridge/src"
+                 "components/tool-registry/resources"
+                 "components/response/src"]
+   :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
+   :task    (tasks/setup *command-line-args*)}
+
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; CLI Development
   ;; ──────────────────────────────────────────────────────────────────────────
