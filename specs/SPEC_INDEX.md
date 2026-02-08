@@ -1,7 +1,7 @@
 # miniforge Specification Index
 
-**Version:** 0.2.0-draft
-**Date:** 2026-02-01
+**Version:** 0.3.0-draft
+**Date:** 2026-02-07
 **Status:** Living specification during OSS development
 
 ---
@@ -151,6 +151,25 @@ Defines:
 - Fleet and enterprise extensions: multi-tenancy, pattern detection
 - CLI/TUI extensions: listener commands, control palette, approval queue
 
+### N9 — External PR Integration 🆕
+
+**File:** [normative/N9-external-pr-integration.md](normative/N9-external-pr-integration.md)
+**Status:** Draft
+**Purpose:** Treat external PRs as first-class Fleet Mode work items with monitoring, policy, and governance
+
+Defines:
+
+- PR Work Item model: canonical representation of any PR (external or Miniforge-originated)
+- Provider ingestion: webhook/polling normalization from GitHub/GitLab to N3 events
+- Readiness computation: deterministic merge-readiness from CI, reviews, conflicts, policy
+- Risk assessment: explainable risk scoring as N6 evidence artifacts
+- Policy evaluation: N4 policy packs applied to external PR diffs with provider feedback
+- Automation tiers: Observe/Advise/Converse/Govern as N8 capability level specializations
+- PR trains: explicit dependency ordering with governed merge sequencing
+- Multi-repo configuration: per-repo opt-in with org-level defaults
+- Fleet Mode disambiguation: N9 (SDLC governance) vs N7 (runtime policy synthesis)
+- CLI/TUI/API extensions: `fleet prs`, `fleet trains` commands and views
+
 ---
 
 ## Informative Documentation (Non-Normative)
@@ -230,7 +249,7 @@ Documents superseded by normative specs. Retained for reference during migration
 
 ### Language Rules
 
-**Normative specs (N1-N8):**
+**Normative specs (N1-N9):**
 
 - MUST use RFC 2119 keywords: MUST, SHALL, SHOULD, MAY, MUST NOT, SHALL NOT
 - MUST define versioning and compatibility expectations
@@ -303,5 +322,6 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.3.0-draft** (2026-02-07) - Added N9 (External PR Integration), Fleet Mode disambiguation
 - **0.2.0-draft** (2026-02-01) - Added N7 (OPSV) and N8 (OCI), updated governance for extension specs
 - **0.1.0-draft** (2026-01-23) - Initial spec index, normative spec structure established

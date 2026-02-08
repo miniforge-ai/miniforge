@@ -1,7 +1,7 @@
 # N6 — Evidence & Provenance Standard
 
-**Version:** 0.1.0-draft
-**Date:** 2026-01-23
+**Version:** 0.3.0-draft
+**Date:** 2026-02-07
 **Status:** Draft
 **Conformance:** MUST
 
@@ -297,6 +297,83 @@ For tasks reaching `:merged` terminal state:
   :merge/branch-up-to-date? boolean}}
 ```
 
+### 2.8 OPSV Evidence (N7)
+
+For Operational Policy Synthesis workflows (see N7), evidence bundles MUST include:
+
+```clojure
+{:evidence/opsv
+ {:opsv/experiment-pack-hash string   ; Content hash of Experiment Pack used
+  :opsv/experiment-pack-id string
+  :opsv/environment-fingerprint       ; Cluster, node pool, image digests, config
+  {:cluster string
+   :node-pools [string ...]
+   :image-digests {...}}
+
+  :opsv/convergence-iterations long   ; Number of convergence iterations
+  :opsv/policy-proposals              ; Proposed operational policies
+  [{:policy-hash string
+    :confidence keyword
+    :scaling {...}
+    :resources {...}
+    :artifact-id uuid}]               ; Link to :operational-policy-proposal artifact
+
+  :opsv/verification
+  {:passed? boolean
+   :criteria-evaluation [...]         ; Per-criterion results
+   :confidence keyword
+   :caveats [string ...]}
+
+  :opsv/actuation
+  {:mode keyword                      ; :recommend-only, :pr-only, :apply-allowed
+   :pr-refs [string ...]              ; PR URLs if PR_ONLY
+   :apply-refs [string ...]}          ; Applied resource refs if APPLY_ALLOWED
+
+  :opsv/metric-snapshots [uuid ...]}} ; Links to :opsv-metric-snapshot artifacts
+```
+
+### 2.9 Control Action Evidence (N8)
+
+Control actions (see N8) MUST be recorded in evidence bundles:
+
+```clojure
+{:evidence/control-actions
+ [{:action/id uuid
+   :action/type keyword               ; See N8 §3.1
+   :action/timestamp inst
+   :action/requester {:principal string :listener-id uuid}
+   :action/justification string
+   :action/approval {:status keyword :approvers [...]}
+   :action/result {:status keyword :error {...}}
+   :action/pre-state {...}            ; State before action
+   :action/post-state {...}}]         ; State after action
+
+ :evidence/annotations
+ [{:annotation/id uuid
+   :annotation/type keyword           ; :recommendation, :warning, :insight, :question
+   :annotation/source {:listener-id uuid :principal string}
+   :annotation/target {:workflow-id uuid :event-id uuid}
+   :annotation/content {:title string :body string :severity keyword}
+   :annotation/timestamp inst}]}
+```
+
+### 2.10 External PR Evidence (N9)
+
+External PR evaluations produce evidence using the existing schema. N9 does NOT
+define a separate evidence model. Evidence for external PRs uses:
+
+- `:risk-assessment` artifacts with explainable factors (see N9 §5.1)
+- `:pr-policy-result` artifacts with per-rule outcomes
+- `:pr-readiness-snapshot` artifacts with point-in-time state
+
+All artifacts MUST have `:artifact/content-hash`, `:artifact/provenance`, and
+`:artifact/created-at` per §3. Evidence artifacts produced by N9 MUST be immutable
+and addressable per §5.1. Policy results and risk factors MUST reference evidence
+artifacts, not inline their content.
+
+For external PRs (no workflow), `:provenance/workflow-id` MAY be nil and
+`:provenance/phase` SHOULD be `:external-pr-eval`.
+
 ---
 
 ## 3. Artifact Provenance Schema
@@ -320,6 +397,8 @@ For tasks reaching `:merged` terminal state:
 
 Implementations MUST support:
 
+**Core artifact types:**
+
 - `:terraform-plan` - Terraform plan output
 - `:terraform-state` - Terraform state file
 - `:code-changes` - Code diff or patch
@@ -329,12 +408,32 @@ Implementations MUST support:
 - `:architecture-diagram` - Design artifacts
 - `:evidence-bundle` - Evidence bundle itself (meta)
 
+**Pack artifact types:**
+
 - `:feature-pack` - Normalized feature pack (EDN)
 - `:policy-pack` - Policy pack (EDN)
 - `:agent-profile-pack` - Agent profile pack (EDN)
 - `:pack-index` - Pack manifest (EDN)
 - `:etl-report` - ETL run report (classifications, coverage)
 - `:risk-report` - Static scanner findings (knowledge-safety)
+
+**OPSV artifact types (N7):**
+
+- `:experiment-pack` - OPSV Experiment Pack definition
+- `:operational-policy-proposal` - Proposed operational policy with scaling/sizing config
+- `:opsv-verification-report` - Verification pass/fail with per-criterion results
+- `:opsv-metric-snapshot` - Metric queries and snapshots used for OPSV conclusions
+
+**Control action artifact types (N8):**
+
+- `:control-action-record` - Audit record of a control action (pre-state, post-state, justification)
+- `:annotation-record` - Record of advisory annotations for evidence
+
+**External PR artifact types (N9):**
+
+- `:risk-assessment` - Risk evaluation for a PR with explainable factors (see N9 §5.1)
+- `:pr-policy-result` - Policy evaluation result for an external PR
+- `:pr-readiness-snapshot` - Point-in-time readiness assessment for a PR
 
 Artifacts of type `:feature-pack`, `:policy-pack`, and `:agent-profile-pack` MUST include:
 
@@ -789,14 +888,19 @@ Fleet-wide evidence will enable:
 ## 13. References
 
 - RFC 2119: Key words for use in RFCs to Indicate Requirement Levels
-- N3 (Event Stream): Evidence bundles link to event streams via sequence ranges
 - N2 (Workflow Execution): Workflows produce evidence bundles
+- N3 (Event Stream): Evidence bundles link to event streams via sequence ranges
 - N4 (Policy Packs): Policy check results stored in evidence
+- N7 (Operational Policy Synthesis): OPSV evidence requirements (§2.8)
+- N8 (Observability Control Interface): Control action and annotation evidence (§2.9)
+- N9 (External PR Integration): External PR evidence artifacts (§2.10, §3.1.1)
 - I-DAG-ORCHESTRATION: DAG executor with PR lifecycle evidence requirements
 
 ---
 
 **Version History:**
 
+- 0.3.0-draft (2026-02-07): Added extension spec evidence from N7, N8, N9
+  (§2.8–§2.10, §3.1.1 artifact types)
 - 0.2.0-draft (2026-02-03): Add DAG orchestration evidence (Section 2.7: DAG Run, Task Workflow, Merge Evidence)
 - 0.1.0-draft (2026-01-23): Initial evidence & provenance specification
