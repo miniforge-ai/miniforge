@@ -116,6 +116,37 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; WebSocket handling
 
+(defn- subscribe-client!
+  "Subscribe WebSocket client to event stream."
+  [event-stream ch]
+  (when event-stream
+    (let [subscriber-id (keyword (str "ws-" (hash ch)))]
+      (try
+        (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
+          (when es-ns
+            (let [subscribe! (ns-resolve es-ns 'subscribe!)]
+              (subscribe! event-stream subscriber-id
+                          (fn [event]
+                            (try
+                              (http/send! ch (json/write-value-as-string event))
+                              (catch Exception e
+                                (println "Error sending event to WebSocket:" (.getMessage e)))))))))
+        (catch Exception e
+          (println "Error subscribing to event stream:" (.getMessage e)))))))
+
+(defn- unsubscribe-client!
+  "Unsubscribe WebSocket client from event stream."
+  [event-stream ch]
+  (when event-stream
+    (let [subscriber-id (keyword (str "ws-" (hash ch)))]
+      (try
+        (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
+          (when es-ns
+            (let [unsubscribe! (ns-resolve es-ns 'unsubscribe!)]
+              (unsubscribe! event-stream subscriber-id))))
+        (catch Exception e
+          (println "Error unsubscribing from event stream:" (.getMessage e)))))))
+
 (defn- create-ws-handler [event-stream]
   (let [connections (atom #{})]
     (fn [req]
@@ -124,36 +155,13 @@
          (fn [ch]
            (println "WebSocket opened")
            (swap! connections conj ch)
-           ;; Subscribe to event stream and forward events to this client
-           (when event-stream
-             (let [subscriber-id (keyword (str "ws-" (hash ch)))]
-               (try
-                 (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
-                   (when es-ns
-                     (let [subscribe! (ns-resolve es-ns 'subscribe!)]
-                       (subscribe! event-stream subscriber-id
-                                   (fn [event]
-                                     (try
-                                       (http/send! ch (json/write-value-as-string event))
-                                       (catch Exception e
-                                         (println "Error sending event to WebSocket:" (.getMessage e)))))))))
-                 (catch Exception e
-                   (println "Error subscribing to event stream:" (.getMessage e)))))))
+           (subscribe-client! event-stream ch))
 
          :on-close
          (fn [ch _status]
            (println "WebSocket closed")
            (swap! connections disj ch)
-           ;; Unsubscribe from event stream
-           (when event-stream
-             (let [subscriber-id (keyword (str "ws-" (hash ch)))]
-               (try
-                 (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
-                   (when es-ns
-                     (let [unsubscribe! (ns-resolve es-ns 'unsubscribe!)]
-                       (unsubscribe! event-stream subscriber-id))))
-                 (catch Exception e
-                   (println "Error unsubscribing from event stream:" (.getMessage e)))))))
+           (unsubscribe-client! event-stream ch))
 
          :on-receive
          (fn [ch data]
