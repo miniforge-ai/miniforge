@@ -315,10 +315,10 @@
     (println)))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
-;; Dashboard commands
+;; Monitoring commands (web dashboard and TUI)
 
-(defn dashboard-cmd
-  "Start workflow monitoring dashboard.
+(defn web-cmd
+  "Start web dashboard for workflow monitoring.
 
    Launches a web server with real-time workflow visualization.
    Provides 5 N5 views: workflow list, detail, evidence, artifacts, DAG kanban."
@@ -340,7 +340,7 @@
         (let [start! (ns-resolve dashboard-ns 'start!)
               create-stream (ns-resolve es-ns 'create-event-stream)
               event-stream (create-stream)]
-          (print-info (str "Starting workflow dashboard on port " port "..."))
+          (print-info (str "Starting web dashboard on port " port "..."))
           (start! {:port port :event-stream event-stream})
           (when open
             (try
@@ -353,26 +353,16 @@
         (print-error (str "Port " port " is already in use."))
         (println)
         (println "Solutions:")
-        (println (str "  1. Use a different port: bb miniforge dashboard --port " (inc port)))
+        (println (str "  1. Use a different port: bb miniforge web --port " (inc port)))
         (println (str "  2. Kill the process using port " port ":"))
         (println (str "     lsof -ti:" port " | xargs kill"))
         (System/exit 1))
       (catch Exception e
-        (print-error (str "Failed to start dashboard: " (ex-message e)))
+        (print-error (str "Failed to start web dashboard: " (ex-message e)))
         (System/exit 1)))))
 
-(defn fleet-dashboard-cmd
-  "Start workflow monitoring dashboard (alias for 'miniforge dashboard')."
-  [m]
-  (dashboard-cmd m))
-
-(defn fleet-web-cmd
-  "Start workflow monitoring dashboard (alias for 'miniforge dashboard')."
-  [m]
-  (dashboard-cmd m))
-
-(defn fleet-tui-cmd
-  "Start terminal UI dashboard with 5 N5 views.
+(defn tui-cmd
+  "Start terminal UI for workflow monitoring.
 
    The TUI provides real-time visibility into workflows:
    - Workflow list (status, phase, progress)
@@ -406,7 +396,7 @@
       (println "  brew install miniforge-tui")
       (println)
       (println "Or use the web dashboard instead:")
-      (println "  miniforge dashboard")
+      (println "  miniforge web")
       (System/exit 1))
     (do
       (print-info "Starting TUI dashboard...")
@@ -611,14 +601,14 @@ Note:
 Examples:
   miniforge doctor
   miniforge run feature.spec.edn
+  miniforge web                        # Start web dashboard (port 8080)
+  miniforge web --port 3000 --open     # Custom port, auto-open browser
+  miniforge tui                        # Start terminal UI (requires miniforge-tui)
   miniforge workflow list
   miniforge workflow run :simple-v2
   miniforge workflow run :canonical-sdlc-v1 -i input.edn
   miniforge workflow run :workflow-id --input-json '{\"task\": \"Build feature\"}'
   miniforge fleet add myorg/myrepo
-  miniforge dashboard                  # Start web dashboard (port 8080)
-  miniforge dashboard --port 3000 --open  # Custom port, auto-open browser
-  miniforge fleet tui                  # Start terminal UI (requires miniforge-tui)
   miniforge pr review https://github.com/org/repo/pull/123
 "))
 
@@ -643,11 +633,14 @@ Examples:
     :fn status-cmd
     :args->opts [:workflow-id]}
 
-   ;; Dashboard command
-   {:cmds ["dashboard"]
-    :fn dashboard-cmd
+   ;; Monitoring commands
+   {:cmds ["web"]
+    :fn web-cmd
     :spec {:port {:coerce :int :alias :p :default 8080}
            :open {:coerce :boolean :alias :o}}}
+
+   {:cmds ["tui"]
+    :fn tui-cmd}
 
    ;; Workflow commands
    {:cmds ["workflow" "run"]
@@ -668,19 +661,12 @@ Examples:
    {:cmds ["config" "get"]  :fn config-get-cmd  :args->opts [:key]}
    {:cmds ["config" "set"]  :fn config-set-cmd  :args->opts [:key :value]}
 
-   ;; Fleet subcommands
-   {:cmds ["fleet" "start"]     :fn fleet-start-cmd}
-   {:cmds ["fleet" "stop"]      :fn fleet-stop-cmd}
-   {:cmds ["fleet" "status"]    :fn fleet-status-cmd}
-   {:cmds ["fleet" "dashboard"] :fn fleet-dashboard-cmd
-    :spec {:port {:coerce :int :alias :p :default 8080}
-           :open {:coerce :boolean :alias :o}}}
-   {:cmds ["fleet" "web"]       :fn fleet-web-cmd
-    :spec {:port {:coerce :int :alias :p :default 8080}
-           :open {:coerce :boolean :alias :o}}}
-   {:cmds ["fleet" "tui"]       :fn fleet-tui-cmd}
-   {:cmds ["fleet" "add"]       :fn fleet-add-cmd    :args->opts [:repo]}
-   {:cmds ["fleet" "remove"]    :fn fleet-remove-cmd :args->opts [:repo]}
+   ;; Fleet subcommands (daemon management)
+   {:cmds ["fleet" "start"]  :fn fleet-start-cmd}
+   {:cmds ["fleet" "stop"]   :fn fleet-stop-cmd}
+   {:cmds ["fleet" "status"] :fn fleet-status-cmd}
+   {:cmds ["fleet" "add"]    :fn fleet-add-cmd    :args->opts [:repo]}
+   {:cmds ["fleet" "remove"] :fn fleet-remove-cmd :args->opts [:repo]}
 
    ;; PR subcommands
    {:cmds ["pr" "list"]    :fn pr-list-cmd    :spec {:repo {:alias :r}}}
@@ -699,9 +685,10 @@ Examples:
   (-main "help")
   (-main "version")
   (-main "doctor")
+  (-main "web")
+  (-main "tui")
   (-main "config" "init")
   (-main "config" "list")
   (-main "run" "test.spec.edn")
-  (-main "fleet" "dashboard")
 
   :end)
