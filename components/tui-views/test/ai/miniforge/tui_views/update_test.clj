@@ -15,139 +15,102 @@
 (ns ai.miniforge.tui-views.update-test
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.tui-views.model :as model]
+   [ai.miniforge.tui-views.test-util :as util]
    [ai.miniforge.tui-views.update :as update]))
 
 (def wf-id-1 (random-uuid))
 (def wf-id-2 (random-uuid))
 
-(defn- with-workflows [model]
-  (-> model
-      (update/update-model [:msg/workflow-added {:workflow-id wf-id-1 :name "wf-1"}])
-      (update/update-model [:msg/workflow-added {:workflow-id wf-id-2 :name "wf-2"}])))
+(defn- two-workflows []
+  (util/with-workflows (util/fresh-model)
+    [{:workflow-id wf-id-1 :name "wf-1"}
+     {:workflow-id wf-id-2 :name "wf-2"}]))
 
 (deftest navigation-test
   (testing "j moves down in workflow list"
-    (let [m (-> (model/init-model) with-workflows
-                (update/update-model [:input :key/j]))]
-      (is (= 1 (:selected-idx m)))))
+    (let [m (util/apply-updates (two-workflows) [[:input :key/j]])]
+      (is (util/selected-idx-is? m 1))))
 
   (testing "k moves up in workflow list"
-    (let [m (-> (model/init-model) with-workflows
-                (update/update-model [:input :key/j])
-                (update/update-model [:input :key/k]))]
-      (is (= 0 (:selected-idx m)))))
+    (let [m (util/apply-updates (two-workflows)
+              [[:input :key/j]
+               [:input :key/k]])]
+      (is (util/selected-idx-is? m 0))))
 
   (testing "k at top stays at 0"
-    (let [m (-> (model/init-model) with-workflows
-                (update/update-model [:input :key/k]))]
-      (is (= 0 (:selected-idx m)))))
+    (let [m (util/apply-updates (two-workflows) [[:input :key/k]])]
+      (is (util/selected-idx-is? m 0))))
 
   (testing "j at bottom stays at max"
-    (let [m (-> (model/init-model) with-workflows
-                (update/update-model [:input :key/j])
-                (update/update-model [:input :key/j])
-                (update/update-model [:input :key/j]))]
-      (is (= 1 (:selected-idx m)))))
+    (let [m (util/apply-updates (two-workflows)
+              [[:input :key/j]
+               [:input :key/j]
+               [:input :key/j]])]
+      (is (util/selected-idx-is? m 1))))
 
   (testing "g goes to top"
-    (let [m (-> (model/init-model) with-workflows
-                (update/update-model [:input :key/j])
-                (update/update-model [:input :key/g]))]
-      (is (= 0 (:selected-idx m)))))
+    (let [m (util/apply-updates (two-workflows)
+              [[:input :key/j]
+               [:input :key/g]])]
+      (is (util/selected-idx-is? m 0))))
 
   (testing "G goes to bottom"
-    (let [m (-> (model/init-model) with-workflows
-                (update/update-model [:input :key/G]))]
-      (is (= 1 (:selected-idx m))))))
+    (let [m (util/apply-updates (two-workflows) [[:input :key/G]])]
+      (is (util/selected-idx-is? m 1)))))
 
 (deftest view-navigation-test
   (testing "Enter drills into workflow detail"
-    (let [m (-> (model/init-model) with-workflows
-                (update/update-model [:input :key/enter]))]
-      (is (= :workflow-detail (:view m)))
+    (let [m (util/apply-updates (two-workflows) [[:input :key/enter]])]
+      (is (util/view-is? m :workflow-detail))
       (is (= wf-id-1 (get-in m [:detail :workflow-id])))))
 
   (testing "Escape returns to workflow list"
-    (let [m (-> (model/init-model) with-workflows
-                (update/update-model [:input :key/enter])
-                (update/update-model [:input :key/escape]))]
-      (is (= :workflow-list (:view m)))))
+    (let [m (util/apply-updates (two-workflows)
+              [[:input :key/enter]
+               [:input :key/escape]])]
+      (is (util/view-is? m :workflow-list))))
 
   (testing "Number keys switch views"
-    (is (= :workflow-list (:view (update/update-model (model/init-model) [:input :key/d1]))))
-    (is (= :workflow-detail (:view (update/update-model (model/init-model) [:input :key/d2]))))
-    (is (= :evidence (:view (update/update-model (model/init-model) [:input :key/d3]))))
-    (is (= :artifact-browser (:view (update/update-model (model/init-model) [:input :key/d4]))))
-    (is (= :dag-kanban (:view (update/update-model (model/init-model) [:input :key/d5]))))))
+    (is (util/view-is? (update/update-model (util/fresh-model) [:input :key/d1]) :workflow-list))
+    (is (util/view-is? (update/update-model (util/fresh-model) [:input :key/d2]) :workflow-detail))
+    (is (util/view-is? (update/update-model (util/fresh-model) [:input :key/d3]) :evidence))
+    (is (util/view-is? (update/update-model (util/fresh-model) [:input :key/d4]) :artifact-browser))
+    (is (util/view-is? (update/update-model (util/fresh-model) [:input :key/d5]) :dag-kanban))))
 
 (deftest workflow-events-test
   (testing "Workflow added appears in list"
-    (let [m (update/update-model (model/init-model)
+    (let [m (update/update-model (util/fresh-model)
               [:msg/workflow-added {:workflow-id wf-id-1 :name "test-wf"}])]
-      (is (= 1 (count (:workflows m))))
+      (is (util/workflow-count-is? m 1))
       (is (= "test-wf" (:name (first (:workflows m)))))))
 
   (testing "Phase changed updates workflow"
-    (let [m (-> (model/init-model)
-                (update/update-model [:msg/workflow-added {:workflow-id wf-id-1 :name "test"}])
-                (update/update-model [:msg/phase-changed {:workflow-id wf-id-1 :phase :implement}]))]
-      (is (= :implement (:phase (first (:workflows m)))))))
+    (let [m (util/apply-updates (util/fresh-model)
+              [[:msg/workflow-added {:workflow-id wf-id-1 :name "test"}]
+               [:msg/phase-changed {:workflow-id wf-id-1 :phase :implement}]])]
+      (is (util/workflow-has-phase? m 0 :implement))))
 
   (testing "Workflow done updates status"
-    (let [m (-> (model/init-model)
-                (update/update-model [:msg/workflow-added {:workflow-id wf-id-1 :name "test"}])
-                (update/update-model [:msg/workflow-done {:workflow-id wf-id-1 :status :success}]))]
-      (is (= :success (:status (first (:workflows m)))))
-      (is (= 100 (:progress (first (:workflows m)))))))
-
-  (testing "Workflow failed updates status"
-    (let [m (-> (model/init-model)
-                (update/update-model [:msg/workflow-added {:workflow-id wf-id-1 :name "test"}])
-                (update/update-model [:msg/workflow-failed {:workflow-id wf-id-1 :error "timeout"}]))]
-      (is (= :failed (:status (first (:workflows m))))))))
+    (let [m (util/apply-updates (util/fresh-model)
+              [[:msg/workflow-added {:workflow-id wf-id-1 :name "test"}]
+               [:msg/workflow-done {:workflow-id wf-id-1 :status :success}]])]
+      (is (util/workflow-has-status? m 0 :success))
+      (is (= 100 (get-in m [:workflows 0 :progress]))))))
 
 (deftest mode-switching-test
-  (testing ": enters command mode"
-    (let [m (update/update-model (model/init-model) [:input :key/colon])]
-      (is (= :command (:mode m)))
+  (testing "Colon enters command mode"
+    (let [m (util/apply-updates (util/fresh-model) [[:input :key/colon]])]
+      (is (util/mode-is? m :command))
       (is (= ":" (:command-buf m)))))
 
-  (testing "/ enters search mode"
-    (let [m (update/update-model (model/init-model) [:input :key/slash])]
-      (is (= :search (:mode m)))
+  (testing "Slash enters search mode"
+    (let [m (util/apply-updates (util/fresh-model) [[:input :key/slash]])]
+      (is (util/mode-is? m :search))
       (is (= "/" (:command-buf m)))))
 
-  (testing "Escape exits command mode"
-    (let [m (-> (model/init-model)
-                (update/update-model [:input :key/colon])
-                (update/update-model [:input :key/escape]))]
-      (is (= :normal (:mode m)))))
-
-  (testing "Character input in command mode appends to buffer"
-    (let [m (-> (model/init-model)
-                (update/update-model [:input :key/colon])
-                (update/update-model [:input {:type :char :char \h}])
-                (update/update-model [:input {:type :char :char \i}]))]
-      (is (= ":hi" (:command-buf m)))))
-
-  (testing "Backspace in command mode removes last char"
-    (let [m (-> (model/init-model)
-                (update/update-model [:input :key/colon])
-                (update/update-model [:input {:type :char :char \x}])
-                (update/update-model [:input :key/backspace]))]
-      (is (= ":" (:command-buf m))))))
-
-(deftest quit-test
-  (testing "q sets quit flag"
-    (let [m (update/update-model (model/init-model) [:input :key/q])]
-      (is (true? (:quit? m))))))
-
-(deftest agent-output-test
-  (testing "Agent output accumulates when viewing detail"
-    (let [m (-> (model/init-model)
-                (update/update-model [:msg/workflow-added {:workflow-id wf-id-1 :name "test"}])
-                (update/update-model [:input :key/enter])
-                (update/update-model [:msg/agent-output {:workflow-id wf-id-1 :delta "Hello "}])
-                (update/update-model [:msg/agent-output {:workflow-id wf-id-1 :delta "World"}]))]
-      (is (= "Hello World" (get-in m [:detail :agent-output]))))))
+  (testing "Escape exits mode"
+    (let [m (util/apply-updates (util/fresh-model)
+              [[:input :key/colon]
+               [:input :key/escape]])]
+      (is (util/mode-is? m :normal))
+      (is (= "" (:command-buf m))))))

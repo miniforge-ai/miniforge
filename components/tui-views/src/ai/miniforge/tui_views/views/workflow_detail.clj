@@ -15,24 +15,74 @@
 (ns ai.miniforge.tui-views.views.workflow-detail
   "Workflow detail view -- N5 Section 3.2.2.
 
-   Shows detailed information for a single workflow:
-   - Phase pipeline with status indicators
-   - Current agent activity and streaming output
-   - Progress breakdown by phase"
+   Shows detailed information about a single workflow:
+   - Phase progress with status indicators
+   - Real-time agent output streaming
+   - Current phase and agent status"
   (:require
    [clojure.string :as str]
    [ai.miniforge.tui-engine.interface.layout :as layout]
    [ai.miniforge.tui-engine.interface.widget :as widget]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Helper: find workflow
+;; Helpers
 
 (defn- find-workflow [model]
   (let [wf-id (get-in model [:detail :workflow-id])]
     (some #(when (= (:id %) wf-id) %) (:workflows model))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Rendering
+(defn- status-suffix [status]
+  (case status
+    :running  " ●"
+    :success  " ✓"
+    :failed   " ✗"
+    ""))
+
+(defn- format-phase-node [{:keys [phase status]}]
+  {:label (str (name phase) (status-suffix status))
+   :depth 0
+   :expandable? false})
+
+(defn- render-title-bar [wf [cols rows]]
+  (layout/text [cols rows]
+               (str " MINIFORGE │ "
+                    (or (:name wf) "Workflow Detail")
+                    (when-let [phase (:phase wf)]
+                      (str " │ " (name phase))))
+               {:fg :cyan :bold? true}))
+
+(defn- render-phase-list [phases [cols rows]]
+  (layout/box [cols rows]
+    {:title "Phases" :border :single :fg :default
+     :content-fn
+     (fn [[ic ir]]
+       (if (empty? phases)
+         (layout/text [ic ir] "  Waiting for phases...")
+         (widget/tree [ic ir]
+           {:nodes (mapv format-phase-node phases)
+            :selected 0})))}))
+
+(defn- render-agent-output [agent output [cols rows]]
+  (layout/box [cols rows]
+    {:title (if agent
+              (str (name (:agent agent)) " - " (name (:status agent :idle)))
+              "Agent Output")
+     :border :single :fg :default
+     :content-fn
+     (fn [[ic ir]]
+       (let [lines (if (seq output)
+                     (str/split-lines output)
+                     ["  Waiting for agent output..."])
+             offset (max 0 (- (count lines) ir))]
+         (widget/scrollable [ic ir]
+           {:lines lines
+            :offset offset
+            :fg :white})))}))
+
+(defn- render-footer [[cols rows]]
+  (layout/text [cols rows]
+    " Esc:back  3:evidence  4:artifacts  5:dag  j/k:scroll  q:quit"
+    {:fg :default}))
 
 (defn render
   "Render the workflow detail view.
@@ -45,62 +95,22 @@
         agent (:current-agent detail)
         output (:agent-output detail)]
     (layout/split-v [cols rows] (/ 2.0 rows)
-      ;; Title bar
-      (fn [[c r]]
-        (layout/text [c r]
-                     (str " MINIFORGE │ "
-                          (or (:name wf) "Workflow Detail")
-                          (when-let [phase (:phase wf)]
-                            (str " │ " (name phase))))
-                     {:fg :cyan :bold? true}))
-      ;; Content + footer
+      (fn [size] (render-title-bar wf size))
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)
-          ;; Main content: left phases + right agent output
           (fn [[mc mr]]
             (layout/split-h [mc mr] 0.35
-              ;; Left pane: phase list
-              (fn [[lc lr]]
-                (layout/box [lc lr]
-                  {:title "Phases" :border :single :fg :default
-                   :content-fn
-                   (fn [[ic ir]]
-                     (if (empty? phases)
-                       (layout/text [ic ir] "  Waiting for phases...")
-                       (let [nodes (mapv (fn [{:keys [phase status]}]
-                                           {:label (str (name phase)
-                                                        (case status
-                                                          :running  " ●"
-                                                          :success  " ✓"
-                                                          :failed   " ✗"
-                                                          ""))
-                                            :depth 0
-                                            :expandable? false})
-                                         phases)]
-                         (widget/tree [ic ir] {:nodes nodes :selected 0}))))}))
-              ;; Right pane: agent output
-              (fn [[rc rr]]
-                (layout/box [rc rr]
-                  {:title (if agent
-                            (str (name (:agent agent)) " - " (name (:status agent :idle)))
-                            "Agent Output")
-                   :border :single :fg :default
-                   :content-fn
-                   (fn [[ic ir]]
-                     (let [lines (if (seq output)
-                                   (str/split-lines output)
-                                   ["  Waiting for agent output..."])
-                           offset (max 0 (- (count lines) ir))]
-                       (widget/scrollable [ic ir]
-                         {:lines lines
-                          :offset offset
-                          :fg :white})))}))))
-          ;; Footer
-          (fn [[fc fr]]
-            (layout/text [fc fr]
-              " Esc:back  3:evidence  4:artifacts  5:dag  j/k:scroll  q:quit"
-              {:fg :default})))))))
+              (fn [size] (render-phase-list phases size))
+              (fn [size] (render-agent-output agent output size))))
+          render-footer)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
+  (def m {:workflows [{:id (random-uuid) :name "deploy-v2" :phase :implement}]
+          :detail {:workflow-id (random-uuid)
+                   :phases [{:phase :plan :status :success}
+                            {:phase :implement :status :running}]
+                   :current-agent {:agent :implementer :status :running}
+                   :agent-output "Generating code..."}})
+  (layout/buf->strings (render m [80 24]))
   :leave-this-here)
