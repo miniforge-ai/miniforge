@@ -339,16 +339,29 @@
 
         (let [start! (ns-resolve dashboard-ns 'start!)
               create-stream (ns-resolve es-ns 'create-event-stream)
-              event-stream (create-stream)]
+              event-stream (create-stream)
+              url (str "http://localhost:" port)]
           (print-info (str "Starting web dashboard on port " port "..."))
           (start! {:port port :event-stream event-stream})
-          (when open
-            (try
-              (process/sh "open" (str "http://localhost:" port))
-              (catch Exception _e nil)))
-          (println (str "Dashboard running at http://localhost:" port))
-          (println "Press Ctrl+C to stop")
-          @(promise)))  ; Block until interrupted
+          (println)
+          (println (str "  " url))
+          (println)
+          (if open
+            (do
+              (println "Opening browser...")
+              (try
+                (process/sh "open" url)
+                (catch Exception _e nil))
+              (println "Press Ctrl+C to stop")
+              @(promise))
+            (do
+              (println "Press Enter to open in browser, Ctrl+C to stop")
+              (read-line)
+              (println "Opening browser...")
+              (try
+                (process/sh "open" url)
+                (catch Exception _e nil))
+              @(promise)))))  ; Block until interrupted
       (catch java.net.BindException _e
         (print-error (str "Port " port " is already in use."))
         (println)
