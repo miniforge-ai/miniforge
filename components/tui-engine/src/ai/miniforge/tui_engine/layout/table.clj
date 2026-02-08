@@ -55,7 +55,7 @@
 
 (defn- render-header-row
   "Render table header row."
-  [buffer cols columns col-widths header-fg header-bg]
+  [buffer columns col-widths header-fg header-bg]
   (reduce (fn [b [idx {:keys [header]} width]]
             (let [txt (pad-right (truncate-str (or header "") width) width)
                   x-offset (compute-col-offset col-widths idx)]
@@ -112,7 +112,7 @@
                          selected-fg :white selected-bg :blue}}]]
   (let [col-widths (compute-col-widths columns cols)
         buffer (buf/make-buffer [cols rows])
-        buffer (render-header-row buffer cols columns col-widths header-fg header-bg)
+        buffer (render-header-row buffer columns col-widths header-fg header-bg)
         buffer (render-separator buffer cols rows)
         visible-rows (take (max 0 (- rows 2)) (or data []))]
     (reduce (fn [b [row-idx row-data]]
