@@ -38,6 +38,15 @@
    [ai.miniforge.cli.spec-parser :as spec-parser]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]))
 
+;; TUI components loaded conditionally (only in JVM/jlink bundled runtime)
+;; Not available in Babashka - use 'miniforge-tui' package for terminal UI
+(def tui-available?
+  (try
+    (require '[ai.miniforge.event-stream.interface :as es])
+    (require '[ai.miniforge.tui-views.interface :as tui])
+    true
+    (catch Exception _ false)))
+
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants and pure helpers
 
@@ -331,6 +340,62 @@
     ;; Keep running until interrupted
     @(promise)))
 
+(defn fleet-tui-cmd
+  "Start terminal UI dashboard with 5 N5 views.
+
+   The TUI provides real-time visibility into workflows:
+   - Workflow list (status, phase, progress)
+   - Workflow detail (phase list, agent output)
+   - Evidence browser (intent, phases, validation)
+   - Artifact browser (diffs, logs, test reports)
+   - DAG kanban (task pipeline visualization)
+
+   Navigation:
+   - j/k: navigate up/down
+   - Enter: drill into detail
+   - Esc: go back
+   - 1-5: switch views directly
+   - /: search mode
+   - :: command mode
+   - q: quit
+
+   Note: The TUI requires the JVM runtime. Install via Homebrew:
+     brew install miniforge-tui
+
+   The main 'miniforge' CLI (this one) uses Babashka for speed.
+   The 'miniforge-tui' package includes a jlink-bundled JVM runtime."
+  [_m]
+  (if-not tui-available?
+    (do
+      (print-error "TUI not available in this runtime.")
+      (println)
+      (println "The TUI requires JVM/Lanterna which isn't available in Babashka.")
+      (println)
+      (println "To use the terminal UI, install the separate package:")
+      (println "  brew install miniforge-tui")
+      (println)
+      (println "Or use the web dashboard instead:")
+      (println "  miniforge fleet web")
+      (System/exit 1))
+    (do
+      (print-info "Starting TUI dashboard...")
+      (print-info "Press 'q' to quit, '?' for help")
+      (println)
+      (try
+        (let [es (requiring-resolve 'ai.miniforge.event-stream.interface)
+              tui (requiring-resolve 'ai.miniforge.tui-views.interface)
+              create-stream (ns-resolve es 'create-event-stream)
+              start-tui! (ns-resolve tui 'start-tui!)
+              event-stream (create-stream)]
+          ;; Start TUI (blocks until quit)
+          (start-tui! event-stream))
+        (catch Exception e
+          (print-error (str "Failed to start TUI: " (.getMessage e)))
+          (when (str/includes? (str e) "terminal")
+            (println)
+            (println "Note: The TUI requires a proper terminal environment.")
+            (println "Try running from Terminal.app or iTerm2, not from an IDE.")))))))
+
 (defn fleet-add-cmd
   "Add a repository to the fleet."
   [m]
@@ -482,7 +547,8 @@ Commands:
     start             Start fleet daemon
     stop              Stop fleet daemon
     status            Show fleet status
-    dashboard         Open TUI dashboard (deprecated - use web)
+    dashboard         Open TUI dashboard (deprecated - use tui or web)
+    tui               Terminal UI (5 N5 views, requires miniforge-tui package)
     web [--port N]    Start web dashboard (default port: 8787)
     add <repo>        Add repo to fleet
     remove <repo>     Remove repo from fleet
@@ -503,6 +569,10 @@ Commands:
   version             Show version info
   help                Show this help
 
+Note:
+  miniforge (this CLI) uses Babashka for fast startup.
+  For terminal UI, install: brew install miniforge-tui (includes jlink-bundled JVM)
+
 Examples:
   miniforge doctor
   miniforge run feature.spec.edn
@@ -512,6 +582,7 @@ Examples:
   miniforge workflow run :workflow-id --input-json '{\"task\": \"Build feature\"}'
   miniforge fleet add myorg/myrepo
   miniforge fleet web                  # Start web dashboard
+  miniforge fleet tui                  # Start terminal UI (requires miniforge-tui)
   miniforge pr review https://github.com/org/repo/pull/123
 "))
 
@@ -562,6 +633,7 @@ Examples:
    {:cmds ["fleet" "dashboard"] :fn fleet-dashboard-cmd}
    {:cmds ["fleet" "web"]       :fn fleet-web-cmd
     :spec {:port {:coerce :int :alias :p :default 8787}}}
+   {:cmds ["fleet" "tui"]       :fn fleet-tui-cmd}
    {:cmds ["fleet" "add"]       :fn fleet-add-cmd    :args->opts [:repo]}
    {:cmds ["fleet" "remove"]    :fn fleet-remove-cmd :args->opts [:repo]}
 
