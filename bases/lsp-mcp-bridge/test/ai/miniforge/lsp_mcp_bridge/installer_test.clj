@@ -2,7 +2,8 @@
   "Tests for LSP auto-installer (unit tests, no actual downloads)."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.lsp-mcp-bridge.installer :as installer]))
+   [ai.miniforge.lsp-mcp-bridge.installer :as installer]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Platform detection
 
@@ -45,10 +46,10 @@
   (testing "returns command unchanged when binary is on PATH"
     (let [result (installer/ensure-installed nil :lsp/test ["bb"])]
       (is (= ["bb"] (:command result)))
-      (is (nil? (:error result))))))
+      (is (not (response/anomaly-map? result))))))
 
 (deftest ensure-installed-not-found-no-registry-test
-  (testing "returns error when binary not found and no registry"
+  (testing "returns anomaly when binary not found and no registry"
     (let [result (installer/ensure-installed nil :lsp/test ["nonexistent-xyz"])]
-      (is (string? (:error result)))
-      (is (.contains (:error result) "not found")))))
+      (is (response/anomaly-map? result))
+      (is (.contains (:anomaly/message result) "not found")))))

@@ -8,7 +8,8 @@
    Layer 1: Server loop"
   (:require
    [ai.miniforge.lsp-mcp-bridge.mcp.protocol :as proto]
-   [ai.miniforge.lsp-mcp-bridge.mcp.tools :as tools])
+   [ai.miniforge.lsp-mcp-bridge.mcp.tools :as tools]
+   [ai.miniforge.response.interface :as response])
   (:import
    [java.io BufferedReader InputStreamReader BufferedWriter OutputStreamWriter]))
 
@@ -18,7 +19,7 @@
 (defn- handle-initialize
   "Handle MCP initialize request."
   [_params]
-  (proto/initialize-result tools/tool-definitions))
+  (proto/initialize-result))
 
 (defn- handle-tools-list
   "Handle MCP tools/list request."
@@ -36,15 +37,15 @@
 (defn- dispatch-request
   "Dispatch a JSON-RPC request to the appropriate handler.
 
-   Returns the result to include in the response."
+   Returns the result to include in the response, or nil for notifications."
   [method params manager]
   (case method
     "initialize"                  (handle-initialize params)
     "tools/list"                  (handle-tools-list params)
     "tools/call"                  (handle-tools-call params manager)
-    ;; Notifications (no response needed)
-    "notifications/initialized"   ::notification
-    "notifications/cancelled"     ::notification
+    ;; Notifications — no response needed
+    "notifications/initialized"   nil
+    "notifications/cancelled"     nil
     ;; Unknown method
     (throw (ex-info (str "Method not found: " method)
                     {:code -32601}))))
@@ -71,16 +72,15 @@
                 method (:method msg)
                 params (:params msg)]
             (try
-              (let [result (dispatch-request method params manager)]
-                (when-not (= result ::notification)
-                  (proto/write-message writer (proto/response id result))))
+              (when-let [result (dispatch-request method params manager)]
+                (proto/write-message writer (proto/response id result)))
               (catch Exception e
-                (let [code (or (:code (ex-data e)) -32603)
-                      message (.getMessage e)]
+                (let [anomaly (response/from-exception e)
+                      code (or (:code (ex-data e)) -32603)]
                   (binding [*out* *err*]
-                    (println "Error handling" method ":" message))
+                    (println "Error handling" method ":" (:anomaly/message anomaly)))
                   (proto/write-message writer
-                                      (proto/error-response id code message)))))))
+                                      (proto/error-response id code (:anomaly/message anomaly))))))))
         (recur)))))
 
 ;------------------------------------------------------------------------------ Rich Comment

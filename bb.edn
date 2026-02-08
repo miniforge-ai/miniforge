@@ -485,7 +485,8 @@
   lsp-mcp-bridge
   {:doc     "Run LSP-to-MCP bridge (for Claude Code integration)"
    :extra-paths ["bases/lsp-mcp-bridge/src"
-                 "components/tool-registry/resources"]
+                 "components/tool-registry/resources"
+                 "components/response/src"]
    :requires ([ai.miniforge.lsp-mcp-bridge.main :as bridge])
    :task    (bridge/-main)}
 

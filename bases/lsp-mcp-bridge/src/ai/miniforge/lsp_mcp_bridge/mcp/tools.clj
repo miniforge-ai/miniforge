@@ -9,8 +9,8 @@
   (:require
    [ai.miniforge.lsp-mcp-bridge.lsp.manager :as manager]
    [ai.miniforge.lsp-mcp-bridge.lsp.client :as client]
-   [ai.miniforge.lsp-mcp-bridge.config :as config]
    [ai.miniforge.lsp-mcp-bridge.mcp.protocol :as mcp-proto]
+   [ai.miniforge.response.interface :as response]
    [cheshire.core :as json]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -115,14 +115,18 @@
      :properties {}
      :required []}}])
 
+(def ^:private diagnostics-wait-ms
+  "Time to wait for diagnostics to arrive via notification."
+  2000)
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Tool handlers
 
 (defn- format-result
-  "Format an LSP result as a readable string for MCP response."
+  "Format an LSP result as MCP response. Checks for anomaly maps."
   [result]
-  (if (:error result)
-    (mcp-proto/tool-call-error (:error result))
+  (if (response/anomaly-map? result)
+    (mcp-proto/tool-call-error (:anomaly/message result))
     (mcp-proto/tool-call-result
      (json/generate-string (:result result) {:pretty true}))))
 
@@ -135,8 +139,8 @@
    - lsp-fn    - Function (fn [client uri] ...) that calls the LSP method"
   [mgr file-path lsp-fn]
   (let [resolve-result (manager/resolve-client-for-file mgr file-path)]
-    (if (:error resolve-result)
-      (mcp-proto/tool-call-error (:error resolve-result))
+    (if (response/anomaly-map? resolve-result)
+      (mcp-proto/tool-call-error (:anomaly/message resolve-result))
       (let [{:keys [client tool-id]} resolve-result
             uri (str "file://" file-path)]
         (manager/ensure-document-open mgr tool-id client file-path)
@@ -197,18 +201,10 @@
 
 (defmethod handle-tool "lsp_diagnostics"
   [_ args mgr]
-  (let [file-path (:file_path args)
-        resolve-result (manager/resolve-client-for-file mgr file-path)]
-    (if (:error resolve-result)
-      (mcp-proto/tool-call-error (:error resolve-result))
-      (let [{:keys [client tool-id]} resolve-result
-            uri (str "file://" file-path)]
-        (manager/ensure-document-open mgr tool-id client file-path)
-        ;; Wait briefly for diagnostics to arrive via notification
-        (Thread/sleep 2000)
-        (let [diags (client/get-diagnostics client uri)]
-          (mcp-proto/tool-call-result
-           (json/generate-string diags {:pretty true})))))))
+  (ensure-and-call mgr (:file_path args)
+    (fn [c uri]
+      (Thread/sleep diagnostics-wait-ms)
+      {:result (client/get-diagnostics c uri)})))
 
 (defmethod handle-tool "lsp_servers"
   [_ _args mgr]

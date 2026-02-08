@@ -9,17 +9,11 @@
    Layer 2: Message I/O (JSON lines — read/write)
    Layer 3: MCP-specific response builders"
   (:require
-   [cheshire.core :as json]))
+   [cheshire.core :as json]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants and message IDs
-
-(def ^:private id-counter (atom 0))
-
-(defn- next-id
-  "Generate the next message ID."
-  []
-  (swap! id-counter inc))
 
 (def jsonrpc-version "2.0")
 
@@ -91,7 +85,7 @@
   [^java.io.BufferedReader reader]
   (try
     (when-let [line (.readLine reader)]
-      (when-not (clojure.string/blank? line)
+      (when-not (str/blank? line)
         (json/parse-string line true)))
     (catch Exception _e
       nil)))
@@ -119,7 +113,7 @@
 
 (defn initialize-result
   "Build the result for an MCP initialize response."
-  [tool-definitions]
+  []
   {:protocolVersion mcp-protocol-version
    :capabilities {:tools {:listChanged false}}
    :serverInfo mcp-server-info})
@@ -154,7 +148,7 @@
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Build responses
-  (response 1 (initialize-result []))
+  (response 1 (initialize-result))
   (response 2 (tools-list-result [{:name "lsp_hover" :description "..." :inputSchema {}}]))
   (response 3 (tool-call-result "hover info here"))
   (error-response 4 -32600 "Invalid request")

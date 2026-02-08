@@ -5,12 +5,14 @@
    Uses Thread + atoms/promises for async message handling.
 
    Layer 0: Client state
-   Layer 1: Message I/O
-   Layer 2: Request/response handling
-   Layer 3: High-level operations"
+   Layer 1: Message dispatch (extracted from reader loop)
+   Layer 2: Message I/O (reader loop, send)
+   Layer 3: Request/response handling
+   Layer 4: High-level operations"
   (:require
    [ai.miniforge.lsp-mcp-bridge.lsp.protocol :as proto]
-   [ai.miniforge.lsp-mcp-bridge.lsp.process :as process])
+   [ai.miniforge.lsp-mcp-bridge.lsp.process :as process]
+   [ai.miniforge.response.interface :as response])
   (:import
    [java.io BufferedReader InputStreamReader BufferedWriter OutputStreamWriter]))
 
@@ -32,50 +34,61 @@
 (def default-timeout-ms 30000)
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Message I/O — delegated to LSP protocol
+;; Message dispatch — extracted from reader loop
+
+(defn- dispatch-response
+  "Deliver a response to its pending promise."
+  [pending-requests msg]
+  (let [id (:id msg)
+        pending @pending-requests]
+    (when (contains? pending id)
+      (let [p (get pending id)]
+        (swap! pending-requests dissoc id)
+        (deliver p msg)))))
+
+(defn- dispatch-notification
+  "Buffer diagnostics and invoke notification handler."
+  [diagnostics-buffer notification-handler msg]
+  (when (and diagnostics-buffer
+             (= (:method msg) "textDocument/publishDiagnostics"))
+    (let [uri (get-in msg [:params :uri])
+          diags (get-in msg [:params :diagnostics])]
+      (swap! diagnostics-buffer assoc uri (vec diags))))
+  (when notification-handler
+    (try
+      (notification-handler msg)
+      (catch Exception e
+        (binding [*out* *err*]
+          (println "Notification handler error:" (.getMessage e)))))))
+
+(defn- dispatch-message
+  "Route an incoming LSP message to the appropriate handler."
+  [client msg]
+  (let [{:keys [pending-requests diagnostics-buffer notification-handler]} client]
+    (cond
+      (proto/response? msg)
+      (dispatch-response pending-requests msg)
+
+      (proto/notification? msg)
+      (dispatch-notification diagnostics-buffer notification-handler msg)
+
+      (proto/request? msg)
+      (binding [*out* *err*]
+        (println "Server request (unhandled):" (:method msg))))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Message I/O
 
 (defn- start-reader-loop
   "Start a background thread reading messages from the LSP server."
   [client]
-  (let [{:keys [reader pending-requests notification-handler diagnostics-buffer]} client
+  (let [{:keys [reader]} client
         thread (Thread.
                 (fn []
                   (try
                     (loop []
                       (when-let [msg (proto/read-message reader)]
-                        (cond
-                          ;; Response to a pending request
-                          (proto/response? msg)
-                          (let [id (:id msg)
-                                p  (let [pending @pending-requests]
-                                     (when (contains? pending id)
-                                       (swap! pending-requests dissoc id)
-                                       (get pending id)))]
-                            (when p
-                              (deliver p msg)))
-
-                          ;; Notification from server
-                          (proto/notification? msg)
-                          (do
-                            ;; Buffer diagnostics
-                            (when (and diagnostics-buffer
-                                       (= (:method msg) "textDocument/publishDiagnostics"))
-                              (let [uri (get-in msg [:params :uri])
-                                    diags (get-in msg [:params :diagnostics])]
-                                (swap! diagnostics-buffer assoc uri (vec diags))))
-                            ;; Call notification handler
-                            (when notification-handler
-                              (try
-                                (notification-handler msg)
-                                (catch Exception e
-                                  (binding [*out* *err*]
-                                    (println "Notification handler error:" (.getMessage e)))))))
-
-                          ;; Request from server (rare)
-                          (proto/request? msg)
-                          (binding [*out* *err*]
-                            (println "Server request (unhandled):" (:method msg))))
-
+                        (dispatch-message client msg)
                         (recur)))
                     (catch Exception e
                       (when (process/process-alive? (:process client))
@@ -86,7 +99,7 @@
     (.start thread)
     thread))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 3
 ;; Request/response handling
 
 (defn send-request
@@ -104,7 +117,7 @@
 
    Returns:
    - {:result any} on success
-   - {:error message} on failure/timeout"
+   - Anomaly map on failure/timeout"
   ([client request]
    (send-request-sync client request default-timeout-ms))
   ([client request timeout-ms]
@@ -115,26 +128,28 @@
            (= result ::timeout)
            (do
              (swap! (:pending-requests client) dissoc (:id request))
-             {:error "Request timed out"})
+             (response/make-anomaly :anomalies/timeout "Request timed out"
+                                    {:lsp/method (:method request)}))
 
            (nil? result)
-           {:error "No response received"}
+           (response/make-anomaly :anomalies/fault "No response received")
 
            (proto/error? result)
-           {:error (get-in result [:error :message] "Unknown error")
-            :code (get-in result [:error :code])}
+           (response/make-anomaly :anomalies/fault
+                                  (get-in result [:error :message] "Unknown error")
+                                  {:lsp/code (get-in result [:error :code])})
 
            :else
            {:result (:result result)}))
        (catch Exception e
-         {:error (.getMessage e)})))))
+         (response/from-exception e))))))
 
 (defn send-notification
   "Send a notification (no response expected)."
   [client notification]
   (proto/write-message (:writer client) notification))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 4
 ;; High-level operations
 
 (defn create-client
@@ -158,21 +173,20 @@
                  :initialized? (atom false)
                  :notification-handler notification-handler
                  :diagnostics-buffer (atom {})
-                 :reader-thread nil})]
-    ;; Start background reader
-    (let [thread (start-reader-loop client)]
-      (assoc client :reader-thread thread))))
+                 :reader-thread nil})
+        thread (start-reader-loop client)]
+    (assoc client :reader-thread thread)))
 
 (defn initialize
   "Initialize the LSP server.
 
    Returns:
    - {:capabilities server-capabilities} on success
-   - {:error message} on failure"
+   - Anomaly map on failure"
   [client root-uri capabilities]
   (let [request (proto/initialize-request root-uri capabilities)
         result (send-request-sync client request 60000)]
-    (if (:error result)
+    (if (response/anomaly-map? result)
       result
       (do
         (reset! (:server-capabilities client) (:capabilities (:result result)))
@@ -184,7 +198,7 @@
   "Shutdown the LSP server gracefully."
   [client]
   (let [result (send-request-sync client (proto/shutdown-request) 10000)]
-    (if (:error result)
+    (if (response/anomaly-map? result)
       result
       (do
         (send-notification client (proto/exit-notification))

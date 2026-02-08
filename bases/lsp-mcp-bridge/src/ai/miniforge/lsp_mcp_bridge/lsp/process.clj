@@ -6,7 +6,8 @@
    Layer 0: Process lifecycle
    Layer 1: Process state and health"
   (:require
-   [babashka.process :as bp]))
+   [babashka.process :as bp]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Process lifecycle
@@ -21,7 +22,7 @@
 
    Returns:
    - {:process Process :tool-id :command :state atom :started-at ms}
-   - {:error message} on failure"
+   - Anomaly map on failure"
   [tool-id command opts]
   (try
     (let [env (merge {} (:env opts))
@@ -39,7 +40,7 @@
        :state (atom :running)
        :started-at (System/currentTimeMillis)})
     (catch Exception e
-      {:error (str "Failed to start LSP server: " (.getMessage e))})))
+      (response/from-exception e))))
 
 (defn stop-process
   "Stop an LSP server process gracefully."

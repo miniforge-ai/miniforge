@@ -2,8 +2,7 @@
   "Tests for MCP JSON-RPC protocol layer."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.lsp-mcp-bridge.mcp.protocol :as proto]
-   [cheshire.core :as json])
+   [ai.miniforge.lsp-mcp-bridge.mcp.protocol :as proto])
   (:import
    [java.io BufferedReader BufferedWriter StringReader StringWriter]))
 
@@ -87,7 +86,7 @@
 
 (deftest initialize-result-test
   (testing "builds MCP initialize result"
-    (let [result (proto/initialize-result [{:name "lsp_hover"}])]
+    (let [result (proto/initialize-result)]
       (is (string? (:protocolVersion result)))
       (is (= {:tools {:listChanged false}} (:capabilities result)))
       (is (= "miniforge-lsp" (get-in result [:serverInfo :name]))))))

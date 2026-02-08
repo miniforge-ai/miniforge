@@ -5,14 +5,16 @@
    Starts servers on-demand and tracks open documents.
 
    Layer 0: Manager state
-   Layer 1: Server lifecycle
-   Layer 2: Client access and document management
-   Layer 3: Status and cleanup"
+   Layer 1: Pipeline helpers and steps
+   Layer 2: Server lifecycle
+   Layer 3: Client access and document management
+   Layer 4: Status and cleanup"
   (:require
    [ai.miniforge.lsp-mcp-bridge.lsp.process :as process]
    [ai.miniforge.lsp-mcp-bridge.lsp.client :as client]
    [ai.miniforge.lsp-mcp-bridge.config :as config]
-   [ai.miniforge.lsp-mcp-bridge.installer :as installer]))
+   [ai.miniforge.lsp-mcp-bridge.installer :as installer]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Manager state
@@ -34,48 +36,96 @@
                (apply println args)))})
 
 ;------------------------------------------------------------------------------ Layer 1
+;; Pipeline helpers and steps
+
+(defn- failed? [state] (contains? state :failure))
+
+(defn- step-ensure-installed
+  "Ensure the LSP binary is installed."
+  [state]
+  (if (failed? state) state
+      (let [{:keys [registry tool-id command]} state
+            install-result (installer/ensure-installed registry tool-id command)]
+        (if (response/anomaly-map? install-result)
+          (assoc state :failure install-result)
+          (assoc state :actual-command (:command install-result))))))
+
+(defn- step-start-process
+  "Start the LSP server subprocess."
+  [state]
+  (if (failed? state) state
+      (let [{:keys [tool-id actual-command opts log-fn]} state]
+        (log-fn "Starting LSP server:" (name tool-id) "command:" actual-command)
+        (let [proc-result (process/start-process tool-id actual-command opts)]
+          (if (response/anomaly-map? proc-result)
+            (assoc state :failure proc-result)
+            (assoc state :process proc-result))))))
+
+(defn- step-create-client
+  "Create the LSP client from the running process."
+  [state]
+  (if (failed? state) state
+      (assoc state :client (client/create-client (:process state) nil))))
+
+(defn- step-initialize
+  "Initialize the LSP server connection."
+  [state]
+  (if (failed? state) state
+      (let [{:keys [client root-uri init-opts process]} state
+            init-result (client/initialize client root-uri init-opts)]
+        (if (response/anomaly-map? init-result)
+          (do
+            (process/stop-process process)
+            (assoc state :failure init-result))
+          state))))
+
+(defn- step-register
+  "Register the running server in the manager's servers atom."
+  [state]
+  (if (failed? state) state
+      (let [{:keys [manager tool-id process client log-fn]} state
+            entry {:process process
+                   :client client
+                   :open-docs (atom #{})
+                   :started-at (System/currentTimeMillis)
+                   :last-used (atom (System/currentTimeMillis))}]
+        (swap! (:servers manager) assoc tool-id entry)
+        (log-fn "LSP server started:" (name tool-id))
+        state)))
+
+(defn- pipeline->result
+  "Convert pipeline state to result."
+  [state]
+  (if (failed? state)
+    (:failure state)
+    {:client (:client state)}))
+
+;------------------------------------------------------------------------------ Layer 2
 ;; Server lifecycle
 
 (defn- start-server
   "Start an LSP server for a tool.
 
-   Returns {:client LSPClient} on success, {:error msg} on failure."
+   Returns {:client LSPClient} on success, anomaly map on failure."
   [manager tool-config]
-  (let [{:keys [config project-dir log-fn]} manager
-        tool-id (:tool/id tool-config)
+  (let [tool-id (:tool/id tool-config)
         lsp-config (:tool/config tool-config)
-        command (:lsp/command lsp-config)
-        registry (:registry config)]
-
-    ;; Ensure binary is installed
-    (let [install-result (installer/ensure-installed registry tool-id command)]
-      (if (:error install-result)
-        install-result
-        (let [actual-command (:command install-result)
-              root-uri (str "file://" (or project-dir (System/getProperty "user.dir")))
-              opts {:env (:lsp/env lsp-config)
-                    :working-dir (or (:lsp/working-dir lsp-config) project-dir)}]
-
-          (log-fn "Starting LSP server:" (name tool-id) "command:" actual-command)
-
-          (let [proc-result (process/start-process tool-id actual-command opts)]
-            (if (:error proc-result)
-              proc-result
-              (let [lsp-client (client/create-client proc-result nil)
-                    init-opts (:lsp/init-options lsp-config {})
-                    init-result (client/initialize lsp-client root-uri init-opts)]
-                (if (:error init-result)
-                  (do
-                    (process/stop-process proc-result)
-                    init-result)
-                  (let [entry {:process proc-result
-                               :client lsp-client
-                               :open-docs (atom #{})
-                               :started-at (System/currentTimeMillis)
-                               :last-used (atom (System/currentTimeMillis))}]
-                    (swap! (:servers manager) assoc tool-id entry)
-                    (log-fn "LSP server started:" (name tool-id))
-                    {:client lsp-client}))))))))))
+        project-dir (:project-dir manager)]
+    (-> {:manager manager
+         :tool-id tool-id
+         :registry (get-in manager [:config :registry])
+         :command (:lsp/command lsp-config)
+         :root-uri (str "file://" (or project-dir (System/getProperty "user.dir")))
+         :init-opts (:lsp/init-options lsp-config {})
+         :opts {:env (:lsp/env lsp-config)
+                :working-dir (or (:lsp/working-dir lsp-config) project-dir)}
+         :log-fn (:log-fn manager)}
+        step-ensure-installed
+        step-start-process
+        step-create-client
+        step-initialize
+        step-register
+        pipeline->result)))
 
 (defn stop-server
   "Stop an LSP server."
@@ -88,13 +138,13 @@
     (swap! (:servers manager) dissoc tool-id)
     ((:log-fn manager) "LSP server stopped:" (name tool-id))))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 3
 ;; Client access and document management
 
 (defn get-client
   "Get the LSP client for a tool, starting the server if needed.
 
-   Returns {:client LSPClient} or {:error msg}."
+   Returns {:client LSPClient} or anomaly map."
   [manager tool-id]
   (let [entry (get @(:servers manager) tool-id)]
     (cond
@@ -108,13 +158,17 @@
       entry
       (do
         (swap! (:servers manager) dissoc tool-id)
-        (when-let [tool-config (get-in (:config manager) [:tool-index tool-id])]
-          (start-server manager tool-config)))
+        (if-let [tool-config (get-in (:config manager) [:tool-index tool-id])]
+          (start-server manager tool-config)
+          (response/make-anomaly :anomalies/not-found
+                                 (str "No tool config for: " tool-id))))
 
       ;; Not started — start
       :else
-      (when-let [tool-config (get-in (:config manager) [:tool-index tool-id])]
-        (start-server manager tool-config)))))
+      (if-let [tool-config (get-in (:config manager) [:tool-index tool-id])]
+        (start-server manager tool-config)
+        (response/make-anomaly :anomalies/not-found
+                               (str "No tool config for: " tool-id))))))
 
 (defn resolve-client-for-file
   "Get the LSP client for a file, starting the server if needed.
@@ -123,15 +177,16 @@
    - manager   - Manager state
    - file-path - Absolute file path
 
-   Returns {:client LSPClient :tool-id keyword} or {:error msg}."
+   Returns {:client LSPClient :tool-id keyword} or anomaly map."
   [manager file-path]
   (if-let [tool-config (config/resolve-tool-for-file (:config manager) file-path)]
     (let [tool-id (:tool/id tool-config)
           result (get-client manager tool-id)]
-      (if (:error result)
+      (if (response/anomaly-map? result)
         result
         (assoc result :tool-id tool-id)))
-    {:error (str "No LSP server configured for file: " file-path)}))
+    (response/make-anomaly :anomalies/not-found
+                           (str "No LSP server configured for file: " file-path))))
 
 (defn ensure-document-open
   "Ensure a document is open on the LSP server.
@@ -146,7 +201,7 @@
         (client/open-document lsp-client uri (or language "text") content)
         (swap! open-docs conj uri)))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 4
 ;; Status and cleanup
 
 (defn list-servers

@@ -26,7 +26,7 @@
     (let [proc (ProcessBuilder.
                  (into-array String
                    ["bb" "-cp"
-                    "bases/lsp-mcp-bridge/src:components/tool-registry/resources"
+                    "bases/lsp-mcp-bridge/src:components/tool-registry/resources:components/response/src"
                     "-m" "ai.miniforge.lsp-mcp-bridge.main"]))
           _ (.redirectErrorStream proc false)
           _ (doto (.environment proc)
@@ -104,7 +104,7 @@
     (let [proc (ProcessBuilder.
                  (into-array String
                    ["bb" "-cp"
-                    "bases/lsp-mcp-bridge/src:components/tool-registry/resources"
+                    "bases/lsp-mcp-bridge/src:components/tool-registry/resources:components/response/src"
                     "-m" "ai.miniforge.lsp-mcp-bridge.main"]))
           _ (doto (.environment proc)
               (.put "MINIFORGE_PROJECT_DIR" (System/getProperty "user.dir")))
