@@ -421,6 +421,45 @@
         (print-success (str "Removed " repo " from fleet"))))))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
+;; Dashboard command
+
+(defn dashboard-cmd
+  "Start workflow monitoring dashboard.
+
+   Launches a web server with real-time workflow visualization.
+   Provides 5 N5 views: workflow list, detail, evidence, artifacts, DAG kanban."
+  [m]
+  (let [{:keys [port open]} (get-opts m)
+        port (or port 8080)]
+    (try
+      ;; Conditionally require web-dashboard (may not be on classpath in Babashka)
+      (require '[ai.miniforge.web-dashboard.interface :as dashboard])
+      (require '[ai.miniforge.event-stream.interface :as es])
+
+      (let [dashboard-ns (find-ns 'ai.miniforge.web-dashboard.interface)
+            es-ns (find-ns 'ai.miniforge.event-stream.interface)]
+        (if (and dashboard-ns es-ns)
+          (let [start! (ns-resolve dashboard-ns 'start!)
+                create-stream (ns-resolve es-ns 'create-event-stream)
+                event-stream (create-stream)]
+            (print-info (str "Starting workflow dashboard on port " port "..."))
+            (start! {:port port :event-stream event-stream})
+            (when open
+              (try
+                (process/sh "open" (str "http://localhost:" port))
+                (catch Exception _ nil)))
+            (println (str "Dashboard running at http://localhost:" port))
+            (println "Press Ctrl+C to stop")
+            @(promise))  ; Block until interrupted
+          (do
+            (print-error "Web dashboard not available in this runtime.")
+            (println "The dashboard requires JVM components not available in Babashka.")
+            (println "Use 'bb miniforge fleet web' for the fleet dashboard (Babashka-compatible)."))))
+      (catch Exception e
+        (print-error (str "Failed to start dashboard: " (ex-message e)))
+        (println "Use 'bb miniforge fleet web' for the fleet dashboard instead.")))))
+
+;; ─────────────────────────────────────────────────────────────────────────────
 ;; PR commands
 
 (defn pr-list-cmd
@@ -534,6 +573,10 @@ Commands:
 
   status [id]         Show workflow status
 
+  dashboard           Start workflow monitoring dashboard (default port: 8080)
+    --port N          Port number
+    --open            Open browser automatically
+
   workflow <subcommand>  Workflow execution
     run <id>          Execute a workflow by ID
       -v, --version   Workflow version (default: latest)
@@ -606,6 +649,12 @@ Examples:
    {:cmds ["status"]
     :fn status-cmd
     :args->opts [:workflow-id]}
+
+   ;; Dashboard command
+   {:cmds ["dashboard"]
+    :fn dashboard-cmd
+    :spec {:port {:coerce :int :alias :p :default 8080}
+           :open {:coerce :boolean :alias :o}}}
 
    ;; Workflow commands
    {:cmds ["workflow" "run"]
