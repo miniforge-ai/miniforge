@@ -1,7 +1,7 @@
 # N5 — Interface Standard: CLI/TUI/API
 
-**Version:** 0.1.0-draft
-**Date:** 2026-01-23
+**Version:** 0.3.0-draft
+**Date:** 2026-02-07
 **Status:** Draft
 **Conformance:** MUST
 
@@ -33,7 +33,7 @@ The operations console (CLI/TUI/API) is the **window into the factory**, not the
 
 ### 2.1 Command Structure
 
-```
+```text
 miniforge <namespace> <command> [arguments] [flags]
 ```
 
@@ -189,6 +189,67 @@ Flags:
   --json              Output as JSON
 ```
 
+##### OPSV Commands (N7)
+
+```bash
+# Operational policy synthesis
+miniforge fleet opsv plan SERVICE [flags]     # Generate Experiment Packs and risk/gate status
+miniforge fleet opsv run SERVICE [flags]      # Execute experiment and converge
+miniforge fleet opsv verify SERVICE [flags]   # Run verification suite
+miniforge fleet opsv propose SERVICE [flags]  # Emit policy proposals without actuation
+miniforge fleet opsv emit SERVICE [flags]     # PR-only emission
+miniforge fleet opsv apply SERVICE [flags]    # Gated apply (if enabled)
+```
+
+##### Listener and Control Commands (N8)
+
+```bash
+# Listener management
+miniforge listener list                       # List active listeners
+miniforge listener attach WORKFLOW_ID         # Attach as OBSERVE listener
+miniforge listener advise WORKFLOW_ID         # Attach as ADVISE listener
+miniforge listener control WORKFLOW_ID        # Attach as CONTROL listener (requires auth)
+
+# Workflow control actions
+miniforge workflow pause WORKFLOW_ID          # Pause workflow execution
+miniforge workflow resume WORKFLOW_ID         # Resume paused workflow
+miniforge workflow retry WORKFLOW_ID          # Retry current phase
+miniforge workflow rollback WORKFLOW_ID       # Rollback to checkpoint
+
+# Agent control actions
+miniforge agent quarantine AGENT_ID           # Quarantine agent
+miniforge agent budget AGENT_ID --tokens=N    # Adjust agent budget
+
+# Gate control actions
+miniforge gate approve GATE_ID               # Approve pending gate
+miniforge gate override GATE_ID --reason=     # Override gate failure
+
+# Fleet control actions
+miniforge fleet emergency-stop                # Emergency stop all workflows
+miniforge fleet drain                         # Drain fleet (stop accepting, complete existing)
+```
+
+##### External PR Commands (N9)
+
+```bash
+# PR monitoring
+miniforge fleet prs [flags]                   # List PR Work Items across repos
+  --repo REPO                                 # Filter by repo
+  --author AUTHOR                             # Filter by author
+  --readiness STATE                           # Filter by readiness state
+  --risk LEVEL                                # Filter by risk level
+  --policy OUTCOME                            # Filter by policy outcome
+  --json                                      # Output as JSON
+
+miniforge fleet pr REPO#NUMBER [flags]        # Show PR Work Item detail
+  --evidence                                  # Include evidence artifact pointers
+  --json                                      # Output as JSON
+
+# Train management (if trains enabled)
+miniforge fleet trains [flags]                # List active trains
+miniforge fleet train TRAIN_ID [flags]        # Show train detail and membership
+```
+
 **Requirements:**
 
 - MUST show real-time workflow status
@@ -198,7 +259,7 @@ Flags:
 
 **Example TUI (see Section 3):**
 
-```
+```text
 ╭─────────────────────────────────────────────────────────────╮
 │ miniforge local fleet  [Workflows: 5 | Active: 2]   ⟳ 15s  │
 ├─────────────────────────────────────────────────────────────┤
@@ -550,7 +611,7 @@ Implementations MUST provide these views:
 
 #### 3.2.1 Workflow List View (Primary View)
 
-```
+```text
 ╭─────────────────────────────────────────────────────────────────────────────╮
 │ miniforge local fleet  [Workflows: 5 | Agents: 4 | Active: 2]   ⟳ 15s ago  │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -575,7 +636,7 @@ Implementations MUST provide these views:
 
 #### 3.2.2 Workflow Detail View
 
-```
+```text
 ╭─────────────────────────────────────────────────────────────────────────────╮
 │ Workflow: rds-import (abc123-def456)                                        │
 │ Status: Executing | Phase: Implement | Started: 2h ago                      │
@@ -618,7 +679,7 @@ Implementations MUST provide these views:
 
 #### 3.2.3 Evidence Viewer
 
-```
+```text
 ╭─────────────────────────────────────────────────────────────────────────────╮
 │ Evidence Bundle: abc123-def456                                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -667,7 +728,7 @@ Implementations MUST provide these views:
 
 #### 3.2.4 Artifact Browser
 
-```
+```text
 ╭─────────────────────────────────────────────────────────────────────────────╮
 │ Artifacts: abc123-def456                                                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -733,6 +794,67 @@ The Kanban view is NOT a separate data model — it is computed from task states
 - SHOULD show elapsed time for active tasks
 - SHOULD show `:failed` and `:skipped` tasks distinctly in DONE column (✗ vs ○)
 
+#### 3.2.6 OPSV Drill-Down View (N7)
+
+For operational policy synthesis, the TUI SHALL provide drill-down navigation:
+
+```text
+Fleet → Service → OPSV Runs → (Experiment Pack, Events, Evidence, Policy Diff, Verification)
+```
+
+**Requirements:**
+
+- MUST show per-service "policy state" view (current vs proposed vs verified)
+- MUST allow drill-down into evidence bundles and event streams per N6
+- MUST show experiment progress, convergence iterations, and verification results
+
+#### 3.2.7 Listener and Control Panel (N8)
+
+The TUI MUST provide:
+
+- **Listener panel**: Show active listeners and their capabilities (OBSERVE/ADVISE/CONTROL)
+- **Control palette**: Quick access to control actions via keyboard shortcuts
+- **Annotation overlay**: Display advisory annotations inline with workflow events
+- **Approval queue**: Pending multi-party approvals for High/Critical actions
+
+#### 3.2.8 PR Fleet View (N9)
+
+```text
+╭─────────────────────────────────────────────────────────────────────────────╮
+│ miniforge fleet PRs  [Repos: 12 | PRs: 34 | Merge-Ready: 8]   ⟳ 15s ago   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ REPO              PR#   TITLE              READINESS       RISK   POLICY   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ acme/api          #42   Add auth endpoint  ✓ merge-ready   low    pass     │
+│ acme/api          #45   Fix rate limiter   ● ci-failing    med    pass     │
+│ acme/infra        #18   Scale RDS          ✓ merge-ready   high   pass     │
+│ acme/frontend     #99   Dark mode          ● needs-review  low    unknown  │
+╰─────────────────────────────────────────────────────────────────────────────╯
+[j/k] Navigate  [Enter] PR Detail  [f] Filter  [t] Trains  [Esc] Back
+```
+
+**Requirements:**
+
+- MUST show PR Work Items across repos with readiness/risk/policy columns
+- MUST support sorting and filtering by readiness, risk, repo, author
+- MUST derive from event stream (N3) and PR Work Item state — projections, not separate data
+
+#### 3.2.9 PR Detail View (N9)
+
+**Requirements:**
+
+- MUST show readiness blockers, risk factors, policy results
+- MUST allow drill-down to evidence artifacts (N6)
+- MUST show automation tier and recent provider actions
+
+#### 3.2.10 Train View (N9)
+
+**Requirements:**
+
+- MUST show ordered train members with merge readiness status
+- MUST indicate which member is next for merge
+- MUST show dependency edges between train members
+
 ### 3.3 TUI Keyboard Navigation
 
 Implementations MUST support:
@@ -784,7 +906,7 @@ Implementations SHOULD provide HTTP REST API:
 
 #### 4.2.1 Workflow Control
 
-```
+```text
 POST /api/workflows
   Body: Workflow spec (JSON or EDN)
   Returns: {:workflow-id uuid}
@@ -803,7 +925,7 @@ DELETE /api/workflows/:id
 
 #### 4.2.2 Event Stream Subscription
 
-```
+```text
 GET /api/workflows/:id/stream
   Returns: Server-Sent Events (SSE) stream
 
@@ -820,7 +942,7 @@ Event format:
 
 #### 4.2.3 Evidence & Artifacts
 
-```
+```text
 GET /api/evidence/:workflow-id
   Returns: Evidence bundle (JSON or EDN)
 
@@ -831,11 +953,31 @@ GET /api/artifacts/:artifact-id/provenance
   Returns: Provenance chain
 ```
 
+#### 4.2.4 Fleet PR API (N9)
+
+```text
+GET /api/fleet/prs
+  Query params: ?repo=org/name&readiness=merge-ready&risk=high
+  Returns: List of PR Work Items
+
+GET /api/fleet/prs/:pr-id
+  Returns: PR Work Item with evidence pointers
+
+GET /api/fleet/trains
+  Returns: List of active trains
+
+GET /api/fleet/trains/:train-id
+  Returns: Train detail with ordered members
+```
+
+The Fleet event stream (§4.2.2) MUST support subscription filters for N9 event types,
+enabling clients to subscribe to PR state changes, readiness changes, and policy changes.
+
 ### 4.3 API Authentication
 
 Implementations SHOULD require authentication:
 
-```
+```text
 Authorization: Bearer <token>
 ```
 
@@ -1220,10 +1362,15 @@ Research directions:
 - N3 (Event Stream): API consumes event stream
 - N4 (Policy Packs): CLI manages policy packs
 - N6 (Evidence & Provenance): CLI/TUI views evidence bundles
+- N7 (Operational Policy Synthesis): OPSV CLI commands and TUI drill-down (§2.3.3, §3.2.6)
+- N8 (Observability Control Interface): Listener/control CLI commands and TUI panels (§2.3.3, §3.2.7)
+- N9 (External PR Integration): Fleet PR CLI/TUI/API commands (§2.3.3, §3.2.8-3.2.10, §4.2.4)
 
 ---
 
 **Version History:**
 
+- 0.3.0-draft (2026-02-07): Added extension spec interfaces from N7, N8, N9
+  (§2.3.3, §3.2.6–§3.2.10, §4.2.4)
 - 0.2.0-draft (2026-02-04): Added DAG Kanban view and task lifecycle CLI command (§3.2.5)
 - 0.1.0-draft (2026-01-23): Initial CLI/TUI/API specification

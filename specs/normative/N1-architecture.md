@@ -1,7 +1,7 @@
 # N1 — Core Architecture & Concepts
 
-**Version:** 0.1.0-draft
-**Date:** 2026-01-23
+**Version:** 0.2.0-draft
+**Date:** 2026-02-07
 **Status:** Draft
 **Conformance:** MUST
 
@@ -18,7 +18,7 @@ miniforge.ai, the autonomous software factory. It establishes:
 - **Operational model** principles (local-first, reproducibility, failure semantics)
 - **Agent protocols** and communication patterns
 
-All other normative specifications (N2-N6) build upon the concepts defined here.
+All other normative specifications (N2-N9) build upon the concepts defined here.
 
 ### 1.1 Design Principles
 
@@ -515,6 +515,238 @@ Incremental ETL MUST:
 5. **Maintain pack index:** Update pack index incrementally, preserving provenance of unchanged packs.
 
 Implementations MAY cache intermediate classification and scanner results for performance.
+
+### 2.11 Operational Policy (N7)
+
+An **Operational Policy** is a versioned set of runtime configuration artifacts that control
+service behavior under load. Operational Policies are specializations of Artifacts (§2.9)
+with provenance per N6.
+
+```clojure
+{:operational-policy/id string       ; REQUIRED: policy identifier
+ :operational-policy/version string  ; REQUIRED: semantic version
+ :operational-policy/target-services [string ...] ; REQUIRED
+ :operational-policy/target-envs [string ...]     ; REQUIRED
+
+ :operational-policy/scaling {...}   ; Scaling signals, thresholds, bounds
+ :operational-policy/resources {...} ; Requests/limits recommendations
+ :operational-policy/guardrails {...} ; Rate limits, concurrency caps
+ :operational-policy/verification-summary
+ {:passed? boolean
+  :confidence keyword
+  :caveats [string ...]}
+
+ :operational-policy/evidence-refs [uuid ...]} ; N6 evidence artifacts
+```
+
+See N7 for detailed Operational Policy specification.
+
+### 2.12 Experiment Pack (N7)
+
+An **Experiment Pack** is a versioned, declarative artifact that defines workload models,
+guardrails, success criteria, and convergence strategies for operational policy synthesis.
+Experiment Packs are specializations of Packs (§2.10.3).
+
+```clojure
+{:experiment-pack/id string          ; REQUIRED: stable identifier
+ :experiment-pack/version string     ; REQUIRED: semantic version or revision
+
+ :experiment-pack/targets
+ {:services [...]                    ; Repo and/or runtime selectors
+  :environments [...]}               ; Cluster/namespace selectors
+
+ :experiment-pack/workload
+ {:profile keyword                   ; step/ramp/spike
+  :mix [...]                         ; Request classes and weights
+  :warmup-seconds long
+  :cooldown-seconds long}
+
+ :experiment-pack/success-criteria {...}
+ :experiment-pack/guardrails {...}
+ :experiment-pack/convergence {...}
+ :experiment-pack/actuation-intent keyword} ; :recommend-only, :pr-only, :apply-allowed
+```
+
+Experiment Packs SHALL be hash-addressed and recorded in the event stream and evidence bundle.
+See N7 for detailed Experiment Pack specification.
+
+### 2.13 Actuation Mode (N7)
+
+An **Actuation Mode** governs whether OPSV workflows produce recommendations, PRs, or
+direct changes:
+
+- **RECOMMEND_ONLY**: produce policy proposals and evidence; no changes emitted.
+- **PR_ONLY**: produce changes as PRs against declared repos.
+- **APPLY_ALLOWED**: apply changes directly when permitted by policy packs and gates.
+
+`APPLY_ALLOWED` MUST be disabled by default. See N7 §1.4.
+
+### 2.14 Verification (N7)
+
+**Verification** is the process of executing an Experiment Pack against a candidate
+Operational Policy and producing an evidence bundle showing whether success criteria
+are satisfied. Verification produces pass/fail with per-criterion results and
+confidence/caveat fields. See N7 §6.
+
+### 2.15 Listener (N8)
+
+A **Listener** is an external actor that subscribes to workflow events and MAY interact
+with workflow execution. Listeners are specializations of the Observer concept (§3.3)
+extended with capability levels and identity.
+
+```clojure
+{:listener/id uuid                   ; REQUIRED: unique listener identifier
+ :listener/type keyword              ; REQUIRED: :watcher, :dashboard, :fleet, :enterprise
+ :listener/capability keyword        ; REQUIRED: :observe, :advise, :control
+
+ :listener/identity                  ; REQUIRED for ADVISE/CONTROL
+ {:principal string
+  :credentials {...}
+  :roles [keyword ...]}
+
+ :listener/filters                   ; OPTIONAL
+ {:workflow-ids [uuid ...]
+  :event-types [keyword ...]
+  :phases [keyword ...]
+  :agents [keyword ...]}}
+```
+
+See N8 for detailed Listener specification.
+
+### 2.16 Capability Level (N8)
+
+Listeners operate at one of three **Capability Levels**:
+
+| Level     | Permissions                                     | Use Case                          |
+| --------- | ----------------------------------------------- | --------------------------------- |
+| `OBSERVE` | Read-only event stream access                   | Monitoring, analytics, audit      |
+| `ADVISE`  | Emit advisory annotations (non-blocking)        | Recommendations, warnings         |
+| `CONTROL` | Request control actions (subject to gates)      | Pause, rollback, approve, adjust  |
+
+Capability levels are hierarchical: CONTROL includes ADVISE includes OBSERVE.
+See N8 §2 for enforcement requirements.
+
+### 2.17 Control Action (N8)
+
+A **Control Action** is a command that modifies workflow execution state. All control
+actions MUST be authorized by RBAC, pass through policy gates, and be audit-logged.
+
+```clojure
+{:action/id uuid                     ; REQUIRED: unique action identifier
+ :action/type keyword                ; REQUIRED: see N8 §3.1
+ :action/timestamp inst              ; REQUIRED
+
+ :action/target
+ {:target-type keyword               ; :workflow, :agent, :gate, :fleet
+  :target-id uuid}
+
+ :action/requester
+ {:principal string
+  :capability keyword                ; Must be :control
+  :listener-id uuid}
+
+ :action/justification string        ; REQUIRED for High/Critical risk
+ :action/result
+ {:status keyword                    ; :success, :failure, :pending
+  :executed-at inst}}
+```
+
+See N8 §3 for the complete control action surface.
+
+### 2.18 Advisory Annotation (N8)
+
+An **Advisory Annotation** is a non-blocking message attached to a workflow or event.
+Annotations MUST NOT block workflow execution but MAY be surfaced in UI and MAY
+trigger alerts if patterns match.
+
+```clojure
+{:annotation/id uuid                 ; REQUIRED
+ :annotation/type keyword            ; REQUIRED: :recommendation, :warning, :insight, :question
+ :annotation/source {:listener-id uuid :principal string}
+ :annotation/target {:workflow-id uuid :event-id uuid}
+ :annotation/content {:title string :body string :severity keyword}}
+```
+
+See N8 §4 for the annotation system specification.
+
+### 2.19 PR Work Item (N9)
+
+A **PR Work Item** is the canonical internal model of a pull request used by the
+Fleet control plane. All PRs — Miniforge-originated and external — MUST be represented
+as PR Work Items. This is distinct from Workflow (§2.1); a PR Work Item tracks
+provider state, not workflow execution state.
+
+```clojure
+{:pr/id uuid                         ; REQUIRED: stable internal id
+ :pr/provider keyword                ; REQUIRED: :github, :gitlab, etc.
+ :pr/repo string                     ; REQUIRED: "org/name"
+ :pr/number long                     ; REQUIRED: provider PR number
+ :pr/external? boolean               ; REQUIRED: true if not Miniforge-originated
+
+ :pr/readiness                       ; REQUIRED: deterministic merge-readiness
+ {:readiness/state keyword           ; :merge-ready, :needs-review, :ci-failing, etc.
+  :readiness/blockers [...]}
+
+ :pr/risk                            ; REQUIRED: explainable risk assessment
+ {:risk/level keyword                ; :low, :medium, :high, :critical
+  :risk/factors [...]
+  :risk/requires-human? boolean}
+
+ :pr/automation-tier keyword         ; REQUIRED: see N9 §10
+
+ :pr/workflow-id uuid}               ; OPTIONAL: absent for external PRs
+```
+
+See N9 for the complete PR Work Item schema and semantics.
+
+### 2.20 Provider (N9)
+
+A **Provider** is an external code hosting platform (GitHub, GitLab, etc.) that is a
+source of PR events and state. Providers are analogous to N7's Environment Targets —
+they are external systems that Miniforge connects to but does not own.
+
+Implementations MUST support at least one provider and MUST normalize provider-native
+events to canonical N3 event types. See N9 §3.
+
+### 2.21 PR Train (N9)
+
+A **PR Train** is an ordered set of PR Work Items with explicit dependency relationships
+that MUST be merged in sequence. Trains are analogous to N2's DAG task dependencies,
+applied to PR merge ordering.
+
+```clojure
+{:train/id uuid                      ; REQUIRED: stable train identifier
+ :train/members                      ; REQUIRED: ordered PR Work Item refs
+ [{:pr/id uuid
+   :pr/repo string
+   :pr/number long
+   :train/position long}]            ; 1-indexed merge order
+
+ :train/policy
+ {:train/merge-strategy keyword      ; :sequential, :batch
+  :train/required-readiness keyword
+  :train/auto-merge? boolean}}       ; Requires Tier 3
+```
+
+See N9 §13 for train operations and governance.
+
+### 2.22 Readiness (N9)
+
+**Readiness** is a deterministic assessment of whether a PR is ready to merge, computed
+from provider signals (CI, reviews, merge conflicts) and policy evaluation results.
+
+Readiness states: `:merge-ready`, `:needs-review`, `:changes-requested`, `:ci-failing`,
+`:policy-failing`, `:merge-conflicts`, `:unknown`.
+
+See N9 §2.2 for readiness computation requirements.
+
+### 2.23 Risk Assessment (N9)
+
+A **Risk Assessment** is an explainable evaluation of change risk for a PR, produced as
+an evidence artifact (N6) with traceable factors. Risk scoring MUST be explainable via
+factor evidence refs and MUST NOT be a black-box number without factors.
+
+See N9 §5 for risk artifact schema.
 
 ---
 
@@ -1106,8 +1338,8 @@ Future versions will support:
 
 Enterprise features will add:
 
-- **PR Trains** - Linked workflows across repos (see roadmap)
-- **DAG Dependencies** - Workflow execution order based on dependencies
+- **PR Trains** - Linked workflows across repos (now specified in N9 §13)
+- **DAG Dependencies** - Workflow execution order based on dependencies (now specified in N2 §13)
 - **Cross-Workflow Context** - Share learnings across related workflows
 
 ### 10.3 Federated Learning (Future Research)
@@ -1129,25 +1361,44 @@ Research directions:
 - N4 (Policy Packs): Defines gate validation rules
 - N5 (CLI/TUI/API): Defines user-facing interfaces
 - N6 (Evidence & Provenance): Defines evidence bundles and artifact provenance
+- N7 (Operational Policy Synthesis): Defines OPSV workflow, Experiment Packs, Operational Policies
+- N8 (Observability Control Interface): Defines Listeners, Capability Levels, Control Actions
+- N9 (External PR Integration): Defines PR Work Items, Providers, PR Trains, Readiness
 
 ---
 
 ## 12. Glossary
 
+- **Actuation Mode** - Governance mode for OPSV outputs: RECOMMEND_ONLY, PR_ONLY, or APPLY_ALLOWED (N7)
+- **Advisory Annotation** - Non-blocking message attached to a workflow or event by a Listener (N8)
 - **Agent** - Autonomous software entity that executes workflow phases
 - **Artifact** - Work product created during workflow execution
+- **Capability Level** - Listener permission tier: OBSERVE, ADVISE, or CONTROL (N8)
+- **Control Action** - Command that modifies workflow execution state, subject to RBAC and gates (N8)
 - **Evidence Bundle** - Immutable audit trail from intent to outcome
+- **Experiment Pack** - Declarative artifact defining workload models, guardrails, and convergence for OPSV (N7)
+- **External PR** - Pull request whose diff was created outside Miniforge's authoring workflow (N9)
 - **Gate** - Validation checkpoint for artifacts
 - **Inner Loop** - Validate → Repair cycle within a phase
+- **Listener** - External actor that subscribes to workflow events with OBSERVE/ADVISE/CONTROL capability (N8)
+- **Operational Policy** - Versioned runtime configuration artifacts controlling service behavior under load (N7)
 - **Outer Loop** - Phase transition state machine
 - **Phase** - Logical SDLC stage (Plan, Implement, Verify, etc.)
 - **Policy Pack** - Collection of validation rules
+- **PR Train** - Ordered set of PR Work Items with dependency relationships for sequential merge (N9)
+- **PR Work Item** - Canonical internal model of a PR in the Fleet control plane (N9)
+- **Provider** - External code hosting platform (GitHub, GitLab) as source of PR events (N9)
+- **Readiness** - Deterministic merge-readiness assessment from provider signals and policy results (N9)
+- **Risk Assessment** - Explainable evaluation of change risk for a PR, produced as N6 evidence artifact (N9)
 - **Subagent** - Specialized agent spawned by parent agent
 - **Tool** - External capability invoked by agent
+- **Verification** - Executing an Experiment Pack against a candidate Operational Policy to produce pass/fail evidence (N7)
 - **Workflow** - Top-level unit of autonomous execution
 
 ---
 
 **Version History:**
 
+- 0.2.0-draft (2026-02-07): Added extension spec concepts from N7, N8, N9
+  (§2.11–§2.23, §12 glossary)
 - 0.1.0-draft (2026-01-23): Initial core architecture specification
