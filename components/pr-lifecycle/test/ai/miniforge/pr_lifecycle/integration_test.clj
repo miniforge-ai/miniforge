@@ -6,7 +6,11 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.pr-lifecycle.controller :as controller]
-   [ai.miniforge.pr-lifecycle.events :as events]
+   ;; Required for with-redefs targets
+   #_{:clj-kondo/ignore [:unused-namespace]}
+   [ai.miniforge.pr-lifecycle.merge]
+   #_{:clj-kondo/ignore [:unused-namespace]}
+   [ai.miniforge.release-executor.interface]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Mock Data
@@ -46,7 +50,7 @@
 (defn mock-release-executor
   "Mock release executor that simulates PR creation."
   [success?]
-  (fn [workflow-state exec-context opts]
+  (fn [_workflow-state _exec-context _opts]
     (if success?
       {:success? true
        :artifacts [{:artifact/type :release
@@ -60,7 +64,7 @@
   "Mock CI monitor that returns predefined CI status."
   [ci-results-seq]
   (let [results (atom ci-results-seq)]
-    (fn [repo-path pr-number]
+    (fn [_repo-path _pr-number]
       (let [result (first @results)]
         (swap! results rest)
         result))))
@@ -69,7 +73,7 @@
   "Mock review monitor that returns predefined review status."
   [review-results-seq]
   (let [results (atom review-results-seq)]
-    (fn [repo-path pr-number]
+    (fn [_repo-path _pr-number]
       (let [result (first @results)]
         (swap! results rest)
         result))))
@@ -77,7 +81,7 @@
 (defn mock-merge-operation
   "Mock merge operation."
   [success?]
-  (fn [repo-path pr-number merge-policy]
+  (fn [_repo-path _pr-number merge-policy]
     (if success?
       {:success? true
        :merged-sha "def789abc123"
@@ -88,7 +92,7 @@
 (defn mock-fix-generator
   "Mock fix generator that returns a code artifact."
   [success?]
-  (fn [task error-details context]
+  (fn [_task error-details _context]
     (if success?
       (response/success
        {:code/id (random-uuid)
@@ -112,11 +116,8 @@
 
 (defn create-test-controller
   "Create a controller with mocked dependencies."
-  [& {:keys [generate-fn ci-monitor-fn review-monitor-fn merge-fn]
-      :or {generate-fn (mock-fix-generator true)
-           ci-monitor-fn (mock-ci-monitor [mock-ci-success])
-           review-monitor-fn (mock-review-monitor [mock-review-approved])
-           merge-fn (mock-merge-operation true)}}]
+  [& {:keys [generate-fn _ci-monitor-fn _review-monitor-fn _merge-fn]
+      :or {generate-fn (mock-fix-generator true)}}]
   (let [event-collector (collect-events)]
     {:controller (controller/create-controller
                   "test-dag" "test-run" "test-task" mock-task
@@ -197,9 +198,9 @@
 
 (deftest ci-failure-triggers-fix-loop-test
   (testing "CI failure triggers fix loop"
-    (let [{:keys [controller events]} (create-test-controller
-                                       :ci-monitor-fn (mock-ci-monitor [mock-ci-failure])
-                                       :generate-fn (mock-fix-generator true))]
+    (let [{:keys [controller]} (create-test-controller
+                                :ci-monitor-fn (mock-ci-monitor [mock-ci-failure])
+                                :generate-fn (mock-fix-generator true))]
 
       ;; Set up controller with PR created
       (simulate-pr-creation! controller mock-pr-info)
@@ -349,7 +350,7 @@
 
 (deftest full-happy-path-simulation-test
   (testing "Full lifecycle: PR → CI pass → Review approve → Merge"
-    (let [{:keys [controller events]} (create-test-controller)]
+    (let [{:keys [controller]} (create-test-controller)]
 
       ;; 1. Start in pending state
       (is (= :pending (get-status controller)))
