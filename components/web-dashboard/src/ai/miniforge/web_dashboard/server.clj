@@ -17,7 +17,8 @@
   (:require
    [org.httpkit.server :as http]
    [jsonista.core :as json]
-   [clojure.java.io :as io]))
+   [clojure.java.io :as io]
+   [ai.miniforge.web-dashboard.views :as views]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Static file serving
@@ -49,7 +50,7 @@
      :body "Not Found"}))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; WebSocket handling
+;; WebSocket handling and workflow state
 
 (defn- subscribe-client!
   "Subscribe WebSocket client to event stream."
@@ -82,6 +83,33 @@
         (catch Exception e
           (println "Error unsubscribing from event stream:" (.getMessage e)))))))
 
+(defn- get-workflows
+  "Get current workflow state from event stream."
+  [event-stream]
+  (try
+    (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
+      (if es-ns
+        (let [get-events (ns-resolve es-ns 'get-events)
+              events (get-events event-stream)]
+          ;; Extract workflows from events
+          ;; This is a simplified version - real impl would track workflow state
+          (->> events
+               (filter #(or (:workflow-id %) (:workflow/id %)))
+               (group-by #(or (:workflow-id %) (:workflow/id %)))
+               (map (fn [[id wf-events]]
+                      (let [latest (first wf-events)]
+                        {:id id
+                         :name (str "Workflow " (subs (str id) 0 8))
+                         :status :running
+                         :phase (or (:phase latest) "unknown")
+                         :progress 50
+                         :agent-status "Active"})))
+               (take 10)))
+        []))
+    (catch Exception e
+      (println "Error getting workflows:" (.getMessage e))
+      [])))
+
 (defn- create-ws-handler [event-stream]
   (let [connections (atom #{})]
     (fn [req]
@@ -106,21 +134,75 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; HTTP routes
 
+(defn- html-response [html]
+  {:status 200
+   :headers {"Content-Type" "text/html; charset=utf-8"}
+   :body html})
+
 (defn- create-handler [event-stream]
   (let [ws-handler (create-ws-handler event-stream)]
     (fn [req]
       (let [uri (:uri req)]
         (cond
-          (= uri "/") (serve-static-file "/index.html")
-          (= uri "/ws") (ws-handler req)
-          (= uri "/health") {:status 200
-                             :headers {"Content-Type" "application/json"}
-                             :body (json/write-value-as-string {:status "ok"})}
-          (or (.startsWith uri "/js/")
-              (.startsWith uri "/css/")) (serve-static-file uri)
-          :else {:status 404
-                 :headers {"Content-Type" "text/plain"}
-                 :body "Not Found"})))))
+          ;; WebSocket
+          (= uri "/ws")
+          (ws-handler req)
+
+          ;; Health check
+          (= uri "/health")
+          {:status 200
+           :headers {"Content-Type" "application/json"}
+           :body (json/write-value-as-string {:status "ok"})}
+
+          ;; Main views
+          (= uri "/")
+          (html-response (views/workflow-list (get-workflows event-stream)))
+
+          (= uri "/evidence")
+          (html-response (views/evidence-view []))
+
+          (= uri "/artifacts")
+          (html-response (views/artifacts-view []))
+
+          (= uri "/dag")
+          (html-response (views/dag-kanban-view []))
+
+          ;; Workflow detail
+          (.startsWith uri "/workflow/")
+          (let [id (subs uri 10)]
+            (html-response (views/workflow-detail
+                            {:id id
+                             :name (str "Workflow " id)
+                             :phases [{:name "Spec" :status :completed}
+                                      {:name "Plan" :status :running}
+                                      {:name "Implement" :status :pending}]
+                             :agent-output "Agent output will appear here..."})))
+
+          ;; API endpoints for htmx
+          (= uri "/api/workflows")
+          (html-response
+           [:div#workflow-list
+            [:table.workflow-table
+             [:tbody
+              (map (fn [wf]
+                     [:tr
+                      [:td (:status wf)]
+                      [:td [:a {:href (str "/workflow/" (:id wf))} (:name wf)]]
+                      [:td (:phase wf)]
+                      [:td (:progress wf)]
+                      [:td (:agent-status wf)]])
+                   (get-workflows event-stream))]]])
+
+          ;; Static files
+          (or (.startsWith uri "/css/")
+              (.startsWith uri "/js/"))
+          (serve-static-file uri)
+
+          ;; 404
+          :else
+          {:status 404
+           :headers {"Content-Type" "text/plain"}
+           :body "Not Found"})))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Server lifecycle
