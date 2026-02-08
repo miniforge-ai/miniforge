@@ -314,7 +314,8 @@
     (println (str "  Failed: " (get-in state [:workflows :failed] 0)))
     (println)))
 
-;; Deprecated TUI dashboard functions removed - use web dashboard instead
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Dashboard commands
 
 (defn dashboard-cmd
   "Start workflow monitoring dashboard.
@@ -363,19 +364,12 @@
 (defn fleet-dashboard-cmd
   "Start workflow monitoring dashboard (alias for 'miniforge dashboard')."
   [m]
-  ;; Forward to the main dashboard-cmd
   (dashboard-cmd m))
 
 (defn fleet-web-cmd
-  "DEPRECATED: Use 'miniforge dashboard' instead."
-  [_m]
-  (print-error "The 'fleet web' command is deprecated.")
-  (println)
-  (println "Use one of these instead:")
-  (println "  bb miniforge dashboard          # Modern web dashboard (port 8080)")
-  (println "  bb miniforge fleet dashboard    # Same as above")
-  (println "  bb miniforge dashboard --port 3000 --open  # Custom port, auto-open browser")
-  (System/exit 1))
+  "Start workflow monitoring dashboard (alias for 'miniforge dashboard')."
+  [m]
+  (dashboard-cmd m))
 
 (defn fleet-tui-cmd
   "Start terminal UI dashboard with 5 N5 views.
@@ -681,7 +675,9 @@ Examples:
    {:cmds ["fleet" "dashboard"] :fn fleet-dashboard-cmd
     :spec {:port {:coerce :int :alias :p :default 8080}
            :open {:coerce :boolean :alias :o}}}
-   {:cmds ["fleet" "web"]       :fn fleet-web-cmd}
+   {:cmds ["fleet" "web"]       :fn fleet-web-cmd
+    :spec {:port {:coerce :int :alias :p :default 8080}
+           :open {:coerce :boolean :alias :o}}}
    {:cmds ["fleet" "tui"]       :fn fleet-tui-cmd}
    {:cmds ["fleet" "add"]       :fn fleet-add-cmd    :args->opts [:repo]}
    {:cmds ["fleet" "remove"]    :fn fleet-remove-cmd :args->opts [:repo]}
