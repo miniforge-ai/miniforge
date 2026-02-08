@@ -16,7 +16,7 @@
   "HTTP server with WebSocket support for the web dashboard."
   (:require
    [org.httpkit.server :as http]
-   [jsonista.core :as json]
+   [cheshire.core :as json]
    [clojure.java.io :as io]
    [ai.miniforge.web-dashboard.views :as views]))
 
@@ -64,7 +64,7 @@
               (subscribe! event-stream subscriber-id
                           (fn [event]
                             (try
-                              (http/send! ch (json/write-value-as-string event))
+                              (http/send! ch (json/generate-string event))
                               (catch Exception e
                                 (println "Error sending event to WebSocket:" (.getMessage e)))))))))
         (catch Exception e
@@ -129,7 +129,7 @@
          :on-receive
          (fn [ch data]
            (println "Received:" data)
-           (http/send! ch (json/write-value-as-string {:echo data})))}))))
+           (http/send! ch (json/generate-string {:echo data})))}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; HTTP routes
@@ -152,7 +152,7 @@
           (= uri "/health")
           {:status 200
            :headers {"Content-Type" "application/json"}
-           :body (json/write-value-as-string {:status "ok"})}
+           :body (json/generate-string {:status "ok"})}
 
           ;; Main views
           (= uri "/")
