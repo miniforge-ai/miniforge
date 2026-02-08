@@ -26,6 +26,7 @@ body {
   color: #d4d4d4;
   font-size: 14px;
   line-height: 1.6;
+  overflow-y: auto;
 }
 
 /* Layout */
@@ -230,9 +231,9 @@ body {
   background: #2d2d2d;
   border-radius: 4px;
   padding: 1.5rem;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .detail-main h3 {
