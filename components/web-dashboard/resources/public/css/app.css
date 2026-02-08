@@ -1,0 +1,150 @@
+/* Copyright 2025 miniforge.ai
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/* Reset and base styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'SF Mono', 'JetBrains Mono', 'Menlo', 'Monaco', monospace;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* Layout */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.app-header {
+  background: #2d2d2d;
+  padding: 1rem 2rem;
+  border-bottom: 1px solid #3d3d3d;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.app-header h1 {
+  color: #00d4ff;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.app-main {
+  flex: 1;
+  overflow: auto;
+  padding: 2rem;
+}
+
+/* Status bar */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.status-label {
+  color: #888;
+}
+
+.status-connected {
+  color: #4ec9b0;
+  font-weight: 600;
+}
+
+.status-disconnected {
+  color: #f48771;
+  font-weight: 600;
+}
+
+/* Event log */
+.event-log {
+  max-width: 1200px;
+}
+
+.event-log h2 {
+  color: #00d4ff;
+  margin-bottom: 1rem;
+  font-size: 1.25rem;
+}
+
+.event-list {
+  background: #2d2d2d;
+  border-radius: 4px;
+  padding: 1rem;
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.event {
+  border-bottom: 1px solid #3d3d3d;
+  padding: 0.75rem 0;
+}
+
+.event:last-child {
+  border-bottom: none;
+}
+
+.event-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.25rem;
+}
+
+.event-type {
+  color: #00d4ff;
+  font-weight: 600;
+}
+
+.event-time {
+  color: #888;
+  font-size: 0.9em;
+}
+
+.event-workflow {
+  margin-top: 0.25rem;
+}
+
+.workflow-id {
+  color: #c586c0;
+  font-size: 0.9em;
+}
+
+/* Scrollbar styling */
+.event-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.event-list::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+
+.event-list::-webkit-scrollbar-thumb {
+  background: #3d3d3d;
+  border-radius: 4px;
+}
+
+.event-list::-webkit-scrollbar-thumb:hover {
+  background: #4d4d4d;
+}

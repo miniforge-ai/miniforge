@@ -1,0 +1,4 @@
+# Compiled ClojureScript
+resources/public/js/
+.shadow-cljs/
+.nrepl-port

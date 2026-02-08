@@ -16,102 +16,37 @@
   "HTTP server with WebSocket support for the web dashboard."
   (:require
    [org.httpkit.server :as http]
-   [hiccup.page :as page]
-   [jsonista.core :as json]))
+   [jsonista.core :as json]
+   [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; HTML rendering
+;; Static file serving
 
-(defn- render-index-page []
-  (page/html5
-   [:head
-    [:title "Miniforge Dashboard"]
-    [:meta {:charset "utf-8"}]
-    [:style "body { font-family: 'SF Mono', 'JetBrains Mono', monospace; background: #1e1e1e; color: #d4d4d4; padding: 2rem; margin: 0; }
-            h1 { color: #00d4ff; margin: 0 0 1rem 0; }
-            .status { margin: 0 0 1rem 0; padding: 1rem; background: #2d2d2d; border-radius: 4px; }
-            .connected { color: #4ec9b0; }
-            .disconnected { color: #f48771; }
-            .event-log { background: #2d2d2d; border-radius: 4px; padding: 1rem; max-height: 600px; overflow-y: auto; }
-            .event { border-bottom: 1px solid #3d3d3d; padding: 0.5rem 0; }
-            .event:last-child { border-bottom: none; }
-            .event-type { color: #00d4ff; font-weight: bold; }
-            .event-time { color: #888; font-size: 0.9em; }
-            .event-data { color: #d4d4d4; margin-top: 0.25rem; }
-            .workflow-id { color: #c586c0; }
-            .phase { color: #dcdcaa; }
-            .status-success { color: #4ec9b0; }
-            .status-error { color: #f48771; }
-            .status-running { color: #4fc1ff; }"]]
-   [:body
-    [:h1 "MINIFORGE | Web Dashboard"]
-    [:div.status
-     [:p "WebSocket: " [:span#ws-status.disconnected "Connecting..."]]
-     [:p [:small [:span#ws-url]]]]
-    [:div#content
-     [:h2 "Event Stream"]
-     [:div#event-log.event-log
-      [:p "Waiting for events..."]]]
-    [:script {:type "text/javascript"}
-     "
-     const wsUrl = 'ws://' + window.location.host + '/ws';
-     document.getElementById('ws-url').textContent = wsUrl;
-     const ws = new WebSocket(wsUrl);
-     const status = document.getElementById('ws-status');
-     const eventLog = document.getElementById('event-log');
-     const events = [];
+(def content-types
+  "MIME types for static files."
+  {".html" "text/html"
+   ".css"  "text/css"
+   ".js"   "application/javascript"
+   ".json" "application/json"})
 
-     ws.onopen = () => {
-       status.textContent = 'Connected';
-       status.className = 'connected';
-       console.log('WebSocket connected');
-     };
+(defn- get-content-type
+  "Get content type from file extension."
+  [path]
+  (or (some (fn [[ext type]]
+              (when (.endsWith path ext) type))
+            content-types)
+      "application/octet-stream"))
 
-     ws.onclose = () => {
-       status.textContent = 'Disconnected';
-       status.className = 'disconnected';
-       console.log('WebSocket disconnected');
-     };
-
-     ws.onmessage = (event) => {
-       const msg = JSON.parse(event.data);
-       console.log('Event:', msg);
-       events.unshift(msg);
-       if (events.length > 100) events.pop();
-       renderEvents();
-     };
-
-     ws.onerror = (error) => {
-       console.error('WebSocket error:', error);
-     };
-
-     function renderEvents() {
-       if (events.length === 0) {
-         eventLog.innerHTML = '<p>Waiting for events...</p>';
-         return;
-       }
-
-       eventLog.innerHTML = events.map(e => {
-         const eventType = e['event/type'] || e.type || 'unknown';
-         const timestamp = e['event/timestamp'] || e.timestamp || new Date().toISOString();
-         const workflowId = e['workflow-id'] || e['workflow/id'] || '';
-         const phase = e.phase || e['workflow/phase'] || '';
-         const data = e.data || {};
-
-         let dataStr = '';
-         if (data.message) dataStr += data.message;
-         if (phase) dataStr += ` [${phase}]`;
-         if (workflowId) dataStr += ` <span class=\"workflow-id\">${workflowId.substring(0, 8)}...</span>`;
-
-         return `
-           <div class=\"event\">
-             <div><span class=\"event-type\">${eventType}</span> <span class=\"event-time\">${new Date(timestamp).toLocaleTimeString()}</span></div>
-             ${dataStr ? `<div class=\"event-data\">${dataStr}</div>` : ''}
-           </div>
-         `;
-       }).join('');
-     }
-     "]]))
+(defn- serve-static-file
+  "Serve a static file from resources/public."
+  [path]
+  (if-let [resource (io/resource (str "public" path))]
+    {:status 200
+     :headers {"Content-Type" (get-content-type path)}
+     :body (slurp resource)}
+    {:status 404
+     :headers {"Content-Type" "text/plain"}
+     :body "Not Found"}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; WebSocket handling
@@ -174,20 +109,18 @@
 (defn- create-handler [event-stream]
   (let [ws-handler (create-ws-handler event-stream)]
     (fn [req]
-      (case (:uri req)
-        "/" {:status 200
-             :headers {"Content-Type" "text/html"}
-             :body (render-index-page)}
-
-        "/ws" (ws-handler req)
-
-        "/health" {:status 200
-                   :headers {"Content-Type" "application/json"}
-                   :body (json/write-value-as-string {:status "ok"})}
-
-        {:status 404
-         :headers {"Content-Type" "text/plain"}
-         :body "Not Found"}))))
+      (let [uri (:uri req)]
+        (cond
+          (= uri "/") (serve-static-file "/index.html")
+          (= uri "/ws") (ws-handler req)
+          (= uri "/health") {:status 200
+                             :headers {"Content-Type" "application/json"}
+                             :body (json/write-value-as-string {:status "ok"})}
+          (or (.startsWith uri "/js/")
+              (.startsWith uri "/css/")) (serve-static-file uri)
+          :else {:status 404
+                 :headers {"Content-Type" "text/plain"}
+                 :body "Not Found"})))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Server lifecycle
