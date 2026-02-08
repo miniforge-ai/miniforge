@@ -18,6 +18,7 @@
    [org.httpkit.server :as http]
    [cheshire.core :as json]
    [clojure.java.io :as io]
+   [hiccup.core :refer [html]]
    [ai.miniforge.web-dashboard.views :as views]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -134,10 +135,14 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; HTTP routes
 
-(defn- html-response [html]
+(defn- html-response
+  "Render hiccup to HTML and return as HTTP response."
+  [hiccup-data]
   {:status 200
    :headers {"Content-Type" "text/html; charset=utf-8"}
-   :body html})
+   :body (if (string? hiccup-data)
+           hiccup-data  ; Already rendered (from views/*)
+           (html hiccup-data))})  ; Render hiccup fragments for htmx
 
 (defn- create-handler [event-stream]
   (let [ws-handler (create-ws-handler event-stream)]
