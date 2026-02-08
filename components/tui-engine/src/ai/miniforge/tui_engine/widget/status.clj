@@ -69,6 +69,41 @@
   "Sub-cell progress bar characters (eighths)."
   [\space \▏ \▎ \▍ \▌ \▋ \▊ \▉ \█])
 
+(defn- render-filled-cells
+  "Render complete filled cells."
+  [buffer full-cells bar-width fill-fg]
+  (reduce (fn [b i]
+            (buf/buf-put-char b i 0
+                              {:char \█ :fg fill-fg :bg :black :bold? false}))
+          buffer
+          (range (min full-cells bar-width))))
+
+(defn- render-fractional-cell
+  "Render partial fill for fractional progress."
+  [buffer full-cells bar-width frac-idx fill-fg]
+  (if (and (< full-cells bar-width) (pos? frac-idx))
+    (buf/buf-put-char buffer full-cells 0
+                      {:char (nth bar-chars frac-idx)
+                       :fg fill-fg :bg :black :bold? false})
+    buffer))
+
+(defn- render-empty-cells
+  "Render remaining empty cells."
+  [buffer full-cells frac-idx bar-width empty-fg]
+  (reduce (fn [b i]
+            (buf/buf-put-char b i 0
+                              {:char \░ :fg empty-fg :bg :black :bold? false}))
+          buffer
+          (range (if (pos? frac-idx) (inc full-cells) full-cells) bar-width)))
+
+(defn- add-percentage-label
+  "Add percentage text label at end of bar."
+  [buffer bar-width label]
+  (if label
+    (buf/buf-put-string buffer bar-width 0 label
+                        {:fg :white :bg :black :bold? false})
+    buffer))
+
 (defn progress-bar
   "Render a progress bar.
    Options:
@@ -84,29 +119,9 @@
         filled-cells (/ (* pct bar-width) 100.0)
         full-cells (int filled-cells)
         frac (- filled-cells full-cells)
-        frac-idx (int (* frac 8))
-        buffer (buf/make-buffer [cols 1])
-        ;; Fill complete cells
-        buffer (reduce (fn [b i]
-                      (buf/buf-put-char b i 0
-                                           {:char \█ :fg fill-fg :bg :black :bold? false}))
-                    buffer (range (min full-cells bar-width)))
-        ;; Fractional cell
-        buffer (if (and (< full-cells bar-width) (pos? frac-idx))
-              (buf/buf-put-char buffer full-cells 0
-                                   {:char (nth bar-chars frac-idx)
-                                    :fg fill-fg :bg :black :bold? false})
-              buffer)
-        ;; Empty cells
-        buffer (reduce (fn [b i]
-                      (buf/buf-put-char b i 0
-                                           {:char \░ :fg empty-fg :bg :black :bold? false}))
-                    buffer
-                    (range (if (pos? frac-idx) (inc full-cells) full-cells)
-                           bar-width))
-        ;; Percentage label
-        buffer (if label
-              (buf/buf-put-string buffer bar-width 0 label
-                                     {:fg :white :bg :black :bold? false})
-              buffer)]
-    buffer))
+        frac-idx (int (* frac 8))]
+    (-> (buf/make-buffer [cols 1])
+        (render-filled-cells full-cells bar-width fill-fg)
+        (render-fractional-cell full-cells bar-width frac-idx fill-fg)
+        (render-empty-cells full-cells frac-idx bar-width empty-fg)
+        (add-percentage-label bar-width label))))

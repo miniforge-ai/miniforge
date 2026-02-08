@@ -48,6 +48,54 @@
                     0)]
     (mapv (fn [spec] (or (:width spec) flex-each)) col-specs)))
 
+(defn- compute-col-offset
+  "Compute x-offset for column at index."
+  [col-widths idx]
+  (reduce + 0 (take idx col-widths)))
+
+(defn- render-header-row
+  "Render table header row."
+  [buffer cols columns col-widths header-fg header-bg]
+  (reduce (fn [b [idx {:keys [header]} width]]
+            (let [txt (pad-right (truncate-str (or header "") width) width)
+                  x-offset (compute-col-offset col-widths idx)]
+              (buf/buf-put-string b x-offset 0 txt
+                                  {:fg header-fg :bg header-bg :bold? true})))
+          buffer
+          (map vector (range) columns col-widths)))
+
+(defn- render-separator
+  "Render horizontal separator line."
+  [buffer cols rows]
+  (if (>= rows 2)
+    (buf/buf-put-string buffer 0 1
+                        (apply str (repeat cols \─))
+                        {:fg :default :bg :black :bold? false})
+    buffer))
+
+(defn- render-data-cell
+  "Render single data cell."
+  [buffer row-data col-idx col-spec width col-widths render-row fg bg]
+  (let [val (str (get row-data (:key col-spec) ""))
+        txt (pad-right (truncate-str val width) width)
+        x-offset (compute-col-offset col-widths col-idx)]
+    (buf/buf-put-string buffer x-offset render-row txt
+                        {:fg fg :bg bg :bold? false})))
+
+(defn- render-data-row
+  "Render single data row across all columns."
+  [buffer row-idx row-data columns col-widths rows selected-row row-fg row-bg selected-fg selected-bg]
+  (let [selected? (= row-idx selected-row)
+        fg (if selected? selected-fg row-fg)
+        bg (if selected? selected-bg row-bg)
+        render-row (+ row-idx 2)]
+    (if (>= render-row rows)
+      (reduced buffer)
+      (reduce (fn [b [col-idx col-spec width]]
+                (render-data-cell b row-data col-idx col-spec width col-widths render-row fg bg))
+              buffer
+              (map vector (range) columns col-widths)))))
+
 (defn table
   "Render a table with column headers and data rows.
    Options:
@@ -64,42 +112,14 @@
                          selected-fg :white selected-bg :blue}}]]
   (let [col-widths (compute-col-widths columns cols)
         buffer (buf/make-buffer [cols rows])
-        ;; Render header
-        buffer (reduce (fn [b [idx {:keys [header]} width]]
-                      (let [txt (pad-right (truncate-str (or header "") width) width)]
-                        (buf/buf-put-string b
-                                        (reduce + 0 (take idx col-widths))
-                                        0 txt
-                                        {:fg header-fg :bg header-bg :bold? true})))
-                    buffer
-                    (map vector (range) columns col-widths))
-        ;; Render separator
-        buffer (if (>= rows 2)
-              (buf/buf-put-string buffer 0 1
-                              (apply str (repeat cols \─))
-                              {:fg :default :bg :black :bold? false})
-              buffer)
-        ;; Render data rows
-        visible-rows (take (max 0 (- rows 2)) (or data []))
-        buffer (reduce (fn [b [row-idx row-data]]
-                      (let [selected? (= row-idx selected-row)
-                            fg (if selected? selected-fg row-fg)
-                            bg (if selected? selected-bg row-bg)
-                            render-row (+ row-idx 2)]
-                        (if (>= render-row rows)
-                          (reduced b)
-                          (reduce (fn [b2 [col-idx {:keys [key]} width]]
-                                    (let [val (str (get row-data key ""))
-                                          txt (pad-right (truncate-str val width) width)]
-                                      (buf/buf-put-string b2
-                                                      (reduce + 0 (take col-idx col-widths))
-                                                      render-row txt
-                                                      {:fg fg :bg bg :bold? false})))
-                                  b
-                                  (map vector (range) columns col-widths)))))
-                    buffer
-                    (map-indexed vector visible-rows))]
-    buffer))
+        buffer (render-header-row buffer cols columns col-widths header-fg header-bg)
+        buffer (render-separator buffer cols rows)
+        visible-rows (take (max 0 (- rows 2)) (or data []))]
+    (reduce (fn [b [row-idx row-data]]
+              (render-data-row b row-idx row-data columns col-widths rows
+                               selected-row row-fg row-bg selected-fg selected-bg))
+            buffer
+            (map-indexed vector visible-rows))))
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Padding

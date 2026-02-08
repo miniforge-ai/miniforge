@@ -72,6 +72,53 @@
    :skipped  :default
    :spinning :cyan})
 
+(defn- render-column-header
+  "Render column header with title."
+  [buffer x-offset avail-w title color]
+  (let [header (subs (str " " title (apply str (repeat avail-w \space)))
+                     0 (min avail-w (+ (count title) 2)))]
+    (buf/buf-put-string buffer x-offset 0 header
+                        {:fg (or color :white) :bg :black :bold? true})))
+
+(defn- render-column-separator
+  "Render horizontal separator below header."
+  [buffer x-offset avail-w rows]
+  (if (>= rows 2)
+    (buf/buf-put-string buffer x-offset 1
+                        (apply str (repeat avail-w \─))
+                        {:fg :default :bg :black :bold? false})
+    buffer))
+
+(defn- format-card-line
+  "Format card text with status indicator."
+  [label status avail-w]
+  (let [indicator (get status-chars status \○)
+        line (str indicator " " (subs label 0 (min (count label) (- avail-w 2))))]
+    (subs line 0 (min (count line) avail-w))))
+
+(defn- render-card
+  "Render single card in column."
+  [buffer x-offset card-idx label status avail-w rows]
+  (let [r (+ card-idx 2)]
+    (if (>= r rows)
+      (reduced buffer)
+      (let [line (format-card-line label status avail-w)]
+        (buf/buf-put-string buffer x-offset r line
+                            {:fg (get status-colors status :white)
+                             :bg :black :bold? false})))))
+
+(defn- render-column
+  "Render complete kanban column."
+  [buffer idx {:keys [title color cards]} col-width cols rows]
+  (let [x-offset (* idx col-width)
+        avail-w (min col-width (- cols x-offset))
+        buffer (render-column-header buffer x-offset avail-w title color)
+        buffer (render-column-separator buffer x-offset avail-w rows)]
+    (reduce (fn [b [card-idx {:keys [label status]}]]
+              (render-card b x-offset card-idx label status avail-w rows))
+            buffer
+            (map-indexed vector (or cards [])))))
+
 (defn kanban
   "Render kanban-style columns.
    Options:
@@ -81,31 +128,7 @@
   (let [n (max 1 (count (or columns [])))
         col-width (max 4 (quot cols n))
         buffer (buf/make-buffer [cols rows])]
-    (reduce (fn [b [idx {:keys [title color cards]}]]
-              (let [x-offset (* idx col-width)
-                    avail-w (min col-width (- cols x-offset))
-                    ;; Header
-                    header (subs (str " " title (apply str (repeat avail-w \space)))
-                                 0 (min avail-w (+ (count title) 2)))
-                    b (buf/buf-put-string b x-offset 0 header
-                                             {:fg (or color :white) :bg :black :bold? true})
-                    ;; Separator
-                    b (if (>= rows 2)
-                        (buf/buf-put-string b x-offset 1
-                                               (apply str (repeat avail-w \─))
-                                               {:fg :default :bg :black :bold? false})
-                        b)]
-                ;; Cards
-                (reduce (fn [b2 [card-idx {:keys [label status]}]]
-                          (let [r (+ card-idx 2)]
-                            (if (>= r rows) (reduced b2)
-                                (let [indicator (get status-chars status \○)
-                                      line (str indicator " " (subs label 0 (min (count label) (- avail-w 2))))
-                                      line (subs line 0 (min (count line) avail-w))]
-                                  (buf/buf-put-string b2 x-offset r line
-                                                         {:fg (get status-colors status :white)
-                                                          :bg :black :bold? false})))))
-                        b
-                        (map-indexed vector (or cards [])))))
+    (reduce (fn [b [idx column]]
+              (render-column b idx column col-width cols rows))
             buffer
             (map-indexed vector (or columns [])))))

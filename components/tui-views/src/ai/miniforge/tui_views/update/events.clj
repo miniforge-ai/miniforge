@@ -23,54 +23,72 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Event stream message handlers
 
+;; Helper functions
+
+(defn- find-workflow-idx
+  "Find index of workflow with given ID in workflows vector."
+  [workflows workflow-id]
+  (some (fn [[i wf]] (when (= (:id wf) workflow-id) i))
+        (map-indexed vector workflows)))
+
+(defn- update-workflow-at
+  "Update workflow at index using update-fn."
+  [model idx update-fn]
+  (if idx
+    (update-in model [:workflows idx] update-fn)
+    model))
+
+(defn- update-detail-if-active
+  "Apply update-fn to detail if workflow-id matches active detail."
+  [model workflow-id update-fn]
+  (if (= workflow-id (get-in model [:detail :workflow-id]))
+    (update-fn model)
+    model))
+
+;; Event handlers
+
 (defn handle-workflow-added [model {:keys [workflow-id name spec]}]
   (let [wf (model/make-workflow {:id workflow-id
                                   :name (or name (:name spec))
                                   :status :running})]
-    (-> model
-        (update :workflows conj wf))))
+    (update model :workflows conj wf)))
 
 (defn handle-phase-changed [model {:keys [workflow-id phase]}]
-  (let [idx (some (fn [[i wf]] (when (= (:id wf) workflow-id) i))
-                  (map-indexed vector (:workflows model)))]
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
     (cond-> model
       idx (assoc-in [:workflows idx :phase] phase)
-      (= workflow-id (get-in model [:detail :workflow-id]))
-      (update-in [:detail :phases] conj {:phase phase :status :running}))))
+      true (update-detail-if-active workflow-id
+             #(update-in % [:detail :phases] conj {:phase phase :status :running})))))
 
 (defn handle-phase-done [model {:keys [workflow-id]}]
-  (let [idx (some (fn [[i wf]] (when (= (:id wf) workflow-id) i))
-                  (map-indexed vector (:workflows model)))]
-    (cond-> model
-      idx (update-in [:workflows idx :progress]
-                     #(min 100 (+ (or % 0) 20))))))
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
+    (update-workflow-at model idx
+      #(update % :progress (fn [p] (min 100 (+ (or p 0) 20)))))))
 
 (defn handle-agent-status [model {:keys [workflow-id agent status message]}]
-  (let [idx (some (fn [[i wf]] (when (= (:id wf) workflow-id) i))
-                  (map-indexed vector (:workflows model)))]
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
     (cond-> model
       idx (assoc-in [:workflows idx :agents agent] {:status status :message message})
-      (= workflow-id (get-in model [:detail :workflow-id]))
-      (assoc-in [:detail :current-agent] {:agent agent :status status :message message}))))
+      true (update-detail-if-active workflow-id
+             #(assoc-in % [:detail :current-agent] {:agent agent :status status :message message})))))
 
 (defn handle-agent-output [model {:keys [workflow-id delta]}]
-  (if (= workflow-id (get-in model [:detail :workflow-id]))
-    (update-in model [:detail :agent-output] str delta)
-    model))
+  (update-detail-if-active model workflow-id
+    #(update-in % [:detail :agent-output] str delta)))
 
 (defn handle-workflow-done [model {:keys [workflow-id status]}]
-  (let [idx (some (fn [[i wf]] (when (= (:id wf) workflow-id) i))
-                  (map-indexed vector (:workflows model)))]
-    (cond-> model
-      idx (-> (assoc-in [:workflows idx :status] (or status :success))
-              (assoc-in [:workflows idx :progress] 100)))))
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
+    (update-workflow-at model idx
+      #(-> %
+           (assoc :status (or status :success))
+           (assoc :progress 100)))))
 
 (defn handle-workflow-failed [model {:keys [workflow-id error]}]
-  (let [idx (some (fn [[i wf]] (when (= (:id wf) workflow-id) i))
-                  (map-indexed vector (:workflows model)))]
-    (cond-> model
-      idx (-> (assoc-in [:workflows idx :status] :failed)
-              (assoc-in [:workflows idx :error] error)))))
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
+    (update-workflow-at model idx
+      #(-> %
+           (assoc :status :failed)
+           (assoc :error error)))))
 
 (defn handle-gate-result [model _payload]
   model)
