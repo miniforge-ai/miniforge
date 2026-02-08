@@ -65,6 +65,8 @@
                        "components/event-stream/resources"
                        "components/tui-engine/src"
                        "components/tui-engine/resources"
+                       "components/tui-views/src"
+                       "components/tui-views/resources"
                        "bases/cli/src"
                        "bases/cli/resources"
                        "bases/lsp-mcp-bridge/src"]
@@ -100,6 +102,7 @@
                      ai.miniforge/repo-dag {:local/root "components/repo-dag"}
                      ai.miniforge/event-stream {:local/root "components/event-stream"}
                      ai.miniforge/tui-engine {:local/root "components/tui-engine"}
+                     ai.miniforge/tui-views {:local/root "components/tui-views"}
                      ai.miniforge/cli {:local/root "bases/cli"}}}
 
   :test {:extra-paths ["development/test"
@@ -133,7 +136,8 @@
                        "components/pr-train/test"
                        "components/repo-dag/test"
                        "components/event-stream/test"
-                       "components/tui-engine/test"]
+                       "components/tui-engine/test"
+                       "components/tui-views/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
                       ai.miniforge/logging {:local/root "components/logging"}
@@ -164,7 +168,8 @@
                       ai.miniforge/pr-train {:local/root "components/pr-train"}
                       ai.miniforge/repo-dag {:local/root "components/repo-dag"}
                       ai.miniforge/event-stream {:local/root "components/event-stream"}
-                      ai.miniforge/tui-engine {:local/root "components/tui-engine"}}}
+                      ai.miniforge/tui-engine {:local/root "components/tui-engine"}
+                      ai.miniforge/tui-views {:local/root "components/tui-views"}}}
 
   :conformance {:extra-paths ["development/test"
                               "tests/conformance"
