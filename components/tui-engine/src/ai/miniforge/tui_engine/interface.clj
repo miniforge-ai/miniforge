@@ -76,15 +76,48 @@
 ;; Re-exports for convenience
 
 ;; Screen
-(def create-screen screen/create-screen)
-(def create-mock-screen screen/create-mock-screen)
-(def mock-enqueue-input! screen/mock-enqueue-input!)
-(def mock-get-cells screen/mock-get-cells)
-(def mock-read-line screen/mock-read-line)
+
+(def create-screen
+  "Create a Lanterna terminal screen for rendering.
+   Dynamically loads the Lanterna implementation (for Babashka compatibility).
+   Returns an IScreen instance."
+  screen/create-screen)
+
+(def create-mock-screen
+  "Create a mock screen for testing.
+   Returns a MockScreen instance that captures renders to a cell buffer."
+  screen/create-mock-screen)
+
+(def mock-enqueue-input!
+  "Enqueue input events into a mock screen's input queue.
+   For testing keyboard interactions."
+  screen/mock-enqueue-input!)
+
+(def mock-get-cells
+  "Get the current cell buffer from a mock screen.
+   Returns a 2D vector of cell maps."
+  screen/mock-get-cells)
+
+(def mock-read-line
+  "Read a line of text from a mock screen's cell buffer.
+   Returns a string representation of the specified row."
+  screen/mock-read-line)
 
 ;; Style
-(def default-theme style/default-theme)
-(def resolve-style style/resolve-style)
+
+(def default-theme
+  "Default color theme for TUI rendering.
+   Map of semantic color names to ANSI color keywords."
+  style/default-theme)
+
+(def resolve-style
+  "Resolve a style map into Lanterna TextCharacter attributes.
+   Converts {:fg :bg :bold?} to Lanterna-compatible representation."
+  style/resolve-style)
 
 ;; Input
-(def normalize-key input/normalize-key)
+
+(def normalize-key
+  "Normalize Lanterna KeyStroke to a semantic keyword.
+   Maps raw key events to keywords like :key/j, :key/enter, :key/escape."
+  input/normalize-key)
