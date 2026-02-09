@@ -2,11 +2,15 @@
   "LLM-based workflow recommendation system.
 
    Provides semantic analysis of task specifications to recommend
-   the most appropriate workflow, complementing rule-based selection."
+   the most appropriate workflow, complementing rule-based selection.
+
+   Returns follow the anomaly system pattern - successful recommendations
+   are plain maps, failures are anomaly maps with :anomaly/category."
   (:require
    [clojure.string :as str]
    [cheshire.core :as json]
-   [ai.miniforge.workflow.interface :as workflow]))
+   [ai.miniforge.workflow.interface :as workflow]
+   [ai.miniforge.response.interface :as response]))
 
 ;;------------------------------------------------------------------------------ Layer 0
 ;; Prompt templates
@@ -142,43 +146,39 @@
      available-workflows - Sequence of workflow definition maps
      llm-client - Optional LLM client
 
-   Returns: Map with recommendation
-     {:workflow keyword - recommended workflow ID
-      :confidence float - 0.0-1.0
-      :reasoning string - explanation
-      :characteristics [strings] - workflow characteristics
-      :source :llm - indicator that this came from LLM}"
+   Returns: WorkflowRecommendation map (validated against schema) or anomaly map
+     Success: {:workflow keyword, :confidence float, :reasoning string, :source :llm, ...}
+     Failure: {:anomaly/category keyword, :anomaly/message string, ...}"
   [spec available-workflows llm-client]
   (if-not llm-client
-    {:workflow nil
-     :confidence 0.0
-     :reasoning "LLM client not available"
-     :source :llm
-     :error :no-llm-client}
+    (response/make-anomaly :anomalies/unavailable
+                           "LLM client not available for workflow recommendation"
+                           {:operation :recommend-workflow
+                            :spec-title (:spec/title spec (:title spec))})
     (try
       (let [prompt (build-recommendation-prompt spec available-workflows)
             response-text (call-llm-for-recommendation llm-client prompt)]
         (if-not response-text
-          {:workflow nil
-           :confidence 0.0
-           :reasoning "LLM did not return a response"
-           :source :llm
-           :error :no-response}
+          (response/make-anomaly :anomalies/unavailable
+                                 "LLM did not return a response"
+                                 {:operation :recommend-workflow
+                                  :spec-title (:spec/title spec (:title spec))})
           (if-let [parsed (parse-llm-response response-text)]
-            (assoc parsed :source :llm)
-            {:workflow nil
-             :confidence 0.0
-             :reasoning "Failed to parse LLM response"
-             :source :llm
-             :error :parse-failed
-             :raw-response response-text})))
+            (let [recommendation (assoc parsed :source :llm)]
+              ;; Validate against schema
+              (if (workflow/valid-recommendation? recommendation)
+                recommendation
+                (response/make-anomaly :anomalies/incorrect
+                                       "LLM returned invalid recommendation format"
+                                       {:operation :recommend-workflow
+                                        :validation-errors (workflow/explain-recommendation recommendation)
+                                        :recommendation recommendation})))
+            (response/make-anomaly :anomalies/fault
+                                   "Failed to parse LLM response"
+                                   {:operation :recommend-workflow
+                                    :raw-response response-text}))))
       (catch Exception e
-        {:workflow nil
-         :confidence 0.0
-         :reasoning (str "LLM recommendation error: " (ex-message e))
-         :source :llm
-         :error :exception
-         :exception e}))))
+        (response/from-exception e)))))
 
 ;;------------------------------------------------------------------------------ Layer 3
 ;; Fallback recommendations

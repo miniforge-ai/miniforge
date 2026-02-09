@@ -5,11 +5,14 @@
    - Dynamic workflow discovery from resources
    - Workflow metadata extraction
    - Extensibility for plugin workflows
-   - Workflow characteristics for selection"
+   - Workflow characteristics for selection
+
+   Workflow characteristics are validated against malli schemas in workflow.schemas."
   (:require
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [ai.miniforge.workflow.schemas :as schemas]))
 
 ;;------------------------------------------------------------------------------ Layer 0
 ;; Registry state
@@ -38,17 +41,37 @@
                         {:resource-path resource-path
                          :error (ex-message e)} e))))))
 
+(defn- load-workflow-registry-config
+  "Load workflow registry configuration from resources.
+
+   Returns: Vector of workflow names or default list"
+  []
+  (if-let [resource (io/resource "config/workflow-registry.edn")]
+    (try
+      (:workflows (edn/read-string (slurp resource)))
+      (catch Exception _e
+        ;; Fallback to hardcoded list if config loading fails
+        ["simple-test-v1.0.0"
+         "minimal-test-v1.0.0"
+         "quick-fix-v2.0.0"
+         "lean-sdlc-v1.0.0"
+         "standard-sdlc-v2.0.0"
+         "canonical-sdlc-v1.0.0"]))
+    ;; Fallback if resource not found
+    ["simple-test-v1.0.0"
+     "minimal-test-v1.0.0"
+     "quick-fix-v2.0.0"
+     "lean-sdlc-v1.0.0"
+     "standard-sdlc-v2.0.0"
+     "canonical-sdlc-v1.0.0"]))
+
 (defn- discover-workflows-from-resources
   "Discover workflows from classpath resources.
+   Workflow names are loaded from resources/config/workflow-registry.edn
 
    Returns: Sequence of workflow maps"
   []
-  (let [workflow-names ["simple-test-v1.0.0"
-                        "minimal-test-v1.0.0"
-                        "quick-fix-v2.0.0"
-                        "lean-sdlc-v1.0.0"
-                        "standard-sdlc-v2.0.0"
-                        "canonical-sdlc-v1.0.0"]]
+  (let [workflow-names (load-workflow-registry-config)]
     (->> workflow-names
          (map #(str "workflows/" % ".edn"))
          (keep load-workflow-from-resource))))
@@ -62,9 +85,11 @@
    Arguments:
      workflow - Workflow definition map
 
-   Returns: Map with characteristics for selection
+   Returns: Map with characteristics for selection (validated against WorkflowCharacteristics schema)
      {:id keyword
       :version string
+      :name string
+      :description string
       :phases int
       :max-iterations int
       :task-types [keywords]
@@ -81,17 +106,23 @@
         complexity (cond
                      (< phase-count 4) :simple
                      (< phase-count 8) :medium
-                     :else :complex)]
-    {:id (:workflow/id workflow)
-     :version (:workflow/version workflow)
-     :name (:workflow/name workflow)
-     :description (:workflow/description workflow)
-     :phases phase-count
-     :max-iterations max-iterations
-     :task-types (or task-types [])
-     :complexity complexity
-     :has-review has-review?
-     :has-testing has-testing?}))
+                     :else :complex)
+        characteristics {:id (:workflow/id workflow)
+                         :version (:workflow/version workflow)
+                         :name (:workflow/name workflow)
+                         :description (:workflow/description workflow)
+                         :phases phase-count
+                         :max-iterations max-iterations
+                         :task-types (or task-types [])
+                         :complexity complexity
+                         :has-review has-review?
+                         :has-testing has-testing?}]
+    ;; Validate against schema
+    (when-not (schemas/valid-characteristics? characteristics)
+      (throw (ex-info "Invalid workflow characteristics"
+                      {:characteristics characteristics
+                       :errors (schemas/explain-characteristics characteristics)})))
+    characteristics))
 
 ;;------------------------------------------------------------------------------ Layer 3
 ;; Registry operations

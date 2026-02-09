@@ -2,9 +2,12 @@
   "User configuration management for Miniforge.
 
    Provides loading, merging, and saving of user configuration.
-   Configuration precedence: user > env > defaults."
+   Configuration precedence: user > env > defaults.
+
+   Default configuration is loaded from resources/config/default-user-config.edn"
   (:require
    [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.pprint]
    [babashka.fs :as fs]
    [babashka.process]))
@@ -16,20 +19,57 @@
   "Default location for user config file."
   (str (fs/home) "/.miniforge/config.edn"))
 
+(defn- load-default-config
+  "Load default configuration from resources.
+
+   Returns: Default config map or hardcoded fallback"
+  []
+  (if-let [resource (io/resource "config/default-user-config.edn")]
+    (try
+      (:config (edn/read-string (slurp resource)))
+      (catch Exception _e
+        ;; Fallback if resource loading fails
+        {:llm {:backend :claude
+               :model "claude-sonnet-4-20250514"
+               :timeout-ms 300000
+               :line-timeout-ms 60000
+               :max-tokens 4000}
+         :workflow {:max-iterations 50
+                    :max-tokens 150000
+                    :failure-strategy :retry}
+         :artifacts {:dir (str (fs/home) "/.miniforge/artifacts")}
+         :meta-loop {:enabled true
+                     :max-convergence-iterations 10
+                     :convergence-threshold 0.95}
+         :model-selection {:enabled true
+                           :strategy :automatic
+                           :cost-limit-per-task 0.10
+                           :prefer-speed false
+                           :allow-downgrade true
+                           :require-local false}}))
+    ;; Fallback if resource not found
+    {:llm {:backend :claude
+           :model "claude-sonnet-4-20250514"
+           :timeout-ms 300000
+           :line-timeout-ms 60000
+           :max-tokens 4000}
+     :workflow {:max-iterations 50
+                :max-tokens 150000
+                :failure-strategy :retry}
+     :artifacts {:dir (str (fs/home) "/.miniforge/artifacts")}
+     :meta-loop {:enabled true
+                 :max-convergence-iterations 10
+                 :convergence-threshold 0.95}
+     :model-selection {:enabled true
+                       :strategy :automatic
+                       :cost-limit-per-task 0.10
+                       :prefer-speed false
+                       :allow-downgrade true
+                       :require-local false}}))
+
 (def default-config
-  "Default configuration values."
-  {:llm {:backend :claude
-         :model "claude-sonnet-4-20250514"
-         :timeout-ms 300000
-         :line-timeout-ms 60000
-         :max-tokens 4000}
-   :workflow {:max-iterations 50
-              :max-tokens 150000
-              :failure-strategy :retry}
-   :artifacts {:dir (str (fs/home) "/.miniforge/artifacts")}
-   :meta-loop {:enabled true
-               :max-convergence-iterations 10
-               :convergence-threshold 0.95}})
+  "Default configuration values loaded from resources/config/default-user-config.edn"
+  (load-default-config))
 
 (defn- read-edn-file
   "Safely read an EDN file, returning nil on error."
@@ -75,7 +115,11 @@
    - MINIFORGE_MAX_ITERATIONS
    - MINIFORGE_MAX_TOKENS
    - MINIFORGE_FAILURE_STRATEGY
-   - MINIFORGE_ARTIFACTS_DIR"
+   - MINIFORGE_ARTIFACTS_DIR
+   - MINIFORGE_MODEL_SELECTION_ENABLED
+   - MINIFORGE_MODEL_SELECTION_STRATEGY
+   - MINIFORGE_MODEL_SELECTION_COST_LIMIT
+   - MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL"
   [config]
   (cond-> config
     ;; LLM settings
@@ -106,7 +150,20 @@
 
     ;; Artifact settings
     (get-env-var "MINIFORGE_ARTIFACTS_DIR")
-    (assoc-in [:artifacts :dir] (get-env-var "MINIFORGE_ARTIFACTS_DIR"))))
+    (assoc-in [:artifacts :dir] (get-env-var "MINIFORGE_ARTIFACTS_DIR"))
+
+    ;; Model selection settings
+    (get-env-var "MINIFORGE_MODEL_SELECTION_ENABLED")
+    (assoc-in [:model-selection :enabled] (parse-env-value (get-env-var "MINIFORGE_MODEL_SELECTION_ENABLED")))
+
+    (get-env-var "MINIFORGE_MODEL_SELECTION_STRATEGY")
+    (assoc-in [:model-selection :strategy] (keyword (get-env-var "MINIFORGE_MODEL_SELECTION_STRATEGY")))
+
+    (get-env-var "MINIFORGE_MODEL_SELECTION_COST_LIMIT")
+    (assoc-in [:model-selection :cost-limit-per-task] (parse-env-value (get-env-var "MINIFORGE_MODEL_SELECTION_COST_LIMIT")))
+
+    (get-env-var "MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL")
+    (assoc-in [:model-selection :require-local] (parse-env-value (get-env-var "MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL")))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Config loading and merging

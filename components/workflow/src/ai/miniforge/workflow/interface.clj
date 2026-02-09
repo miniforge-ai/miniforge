@@ -6,6 +6,7 @@
    [ai.miniforge.workflow.persistence :as persist]
    [ai.miniforge.workflow.replay :as replay]
    [ai.miniforge.workflow.registry :as registry]
+   [ai.miniforge.workflow.schemas :as schemas]
    [ai.miniforge.workflow.interface.protocols.workflow :as workflow-proto]
    [ai.miniforge.workflow.interface.protocols.phase-executor :as executor-proto]
    [ai.miniforge.workflow.interface.protocols.workflow-observer :as observer-proto]
@@ -466,6 +467,19 @@
   "Ensure the registry is initialized (idempotent).
    See workflow.registry for details."
   registry/ensure-initialized!)
+
+;------------------------------------------------------------------------------ Layer 8
+;; Workflow schemas
+
+(def valid-recommendation?
+  "Check if a value is a valid workflow recommendation.
+   See workflow.schemas for details."
+  schemas/valid-recommendation?)
+
+(def explain-recommendation
+  "Get human-readable explanation of validation errors for recommendation.
+   See workflow.schemas for details."
+  schemas/explain-recommendation)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

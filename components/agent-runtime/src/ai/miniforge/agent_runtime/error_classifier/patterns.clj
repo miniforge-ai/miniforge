@@ -4,93 +4,75 @@
    Provides patterns for classifying errors into three categories:
    - :agent-backend - Agent system bugs
    - :task-code - User code errors
-   - :external - External service errors")
+   - :external - External service errors
+
+   Pattern definitions are loaded from EDN configuration files in resources/error-patterns/"
+  (:require
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]))
 
 ;;------------------------------------------------------------------------------ Layer 0
-;; Pattern definitions
+;; Pattern loading from configuration
 
-(def agent-backend-patterns
-  "Patterns that indicate agent system bugs (Claude Code internal errors)"
-  [{:regex #"classifyHandoffIfNeeded is not defined"
-    :type :agent-backend
-    :vendor "Claude Code"}
-   {:regex #"ReferenceError:.*agent.*is not defined"
-    :type :agent-backend
-    :vendor "Claude Code"}
-   {:regex #"TypeError:.*agent\..*is not a function"
-    :type :agent-backend
-    :vendor "Claude Code"}
-   {:regex #"Cannot read property.*of undefined"
-    :type :agent-backend
-    :vendor "Claude Code"}
-   {:regex #"null toolResult received"
-    :type :agent-backend
-    :vendor "Claude Code"}
-   {:regex #"agent is undefined"
-    :type :agent-backend
-    :vendor "Claude Code"}
-   {:regex #"handoff failed for agent"
-    :type :agent-backend
-    :vendor "Claude Code"}])
+(defn- load-pattern-config
+  "Load error pattern configuration from resource file.
 
-(def task-code-patterns
-  "Patterns that indicate user code errors"
-  [{:regex #"Syntax error"
-    :type :task-code
-    :vendor "miniforge"}
-   {:regex #"Compilation failed"
-    :type :task-code
-    :vendor "miniforge"}
-   {:regex #"linting took.*errors:"
-    :type :task-code
-    :vendor "miniforge"}
-   {:regex #"test suite failed"
-    :type :task-code
-    :vendor "miniforge"}
-   {:regex #"Could not resolve namespace"
-    :type :task-code
-    :vendor "miniforge"}
-   {:regex #"No such file or directory"
-    :type :task-code
-    :vendor "miniforge"}
-   {:regex #"Unexpected token"
-    :type :task-code
-    :vendor "miniforge"}
-   {:regex #"Parse error"
-    :type :task-code
-    :vendor "miniforge"}])
+   Arguments:
+     resource-path - Path to EDN file in resources
 
-(def external-patterns
-  "Patterns that indicate external service errors"
-  [{:regex #"ECONNREFUSED"
-    :type :external
-    :vendor "External Service"}
-   {:regex #"Network error"
-    :type :external
-    :vendor "External Service"}
-   {:regex #"API rate limit exceeded"
-    :type :external
-    :vendor "External Service"}
-   {:regex #"API service unavailable"
-    :type :external
-    :vendor "External Service"}
-   {:regex #"Request timeout"
-    :type :external
-    :vendor "External Service"}
-   {:regex #"502 Bad Gateway"
-    :type :external
-    :vendor "External Service"}
-   {:regex #"503 Service Unavailable"
-    :type :external
-    :vendor "External Service"}
-   {:regex #"Connection refused"
-    :type :external
-    :vendor "External Service"}
-   {:regex #"DNS lookup failed"
-    :type :external
-    :vendor "External Service"}])
+   Returns: Pattern config map or nil on error"
+  [resource-path]
+  (when-let [resource (io/resource resource-path)]
+    (try
+      (edn/read-string (slurp resource))
+      (catch Exception _e
+        nil))))
+
+(defn- compile-pattern
+  "Compile a pattern map with regex string to regex object.
+
+   Arguments:
+     pattern - Map with :regex string
+     type - Error type keyword
+
+   Returns: Pattern map with compiled :regex"
+  [pattern type]
+  (-> pattern
+      (assoc :type type)
+      (update :regex re-pattern)))
+
+(defn- load-patterns
+  "Load and compile patterns from a config file.
+
+   Arguments:
+     config-name - Name of config file (without .edn)
+
+   Returns: Vector of compiled pattern maps"
+  [config-name]
+  (if-let [config (load-pattern-config (str "error-patterns/" config-name ".edn"))]
+    (let [type (:type config)]
+      (mapv #(compile-pattern % type) (:patterns config)))
+    []))
 
 ;;------------------------------------------------------------------------------ Layer 1
+;; Pattern definitions (loaded from config)
+
+(def agent-backend-patterns
+  "Patterns that indicate agent system bugs (Claude Code internal errors).
+   Loaded from resources/error-patterns/agent-backend.edn"
+  (load-patterns "agent-backend"))
+
+(def task-code-patterns
+  "Patterns that indicate user code errors.
+   Loaded from resources/error-patterns/task-code.edn"
+  (load-patterns "task-code"))
+
+(def external-patterns
+  "Patterns that indicate external service errors.
+   Loaded from resources/error-patterns/external.edn"
+  (load-patterns "external"))
+
+;;------------------------------------------------------------------------------ Layer 2
 ;; Pattern matching
 
 (defn matches-pattern?
