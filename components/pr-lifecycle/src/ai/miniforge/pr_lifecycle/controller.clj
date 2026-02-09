@@ -35,15 +35,18 @@
    - :max-fix-iterations - Max fix iterations (default 5)
    - :ci-poll-interval-ms - CI poll interval (default 30000)
    - :review-poll-interval-ms - Review poll interval (default 30000)
+   - :auto-resolve-comments - Auto-resolve conversation threads after fixes (default true)
 
    Returns controller state atom."
   [dag-id run-id task-id task
    & {:keys [worktree-path event-bus logger generate-fn merge-policy
-             max-fix-iterations ci-poll-interval-ms review-poll-interval-ms]
+             max-fix-iterations ci-poll-interval-ms review-poll-interval-ms
+             auto-resolve-comments]
       :or {max-fix-iterations 5
            ci-poll-interval-ms 30000
            review-poll-interval-ms 30000
-           merge-policy merge/default-merge-policy}}]
+           merge-policy merge/default-merge-policy
+           auto-resolve-comments true}}]
   (atom {:controller/id (random-uuid)
          :dag/id dag-id
          :run/id run-id
@@ -55,7 +58,8 @@
                   :merge-policy merge-policy
                   :max-fix-iterations max-fix-iterations
                   :ci-poll-interval-ms ci-poll-interval-ms
-                  :review-poll-interval-ms review-poll-interval-ms}
+                  :review-poll-interval-ms review-poll-interval-ms
+                  :auto-resolve-comments auto-resolve-comments}
 
          ;; Dependencies
          :event-bus event-bus
@@ -270,7 +274,7 @@
   "Handle review feedback by running the fix loop."
   [controller review-comments]
   (let [{task-id :task/id :keys [task pr config event-bus logger generate-fn]} @controller
-        {:keys [worktree-path max-fix-iterations]} config
+        {:keys [worktree-path max-fix-iterations auto-resolve-comments]} config
         current-iterations (:fix-iterations @controller)]
 
     (when (>= current-iterations max-fix-iterations)
@@ -294,7 +298,8 @@
                        :logger logger
                        :event-bus event-bus
                        :dag/id (:dag/id @controller)
-                       :run/id (:run/id @controller)})]
+                       :run/id (:run/id @controller)
+                       :auto-resolve-comments auto-resolve-comments})]
       (add-history! controller :review-fix-completed {:success? (:success? fix-result)})
       fix-result)))
 
