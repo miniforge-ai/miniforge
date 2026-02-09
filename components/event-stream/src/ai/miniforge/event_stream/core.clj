@@ -20,12 +20,17 @@
   "Event bus and event constructors for workflow observability."
   (:require
    [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.response.interface :as response]))
+   [ai.miniforge.response.interface :as response]
+   [ai.miniforge.event-stream.sinks :as sinks]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants
 
 (def ^:const event-version "1.0.0")
+
+;------------------------------------------------------------------------------ Layer 0
+;; Event persistence via configurable sinks
+;; Note: File persistence moved to sinks.clj for configurability
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event envelope constructor
@@ -44,16 +49,56 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Event bus operations
 
-(defn create-event-stream [& [opts]]
-  (atom {:events []
-         :subscribers {}
-         :filters {}
-         :sequence-numbers {}
-         :logger (:logger opts)}))
+(defn create-event-stream
+  "Create an event stream with configurable sinks.
+
+   Options:
+     :logger - Optional logger instance
+     :sinks - Vector of sink functions (default: file sink)
+     :config - Config map to create sinks from
+
+   Returns: Event stream atom
+
+   Example:
+     ;; Default file sink
+     (create-event-stream)
+
+     ;; Custom sinks
+     (create-event-stream {:sinks [(sinks/file-sink) (sinks/stdout-sink)]})
+
+     ;; From config
+     (create-event-stream {:config user-config})"
+  [& [opts]]
+  (let [;; Create sinks from config or use provided sinks or default
+        event-sinks (cond
+                      (:sinks opts) (:sinks opts)
+                      (:config opts) (sinks/create-sinks-from-config (:config opts))
+                      :else [(sinks/file-sink)])] ;; Default to file sink
+    (atom {:events []
+           :subscribers {}
+           :filters {}
+           :sequence-numbers {}
+           :logger (:logger opts)
+           :sinks event-sinks})))
 
 (defn publish! [stream event]
-  (let [{:keys [subscribers filters logger]} @stream]
+  (let [{:keys [subscribers filters logger sinks]} @stream
+        workflow-id (:workflow/id event)]
+    ;; Persist event to configured sinks
+    (doseq [sink sinks]
+      (try
+        (sink event)
+        (catch Exception e
+          (when logger
+            (log/warn logger :event-stream :sink-error
+                     {:message "Event sink failed"
+                      :data {:event-type (:event/type event)
+                             :error (.getMessage e)}})))))
+
+    ;; In-memory event log
     (swap! stream update :events conj event)
+
+    ;; Notify subscribers
     (doseq [[sub-id callback] subscribers]
       (let [filter-fn (get filters sub-id (constantly true))]
         (when (filter-fn event)
@@ -70,7 +115,7 @@
       (log/debug logger :event-stream :event/published
                  {:message "Event published"
                   :data {:event-type (:event/type event)
-                         :workflow-id (:workflow/id event)
+                         :workflow-id workflow-id
                          :sequence (:event/sequence-number event)}}))
     event))
 
