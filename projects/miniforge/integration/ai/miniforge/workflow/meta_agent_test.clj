@@ -1,4 +1,8 @@
-;; Copyright 2025 miniforge.ai
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;;
 ;; Licensed under the Apache License, Version 2.0 (the "License");
 ;; you may not use this file except in compliance with the License.
@@ -21,7 +25,6 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.runner :as runner]
-   [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.agent.interface :as agent]))
 
 ;------------------------------------------------------------------------------ Test fixtures
@@ -60,7 +63,7 @@
         counter (atom 0)]
     (reify
       clojure.lang.IFn
-      (invoke [_this _messages opts]
+      (invoke [_this _messages _opts]
         (let [idx @counter
               response (get responses idx (last responses))]
           (swap! counter inc)
@@ -224,10 +227,10 @@
                   workflow
                   input
                   {:llm-backend mock-llm
-                   :on-phase-start (fn [ctx ic]
+                   :on-phase-start (fn [_ctx ic]
                                      (swap! phase-starts conj
                                             (get-in ic [:config :phase])))
-                   :on-phase-complete (fn [ctx ic res]
+                   :on-phase-complete (fn [_ctx ic res]
                                         (swap! phase-completes conj
                                                {:phase (get-in ic [:config :phase])
                                                 :status (or (:status res)
