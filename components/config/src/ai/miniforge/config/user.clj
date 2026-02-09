@@ -46,7 +46,12 @@
                            :cost-limit-per-task 0.10
                            :prefer-speed false
                            :allow-downgrade true
-                           :require-local false}}))
+                           :require-local false}
+         :self-healing {:enabled true
+                        :workaround-auto-apply true
+                        :backend-auto-switch true
+                        :backend-health-threshold 0.90
+                        :backend-switch-cooldown-ms 1800000}}))
     ;; Fallback if resource not found
     {:llm {:backend :claude
            :model "claude-sonnet-4-20250514"
@@ -65,7 +70,12 @@
                        :cost-limit-per-task 0.10
                        :prefer-speed false
                        :allow-downgrade true
-                       :require-local false}}))
+                       :require-local false}
+     :self-healing {:enabled true
+                    :workaround-auto-apply true
+                    :backend-auto-switch true
+                    :backend-health-threshold 0.90
+                    :backend-switch-cooldown-ms 1800000}}))
 
 (def default-config
   "Default configuration values loaded from resources/config/default-user-config.edn"
@@ -119,7 +129,11 @@
    - MINIFORGE_MODEL_SELECTION_ENABLED
    - MINIFORGE_MODEL_SELECTION_STRATEGY
    - MINIFORGE_MODEL_SELECTION_COST_LIMIT
-   - MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL"
+   - MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL
+   - MINIFORGE_SELF_HEALING_ENABLED
+   - MINIFORGE_SELF_HEALING_AUTO_APPLY
+   - MINIFORGE_BACKEND_AUTO_SWITCH
+   - MINIFORGE_BACKEND_HEALTH_THRESHOLD"
   [config]
   (cond-> config
     ;; LLM settings
@@ -163,7 +177,20 @@
     (assoc-in [:model-selection :cost-limit-per-task] (parse-env-value (get-env-var "MINIFORGE_MODEL_SELECTION_COST_LIMIT")))
 
     (get-env-var "MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL")
-    (assoc-in [:model-selection :require-local] (parse-env-value (get-env-var "MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL")))))
+    (assoc-in [:model-selection :require-local] (parse-env-value (get-env-var "MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL")))
+
+    ;; Self-healing settings
+    (get-env-var "MINIFORGE_SELF_HEALING_ENABLED")
+    (assoc-in [:self-healing :enabled] (parse-env-value (get-env-var "MINIFORGE_SELF_HEALING_ENABLED")))
+
+    (get-env-var "MINIFORGE_SELF_HEALING_AUTO_APPLY")
+    (assoc-in [:self-healing :workaround-auto-apply] (parse-env-value (get-env-var "MINIFORGE_SELF_HEALING_AUTO_APPLY")))
+
+    (get-env-var "MINIFORGE_BACKEND_AUTO_SWITCH")
+    (assoc-in [:self-healing :backend-auto-switch] (parse-env-value (get-env-var "MINIFORGE_BACKEND_AUTO_SWITCH")))
+
+    (get-env-var "MINIFORGE_BACKEND_HEALTH_THRESHOLD")
+    (assoc-in [:self-healing :backend-health-threshold] (parse-env-value (get-env-var "MINIFORGE_BACKEND_HEALTH_THRESHOLD")))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Config loading and merging

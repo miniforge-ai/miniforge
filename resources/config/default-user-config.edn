@@ -17,4 +17,9 @@
                     :cost-limit-per-task 0.10
                     :prefer-speed false
                     :allow-downgrade true
-                    :require-local false}}}
+                    :require-local false}
+  :self-healing {:enabled true
+                 :workaround-auto-apply true
+                 :backend-auto-switch true
+                 :backend-health-threshold 0.90
+                 :backend-switch-cooldown-ms 1800000}}}

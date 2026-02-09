@@ -179,6 +179,38 @@
    [:message string?]])
 
 ;------------------------------------------------------------------------------ Layer 3
+;; Self-healing event schemas
+
+(def WorkaroundApplied
+  "Schema for self-healing/workaround-applied event."
+  [:map
+   [:event/type [:= :self-healing/workaround-applied]]
+   [:event/id uuid?]
+   [:event/timestamp inst?]
+   [:event/version string?]
+   [:event/sequence-number int?]
+   [:workflow/id uuid?]
+   [:workaround-id {:optional true} keyword?]
+   [:pattern-id keyword?]
+   [:success? boolean?]
+   [:message string?]])
+
+(def BackendSwitched
+  "Schema for self-healing/backend-switched event."
+  [:map
+   [:event/type [:= :self-healing/backend-switched]]
+   [:event/id uuid?]
+   [:event/timestamp inst?]
+   [:event/version string?]
+   [:event/sequence-number int?]
+   [:workflow/id uuid?]
+   [:from keyword?]
+   [:to keyword?]
+   [:reason string?]
+   [:cooldown-until inst?]
+   [:message string?]])
+
+;------------------------------------------------------------------------------ Layer 4
 ;; LLM event schemas
 
 (def LLMRequest
