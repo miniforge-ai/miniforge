@@ -5,7 +5,9 @@
    [ai.miniforge.llm.interface.protocols.llm-client :as p]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
    [ai.miniforge.llm.protocols.records.llm-client :as records]
-   [ai.miniforge.llm.progress-monitor :as pm]))
+   [ai.miniforge.llm.progress-monitor :as pm]
+   [ai.miniforge.llm.model-registry :as registry]
+   [ai.miniforge.llm.model-selector :as selector]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Backend information
@@ -236,6 +238,78 @@
        (println \"Chunks:\" (:chunks stats)))"
   [monitor]
   (pm/get-stats monitor))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Model Selection API
+
+(defn get-model
+  "Get a model's full profile by keyword.
+
+   Example:
+     (get-model :opus-4.6)
+     (get-model :sonnet-4.5)"
+  [model-key]
+  (registry/get-model model-key))
+
+(defn get-models-by-capability
+  "Get models meeting or exceeding a capability level.
+
+   Example:
+     (get-models-by-capability :reasoning :excellent)"
+  [capability min-level]
+  (registry/get-models-by-capability capability min-level))
+
+(defn get-models-by-use-case
+  "Get models that support a specific use-case.
+
+   Example:
+     (get-models-by-use-case :code-implementation)"
+  [use-case]
+  (registry/get-models-by-use-case use-case))
+
+(defn recommend-models-for-task-type
+  "Get recommended models for a task type.
+
+   Example:
+     (recommend-models-for-task-type :thinking-heavy)"
+  [task-type]
+  (registry/recommend-models-for-task-type task-type))
+
+(defn select-model
+  "Select optimal model based on task classification.
+
+   Arguments:
+   - task-classification - Map with :type, :confidence, :reason
+   - config - Optional configuration map
+   - constraints - Optional constraints map
+
+   Example:
+     (select-model {:type :execution-focused
+                    :confidence 0.9
+                    :reason \"Code implementation\"})"
+  ([task-classification]
+   (selector/select-model task-classification))
+  ([task-classification config]
+   (selector/select-model task-classification config))
+  ([task-classification config constraints]
+   (selector/select-model task-classification config constraints)))
+
+(defn select-model-for-phase
+  "Select model for a workflow phase.
+
+   Example:
+     (select-model-for-phase :plan)
+     (select-model-for-phase :implement)"
+  [phase & {:keys [config constraints]}]
+  (selector/select-model-for-phase phase :config config :constraints constraints))
+
+(defn explain-selection
+  "Generate user-facing explanation of model selection.
+
+   Example:
+     (explain-selection selection)"
+  [selection]
+  (selector/explain-selection selection))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -18,6 +18,8 @@
                        "components/artifact/resources"
                        "components/agent/src"
                        "components/agent/resources"
+                       "components/agent-runtime/src"
+                       "components/agent-runtime/resources"
                        "components/task/src"
                        "components/task/resources"
                        "components/loop/src"
@@ -78,6 +80,7 @@
                       ai.miniforge/tool {:local/root "components/tool"}
                       ai.miniforge/artifact {:local/root "components/artifact"}
                       ai.miniforge/agent {:local/root "components/agent"}
+                      ai.miniforge/agent-runtime {:local/root "components/agent-runtime"}
                       ai.miniforge/task {:local/root "components/task"}
                       ai.miniforge/loop {:local/root "components/loop"}
                       ai.miniforge/knowledge {:local/root "components/knowledge"}
@@ -115,6 +118,7 @@
                        "components/tool/test"
                        "components/artifact/test"
                        "components/agent/test"
+                       "components/agent-runtime/test"
                        "components/task/test"
                        "components/loop/test"
                        "components/knowledge/test"
@@ -145,6 +149,7 @@
                       ai.miniforge/tool {:local/root "components/tool"}
                       ai.miniforge/artifact {:local/root "components/artifact"}
                       ai.miniforge/agent {:local/root "components/agent"}
+                      ai.miniforge/agent-runtime {:local/root "components/agent-runtime"}
                       ai.miniforge/task {:local/root "components/task"}
                       ai.miniforge/loop {:local/root "components/loop"}
                       ai.miniforge/knowledge {:local/root "components/knowledge"}

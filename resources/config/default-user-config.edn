@@ -1,0 +1,20 @@
+{:description "Default user configuration for Miniforge"
+ :config
+ {:llm {:backend :claude
+        :model "claude-sonnet-4-20250514"
+        :timeout-ms 300000
+        :line-timeout-ms 60000
+        :max-tokens 4000}
+  :workflow {:max-iterations 50
+             :max-tokens 150000
+             :failure-strategy :retry}
+  :artifacts {:dir "~/.miniforge/artifacts"}
+  :meta-loop {:enabled true
+              :max-convergence-iterations 10
+              :convergence-threshold 0.95}
+  :model-selection {:enabled true
+                    :strategy :automatic
+                    :cost-limit-per-task 0.10
+                    :prefer-speed false
+                    :allow-downgrade true
+                    :require-local false}}}

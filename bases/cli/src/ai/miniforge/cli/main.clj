@@ -39,7 +39,8 @@
    [clojure.edn :as edn]
    [cheshire.core :as json]
    [ai.miniforge.cli.spec-parser :as spec-parser]
-   [ai.miniforge.cli.workflow-runner :as workflow-runner]))
+   [ai.miniforge.cli.workflow-runner :as workflow-runner]
+   [ai.miniforge.cli.config :as config]))
 
 ;; TUI components loaded conditionally (only in JVM/jlink bundled runtime)
 ;; Not available in Babashka - use 'miniforge-tui' package for terminal UI
@@ -99,6 +100,119 @@
 
 (defn- print-info [msg]
   (println (style msg :foreground :cyan)))
+
+(defn- print-agent-backend-error-header
+  "Print header for agent backend errors."
+  [completed-work]
+  (println (style "⚠️  Agent System Error (Not Your Fault!)" :foreground :yellow :bold true))
+  (when (seq completed-work)
+    (println)
+    (println (style "Your task completed successfully:" :foreground :green))
+    (doseq [work completed-work]
+      (println (str "  " (style "✅" :foreground :green) " " work)))))
+
+(defn- print-task-code-error-header
+  "Print header for task code errors."
+  []
+  (println (style "❌ Task Code Error" :foreground :red :bold true)))
+
+(defn- print-external-error-header
+  "Print header for external service errors."
+  []
+  (println (style "⚠️  External Service Error" :foreground :yellow :bold true)))
+
+(defn- print-generic-error-header
+  "Print header for unclassified errors."
+  []
+  (println (style "❌ Error" :foreground :red :bold true)))
+
+(defn- print-agent-backend-error-context
+  "Print context for agent backend errors."
+  [completed-work]
+  (if (seq completed-work)
+    (println "This is a bug in Claude Code's agent runtime, not in your task or miniforge.\nYour work is complete and safe.")
+    (println "This is a bug in Claude Code's agent runtime.")))
+
+(defn- print-task-code-error-context
+  "Print context for task code errors."
+  [completed-work]
+  (println "This is an issue with the code being generated or the task specification.")
+  (when (seq completed-work)
+    (println)
+    (println "Partial work completed:")
+    (doseq [work completed-work]
+      (println (str "  ⏸️  " work)))))
+
+(defn- print-external-error-context
+  "Print context for external service errors."
+  [completed-work]
+  (println "This is not an issue with your code or miniforge. The external service\nis temporarily unavailable.")
+  (when (seq completed-work)
+    (println)
+    (println "Partial work completed:")
+    (doseq [work completed-work]
+      (println (str "  " (style "✅" :foreground :green) " " work)))))
+
+(defn- print-error-header
+  "Print error header based on error type."
+  [error-type completed-work]
+  (case error-type
+    :agent-backend (print-agent-backend-error-header completed-work)
+    :task-code (print-task-code-error-header)
+    :external (print-external-error-header)
+    (print-generic-error-header)))
+
+(defn- print-error-context
+  "Print error context based on error type."
+  [error-type completed-work]
+  (case error-type
+    :agent-backend (print-agent-backend-error-context completed-work)
+    :task-code (print-task-code-error-context completed-work)
+    :external (print-external-error-context completed-work)
+    nil))
+
+(defn- print-error-report-url
+  "Print error reporting URL if available."
+  [report-url vendor]
+  (when report-url
+    (println)
+    (println (str (style "📝 Please report this to " :foreground :cyan) vendor ":"))
+    (println (str "   " report-url))))
+
+(defn- get-retry-recommendation
+  "Get retry recommendation message based on error type."
+  [error-type]
+  (case error-type
+    :task-code "Fix the issue and retry the task."
+    :external "Wait a few minutes and retry - this is likely transient."
+    :agent-backend "Try again later after the bug is fixed."
+    "Check the error and decide if retry is appropriate."))
+
+(defn- print-retry-recommendation
+  "Print retry recommendation based on error characteristics."
+  [should-retry error-type completed-work]
+  (println)
+  (if should-retry
+    (println (str (style "🔄 Recommendation: " :foreground :cyan)
+                 (get-retry-recommendation error-type)))
+    (println (str (style "⚙️  " :foreground :cyan)
+                 (if (seq completed-work)
+                   "No need to retry - your task succeeded."
+                   "Report this bug and try again later.")))))
+
+(defn- print-classified-error
+  "Display a classified error with rich formatting.
+   Expects error-classification map from error-classifier/classify-error."
+  [error-classification]
+  (when error-classification
+    (let [{:keys [type message completed-work report-url should-retry vendor]} error-classification]
+      (print-error-header type completed-work)
+      (println)
+      (println (str "  " message))
+      (println)
+      (print-error-context type completed-work)
+      (print-error-report-url report-url vendor)
+      (print-retry-recommendation should-retry type completed-work))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Configuration management
@@ -182,48 +296,47 @@
 (defn config-init-cmd
   "Initialize configuration file."
   [m]
-  (let [opts (get-opts m)
-        config-path (or (:config opts) default-config-path)]
-    (if (fs/exists? config-path)
-      (do
-        (print-info (str "Config already exists at " config-path))
-        (println "Use 'miniforge config set <key> <value>' to modify"))
-      (do
-        (save-config default-config config-path)
-        (print-success (str "Created config at " config-path))))))
+  (config/cmd-init (get-opts m)))
 
 (defn config-list-cmd
   "List all configuration values."
   [m]
-  (let [opts (get-opts m)
-        config (load-config (:config opts))]
-    (println (pr-str config))))
+  (config/cmd-list (get-opts m)))
 
 (defn config-get-cmd
   "Get a configuration value."
   [m]
-  (let [{:keys [key config]} (get-opts m)]
-    (if-not key
-      (print-error "Usage: miniforge config get <key>")
-      (let [cfg (load-config config)
-            path (map keyword (str/split key #"\."))
-            value (get-in cfg path)]
-        (if value
-          (println (pr-str value))
-          (print-error (str "Key not found: " key)))))))
+  (config/cmd-get (get-opts m)))
 
 (defn config-set-cmd
   "Set a configuration value."
   [m]
-  (let [{:keys [key value config]} (get-opts m)]
-    (if (or (not key) (not value))
-      (print-error "Usage: miniforge config set <key> <value>")
-      (let [cfg (load-config config)
-            path (map keyword (str/split key #"\."))
-            new-value (try (edn/read-string value) (catch Exception _ value))
-            new-cfg (assoc-in cfg path new-value)]
-        (save-config new-cfg config)
-        (print-success (str "Set " key " = " (pr-str new-value)))))))
+  (config/cmd-set (get-opts m)))
+
+(defn config-edit-cmd
+  "Edit configuration file."
+  [m]
+  (config/cmd-edit (get-opts m)))
+
+(defn config-reset-cmd
+  "Reset configuration to defaults."
+  [m]
+  (config/cmd-reset (get-opts m)))
+
+(defn config-backends-cmd
+  "List available backends."
+  [m]
+  (config/cmd-backends (get-opts m)))
+
+(defn config-backend-cmd
+  "Set LLM backend."
+  [m]
+  (config/cmd-backend (get-opts m)))
+
+(defn config-validate-cmd
+  "Validate configuration."
+  [m]
+  (config/cmd-validate (get-opts m)))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Run command - Execute workflow from spec file
@@ -263,9 +376,19 @@
                {:output :pretty
                 :quiet false}))))
         (catch Exception e
-          (print-error (str "Failed to run workflow: " (ex-message e)))
-          (when-let [data (ex-data e)]
-            (println (str "  Details: " (pr-str data)))))))))
+          ;; Try to classify the error if agent-runtime is available
+          (let [error-classification (try
+                                      (let [classifier (requiring-resolve 'ai.miniforge.agent-runtime.interface/classify-error)]
+                                        (when classifier
+                                          (classifier e (ex-data e))))
+                                      (catch Exception _ nil))]
+            (if error-classification
+              (print-classified-error error-classification)
+              ;; Fallback to basic error display
+              (do
+                (print-error (str "Failed to run workflow: " (ex-message e)))
+                (when-let [data (ex-data e)]
+                  (println (str "  Details: " (pr-str data))))))))))))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Status command (stub)
@@ -601,11 +724,16 @@ Commands:
     respond <url>     Respond to comments
     merge <url>       Merge a PR
 
-  config <subcommand> Configuration
+  config <subcommand> Configuration management
     init              Initialize config file
-    list              List all config
-    get <key>         Get config value
+    list              List all configuration values
+    get <key>         Get specific config value
     set <key> <val>   Set config value
+    edit              Open config in $EDITOR
+    reset             Reset config to defaults
+    backends          List available LLM backends with status
+    backend <name>    Set LLM backend (shorthand)
+    validate          Validate config file
 
   doctor              Check system health
   version             Show version info
@@ -673,10 +801,16 @@ Examples:
     :fn workflow-list-cmd}
 
    ;; Config subcommands
+   {:cmds ["config"] :fn help-cmd}  ; Show help when no subcommand provided
    {:cmds ["config" "init"] :fn config-init-cmd}
    {:cmds ["config" "list"] :fn config-list-cmd}
    {:cmds ["config" "get"]  :fn config-get-cmd  :args->opts [:key]}
    {:cmds ["config" "set"]  :fn config-set-cmd  :args->opts [:key :value]}
+   {:cmds ["config" "edit"] :fn config-edit-cmd}
+   {:cmds ["config" "reset"] :fn config-reset-cmd}
+   {:cmds ["config" "backends"] :fn config-backends-cmd}
+   {:cmds ["config" "backend"] :fn config-backend-cmd :args->opts [:backend]}
+   {:cmds ["config" "validate"] :fn config-validate-cmd}
 
    ;; Fleet subcommands (daemon management)
    {:cmds ["fleet" "start"]  :fn fleet-start-cmd}

@@ -34,7 +34,9 @@
    :gates [:review-approved :quality-check]
    :budget {:tokens 10000
             :iterations 2
-            :time-seconds 180}})
+            :time-seconds 180}
+   ;; Code review needs balanced capabilities - hint at Sonnet
+   :model-hint :sonnet-4.5})
 
 ;; Register defaults on load
 (registry/register-phase-defaults! :review default-config)

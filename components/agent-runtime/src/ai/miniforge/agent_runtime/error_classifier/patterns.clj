@@ -1,0 +1,103 @@
+(ns ai.miniforge.agent-runtime.error-classifier.patterns
+  "Error pattern definitions and matching logic.
+
+   Provides patterns for classifying errors into three categories:
+   - :agent-backend - Agent system bugs
+   - :task-code - User code errors
+   - :external - External service errors
+
+   Pattern definitions are loaded from EDN configuration files in resources/error-patterns/"
+  (:require
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]))
+
+;;------------------------------------------------------------------------------ Layer 0
+;; Pattern loading from configuration
+
+(defn- load-pattern-config
+  "Load error pattern configuration from resource file.
+
+   Arguments:
+     resource-path - Path to EDN file in resources
+
+   Returns: Pattern config map or nil on error"
+  [resource-path]
+  (when-let [resource (io/resource resource-path)]
+    (try
+      (edn/read-string (slurp resource))
+      (catch Exception _e
+        nil))))
+
+(defn- compile-pattern
+  "Compile a pattern map with regex string to regex object.
+
+   Arguments:
+     pattern - Map with :regex string
+     type - Error type keyword
+
+   Returns: Pattern map with compiled :regex"
+  [pattern type]
+  (-> pattern
+      (assoc :type type)
+      (update :regex re-pattern)))
+
+(defn- load-patterns
+  "Load and compile patterns from a config file.
+
+   Arguments:
+     config-name - Name of config file (without .edn)
+
+   Returns: Vector of compiled pattern maps"
+  [config-name]
+  (if-let [config (load-pattern-config (str "error-patterns/" config-name ".edn"))]
+    (let [type (:type config)]
+      (mapv #(compile-pattern % type) (:patterns config)))
+    []))
+
+;;------------------------------------------------------------------------------ Layer 1
+;; Pattern definitions (loaded from config)
+
+(def agent-backend-patterns
+  "Patterns that indicate agent system bugs (Claude Code internal errors).
+   Loaded from resources/error-patterns/agent-backend.edn"
+  (load-patterns "agent-backend"))
+
+(def task-code-patterns
+  "Patterns that indicate user code errors.
+   Loaded from resources/error-patterns/task-code.edn"
+  (load-patterns "task-code"))
+
+(def external-patterns
+  "Patterns that indicate external service errors.
+   Loaded from resources/error-patterns/external.edn"
+  (load-patterns "external"))
+
+;;------------------------------------------------------------------------------ Layer 2
+;; Pattern matching
+
+(defn matches-pattern?
+  "Check if error message matches a pattern.
+
+   Arguments:
+     error - Error message string
+     pattern - Pattern map with :regex key
+
+   Returns: Boolean indicating if pattern matches"
+  [error pattern]
+  (when error
+    (boolean (re-find (:regex pattern) error))))
+
+(defn classify-by-patterns
+  "Classify error by matching against pattern lists.
+
+   Arguments:
+     message - Error message string
+
+   Returns: Pattern map with :type and :vendor, or default task-code classification"
+  [message]
+  (let [all-patterns (concat agent-backend-patterns
+                             task-code-patterns
+                             external-patterns)]
+    (or (first (filter #(matches-pattern? message %) all-patterns))
+        {:type :task-code
+         :vendor "miniforge"})))

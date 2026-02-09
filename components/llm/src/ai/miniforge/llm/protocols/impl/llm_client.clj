@@ -4,6 +4,7 @@
    [clojure.string :as str]
    [cheshire.core :as json]
    [babashka.process :as p]
+   [babashka.http-client :as http]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.response.interface :as response])
@@ -11,19 +12,62 @@
    [java.io ByteArrayInputStream]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Stream parser functions
+
+(defn- parse-claude-stream-line
+  "Parse a line from Claude CLI streaming output.
+
+   Arguments:
+     line - String line from stream
+
+   Returns: {:delta string :done? boolean} or nil"
+  [line]
+  (try
+    (when-not (str/blank? line)
+      (let [data (json/parse-string line true)]
+        (when (= "stream_event" (:type data))
+          (when-let [delta-text (get-in data [:event :delta :text])]
+            {:delta delta-text :done? false}))))
+    (catch Exception _e
+      nil)))
+
+(defn- parse-codex-stream-line
+  "Parse a line from Codex CLI streaming output.
+
+   Arguments:
+     line - String line from stream
+
+   Returns: {:delta string :done? boolean} or nil"
+  [line]
+  (try
+    (when-not (str/blank? line)
+      (let [data (json/parse-string line true)]
+        (cond
+          ;; Extract content from content_block_delta events
+          (= "content_block_delta" (:type data))
+          (when-let [delta-text (get-in data [:delta :text])]
+            {:delta delta-text :done? false})
+
+          ;; Handle message_delta for streaming text
+          (and (= "message_delta" (:type data))
+               (get-in data [:delta :text]))
+          {:delta (get-in data [:delta :text]) :done? false}
+
+          ;; Ignore other event types
+          :else nil)))
+    (catch Exception _e
+      nil)))
+
+;------------------------------------------------------------------------------ Backend configurations
 
 (def backends
   {:claude {:cmd "claude"
             :streaming? true
-            :stream-parser (fn [line]
-                             (try
-                               (when-not (str/blank? line)
-                                 (let [data (json/parse-string line true)]
-                                   (when (= "stream_event" (:type data))
-                                     (when-let [delta-text (get-in data [:event :delta :text])]
-                                       {:delta delta-text :done? false}))))
-                               (catch Exception _e
-                                 nil)))
+            :description "Claude via Anthropic CLI"
+            :provider "Anthropic"
+            :requires-cli? true
+            :api-key-var "ANTHROPIC_API_KEY"
+            :stream-parser parse-claude-stream-line
             :args-fn (fn [{:keys [prompt system max-tokens streaming?]}]
                        (cond-> ["-p"]
                          streaming? (conj "--output-format" "stream-json")
@@ -33,10 +77,58 @@
                          max-tokens (into ["--max-budget-usd" "0.10"])
                          true (conj prompt)))}
 
-   :echo   {:cmd "echo"
+   :codex {:cmd "codex"
+           :streaming? true
+           :description "Codex via Codex CLI"
+           :provider "Codex"
+           :requires-cli? true
+           :api-key-var nil
+           :stream-parser parse-codex-stream-line
+           :args-fn (fn [{:keys [prompt model]}]
+                      (cond-> ["exec"
+                               "--json"
+                               "--full-auto"
+                               "--skip-git-repo-check"]
+                        model (into ["-m" model])
+                        true (conj prompt)))}
+
+   :openai {:cmd "http"
+            :streaming? true
+            :description "OpenAI GPT-4 via API"
+            :provider "OpenAI"
+            :requires-cli? false
+            :api-key-var "OPENAI_API_KEY"
+            :api-endpoint "https://api.openai.com/v1/chat/completions"
+            :default-model "gpt-4"
+            :models ["gpt-4-turbo" "gpt-4" "gpt-3.5-turbo"]}
+
+   :ollama {:cmd "http"
+            :streaming? true
+            :description "Local models via Ollama"
+            :provider "Ollama"
+            :requires-cli? false
+            :api-key-var nil
+            :api-endpoint "http://localhost:11434/api/chat"
+            :default-model "codellama"
+            :models ["codellama" "llama2" "mistral"]}
+
+   :cursor {:cmd "cursor-cli"
             :streaming? false
+            :description "Cursor AI via CLI"
+            :provider "Cursor"
+            :requires-cli? true
+            :api-key-var nil
             :args-fn (fn [{:keys [prompt]}]
-                       [prompt])}})
+                       ["--prompt" prompt])}
+
+   :echo {:cmd "echo"
+          :streaming? false
+          :description "Echo backend for testing"
+          :provider "Test"
+          :requires-cli? false
+          :api-key-var nil
+          :args-fn (fn [{:keys [prompt]}]
+                     [prompt])}})
 
 (defn build-messages-prompt [messages]
   (->> messages
@@ -47,6 +139,168 @@
                 "system" (str "[System]: " content)
                 content)))
        (str/join "\n\n")))
+
+;------------------------------------------------------------------------------ HTTP Backend Support
+
+(defn- openai-request-body
+  "Build OpenAI API request body."
+  [{:keys [prompt messages model max-tokens streaming?]}]
+  (let [model (or model "gpt-4-turbo")
+        msgs (or messages
+                 [{:role "user" :content prompt}])]
+    {:model model
+     :messages msgs
+     :stream (boolean streaming?)
+     :max_tokens (or max-tokens 4000)}))
+
+(defn- ollama-request-body
+  "Build Ollama API request body."
+  [{:keys [prompt messages model streaming?]}]
+  (let [model (or model "codellama")
+        msg-content (or prompt
+                        (build-messages-prompt messages))]
+    {:model model
+     :messages [{:role "user" :content msg-content}]
+     :stream (boolean streaming?)}))
+
+(defn- http-post-request
+  "Make HTTP POST request to LLM API.
+
+   Returns HTTP response map or anomaly map on exception."
+  [url headers body]
+  (try
+    (http/post url
+               {:headers headers
+                :body (json/generate-string body)
+                :throw false})
+    (catch Exception e
+      (response/make-anomaly
+       :anomalies/unavailable
+       (str "HTTP request failed: " (.getMessage e))
+       {:anomaly/operation :http-request
+        :anomaly.llm/url url}))))
+
+(defn- parse-openai-response
+  "Parse OpenAI API response.
+
+   Handles anomaly maps from http-post-request or HTTP response maps."
+  [response]
+  ;; If response is already an anomaly map, pass it through
+  (if (response/anomaly-map? response)
+    {:success false
+     :anomaly response
+     :error {:type "http_error"
+             :message (:anomaly/message response)}}
+    (try
+      (let [body (json/parse-string (:body response) true)]
+        (if (= 200 (:status response))
+          {:success true
+           :content (get-in body [:choices 0 :message :content] "")
+           :usage {:input-tokens (get-in body [:usage :prompt_tokens])
+                   :output-tokens (get-in body [:usage :completion_tokens])}}
+          {:success false
+           :anomaly (response/make-anomaly
+                     :anomalies/unavailable
+                     (or (get-in body [:error :message]) "Unknown API error")
+                     {:anomaly/operation :llm-api-call
+                      :anomaly.llm/status (:status response)})
+           :error {:type "api_error"
+                   :message (or (get-in body [:error :message])
+                                "Unknown API error")}}))
+      (catch Exception e
+        {:success false
+         :anomaly (response/make-anomaly
+                   :anomalies/fault
+                   (str "Failed to parse response: " (.getMessage e))
+                   {:anomaly/operation :llm-response-parse})
+         :error {:type "parse_error"
+                 :message (str "Failed to parse response: " (.getMessage e))}}))))
+
+(defn- parse-ollama-response
+  "Parse Ollama API response.
+
+   Handles anomaly maps from http-post-request or HTTP response maps."
+  [response]
+  ;; If response is already an anomaly map, pass it through
+  (if (response/anomaly-map? response)
+    {:success false
+     :anomaly response
+     :error {:type "http_error"
+             :message (:anomaly/message response)}}
+    (try
+      (let [body (json/parse-string (:body response) true)]
+        (if (= 200 (:status response))
+          {:success true
+           :content (get-in body [:message :content] "")
+           :usage {:input-tokens nil
+                   :output-tokens nil}}
+          {:success false
+           :anomaly (response/make-anomaly
+                     :anomalies/unavailable
+                     (or (:error body) "Unknown API error")
+                     {:anomaly/operation :llm-api-call
+                      :anomaly.llm/status (:status response)})
+           :error {:type "api_error"
+                   :message (or (:error body) "Unknown API error")}}))
+      (catch Exception e
+        {:success false
+         :anomaly (response/make-anomaly
+                   :anomalies/fault
+                   (str "Failed to parse response: " (.getMessage e))
+                   {:anomaly/operation :llm-response-parse})
+         :error {:type "parse_error"
+                 :message (str "Failed to parse response: " (.getMessage e))}}))))
+
+(defn- http-complete
+  "Complete request using HTTP API backend."
+  [backend-config request api-key]
+  (let [{:keys [api-endpoint provider]} backend-config
+        headers (cond
+                  (= provider "OpenAI")
+                  {"Authorization" (str "Bearer " api-key)
+                   "Content-Type" "application/json"}
+
+                  (= provider "Ollama")
+                  {"Content-Type" "application/json"}
+
+                  :else
+                  {"Content-Type" "application/json"})
+        body (case provider
+               "OpenAI" (openai-request-body request)
+               "Ollama" (ollama-request-body request)
+               {})
+        response (http-post-request api-endpoint headers body)]
+    (case provider
+      "OpenAI" (parse-openai-response response)
+      "Ollama" (parse-ollama-response response)
+      {:success false
+       :error {:type "unsupported_backend"
+               :message (str "HTTP backend not implemented for: " provider)}})))
+
+(defn- http-stream-complete
+  "Complete request using HTTP API with streaming.
+
+   Note: Currently falls back to non-streaming as babashka.http-client
+   doesn't support streaming responses yet."
+  [backend-config request api-key on-chunk]
+  (let [accumulated (atom "")]
+    (try
+      ;; Note: babashka.http-client doesn't support streaming responses yet
+      ;; For now, fall back to non-streaming for HTTP backends
+      (let [result (http-complete backend-config (assoc request :streaming? false) api-key)]
+        (when (:success result)
+          (let [content (:content result)]
+            (reset! accumulated content)
+            (on-chunk {:delta content :done? true :content content})))
+        result)
+      (catch Exception e
+        {:success false
+         :anomaly (response/make-anomaly
+                   :anomalies/fault
+                   (str "Streaming failed: " (.getMessage e))
+                   {:anomaly/operation :llm-stream})
+         :error {:type "stream_error"
+                 :message (str "Streaming failed: " (.getMessage e))}}))))
 
 (defn- success-response [output exit-code]
   {:success true
@@ -160,15 +414,28 @@
   (let [{:keys [config logger exec-fn]} client
         {:keys [backend]} config
         backend-config (get backends backend)
-        {:keys [cmd args-fn]} backend-config
-        prompt (build-request-prompt request)
-        args (args-fn (assoc request :prompt prompt))
-        full-cmd (into [cmd] args)]
-    (log-prompt-sent logger backend prompt)
-    (let [result (exec-fn full-cmd)
-          response (parse-cli-output (:out result) (:exit result) (:err result))]
-      (log-response logger response)
-      response)))
+        {:keys [cmd args-fn api-key-var]} backend-config]
+    (log-prompt-sent logger backend (build-request-prompt request))
+
+    ;; Handle HTTP backends differently from CLI backends
+    (if (= cmd "http")
+      (let [api-key (when api-key-var (System/getenv api-key-var))]
+        (if (and api-key-var (not api-key))
+          {:success false
+           :error {:type "missing_api_key"
+                   :message (str "Missing API key: " api-key-var " not set")}}
+          (let [response (http-complete backend-config request api-key)]
+            (log-response logger response)
+            response)))
+
+      ;; CLI backend
+      (let [prompt (build-request-prompt request)
+            args (args-fn (assoc request :prompt prompt))
+            full-cmd (into [cmd] args)
+            result (exec-fn full-cmd)
+            response (parse-cli-output (:out result) (:exit result) (:err result))]
+        (log-response logger response)
+        response))))
 
 (defn- handle-non-streaming-fallback [client request on-chunk]
   (let [result (complete-impl client request)]
@@ -251,14 +518,25 @@
   (let [{:keys [config]} client
         {:keys [backend]} config
         backend-config (get backends backend)
-        {:keys [streaming?]} backend-config
+        {:keys [streaming? cmd api-key-var]} backend-config
         progress-monitor (or (:progress-monitor request)
                              (pm/create-progress-monitor
                               {:stagnation-threshold-ms 120000
                                :max-total-ms 600000}))]
-    (if-not streaming?
-      (handle-non-streaming-fallback client request on-chunk)
-      (handle-streaming client request on-chunk backend-config progress-monitor))))
+
+    ;; Handle HTTP backends
+    (if (= cmd "http")
+      (let [api-key (when api-key-var (System/getenv api-key-var))]
+        (if (and api-key-var (not api-key))
+          {:success false
+           :error {:type "missing_api_key"
+                   :message (str "Missing API key: " api-key-var " not set")}}
+          (http-stream-complete backend-config request api-key on-chunk)))
+
+      ;; CLI backends
+      (if-not streaming?
+        (handle-non-streaming-fallback client request on-chunk)
+        (handle-streaming client request on-chunk backend-config progress-monitor)))))
 
 (defn get-config-impl [client]
   (:config client))

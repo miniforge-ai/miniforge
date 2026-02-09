@@ -11,7 +11,8 @@
             [ai.miniforge.task-executor.generate :as generate]
             [ai.miniforge.pr-lifecycle.interface :as pr]
             [ai.miniforge.dag-executor.interface :as dag]
-            [ai.miniforge.logging.interface :as log]))
+            [ai.miniforge.logging.interface :as log]
+            [ai.miniforge.agent-runtime.interface :as error-classifier]))
 
 (defn create-task-context
   "Assemble context for a task execution.
@@ -272,16 +273,23 @@
            :value lifecycle-result})
 
         (catch Exception e
-          (log-event logger :task-execution-failed task-id
-                     {:error (ex-message e)
-                      :cause (ex-cause e)
-                      :duration-ms (- (System/currentTimeMillis) start-time)})
+          ;; Classify the error to provide user-friendly context
+          (let [task-state (when run-atom
+                            (get-in @run-atom [:tasks task-id :state]))
+                classified (error-classifier/classify-error e task-state)]
+            (log-event logger :task-execution-failed task-id
+                       {:error (ex-message e)
+                        :cause (ex-cause e)
+                        :duration-ms (- (System/currentTimeMillis) start-time)
+                        :error-classification (:type classified)
+                        :vendor (:vendor classified)})
 
-          ;; Mark task as failed in DAG
-          (dag/mark-failed! run-atom task-id e logger)
+            ;; Mark task as failed in DAG
+            (dag/mark-failed! run-atom task-id e logger)
 
-          {:ok? false
-           :error e})
+            {:ok? false
+             :error e
+             :error-classification classified}))
 
         (finally
           ;; Always clean up resources

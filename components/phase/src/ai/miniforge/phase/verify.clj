@@ -35,7 +35,9 @@
    :gates [:tests-pass :coverage]
    :budget {:tokens 15000
             :iterations 3
-            :time-seconds 300}})
+            :time-seconds 300}
+   ;; Verification can use fast validation - hint at Haiku
+   :model-hint :haiku-4.5})
 
 ;; Register defaults on load
 (registry/register-phase-defaults! :verify default-config)

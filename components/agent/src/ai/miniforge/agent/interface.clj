@@ -19,7 +19,8 @@
    [ai.miniforge.agent.reviewer :as reviewer]
    [ai.miniforge.agent.releaser :as releaser]
    [ai.miniforge.agent.meta-coordinator :as meta-coord]
-   [ai.miniforge.agent.meta.progress-monitor :as progress-monitor]))
+   [ai.miniforge.agent.meta.progress-monitor :as progress-monitor]
+   [ai.miniforge.agent.task-classifier :as classifier]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol re-exports (allow other components to reference protocols)
@@ -776,3 +777,34 @@
   (clear-workflow-messages router workflow-id)
 
   :leave-this-here)
+
+;------------------------------------------------------------------------------ Layer 9
+;; Task Classification (for intelligent model selection)
+
+(defn classify-task
+  "Classify a task to determine optimal model type.
+
+   Arguments:
+   - task - Map with :phase, :agent-type, :description, :title, etc.
+
+   Returns:
+   - {:type :thinking-heavy|:execution-focused|:simple-validation|...
+      :confidence 0.0-1.0
+      :reason \"...\"
+      :alternative-types [...]
+      :all-reasons [...]}
+
+   Example:
+     (classify-task {:phase :plan
+                     :agent-type :planner-agent
+                     :description \"Design architecture\"})"
+  [task]
+  (classifier/classify-task task))
+
+(defn get-task-characteristics
+  "Extract task characteristics for debugging/transparency.
+
+   Example:
+     (get-task-characteristics task)"
+  [task]
+  (classifier/get-task-characteristics task))

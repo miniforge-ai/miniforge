@@ -1,0 +1,136 @@
+;; Codex CLI Integration
+
+{:title "Integrate Codex CLI Backend"
+ :version "1.0.0"
+ :type :enhancement
+ :priority :high
+ :pr-comment "PR #153: CONFIG-SYSTEM.md:74"
+
+ :description
+ "Replace HTTP API implementation for Codex backend with proper CLI integration.
+  Codex has both a desktop app and CLI (`codex-cli 0.98.0`) installed on the dev
+  machine. The CLI provides non-interactive execution similar to Claude CLI with
+  streaming support via JSONL output."
+
+ :current-state
+ {:codex-backend "Uses HTTP API client (babashka.http-client)"
+  :implementation "components/llm/src/.../llm_client.clj:138-212"
+  :limitation "HTTP API requires manual request/response handling"
+  :problem "Codex CLI is available but not used"}
+
+ :codex-cli-capabilities
+ {:command "codex"
+  :version "0.98.0"
+  :location "/opt/homebrew/bin/codex"
+
+  :non-interactive-mode
+  {:command "codex exec [PROMPT]"
+   :stdin-support "codex exec - (reads from stdin)"
+   :streaming "--json flag outputs JSONL events"
+   :output-file "-o, --output-last-message <FILE>"
+   :model-selection "-m, --model <MODEL>"
+   :working-dir "-C, --cd <DIR>"
+   :config-override "-c, --config <key=value>"}
+
+  :models
+  ["o1" "o1-mini" "o1-preview"
+   "gpt-4o" "gpt-4o-mini" "gpt-4-turbo"
+   "claude-3-5-sonnet" "claude-3-opus"]
+
+  :sandbox-modes
+  ["read-only" "workspace-write" "danger-full-access"]
+
+  :approval-policies
+  ["untrusted" "on-failure" "on-request" "never"]}
+
+ :implementation-plan
+ {:update-backend-definition
+  {:file "components/llm/src/.../llm_client.clj"
+   :change
+   "Update :codex backend from:
+      {:cmd \"http\"
+       :api-endpoint \"https://api.openai.com/v1/chat/completions\"
+       :provider \"OpenAI\"
+       ...}
+
+    To:
+      {:cmd \"codex\"
+       :streaming? true
+       :args-fn codex-args
+       :provider \"Codex\"
+       :description \"Codex via Codex CLI\"
+       ...}"
+
+   :add-args-fn
+   "(defn codex-args
+      [{:keys [prompt model max-tokens]}]
+      [\"exec\"
+       \"--json\"                          ; JSONL streaming output
+       \"--full-auto\"                     ; Auto-approve in workspace
+       \"--skip-git-repo-check\"           ; Allow outside git repos
+       (when model [\"-m\" model])
+       prompt])"}
+
+  :streaming-support
+  {:approach "Reuse existing CLI streaming logic from Claude backend"
+   :parse-fn "(defn parse-codex-json-line [line] ...)"
+   :event-types
+   ["message_start" "content_block_delta" "content_block_stop" "message_stop"
+    "agent_step" "command_execution" "approval_request"]
+   :extract-content "Extract text deltas from content_block_delta events"}
+
+  :backend-status-check
+  {:file "bases/cli/src/ai/miniforge/cli/backends.clj"
+   :update-spec
+   ":codex
+    {:provider \"Codex\"
+     :description \"Codex via Codex CLI\"
+     :command \"codex\"                    ; Changed from nil
+     :installation \"Install from https://codex.dev\"
+     :api-key-var nil                      ; No API key needed for CLI
+     :models [\"o1\" \"gpt-4o\" \"claude-3-5-sonnet\"]
+     :check-type :cli                      ; Changed from :api-key
+     :docs-url \"https://codex.dev\"}"}}
+
+ :testing-strategy
+ {:manual-tests
+  ["Run: codex exec --json \"What is 2+2?\""
+   "Verify JSONL output structure"
+   "Test streaming with longer prompts"
+   "Test model selection: codex exec -m gpt-4o \"...\""
+   "Verify workspace directory handling"]
+
+  :integration-tests
+  ["Set backend: miniforge config backend codex"
+   "Run workflow with Codex backend"
+   "Verify streaming output captured correctly"
+   "Test error handling when codex CLI missing"
+   "Verify backend status shows correct state"]}
+
+ :migration
+ {:backward-compatibility "OpenAI HTTP backend still available via :openai"
+  :remove-codex-http "Delete HTTP client code for :codex (lines 138-212)"
+  :update-docs "CONFIG-SYSTEM.md: Change Codex from API to CLI"}
+
+ :acceptance-criteria
+ [{:criterion "Codex backend uses CLI not HTTP API"
+   :verification "Check backends definition uses cmd=codex"}
+
+  {:criterion "Streaming works via JSONL parsing"
+   :verification "Run workflow with codex backend, see streaming output"}
+
+  {:criterion "Backend status checks for CLI availability"
+   :verification "miniforge config backends shows codex status"}
+
+  {:criterion "No API key required"
+   :verification "Codex works without OPENAI_API_KEY"}
+
+  {:criterion "Model selection supported"
+   :verification "Can specify model in config or via -m flag"}]
+
+ :notes
+ ["Codex CLI is more reliable than HTTP API"
+  "Streaming via JSONL similar to Claude CLI pattern"
+  "No API key management needed for CLI"
+  "Supports multiple model providers (OpenAI, Anthropic, etc.)"
+  "Keep :openai backend for users who prefer HTTP API"]}
