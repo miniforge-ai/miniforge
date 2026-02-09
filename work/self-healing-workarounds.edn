@@ -1,0 +1,374 @@
+;; Self-Healing Workaround System
+
+{:title "Self-Healing Workaround Detection and Backend Fallback"
+ :version "1.0.0"
+ :type :enhancement
+ :priority :critical
+
+ :description
+ "Implement self-healing behavior when vendor bugs block miniforge operation.
+  When errors occur, automatically search for known workarounds, apply them,
+  and track reliability metrics to switch backends when one becomes unreliable.
+
+  Core principle: **Miniforge cannot be broken if a workaround exists.**"
+
+ :motivation
+ {:trigger "classifyHandoffIfNeeded bug in Claude Code v2.1.29-2.1.37"
+  :impact "4 agents failed with false failures (work completed but marked failed)"
+  :user-quote "This is going to happen a lot I am guessing and we can't be broken
+               if a workaround exists"
+  :current-problem
+  ["Vendor bugs block miniforge operation"
+   "Known workarounds exist but require manual intervention"
+   "Users must discover issues, find workarounds, apply fixes"
+   "No automatic recovery or resilience"
+   "Single backend failure = total failure"]}
+
+ :architecture
+ {:layer-1-workaround-detection
+  {:responsibility "Detect vendor bugs and find workarounds"
+   :triggers ["Agent backend errors (:agent-backend classification)"
+              "Repeated failures with same error pattern"
+              "Task marked failed but work completed"]
+   :actions
+   ["Search vendor issue tracker (GitHub API)"
+    "Parse issue body for workaround instructions"
+    "Extract configuration changes or commands"
+    "Present workaround to user or apply automatically"]}
+
+  :layer-2-workaround-registry
+  {:responsibility "Store and reuse known workarounds"
+   :location "~/.miniforge/known_workarounds.edn"
+   :structure
+   "{:workarounds
+     {:claude-code/classifyHandoffIfNeeded
+      {:error-pattern #\"classifyHandoffIfNeeded is not defined\"
+       :vendor :claude-code
+       :issue-url \"https://github.com/anthropics/claude-code/issues/22573\"
+       :severity :p1
+       :workaround
+       {:type :settings-modification
+        :description \"Disable SubagentStop hooks\"
+        :files [\".claude/settings.json\" \"~/.claude/settings.json\"]
+        :changes {:hooks {:SubagentStop {:enabled false}}}}
+       :auto-apply true
+       :applied-at #inst \"2026-02-09\"
+       :success-rate 1.0}}}"
+   :operations
+   ["Add workaround (from issue search or manual)"
+    "Check if error matches known workaround"
+    "Apply workaround automatically if auto-apply true"
+    "Track success rate of applied workarounds"]}
+
+  :layer-3-backend-reliability
+  {:responsibility "Track backend health and switch when unreliable"
+   :location "~/.miniforge/backend_health.edn"
+   :metrics
+   {:per-backend
+    {:claude {:total-invocations 150
+              :successful 142
+              :failed 8
+              :agent-backend-errors 6  ; Vendor bugs
+              :task-code-errors 2       ; User code bugs
+              :success-rate 0.947
+              :recent-failures [#inst "2026-02-09" #inst "2026-02-09"]
+              :health :degraded}
+     :codex {:total-invocations 20
+             :successful 20
+             :failed 0
+             :success-rate 1.0
+             :health :healthy}}}
+   :thresholds
+   {:healthy "> 95% success rate, < 2 agent-backend errors/day"
+    :degraded "90-95% success rate, 2-5 agent-backend errors/day"
+    :unhealthy "< 90% success rate, > 5 agent-backend errors/day"}
+   :actions
+   {:degraded "Warn user, continue with current backend"
+    :unhealthy "Auto-switch to best healthy alternative backend"}}}
+
+ :implementation
+ {:phase-1-workaround-detection
+  {:files-to-create
+   ["components/agent-runtime/src/ai/miniforge/agent_runtime/workaround_detector.clj (~200 lines)"
+    "- search-vendor-issues: Query GitHub API for error pattern"
+    "- parse-workaround: Extract workaround from issue body"
+    "- classify-workaround: Determine type (settings, command, env-var)"
+    "- should-auto-apply?: Check if safe to apply automatically"]
+
+   :github-api-integration
+   "Use gh CLI or GitHub API to search issues:
+      gh api search/issues --jq '.items[] | {number, title, body}'
+        -f q='repo:anthropics/claude-code classifyHandoffIfNeeded'
+
+    Parse issue body for workaround markers:
+      - '## Workaround' section
+      - Code blocks with bash commands
+      - Configuration snippets
+      - 'Disable X' or 'Set Y to Z' patterns"}
+
+  :phase-2-workaround-registry
+  {:files-to-create
+   ["components/config/src/ai/miniforge/config/workarounds.clj (~150 lines)"
+    "- load-workarounds: Read ~/.miniforge/known_workarounds.edn"
+    "- save-workaround!: Add workaround to registry"
+    "- find-workaround: Match error to known workaround"
+    "- apply-workaround!: Execute workaround actions"
+    "- track-success!: Update success rate"]
+
+   :workaround-types
+   {:settings-modification
+    {:description "Modify JSON/EDN settings files"
+     :safety :medium
+     :requires-backup true
+     :example "Disable SubagentStop hooks in .claude/settings.json"}
+
+    :environment-variable
+    {:description "Set or unset environment variables"
+     :safety :high
+     :requires-backup false
+     :example "export MINIFORGE_DISABLE_HOOKS=true"}
+
+    :command-execution
+    {:description "Run shell command"
+     :safety :low
+     :requires-approval true
+     :example "cp settings_backup.json .claude/settings.json"}
+
+    :backend-switch
+    {:description "Change LLM backend"
+     :safety :high
+     :requires-backup false
+     :example "miniforge config backend codex"}}}
+
+  :phase-3-backend-health-tracking
+  {:files-to-create
+   ["components/agent-runtime/src/ai/miniforge/agent_runtime/backend_health.clj (~200 lines)"
+    "- record-invocation: Track each backend call"
+    "- record-failure: Record failure type (agent-backend vs task-code)"
+    "- calculate-health: Compute health status from metrics"
+    "- get-best-alternative: Find healthiest alternative backend"
+    "- auto-switch-backend!: Switch when current backend unhealthy"]
+
+   :health-calculation
+   "health-score = (successful / total) * 0.7 +
+                   (1 - agent-backend-errors / total) * 0.3
+
+    Prioritizes:
+    - Overall success rate (70% weight)
+    - Absence of vendor bugs (30% weight)
+
+    Ignores task-code-errors (user's responsibility)"}
+
+  :phase-4-integration
+  {:files-to-modify
+   ["components/agent-runtime/src/ai/miniforge/agent_runtime/interface.clj"
+    "- After error classification, check for workarounds"
+    "- If agent-backend error, search for workaround"
+    "- Apply workaround if found and auto-apply enabled"
+    "- Track backend health metrics"
+    "- Auto-switch if backend becomes unhealthy"]
+
+   :workflow
+   "1. Agent fails with error
+    2. Error classifier determines :agent-backend
+    3. Workaround detector searches vendor issues
+    4. If workaround found:
+       - Check registry if already applied
+       - If new, ask user or auto-apply
+       - Record in registry
+    5. Record backend health metrics
+    6. If backend unhealthy (< 90% success):
+       - Warn: 'Claude backend unhealthy, switching to Codex'
+       - Update config: miniforge config backend codex
+       - Retry failed operation
+    7. Continue execution"}}
+
+ :user-experience
+ {:workaround-discovered
+  "⚠️  Agent Backend Error Detected
+
+   Error: classifyHandoffIfNeeded is not defined
+   Classification: :agent-backend (vendor bug, not your fault)
+
+   🔍 Searching for known workarounds...
+   ✅ Found: Issue #22573 (Claude Code)
+
+   Workaround: Disable SubagentStop hooks
+   - Modify .claude/settings.json
+   - Modify ~/.claude/settings.json
+
+   Apply workaround? [Y/n]
+   (Will be stored for future auto-apply)"
+
+  :workaround-applied
+  "✅ Workaround applied successfully
+   Updated: .claude/settings.json
+   Backup: .claude/settings.json.backup
+
+   Retrying agent invocation..."
+
+  :backend-degraded
+  "⚠️  Backend Health Warning
+
+   Claude backend: 6 agent-backend errors in last hour
+   Success rate: 94.7% (degraded)
+
+   Continuing with Claude. Will auto-switch if < 90%."
+
+  :backend-unhealthy
+  "❌ Backend Unhealthy: Auto-Switching
+
+   Claude backend: 11 agent-backend errors
+   Success rate: 87.3% (unhealthy)
+
+   🔄 Switching to Codex (100% success rate)
+   Updated: ~/.miniforge/config.edn
+
+   Retrying with Codex backend..."
+
+  :backend-switched
+  "✅ Backend switched to Codex
+
+   Previous: Claude (87.3% success, 11 vendor bugs)
+   Current:  Codex (100% success, 0 vendor bugs)
+
+   To switch back: miniforge config backend claude"}
+
+ :safety-guardrails
+ {:automatic-workaround-application
+  {:safe-to-auto-apply
+   ["Settings file modifications (with backup)"
+    "Environment variable changes"
+    "Backend switches (reversible)"]
+   :require-user-approval
+   ["Shell command execution"
+    "File deletions"
+    "System-wide changes"]
+   :always-backup
+   ["Config files before modification"
+    "Settings before workaround application"
+    "Store previous backend in rollback registry"]}
+
+  :backend-switching
+  {:conditions
+   ["Backend health < 90% success rate"
+    "≥ 3 agent-backend errors in 10-minute window"
+    "Alternative backend available with > 95% health"]
+   :prevent-thrashing
+   ["Min 30 minutes between switches"
+    "Max 3 switches per hour"
+    "Exponential backoff if alternatives also fail"]
+   :user-notification
+   ["Always notify user of backend switch"
+    "Show health metrics for transparency"
+    "Provide rollback command"]}}
+
+ :complexity-boundaries
+ {:what-to-implement
+  ["✅ Workaround detection and application"
+   "✅ Backend health tracking"
+   "✅ Auto-switch to alternative backends"
+   "✅ Registry of known workarounds"
+   "✅ User approval for risky workarounds"]
+
+  :what-not-to-implement
+  ["❌ Complex pattern avoidance heuristics"
+   "❌ ML-based failure prediction"
+   "❌ Automatic issue filing on new errors"
+   "❌ Cross-backend query routing"
+   "❌ Dynamic workaround generation"]
+
+  :rationale
+  "Keep it simple:
+   1. Detect known problems → apply known solutions
+   2. Track reliability → switch when unreliable
+   3. No complex heuristics or predictions
+   4. User remains in control with transparency"}
+
+ :configuration
+ {:config-keys
+  {:self-healing-enabled "default: true"
+   :workaround-auto-apply "default: true (for safe workarounds)"
+   :backend-auto-switch "default: true"
+   :backend-health-threshold "default: 0.90 (90% success)"
+   :backend-switch-cooldown-ms "default: 1800000 (30 minutes)"
+   :workaround-registry-path "~/.miniforge/known_workarounds.edn"
+   :backend-health-path "~/.miniforge/backend_health.edn"}
+
+  :user-override
+  "# Disable self-healing entirely:
+   miniforge config set self-healing.enabled false
+
+   # Require approval for all workarounds:
+   miniforge config set self-healing.auto-apply false
+
+   # Disable backend auto-switching:
+   miniforge config set self-healing.backend-auto-switch false
+
+   # Adjust health threshold (stricter):
+   miniforge config set self-healing.health-threshold 0.95"}
+
+ :testing-strategy
+ {:unit-tests
+  ["Test workaround detection from mock GitHub issues"
+   "Test workaround parsing (extract commands/settings)"
+   "Test health calculation from metrics"
+   "Test backend selection (choose best alternative)"]
+
+  :integration-tests
+  ["Simulate agent-backend error → workaround applied"
+   "Simulate repeated failures → backend switched"
+   "Test backup creation before workaround"
+   "Test rollback when workaround fails"
+   "Test cooldown prevents thrashing"]}
+
+ :acceptance-criteria
+ [{:criterion "Known workarounds auto-applied"
+   :verification "Hit classifyHandoffIfNeeded error, workaround applied automatically"}
+
+  {:criterion "Backend switches when unhealthy"
+   :verification "Force Claude failures, system switches to Codex"}
+
+  {:criterion "User notified transparently"
+   :verification "Messages show health metrics, workaround details, backend switch reason"}
+
+  {:criterion "Risky operations require approval"
+   :verification "Shell commands prompt user before execution"}
+
+  {:criterion "Backups created and restorable"
+   :verification "Settings backed up before modification, can be restored"}
+
+  {:criterion "System doesn't thrash"
+   :verification "Cooldown prevents rapid backend switching"}]
+
+ :success-metrics
+ ["Zero manual intervention for known vendor bugs"
+  "< 1% downtime due to vendor issues with known workarounds"
+  "Automatic recovery from backend failures"
+  "User informed but not interrupted"
+  "System resilience increases over time as workaround registry grows"]
+
+ :future-enhancements
+ [:community-workaround-sharing
+  "Share workaround registry across miniforge users
+   → If one user discovers workaround, all benefit"
+
+  :vendor-notification
+  "Automatically post health metrics to vendor issue trackers
+   → Pressure vendors to fix bugs affecting miniforge"
+
+  :multi-backend-consensus
+  "For critical operations, query multiple backends and use consensus
+   → If Claude fails but Codex succeeds, trust Codex result"
+
+  :circuit-breaker-pattern
+  "After N failures, temporarily disable backend completely
+   → Prevent wasted tokens on known-failing backends"]
+
+ :notes
+ ["This makes miniforge anti-fragile: it gets stronger from failures"
+  "Workaround registry becomes institutional knowledge"
+  "Backend health tracking provides vendor accountability"
+  "Simple rules > complex heuristics (avoid over-engineering)"
+  "User transparency and control maintained throughout"
+  "With 6 backends now available, failover is practical"]}

@@ -25,7 +25,7 @@
     :command "codex"
     :installation "Install from https://codex.dev"
     :api-key-var nil
-    :models ["o1" "o1-mini" "gpt-4o" "gpt-4o-mini" "claude-3-5-sonnet"]
+    :models ["gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.2" "gpt-5.1-codex-max"]
     :check-type :cli
     :docs-url "https://codex.dev"}
 
