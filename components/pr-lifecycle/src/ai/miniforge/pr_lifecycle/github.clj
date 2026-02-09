@@ -94,37 +94,58 @@
 
    Arguments:
    - worktree-path: Path to git worktree
+   - pr-number: Pull request number
    - comment-id: REST API comment ID (integer)
 
    Returns DAG result with :thread-id or error"
-  [worktree-path comment-id]
-  (let [query (str "query {
-  node(id: \"" comment-id "\") {
-    ... on PullRequestReviewComment {
-      id
-      pullRequestReview {
-        id
-      }
-      thread {
-        id
-        isResolved
+  [worktree-path pr-number comment-id]
+  (let [;; First get repo owner/name from git remote
+        remote-result (run-gh-command ["git" "config" "--get" "remote.origin.url"] worktree-path)]
+    (if (dag/err? remote-result)
+      remote-result
+      (let [remote-url (str/trim (:output (:data remote-result)))
+            ;; Parse owner/repo from URL (supports both SSH and HTTPS)
+            ;; git@github.com:owner/repo.git or https://github.com/owner/repo.git
+            parts (re-find #"github\.com[:/]([^/]+)/([^/.]+)" remote-url)
+            owner (nth parts 1 nil)
+            repo (nth parts 2 nil)]
+        (if-not (and owner repo)
+          (dag/err :invalid-remote
+                   (str "Could not parse owner/repo from remote URL: " remote-url))
+          (let [query (str "query {
+  repository(owner: \"" owner "\", name: \"" repo "\") {
+    pullRequest(number: " pr-number ") {
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          isResolved
+          comments(first: 10) {
+            nodes {
+              databaseId
+            }
+          }
+        }
       }
     }
   }
 }")
-        result (graphql-query query worktree-path)]
-    (if (dag/ok? result)
-      (let [node (get-in (:data result) [:data :node])
-            thread-id (get-in node [:thread :id])
-            is-resolved (get-in node [:thread :isResolved])]
-        (if thread-id
-          (dag/ok {:thread-id thread-id
-                   :is-resolved is-resolved
-                   :node node})
-          (dag/err :thread-not-found
-                   "Could not find thread ID for comment"
-                   {:comment-id comment-id})))
-      result)))
+                result (graphql-query query worktree-path)]
+            (if (dag/ok? result)
+              (let [threads (get-in (:data result) [:data :repository :pullRequest :reviewThreads :nodes])
+                    ;; Find thread containing our comment ID
+                    matching-thread (some (fn [thread]
+                                            (when (some #(= (:databaseId %) comment-id)
+                                                        (get-in thread [:comments :nodes]))
+                                              thread))
+                                          threads)]
+                (if matching-thread
+                  (dag/ok {:thread-id (:id matching-thread)
+                           :is-resolved (:isResolved matching-thread)})
+                  (dag/err :thread-not-found
+                           "Could not find thread containing comment ID"
+                           {:comment-id comment-id
+                            :pr-number pr-number})))
+              result)))))))
 
 (defn reply-to-comment
   "Post a reply to a review comment thread.
@@ -252,7 +273,7 @@
 
           ;; Try to resolve
           (let [;; First, get thread ID from comment ID
-                thread-result (get-thread-id worktree-path comment-id)]
+                thread-result (get-thread-id worktree-path pr-number comment-id)]
 
             (if (dag/err? thread-result)
               ;; Can't get thread ID - log warning but return success for reply
@@ -314,7 +335,7 @@
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Get thread ID from comment
-  (get-thread-id "/path/to/repo" "2780310737")
+  (get-thread-id "/path/to/repo" 148 2780310737)
   ; => {:success true :data {:thread-id "PRRT_..." :is-resolved false ...}}
 
   ;; Reply to a comment
