@@ -54,7 +54,9 @@
    :gates [:syntax :lint]
    :budget {:tokens 30000
             :iterations 5
-            :time-seconds 600}})
+            :time-seconds 600}
+   ;; Implementation is code-heavy - hint at Sonnet
+   :model-hint :sonnet-4.5})
 
 ;; Register defaults on load
 (registry/register-phase-defaults! :implement default-config)

@@ -54,7 +54,9 @@
    :gates [:plan-complete]
    :budget {:tokens 10000
             :iterations 3
-            :time-seconds 300}})
+            :time-seconds 300}
+   ;; Planning requires complex reasoning - hint at Opus
+   :model-hint :opus-4.6})
 
 ;; Register defaults on load
 (registry/register-phase-defaults! :plan default-config)

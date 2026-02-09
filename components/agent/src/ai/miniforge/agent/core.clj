@@ -8,8 +8,11 @@
   (:require
    [ai.miniforge.agent.protocol :as protocol]
    [ai.miniforge.agent.memory :as memory]
+   [ai.miniforge.agent.task-classifier :as classifier]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.response.interface :as response]
-   [ai.miniforge.tool.interface :as tool]))
+   [ai.miniforge.tool.interface :as tool]
+   [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Role configurations and defaults
@@ -297,6 +300,49 @@ Output execution logs and status reports."})
 ;------------------------------------------------------------------------------ Layer 2
 ;; Agent factory and executor
 
+(defn select-model-for-agent
+  "Select optimal model for agent based on role and task.
+   Returns {:model model-id :selection selection-info} or nil if disabled."
+  [role opts]
+  (when-not (false? (:model-selection-enabled opts true))
+    (try
+      (let [;; Build task description from role and options
+            task {:phase (:phase opts)
+                  :agent-type (keyword (str (name role) "-agent"))
+                  :description (:description opts)
+                  :title (:title opts)
+                  :context-tokens (:context-tokens opts)
+                  :privacy-required (:privacy-required opts)
+                  :cost-limit (:cost-limit opts)}
+
+            ;; Classify task
+            classification (classifier/classify-task task)
+
+            ;; Select model (unless explicitly overridden)
+            selection (when-not (:model opts)
+                        (llm/select-model
+                         classification
+                         {:strategy (:model-selection-strategy opts :automatic)}
+                         {:context-size (:context-tokens opts)
+                          :cost-limit (:cost-limit opts)
+                          :require-local (:privacy-required opts)}))]
+
+        (when selection
+          (log/info ::model-auto-selected
+                    "Model automatically selected for agent"
+                    {:role role
+                     :task-type (:task-type selection)
+                     :model (:model selection)
+                     :confidence (:confidence selection)})
+          {:model (:model-id selection)
+           :selection selection}))
+      (catch Exception e
+        (log/warn ::model-selection-failed
+                  "Model selection failed, using default"
+                  {:role role
+                   :error (ex-message e)})
+        nil))))
+
 (defn create-agent
   "Create an agent by role with optional config overrides.
 
@@ -305,29 +351,45 @@ Output execution logs and status reports."})
    - opts    - Optional config overrides
 
    Options:
-   - :model       - LLM model to use
+   - :model       - LLM model to use (explicit override)
    - :temperature - Sampling temperature
    - :max-tokens  - Max tokens per response
    - :budget      - Token/cost budget {:tokens int :cost-usd double}
    - :memory-id   - Existing memory ID to use
+   - :phase       - Workflow phase (for model selection)
+   - :model-selection-enabled - Enable automatic model selection (default: true)
+   - :model-selection-strategy - Selection strategy (:automatic, :cost-optimized, :speed)
+   - :privacy-required - Require local model
+   - :cost-limit   - Maximum cost per task
 
    Example:
-     (create-agent :implementer {:model \"claude-opus-4\" :max-tokens 16000})"
+     (create-agent :implementer {:model \"claude-opus-4\" :max-tokens 16000})
+     (create-agent :planner {:phase :plan}) ; Auto-selects Opus for planning"
   ([role] (create-agent role {}))
   ([role opts]
-   (let [base-config (get default-role-configs role
+   (let [;; Try intelligent model selection first
+         model-selection (select-model-for-agent role opts)
+         selected-model (or (:model model-selection)
+                            (:model opts))
+
+         base-config (get default-role-configs role
                           (get default-role-configs :implementer))
-        config (merge base-config (select-keys opts [:model :temperature :max-tokens :budget]))
-        capabilities (get role-capabilities role #{})
-        memory-id (or (:memory-id opts) (random-uuid))]
-    (->BaseAgent
-     (random-uuid)
-     role
-     capabilities
-     config
-     memory-id
-     {:status :created
-      :created-at (java.util.Date.)}))))
+         config (merge base-config
+                       (select-keys opts [:temperature :max-tokens :budget])
+                       (when selected-model {:model selected-model}))
+         capabilities (get role-capabilities role #{})
+         memory-id (or (:memory-id opts) (random-uuid))]
+
+     ;; Store selection info in agent state for debugging/transparency
+     (->BaseAgent
+      (random-uuid)
+      role
+      capabilities
+      config
+      memory-id
+      (cond-> {:status :created
+               :created-at (java.util.Date.)}
+        model-selection (assoc :model-selection (:selection model-selection)))))))
 
 (defn create-agent-map
   "Create an agent and return as a map conforming to Agent schema.

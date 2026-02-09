@@ -97,70 +97,118 @@
 (defn- print-info [msg]
   (println (style msg :foreground :cyan)))
 
+(defn- print-agent-backend-error-header
+  "Print header for agent backend errors."
+  [completed-work]
+  (println (style "⚠️  Agent System Error (Not Your Fault!)" :foreground :yellow :bold true))
+  (when (seq completed-work)
+    (println)
+    (println (style "Your task completed successfully:" :foreground :green))
+    (doseq [work completed-work]
+      (println (str "  " (style "✅" :foreground :green) " " work)))))
+
+(defn- print-task-code-error-header
+  "Print header for task code errors."
+  []
+  (println (style "❌ Task Code Error" :foreground :red :bold true)))
+
+(defn- print-external-error-header
+  "Print header for external service errors."
+  []
+  (println (style "⚠️  External Service Error" :foreground :yellow :bold true)))
+
+(defn- print-generic-error-header
+  "Print header for unclassified errors."
+  []
+  (println (style "❌ Error" :foreground :red :bold true)))
+
+(defn- print-agent-backend-error-context
+  "Print context for agent backend errors."
+  [completed-work]
+  (if (seq completed-work)
+    (println "This is a bug in Claude Code's agent runtime, not in your task or miniforge.\nYour work is complete and safe.")
+    (println "This is a bug in Claude Code's agent runtime.")))
+
+(defn- print-task-code-error-context
+  "Print context for task code errors."
+  [completed-work]
+  (println "This is an issue with the code being generated or the task specification.")
+  (when (seq completed-work)
+    (println)
+    (println "Partial work completed:")
+    (doseq [work completed-work]
+      (println (str "  ⏸️  " work)))))
+
+(defn- print-external-error-context
+  "Print context for external service errors."
+  [completed-work]
+  (println "This is not an issue with your code or miniforge. The external service\nis temporarily unavailable.")
+  (when (seq completed-work)
+    (println)
+    (println "Partial work completed:")
+    (doseq [work completed-work]
+      (println (str "  " (style "✅" :foreground :green) " " work)))))
+
+(defn- print-error-header
+  "Print error header based on error type."
+  [error-type completed-work]
+  (case error-type
+    :agent-backend (print-agent-backend-error-header completed-work)
+    :task-code (print-task-code-error-header)
+    :external (print-external-error-header)
+    (print-generic-error-header)))
+
+(defn- print-error-context
+  "Print error context based on error type."
+  [error-type completed-work]
+  (case error-type
+    :agent-backend (print-agent-backend-error-context completed-work)
+    :task-code (print-task-code-error-context completed-work)
+    :external (print-external-error-context completed-work)
+    nil))
+
+(defn- print-error-report-url
+  "Print error reporting URL if available."
+  [report-url vendor]
+  (when report-url
+    (println)
+    (println (str (style "📝 Please report this to " :foreground :cyan) vendor ":"))
+    (println (str "   " report-url))))
+
+(defn- get-retry-recommendation
+  "Get retry recommendation message based on error type."
+  [error-type]
+  (case error-type
+    :task-code "Fix the issue and retry the task."
+    :external "Wait a few minutes and retry - this is likely transient."
+    :agent-backend "Try again later after the bug is fixed."
+    "Check the error and decide if retry is appropriate."))
+
+(defn- print-retry-recommendation
+  "Print retry recommendation based on error characteristics."
+  [should-retry error-type completed-work]
+  (println)
+  (if should-retry
+    (println (str (style "🔄 Recommendation: " :foreground :cyan)
+                 (get-retry-recommendation error-type)))
+    (println (str (style "⚙️  " :foreground :cyan)
+                 (if (seq completed-work)
+                   "No need to retry - your task succeeded."
+                   "Report this bug and try again later.")))))
+
 (defn- print-classified-error
   "Display a classified error with rich formatting.
    Expects error-classification map from error-classifier/classify-error."
   [error-classification]
   (when error-classification
     (let [{:keys [type message completed-work report-url should-retry vendor]} error-classification]
-      ;; Print error header based on type
-      (case type
-        :agent-backend (do
-                        (println (style "⚠️  Agent System Error (Not Your Fault!)" :foreground :yellow :bold true))
-                        (when (seq completed-work)
-                          (println)
-                          (println (style "Your task completed successfully:" :foreground :green))
-                          (doseq [work completed-work]
-                            (println (str "  " (style "✅" :foreground :green) " " work)))))
-        :task-code (println (style "❌ Task Code Error" :foreground :red :bold true))
-        :external (println (style "⚠️  External Service Error" :foreground :yellow :bold true))
-        (println (style "❌ Error" :foreground :red :bold true)))
-
-      ;; Print error message
+      (print-error-header type completed-work)
       (println)
       (println (str "  " message))
       (println)
-
-      ;; Print context based on type
-      (case type
-        :agent-backend (if (seq completed-work)
-                        (println "This is a bug in Claude Code's agent runtime, not in your task or miniforge.\nYour work is complete and safe.")
-                        (println "This is a bug in Claude Code's agent runtime."))
-        :task-code (do
-                    (println "This is an issue with the code being generated or the task specification.")
-                    (when (seq completed-work)
-                      (println)
-                      (println "Partial work completed:")
-                      (doseq [work completed-work]
-                        (println (str "  ⏸️  " work)))))
-        :external (do
-                   (println "This is not an issue with your code or miniforge. The external service\nis temporarily unavailable.")
-                   (when (seq completed-work)
-                     (println)
-                     (println "Partial work completed:")
-                     (doseq [work completed-work]
-                       (println (str "  " (style "✅" :foreground :green) " " work)))))
-        nil)
-
-      ;; Print reporting URL
-      (when report-url
-        (println)
-        (println (str (style "📝 Please report this to " :foreground :cyan) vendor ":"))
-        (println (str "   " report-url)))
-
-      ;; Print retry recommendation
-      (println)
-      (if should-retry
-        (println (str (style "🔄 Recommendation: " :foreground :cyan)
-                     (case type
-                       :task-code "Fix the issue and retry the task."
-                       :external "Wait a few minutes and retry - this is likely transient."
-                       :agent-backend "Try again later after the bug is fixed."
-                       "Check the error and decide if retry is appropriate.")))
-        (println (str (style "⚙️  " :foreground :cyan)
-                     (if (seq completed-work)
-                       "No need to retry - your task succeeded."
-                       "Report this bug and try again later.")))))))
+      (print-error-context type completed-work)
+      (print-error-report-url report-url vendor)
+      (print-retry-recommendation should-retry type completed-work))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Configuration management

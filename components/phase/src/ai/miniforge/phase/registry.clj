@@ -41,7 +41,10 @@
    [:budget {:optional true} Budget]
    [:on-fail {:optional true} keyword?]
    [:on-success {:optional true} keyword?]
-   [:metadata {:optional true} map?]])
+   [:metadata {:optional true} map?]
+   ;; Model selection hints
+   [:model-hint {:optional true} keyword?]
+   [:require-model {:optional true} keyword?]])
 
 (def Interceptor
   "Interceptor schema (Pedestal-style)"

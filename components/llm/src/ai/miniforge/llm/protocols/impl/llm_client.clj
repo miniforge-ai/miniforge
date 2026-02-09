@@ -12,6 +12,53 @@
    [java.io ByteArrayInputStream]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Stream parser functions
+
+(defn- parse-claude-stream-line
+  "Parse a line from Claude CLI streaming output.
+
+   Arguments:
+     line - String line from stream
+
+   Returns: {:delta string :done? boolean} or nil"
+  [line]
+  (try
+    (when-not (str/blank? line)
+      (let [data (json/parse-string line true)]
+        (when (= "stream_event" (:type data))
+          (when-let [delta-text (get-in data [:event :delta :text])]
+            {:delta delta-text :done? false}))))
+    (catch Exception _e
+      nil)))
+
+(defn- parse-codex-stream-line
+  "Parse a line from Codex CLI streaming output.
+
+   Arguments:
+     line - String line from stream
+
+   Returns: {:delta string :done? boolean} or nil"
+  [line]
+  (try
+    (when-not (str/blank? line)
+      (let [data (json/parse-string line true)]
+        (cond
+          ;; Extract content from content_block_delta events
+          (= "content_block_delta" (:type data))
+          (when-let [delta-text (get-in data [:delta :text])]
+            {:delta delta-text :done? false})
+
+          ;; Handle message_delta for streaming text
+          (and (= "message_delta" (:type data))
+               (get-in data [:delta :text]))
+          {:delta (get-in data [:delta :text]) :done? false}
+
+          ;; Ignore other event types
+          :else nil)))
+    (catch Exception _e
+      nil)))
+
+;------------------------------------------------------------------------------ Backend configurations
 
 (def backends
   {:claude {:cmd "claude"
@@ -20,15 +67,7 @@
             :provider "Anthropic"
             :requires-cli? true
             :api-key-var "ANTHROPIC_API_KEY"
-            :stream-parser (fn [line]
-                             (try
-                               (when-not (str/blank? line)
-                                 (let [data (json/parse-string line true)]
-                                   (when (= "stream_event" (:type data))
-                                     (when-let [delta-text (get-in data [:event :delta :text])]
-                                       {:delta delta-text :done? false}))))
-                               (catch Exception _e
-                                 nil)))
+            :stream-parser parse-claude-stream-line
             :args-fn (fn [{:keys [prompt system max-tokens streaming?]}]
                        (cond-> ["-p"]
                          streaming? (conj "--output-format" "stream-json")
@@ -44,25 +83,7 @@
            :provider "Codex"
            :requires-cli? true
            :api-key-var nil
-           :stream-parser (fn [line]
-                            (try
-                              (when-not (str/blank? line)
-                                (let [data (json/parse-string line true)]
-                                  (cond
-                                    ;; Extract content from content_block_delta events
-                                    (= "content_block_delta" (:type data))
-                                    (when-let [delta-text (get-in data [:delta :text])]
-                                      {:delta delta-text :done? false})
-
-                                    ;; Handle message_delta for streaming text
-                                    (and (= "message_delta" (:type data))
-                                         (get-in data [:delta :text]))
-                                    {:delta (get-in data [:delta :text]) :done? false}
-
-                                    ;; Ignore other event types
-                                    :else nil)))
-                              (catch Exception _e
-                                nil)))
+           :stream-parser parse-codex-stream-line
            :args-fn (fn [{:keys [prompt model]}]
                       (cond-> ["exec"
                                "--json"
@@ -143,7 +164,9 @@
      :stream (boolean streaming?)}))
 
 (defn- http-post-request
-  "Make HTTP POST request to LLM API."
+  "Make HTTP POST request to LLM API.
+
+   Returns HTTP response map or anomaly map on exception."
   [url headers body]
   (try
     (http/post url
@@ -151,45 +174,82 @@
                 :body (json/generate-string body)
                 :throw false})
     (catch Exception e
-      {:status 500
-       :body (str "HTTP request failed: " (.getMessage e))})))
+      (response/make-anomaly
+       :anomalies/unavailable
+       (str "HTTP request failed: " (.getMessage e))
+       {:anomaly/operation :http-request
+        :anomaly.llm/url url}))))
 
 (defn- parse-openai-response
-  "Parse OpenAI API response."
+  "Parse OpenAI API response.
+
+   Handles anomaly maps from http-post-request or HTTP response maps."
   [response]
-  (try
-    (let [body (json/parse-string (:body response) true)]
-      (if (= 200 (:status response))
-        {:success true
-         :content (get-in body [:choices 0 :message :content] "")
-         :usage {:input-tokens (get-in body [:usage :prompt_tokens])
-                 :output-tokens (get-in body [:usage :completion_tokens])}}
+  ;; If response is already an anomaly map, pass it through
+  (if (response/anomaly-map? response)
+    {:success false
+     :anomaly response
+     :error {:type "http_error"
+             :message (:anomaly/message response)}}
+    (try
+      (let [body (json/parse-string (:body response) true)]
+        (if (= 200 (:status response))
+          {:success true
+           :content (get-in body [:choices 0 :message :content] "")
+           :usage {:input-tokens (get-in body [:usage :prompt_tokens])
+                   :output-tokens (get-in body [:usage :completion_tokens])}}
+          {:success false
+           :anomaly (response/make-anomaly
+                     :anomalies/unavailable
+                     (or (get-in body [:error :message]) "Unknown API error")
+                     {:anomaly/operation :llm-api-call
+                      :anomaly.llm/status (:status response)})
+           :error {:type "api_error"
+                   :message (or (get-in body [:error :message])
+                                "Unknown API error")}}))
+      (catch Exception e
         {:success false
-         :error {:type "api_error"
-                 :message (or (get-in body [:error :message])
-                              "Unknown API error")}}))
-    (catch Exception e
-      {:success false
-       :error {:type "parse_error"
-               :message (str "Failed to parse response: " (.getMessage e))}})))
+         :anomaly (response/make-anomaly
+                   :anomalies/fault
+                   (str "Failed to parse response: " (.getMessage e))
+                   {:anomaly/operation :llm-response-parse})
+         :error {:type "parse_error"
+                 :message (str "Failed to parse response: " (.getMessage e))}}))))
 
 (defn- parse-ollama-response
-  "Parse Ollama API response."
+  "Parse Ollama API response.
+
+   Handles anomaly maps from http-post-request or HTTP response maps."
   [response]
-  (try
-    (let [body (json/parse-string (:body response) true)]
-      (if (= 200 (:status response))
-        {:success true
-         :content (get-in body [:message :content] "")
-         :usage {:input-tokens nil
-                 :output-tokens nil}}
+  ;; If response is already an anomaly map, pass it through
+  (if (response/anomaly-map? response)
+    {:success false
+     :anomaly response
+     :error {:type "http_error"
+             :message (:anomaly/message response)}}
+    (try
+      (let [body (json/parse-string (:body response) true)]
+        (if (= 200 (:status response))
+          {:success true
+           :content (get-in body [:message :content] "")
+           :usage {:input-tokens nil
+                   :output-tokens nil}}
+          {:success false
+           :anomaly (response/make-anomaly
+                     :anomalies/unavailable
+                     (or (:error body) "Unknown API error")
+                     {:anomaly/operation :llm-api-call
+                      :anomaly.llm/status (:status response)})
+           :error {:type "api_error"
+                   :message (or (:error body) "Unknown API error")}}))
+      (catch Exception e
         {:success false
-         :error {:type "api_error"
-                 :message (or (:error body) "Unknown API error")}}))
-    (catch Exception e
-      {:success false
-       :error {:type "parse_error"
-               :message (str "Failed to parse response: " (.getMessage e))}})))
+         :anomaly (response/make-anomaly
+                   :anomalies/fault
+                   (str "Failed to parse response: " (.getMessage e))
+                   {:anomaly/operation :llm-response-parse})
+         :error {:type "parse_error"
+                 :message (str "Failed to parse response: " (.getMessage e))}}))))
 
 (defn- http-complete
   "Complete request using HTTP API backend."
@@ -235,6 +295,10 @@
         result)
       (catch Exception e
         {:success false
+         :anomaly (response/make-anomaly
+                   :anomalies/fault
+                   (str "Streaming failed: " (.getMessage e))
+                   {:anomaly/operation :llm-stream})
          :error {:type "stream_error"
                  :message (str "Streaming failed: " (.getMessage e))}}))))
 
