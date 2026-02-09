@@ -13,19 +13,11 @@
  * limitations under the License.
  */
 
-/* Reset and base styles */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+/* Import design system */
+@import "design-system.css";
 
+/* App-specific overrides */
 body {
-  font-family: 'SF Mono', 'JetBrains Mono', 'Menlo', 'Monaco', monospace;
-  background: #1e1e1e;
-  color: #d4d4d4;
-  font-size: 14px;
-  line-height: 1.6;
   overflow-y: auto;
 }
 
