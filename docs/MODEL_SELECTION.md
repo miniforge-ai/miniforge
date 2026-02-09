@@ -48,25 +48,30 @@ Example classifications:
 Based on the classification, the system selects the optimal model:
 
 **Thinking-Heavy Tasks** (Planning, Architecture, Research)
+
 - Primary: **Opus 4.6** (best reasoning)
 - Alternatives: GPT-5.3 Codex, Gemini 2.0 Flash Thinking
 - Local: Llama 3.3 70B
 
 **Execution-Focused Tasks** (Implementation, Testing, Review)
+
 - Primary: **Sonnet 4.5** (best code generation)
 - Alternatives: GPT-5.2 Codex, GPT-5.3 Codex
 - Local: Qwen 2.5 Coder 32B, DeepSeek Coder 33B
 
 **Simple Validation** (Syntax, Formatting, Quick Checks)
+
 - Primary: **Haiku 4.5** (fastest, cheapest)
 - Alternatives: Gemini 2.0 Flash, GPT-5.1 Codex Max
 - Local: CodeLlama 34B
 
 **Large Context** (>200k tokens)
+
 - Primary: **Gemini Pro 2.0** (2M context window!)
 - Alternatives: Gemini 2.0 Flash (1M), Opus 4.6 (200k)
 
 **Privacy-Sensitive** (Proprietary code, offline)
+
 - Primary: **Llama 3.3 70B** (best local reasoning)
 - Alternatives: Qwen 2.5 Coder, DeepSeek Coder
 - For Chinese: GLM-4 Plus
@@ -142,16 +147,19 @@ Force a specific model for a workflow phase:
 ### Anthropic Claude
 
 **Opus 4.6** (Flagship)
+
 - Best for: Complex reasoning, architecture, planning
 - Reasoning: 10/10 | Code: 9/10 | Speed: 2/10 | Cost: $$
 - Context: 200k tokens
 
 **Sonnet 4.5** (Workhorse)
+
 - Best for: Code implementation, testing, review
 - Reasoning: 8/10 | Code: 10/10 | Speed: 7/10 | Cost: $
 - Context: 200k tokens
 
 **Haiku 4.5** (Efficient)
+
 - Best for: Validation, formatting, quick checks
 - Reasoning: 6/10 | Code: 7/10 | Speed: 10/10 | Cost: ¢
 - Context: 200k tokens
@@ -159,21 +167,25 @@ Force a specific model for a workflow phase:
 ### OpenAI Codex (GPT-5)
 
 **GPT-5.3 Codex** (Flagship)
+
 - Best for: Advanced code generation, polyglot programming
 - Reasoning: 10/10 | Code: 10/10 | Speed: 6/10 | Cost: $$
 - Context: 128k tokens
 
 **GPT-5.2 Codex** (Workhorse)
+
 - Best for: Standard code tasks, implementation
 - Reasoning: 8/10 | Code: 9/10 | Speed: 7/10 | Cost: $
 - Context: 128k tokens
 
 **GPT-5.1 Codex Max** (Balanced)
+
 - Best for: Fast code generation, large outputs
 - Reasoning: 8/10 | Code: 9/10 | Speed: 8/10 | Cost: $
 - Context: 128k tokens
 
 **GPT-5.2** (General)
+
 - Best for: Mixed code and text, documentation
 - Reasoning: 8/10 | Code: 7/10 | Speed: 7/10 | Cost: $
 - Context: 128k tokens
@@ -181,16 +193,19 @@ Force a specific model for a workflow phase:
 ### Google Gemini
 
 **Gemini Pro 2.0** (Workhorse)
+
 - Best for: Very large codebases, multimodal
 - Reasoning: 8/10 | Code: 8/10 | Speed: 7/10 | Cost: $
 - Context: **2M tokens!**
 
 **Gemini 2.0 Flash** (Fast)
+
 - Best for: Fast execution, large context, batch operations
 - Reasoning: 8/10 | Code: 8/10 | Speed: 9/10 | Cost: ¢
 - Context: 1M tokens
 
 **Gemini 2.0 Flash Thinking (Experimental)**
+
 - Best for: Extended reasoning, complex problem decomposition
 - Reasoning: 10/10 | Code: 8/10 | Speed: 3/10 | Cost: $$
 - Context: 1M tokens
@@ -198,26 +213,31 @@ Force a specific model for a workflow phase:
 ### Open Source / Local Models
 
 **Llama 3.3 70B** (OSS Flagship)
+
 - Best for: Privacy-sensitive, offline, cost-free
 - Reasoning: 8/10 | Code: 7/10 | Speed: 5/10 | Cost: Free
 - Context: 128k tokens
 
 **Qwen 2.5 Coder 32B** (OSS Specialist)
+
 - Best for: Fast local code generation
 - Reasoning: 7/10 | Code: 9/10 | Speed: 8/10 | Cost: Free
 - Context: 32k tokens
 
 **DeepSeek Coder 33B** (OSS Specialist)
+
 - Best for: Code-focused tasks, fill-in-the-middle
 - Reasoning: 7/10 | Code: 9/10 | Speed: 6/10 | Cost: Free
 - Context: 16k tokens
 
 **GLM-4 Plus** (OSS Advanced)
+
 - Best for: Chinese language, multilingual codebases
 - Reasoning: 8/10 | Code: 7/10 | Speed: 6/10 | Cost: Free
 - Context: 128k tokens
 
 **CodeLlama 34B** (OSS Specialist)
+
 - Best for: Fast local inference, low-resource environments
 - Reasoning: 6/10 | Code: 8/10 | Speed: 8/10 | Cost: Free
 - Context: 16k tokens
@@ -421,6 +441,7 @@ Task Type?
 ### Model selection not working?
 
 Check configuration:
+
 ```bash
 miniforge config get model-selection
 ```
@@ -428,6 +449,7 @@ miniforge config get model-selection
 ### Want to see selection reasoning?
 
 Enable verbose logging:
+
 ```bash
 export MINIFORGE_LOG_LEVEL=debug
 miniforge workflow run spec.edn
@@ -436,6 +458,7 @@ miniforge workflow run spec.edn
 ### Override not working?
 
 Ensure you're passing `:model` explicitly:
+
 ```clojure
 (create-agent :implementer {:model "claude-opus-4-6"})
 ```
@@ -443,6 +466,7 @@ Ensure you're passing `:model` explicitly:
 ### Local models not available?
 
 Install via Ollama:
+
 ```bash
 ollama pull llama3.3:70b
 ollama pull qwen2.5-coder:32b

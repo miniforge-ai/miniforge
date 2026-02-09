@@ -22,6 +22,7 @@ All acceptance criteria from the specification have been met:
 **Status**: ✅ Complete (520 lines)
 
 Features:
+
 - 16 model profiles across 4 providers (Anthropic, OpenAI, Google, OSS)
 - Comprehensive capability metadata (reasoning, code-generation, speed, cost)
 - Use-case mappings for each model
@@ -29,6 +30,7 @@ Features:
 - Task-type recommendations with tiered fallbacks
 
 Models included:
+
 - **Anthropic**: Opus 4.6, Sonnet 4.5, Haiku 4.5
 - **OpenAI Codex**: GPT-5.3, GPT-5.2, GPT-5.1 Max, GPT-5.2
 - **Google Gemini**: Pro 2.0, 2.0 Flash, 2.0 Flash Thinking
@@ -39,6 +41,7 @@ Models included:
 **Status**: ✅ Complete (236 lines)
 
 Features:
+
 - Automatic task classification into 6 types:
   - `:thinking-heavy` - Planning, architecture, research
   - `:execution-focused` - Implementation, testing, review
@@ -55,6 +58,7 @@ Features:
 **Status**: ✅ Complete (223 lines)
 
 Features:
+
 - Three selection strategies:
   - `:automatic` - Best model for task type (default)
   - `:cost-optimized` - Cheapest sufficient model
@@ -72,6 +76,7 @@ Features:
 **Status**: ✅ Complete (integration added)
 
 Features:
+
 - Automatic model selection in `create-agent`
 - Model selection info stored in agent state
 - Logging of selection decisions
@@ -79,6 +84,7 @@ Features:
 - Seamless integration with existing agent lifecycle
 
 Integration points:
+
 ```clojure
 ;; Automatic selection when creating agent
 (create-agent :planner {:phase :plan})
@@ -94,6 +100,7 @@ Integration points:
 **Status**: ✅ Complete (exports added)
 
 Exported functions:
+
 - `get-model` - Get model profile
 - `get-models-by-capability` - Query by capability level
 - `get-models-by-use-case` - Query by use-case
@@ -107,6 +114,7 @@ Exported functions:
 **Status**: ✅ Complete (configuration keys added)
 
 Configuration keys:
+
 ```edn
 {:model-selection
  {:enabled true                    ; Enable/disable auto-selection
@@ -118,6 +126,7 @@ Configuration keys:
 ```
 
 Environment variables:
+
 - `MINIFORGE_MODEL_SELECTION_ENABLED`
 - `MINIFORGE_MODEL_SELECTION_STRATEGY`
 - `MINIFORGE_MODEL_SELECTION_COST_LIMIT`
@@ -128,20 +137,24 @@ Environment variables:
 ### Unit Tests
 
 **Model Registry Tests** (`components/llm/test/ai/miniforge/llm/model_registry_test.clj`)
+
 - ✅ 154 lines, comprehensive coverage
 - Tests: get-model, query by capability, query by use-case, provider queries, local models, context support, recommendations
 
 **Model Selector Tests** (`components/llm/test/ai/miniforge/llm/model_selector_test.clj`)
+
 - ✅ 189 lines, comprehensive coverage
 - Tests: automatic selection, cost-optimized, speed, constraints, strategies, fallback
 
 **Task Classifier Tests** (`components/agent/test/ai/miniforge/agent/task_classifier_test.clj`)
+
 - ✅ 189 lines, comprehensive coverage
 - Tests: phase classification, agent-type, keywords, context, privacy, cost, merging
 
 ### Integration Tests
 
 **Model Selection Integration** (`components/llm/test/ai/miniforge/llm/model_selection_integration_test.clj`)
+
 - ✅ 383 lines, NEW
 - Tests: end-to-end workflows, privacy constraints, large context, cost optimization, cross-provider, transparency, all 16 models
 
@@ -150,6 +163,7 @@ Environment variables:
 ### User Documentation
 
 **MODEL_SELECTION.md** (`docs/MODEL_SELECTION.md`)
+
 - ✅ Comprehensive user guide (500+ lines)
 - Sections:
   - How it works (classification + selection)
@@ -165,6 +179,7 @@ Environment variables:
 ### Demo/Example
 
 **model_selection_demo.clj** (`examples/model_selection_demo.clj`)
+
 - ✅ Interactive demonstration script
 - Shows 5 example scenarios:
   1. Planning task → Opus 4.6
@@ -181,6 +196,7 @@ Environment variables:
 ### Cross-Provider Selection (Best-of-Breed)
 
 The system can select from multiple providers based on task needs:
+
 - **Anthropic**: Best overall, great code generation
 - **OpenAI Codex**: Code specialists
 - **Google Gemini**: Massive context (1-2M tokens), fast
@@ -189,6 +205,7 @@ The system can select from multiple providers based on task needs:
 ### Intelligent Cost Optimization
 
 Example 7-phase workflow:
+
 - **Without intelligent selection** (all Opus): $0.84
 - **With intelligent selection**: $0.28
 - **Savings**: 67% ($0.56)
@@ -197,6 +214,7 @@ Example 7-phase workflow:
 ### Privacy Support
 
 Local models for sensitive code:
+
 - Llama 3.3 70B (best local reasoning)
 - Qwen 2.5 Coder (fast code generation)
 - DeepSeek Coder (code specialist)
@@ -205,6 +223,7 @@ Local models for sensitive code:
 ### Transparent Reasoning
 
 Every selection includes:
+
 - Task classification with confidence
 - Selected model with rationale
 - Alternative models
@@ -212,6 +231,7 @@ Every selection includes:
 - Override instructions
 
 Example:
+
 ```
 🎯 Model Auto-Selected: Sonnet 4.5
 
@@ -349,12 +369,14 @@ Potential improvements (not in current scope):
 ## Files Modified/Created
 
 ### Created (New Files)
+
 - `components/llm/test/ai/miniforge/llm/model_selection_integration_test.clj` (383 lines)
 - `docs/MODEL_SELECTION.md` (500+ lines)
 - `examples/model_selection_demo.clj` (230 lines)
 - `IMPLEMENTATION_SUMMARY.md` (this file)
 
 ### Already Implemented (Existing Files)
+
 - `components/llm/src/ai/miniforge/llm/model_registry.clj` (520 lines)
 - `components/llm/src/ai/miniforge/llm/model_selector.clj` (223 lines)
 - `components/agent/src/ai/miniforge/agent/task_classifier.clj` (236 lines)
@@ -363,6 +385,7 @@ Potential improvements (not in current scope):
 - `components/agent/test/ai/miniforge/agent/task_classifier_test.clj` (189 lines)
 
 ### Modified (Integration Points)
+
 - `components/agent/src/ai/miniforge/agent/core.clj` (added select-model-for-agent)
 - `components/agent/src/ai/miniforge/agent/interface.clj` (exported classify-task)
 - `components/llm/src/ai/miniforge/llm/interface.clj` (exported model selection APIs)
@@ -378,6 +401,7 @@ Potential improvements (not in current scope):
 ## Testing
 
 Run tests:
+
 ```bash
 # All tests
 clojure -M:test
