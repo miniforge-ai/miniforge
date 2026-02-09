@@ -6,6 +6,7 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.events :as events]
+   [ai.miniforge.pr-lifecycle.github :as github]
    [ai.miniforge.pr-lifecycle.triage :as triage]
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.logging.interface :as log]
@@ -42,6 +43,10 @@
    :fix/build-errors (:build-errors failure-info)
    :fix/review-comments (:comments failure-info)
    :fix/conflict-files (:conflict-files failure-info)
+
+   ;; Comment metadata for conversation resolution
+   :fix/comment-id (:comment-id failure-info)
+   :fix/parent-pr-number (:parent-pr-number failure-info)
 
    ;; Task context
    :fix/acceptance-criteria (:task/acceptance-criteria task)
@@ -212,6 +217,59 @@
             (dag/err :push-failed (:error push-result))))
         (dag/err :commit-failed (:error stage-result))))))
 
+;------------------------------------------------------------------------------ Layer 1
+;; Conversation resolution
+
+(defn resolve-comment-thread
+  "Resolve a conversation thread after creating a fix PR.
+
+   Arguments:
+   - worktree-path: Path to git worktree
+   - fix-context: Fix context with comment metadata
+   - fix-pr-number: Fix PR number
+   - logger: Logger instance
+
+   Options:
+   - :auto-resolve - Whether to resolve conversation (default true)
+
+   Returns DAG result with resolution status"
+  [worktree-path fix-context fix-pr-number logger & {:keys [auto-resolve]
+                                                      :or {auto-resolve true}}]
+  (let [comment-id (:fix/comment-id fix-context)
+        parent-pr-number (:fix/parent-pr-number fix-context)]
+
+    ;; Only attempt resolution if we have the necessary metadata
+    (if (and comment-id parent-pr-number auto-resolve)
+      (do
+        (when logger
+          (log/info logger :pr-lifecycle :fix/resolving-conversation
+                    {:message "Resolving conversation thread"
+                     :data {:parent-pr parent-pr-number
+                            :comment-id comment-id
+                            :fix-pr fix-pr-number}}))
+
+        (let [result (github/link-fix-pr-to-comment
+                      worktree-path parent-pr-number comment-id fix-pr-number logger
+                      :auto-resolve auto-resolve)]
+          (when (dag/ok? result)
+            (when logger
+              (log/info logger :pr-lifecycle :fix/conversation-resolved
+                        {:message "Successfully linked fix PR to comment"
+                         :data {:resolved (:resolved (:data result))
+                                :reply-url (:reply-url (:data result))}})))
+          result))
+
+      ;; No comment metadata - skip resolution
+      (do
+        (when (and logger (or comment-id parent-pr-number))
+          (log/debug logger :pr-lifecycle :fix/skipping-resolution
+                     {:message "Skipping conversation resolution"
+                      :data {:reason (cond
+                                       (not auto-resolve) "auto-resolve disabled"
+                                       (not comment-id) "no comment-id"
+                                       (not parent-pr-number) "no parent-pr-number")}}))
+        (dag/ok {:skipped true :reason "missing-metadata"})))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Fix loop orchestration
 
@@ -232,11 +290,12 @@
    - :max-attempts - Max fix attempts before giving up (default 3)
    - :event-bus - Event bus for publishing events
    - :run-gates-locally - Whether to run gates before push (default true)
+   - :auto-resolve-comments - Whether to auto-resolve conversation threads (default true)
 
    Returns {:success? bool :commit-sha string :attempts int :metrics {...}}"
   [task pr-info failure-info generate-fn context
-   & {:keys [worktree-path max-attempts event-bus _run-gates-locally]
-      :or {max-attempts 3}}]
+   & {:keys [worktree-path max-attempts event-bus _run-gates-locally auto-resolve-comments]
+      :or {max-attempts 3 auto-resolve-comments true}}]
   (let [logger (:logger context)
         dag-id (:dag/id context)
         run-id (:run/id context)
@@ -297,6 +356,26 @@
                 (let [commit-result (commit-fix worktree-path fix-context branch logger)]
                   (if (dag/ok? commit-result)
                     (do
+                      (when logger
+                        (log/info logger :pr-lifecycle :fix-loop/success
+                                  {:message "Fix pushed successfully"
+                                   :data {:task-id task-id
+                                          :attempt attempt
+                                          :commit-sha (:commit-sha (:data commit-result))}}))
+
+                      ;; Try to resolve conversation thread (non-blocking)
+                      (when (and auto-resolve-comments
+                                 (:fix/comment-id fix-context))
+                        (try
+                          (resolve-comment-thread worktree-path fix-context pr-id logger
+                                                  :auto-resolve auto-resolve-comments)
+                          (catch Exception e
+                            ;; Log error but don't fail the fix loop
+                            (when logger
+                              (log/warn logger :pr-lifecycle :fix-loop/resolution-error
+                                        {:message "Failed to resolve conversation (non-fatal)"
+                                         :data {:error (.getMessage e)}})))))
+
                       ;; Publish fix-pushed event
                       (when event-bus
                         (events/publish! event-bus
@@ -304,12 +383,7 @@
                                                             (:commit-sha (:data commit-result))
                                                             (:fix/type fix-context))
                                          logger))
-                      (when logger
-                        (log/info logger :pr-lifecycle :fix-loop/success
-                                  {:message "Fix pushed successfully"
-                                   :data {:task-id task-id
-                                          :attempt attempt
-                                          :commit-sha (:commit-sha (:data commit-result))}}))
+
                       {:success? true
                        :commit-sha (:commit-sha (:data commit-result))
                        :attempts attempt
@@ -365,16 +439,26 @@
    - generate-fn: Agent generation function
    - context: Execution context with :worktree-path
 
+   Options (from context):
+   - :auto-resolve-comments - Whether to auto-resolve conversations (default true)
+
    Returns fix result."
   [task pr-info review-comments generate-fn context]
   (let [grouped (triage/group-changes-by-file
                  (triage/extract-requested-changes review-comments))
+        ;; Extract comment metadata for resolution (take first comment if multiple)
+        first-comment (first review-comments)
+        comment-id (:comment-id first-comment)
+        parent-pr-number (:parent-pr-number first-comment (:pr/id pr-info))
         failure-info {:type :review-changes
                       :summary (str (count review-comments) " requested changes")
                       :comments review-comments
-                      :affected-files (mapv :file grouped)}]
+                      :affected-files (mapv :file grouped)
+                      :comment-id comment-id
+                      :parent-pr-number parent-pr-number}]
     (run-fix-loop task pr-info failure-info generate-fn context
-                  :worktree-path (:worktree-path context))))
+                  :worktree-path (:worktree-path context)
+                  :auto-resolve-comments (:auto-resolve-comments context true))))
 
 (defn fix-merge-conflict
   "Convenience function for fixing merge conflicts.

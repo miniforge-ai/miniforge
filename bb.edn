@@ -507,7 +507,7 @@
    :task    (tasks/install *command-line-args*)}
 
   lsp:setup
-  {:doc     "Generate MCP config for Claude Code/Desktop (--claude-code or --claude-desktop)"
+  {:doc     "Generate MCP config for Claude Code/Desktop and Codex (--claude-code, --claude-desktop, --codex)"
    :extra-paths ["bases/lsp-mcp-bridge/src"
                  "components/tool-registry/resources"
                  "components/response/src"]

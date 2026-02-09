@@ -16,6 +16,7 @@
    [ai.miniforge.pr-lifecycle.ci-monitor :as ci]
    [ai.miniforge.pr-lifecycle.review-monitor :as review]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
+   [ai.miniforge.pr-lifecycle.github :as github]
    [ai.miniforge.pr-lifecycle.triage :as triage]
    [ai.miniforge.pr-lifecycle.merge :as merge]
    [ai.miniforge.pr-lifecycle.events :as events]))
@@ -206,6 +207,83 @@
   "Compute overall review status from reviews.
    Returns {:status keyword :approvers [...] :changes-requested-by [...]}"
   review/compute-review-status)
+
+;------------------------------------------------------------------------------ Layer 2
+;; GitHub conversation management
+
+(def get-thread-id
+  "Get GraphQL thread ID from a comment ID.
+
+   GitHub review comments have both a REST API comment ID and a
+   GraphQL thread ID. This function fetches the thread ID needed
+   for resolving conversations.
+
+   Arguments:
+   - worktree-path: Path to git worktree
+   - comment-id: REST API comment ID (integer)
+
+   Returns DAG result with :thread-id or error
+
+   Example:
+     (get-thread-id \"/path/to/repo\" 2780310737)
+     ; => {:success true :data {:thread-id \"PRRT_...\" :is-resolved false}}"
+  github/get-thread-id)
+
+(def reply-to-comment
+  "Post a reply to a review comment thread.
+
+   Arguments:
+   - worktree-path: Path to git worktree
+   - pr-number: Pull request number
+   - comment-id: Comment ID to reply to
+   - message: Reply message text
+
+   Returns DAG result with reply info or error
+
+   Example:
+     (reply-to-comment \"/path/to/repo\" 148 2780310737 \"Fixed in PR #150\")
+     ; => {:success true :data {:reply-id ... :url \"https://...\"}}"
+  github/reply-to-comment)
+
+(def resolve-conversation
+  "Mark a conversation thread as resolved via GraphQL.
+
+   Arguments:
+   - worktree-path: Path to git worktree
+   - thread-id: GraphQL thread ID (starts with 'PRRT_' or 'RT_')
+
+   Returns DAG result with resolution status or error
+
+   Example:
+     (resolve-conversation \"/path/to/repo\" \"PRRT_kwDO...\")
+     ; => {:success true :data {:thread-id \"PRRT_...\" :resolved true}}"
+  github/resolve-conversation)
+
+(def link-fix-pr-to-comment
+  "Link a fix PR to a review comment and resolve the conversation.
+
+   This is the main entry point for conversation resolution after
+   creating a fix PR. It:
+   1. Posts a reply linking to the fix PR
+   2. Resolves the conversation thread (if configured)
+
+   Arguments:
+   - worktree-path: Path to git worktree
+   - pr-number: Original PR number (where comment was made)
+   - comment-id: Comment ID to reply to
+   - fix-pr-number: Fix PR number to link
+   - logger: Optional logger instance
+
+   Options:
+   - :auto-resolve - Whether to resolve conversation (default true)
+   - :message-template - Custom message template
+
+   Returns DAG result with success status and actions taken
+
+   Example:
+     (link-fix-pr-to-comment \"/path/to/repo\" 148 2780310737 150 logger)
+     ; => {:success true :data {:reply-posted true :resolved true :thread-id \"PRRT_...\"}}"
+  github/link-fix-pr-to-comment)
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Fix loop

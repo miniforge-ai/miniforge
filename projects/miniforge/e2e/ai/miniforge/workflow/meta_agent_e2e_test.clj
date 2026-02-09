@@ -1,4 +1,8 @@
-;; Copyright 2025 miniforge.ai
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;;
 ;; Licensed under the Apache License, Version 2.0 (the "License");
 ;; you may not use this file except in compliance with the License.
@@ -117,7 +121,7 @@
         ;; Just verify the infrastructure ran - don't require specific outputs
         ;; (real LLM execution may vary)
         (is (map? result)
-            "Should return execution result map"))))
+            "Should return execution result map")))))
 
 (deftest ^:e2e test-meta-agent-streaming-detection
   (testing "Meta-agent infrastructure works with real CLI backend"
@@ -167,7 +171,7 @@
           (println "\n📈 CLI Backend Metrics:")
           (println "  Status:" (:execution/status result))
           (println "  Duration:" (:duration-ms metrics) "ms")
-          (println "  ✓ Metrics tracking infrastructure present")))))))
+          (println "  ✓ Metrics tracking infrastructure present"))))))
 
 (defn create-iterating-mock-llm
   "Create a mock LLM that returns multiple responses for multiple iterations.
@@ -175,12 +179,11 @@
    This simulates a workflow that goes through multiple phases/iterations,
    allowing meta-agents to perform health checks between iterations."
   []
-  (let [call-count (atom 0)]
-    (llm/mock-client
-     {:outputs ["(defn plan-iteration-1 [] :planning)"
-                "(defn plan-iteration-2 [] :more-planning)"
-                "(defn plan-iteration-3 [] :final-plan)"
-                ":done"]})))
+  (llm/mock-client
+   {:outputs ["(defn plan-iteration-1 [] :planning)"
+              "(defn plan-iteration-2 [] :more-planning)"
+              "(defn plan-iteration-3 [] :final-plan)"
+              ":done"]}))
 
 (deftest ^:e2e test-meta-agent-monitors-mocked-workflow
   (testing "Real meta-agent monitors mocked workflow and performs health checks"

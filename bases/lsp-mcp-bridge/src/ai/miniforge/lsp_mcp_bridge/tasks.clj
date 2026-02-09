@@ -2,12 +2,12 @@
   "bb task implementations for LSP server management.
 
    Provides CLI commands for installing LSP servers and configuring
-   Claude Code / Claude Desktop to use the miniforge LSP-MCP bridge.
+   Claude Code / Claude Desktop / Codex to use the miniforge LSP-MCP bridge.
 
    Layer 0: Name resolution and display helpers
    Layer 1: lsp:status — show installed/available LSP servers
    Layer 2: lsp:install — install LSP servers
-   Layer 3: lsp:setup — generate MCP config for Claude Code / Claude Desktop"
+   Layer 3: lsp:setup — generate MCP config for Claude Code / Claude Desktop / Codex"
   (:require
    [ai.miniforge.lsp-mcp-bridge.config :as config]
    [ai.miniforge.lsp-mcp-bridge.installer :as installer]
@@ -139,7 +139,7 @@
           (System/exit 1))))))
 
 ;------------------------------------------------------------------------------ Layer 3
-;; lsp:setup — generate MCP config for Claude Code / Claude Desktop
+;; lsp:setup — generate MCP config for Claude Code / Claude Desktop / Codex
 
 (defn- project-dir
   "Get the absolute project directory."
@@ -170,6 +170,11 @@
       (str (fs/home) "/Library/Application Support/Claude/claude_desktop_config.json")
       (str (fs/home) "/.config/Claude/claude_desktop_config.json"))))
 
+(defn- codex-config-path
+  "Path to Codex config file."
+  []
+  (str (fs/home) "/.codex/config.toml"))
+
 (defn- read-json-file
   "Read and parse a JSON file. Returns {} if missing or invalid."
   [path]
@@ -181,8 +186,79 @@
 (defn- write-json-file
   "Write data as formatted JSON to a file."
   [path data]
+  (fs/create-dirs (fs/parent path))
   (spit path (json/generate-string data {:pretty true}))
   (println (str "  Wrote: " path)))
+
+(defn- toml-escape
+  "Escape a string for TOML output."
+  [value]
+  (-> value
+      (str/replace "\\" "\\\\")
+      (str/replace "\"" "\\\"")))
+
+(defn- toml-string
+  "Render a TOML string value."
+  [value]
+  (str "\"" (toml-escape value) "\""))
+
+(defn- toml-array
+  "Render a TOML array of strings."
+  [values]
+  (str "[" (str/join ", " (map toml-string values)) "]"))
+
+(defn- toml-inline-table
+  "Render a TOML inline table from a string map."
+  [m]
+  (str "{ "
+       (str/join ", "
+                 (map (fn [[k v]]
+                        (str (name k) " = " (toml-string v)))
+                      m))
+       " }"))
+
+(defn- remove-toml-block
+  "Remove a TOML block by header (e.g., mcp_servers.miniforge-lsp)."
+  [content header]
+  (let [lines (str/split-lines (or content ""))
+        header-line (str "[" header "]")]
+    (loop [remaining lines
+           acc []
+           skipping? false]
+      (if (empty? remaining)
+        (str/join "\n" acc)
+        (let [line (first remaining)
+              trimmed (str/trim line)
+              is-header (re-matches #"^\s*\[.+\]\s*$" line)]
+          (cond
+            (and (not skipping?) (= trimmed header-line))
+            (recur (rest remaining) acc true)
+
+            (and skipping? is-header)
+            (recur remaining acc false)
+
+            skipping?
+            (recur (rest remaining) acc true)
+
+            :else
+            (recur (rest remaining) (conj acc line) false)))))))
+
+(defn- append-toml-block
+  "Append a TOML block to existing content, ensuring separation."
+  [content block]
+  (let [content (str/trim (or content ""))]
+    (str (when (seq content) (str content "\n\n"))
+         block
+         "\n")))
+
+(defn- render-codex-mcp-block
+  "Render TOML block for Codex MCP server."
+  [entry]
+  (str "[mcp_servers.miniforge-lsp]\n"
+       "command = " (toml-string (get entry "command")) "\n"
+       "args = " (toml-array (get entry "args")) "\n"
+       "cwd = " (toml-string (get entry "cwd")) "\n"
+       "env = " (toml-inline-table (get entry "env")) "\n"))
 
 (defn- setup-claude-code
   "Write or update .mcp.json in the project root for Claude Code CLI."
@@ -211,6 +287,20 @@
         (write-json-file path updated)
         (println "  Claude Desktop configured. Restart Claude Desktop to pick up changes.")))))
 
+(defn- setup-codex
+  "Merge miniforge-lsp entry into Codex config (config.toml)."
+  []
+  (let [path (codex-config-path)
+        entry (mcp-server-entry-claude-desktop)
+        block (render-codex-mcp-block entry)
+        existing (if (fs/exists? path) (slurp path) "")
+        cleaned (remove-toml-block existing "mcp_servers.miniforge-lsp")
+        updated (append-toml-block cleaned block)]
+    (fs/create-dirs (fs/parent path))
+    (spit path updated)
+    (println (str "  Wrote: " path))
+    (println "  Codex configured. Restart Codex to pick up changes.")))
+
 (defn- print-config-preview
   "Print what the MCP configs would look like, without writing anything."
   []
@@ -222,24 +312,32 @@
   (println (json/generate-string
             {"mcpServers" {"miniforge-lsp" (mcp-server-entry-claude-desktop)}}
             {:pretty true}))
-  (println "\nRun with --claude-code or --claude-desktop to write config files."))
+  (println "\nCodex (config.toml):")
+  (println (render-codex-mcp-block (mcp-server-entry-claude-desktop)))
+  (println "\nRun with --claude-code, --claude-desktop, or --codex to write config files."))
 
 (defn setup
-  "Generate MCP config for Claude Code and/or Claude Desktop.
+  "Generate MCP config for Claude Code and/or Claude Desktop and/or Codex.
 
    Arguments:
-   - args - Command-line args (--claude-code, --claude-desktop, or empty for preview)"
+   - args - Command-line args (--claude-code, --claude-desktop, --codex, --codex-cli,
+     --codex-desktop, or empty for preview)"
   [args]
   (let [args-set (set args)]
     (cond
-      (contains? args-set "--claude-code")
-      (setup-claude-code)
-
-      (contains? args-set "--claude-desktop")
-      (setup-claude-desktop)
+      (empty? args-set)
+      (print-config-preview)
 
       :else
-      (print-config-preview))))
+      (do
+        (when (contains? args-set "--claude-code")
+          (setup-claude-code))
+        (when (contains? args-set "--claude-desktop")
+          (setup-claude-desktop))
+        (when (or (contains? args-set "--codex")
+                  (contains? args-set "--codex-cli")
+                  (contains? args-set "--codex-desktop"))
+          (setup-codex))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
