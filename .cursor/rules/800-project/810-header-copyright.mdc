@@ -1,0 +1,29 @@
+---
+description: Enforce Miniforge.ai header and copyright on published content
+globs: **/*.{md,mdx,html}
+---
+
+# Miniforge.ai Header & Copyright
+
+<version>1.0.0</version>
+
+## Context
+- Use when authoring or editing site, docs, blog, or README content.
+
+## Requirements
+- Include this header block verbatim at the top of content.
+- Use copyright owner: Christopher Lester (christopher@miniforge.ai).
+- Do not attribute copyright to Miniforge.ai as an entity. ✅
+
+## Examples
+<example>
+  Title: Miniforge.ai
+  Subtitle: An agentic SDLC / fleet-control platform
+  Author: Christopher Lester
+  Line: Founder, Miniforge.ai (project)
+  Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+</example>
+
+<example type="invalid">
+  Copyright 2025 miniforge.ai
+</example>

@@ -185,4 +185,8 @@ See [docs/specs/architecture.spec](docs/specs/architecture.spec) for the full ar
 
 miniforge is licensed under the [Apache License 2.0](LICENSE).
 
-Copyright 2025 miniforge.ai
+Title: Miniforge.ai
+Subtitle: An agentic SDLC / fleet-control platform
+Author: Christopher Lester
+Line: Founder, Miniforge.ai (project)
+Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)

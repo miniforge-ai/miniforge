@@ -1,4 +1,8 @@
-;; Copyright 2025 miniforge.ai
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;;
 ;; Licensed under the Apache License, Version 2.0 (the "License");
 ;; you may not use this file except in compliance with the License.
