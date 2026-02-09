@@ -34,7 +34,6 @@
    [clojure.string :as str]
    [clojure.edn :as edn]
    [cheshire.core :as json]
-   [ai.miniforge.cli.web :as web]
    [ai.miniforge.cli.spec-parser :as spec-parser]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]))
 
@@ -315,33 +314,68 @@
     (println (str "  Failed: " (get-in state [:workflows :failed] 0)))
     (println)))
 
-;; Deprecated TUI dashboard functions removed - use web dashboard instead
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Monitoring commands (web dashboard and TUI)
 
-(defn fleet-dashboard-cmd
-  "Open interactive two-pane TUI dashboard."
-  [_m]
-  (print-info "TUI dashboard is deprecated. Use the web dashboard instead:")
-  (println "  bb miniforge fleet web")
-  (println)
-  (println "The web dashboard offers:")
-  (println "  - Better UX with htmx-powered interactions")
-  (println "  - AI chat integration")
-  (println "  - PR risk analysis and batch operations")
-  (println "  - Accessible from any browser")
-  nil)
+(defn web-cmd
+  "Start web dashboard for workflow monitoring.
 
-(defn fleet-web-cmd
-  "Start web-based fleet dashboard."
+   Launches a web server with real-time workflow visualization.
+   Provides 5 N5 views: workflow list, detail, evidence, artifacts, DAG kanban."
   [m]
-  (let [{:keys [port]} (get-opts m)
-        port (or port 8787)]
-    (print-info (str "Starting web dashboard on port " port "..."))
-    (web/start-server! :port port)
-    ;; Keep running until interrupted
-    @(promise)))
+  (let [{:keys [port open]} (get-opts m)
+        port (or port 8080)]
+    (try
+      ;; Conditionally require web-dashboard (may not be on classpath in Babashka)
+      (require '[ai.miniforge.web-dashboard.interface :as dashboard])
+      (require '[ai.miniforge.event-stream.interface :as es])
 
-(defn fleet-tui-cmd
-  "Start terminal UI dashboard with 5 N5 views.
+      (let [dashboard-ns (find-ns 'ai.miniforge.web-dashboard.interface)
+            es-ns (find-ns 'ai.miniforge.event-stream.interface)]
+        (when-not (and dashboard-ns es-ns)
+          (print-error "Web dashboard not available in this runtime.")
+          (println "The dashboard requires JVM components not available in Babashka.")
+          (System/exit 1))
+
+        (let [start! (ns-resolve dashboard-ns 'start!)
+              create-stream (ns-resolve es-ns 'create-event-stream)
+              event-stream (create-stream)
+              url (str "http://localhost:" port)]
+          (print-info (str "Starting web dashboard on port " port "..."))
+          (start! {:port port :event-stream event-stream})
+          (println)
+          (println (str "  " url))
+          (println)
+          (if open
+            (do
+              (println "Opening browser...")
+              (try
+                (process/sh "open" url)
+                (catch Exception _e nil))
+              (println "Press Ctrl+C to stop")
+              @(promise))
+            (do
+              (println "Press Enter to open in browser, Ctrl+C to stop")
+              (read-line)
+              (println "Opening browser...")
+              (try
+                (process/sh "open" url)
+                (catch Exception _e nil))
+              @(promise)))))  ; Block until interrupted
+      (catch java.net.BindException _e
+        (print-error (str "Port " port " is already in use."))
+        (println)
+        (println "Solutions:")
+        (println (str "  1. Use a different port: bb miniforge web --port " (inc port)))
+        (println (str "  2. Kill the process using port " port ":"))
+        (println (str "     lsof -ti:" port " | xargs kill"))
+        (System/exit 1))
+      (catch Exception e
+        (print-error (str "Failed to start web dashboard: " (ex-message e)))
+        (System/exit 1)))))
+
+(defn tui-cmd
+  "Start terminal UI for workflow monitoring.
 
    The TUI provides real-time visibility into workflows:
    - Workflow list (status, phase, progress)
@@ -375,7 +409,7 @@
       (println "  brew install miniforge-tui")
       (println)
       (println "Or use the web dashboard instead:")
-      (println "  miniforge fleet web")
+      (println "  miniforge web")
       (System/exit 1))
     (do
       (print-info "Starting TUI dashboard...")
@@ -419,45 +453,6 @@
             new-cfg (assoc-in cfg [:fleet :repos] (vec (remove #{repo} repos)))]
         (save-config new-cfg config)
         (print-success (str "Removed " repo " from fleet"))))))
-
-;; ─────────────────────────────────────────────────────────────────────────────
-;; Dashboard command
-
-(defn dashboard-cmd
-  "Start workflow monitoring dashboard.
-
-   Launches a web server with real-time workflow visualization.
-   Provides 5 N5 views: workflow list, detail, evidence, artifacts, DAG kanban."
-  [m]
-  (let [{:keys [port open]} (get-opts m)
-        port (or port 8080)]
-    (try
-      ;; Conditionally require web-dashboard (may not be on classpath in Babashka)
-      (require '[ai.miniforge.web-dashboard.interface :as dashboard])
-      (require '[ai.miniforge.event-stream.interface :as es])
-
-      (let [dashboard-ns (find-ns 'ai.miniforge.web-dashboard.interface)
-            es-ns (find-ns 'ai.miniforge.event-stream.interface)]
-        (if (and dashboard-ns es-ns)
-          (let [start! (ns-resolve dashboard-ns 'start!)
-                create-stream (ns-resolve es-ns 'create-event-stream)
-                event-stream (create-stream)]
-            (print-info (str "Starting workflow dashboard on port " port "..."))
-            (start! {:port port :event-stream event-stream})
-            (when open
-              (try
-                (process/sh "open" (str "http://localhost:" port))
-                (catch Exception _ nil)))
-            (println (str "Dashboard running at http://localhost:" port))
-            (println "Press Ctrl+C to stop")
-            @(promise))  ; Block until interrupted
-          (do
-            (print-error "Web dashboard not available in this runtime.")
-            (println "The dashboard requires JVM components not available in Babashka.")
-            (println "Use 'bb miniforge fleet web' for the fleet dashboard (Babashka-compatible)."))))
-      (catch Exception e
-        (print-error (str "Failed to start dashboard: " (ex-message e)))
-        (println "Use 'bb miniforge fleet web' for the fleet dashboard instead.")))))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; PR commands
@@ -619,13 +614,14 @@ Note:
 Examples:
   miniforge doctor
   miniforge run feature.spec.edn
+  miniforge web                        # Start web dashboard (port 8080)
+  miniforge web --port 3000 --open     # Custom port, auto-open browser
+  miniforge tui                        # Start terminal UI (requires miniforge-tui)
   miniforge workflow list
   miniforge workflow run :simple-v2
   miniforge workflow run :canonical-sdlc-v1 -i input.edn
   miniforge workflow run :workflow-id --input-json '{\"task\": \"Build feature\"}'
   miniforge fleet add myorg/myrepo
-  miniforge fleet web                  # Start web dashboard
-  miniforge fleet tui                  # Start terminal UI (requires miniforge-tui)
   miniforge pr review https://github.com/org/repo/pull/123
 "))
 
@@ -650,11 +646,14 @@ Examples:
     :fn status-cmd
     :args->opts [:workflow-id]}
 
-   ;; Dashboard command
-   {:cmds ["dashboard"]
-    :fn dashboard-cmd
+   ;; Monitoring commands
+   {:cmds ["web"]
+    :fn web-cmd
     :spec {:port {:coerce :int :alias :p :default 8080}
            :open {:coerce :boolean :alias :o}}}
+
+   {:cmds ["tui"]
+    :fn tui-cmd}
 
    ;; Workflow commands
    {:cmds ["workflow" "run"]
@@ -675,16 +674,12 @@ Examples:
    {:cmds ["config" "get"]  :fn config-get-cmd  :args->opts [:key]}
    {:cmds ["config" "set"]  :fn config-set-cmd  :args->opts [:key :value]}
 
-   ;; Fleet subcommands
-   {:cmds ["fleet" "start"]     :fn fleet-start-cmd}
-   {:cmds ["fleet" "stop"]      :fn fleet-stop-cmd}
-   {:cmds ["fleet" "status"]    :fn fleet-status-cmd}
-   {:cmds ["fleet" "dashboard"] :fn fleet-dashboard-cmd}
-   {:cmds ["fleet" "web"]       :fn fleet-web-cmd
-    :spec {:port {:coerce :int :alias :p :default 8787}}}
-   {:cmds ["fleet" "tui"]       :fn fleet-tui-cmd}
-   {:cmds ["fleet" "add"]       :fn fleet-add-cmd    :args->opts [:repo]}
-   {:cmds ["fleet" "remove"]    :fn fleet-remove-cmd :args->opts [:repo]}
+   ;; Fleet subcommands (daemon management)
+   {:cmds ["fleet" "start"]  :fn fleet-start-cmd}
+   {:cmds ["fleet" "stop"]   :fn fleet-stop-cmd}
+   {:cmds ["fleet" "status"] :fn fleet-status-cmd}
+   {:cmds ["fleet" "add"]    :fn fleet-add-cmd    :args->opts [:repo]}
+   {:cmds ["fleet" "remove"] :fn fleet-remove-cmd :args->opts [:repo]}
 
    ;; PR subcommands
    {:cmds ["pr" "list"]    :fn pr-list-cmd    :spec {:repo {:alias :r}}}
@@ -695,7 +690,38 @@ Examples:
 (defn -main
   "CLI entry point."
   [& args]
-  (cli/dispatch dispatch-table args))
+  (try
+    (cli/dispatch dispatch-table args)
+    (catch clojure.lang.ExceptionInfo e
+      (let [data (ex-data e)]
+        (if (and (= (:type data) :org.babashka/cli)
+                 (= (:cause data) :no-match))
+          (let [wrong-input (:wrong-input data)
+                dispatch (:dispatch data)
+                all-commands (:all-commands data)]
+            (print-error (str "Unknown command: " (str/join " " (conj (vec dispatch) wrong-input))))
+            (println)
+
+            ;; Special case: suggest alternatives for moved commands
+            (when (and (= (first dispatch) "fleet")
+                       (contains? #{"web" "dashboard" "tui"} wrong-input))
+              (println "Did you mean:")
+              (println (str "  miniforge " (if (= wrong-input "dashboard") "web" wrong-input)))
+              (println))
+
+            (when (seq all-commands)
+              (println (str "Available " (if (seq dispatch)
+                                           (str "'" (str/join " " dispatch) "' ")
+                                           "")
+                           "commands:"))
+              (doseq [cmd all-commands]
+                (println (str "  miniforge " (str/join " " (conj (vec dispatch) cmd)))))
+              (println))
+
+            (println "Run 'miniforge help' for more information.")
+            (System/exit 1))
+          ;; Re-throw if not a no-match error
+          (throw e))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
@@ -703,9 +729,10 @@ Examples:
   (-main "help")
   (-main "version")
   (-main "doctor")
+  (-main "web")
+  (-main "tui")
   (-main "config" "init")
   (-main "config" "list")
   (-main "run" "test.spec.edn")
-  (-main "fleet" "dashboard")
 
   :end)
