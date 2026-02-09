@@ -22,6 +22,8 @@
                        "components/agent-runtime/resources"
                        "components/task/src"
                        "components/task/resources"
+                       "components/task-executor/src"
+                       "components/task-executor/resources"
                        "components/loop/src"
                        "components/loop/resources"
                        "components/knowledge/src"
@@ -69,6 +71,8 @@
                        "components/tui-engine/resources"
                        "components/tui-views/src"
                        "components/tui-views/resources"
+                       "components/web-dashboard/src"
+                       "components/web-dashboard/resources"
                        "bases/cli/src"
                        "bases/cli/resources"
                        "bases/lsp-mcp-bridge/src"]
@@ -82,6 +86,7 @@
                       ai.miniforge/agent {:local/root "components/agent"}
                       ai.miniforge/agent-runtime {:local/root "components/agent-runtime"}
                       ai.miniforge/task {:local/root "components/task"}
+                      ai.miniforge/task-executor {:local/root "components/task-executor"}
                       ai.miniforge/loop {:local/root "components/loop"}
                       ai.miniforge/knowledge {:local/root "components/knowledge"}
                       ai.miniforge/policy {:local/root "components/policy"}
@@ -106,6 +111,7 @@
                      ai.miniforge/event-stream {:local/root "components/event-stream"}
                      ai.miniforge/tui-engine {:local/root "components/tui-engine"}
                      ai.miniforge/tui-views {:local/root "components/tui-views"}
+                     ai.miniforge/web-dashboard {:local/root "components/web-dashboard"}
                      ai.miniforge/cli {:local/root "bases/cli"}}}
 
   :test {:extra-paths ["development/test"
