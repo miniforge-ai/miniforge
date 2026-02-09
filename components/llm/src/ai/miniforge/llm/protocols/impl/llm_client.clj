@@ -38,15 +38,38 @@
                          max-tokens (into ["--max-budget-usd" "0.10"])
                          true (conj prompt)))}
 
-   :codex {:cmd "http"
+   :codex {:cmd "codex"
            :streaming? true
-           :description "OpenAI Codex via API"
-           :provider "OpenAI"
-           :requires-cli? false
-           :api-key-var "OPENAI_API_KEY"
-           :api-endpoint "https://api.openai.com/v1/chat/completions"
-           :default-model "gpt-4-turbo"
-           :models ["gpt-4-turbo" "gpt-4" "gpt-3.5-turbo"]}
+           :description "Codex via Codex CLI"
+           :provider "Codex"
+           :requires-cli? true
+           :api-key-var nil
+           :stream-parser (fn [line]
+                            (try
+                              (when-not (str/blank? line)
+                                (let [data (json/parse-string line true)]
+                                  (cond
+                                    ;; Extract content from content_block_delta events
+                                    (= "content_block_delta" (:type data))
+                                    (when-let [delta-text (get-in data [:delta :text])]
+                                      {:delta delta-text :done? false})
+
+                                    ;; Handle message_delta for streaming text
+                                    (and (= "message_delta" (:type data))
+                                         (get-in data [:delta :text]))
+                                    {:delta (get-in data [:delta :text]) :done? false}
+
+                                    ;; Ignore other event types
+                                    :else nil)))
+                              (catch Exception _e
+                                nil)))
+           :args-fn (fn [{:keys [prompt model]}]
+                      (cond-> ["exec"
+                               "--json"
+                               "--full-auto"
+                               "--skip-git-repo-check"]
+                        model (into ["-m" model])
+                        true (conj prompt)))}
 
    :openai {:cmd "http"
             :streaming? true

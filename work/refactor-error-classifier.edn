@@ -1,0 +1,196 @@
+;; Refactor Error Classifier
+
+{:title "Refactor Error Classifier into Sub-Namespaces"
+ :version "1.0.0"
+ :type :refactoring
+ :priority :medium
+ :pr-comment "PR #152: error_classifier.clj:1"
+
+ :description
+ "Split the error_classifier.clj file (~400 lines) into multiple focused
+  sub-namespaces following stratified design principles. Each sub-namespace
+  should have a single responsibility and stay under 400 lines per Rule 720."
+
+ :current-state
+ {:file "components/agent-runtime/src/ai/miniforge/agent_runtime/error_classifier.clj"
+  :size "~400 lines (at Rule 720 limit)"
+  :structure
+  ["Layer 0: Error pattern definitions"
+   "Layer 1: Pattern matching functions"
+   "Layer 2: Classification logic"
+   "Layer 3: User-facing message formatting"
+   "Layer 4: Vendor reporting URL generation"]}
+
+ :problems
+ {:size "Single file at 400 line limit"
+  :cohesion "Multiple responsibilities in one file"
+  :extensibility "Hard to add new error types or vendors"
+  :testing "Large file makes unit testing harder"
+  :rule-violation "Approaching Rule 720 limit (≤400 lines per PR)"}
+
+ :refactoring-strategy
+ {:principle "Stratified design: separate concerns into focused namespaces"
+  :goal "Each namespace ≤200 lines, single responsibility"
+  :approach "Extract by responsibility, not by layers"}
+
+ :new-structure
+ {:patterns
+  {:namespace "ai.miniforge.agent_runtime.error_classifier.patterns"
+   :responsibility "Error pattern definitions and matching"
+   :size "~100 lines"
+   :exports
+   ["agent-backend-patterns - List of {regex, type, vendor} maps"
+    "task-code-patterns - List of code error patterns"
+    "external-patterns - List of external service patterns"
+    "matches-pattern? - (matches-pattern? error pattern) -> boolean"]}
+
+  :classifier
+  {:namespace "ai.miniforge.agent_runtime.error_classifier.core"
+   :responsibility "Core classification logic"
+   :size "~100 lines"
+   :exports
+   ["classify-error - (classify-error error) -> {:type :vendor :pattern :confidence}"
+    "extract-error-context - Extract relevant context from error"
+    "determine-confidence - Calculate confidence score"]}
+
+  :messages
+  {:namespace "ai.miniforge.agent_runtime.error_classifier.messages"
+   :responsibility "User-facing message generation"
+   :size "~100 lines"
+   :exports
+   ["format-error-message - Generate user-friendly error message"
+    "format-agent-backend-error - Format agent backend failures"
+    "format-task-code-error - Format task code errors"
+    "format-external-error - Format external service errors"
+    "add-suggestions - Add troubleshooting suggestions"]}
+
+  :reporting
+  {:namespace "ai.miniforge.agent_runtime.error_classifier.reporting"
+   :responsibility "Vendor reporting and issue tracking"
+   :size "~80 lines"
+   :exports
+   ["get-vendor-report-url - Generate vendor-specific issue URL"
+    "build-issue-template - Build issue template for vendor"
+    "vendor-info - Map of vendor -> {:name :report-url :contact}"]}
+
+  :interface
+  {:namespace "ai.miniforge.agent_runtime.interface"
+   :responsibility "Public API (unchanged)"
+   :size "~40 lines"
+   :exports
+   ["classify-and-format - Main entry point"
+    "Delegates to error_classifier.core/classify-error"
+    "Then formats via error_classifier.messages/format-error-message"]}}
+
+ :implementation-plan
+ {:pr-1-extract-patterns
+  {:title "Extract error patterns into dedicated namespace"
+   :files-to-create
+   ["components/agent-runtime/src/ai/miniforge/agent_runtime/error_classifier/patterns.clj"]
+   :files-to-modify
+   ["components/agent-runtime/src/ai/miniforge/agent_runtime/error_classifier.clj"
+    "- Remove pattern definitions (move to patterns.clj)"
+    "- Add require for patterns namespace"]
+   :estimated-size "~120 lines moved"}
+
+  :pr-2-extract-messages
+  {:title "Extract message formatting into dedicated namespace"
+   :files-to-create
+   ["components/agent-runtime/src/ai/miniforge/agent_runtime/error_classifier/messages.clj"]
+   :files-to-modify
+   ["components/agent-runtime/src/ai/miniforge/agent_runtime/error_classifier.clj"
+    "- Remove message formatting functions"
+    "- Add require for messages namespace"]
+   :estimated-size "~100 lines moved"}
+
+  :pr-3-extract-reporting
+  {:title "Extract vendor reporting into dedicated namespace"
+   :files-to-create
+   ["components/agent-runtime/src/ai/miniforge/agent_runtime/error_classifier/reporting.clj"]
+   :files-to-modify
+   ["components/agent-runtime/src/ai/miniforge/agent_runtime/error_classifier.clj"
+    "- Remove vendor URL and reporting logic"
+    "- Add require for reporting namespace"]
+   :estimated-size "~80 lines moved"}
+
+  :pr-4-rename-core
+  {:title "Rename main file to core.clj for clarity"
+   :files-to-rename
+   ["error_classifier.clj -> error_classifier/core.clj"]
+   :files-to-modify
+   ["components/agent-runtime/src/ai/miniforge/agent_runtime/interface.clj"
+    "- Update require from error_classifier to error_classifier.core"]
+   :result "Core classification logic now ~100 lines"}
+
+  :pr-5-add-tests
+  {:title "Add comprehensive tests for each namespace"
+   :files-to-create
+   ["components/agent-runtime/test/ai/miniforge/agent_runtime/error_classifier/patterns_test.clj"
+    "components/agent-runtime/test/ai/miniforge/agent_runtime/error_classifier/messages_test.clj"
+    "components/agent-runtime/test/ai/miniforge/agent_runtime/error_classifier/reporting_test.clj"
+    "components/agent-runtime/test/ai/miniforge/agent_runtime/error_classifier/core_test.clj"]
+   :estimated-size "~200 lines total tests"}}
+
+ :directory-structure-after
+ "components/agent-runtime/src/ai/miniforge/agent_runtime/
+  ├── interface.clj (40 lines) - Public API
+  └── error_classifier/
+      ├── core.clj (100 lines) - Classification logic
+      ├── patterns.clj (100 lines) - Error pattern definitions
+      ├── messages.clj (100 lines) - Message formatting
+      └── reporting.clj (80 lines) - Vendor reporting"
+
+ :benefits
+ {:maintainability "Easier to find and modify specific functionality"
+  :extensibility "Adding new error patterns or vendors is clearer"
+  :testability "Each namespace can be tested independently"
+  :readability "Smaller files are easier to understand"
+  :rule-compliance "All files well under 400 line limit"}
+
+ :backward-compatibility
+ {:interface-unchanged "Public API in interface.clj remains the same"
+  :internal-only "Only internal structure changes"
+  :no-breaking-changes "All existing callers continue to work"}
+
+ :testing-strategy
+ {:unit-tests
+  ["Test each namespace independently"
+   "Verify pattern matching in patterns_test.clj"
+   "Verify message formatting in messages_test.clj"
+   "Verify URL generation in reporting_test.clj"
+   "Verify classification in core_test.clj"]
+
+  :integration-tests
+  ["Test full flow through interface.clj"
+   "Verify backward compatibility"
+   "Test with real error messages"]}
+
+ :acceptance-criteria
+ [{:criterion "All files under 400 lines"
+   :verification "Check line counts: wc -l *.clj"}
+
+  {:criterion "Namespaces have single responsibility"
+   :verification "Each file focuses on one aspect"}
+
+  {:criterion "Public API unchanged"
+   :verification "Existing code using interface.clj works"}
+
+  {:criterion "Comprehensive test coverage"
+   :verification "Each namespace has tests"}
+
+  {:criterion "Clear separation of concerns"
+   :verification "Code review shows logical structure"}]
+
+ :migration-path
+ {:step-1 "Extract patterns namespace (minimal risk)"
+  :step-2 "Extract messages namespace (low risk)"
+  :step-3 "Extract reporting namespace (low risk)"
+  :step-4 "Rename to core.clj (cleanup)"
+  :step-5 "Add tests (verification)"}
+
+ :notes
+ ["This refactoring makes the code more maintainable without changing behavior"
+  "Each PR is independent and can be reviewed separately"
+  "All changes are internal; public interface remains stable"
+  "Follow stratified design: each namespace has clear dependencies"
+  "Consider this pattern for other large files approaching 400 lines"]}

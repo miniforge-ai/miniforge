@@ -10,6 +10,7 @@
         ai.miniforge/tool {:local/root "../../components/tool"}
         ai.miniforge/artifact {:local/root "../../components/artifact"}
         ai.miniforge/agent {:local/root "../../components/agent"}
+        ai.miniforge/agent-runtime {:local/root "../../components/agent-runtime"}
         ai.miniforge/task {:local/root "../../components/task"}
         ai.miniforge/loop {:local/root "../../components/loop"}
         ai.miniforge/observer {:local/root "../../components/observer"}

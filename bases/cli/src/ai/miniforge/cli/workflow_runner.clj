@@ -9,7 +9,8 @@
    [cheshire.core :as json]
    [ai.miniforge.cli.config :as config]
    [ai.miniforge.dag-executor.interface :as dag]
-   [ai.miniforge.event-stream.interface :as es]))
+   [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.cli.workflow-recommender :as recommender]))
 
 (defn create-llm-backend-adapter [llm-client]
   (when llm-client
@@ -480,10 +481,36 @@
         (when-not (:quiet opts)
           (println (colorize :yellow "🐳 Sandbox container released")))))))
 
+(defn- select-workflow-type
+  "Select workflow type using LLM recommendation if not explicitly specified.
+
+   Arguments:
+     spec - Task specification map
+     llm-client - Optional LLM client for recommendation
+     quiet - Boolean to suppress output
+
+   Returns: Keyword workflow type"
+  [spec llm-client quiet]
+  (if-let [explicit-type (:spec/workflow-type spec)]
+    (do
+      (when-not quiet
+        (println (colorize :cyan (str "ℹ️  Workflow: " (name explicit-type) " [user-specified]"))))
+      explicit-type)
+    (let [recommendation (recommender/recommend-workflow-with-fallback spec llm-client)]
+      (when-not quiet
+        (println (colorize :cyan (str "\nℹ️  Workflow Auto-Selected: " (name (:workflow recommendation)))))
+        (println (str "   Reason: " (:reasoning recommendation)))
+        (when (= :llm (:source recommendation))
+          (println (str "   Confidence: " (format "%.0f%%" (* 100 (:confidence recommendation 0.0))))))
+        (println (colorize :yellow "   Override with :spec/workflow-type in your spec\n")))
+      (:workflow recommendation))))
+
 (defn run-workflow-from-spec! [spec {:keys [quiet] :or {quiet false} :as opts}]
   (try
     (let [{:keys [load-workflow run-pipeline]} (resolve-workflow-interface)
-          workflow-type (or (:spec/workflow-type spec) :simple)
+          ;; Create initial LLM client for workflow selection
+          selection-llm-client (create-llm-client nil spec quiet)
+          workflow-type (select-workflow-type spec selection-llm-client quiet)
           workflow-version (or (:spec/workflow-version spec) "latest")
           workflow (load-or-create-workflow load-workflow workflow-type workflow-version)
           enriched-spec (decorate-spec-with-runtime-context spec opts)
@@ -491,6 +518,7 @@
           artifact-store (create-artifact-store quiet)
           event-stream (es/create-event-stream)
           workflow-id (or (get-in enriched-spec [:spec/metadata :session-id]) (random-uuid))
+          ;; Create workflow-specific LLM client for execution
           llm-client (create-llm-client workflow spec quiet)
           callbacks (create-phase-callbacks quiet)
           base-context (create-workflow-context {:callbacks callbacks

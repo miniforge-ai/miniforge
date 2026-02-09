@@ -370,14 +370,21 @@ Output execution logs and status reports."})
           result (try
                    (protocol/invoke initialized-agent task exec-context)
                    (catch Exception e
-                     {:success false
-                      :error (.getMessage e)
-                      :exception-type (type e)
-                      :anomaly (response/from-exception e)
-                      :outputs []
-                      :decisions [:execution-error]
-                      :signals [:task-failed]
-                      :metrics (make-metrics)}))
+                     (let [;; Try to classify the error if agent-runtime is available
+                           error-classification (try
+                                                 (let [classifier (requiring-resolve 'ai.miniforge.agent-runtime.interface/classify-error)]
+                                                   (when classifier
+                                                     (classifier e {:task-id task-id})))
+                                                 (catch Exception _ nil))]
+                       {:success false
+                        :error (.getMessage e)
+                        :exception-type (type e)
+                        :anomaly (response/from-exception e)
+                        :error-classification error-classification
+                        :outputs []
+                        :decisions [:execution-error]
+                        :signals [:task-failed]
+                        :metrics (make-metrics)})))
 
           ;; Validate output
           validation (protocol/validate agent result exec-context)

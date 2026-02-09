@@ -20,14 +20,14 @@
     :check-type :cli}
 
    :codex
-   {:provider "OpenAI"
-    :description "OpenAI Codex via API"
-    :command nil
-    :installation "Set OPENAI_API_KEY environment variable"
-    :api-key-var "OPENAI_API_KEY"
-    :models ["gpt-4-turbo" "gpt-4" "gpt-3.5-turbo"]
-    :check-type :api-key
-    :docs-url "https://platform.openai.com/api-keys"}
+   {:provider "Codex"
+    :description "Codex via Codex CLI"
+    :command "codex"
+    :installation "Install from https://codex.dev"
+    :api-key-var nil
+    :models ["o1" "o1-mini" "gpt-4o" "gpt-4o-mini" "claude-3-5-sonnet"]
+    :check-type :cli
+    :docs-url "https://codex.dev"}
 
    :openai
    {:provider "OpenAI"

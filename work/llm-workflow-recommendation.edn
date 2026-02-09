@@ -1,0 +1,191 @@
+;; LLM-Based Workflow Recommendation
+
+{:title "Enhance Workflow Selection with LLM Recommendation"
+ :version "1.0.0"
+ :type :enhancement
+ :priority :medium
+ :pr-comment "PR #152: workflow_selector.clj:66 and :234"
+
+ :description
+ "Augment the mechanical rule-based workflow selector with LLM-powered
+  recommendation. The current implementation does good pattern matching,
+  but an LLM can provide deeper semantic understanding of spec intent.
+  Also make workflow matching extensible to support dynamic workflow discovery."
+
+ :current-state
+ {:selector "bases/cli/src/ai/miniforge/cli/workflow_selector.clj"
+  :approach "Rule-based pattern matching (7 hardcoded rules)"
+  :workflows "Hardcoded: :simple-test-v1, :lean-sdlc-v1, :canonical-sdlc-v1"
+  :limitation "Cannot adapt to new workflows without code changes"}
+
+ :enhancement-approach
+ {:layer-0 "Rule-based selector (existing, fast, no LLM needed)"
+  :layer-1 "LLM recommendation (semantic understanding, uses configured backend)"
+  :layer-2 "Hybrid: combine rule confidence + LLM reasoning"
+  :extensibility "Dynamic workflow discovery from workflow registry"}
+
+ :architecture
+ {:workflow-registry
+  {:purpose "Centralized source of truth for available workflows"
+   :location "components/workflow/src/ai/miniforge/workflow/registry.clj"
+   :structure
+   "{:workflows
+     {:simple-test-v1 {:phases 3 :max-iterations 20 ...}
+      :lean-sdlc-v1 {:phases 6 :max-iterations 50 ...}
+      :canonical-sdlc-v1 {:phases 10 :max-iterations 100 ...}
+      ;; Future workflows added here automatically
+      :security-audit-v1 {...}
+      :data-pipeline-v1 {...}}}"
+
+   :interface
+   ["(list-workflows) -> all available workflows"
+    "(get-workflow id) -> workflow definition"
+    "(register-workflow! id definition) -> adds workflow"
+    "(workflow-characteristics id) -> metadata for selection"]}
+
+  :llm-recommender
+  {:location "bases/cli/src/ai/miniforge/cli/workflow_recommender.clj"
+   :function "(recommend-workflow spec available-workflows)"
+   :prompt-template
+   "You are a workflow recommendation system for Miniforge.
+
+    Given a task specification, recommend the most appropriate workflow.
+
+    Available workflows:
+    {{workflow-summaries}}
+
+    Task specification:
+    {{spec}}
+
+    Analyze:
+    1. Task complexity (simple, medium, complex)
+    2. Risk level (low, medium, high)
+    3. Review requirements (minimal, standard, comprehensive)
+    4. Time constraints (quick, normal, extensive)
+
+    Return JSON:
+    {\"workflow\": \"workflow-id\",
+     \"confidence\": 0.0-1.0,
+     \"reasoning\": \"explanation\",
+     \"characteristics\": [\"multi-phase\", \"refactoring\", ...]}"}
+
+  :hybrid-selector
+  {:function "(select-workflow-hybrid spec)"
+   :steps
+   ["1. Run rule-based selector -> {rule-choice confidence-score}"
+    "2. If confidence < 0.7, query LLM recommender"
+    "3. Combine: if rule confidence high, use rule; else use LLM"
+    "4. Return final selection with reasoning from both"]}}
+
+ :implementation-plan
+ {:phase-1-workflow-registry
+  {:files-to-create
+   ["components/workflow/src/ai/miniforge/workflow/registry.clj (~200 lines)"
+    "- Move workflow definitions from hardcoded maps"
+    "- Public interface: list-workflows, get-workflow, register-workflow!"
+    "- Characteristics extraction for each workflow"]
+
+   :files-to-modify
+   ["bases/cli/src/ai/miniforge/cli/workflow_runner.clj"
+    "- Use registry to get available workflows"
+    "- Support dynamic workflow loading"]}
+
+  :phase-2-llm-recommender
+  {:files-to-create
+   ["bases/cli/src/ai/miniforge/cli/workflow_recommender.clj (~250 lines)"
+    "- LLM prompt construction with workflow summaries"
+    "- Call configured LLM backend (respects user's choice)"
+    "- Parse JSON response with error handling"
+    "- Fallback to rule-based if LLM unavailable"]
+
+   :prompt-engineering
+   ["Include workflow characteristics in prompt"
+    "Provide task type examples (refactoring, feature, bugfix)"
+    "Request structured JSON output"
+    "Include confidence score for hybrid decision"]}
+
+  :phase-3-hybrid-selection
+  {:files-to-modify
+   ["bases/cli/src/ai/miniforge/cli/workflow_selector.clj"
+    "- Add select-workflow-hybrid function"
+    "- Confidence threshold tuning (default 0.7)"
+    "- Combine rule + LLM reasoning in output"
+    "- User message shows both perspectives"]
+
+   :user-experience
+   "ℹ️  Workflow Auto-Selected: canonical-sdlc-v1
+
+    Rule-based analysis: canonical-sdlc-v1 (confidence: 0.85)
+    → Multi-phase refactoring detected (6 PRs)
+
+    LLM recommendation: canonical-sdlc-v1 (confidence: 0.92)
+    → Complex architectural refactoring requiring careful review
+      loops and coordination between phases. High risk of breaking
+      changes necessitates comprehensive validation.
+
+    To override: :spec/workflow-type in your spec"}}
+
+ :extensibility-features
+ {:workflow-discovery
+  {:approach "Scan workflow component for workflow definitions"
+   :pattern "Look for (defworkflow ...) or workflow maps"
+   :auto-register "New workflows automatically available"}
+
+  :plugin-workflows
+  {:support "Load workflows from external EDN files"
+   :location "~/.miniforge/workflows/*.edn"
+   :example
+   "{:id :custom-ml-pipeline-v1
+    :phases [...]
+    :characteristics {:type :ml-training :gpu true}}"}}
+
+ :configuration
+ {:config-keys
+  {:llm-recommendation-enabled "default: true"
+   :llm-recommendation-threshold "confidence < 0.7 triggers LLM"
+   :llm-recommendation-timeout "5s max wait for LLM"
+   :llm-recommendation-fallback "rule-based if LLM fails"}
+
+  :user-override
+  ":spec/workflow-selection-method [:rule-based | :llm-only | :hybrid]"}
+
+ :testing-strategy
+ {:unit-tests
+  ["Test workflow registry CRUD operations"
+   "Test LLM prompt generation"
+   "Test hybrid selection logic"
+   "Test confidence threshold behavior"]
+
+  :integration-tests
+  ["Test with real specs (emojui refactor, simple bugfix, etc.)"
+   "Verify rule-based still works without LLM"
+   "Test LLM recommendation with various backends"
+   "Verify fallback when LLM unavailable"]}
+
+ :acceptance-criteria
+ [{:criterion "Workflow registry centralizes workflow definitions"
+   :verification "New workflows can be added without touching selector code"}
+
+  {:criterion "LLM provides semantic recommendations"
+   :verification "LLM analyzes spec content and provides reasoning"}
+
+  {:criterion "Hybrid approach combines both"
+   :verification "High-confidence rules skip LLM, low-confidence queries LLM"}
+
+  {:criterion "System works without LLM"
+   :verification "Rule-based fallback always available"}
+
+  {:criterion "User sees reasoning from both approaches"
+   :verification "Output shows rule + LLM analysis when both run"}]
+
+ :migration
+ {:backward-compatibility
+  "Existing specs continue to work with rule-based selection.
+   LLM recommendation is opt-in enhancement, not breaking change."}
+
+ :notes
+ ["LLM recommendation uses configured backend (respects user choice)"
+  "Rule-based remains default for speed and reliability"
+  "LLM adds value for ambiguous or novel task types"
+  "Workflow registry enables future extensibility"
+  "Consider meta-agent suggestion from comment (future enhancement)"]}

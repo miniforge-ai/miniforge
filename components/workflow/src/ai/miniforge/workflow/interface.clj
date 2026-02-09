@@ -5,6 +5,7 @@
    [ai.miniforge.workflow.core :as core]
    [ai.miniforge.workflow.persistence :as persist]
    [ai.miniforge.workflow.replay :as replay]
+   [ai.miniforge.workflow.registry :as registry]
    [ai.miniforge.workflow.interface.protocols.workflow :as workflow-proto]
    [ai.miniforge.workflow.interface.protocols.phase-executor :as executor-proto]
    [ai.miniforge.workflow.interface.protocols.workflow-observer :as observer-proto]
@@ -432,6 +433,39 @@
   [execution-states]
   ((requiring-resolve 'ai.miniforge.workflow.comparison/compare-workflows)
    execution-states))
+
+;------------------------------------------------------------------------------ Layer 7
+;; Workflow registry
+
+(def register-workflow!
+  "Register a workflow in the registry.
+   See workflow.registry for details."
+  registry/register-workflow!)
+
+(def get-workflow
+  "Get a workflow by ID from the registry.
+   See workflow.registry for details."
+  registry/get-workflow)
+
+(def list-workflow-ids
+  "List all registered workflow IDs.
+   See workflow.registry for details."
+  registry/list-workflow-ids)
+
+(def workflow-exists?
+  "Check if a workflow is registered.
+   See workflow.registry for details."
+  registry/workflow-exists?)
+
+(def workflow-characteristics
+  "Extract characteristics from workflow for selection.
+   See workflow.registry for details."
+  registry/workflow-characteristics)
+
+(def ensure-initialized!
+  "Ensure the registry is initialized (idempotent).
+   See workflow.registry for details."
+  registry/ensure-initialized!)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -1,0 +1,439 @@
+;; Frictionless Configuration System
+
+{:title "Frictionless Configuration: Backends, Workflows, and Settings"
+ :version "1.0.0"
+ :type :enhancement
+ :priority :critical
+
+ :description
+ "Make miniforge configuration simple, discoverable, and frictionless. Users
+  should be able to set backends (Codex, Claude, etc.), configure workflows,
+  and manage settings without reading docs or editing config files.
+
+  Current problem: Configuration is a rite of passage - users must know:
+  - What backends exist (only :claude and :echo are defined!)
+  - How to set them (env vars? config file in resources?)
+  - What settings are available
+  - How workflows are configured
+
+  This is unacceptable UX. Configuration must be paramount, simple, frictionless."
+
+ :intent
+ {:type :user-experience-overhaul
+  :scope ["LLM backend management"
+          "Configuration discovery and CLI"
+          "Multiple LLM provider support"
+          "User-friendly settings management"
+          "Clear documentation and help"]
+
+  :context
+   {:triggering-issue
+    ["User wants to set backend to Codex - it's unclear how"
+     "Codex backend doesn't even exist in the codebase"
+     "Only :claude and :echo backends defined"
+     "Config commands broken (dispatch error)"
+     "Config file in resources/ (not user-accessible)"
+     "Must use MINIFORGE_LLM_BACKEND env var (not discoverable)"
+     "No way to list available backends"
+     "No way to see current configuration easily"]
+
+    :user-quote
+    "It's unclear how to do that. From the user POV creating new workflows,
+     setting backends, configuring miniforge needs to be paramount, simple
+     and frictionless. It can't be the typical devops tools that make config
+     a rite of passage."
+
+    :current-ux-flow
+    ["User: 'How do I use Codex?'"
+     "System: *silence* (no Codex backend exists)"
+     "User: 'miniforge config --help'"
+     "System: *error* (babashka/cli dispatch broken)"
+     "User: 'Where is config?'"
+     "System: *silence* (buried in bases/cli/resources/config.edn)"
+     "User: *frustrated, gives up*"]
+
+    :desired-ux-flow
+    ["User: 'miniforge config backends'"
+     "System: Shows available backends with descriptions"
+     "User: 'miniforge config set llm.backend codex'"
+     "System: ✅ Backend set to codex, saves to ~/.miniforge/config.edn"
+     "User: 'miniforge config get llm.backend'"
+     "System: codex"
+     "User: *happy, productive*"]}}
+
+ :requirements
+ [{:id "R1"
+   :requirement "Support multiple LLM backends"
+   :providers
+   ["Claude (Anthropic CLI)"
+    "Codex (OpenAI API)"
+    "OpenAI GPT-4"
+    "Cursor (Cursor CLI)"
+    "Ollama (local models)"
+    "Azure OpenAI"
+    "Echo (testing)"]
+   :must-have [:claude :codex :openai :cursor :echo]
+   :nice-to-have [:ollama :azure-openai]}
+
+  {:id "R2"
+   :requirement "Simple CLI for configuration"
+   :commands
+   ["miniforge config list                    # Show all config"
+    "miniforge config get <key>               # Get specific value"
+    "miniforge config set <key> <value>       # Set value"
+    "miniforge config backends                # List available backends"
+    "miniforge config backend <name>          # Set backend (shorthand)"
+    "miniforge config init                    # Create user config file"
+    "miniforge config edit                    # Open config in $EDITOR"
+    "miniforge config reset                   # Reset to defaults"]
+   :no-errors true
+   :helpful-output true}
+
+  {:id "R3"
+   :requirement "User config file in standard location"
+   :location "~/.miniforge/config.edn"
+   :precedence ["~/.miniforge/config.edn (user config)"
+                "Environment variables (MINIFORGE_*)"
+                "bases/cli/resources/config.edn (defaults)"]
+   :auto-create "Create user config on first run or 'config init'"}
+
+  {:id "R4"
+   :requirement "Discoverable configuration"
+   :help-commands
+   ["miniforge config --help                  # Show all config commands"
+    "miniforge config backends --help         # Show backend options"
+    "miniforge config get --help <key>        # Show what <key> controls"]
+   :inline-help "Show available options when setting values"}
+
+  {:id "R5"
+   :requirement "Clear backend information"
+   :backend-info
+   "Each backend should show:
+    - Name and provider
+    - Description
+    - Requirements (CLI tool, API key, etc.)
+    - Installation instructions
+    - Current status (available, missing, needs key)"}
+
+  {:id "R6"
+   :requirement "Validation and helpful errors"
+   :examples
+   ["Setting invalid backend → show available backends"
+    "Missing API key → show how to set it"
+    "Invalid config value → show valid options"
+    "Broken config file → show fix suggestions"]}]
+
+ :backend-specifications
+ {:claude
+  {:provider "Anthropic"
+   :command "claude"
+   :description "Claude via Anthropic CLI (claude command)"
+   :installation "npm install -g @anthropic-ai/claude-cli"
+   :api-key-var "ANTHROPIC_API_KEY"
+   :streaming true
+   :models ["claude-sonnet-4-20250514" "claude-opus-4-20250514" "claude-haiku-4-20250514"]
+   :status-check "(process/shell \"which\" \"claude\")"}
+
+  :codex
+  {:provider "OpenAI"
+   :command "api"
+   :description "OpenAI Codex via OpenAI API"
+   :installation "No CLI needed - uses API key"
+   :api-key-var "OPENAI_API_KEY"
+   :streaming true
+   :models ["gpt-4-turbo" "gpt-4" "gpt-3.5-turbo"]
+   :implementation "Use OpenAI HTTP API directly"
+   :status-check "(System/getenv \"OPENAI_API_KEY\")"}
+
+  :openai
+  {:provider "OpenAI"
+   :command "api"
+   :description "OpenAI GPT-4 via OpenAI API"
+   :installation "No CLI needed - uses API key"
+   :api-key-var "OPENAI_API_KEY"
+   :streaming true
+   :models ["gpt-4-turbo" "gpt-4" "gpt-3.5-turbo"]
+   :implementation "Same as :codex, different default model"
+   :status-check "(System/getenv \"OPENAI_API_KEY\")"}
+
+  :cursor
+  {:provider "Cursor"
+   :command "cursor-cli"
+   :description "Cursor AI via Cursor CLI"
+   :installation "Install Cursor from https://cursor.sh"
+   :api-key-var nil
+   :streaming false
+   :models ["cursor-default"]
+   :status-check "(process/shell \"which\" \"cursor-cli\")"}
+
+  :ollama
+  {:provider "Ollama"
+   :command "ollama"
+   :description "Local models via Ollama"
+   :installation "brew install ollama"
+   :api-key-var nil
+   :streaming true
+   :models ["codellama" "llama2" "mistral"]
+   :status-check "(process/shell \"which\" \"ollama\")"}
+
+  :echo
+  {:provider "Test"
+   :command "echo"
+   :description "Echo backend for testing (no actual LLM)"
+   :installation "Built-in"
+   :api-key-var nil
+   :streaming false
+   :models ["echo"]
+   :status-check "true"}}
+
+ :implementation
+ {:phase-1-fix-config-commands
+  {:files-to-modify
+   ["bases/cli/src/ai/miniforge/cli/main.clj - Fix config command dispatch"]
+   :issue "babashka/cli dispatch error with :input-exhausted"
+   :fix "Add proper subcommand handling for config commands"
+   :pr-size "~50 lines"}
+
+  :phase-2-user-config-file
+  {:files-to-create
+   ["components/config/src/ai/miniforge/config/user.clj (~150 lines)"
+    "- load-user-config from ~/.miniforge/config.edn"
+    "- merge-configs (user > env > defaults)"
+    "- save-user-config"
+    "- init-user-config (create with defaults)"
+    "- edit-user-config (open in $EDITOR)"]
+   :pr-size "~200 lines"}
+
+  :phase-3-backend-implementations
+  {:files-to-modify
+   ["components/llm/src/ai/miniforge/llm/protocols/impl/llm_client.clj"]
+   :add-backends [:codex :openai :ollama]
+   :implementation
+   {:codex "HTTP API client using clj-http or babashka.http-client"
+    :openai "Same as Codex, different default model"
+    :ollama "HTTP API to localhost:11434"}
+   :pr-size "~400 lines"}
+
+  :phase-4-backend-discovery
+  {:files-to-create
+   ["bases/cli/src/ai/miniforge/cli/backends.clj (~200 lines)"
+    "- list-backends (show all with status)"
+    "- check-backend-status (available? needs-key? installed?)"
+    "- get-backend-info (description, requirements, etc.)"
+    "- set-backend (save to user config)"]
+   :pr-size "~250 lines"}
+
+  :phase-5-improved-config-cli
+  {:files-to-modify
+   ["bases/cli/src/ai/miniforge/cli/config.clj (~200 lines added)"
+    "- list-cmd (show all config)"
+    "- get-cmd (get specific key)"
+    "- set-cmd (set key=value)"
+    "- backends-cmd (list backends)"
+    "- backend-cmd (set backend shorthand)"
+    "- init-cmd (create user config)"
+    "- edit-cmd (open in editor)"
+    "- reset-cmd (reset to defaults)"
+    "- validate-cmd (check config)"]
+   :pr-size "~300 lines"}}
+
+ :user-experience-examples
+ {:list-backends
+  "$ miniforge config backends
+
+   Available LLM Backends:
+
+   ✅ claude (Anthropic)
+      Claude via Anthropic CLI
+      Status: Available (claude CLI found)
+      Current: Yes
+      Models: claude-sonnet-4, claude-opus-4, claude-haiku-4
+
+   ⚠️  codex (OpenAI)
+      OpenAI Codex via API
+      Status: Needs API key (set OPENAI_API_KEY)
+      Models: gpt-4-turbo, gpt-4, gpt-3.5-turbo
+      Install: Set OPENAI_API_KEY environment variable
+
+   ❌ cursor (Cursor)
+      Cursor AI via CLI
+      Status: Not installed (cursor-cli not found)
+      Install: Download from https://cursor.sh
+
+   ⚠️  ollama (Ollama)
+      Local models via Ollama
+      Status: Not running (install with: brew install ollama)
+      Models: codellama, llama2, mistral
+
+   🧪 echo (Test)
+      Echo backend for testing
+      Status: Available
+      Description: Returns input as output (no actual LLM)"
+
+  :set-backend
+  "$ miniforge config backend codex
+
+   ❌ Error: Codex backend requires OPENAI_API_KEY
+
+   To use Codex:
+   1. Get an API key from https://platform.openai.com/api-keys
+   2. Set the environment variable:
+      export OPENAI_API_KEY='sk-...'
+   3. Or add to ~/.miniforge/config.edn:
+      {:llm {:backend :codex
+             :api-key #env OPENAI_API_KEY}}
+   4. Try again: miniforge config backend codex
+
+   $ export OPENAI_API_KEY='sk-...'
+   $ miniforge config backend codex
+
+   ✅ Backend set to codex
+      Saved to: ~/.miniforge/config.edn
+      Provider: OpenAI
+      Model: gpt-4-turbo (default)
+
+   To change model:
+   miniforge config set llm.model gpt-4"
+
+  :list-config
+  "$ miniforge config list
+
+   Current Configuration:
+
+   LLM Settings:
+     backend: codex (OpenAI)
+     model: gpt-4-turbo
+     max-tokens: 4000
+     timeout: 5 minutes
+
+   Workflow Settings:
+     max-iterations: 50
+     max-tokens: 150000
+     failure-strategy: retry
+
+   Artifacts:
+     dir: ~/.miniforge/artifacts
+
+   Config files:
+     User: ~/.miniforge/config.edn
+     Defaults: <miniforge>/bases/cli/resources/config.edn
+
+   Override with environment variables:
+     MINIFORGE_LLM_BACKEND=openai
+     MINIFORGE_LLM_MODEL=gpt-4
+     ..."
+
+  :get-config
+  "$ miniforge config get llm.backend
+   codex
+
+   $ miniforge config get llm
+   {:backend :codex
+    :model \"gpt-4-turbo\"
+    :max-tokens 4000
+    :timeout-ms 300000}"
+
+  :set-config
+  "$ miniforge config set llm.model gpt-4
+   ✅ Set llm.model to gpt-4
+      Saved to: ~/.miniforge/config.edn
+
+   $ miniforge config set llm.timeout 600000
+   ✅ Set llm.timeout to 600000 (10 minutes)
+      Saved to: ~/.miniforge/config.edn"}
+
+ :testing-strategy
+ {:unit-tests
+  ["Test config merging (user > env > defaults)"
+   "Test backend status checking"
+   "Test config get/set/list"
+   "Test backend validation"]
+
+  :integration-tests
+  ["Test full config workflow (init, set, get, list)"
+   "Test backend switching"
+   "Test with multiple backends"
+   "Test config file creation"]
+
+  :manual-tests
+  ["Fresh install → config init creates file"
+   "Set each backend and verify it works"
+   "Test with missing API keys (helpful errors)"
+   "Test config edit opens $EDITOR"]}
+
+ :acceptance-criteria
+ [{:criterion "Multiple backends supported"
+   :verification "Claude, Codex, OpenAI, Cursor, Ollama, Echo all work"}
+
+  {:criterion "Config CLI works without errors"
+   :verification "All config commands work, no dispatch errors"}
+
+  {:criterion "User config file auto-created"
+   :verification "~/.miniforge/config.edn created on first run"}
+
+  {:criterion "Backends discoverable"
+   :verification "'miniforge config backends' shows all with status"}
+
+  {:criterion "Setting backend is simple"
+   :verification "'miniforge config backend codex' just works"}
+
+  {:criterion "Helpful error messages"
+   :verification "Missing API key → clear instructions to fix"}
+
+  {:criterion "Config documented"
+   :verification "config --help shows all commands with examples"}]
+
+ :success-metrics
+ ["Users can set backend in <30 seconds"
+  "Zero confusion about what backends exist"
+  "Clear path from 'want Codex' to 'using Codex'"
+  "No need to read docs or edit files"
+  "Helpful errors guide users to success"]
+
+ :documentation
+ {:readme-section
+  "## Configuration
+
+   Miniforge stores configuration in ~/.miniforge/config.edn (auto-created).
+
+   ### Quick Start
+
+   ```bash
+   # List available backends
+   miniforge config backends
+
+   # Set backend to Codex
+   export OPENAI_API_KEY='sk-...'
+   miniforge config backend codex
+
+   # Show current config
+   miniforge config list
+
+   # Change specific setting
+   miniforge config set llm.model gpt-4
+   ```
+
+   ### Available Backends
+
+   - **claude**: Anthropic Claude (requires claude CLI)
+   - **codex**: OpenAI Codex (requires OPENAI_API_KEY)
+   - **openai**: OpenAI GPT-4 (requires OPENAI_API_KEY)
+   - **cursor**: Cursor AI (requires Cursor CLI)
+   - **ollama**: Local models (requires Ollama)
+   - **echo**: Testing backend
+
+   See `miniforge config backends` for current status of each."
+
+  :inline-help
+  "Every config command should show examples in --help"}
+
+ :migration-plan
+ "Existing users with MINIFORGE_LLM_BACKEND env var continue to work.
+  New users get user config file on first run."
+
+ :notes
+ ["This is critical UX - configuration can't be a barrier"
+  "Make it impossible to not know what backends exist"
+  "Make it obvious how to set backend"
+  "Helpful errors are as important as happy path"
+  "This should be frictionless, not a rite of passage"]}

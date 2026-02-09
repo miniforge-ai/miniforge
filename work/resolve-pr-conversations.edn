@@ -1,0 +1,144 @@
+;; Specification: Add conversation resolution to PR lifecycle
+
+{:title "Add PR Conversation Resolution Capability"
+ :version "1.0.0"
+ :type :enhancement
+ :component "pr-lifecycle"
+
+ :description
+ "When miniforge creates a fix PR addressing review feedback, it should:
+  1. Link the fix PR to the original conversation
+  2. Resolve the conversation thread in the parent PR
+  3. Optionally add a comment linking to the fix PR
+
+  Currently: Fix PR is created but conversation remains unresolved.
+  Desired: Conversation is marked as resolved with link to fix PR."
+
+ :context
+ {:current-behavior
+  ["PR #148 has review comment: 'Split this file into multiple namespaces'"
+   "Miniforge created PR #150 with the fix"
+   "But the conversation thread in PR #148 is still unresolved"
+   "Manual resolution required"]
+
+  :desired-behavior
+  ["After creating fix PR #150, miniforge should:"
+   "1. Post reply to comment thread: 'Fixed in PR #150'"
+   "2. Resolve the conversation thread"
+   "3. (Optional) Add PR #150 to 'fixes #148' or similar linkage"]
+
+  :github-api
+  ["GraphQL mutation: resolveReviewThread"
+   "REST API: PATCH /repos/{owner}/{repo}/pulls/comments/{comment_id}/replies"
+   "gh CLI: gh pr review --approve-review-id {id} (limited support)"]
+
+  :references
+  ["components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/review_monitor.clj"
+   "components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/fix_loop.clj"
+   "components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/controller.clj"]}
+
+ :requirements
+ [{:id "R1"
+   :requirement "After creating fix PR, post reply to original comment thread"
+   :details "Reply should include: link to fix PR, brief description of fix"}
+
+  {:id "R2"
+   :requirement "Resolve the conversation thread"
+   :details "Use GraphQL mutation resolveReviewThread with thread ID"}
+
+  {:id "R3"
+   :requirement "Handle errors gracefully"
+   :details "If resolution fails, log warning but don't fail the fix loop"}
+
+  {:id "R4"
+   :requirement "Support both review comments and issue comments"
+   :details "Different APIs for inline review comments vs issue comments"}
+
+  {:id "R5"
+   :requirement "Make resolution optional via configuration"
+   :details "Allow disabling auto-resolution if needed"}]
+
+ :implementation
+ {:new-functions
+  [{:name "reply-to-comment"
+    :signature "(reply-to-comment worktree-path comment-id message)"
+    :purpose "Post reply to a review comment thread"
+    :location "pr-lifecycle/review_monitor.clj or new github.clj"}
+
+   {:name "resolve-conversation"
+    :signature "(resolve-conversation worktree-path thread-id)"
+    :purpose "Resolve a review conversation thread"
+    :location "pr-lifecycle/review_monitor.clj or new github.clj"}
+
+   {:name "link-fix-pr-to-comment"
+    :signature "(link-fix-pr-to-comment comment fix-pr-number worktree-path)"
+    :purpose "Reply to comment and resolve, linking to fix PR"
+    :location "pr-lifecycle/fix_loop.clj"}]
+
+  :modifications
+  [{:file "components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/fix_loop.clj"
+    :function "run-fix-loop"
+    :change "After successful fix PR creation, call link-fix-pr-to-comment"}
+
+   {:file "components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/controller.clj"
+    :function "handle-review-feedback!"
+    :change "Pass comment/thread info to fix loop for resolution"}]
+
+  :github-api-usage
+  {:graphql
+   {:mutation "resolveReviewThread"
+    :example
+    "mutation {
+       resolveReviewThread(input: {threadId: \"RT_kwDO...\"}) {
+         thread { isResolved }
+       }
+     }"}
+
+   :rest-api
+   {:endpoint "POST /repos/{owner}/{repo}/pulls/{pr_number}/comments/{comment_id}/replies"
+    :body {:body "Fixed in PR #150"}
+    :example "gh api repos/miniforge-ai/miniforge/pulls/148/comments/2780310737/replies -f body='Fixed in PR #150'"}}}
+
+ :testing
+ {:manual-test
+  ["1. Create test PR with intentional issue"
+   "2. Leave review comment requesting fix"
+   "3. Trigger miniforge fix loop"
+   "4. Verify fix PR is created"
+   "5. Verify reply is posted to comment"
+   "6. Verify conversation is marked as resolved"]
+
+  :automated-test
+  ["Test reply-to-comment with mock gh CLI"
+   "Test resolve-conversation with mock GraphQL"
+   "Test link-fix-pr-to-comment end-to-end with test repo"]}
+
+ :acceptance-criteria
+ [{:criterion "After creating fix PR, conversation is resolved"
+   :verification "Check isResolved=true in GraphQL query"}
+
+  {:criterion "Reply includes link to fix PR"
+   :verification "Comment body contains PR #XXX link"}
+
+  {:criterion "Graceful degradation if resolution fails"
+   :verification "Fix loop completes even if resolution API fails"}
+
+  {:criterion "Configuration option to disable auto-resolution"
+   :verification "Setting :auto-resolve-comments false skips resolution"}]
+
+ :example-flow
+ "1. PR #148 has comment: 'Split this file'
+  2. Miniforge creates fix PR #150
+  3. Miniforge calls: (reply-to-comment 'Fixed in PR #150')
+  4. Miniforge calls: (resolve-conversation thread-id)
+  5. Result: Comment thread shows resolved with link to #150"
+
+ :notes
+ ["GitHub's GraphQL API is preferred for resolving threads"
+  "gh CLI has limited support; may need direct API calls"
+  "Thread ID is different from comment ID - must fetch from GraphQL"
+  "Consider rate limits when resolving many comments"]
+
+ :priority :medium
+ :estimated-size "~200 lines"
+ :files-affected 3}
