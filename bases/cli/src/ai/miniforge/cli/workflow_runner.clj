@@ -8,6 +8,7 @@
    [babashka.process :as p]
    [cheshire.core :as json]
    [ai.miniforge.cli.config :as config]
+   [ai.miniforge.cli.workflow-selector :as workflow-selector]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.event-stream.interface :as es]))
 
@@ -483,8 +484,16 @@
 (defn run-workflow-from-spec! [spec {:keys [quiet] :or {quiet false} :as opts}]
   (try
     (let [{:keys [load-workflow run-pipeline]} (resolve-workflow-interface)
-          workflow-type (or (:spec/workflow-type spec) :simple)
+          ;; Intelligent workflow selection with fallback
+          selection (when-not (:spec/workflow-type spec)
+                      (workflow-selector/select-workflow spec))
+          workflow-type (or (:spec/workflow-type spec)
+                            (:workflow-type selection)
+                            :lean-sdlc-v1)
           workflow-version (or (:spec/workflow-version spec) "latest")
+          ;; Print selection explanation when auto-selecting
+          _ (when (and selection (not quiet))
+              (println (workflow-selector/explain-selection selection)))
           workflow (load-or-create-workflow load-workflow workflow-type workflow-version)
           enriched-spec (decorate-spec-with-runtime-context spec opts)
           workflow-input (spec->workflow-input enriched-spec)
