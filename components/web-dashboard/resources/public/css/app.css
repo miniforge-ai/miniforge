@@ -20,10 +20,12 @@
   --accent-primary: #ff5722;    /* Vibrant red-orange (primary brand) */
   --accent-secondary: #d84315;  /* Deep orange-red */
   --accent-tertiary: #bf360c;   /* Dark red accent */
-  --accent-success: #8d6e63;    /* Brown success (industrial) */
-  --accent-warning: #ff6f00;    /* Bright orange warning */
-  --accent-error: #c62828;      /* Deep red error */
-  --accent-info: #ff8a65;       /* Light orange info */
+
+  /* Status colors - universal traffic light system for clarity */
+  --accent-success: #66bb6a;    /* Green - success/healthy */
+  --accent-warning: #ff9800;    /* Orange - warning/attention */
+  --accent-error: #ef5350;      /* Red - error/critical */
+  --accent-info: #42a5f5;       /* Blue - informational */
 
   --border-color: #4a3f3a;
   --border-active: #ff5722;
