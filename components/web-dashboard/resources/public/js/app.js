@@ -38,11 +38,29 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// Control plane - send commands to workflows
+function sendWorkflowCommand(command, params = {}) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    console.error('WebSocket not connected');
+    return;
+  }
+
+  const message = {
+    command: command,
+    params: params,
+    timestamp: new Date().toISOString()
+  };
+
+  ws.send(JSON.stringify(message));
+  console.log('Sent workflow command:', command);
+}
+
 // Export functions for global use
 window.miniforge = {
   switchTheme,
   cycleTheme,
-  getCurrentTheme: () => document.documentElement.getAttribute('data-theme') || 'dark'
+  getCurrentTheme: () => document.documentElement.getAttribute('data-theme') || 'dark',
+  sendWorkflowCommand
 };
 
 // WebSocket connection management

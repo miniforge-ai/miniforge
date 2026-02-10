@@ -95,7 +95,7 @@
         (catch Exception e
           (println "Error unsubscribing from event stream:" (.getMessage e)))))))
 
-(defn- create-ws-handler [state]
+(defn- create-ws-handler [state workflow-connections]
   (let [connections (atom #{})]
     (fn [req]
       (http/as-channel req
@@ -119,44 +119,58 @@
                         (fn [ch data]
                           (try
                             (let [msg (json/parse-string data true)]
-                              (case (:action msg)
-                                :refresh (http/send! ch (json/generate-string
-                                                         {:type :state
-                                                          :data (state/get-dashboard-state state)}))
+                              (cond
+                                ;; UI refresh request
+                                (= :refresh (:action msg))
+                                (http/send! ch (json/generate-string
+                                               {:type :state
+                                                :data (state/get-dashboard-state state)}))
+
+                                ;; Control plane command - forward to workflows
+                                (:command msg)
+                                (do
+                                  (println "Broadcasting command to workflows:" (:command msg))
+                                  (doseq [workflow-ch @workflow-connections]
+                                    (try
+                                      (http/send! workflow-ch (json/generate-string msg))
+                                      (catch Exception e
+                                        (println "Error sending command to workflow:" (.getMessage e))))))
+
+                                ;; Unknown message
+                                :else
                                 (http/send! ch (json/generate-string {:error "Unknown action"}))))
                             (catch Exception e
                               (println "Error handling WebSocket message:" (.getMessage e)))))}))))
 
-(defn- create-events-ws-handler [state]
+(defn- create-events-ws-handler [state workflow-connections]
   "WebSocket handler for workflow processes to publish events."
-  (let [workflow-connections (atom #{})]
-    (fn [req]
-      (http/as-channel req
-                       {:on-open
-                        (fn [ch]
-                          (println "Workflow event stream connected")
-                          (swap! workflow-connections conj ch))
+  (fn [req]
+    (http/as-channel req
+                     {:on-open
+                      (fn [ch]
+                        (println "Workflow event stream connected")
+                        (swap! workflow-connections conj ch))
 
-                        :on-close
-                        (fn [ch _status]
-                          (println "Workflow event stream disconnected")
-                          (swap! workflow-connections disj ch))
+                      :on-close
+                      (fn [ch _status]
+                        (println "Workflow event stream disconnected")
+                        (swap! workflow-connections disj ch))
 
-                        :on-receive
-                        (fn [_ch data]
-                          (try
-                            (let [event (json/parse-string data true)]
-                              ;; Publish event to dashboard's event stream
-                              (when-let [es (:event-stream @state)]
-                                (try
-                                  (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
-                                    (when es-ns
-                                      (when-let [publish! (ns-resolve es-ns 'publish!)]
-                                        (publish! es event))))
-                                  (catch Exception e
-                                    (println "Error publishing workflow event:" (.getMessage e))))))
-                            (catch Exception e
-                              (println "Error parsing workflow event:" (.getMessage e)))))}))))
+                      :on-receive
+                      (fn [_ch data]
+                        (try
+                          (let [event (json/parse-string data true)]
+                            ;; Publish event to dashboard's event stream
+                            (when-let [es (:event-stream @state)]
+                              (try
+                                (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
+                                  (when es-ns
+                                    (when-let [publish! (ns-resolve es-ns 'publish!)]
+                                      (publish! es event))))
+                                (catch Exception e
+                                  (println "Error publishing workflow event:" (.getMessage e))))))
+                          (catch Exception e
+                            (println "Error parsing workflow event:" (.getMessage e)))))})))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; HTTP routes
@@ -178,8 +192,9 @@
    :body (json/generate-string data)})
 
 (defn- create-handler [state]
-  (let [ws-handler (create-ws-handler state)
-        events-ws-handler (create-events-ws-handler state)]
+  (let [workflow-connections (atom #{})
+        ws-handler (create-ws-handler state workflow-connections)
+        events-ws-handler (create-events-ws-handler state workflow-connections)]
     (fn [req]
       (let [uri (:uri req)
             params (:params req)]

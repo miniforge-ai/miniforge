@@ -102,7 +102,7 @@
 (defn- connect-to-dashboard
   "Connect to dashboard via WebSocket for event streaming.
    Returns event-stream map with :websocket connection, or nil if connection fails."
-  [dashboard-url]
+  [dashboard-url control-state]
   (when dashboard-url
     (try
       (require '[org.httpkit.client :as http])
@@ -113,9 +113,30 @@
                 ws (websocket-fn ws-url
                                  {:on-open (fn [_ws] (println "Connected to dashboard:" ws-url))
                                   :on-close (fn [_ws _status] (println "Disconnected from dashboard"))
-                                  :on-error (fn [_ws error] (println "Dashboard WebSocket error:" error))})]
+                                  :on-error (fn [_ws error] (println "Dashboard WebSocket error:" error))
+                                  :on-receive (fn [_ws msg]
+                                                (try
+                                                  (let [command (json/parse-string msg true)]
+                                                    (case (:command command)
+                                                      :pause (do
+                                                               (swap! control-state assoc :paused true)
+                                                               (println "⏸  Workflow paused by dashboard"))
+                                                      :resume (do
+                                                                (swap! control-state assoc :paused false)
+                                                                (println "▶  Workflow resumed by dashboard"))
+                                                      :stop (do
+                                                              (swap! control-state assoc :stopped true)
+                                                              (println "⏹  Workflow stopped by dashboard"))
+                                                      :adjust (do
+                                                                (when-let [params (:params command)]
+                                                                  (swap! control-state update :adjustments merge params)
+                                                                  (println "⚙  Workflow parameters adjusted:" params)))
+                                                      (println "Unknown command:" (:command command))))
+                                                  (catch Exception e
+                                                    (println "Error handling dashboard command:" (.getMessage e)))))})]
             {:websocket ws
-             :dashboard-url dashboard-url})))
+             :dashboard-url dashboard-url
+             :control-state control-state})))
       (catch Exception e
         (println "Warning: Could not connect to dashboard:" (.getMessage e))
         nil))))
@@ -187,8 +208,22 @@
   "Execute single pipeline iteration: health check -> phase execution -> cleanup.
 
    Returns updated context."
-  [pipeline context callbacks iteration]
-  (let [;; Check workflow health via meta-agents
+  [pipeline context callbacks iteration control-state]
+  (let [;; Check control state from dashboard
+        state @control-state
+
+        ;; Handle pause - wait until resumed
+        _ (when (:paused state)
+            (println "⏸  Workflow paused, waiting for resume...")
+            (while (:paused @control-state)
+              (Thread/sleep 1000)))
+
+        ;; Check for stop command
+        _ (when (:stopped state)
+            (println "⏹  Workflow stopped by dashboard")
+            (throw (ex-info "Workflow stopped by control plane" {:reason :dashboard-stop})))
+
+        ;; Check workflow health via meta-agents
         coordinator (:execution/meta-coordinator context)
         workflow-state (monitoring/build-workflow-state context iteration)
         health-check (monitoring/check-workflow-health coordinator workflow-state)]
@@ -223,9 +258,11 @@
   ([workflow input opts]
    (let [pipeline (build-pipeline workflow)
          max-phases (or (:max-phases opts) 50)
+         ;; Control state for dashboard commands
+         control-state (atom {:paused false :stopped false :adjustments {}})
          ;; Connect to dashboard if URL provided, otherwise use in-memory event stream
          event-stream (or (when-let [dashboard-url (:dashboard-url opts)]
-                            (connect-to-dashboard dashboard-url))
+                            (connect-to-dashboard dashboard-url control-state))
                           (:event-stream opts))
 
          ;; Wrap callbacks to publish events
@@ -263,7 +300,7 @@
 
                  ;; Execute next iteration: health check -> phase -> cleanup
                  :else
-                 (recur (execute-single-iteration pipeline context callbacks iteration)
+                 (recur (execute-single-iteration pipeline context callbacks iteration control-state)
                         (inc iteration)))))]
 
        ;; Publish workflow completed event

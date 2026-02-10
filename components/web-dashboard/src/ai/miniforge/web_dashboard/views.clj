@@ -384,9 +384,29 @@
     (layout "Error" [:div.error (:error workflow)])
     (layout (str "Workflow: " (:name workflow))
      [:div.workflow-detail
-      [:h2 (:name workflow)]
+      [:div.workflow-header
+       [:h2 (:name workflow)]
+       [:div.workflow-controls
+        [:button.btn.btn-sm
+         {:onclick "sendWorkflowCommand('pause')"
+          :title "Pause workflow execution"}
+         "⏸ Pause"]
+        [:button.btn.btn-sm
+         {:onclick "sendWorkflowCommand('resume')"
+          :title "Resume paused workflow"}
+         "▶ Resume"]
+        [:button.btn.btn-sm
+         {:onclick "sendWorkflowCommand('stop')"
+          :title "Stop workflow"
+          :style "color: var(--color-status-error);"}
+         "⏹ Stop"]]]
       [:div.workflow-info
-       [:span (str "Status: " (name (:status workflow)))]
+       [:span (c/badge (name (:status workflow))
+                      {:variant (case (:status workflow)
+                                 :completed :success
+                                 :running :info
+                                 :failed :error
+                                 :neutral)})]
        [:span (str "Phase: " (:phase workflow))]
        [:span (str "Progress: " (:progress workflow) "%")]]
       [:div.workflow-output
