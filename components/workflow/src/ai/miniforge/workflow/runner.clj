@@ -31,6 +31,59 @@
             [ai.miniforge.workflow.execution :as exec]
             [ai.miniforge.workflow.monitoring :as monitoring]))
 
+;------------------------------------------------------------------------------ Layer -1: Event publishing
+
+(defn- publish-event!
+  "Publish event to event stream if available."
+  [event-stream event]
+  (when event-stream
+    (try
+      (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
+        (when es-ns
+          (when-let [publish! (ns-resolve es-ns 'publish!)]
+            (publish! event-stream event))))
+      (catch Exception e
+        (println "Warning: Failed to publish event:" (.getMessage e))))))
+
+(defn- publish-workflow-started!
+  "Publish workflow started event."
+  [event-stream context]
+  (publish-event! event-stream
+                  {:event/type :workflow/started
+                   :workflow-id (:execution/id context)
+                   :workflow-spec (select-keys (:execution/workflow context)
+                                               [:workflow/id :workflow/version])
+                   :timestamp (java.time.Instant/now)}))
+
+(defn- publish-workflow-completed!
+  "Publish workflow completed event."
+  [event-stream context]
+  (publish-event! event-stream
+                  {:event/type :workflow/completed
+                   :workflow-id (:execution/id context)
+                   :status (:execution/status context)
+                   :metrics (:execution/metrics context)
+                   :timestamp (java.time.Instant/now)}))
+
+(defn- publish-phase-started!
+  "Publish phase started event."
+  [event-stream context phase-name]
+  (publish-event! event-stream
+                  {:event/type :workflow/phase-started
+                   :workflow-id (:execution/id context)
+                   :phase phase-name
+                   :timestamp (java.time.Instant/now)}))
+
+(defn- publish-phase-completed!
+  "Publish phase completed event."
+  [event-stream context phase-name result]
+  (publish-event! event-stream
+                  {:event/type :workflow/phase-completed
+                   :workflow-id (:execution/id context)
+                   :phase phase-name
+                   :success? (:success? result)
+                   :timestamp (java.time.Instant/now)}))
+
 ;------------------------------------------------------------------------------ Layer 0: Pipeline helpers
 
 (defn build-pipeline
@@ -134,29 +187,49 @@
   ([workflow input opts]
    (let [pipeline (build-pipeline workflow)
          max-phases (or (:max-phases opts) 50)
-         callbacks {:on-phase-start (:on-phase-start opts)
-                    :on-phase-complete (:on-phase-complete opts)}
+         event-stream (:event-stream opts)
+
+         ;; Wrap callbacks to publish events
+         callbacks {:on-phase-start (fn [ctx interceptor]
+                                      (when-let [phase-name (:phase interceptor)]
+                                        (publish-phase-started! event-stream ctx phase-name))
+                                      (when-let [cb (:on-phase-start opts)]
+                                        (cb ctx interceptor)))
+                    :on-phase-complete (fn [ctx interceptor result]
+                                         (when-let [phase-name (:phase interceptor)]
+                                           (publish-phase-completed! event-stream ctx phase-name result))
+                                         (when-let [cb (:on-phase-complete opts)]
+                                           (cb ctx interceptor result)))}
+
          initial-ctx (ctx/create-context workflow input opts)]
 
-     (if (empty? pipeline)
-       (handle-empty-pipeline initial-ctx)
+     ;; Publish workflow started event
+     (publish-workflow-started! event-stream initial-ctx)
 
-       ;; Execute pipeline loop
-       (loop [context initial-ctx
-              iteration 0]
-         (cond
-           ;; Terminal state reached
-           (terminal-state? context)
-           context
+     (let [final-ctx
+           (if (empty? pipeline)
+             (handle-empty-pipeline initial-ctx)
 
-           ;; Max iterations exceeded
-           (>= iteration max-phases)
-           (handle-max-phases-exceeded context max-phases)
+             ;; Execute pipeline loop
+             (loop [context initial-ctx
+                    iteration 0]
+               (cond
+                 ;; Terminal state reached
+                 (terminal-state? context)
+                 context
 
-           ;; Execute next iteration: health check -> phase -> cleanup
-           :else
-           (recur (execute-single-iteration pipeline context callbacks iteration)
-                  (inc iteration))))))))
+                 ;; Max iterations exceeded
+                 (>= iteration max-phases)
+                 (handle-max-phases-exceeded context max-phases)
+
+                 ;; Execute next iteration: health check -> phase -> cleanup
+                 :else
+                 (recur (execute-single-iteration pipeline context callbacks iteration)
+                        (inc iteration)))))]
+
+       ;; Publish workflow completed event
+       (publish-workflow-completed! event-stream final-ctx)
+       final-ctx))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
