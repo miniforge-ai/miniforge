@@ -225,9 +225,10 @@
         (close-store artifact-store))
       (catch Exception _))))
 
-(defn- execute-workflow-pipeline [run-pipeline workflow input callbacks artifact-store]
+(defn- execute-workflow-pipeline [run-pipeline workflow input callbacks artifact-store event-stream]
   (-> callbacks
       (cond-> artifact-store (assoc :artifact-store artifact-store))
+      (cond-> event-stream (assoc :event-stream event-stream))
       (->> (run-pipeline workflow input))))
 
 (defn- get-git-info []
@@ -268,17 +269,25 @@
                     :iteration iteration}
              parent-task-id (assoc :parent-task-id parent-task-id)))))
 
-(defn run-workflow! [workflow-id {:keys [version output quiet]
+(defn run-workflow! [workflow-id {:keys [version output quiet event-stream]
                                     :or {version "latest" output :pretty quiet false}
                                     :as opts}]
   (try
-    (let [{:keys [load-workflow run-pipeline]} (resolve-workflow-interface)]
+    (let [{:keys [load-workflow run-pipeline]} (resolve-workflow-interface)
+          ;; Create event stream if not provided
+          es (or event-stream
+                 (try
+                   (require '[ai.miniforge.event-stream.interface :as es])
+                   (when-let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
+                     (when-let [create-fn (ns-resolve es-ns 'create-event-stream)]
+                       (create-fn)))
+                   (catch Exception _ nil)))]
       (print-workflow-header workflow-id version quiet)
       (let [workflow-input (resolve-input opts)
             workflow (load-and-validate-workflow load-workflow workflow-id version)
             artifact-store (create-artifact-store quiet)
             callbacks (create-phase-callbacks quiet)
-            result (execute-workflow-pipeline run-pipeline workflow workflow-input callbacks artifact-store)]
+            result (execute-workflow-pipeline run-pipeline workflow workflow-input callbacks artifact-store es)]
         (close-artifact-store artifact-store)
         (print-result result opts)
         result))
@@ -470,7 +479,7 @@
                               :message (str (:error sandbox-error))}]}]
         (print-result result opts)
         result)
-      (let [result (execute-workflow-pipeline run-pipeline workflow workflow-input context artifact-store)]
+      (let [result (execute-workflow-pipeline run-pipeline workflow workflow-input context artifact-store event-stream)]
         (publish-completion-event event-stream workflow-id result)
         (close-artifact-store artifact-store)
         (print-result result opts)

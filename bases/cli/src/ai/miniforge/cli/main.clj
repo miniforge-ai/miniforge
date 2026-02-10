@@ -467,9 +467,33 @@
         (let [start! (ns-resolve dashboard-ns 'start!)
               create-stream (ns-resolve es-ns 'create-event-stream)
               event-stream (create-stream)
+
+              ;; Create PR train manager
+              pr-train-manager (try
+                                 (require '[ai.miniforge.pr-train.interface :as pr-train])
+                                 (when-let [pr-ns (find-ns 'ai.miniforge.pr-train.interface)]
+                                   (when-let [create-fn (ns-resolve pr-ns 'create-manager)]
+                                     (create-fn)))
+                                 (catch Exception e
+                                   (println "Warning: Could not create PR train manager:" (.getMessage e))
+                                   nil))
+
+              ;; Create repo DAG manager
+              repo-dag-manager (try
+                                 (require '[ai.miniforge.repo-dag.interface :as repo-dag])
+                                 (when-let [dag-ns (find-ns 'ai.miniforge.repo-dag.interface)]
+                                   (when-let [create-fn (ns-resolve dag-ns 'create-manager)]
+                                     (create-fn)))
+                                 (catch Exception e
+                                   (println "Warning: Could not create repo DAG manager:" (.getMessage e))
+                                   nil))
+
               url (str "http://localhost:" port)]
           (print-info (str "Starting web dashboard on port " port "..."))
-          (start! {:port port :event-stream event-stream})
+          (start! {:port port
+                   :event-stream event-stream
+                   :pr-train-manager pr-train-manager
+                   :repo-dag-manager repo-dag-manager})
           (println)
           (println (str "  " url))
           (println)
