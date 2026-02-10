@@ -178,6 +178,10 @@
           (= uri "/dag")
           (html-response (views/dag-kanban-view (state/get-dag-state state)))
 
+          ;; Workflows list view
+          (= uri "/workflows")
+          (html-response (views/workflows-view (state/get-workflows state)))
+
           ;; Workflow detail
           (.startsWith uri "/workflow/")
           (let [id (subs uri 10)]

@@ -407,6 +407,20 @@
                 (str (.format (java.text.SimpleDateFormat. "HH:mm") (:started-at wf)))
                 "—")]])]]]))
 
+(defn workflows-view
+  "Workflows list page view."
+  [workflows]
+  (layout "Workflows"
+   [:div.workflows-page
+    [:header.page-header
+     [:h1 "Workflows"]
+     [:p.subtitle (str (count workflows) " total workflows")]]
+    [:section.workflows-section
+     {:hx-get "/api/workflows"
+      :hx-trigger "refresh from:body, every 5s"
+      :hx-swap "innerHTML"}
+     (workflow-list-fragment workflows)]]))
+
 (defn workflow-detail-view
   "Detailed workflow view."
   [workflow]
