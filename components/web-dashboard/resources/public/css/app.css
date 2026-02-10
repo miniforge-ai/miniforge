@@ -626,6 +626,43 @@ body {
   overflow: hidden;
 }
 
+/* Kanban column status colors - UX best practices */
+.kanban-column.blocked {
+  border-left: 4px solid var(--accent-error);
+}
+
+.kanban-column.blocked .column-header {
+  background: rgba(239, 83, 80, 0.15);
+  border-bottom-color: var(--accent-error);
+}
+
+.kanban-column.ready {
+  border-left: 4px solid var(--accent-info);
+}
+
+.kanban-column.ready .column-header {
+  background: rgba(66, 165, 245, 0.15);
+  border-bottom-color: var(--accent-info);
+}
+
+.kanban-column.running {
+  border-left: 4px solid var(--accent-warning);
+}
+
+.kanban-column.running .column-header {
+  background: rgba(255, 152, 0, 0.15);
+  border-bottom-color: var(--accent-warning);
+}
+
+.kanban-column.done {
+  border-left: 4px solid var(--accent-success);
+}
+
+.kanban-column.done .column-header {
+  background: rgba(102, 187, 106, 0.15);
+  border-bottom-color: var(--accent-success);
+}
+
 .column-header {
   padding: var(--space-md);
   background: var(--bg-hover);
