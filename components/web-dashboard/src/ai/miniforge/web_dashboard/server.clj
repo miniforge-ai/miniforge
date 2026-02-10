@@ -17,13 +17,14 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.web-dashboard.server
-  "HTTP server with WebSocket support for the web dashboard."
+  "HTTP server with WebSocket support for the production web dashboard."
   (:require
    [org.httpkit.server :as http]
    [cheshire.core :as json]
    [clojure.java.io :as io]
    [hiccup.core :refer [html]]
-   [ai.miniforge.web-dashboard.views :as views]))
+   [ai.miniforge.web-dashboard.views :as views]
+   [ai.miniforge.web-dashboard.state :as state]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Static file serving
@@ -55,7 +56,7 @@
      :body "Not Found"}))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; WebSocket handling and workflow state
+;; WebSocket handling and real-time updates
 
 (defn- subscribe-client!
   "Subscribe WebSocket client to event stream."
@@ -88,34 +89,7 @@
         (catch Exception e
           (println "Error unsubscribing from event stream:" (.getMessage e)))))))
 
-(defn- get-workflows
-  "Get current workflow state from event stream."
-  [event-stream]
-  (try
-    (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
-      (if es-ns
-        (let [get-events (ns-resolve es-ns 'get-events)
-              events (get-events event-stream)]
-          ;; Extract workflows from events
-          ;; This is a simplified version - real impl would track workflow state
-          (->> events
-               (filter #(or (:workflow-id %) (:workflow/id %)))
-               (group-by #(or (:workflow-id %) (:workflow/id %)))
-               (map (fn [[id wf-events]]
-                      (let [latest (first wf-events)]
-                        {:id id
-                         :name (str "Workflow " (subs (str id) 0 8))
-                         :status :running
-                         :phase (or (:phase latest) "unknown")
-                         :progress 50
-                         :agent-status "Active"})))
-               (take 10)))
-        []))
-    (catch Exception e
-      (println "Error getting workflows:" (.getMessage e))
-      [])))
-
-(defn- create-ws-handler [event-stream]
+(defn- create-ws-handler [state]
   (let [connections (atom #{})]
     (fn [req]
       (http/as-channel req
@@ -123,18 +97,29 @@
          (fn [ch]
            (println "WebSocket opened")
            (swap! connections conj ch)
-           (subscribe-client! event-stream ch))
+           (subscribe-client! (:event-stream state) ch)
+           ;; Send initial state
+           (http/send! ch (json/generate-string
+                          {:type :init
+                           :data (state/get-dashboard-state state)})))
 
          :on-close
          (fn [ch _status]
            (println "WebSocket closed")
            (swap! connections disj ch)
-           (unsubscribe-client! event-stream ch))
+           (unsubscribe-client! (:event-stream state) ch))
 
          :on-receive
          (fn [ch data]
-           (println "Received:" data)
-           (http/send! ch (json/generate-string {:echo data})))}))))
+           (try
+             (let [msg (json/parse-string data true)]
+               (case (:action msg)
+                 :refresh (http/send! ch (json/generate-string
+                                          {:type :state
+                                           :data (state/get-dashboard-state state)}))
+                 (http/send! ch (json/generate-string {:error "Unknown action"}))))
+             (catch Exception e
+               (println "Error handling WebSocket message:" (.getMessage e)))))}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; HTTP routes
@@ -145,13 +130,21 @@
   {:status 200
    :headers {"Content-Type" "text/html; charset=utf-8"}
    :body (if (string? hiccup-data)
-           hiccup-data  ; Already rendered (from views/*)
-           (html hiccup-data))})  ; Render hiccup fragments for htmx
+           hiccup-data
+           (html hiccup-data))})
 
-(defn- create-handler [event-stream]
-  (let [ws-handler (create-ws-handler event-stream)]
+(defn- json-response
+  "Return JSON response."
+  [data]
+  {:status 200
+   :headers {"Content-Type" "application/json"}
+   :body (json/generate-string data)})
+
+(defn- create-handler [state]
+  (let [ws-handler (create-ws-handler state)]
     (fn [req]
-      (let [uri (:uri req)]
+      (let [uri (:uri req)
+            params (:params req)]
         (cond
           ;; WebSocket
           (= uri "/ws")
@@ -159,48 +152,68 @@
 
           ;; Health check
           (= uri "/health")
-          {:status 200
-           :headers {"Content-Type" "application/json"}
-           :body (json/generate-string {:status "ok"})}
+          (json-response {:status "ok"
+                          :version "2.0.0"
+                          :uptime (state/get-uptime state)})
 
-          ;; Main views
+          ;; Main dashboard view
           (= uri "/")
-          (html-response (views/workflow-list (get-workflows event-stream)))
+          (html-response (views/dashboard-view (state/get-dashboard-state state)))
 
+          ;; PR Fleet Management
+          (= uri "/fleet")
+          (html-response (views/fleet-view (state/get-fleet-state state)))
+
+          ;; PR Train detail
+          (.startsWith uri "/train/")
+          (let [train-id (subs uri 7)]
+            (html-response (views/train-detail-view
+                           (state/get-train-detail state train-id))))
+
+          ;; Evidence view
           (= uri "/evidence")
-          (html-response (views/evidence-view []))
+          (html-response (views/evidence-view (state/get-evidence-state state)))
 
-          (= uri "/artifacts")
-          (html-response (views/artifacts-view []))
-
+          ;; DAG Kanban view
           (= uri "/dag")
-          (html-response (views/dag-kanban-view []))
+          (html-response (views/dag-kanban-view (state/get-dag-state state)))
 
           ;; Workflow detail
           (.startsWith uri "/workflow/")
           (let [id (subs uri 10)]
-            (html-response (views/workflow-detail
-                            {:id id
-                             :name (str "Workflow " id)
-                             :phases [{:name "Spec" :status :completed}
-                                      {:name "Plan" :status :running}
-                                      {:name "Implement" :status :pending}]
-                             :agent-output "Agent output will appear here..."})))
+            (html-response (views/workflow-detail-view
+                           (state/get-workflow-detail state id))))
 
-          ;; API endpoints for htmx
+          ;; API: Dashboard stats (for htmx updates)
+          (= uri "/api/stats")
+          (html-response (views/stats-fragment (state/get-stats state)))
+
+          ;; API: Fleet status grid (for htmx updates)
+          (= uri "/api/fleet/grid")
+          (html-response (views/fleet-grid-fragment (state/get-fleet-state state)))
+
+          ;; API: PR Train list (for htmx updates)
+          (= uri "/api/trains")
+          (html-response (views/train-list-fragment (state/get-trains state)))
+
+          ;; API: Risk analysis (for htmx updates)
+          (= uri "/api/risk")
+          (html-response (views/risk-analysis-fragment (state/get-risk-analysis state)))
+
+          ;; API: Recent activity (for htmx updates)
+          (= uri "/api/activity")
+          (html-response (views/activity-fragment (state/get-recent-activity state)))
+
+          ;; API: Workflow list
           (= uri "/api/workflows")
-          (html-response
-           [:div#workflow-list
-            [:table.workflow-table
-             [:tbody
-              (map (fn [wf]
-                     [:tr
-                      [:td (:status wf)]
-                      [:td [:a {:href (str "/workflow/" (:id wf))} (:name wf)]]
-                      [:td (:phase wf)]
-                      [:td (:progress wf)]
-                      [:td (:agent-status wf)]])
-                   (get-workflows event-stream))]]])
+          (html-response (views/workflow-list-fragment (state/get-workflows state)))
+
+          ;; API: Train action
+          (= uri "/api/train/action")
+          (let [action (get params :action)
+                train-id (get params :train-id)]
+            (state/train-action! state train-id action)
+            (json-response {:success true}))
 
           ;; Static files
           (or (.startsWith uri "/css/")
@@ -217,17 +230,34 @@
 ;; Server lifecycle
 
 (defn start-server!
-  "Start HTTP server with WebSocket support."
-  [{:keys [port event-stream] :or {port 8080}}]
-  (let [handler (create-handler event-stream)
+  "Start HTTP server with WebSocket support.
+
+   Options:
+   - :port - Port to listen on (default 8080)
+   - :event-stream - Event stream atom for subscribing to workflow events
+   - :pr-train-manager - PR train manager instance
+   - :repo-dag-manager - Repo DAG manager instance"
+  [{:keys [port event-stream pr-train-manager repo-dag-manager]
+    :or {port 8080}}]
+  (let [state (state/create-state {:event-stream event-stream
+                                    :pr-train-manager pr-train-manager
+                                    :repo-dag-manager repo-dag-manager
+                                    :start-time (System/currentTimeMillis)})
+        handler (create-handler state)
         server (http/run-server handler {:port port})
         actual-port (if (zero? port)
                       (.getLocalPort (:server-socket @server))
                       port)]
-    (println (str "Web dashboard started on http://localhost:" actual-port))
+    (println (str "┌─────────────────────────────────────────────────────┐"))
+    (println (str "│ Miniforge Web Dashboard                             │"))
+    (println (str "│ Production-ready fleet control interface            │"))
+    (println (str "├─────────────────────────────────────────────────────┤"))
+    (println (str "│ URL: http://localhost:" actual-port (apply str (repeat (- 28 (count (str actual-port))) " ")) "│"))
+    (println (str "│ WebSocket: ws://localhost:" actual-port "/ws" (apply str (repeat (- 21 (count (str actual-port))) " ")) "│"))
+    (println (str "└─────────────────────────────────────────────────────┘"))
     {:server server
      :port actual-port
-     :event-stream event-stream}))
+     :state state}))
 
 (defn stop-server!
   "Stop HTTP server."
