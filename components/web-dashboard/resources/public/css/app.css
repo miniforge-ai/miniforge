@@ -1,43 +1,49 @@
 /* Miniforge Web Dashboard - Production Styles
- * Terminal aesthetic with Tableau-inspired density
+ * Industrial aesthetic with high information density
+ * Vibrant red/orange/brown color scheme
  * No build step required
  */
 
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Roboto+Condensed:wght@400;700&family=Roboto+Mono:wght@400;500&display=swap');
+
 :root {
-  /* Terminal color palette */
-  --bg-primary: #0a0e14;
-  --bg-secondary: #131821;
-  --bg-tertiary: #1c222d;
-  --bg-hover: #252d3a;
-  
-  --text-primary: #e6e8eb;
-  --text-secondary: #a0a8b7;
-  --text-muted: #6c7589;
-  
-  --accent-primary: #39bae6;
-  --accent-success: #7fd962;
-  --accent-warning: #ffb454;
-  --accent-error: #ff6b6b;
-  --accent-info: #8b91ff;
-  
-  --border-color: #252d3a;
-  --border-active: #39bae6;
-  
+  /* Miniforge.ai brand colors - Industrial red/orange/brown palette */
+  --bg-primary: #1a1412;        /* Deep brown-black */
+  --bg-secondary: #2b2320;      /* Dark brown */
+  --bg-tertiary: #3d3330;       /* Medium brown */
+  --bg-hover: #4a3f3a;          /* Lighter brown hover */
+
+  --text-primary: #f5f5f5;      /* Off-white for high contrast */
+  --text-secondary: #d4c5b9;    /* Warm tan */
+  --text-muted: #9a8678;        /* Muted brown */
+
+  --accent-primary: #ff5722;    /* Vibrant red-orange (primary brand) */
+  --accent-secondary: #d84315;  /* Deep orange-red */
+  --accent-tertiary: #bf360c;   /* Dark red accent */
+  --accent-success: #8d6e63;    /* Brown success (industrial) */
+  --accent-warning: #ff6f00;    /* Bright orange warning */
+  --accent-error: #c62828;      /* Deep red error */
+  --accent-info: #ff8a65;       /* Light orange info */
+
+  --border-color: #4a3f3a;
+  --border-active: #ff5722;
+
   /* Spacing scale (8px base) */
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 16px;
   --space-lg: 24px;
   --space-xl: 32px;
-  
-  /* Typography */
-  --font-mono: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  
-  /* Shadows */
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
-  --shadow-md: 0 4px 6px rgba(0,0,0,0.4);
-  --shadow-lg: 0 10px 20px rgba(0,0,0,0.5);
+
+  /* Typography - Industrial aesthetic */
+  --font-primary: 'Roboto Condensed', 'Oswald', 'Bebas Neue', 'Impact', sans-serif;
+  --font-mono: 'Roboto Mono', 'Courier New', monospace;
+  --font-display: 'Bebas Neue', 'Oswald', 'Impact', sans-serif;
+
+  /* Shadows with warm tones */
+  --shadow-sm: 0 1px 3px rgba(191,54,12,0.2);
+  --shadow-md: 0 4px 6px rgba(191,54,12,0.3);
+  --shadow-lg: 0 10px 20px rgba(191,54,12,0.4);
 }
 
 * {
@@ -47,12 +53,14 @@
 }
 
 body {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1.5;
+  font-family: var(--font-primary);
+  font-size: 14px;
+  line-height: 1.6;
   background: var(--bg-primary);
   color: var(--text-primary);
   overflow-x: hidden;
+  font-weight: 400;
+  letter-spacing: 0.3px;
 }
 
 /* Dashboard layout */
@@ -73,14 +81,22 @@ body {
 
 .logo {
   margin-bottom: var(--space-lg);
+  padding: var(--space-md);
+  background: linear-gradient(135deg, var(--bg-tertiary) 0%, var(--bg-secondary) 100%);
+  border-radius: 8px;
+  border: 2px solid var(--accent-primary);
+  box-shadow: 0 0 20px rgba(255,87,34,0.3);
 }
 
 .ascii-logo {
-  font-size: 9px;
-  line-height: 1.2;
+  font-size: 11px;
+  line-height: 1.3;
   color: var(--accent-primary);
   white-space: pre;
   font-family: var(--font-mono);
+  font-weight: 700;
+  text-shadow: 0 0 10px rgba(255,87,34,0.5);
+  filter: brightness(1.2);
 }
 
 .nav {
