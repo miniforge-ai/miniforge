@@ -40,7 +40,8 @@
    [cheshire.core :as json]
    [ai.miniforge.cli.spec-parser :as spec-parser]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]
-   [ai.miniforge.cli.config :as config]))
+   [ai.miniforge.cli.config :as config]
+   [ai.miniforge.cli.observability :as observability]))
 
 ;; TUI components loaded conditionally (only in JVM/jlink bundled runtime)
 ;; Not available in Babashka - use 'miniforge-tui' package for terminal UI
@@ -678,6 +679,31 @@
   (workflow-runner/list-workflows!))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
+;; Observability commands
+
+(defn logs-tail-cmd
+  "Tail logs for a workflow."
+  [m]
+  (let [opts (get-opts m)]
+    (observability/handle-logs (assoc opts :subcommand "tail"))))
+
+(defn logs-list-cmd
+  "List available log files."
+  [_m]
+  (observability/handle-logs {:subcommand "list"}))
+
+(defn events-tail-cmd
+  "Tail events for a workflow."
+  [m]
+  (let [opts (get-opts m)]
+    (observability/handle-events (assoc opts :subcommand "tail"))))
+
+(defn events-list-cmd
+  "List available event stream files."
+  [_m]
+  (observability/handle-events {:subcommand "list"}))
+
+;; ─────────────────────────────────────────────────────────────────────────────
 ;; Help command
 
 (defn help-cmd
@@ -811,6 +837,30 @@ Examples:
    {:cmds ["config" "backends"] :fn config-backends-cmd}
    {:cmds ["config" "backend"] :fn config-backend-cmd :args->opts [:backend]}
    {:cmds ["config" "validate"] :fn config-validate-cmd}
+
+   ;; Observability commands
+   {:cmds ["logs" "tail"]
+    :fn logs-tail-cmd
+    :args->opts [:workflow-id]
+    :spec {:file {:alias :f}
+           :lines {:coerce :int :alias :n :default 10}
+           :follow {:coerce :boolean :default true}
+           :all {:coerce :boolean}}}
+
+   {:cmds ["logs" "list"]
+    :fn logs-list-cmd}
+
+   {:cmds ["events" "tail"]
+    :fn events-tail-cmd
+    :args->opts [:workflow-id]
+    :spec {:file {:alias :f}
+           :lines {:coerce :int :alias :n :default 20}
+           :follow {:coerce :boolean :default true}
+           :filter {:coerce :keyword}
+           :all {:coerce :boolean}}}
+
+   {:cmds ["events" "list"]
+    :fn events-list-cmd}
 
    ;; Fleet subcommands (daemon management)
    {:cmds ["fleet" "start"]  :fn fleet-start-cmd}

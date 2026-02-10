@@ -57,12 +57,24 @@
 
    Options:
    - :logger - Optional logger instance for debugging
+   - :sinks - Vector of sink functions (default: file sink)
+   - :config - User config map to create sinks from
 
    Returns: Event stream atom that manages subscribers and event log.
 
-   Example:
+   Sinks control where events are written (files, stdout, fleet, etc).
+   See ai.miniforge.event-stream.sinks for sink options.
+
+   Examples:
+     ;; Default file sink
      (create-event-stream)
-     (create-event-stream {:logger my-logger})"
+
+     ;; With custom sinks
+     (require '[ai.miniforge.event-stream.sinks :as sinks])
+     (create-event-stream {:sinks [(sinks/file-sink) (sinks/stdout-sink)]})
+
+     ;; From user config
+     (create-event-stream {:config user-config})"
   [& [opts]]
   (core/create-event-stream opts))
 

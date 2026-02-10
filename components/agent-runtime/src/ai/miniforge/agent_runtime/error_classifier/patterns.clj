@@ -72,6 +72,11 @@
    Loaded from resources/error-patterns/external.edn"
   (load-patterns "external"))
 
+(def backend-setup-patterns
+  "Patterns that indicate backend setup/configuration errors.
+   Loaded from resources/error-patterns/backend-setup.edn"
+  (load-patterns "backend-setup"))
+
 ;;------------------------------------------------------------------------------ Layer 2
 ;; Pattern matching
 
@@ -97,7 +102,8 @@
   [message]
   (let [all-patterns (concat agent-backend-patterns
                              task-code-patterns
-                             external-patterns)]
+                             external-patterns
+                             backend-setup-patterns)]
     (or (first (filter #(matches-pattern? message %) all-patterns))
         {:type :task-code
          :vendor "miniforge"})))

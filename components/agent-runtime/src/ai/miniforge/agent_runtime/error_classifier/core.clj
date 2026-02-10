@@ -33,7 +33,7 @@
 
    Returns: Vector of work item descriptions"
   [task-state]
-  (when task-state
+  (if task-state
     (let [items (atom [])]
       ;; Files created
       (when-let [files (:files-created task-state)]
@@ -67,7 +67,8 @@
       (when-let [commits (:commits-made task-state)]
         (swap! items conj (str commits " commits made")))
 
-      @items)))
+      @items)
+    []))
 
 ;;------------------------------------------------------------------------------ Layer 2
 ;; Retry logic

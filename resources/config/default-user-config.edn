@@ -17,4 +17,17 @@
                     :cost-limit-per-task 0.10
                     :prefer-speed false
                     :allow-downgrade true
-                    :require-local false}}}
+                    :require-local false}
+  :self-healing {:enabled true
+                 :workaround-auto-apply true
+                 :backend-auto-switch true
+                 :backend-health-threshold 0.90
+                 :backend-switch-cooldown-ms 1800000}
+  :observability {:event-sinks [:file]
+                  :log-sinks [:file]
+                  :rotation {:max-size-mb 10
+                             :retention-days 7}
+                  :fleet {:url nil
+                          :api-key nil
+                          :batch-size 50
+                          :flush-interval-ms 10000}}}}

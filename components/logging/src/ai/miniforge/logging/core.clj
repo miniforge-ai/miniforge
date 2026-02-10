@@ -1,7 +1,9 @@
 (ns ai.miniforge.logging.core
   "Structured EDN logging implementation.
    Layer 0: Pure functions for log entry creation
-   Layer 1: Logger protocol and default implementation")
+   Layer 1: Logger protocol and default implementation"
+  (:require
+   [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure functions for log entry creation
@@ -95,19 +97,138 @@
     [(fn [entry] (swap! entries conj entry))
      entries]))
 
+(defn- log-file-path
+  "Get path to log file for a workflow.
+
+   Arguments:
+     workflow-id - UUID or string workflow identifier
+
+   Returns: String path to ~/.miniforge/logs/<workflow-id>.log"
+  [workflow-id]
+  (let [home (System/getProperty "user.home")
+        logs-dir (io/file home ".miniforge" "logs")
+        log-file (str workflow-id ".log")]
+    (.mkdirs logs-dir)
+    (.getPath (io/file logs-dir log-file))))
+
+(defn- file-size-mb
+  "Get file size in megabytes.
+
+   Arguments:
+     file-path - String path to file
+
+   Returns: Double size in MB"
+  [file-path]
+  (let [file (io/file file-path)]
+    (if (.exists file)
+      (/ (.length file) 1024.0 1024.0)
+      0.0)))
+
+(defn- rotate-log-if-needed
+  "Rotate log file if it exceeds size threshold.
+
+   Arguments:
+     file-path - String path to log file
+     max-size-mb - Maximum size in MB (default 10MB)
+
+   Returns: nil"
+  [file-path max-size-mb]
+  (when (> (file-size-mb file-path) max-size-mb)
+    (let [timestamp (.format (java.time.LocalDateTime/now)
+                             (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss"))
+          rotated-path (str file-path "." timestamp)]
+      (.renameTo (io/file file-path) (io/file rotated-path)))))
+
+(defn file-output-fn
+  "Output function that writes logs to per-workflow files.
+
+   DEPRECATED: Use ai.miniforge.logging.sinks/file-sink instead.
+   Kept for backward compatibility.
+
+   Logs are written to ~/.miniforge/logs/<workflow-id>.log
+   Files are automatically rotated when they exceed 10MB.
+
+   Arguments:
+     opts - Map with optional:
+       :max-size-mb - Max file size before rotation (default 10)
+       :format - :edn or :human (default :human)
+
+   Returns: Output function"
+  [& [opts]]
+  (let [max-size-mb (:max-size-mb opts 10)
+        format-fn (case (:format opts :human)
+                    :edn format-edn
+                    :human format-human
+                    format-human)]
+    (fn [entry]
+      (when-let [workflow-id (:workflow/id entry)]
+        (try
+          (let [file-path (log-file-path workflow-id)]
+            (rotate-log-if-needed file-path max-size-mb)
+            (with-open [writer (io/writer file-path :append true)]
+              (.write writer (format-fn entry))
+              (.write writer "\n")))
+          (catch Exception _e
+            ;; Silently fail - don't break logging if file write fails
+            nil))))))
+
+(defn combined-output-fn
+  "Combine multiple output functions.
+
+   Arguments:
+     output-fns - Vector of output functions
+
+   Returns: Combined output function"
+  [output-fns]
+  (fn [entry]
+    (doseq [output-fn output-fns]
+      (try
+        (output-fn entry)
+        (catch Exception _e
+          ;; Continue with other outputs even if one fails
+          nil)))))
+
 (defn create-logger
   "Create a new EDN logger with the given configuration.
 
    Options:
    - :min-level - Minimum log level to emit (default :trace)
    - :output    - Output mode :edn (default), :human, or custom function
-   - :context   - Initial context map"
+   - :context   - Initial context map
+   - :config    - User config map to create sinks from
+   - :sinks     - Explicit sink functions (overrides :output)
+
+   When :config is provided, uses ai.miniforge.logging.sinks to create
+   configurable sinks from user configuration.
+
+   Example:
+     ;; Simple stdout logger
+     (create-logger {:output :human})
+
+     ;; Logger with configurable sinks
+     (create-logger {:config user-config})
+
+     ;; Logger with explicit sinks
+     (create-logger {:sinks [(sinks/file-sink) (sinks/stdout-sink)]})"
   ([] (create-logger {}))
-  ([{:keys [min-level output context] :or {min-level :trace output :edn}}]
-   (let [output-fn (case output
-                     :edn default-output-fn
-                     :human human-output-fn
-                     output)]
+  ([{:keys [min-level output context config sinks] :or {min-level :trace output :edn}}]
+   (let [output-fn (cond
+                     ;; Explicit sinks provided
+                     sinks
+                     (let [multi-sink (requiring-resolve 'ai.miniforge.logging.sinks/multi-sink)]
+                       (multi-sink sinks))
+
+                     ;; Create sinks from config
+                     config
+                     (let [create-from-config (requiring-resolve 'ai.miniforge.logging.sinks/create-sinks-from-config)]
+                       (create-from-config config))
+
+                     ;; Legacy output mode
+                     :else
+                     (case output
+                       :edn default-output-fn
+                       :human human-output-fn
+                       output))]
      (->EDNLogger {:min-level min-level} (or context {}) output-fn))))
 
 (defn timed*

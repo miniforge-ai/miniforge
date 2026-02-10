@@ -2,7 +2,7 @@
   "Unit tests for error classification and message generation."
   (:require [clojure.test :refer [deftest is testing are]]
             [clojure.string :as str]
-            [ai.miniforge.agent-runtime.error-classifier :as classifier]))
+            [ai.miniforge.agent-runtime.interface :as classifier]))
 
 ;------------------------------------------------------------------------------ Layer 0 Tests
 ;; Pattern matching and classification

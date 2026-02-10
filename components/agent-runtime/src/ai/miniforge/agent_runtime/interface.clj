@@ -33,7 +33,9 @@
    - :task-code     - Task execution errors (user's code/spec issues)
    - :external      - External service errors (GitHub, network, transient)"
   (:require
-   [ai.miniforge.agent-runtime.error-classifier :as classifier]))
+   [ai.miniforge.agent-runtime.error-classifier.core :as core]
+   [ai.miniforge.agent-runtime.error-classifier.messages :as messages]
+   [ai.miniforge.agent-runtime.error-classifier.reporting :as reporting]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Error classification
@@ -63,7 +65,7 @@
          :completed-work [\"Created 4 files\" \"PR created: ...\"]
          :report-url \"https://github.com/anthropics/claude-code/issues/new?...\"
          :should-retry false}"
-  classifier/classify-error)
+  core/classify-error)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Message formatting
@@ -83,7 +85,7 @@
                            :report-url \"...\"
                            :should-retry false})
      => \"⚠️  Agent System Error (Not Your Fault!)...\""
-  classifier/format-error-message)
+  messages/format-error-message)
 
 (def extract-completed-work
   "Extract completed work items from task state.
@@ -101,7 +103,7 @@
      => [\"Created 4 files (523 lines)\"
          \"All tests passed\"
          \"PR created at https://...\"]"
-  classifier/extract-completed-work)
+  core/extract-completed-work)
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Reporting and retry logic
@@ -121,9 +123,9 @@
                          {:message \"classifyHandoffIfNeeded is not defined\"
                           :task-id \"abc123\"})
      => \"https://github.com/anthropics/claude-code/issues/new?title=...\""
-  classifier/generate-report-url)
+  reporting/get-vendor-report-url)
 
-(def should-retry?
+(defn should-retry?
   "Determine if user should retry based on error type.
 
    Arguments:
@@ -142,7 +144,8 @@
 
      (should-retry? {:type :external})
      => true"
-  classifier/should-retry?)
+  [{:keys [type completed-work]}]
+  (core/should-retry? type completed-work))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
