@@ -13,9 +13,7 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.web-dashboard.state
-  "State management for web dashboard with integration to PR trains and DAGs."
-  (:require
-   [clojure.string :as str]))
+  "State management for web dashboard with integration to PR trains and DAGs.")
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; State atom creation
@@ -157,6 +155,46 @@
               :critical (count (filter #(>= (calculate-risk-score %) 50) trains))}}))
 
 ;------------------------------------------------------------------------------ Layer 5
+;; Workflow state
+
+(defn get-workflows
+  "Get workflows from event stream."
+  [state]
+  (try
+    (if-let [stream (:event-stream @state)]
+      (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
+        (if es-ns
+          (let [get-events (ns-resolve es-ns 'get-events)
+                events (get-events stream)]
+            (->> events
+                 (filter #(#{:workflow/started :workflow/completed} (:event/type %)))
+                 (group-by #(or (:workflow-id %) (:workflow/id %)))
+                 (map (fn [[id wf-events]]
+                        (let [started (first (filter #(= :workflow/started (:event/type %)) wf-events))
+                              completed (first (filter #(= :workflow/completed (:event/type %)) wf-events))]
+                          {:id id
+                           :name (get-in started [:spec :name] (str "Workflow " (subs (str id) 0 8)))
+                           :status (if completed :completed :running)
+                           :phase (get-in started [:phase] "unknown")
+                           :progress (if completed 100 50)
+                           :started-at (:timestamp started)
+                           :completed-at (:timestamp completed)})))
+                 (take 50)
+                 vec))
+          []))
+      [])
+    (catch Exception e
+      (println "Error getting workflows:" (.getMessage e))
+      [])))
+
+(defn get-workflow-detail
+  "Get workflow detail."
+  [state id]
+  (let [workflows (get-workflows state)]
+    (or (first (filter #(= (str (:id %)) id) workflows))
+        {:error "Workflow not found"})))
+
+;------------------------------------------------------------------------------ Layer 6
 ;; Dashboard state
 
 (defn get-stats
@@ -209,46 +247,6 @@
      :summary {:high (count (filter #(= :high (:risk-level %)) risks))
                :medium (count (filter #(= :medium (:risk-level %)) risks))
                :low (count (filter #(= :low (:risk-level %)) risks))}}))
-
-;------------------------------------------------------------------------------ Layer 6
-;; Workflow state
-
-(defn get-workflows
-  "Get workflows from event stream."
-  [state]
-  (try
-    (if-let [stream (:event-stream @state)]
-      (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
-        (if es-ns
-          (let [get-events (ns-resolve es-ns 'get-events)
-                events (get-events stream)]
-            (->> events
-                 (filter #(#{:workflow/started :workflow/completed} (:event/type %)))
-                 (group-by #(or (:workflow-id %) (:workflow/id %)))
-                 (map (fn [[id wf-events]]
-                        (let [started (first (filter #(= :workflow/started (:event/type %)) wf-events))
-                              completed (first (filter #(= :workflow/completed (:event/type %)) wf-events))]
-                          {:id id
-                           :name (get-in started [:spec :name] (str "Workflow " (subs (str id) 0 8)))
-                           :status (if completed :completed :running)
-                           :phase (get-in started [:phase] "unknown")
-                           :progress (if completed 100 50)
-                           :started-at (:timestamp started)
-                           :completed-at (:timestamp completed)})))
-                 (take 50)
-                 vec))
-          []))
-      [])
-    (catch Exception e
-      (println "Error getting workflows:" (.getMessage e))
-      [])))
-
-(defn get-workflow-detail
-  "Get workflow detail."
-  [state id]
-  (let [workflows (get-workflows state)]
-    (or (first (filter #(= (str (:id %)) id) workflows))
-        {:error "Workflow not found"})))
 
 ;------------------------------------------------------------------------------ Layer 7
 ;; Activity tracking
