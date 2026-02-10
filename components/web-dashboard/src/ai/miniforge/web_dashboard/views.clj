@@ -19,7 +19,7 @@
    No build step required - pure server-side rendering."
   (:require
    [hiccup.page :as page]
-   [hiccupv2.core :refer [html]]
+   [hiccup2.core :refer [html]]
    [clojure.string :as str]
    [ai.miniforge.web-dashboard.components :as c]))
 
