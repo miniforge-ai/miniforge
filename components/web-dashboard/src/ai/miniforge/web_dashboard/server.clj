@@ -95,7 +95,38 @@
         (catch Exception e
           (println "Error unsubscribing from event stream:" (.getMessage e)))))))
 
-(defn- create-ws-handler [state workflow-connections]
+(defn- handle-ws-message
+  "Handle incoming WebSocket message from dashboard UI.
+   Supports refresh requests and control plane commands."
+  [state workflow-connections ch data]
+  (try
+    (let [msg (json/parse-string data true)]
+      (cond
+        ;; UI refresh request
+        (= :refresh (:action msg))
+        (http/send! ch (json/generate-string
+                       {:type :state
+                        :data (state/get-dashboard-state state)}))
+
+        ;; Control plane command - forward to workflows
+        (:command msg)
+        (do
+          (println "Broadcasting command to workflows:" (:command msg))
+          (doseq [workflow-ch @workflow-connections]
+            (try
+              (http/send! workflow-ch (json/generate-string msg))
+              (catch Exception e
+                (println "Error sending command to workflow:" (.getMessage e))))))
+
+        ;; Unknown message
+        :else
+        (http/send! ch (json/generate-string {:error "Unknown action"}))))
+    (catch Exception e
+      (println "Error handling WebSocket message:" (.getMessage e)))))
+
+(defn- create-ws-handler
+  "Create WebSocket handler with event streaming and workflow control."
+  [state workflow-connections]
   (let [connections (atom #{})]
     (fn [req]
       (http/as-channel req
@@ -117,30 +148,7 @@
 
                         :on-receive
                         (fn [ch data]
-                          (try
-                            (let [msg (json/parse-string data true)]
-                              (cond
-                                ;; UI refresh request
-                                (= :refresh (:action msg))
-                                (http/send! ch (json/generate-string
-                                               {:type :state
-                                                :data (state/get-dashboard-state state)}))
-
-                                ;; Control plane command - forward to workflows
-                                (:command msg)
-                                (do
-                                  (println "Broadcasting command to workflows:" (:command msg))
-                                  (doseq [workflow-ch @workflow-connections]
-                                    (try
-                                      (http/send! workflow-ch (json/generate-string msg))
-                                      (catch Exception e
-                                        (println "Error sending command to workflow:" (.getMessage e))))))
-
-                                ;; Unknown message
-                                :else
-                                (http/send! ch (json/generate-string {:error "Unknown action"}))))
-                            (catch Exception e
-                              (println "Error handling WebSocket message:" (.getMessage e)))))}))))
+                          (handle-ws-message state workflow-connections ch data))}))))
 
 (defn- create-events-ws-handler
   "WebSocket handler for workflow processes to publish events."
@@ -174,7 +182,7 @@
                             (println "Error parsing workflow event:" (.getMessage e)))))})))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; HTTP routes
+;; HTTP response helpers
 
 (defn- html-response
   "Render hiccup to HTML and return as HTTP response."
@@ -192,7 +200,109 @@
    :headers {"Content-Type" "application/json"}
    :body (json/generate-string data)})
 
-(defn- create-handler [state]
+(defn- not-found-response
+  "Return 404 response."
+  []
+  {:status 404
+   :headers {"Content-Type" "text/plain"}
+   :body "Not Found"})
+
+;------------------------------------------------------------------------------ Layer 2.5
+;; Route handlers
+
+(defn- handle-health
+  "Health check endpoint."
+  [state]
+  (json-response {:status "ok"
+                  :version "2.0.0"
+                  :uptime (state/get-uptime state)}))
+
+(defn- handle-dashboard
+  "Main dashboard view."
+  [state]
+  (html-response (views/dashboard-view (state/get-dashboard-state state))))
+
+(defn- handle-fleet
+  "PR Fleet management view."
+  [state]
+  (html-response (views/fleet-view (state/get-fleet-state state))))
+
+(defn- handle-train-detail
+  "PR Train detail view."
+  [state train-id]
+  (html-response (views/train-detail-view
+                  (state/get-train-detail state train-id))))
+
+(defn- handle-evidence
+  "Evidence artifacts view."
+  [state]
+  (html-response (views/evidence-view (state/get-evidence-state state))))
+
+(defn- handle-dag
+  "DAG Kanban view."
+  [state]
+  (html-response (views/dag-kanban-view (state/get-dag-state state))))
+
+(defn- handle-workflows
+  "Workflows list view."
+  [state]
+  (html-response (views/workflows-view (state/get-workflows state))))
+
+(defn- handle-workflow-detail
+  "Workflow detail view."
+  [state workflow-id]
+  (html-response (views/workflow-detail-view
+                  (state/get-workflow-detail state workflow-id))))
+
+(defn- handle-api-stats
+  "API: Dashboard stats fragment (for htmx updates)."
+  [state]
+  (html-response (views/stats-fragment (state/get-stats state))))
+
+(defn- handle-api-fleet-grid
+  "API: Fleet status grid fragment (for htmx updates)."
+  [state]
+  (html-response (views/fleet-grid-fragment (state/get-fleet-state state))))
+
+(defn- handle-api-trains
+  "API: PR Train list fragment (for htmx updates)."
+  [state]
+  (html-response (views/train-list-fragment (state/get-trains state))))
+
+(defn- handle-api-risk
+  "API: Risk analysis fragment (for htmx updates)."
+  [state]
+  (html-response (views/risk-analysis-fragment (state/get-risk-analysis state))))
+
+(defn- handle-api-activity
+  "API: Recent activity fragment (for htmx updates)."
+  [state]
+  (html-response (views/activity-fragment (state/get-recent-activity state))))
+
+(defn- handle-api-workflows
+  "API: Workflow list fragment (for htmx updates)."
+  [state]
+  (html-response (views/workflow-list-fragment (state/get-workflows state))))
+
+(defn- handle-api-train-action
+  "API: Train action handler."
+  [state params]
+  (let [action (get params :action)
+        train-id (get params :train-id)]
+    (state/train-action! state train-id action)
+    (json-response {:success true})))
+
+(defn- handle-static
+  "Static file handler."
+  [uri]
+  (serve-static-file uri))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Request routing
+
+(defn- create-handler
+  "Create main HTTP request handler with routing and workflow event integration."
+  [state]
   (let [workflow-connections (atom #{})
         ws-handler (create-ws-handler state workflow-connections)
         events-ws-handler (create-events-ws-handler state workflow-connections)]
@@ -210,86 +320,63 @@
 
           ;; Health check
           (= uri "/health")
-          (json-response {:status "ok"
-                          :version "2.0.0"
-                          :uptime (state/get-uptime state)})
+          (handle-health state)
 
-          ;; Main dashboard view
+          ;; Main views
           (= uri "/")
-          (html-response (views/dashboard-view (state/get-dashboard-state state)))
+          (handle-dashboard state)
 
-          ;; PR Fleet Management
           (= uri "/fleet")
-          (html-response (views/fleet-view (state/get-fleet-state state)))
+          (handle-fleet state)
 
-          ;; PR Train detail
           (.startsWith uri "/train/")
-          (let [train-id (subs uri 7)]
-            (html-response (views/train-detail-view
-                            (state/get-train-detail state train-id))))
+          (handle-train-detail state (subs uri 7))
 
-          ;; Evidence view
           (= uri "/evidence")
-          (html-response (views/evidence-view (state/get-evidence-state state)))
+          (handle-evidence state)
 
-          ;; DAG Kanban view
           (= uri "/dag")
-          (html-response (views/dag-kanban-view (state/get-dag-state state)))
+          (handle-dag state)
 
-          ;; Workflows list view
           (= uri "/workflows")
-          (html-response (views/workflows-view (state/get-workflows state)))
+          (handle-workflows state)
 
-          ;; Workflow detail
           (.startsWith uri "/workflow/")
-          (let [id (subs uri 10)]
-            (html-response (views/workflow-detail-view
-                            (state/get-workflow-detail state id))))
+          (handle-workflow-detail state (subs uri 10))
 
-          ;; API: Dashboard stats (for htmx updates)
+          ;; API endpoints (htmx fragments)
           (= uri "/api/stats")
-          (html-response (views/stats-fragment (state/get-stats state)))
+          (handle-api-stats state)
 
-          ;; API: Fleet status grid (for htmx updates)
           (= uri "/api/fleet/grid")
-          (html-response (views/fleet-grid-fragment (state/get-fleet-state state)))
+          (handle-api-fleet-grid state)
 
-          ;; API: PR Train list (for htmx updates)
           (= uri "/api/trains")
-          (html-response (views/train-list-fragment (state/get-trains state)))
+          (handle-api-trains state)
 
-          ;; API: Risk analysis (for htmx updates)
           (= uri "/api/risk")
-          (html-response (views/risk-analysis-fragment (state/get-risk-analysis state)))
+          (handle-api-risk state)
 
-          ;; API: Recent activity (for htmx updates)
           (= uri "/api/activity")
-          (html-response (views/activity-fragment (state/get-recent-activity state)))
+          (handle-api-activity state)
 
-          ;; API: Workflow list
           (= uri "/api/workflows")
-          (html-response (views/workflow-list-fragment (state/get-workflows state)))
+          (handle-api-workflows state)
 
-          ;; API: Train action
           (= uri "/api/train/action")
-          (let [action (get params :action)
-                train-id (get params :train-id)]
-            (state/train-action! state train-id action)
-            (json-response {:success true}))
+          (handle-api-train-action state params)
 
           ;; Static files
           (or (.startsWith uri "/css/")
               (.startsWith uri "/js/")
               (.startsWith uri "/img/"))
-          (serve-static-file uri)
+          (handle-static uri)
 
           ;; 404
           :else
-          {:status 404
-           :headers {"Content-Type" "text/plain"}
-           :body "Not Found"})))))
+          (not-found-response))))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 4
 ;; Server lifecycle
 
 (defn- write-discovery-file!

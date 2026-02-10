@@ -54,8 +54,6 @@
                         :backend-switch-cooldown-ms 1800000}
          :dashboard {:port 7878
                      :auto-open false}}))
-         :dashboard {:port 7878
-                     :auto-open false}}))
     ;; Fallback if resource not found
     {:llm {:backend :claude
            :model "claude-sonnet-4-20250514"
@@ -82,8 +80,6 @@
                         :backend-switch-cooldown-ms 1800000}
          :dashboard {:port 7878
                      :auto-open false}}))
-     :dashboard {:port 7878
-                 :auto-open false}}))
 
 (def default-config
   "Default configuration values loaded from resources/config/default-user-config.edn"
