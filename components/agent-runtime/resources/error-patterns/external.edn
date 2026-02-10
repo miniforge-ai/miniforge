@@ -1,0 +1,29 @@
+{:type :external
+ :vendor "External Service"
+ :patterns
+ [{:regex "ECONNREFUSED"
+   :description "Connection refused"}
+  {:regex "Network error: timeout"
+   :description "Network timeout"}
+  {:regex "GitHub API rate limit exceeded"
+   :description "GitHub rate limit hit"}
+  {:regex "API service unavailable"
+   :description "API unavailable"}
+  {:regex "Request timeout"
+   :description "Request timeout"}
+  {:regex "502 Bad Gateway"
+   :description "Bad gateway error"}
+  {:regex "503 Service Unavailable"
+   :description "Service unavailable"}
+  {:regex "Connection refused"
+   :description "Connection refused"}
+  {:regex "DNS lookup failed"
+   :description "DNS resolution failure"}
+  {:regex "ETIMEDOUT"
+   :description "Connection timeout"}
+  {:regex "ENOTFOUND"
+   :description "DNS not found"}
+  {:regex "Rate limit exceeded"
+   :description "API rate limiting"}
+  {:regex "Service unavailable"
+   :description "Service unavailable"}]}

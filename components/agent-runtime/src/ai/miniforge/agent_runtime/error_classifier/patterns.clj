@@ -34,11 +34,12 @@
    Arguments:
      pattern - Map with :regex string
      type - Error type keyword
+     vendor - Vendor name string
 
    Returns: Pattern map with compiled :regex"
-  [pattern type]
+  [pattern type vendor]
   (-> pattern
-      (assoc :type type)
+      (assoc :type type :vendor vendor)
       (update :regex re-pattern)))
 
 (defn- load-patterns
@@ -50,8 +51,9 @@
    Returns: Vector of compiled pattern maps"
   [config-name]
   (if-let [config (load-pattern-config (str "error-patterns/" config-name ".edn"))]
-    (let [type (:type config)]
-      (mapv #(compile-pattern % type) (:patterns config)))
+    (let [type (:type config)
+          vendor (:vendor config)]
+      (mapv #(compile-pattern % type vendor) (:patterns config)))
     []))
 
 ;;------------------------------------------------------------------------------ Layer 1
