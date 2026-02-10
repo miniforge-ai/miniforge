@@ -29,19 +29,34 @@
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.execution :as exec]
-            [ai.miniforge.workflow.monitoring :as monitoring]))
+            [ai.miniforge.workflow.monitoring :as monitoring]
+            [cheshire.core :as json]))
 
 ;------------------------------------------------------------------------------ Layer -1: Event publishing
 
 (defn- publish-event!
-  "Publish event to event stream if available."
+  "Publish event to event stream or dashboard WebSocket."
   [event-stream event]
   (when event-stream
     (try
-      (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
-        (when es-ns
-          (when-let [publish! (ns-resolve es-ns 'publish!)]
-            (publish! event-stream event))))
+      (cond
+        ;; WebSocket connection to dashboard
+        (:websocket event-stream)
+        (try
+          (require '[org.httpkit.client :as http])
+          (when-let [http-ns (find-ns 'org.httpkit.client)]
+            (when-let [ws (:websocket event-stream)]
+              (when-let [send-fn (ns-resolve http-ns 'send!)]
+                (send-fn ws (cheshire.core/generate-string event)))))
+          (catch Exception e
+            (println "Warning: Failed to send event via WebSocket:" (.getMessage e))))
+
+        ;; In-memory event stream (same process)
+        :else
+        (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
+          (when es-ns
+            (when-let [publish! (ns-resolve es-ns 'publish!)]
+              (publish! event-stream event)))))
       (catch Exception e
         (println "Warning: Failed to publish event:" (.getMessage e))))))
 
@@ -83,6 +98,27 @@
                    :phase phase-name
                    :success? (:success? result)
                    :timestamp (java.time.Instant/now)}))
+
+(defn- connect-to-dashboard
+  "Connect to dashboard via WebSocket for event streaming.
+   Returns event-stream map with :websocket connection, or nil if connection fails."
+  [dashboard-url]
+  (when dashboard-url
+    (try
+      (require '[org.httpkit.client :as http])
+      (when-let [http-ns (find-ns 'org.httpkit.client)]
+        (when-let [websocket-fn (ns-resolve http-ns 'websocket)]
+          (let [ws-url (clojure.string/replace dashboard-url #"^http" "ws")
+                ws-url (str ws-url "/ws/events")
+                ws (websocket-fn ws-url
+                                 {:on-open (fn [_ws] (println "Connected to dashboard:" ws-url))
+                                  :on-close (fn [_ws _status] (println "Disconnected from dashboard"))
+                                  :on-error (fn [_ws error] (println "Dashboard WebSocket error:" error))})]
+            {:websocket ws
+             :dashboard-url dashboard-url})))
+      (catch Exception e
+        (println "Warning: Could not connect to dashboard:" (.getMessage e))
+        nil))))
 
 ;------------------------------------------------------------------------------ Layer 0: Pipeline helpers
 
@@ -187,7 +223,10 @@
   ([workflow input opts]
    (let [pipeline (build-pipeline workflow)
          max-phases (or (:max-phases opts) 50)
-         event-stream (:event-stream opts)
+         ;; Connect to dashboard if URL provided, otherwise use in-memory event stream
+         event-stream (or (when-let [dashboard-url (:dashboard-url opts)]
+                            (connect-to-dashboard dashboard-url))
+                          (:event-stream opts))
 
          ;; Wrap callbacks to publish events
          callbacks {:on-phase-start (fn [ctx interceptor]

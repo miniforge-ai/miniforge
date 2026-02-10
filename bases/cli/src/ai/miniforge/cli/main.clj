@@ -845,7 +845,8 @@ Examples:
            :input {:alias :i}
            :input-json {}
            :output {:coerce :keyword :alias :o :default :pretty}
-           :quiet {:coerce :boolean :alias :q}}}
+           :quiet {:coerce :boolean :alias :q}
+           :dashboard-url {:coerce :string :alias :d}}}
 
    {:cmds ["workflow" "list"]
     :fn workflow-list-cmd}

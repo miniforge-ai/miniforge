@@ -269,25 +269,29 @@
                     :iteration iteration}
              parent-task-id (assoc :parent-task-id parent-task-id)))))
 
-(defn run-workflow! [workflow-id {:keys [version output quiet event-stream]
+(defn run-workflow! [workflow-id {:keys [version output quiet event-stream dashboard-url]
                                     :or {version "latest" output :pretty quiet false}
                                     :as opts}]
   (try
     (let [{:keys [load-workflow run-pipeline]} (resolve-workflow-interface)
-          ;; Create event stream if not provided
+          ;; Create event stream if not provided (dashboard-url takes precedence)
           es (or event-stream
-                 (try
-                   (require '[ai.miniforge.event-stream.interface :as es])
-                   (when-let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
-                     (when-let [create-fn (ns-resolve es-ns 'create-event-stream)]
-                       (create-fn)))
-                   (catch Exception _ nil)))]
+                 (when-not dashboard-url
+                   (try
+                     (require '[ai.miniforge.event-stream.interface :as es])
+                     (when-let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
+                       (when-let [create-fn (ns-resolve es-ns 'create-event-stream)]
+                         (create-fn)))
+                     (catch Exception _ nil))))]
       (print-workflow-header workflow-id version quiet)
       (let [workflow-input (resolve-input opts)
             workflow (load-and-validate-workflow load-workflow workflow-id version)
             artifact-store (create-artifact-store quiet)
             callbacks (create-phase-callbacks quiet)
-            result (execute-workflow-pipeline run-pipeline workflow workflow-input callbacks artifact-store es)]
+            ;; Pass dashboard-url in callbacks if provided
+            callbacks-with-url (cond-> callbacks
+                                 dashboard-url (assoc :dashboard-url dashboard-url))
+            result (execute-workflow-pipeline run-pipeline workflow workflow-input callbacks-with-url artifact-store es)]
         (close-artifact-store artifact-store)
         (print-result result opts)
         result))

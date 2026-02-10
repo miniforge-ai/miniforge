@@ -127,6 +127,37 @@
                             (catch Exception e
                               (println "Error handling WebSocket message:" (.getMessage e)))))}))))
 
+(defn- create-events-ws-handler [state]
+  "WebSocket handler for workflow processes to publish events."
+  (let [workflow-connections (atom #{})]
+    (fn [req]
+      (http/as-channel req
+                       {:on-open
+                        (fn [ch]
+                          (println "Workflow event stream connected")
+                          (swap! workflow-connections conj ch))
+
+                        :on-close
+                        (fn [ch _status]
+                          (println "Workflow event stream disconnected")
+                          (swap! workflow-connections disj ch))
+
+                        :on-receive
+                        (fn [_ch data]
+                          (try
+                            (let [event (json/parse-string data true)]
+                              ;; Publish event to dashboard's event stream
+                              (when-let [es (:event-stream @state)]
+                                (try
+                                  (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
+                                    (when es-ns
+                                      (when-let [publish! (ns-resolve es-ns 'publish!)]
+                                        (publish! es event))))
+                                  (catch Exception e
+                                    (println "Error publishing workflow event:" (.getMessage e))))))
+                            (catch Exception e
+                              (println "Error parsing workflow event:" (.getMessage e)))))}))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; HTTP routes
 
@@ -147,14 +178,19 @@
    :body (json/generate-string data)})
 
 (defn- create-handler [state]
-  (let [ws-handler (create-ws-handler state)]
+  (let [ws-handler (create-ws-handler state)
+        events-ws-handler (create-events-ws-handler state)]
     (fn [req]
       (let [uri (:uri req)
             params (:params req)]
         (cond
-          ;; WebSocket
+          ;; WebSocket for UI clients
           (= uri "/ws")
           (ws-handler req)
+
+          ;; WebSocket for workflow event ingestion
+          (= uri "/ws/events")
+          (events-ws-handler req)
 
           ;; Health check
           (= uri "/health")
