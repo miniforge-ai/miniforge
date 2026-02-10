@@ -22,7 +22,7 @@
    [org.httpkit.server :as http]
    [cheshire.core :as json]
    [clojure.java.io :as io]
-   [hiccup.core :refer [html]]
+   [hiccup2.core :refer [html]]
    [ai.miniforge.web-dashboard.views :as views]
    [ai.miniforge.web-dashboard.state :as state]))
 
@@ -34,7 +34,13 @@
   {".html" "text/html"
    ".css"  "text/css"
    ".js"   "application/javascript"
-   ".json" "application/json"})
+   ".json" "application/json"
+   ".png"  "image/png"
+   ".jpg"  "image/jpeg"
+   ".jpeg" "image/jpeg"
+   ".svg"  "image/svg+xml"
+   ".gif"  "image/gif"
+   ".ico"  "image/x-icon"})
 
 (defn- get-content-type
   "Get content type from file extension."
@@ -93,33 +99,33 @@
   (let [connections (atom #{})]
     (fn [req]
       (http/as-channel req
-        {:on-open
-         (fn [ch]
-           (println "WebSocket opened")
-           (swap! connections conj ch)
-           (subscribe-client! (:event-stream state) ch)
-           ;; Send initial state
-           (http/send! ch (json/generate-string
-                          {:type :init
-                           :data (state/get-dashboard-state state)})))
+                       {:on-open
+                        (fn [ch]
+                          (println "WebSocket opened")
+                          (swap! connections conj ch)
+                          (subscribe-client! (:event-stream state) ch)
+                          ;; Send initial state
+                          (http/send! ch (json/generate-string
+                                          {:type :init
+                                           :data (state/get-dashboard-state state)})))
 
-         :on-close
-         (fn [ch _status]
-           (println "WebSocket closed")
-           (swap! connections disj ch)
-           (unsubscribe-client! (:event-stream state) ch))
+                        :on-close
+                        (fn [ch _status]
+                          (println "WebSocket closed")
+                          (swap! connections disj ch)
+                          (unsubscribe-client! (:event-stream state) ch))
 
-         :on-receive
-         (fn [ch data]
-           (try
-             (let [msg (json/parse-string data true)]
-               (case (:action msg)
-                 :refresh (http/send! ch (json/generate-string
-                                          {:type :state
-                                           :data (state/get-dashboard-state state)}))
-                 (http/send! ch (json/generate-string {:error "Unknown action"}))))
-             (catch Exception e
-               (println "Error handling WebSocket message:" (.getMessage e)))))}))))
+                        :on-receive
+                        (fn [ch data]
+                          (try
+                            (let [msg (json/parse-string data true)]
+                              (case (:action msg)
+                                :refresh (http/send! ch (json/generate-string
+                                                         {:type :state
+                                                          :data (state/get-dashboard-state state)}))
+                                (http/send! ch (json/generate-string {:error "Unknown action"}))))
+                            (catch Exception e
+                              (println "Error handling WebSocket message:" (.getMessage e)))))}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; HTTP routes
@@ -131,7 +137,7 @@
    :headers {"Content-Type" "text/html; charset=utf-8"}
    :body (if (string? hiccup-data)
            hiccup-data
-           (html hiccup-data))})
+           (str (html hiccup-data)))})
 
 (defn- json-response
   "Return JSON response."
@@ -168,7 +174,7 @@
           (.startsWith uri "/train/")
           (let [train-id (subs uri 7)]
             (html-response (views/train-detail-view
-                           (state/get-train-detail state train-id))))
+                            (state/get-train-detail state train-id))))
 
           ;; Evidence view
           (= uri "/evidence")
@@ -178,11 +184,15 @@
           (= uri "/dag")
           (html-response (views/dag-kanban-view (state/get-dag-state state)))
 
+          ;; Workflows list view
+          (= uri "/workflows")
+          (html-response (views/workflows-view (state/get-workflows state)))
+
           ;; Workflow detail
           (.startsWith uri "/workflow/")
           (let [id (subs uri 10)]
             (html-response (views/workflow-detail-view
-                           (state/get-workflow-detail state id))))
+                            (state/get-workflow-detail state id))))
 
           ;; API: Dashboard stats (for htmx updates)
           (= uri "/api/stats")
@@ -217,7 +227,8 @@
 
           ;; Static files
           (or (.startsWith uri "/css/")
-              (.startsWith uri "/js/"))
+              (.startsWith uri "/js/")
+              (.startsWith uri "/img/"))
           (serve-static-file uri)
 
           ;; 404
@@ -240,21 +251,21 @@
   [{:keys [port event-stream pr-train-manager repo-dag-manager]
     :or {port 8080}}]
   (let [state (state/create-state {:event-stream event-stream
-                                    :pr-train-manager pr-train-manager
-                                    :repo-dag-manager repo-dag-manager
-                                    :start-time (System/currentTimeMillis)})
+                                   :pr-train-manager pr-train-manager
+                                   :repo-dag-manager repo-dag-manager
+                                   :start-time (System/currentTimeMillis)})
         handler (create-handler state)
         server (http/run-server handler {:port port})
         actual-port (if (zero? port)
                       (.getLocalPort (:server-socket @server))
                       port)]
-    (println (str "┌─────────────────────────────────────────────────────┐"))
-    (println (str "│ Miniforge Web Dashboard                             │"))
-    (println (str "│ Production-ready fleet control interface            │"))
-    (println (str "├─────────────────────────────────────────────────────┤"))
-    (println (str "│ URL: http://localhost:" actual-port (apply str (repeat (- 28 (count (str actual-port))) " ")) "│"))
-    (println (str "│ WebSocket: ws://localhost:" actual-port "/ws" (apply str (repeat (- 21 (count (str actual-port))) " ")) "│"))
-    (println (str "└─────────────────────────────────────────────────────┘"))
+    (println "┌─────────────────────────────────────────────────────┐")
+    (println "│ Miniforge Web Dashboard                             │")
+    (println "│ Production-ready fleet control interface            │")
+    (println "├─────────────────────────────────────────────────────┤")
+    (println  "│ URL: http://localhost:" actual-port (apply str (repeat (- 28 (count (str actual-port))) " ")) "│")
+    (println  "│ WebSocket: ws://localhost:" actual-port "/ws" (apply str (repeat (- 21 (count (str actual-port))) " ")) "│")
+    (println "└─────────────────────────────────────────────────────┘")
     {:server server
      :port actual-port
      :state state}))

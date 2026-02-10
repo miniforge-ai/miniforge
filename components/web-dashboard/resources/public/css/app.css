@@ -1,43 +1,155 @@
 /* Miniforge Web Dashboard - Production Styles
- * Terminal aesthetic with Tableau-inspired density
+ * Mid-century modern industrial aesthetic
+ * Themeable design system (dark, light, high-contrast)
  * No build step required
  */
 
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Roboto+Condensed:wght@400;700&family=Roboto+Mono:wght@400;500&display=swap');
+
+/*============================================================================*/
+/* THEME SYSTEM - Mid-Century Modern Industrial Aesthetic                    */
+/*============================================================================*/
+
+/* Default theme: Dark (Industrial night shift) */
+:root,
+[data-theme="dark"] {
+  /* Backgrounds - warm browns and charcoals */
+  --bg-primary: #1a1412;
+  --bg-secondary: #2b2320;
+  --bg-tertiary: #3d3330;
+  --bg-hover: #4a3f3a;
+
+  /* Text - warm off-whites and tans */
+  --text-primary: #f5f5f5;
+  --text-secondary: #d4c5b9;
+  --text-muted: #9a8678;
+
+  /* Brand accent - burnt orange/red (forge fire) */
+  --color-brand-primary: #d84315;
+  --color-brand-secondary: #bf360c;
+
+  /* Semantic colors - Mid-century muted tones */
+  --color-risk-critical: #c62828;     /* Muted red - critical risks */
+  --color-pr-ready: #689f38;          /* Muted green - ready to merge */
+  --color-pr-blocked: #f57c00;        /* Burnt orange - blocked PRs */
+  --color-train-active: #5e92c4;      /* Steel blue - active trains */
+
+  /* Status indicators */
+  --color-status-success: #689f38;    /* Muted green */
+  --color-status-warning: #f57c00;    /* Burnt orange */
+  --color-status-error: #c62828;      /* Muted red */
+  --color-status-info: #5e92c4;       /* Steel blue */
+
+  /* Kanban states */
+  --color-kanban-blocked: #f57c00;    /* Burnt orange */
+  --color-kanban-ready: #5e92c4;      /* Steel blue */
+  --color-kanban-running: #fbc02d;    /* Warm yellow */
+  --color-kanban-done: #689f38;       /* Muted green */
+
+  /* Borders */
+  --border-color: #4a3f3a;
+  --border-active: var(--color-brand-primary);
+
+  /* Shadows - warm industrial */
+  --shadow-sm: 0 1px 3px rgba(191,54,12,0.2);
+  --shadow-md: 0 4px 6px rgba(191,54,12,0.3);
+  --shadow-lg: 0 10px 20px rgba(191,54,12,0.4);
+}
+
+/* Light theme: Industrial daylight */
+[data-theme="light"] {
+  /* Backgrounds - warm creams and tans */
+  --bg-primary: #f5f1ed;
+  --bg-secondary: #e8e0d5;
+  --bg-tertiary: #ddd4c7;
+  --bg-hover: #d4c5b9;
+
+  /* Text - rich browns */
+  --text-primary: #2b2320;
+  --text-secondary: #4a3f3a;
+  --text-muted: #6d5d52;
+
+  /* Brand accent - burnt orange (consistent across themes) */
+  --color-brand-primary: #d84315;
+  --color-brand-secondary: #bf360c;
+
+  /* Semantic colors - slightly deeper for light bg */
+  --color-risk-critical: #b71c1c;
+  --color-pr-ready: #558b2f;
+  --color-pr-blocked: #e65100;
+  --color-train-active: #1976d2;
+
+  --color-status-success: #558b2f;
+  --color-status-warning: #e65100;
+  --color-status-error: #b71c1c;
+  --color-status-info: #1976d2;
+
+  --color-kanban-blocked: #e65100;
+  --color-kanban-ready: #1976d2;
+  --color-kanban-running: #f9a825;
+  --color-kanban-done: #558b2f;
+
+  --border-color: #c7b8a8;
+  --border-active: var(--color-brand-primary);
+
+  --shadow-sm: 0 1px 3px rgba(43,35,32,0.1);
+  --shadow-md: 0 4px 6px rgba(43,35,32,0.15);
+  --shadow-lg: 0 10px 20px rgba(43,35,32,0.2);
+}
+
+/* High contrast theme: Maximum accessibility */
+[data-theme="high-contrast"] {
+  --bg-primary: #000000;
+  --bg-secondary: #1a1a1a;
+  --bg-tertiary: #2a2a2a;
+  --bg-hover: #3a3a3a;
+
+  --text-primary: #ffffff;
+  --text-secondary: #e0e0e0;
+  --text-muted: #b0b0b0;
+
+  --color-brand-primary: #ff6d00;
+  --color-brand-secondary: #dd2c00;
+
+  --color-risk-critical: #ff1744;
+  --color-pr-ready: #00e676;
+  --color-pr-blocked: #ff9100;
+  --color-train-active: #2979ff;
+
+  --color-status-success: #00e676;
+  --color-status-warning: #ff9100;
+  --color-status-error: #ff1744;
+  --color-status-info: #2979ff;
+
+  --color-kanban-blocked: #ff9100;
+  --color-kanban-ready: #2979ff;
+  --color-kanban-running: #ffd600;
+  --color-kanban-done: #00e676;
+
+  --border-color: #4a4a4a;
+  --border-active: #ffffff;
+
+  --shadow-sm: 0 1px 3px rgba(255,255,255,0.2);
+  --shadow-md: 0 4px 6px rgba(255,255,255,0.3);
+  --shadow-lg: 0 10px 20px rgba(255,255,255,0.4);
+}
+
+/*============================================================================*/
+/* DESIGN TOKENS - Theme-independent                                         */
+/*============================================================================*/
+
 :root {
-  /* Terminal color palette */
-  --bg-primary: #0a0e14;
-  --bg-secondary: #131821;
-  --bg-tertiary: #1c222d;
-  --bg-hover: #252d3a;
-  
-  --text-primary: #e6e8eb;
-  --text-secondary: #a0a8b7;
-  --text-muted: #6c7589;
-  
-  --accent-primary: #39bae6;
-  --accent-success: #7fd962;
-  --accent-warning: #ffb454;
-  --accent-error: #ff6b6b;
-  --accent-info: #8b91ff;
-  
-  --border-color: #252d3a;
-  --border-active: #39bae6;
-  
   /* Spacing scale (8px base) */
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 16px;
   --space-lg: 24px;
   --space-xl: 32px;
-  
-  /* Typography */
-  --font-mono: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  
-  /* Shadows */
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
-  --shadow-md: 0 4px 6px rgba(0,0,0,0.4);
-  --shadow-lg: 0 10px 20px rgba(0,0,0,0.5);
+
+  /* Typography - Industrial aesthetic */
+  --font-primary: 'Roboto Condensed', 'Oswald', 'Bebas Neue', 'Impact', sans-serif;
+  --font-mono: 'Roboto Mono', 'Courier New', monospace;
+  --font-display: 'Bebas Neue', 'Oswald', 'Impact', sans-serif;
 }
 
 * {
@@ -47,12 +159,14 @@
 }
 
 body {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1.5;
+  font-family: var(--font-primary);
+  font-size: 14px;
+  line-height: 1.6;
   background: var(--bg-primary);
   color: var(--text-primary);
   overflow-x: hidden;
+  font-weight: 400;
+  letter-spacing: 0.3px;
 }
 
 /* Dashboard layout */
@@ -73,14 +187,20 @@ body {
 
 .logo {
   margin-bottom: var(--space-lg);
+  padding: var(--space-md);
+  background: linear-gradient(135deg, var(--bg-tertiary) 0%, var(--bg-secondary) 100%);
+  border-radius: 8px;
+  border: 2px solid var(--color-brand-primary);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.ascii-logo {
-  font-size: 9px;
-  line-height: 1.2;
-  color: var(--accent-primary);
-  white-space: pre;
-  font-family: var(--font-mono);
+.logo img {
+  max-width: 100%;
+  height: auto;
+  filter: drop-shadow(0 0 8px var(--color-brand-secondary));
 }
 
 .nav {
@@ -108,13 +228,13 @@ body {
 
 .nav-item.active {
   background: var(--bg-tertiary);
-  color: var(--accent-primary);
-  border-left: 2px solid var(--accent-primary);
+  color: var(--color-brand-primary);
+  border-left: 2px solid var(--color-brand-primary);
 }
 
 .nav-item .icon {
   font-size: 10px;
-  color: var(--accent-primary);
+  color: var(--color-brand-primary);
 }
 
 .ws-status {
@@ -136,8 +256,8 @@ body {
 }
 
 .status-dot.connected {
-  background: var(--accent-success);
-  box-shadow: 0 0 8px var(--accent-success);
+  background: var(--color-status-success);
+  box-shadow: 0 0 8px var(--color-status-success);
 }
 
 .status-dot.disconnected {
@@ -145,7 +265,7 @@ body {
 }
 
 .status-dot.error {
-  background: var(--accent-error);
+  background: var(--color-status-error);
 }
 
 /* Main content */
@@ -235,8 +355,21 @@ body {
 .stat-value {
   font-size: 32px;
   font-weight: 700;
-  color: var(--accent-primary);
+  color: var(--color-status-info);
   line-height: 1;
+}
+
+.stat-value.critical,
+.stat-value.risk-high {
+  color: var(--color-risk-critical);
+}
+
+.stat-value.success {
+  color: var(--color-status-success);
+}
+
+.stat-value.warning {
+  color: var(--color-status-warning);
 }
 
 .stat-label {
@@ -252,11 +385,11 @@ body {
 }
 
 .stat-trend.up {
-  color: var(--accent-success);
+  color: var(--color-status-success);
 }
 
 .stat-trend.down {
-  color: var(--accent-error);
+  color: var(--color-status-error);
 }
 
 .stat-trend.neutral {
@@ -285,21 +418,21 @@ body {
 }
 
 .risk-badge.risk-high {
-  background: rgba(255, 107, 107, 0.2);
-  color: var(--accent-error);
-  border: 1px solid var(--accent-error);
+  background: color-mix(in srgb, var(--color-risk-critical) 20%, transparent);
+  color: var(--color-risk-critical);
+  border: 1px solid var(--color-risk-critical);
 }
 
 .risk-badge.risk-medium {
-  background: rgba(255, 180, 84, 0.2);
-  color: var(--accent-warning);
-  border: 1px solid var(--accent-warning);
+  background: color-mix(in srgb, var(--color-status-warning) 20%, transparent);
+  color: var(--color-status-warning);
+  border: 1px solid var(--color-status-warning);
 }
 
 .risk-badge.risk-low {
-  background: rgba(127, 217, 98, 0.2);
-  color: var(--accent-success);
-  border: 1px solid var(--accent-success);
+  background: color-mix(in srgb, var(--color-status-success) 20%, transparent);
+  color: var(--color-status-success);
+  border: 1px solid var(--color-status-success);
 }
 
 .risk-list {
@@ -318,15 +451,15 @@ body {
 }
 
 .risk-item.risk-high {
-  border-left-color: var(--accent-error);
+  border-left-color: var(--color-risk-critical);
 }
 
 .risk-item.risk-medium {
-  border-left-color: var(--accent-warning);
+  border-left-color: var(--color-status-warning);
 }
 
 .risk-item.risk-low {
-  border-left-color: var(--accent-success);
+  border-left-color: var(--color-status-success);
 }
 
 .risk-header {
@@ -339,7 +472,7 @@ body {
 .risk-score {
   font-size: 18px;
   font-weight: 700;
-  color: var(--accent-error);
+  color: var(--color-risk-critical);
 }
 
 .risk-name {
@@ -396,7 +529,7 @@ body {
 }
 
 .activity-link {
-  color: var(--accent-primary);
+  color: var(--color-brand-primary);
   text-decoration: none;
 }
 
@@ -451,7 +584,7 @@ body {
 }
 
 .train-card:hover {
-  border-color: var(--accent-primary);
+  border-color: var(--color-brand-primary);
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
 }
@@ -488,7 +621,7 @@ body {
 .train-stats .stat-value {
   font-size: 20px;
   font-weight: 700;
-  color: var(--accent-primary);
+  color: var(--color-status-info);
 }
 
 /* Progress bar */
@@ -501,16 +634,16 @@ body {
 
 .progress-fill {
   height: 100%;
-  background: var(--accent-primary);
+  background: var(--color-brand-primary);
   transition: width 0.3s ease;
 }
 
 .progress-fill.progress-success {
-  background: var(--accent-success);
+  background: var(--color-status-success);
 }
 
 .progress-fill.progress-error {
-  background: var(--accent-error);
+  background: var(--color-status-error);
 }
 
 /* Buttons */
@@ -528,17 +661,17 @@ body {
 
 .btn:hover {
   background: var(--bg-hover);
-  border-color: var(--accent-primary);
+  border-color: var(--color-brand-primary);
 }
 
 .btn-primary {
-  background: var(--accent-primary);
-  border-color: var(--accent-primary);
+  background: var(--color-brand-primary);
+  border-color: var(--color-brand-primary);
   color: var(--bg-primary);
 }
 
 .btn-primary:hover {
-  background: #2da5cc;
+  background: var(--color-brand-secondary);
 }
 
 .btn-ghost {
@@ -567,23 +700,23 @@ body {
 }
 
 .badge-success {
-  background: rgba(127, 217, 98, 0.2);
-  color: var(--accent-success);
+  background: color-mix(in srgb, var(--color-status-success) 20%, transparent);
+  color: var(--color-status-success);
 }
 
 .badge-warning {
-  background: rgba(255, 180, 84, 0.2);
-  color: var(--accent-warning);
+  background: color-mix(in srgb, var(--color-status-warning) 20%, transparent);
+  color: var(--color-status-warning);
 }
 
 .badge-error {
-  background: rgba(255, 107, 107, 0.2);
-  color: var(--accent-error);
+  background: color-mix(in srgb, var(--color-status-error) 20%, transparent);
+  color: var(--color-status-error);
 }
 
 .badge-info {
-  background: rgba(139, 145, 255, 0.2);
-  color: var(--accent-info);
+  background: color-mix(in srgb, var(--color-status-info) 20%, transparent);
+  color: var(--color-status-info);
 }
 
 .badge-neutral {
@@ -606,6 +739,43 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Kanban column status colors - UX best practices */
+.kanban-column.blocked {
+  border-left: 4px solid var(--color-kanban-blocked);
+}
+
+.kanban-column.blocked .column-header {
+  background: color-mix(in srgb, var(--color-kanban-blocked) 15%, transparent);
+  border-bottom-color: var(--color-kanban-blocked);
+}
+
+.kanban-column.ready {
+  border-left: 4px solid var(--color-kanban-ready);
+}
+
+.kanban-column.ready .column-header {
+  background: color-mix(in srgb, var(--color-kanban-ready) 15%, transparent);
+  border-bottom-color: var(--color-kanban-ready);
+}
+
+.kanban-column.running {
+  border-left: 4px solid var(--color-kanban-running);
+}
+
+.kanban-column.running .column-header {
+  background: color-mix(in srgb, var(--color-kanban-running) 15%, transparent);
+  border-bottom-color: var(--color-kanban-running);
+}
+
+.kanban-column.done {
+  border-left: 4px solid var(--color-kanban-done);
+}
+
+.kanban-column.done .column-header {
+  background: color-mix(in srgb, var(--color-kanban-done) 15%, transparent);
+  border-bottom-color: var(--color-kanban-done);
 }
 
 .column-header {
@@ -647,7 +817,7 @@ body {
 }
 
 .kanban-card:hover {
-  border-color: var(--accent-primary);
+  border-color: var(--color-brand-primary);
   transform: translateX(4px);
 }
 
@@ -674,7 +844,7 @@ body {
 
 .card-link {
   font-size: 10px;
-  color: var(--accent-primary);
+  color: var(--color-brand-primary);
   text-decoration: none;
 }
 

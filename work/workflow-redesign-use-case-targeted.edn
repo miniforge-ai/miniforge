@@ -1,0 +1,517 @@
+{:title "Redesign Workflows: Use-Case Targeted with Safety by Default"
+ :version "1.0.0"
+ :priority :high
+ :context
+ "CRITICAL INSIGHT from dogfooding: The current complexity-based workflow system
+  (simple/lean/canonical) is fundamentally flawed. The :simple workflow skips
+  essential safeguards (testing, PR monitoring, review gates) that should be
+  present in ALL workflows, regardless of task size.
+
+  Discovered during dashboard build: spec without explicit workflow type defaulted
+  to :simple (due to parser bug, now fixed), which would have skipped tests and
+  PR monitoring for a production-critical feature.
+
+  NEW ARCHITECTURE: Use-case targeted workflows with safety built-in by default.
+  Every workflow includes cognitive safety, testing, PR monitoring, and review
+  gates. The difference is in the APPROACH, not the presence of safety features."
+
+ :description
+ "Replace complexity-based workflows (simple, lean, canonical) with use-case
+  targeted workflows that match developer intent. Every workflow includes safety
+  features by default - the variation is in approach (iteration style, review
+  depth, planning rigor) not in whether safety exists.
+
+  Current problems:
+  - :simple skips tests, PR monitoring, review gates (unsafe!)
+  - :lean vs :canonical is unclear to users (when to use which?)
+  - Complexity-based naming doesn't match user mental models
+  - No workflow for common use cases (bugfix, docs, feature, refactor)
+
+  New approach:
+  - Workflows named after USE CASES (bugfix, feature, refactor, docs, experiment)
+  - ALL workflows include: tests, linting, PR monitoring, review gates
+  - Variation is in APPROACH: iteration speed, review depth, planning style
+  - Clear mapping from user intent to workflow type"
+
+ :intent
+ {:type :architectural-redesign
+  :scope ["Remove simple/lean/canonical workflows"
+          "Implement 5 use-case targeted workflows"
+          "Update workflow selector logic"
+          "Migrate existing specs"
+          "Update documentation"]
+
+  :success-criteria
+  ["All workflows include safety features by default"
+   "Workflow selection matches user intent clearly"
+   "No workflows skip tests, linting, or PR monitoring"
+   "Backward compatibility via migration"
+   "Comprehensive documentation"
+   "Dogfood with real tasks successfully"]}
+
+ :proposed-workflows
+ {:bugfix
+  {:name "Bugfix Workflow"
+   :id :bugfix-v1
+   :description
+   "Fast iteration for bug fixes with full safety.
+
+    Approach:
+    - Quick diagnosis and fix
+    - Test-driven: write failing test, fix bug, verify
+    - Single PR with clear before/after
+    - Automated review gates
+    - Monitoring for regression
+
+    Safety features (always included):
+    - ✅ Test coverage required
+    - ✅ Linting must pass
+    - ✅ PR monitoring
+    - ✅ Review checklist
+    - ✅ Regression testing"
+
+   :phases
+   [:diagnosis      ; Analyze error, identify root cause
+    :reproduction   ; Create minimal failing test
+    :fix            ; Implement fix
+    :verification   ; Run full test suite
+    :pr-review      ; Create PR, monitor until merged
+    :post-merge]    ; Verify fix in production
+
+   :characteristics
+   {:iteration-speed :fast          ; Quick cycles
+    :review-depth :automated        ; Automated checks + human review
+    :planning-rigor :minimal        ; Just enough planning
+    :pr-strategy :single-pr         ; One PR for the fix
+    :risk-tolerance :low}           ; Bug fixes must be safe
+
+   :when-to-use
+   ["Fixing a specific bug or error"
+    "Addressing regression"
+    "Patching security vulnerability"
+    "Correcting incorrect behavior"]}
+
+  :feature
+  {:name "Feature Workflow"
+   :id :feature-v1
+   :description
+   "Iterative feature development with comprehensive review.
+
+    Approach:
+    - Design → Implement → Test → Review cycle
+    - Multi-PR if needed (feature flags, incremental rollout)
+    - Comprehensive testing (unit, integration, E2E)
+    - Design review + code review
+    - Metrics and monitoring
+
+    Safety features (always included):
+    - ✅ Design review checkpoint
+    - ✅ Comprehensive test coverage
+    - ✅ Linting and type checking
+    - ✅ PR monitoring with risk analysis
+    - ✅ Review gates (design + code + QA)
+    - ✅ Feature flags for safe rollout
+    - ✅ Metrics and observability"
+
+   :phases
+   [:design         ; Design review, architecture decisions
+    :implementation ; Iterative development with tests
+    :testing        ; Comprehensive test coverage
+    :integration    ; Integration testing
+    :pr-review      ; PR creation, review, monitoring
+    :post-merge     ; Monitoring, metrics, rollout
+    ]
+
+   :characteristics
+   {:iteration-speed :moderate      ; Balanced pace
+    :review-depth :comprehensive    ; Design + code + QA
+    :planning-rigor :thorough       ; Upfront design work
+    :pr-strategy :multi-pr-allowed  ; Can split into multiple PRs
+    :risk-tolerance :low-to-medium} ; Features should be stable
+
+   :when-to-use
+   ["Adding new functionality"
+    "Building new component or service"
+    "Implementing user-facing features"
+    "Multi-phase development needed"]}
+
+  :refactor
+  {:name "Refactoring Workflow"
+   :id :refactor-v1
+   :description
+   "Systematic refactoring with behavior preservation.
+
+    Approach:
+    - Analysis → Plan → Refactor → Verify cycle
+    - Stratified design principles (≤3 layers, ≤400 lines)
+    - Multi-PR with dependencies (layered refactoring)
+    - Behavior-preserving transformations
+    - Comprehensive regression testing
+
+    Safety features (always included):
+    - ✅ Baseline tests before refactoring
+    - ✅ Behavior preservation verification
+    - ✅ Stratification analysis
+    - ✅ Linting and complexity metrics
+    - ✅ PR dependency tracking
+    - ✅ Regression test suite
+    - ✅ Code review with before/after comparison"
+
+   :phases
+   [:analysis       ; Analyze current structure, identify issues
+    :planning       ; Plan refactoring strategy (layers, PRs)
+    :baseline       ; Establish test baseline
+    :refactoring    ; Iterative refactoring with tests
+    :verification   ; Verify behavior preservation
+    :pr-review      ; Multi-PR with dependencies
+    :post-merge]    ; Verify system still works
+
+   :characteristics
+   {:iteration-speed :deliberate    ; Careful, methodical
+    :review-depth :comprehensive    ; Architecture + code review
+    :planning-rigor :high           ; Detailed refactoring plan
+    :pr-strategy :multi-pr-phased   ; Phased PRs with dependencies
+    :risk-tolerance :very-low}      ; Must preserve behavior
+
+   :when-to-use
+   ["Improving code structure"
+    "Applying stratified design"
+    "Reducing complexity"
+    "Extracting components"
+    "Following Rule 720 or Rule 210"]}
+
+  :docs
+  {:name "Documentation Workflow"
+   :id :docs-v1
+   :description
+   "Documentation updates with quality review.
+
+    Approach:
+    - Write → Review → Publish cycle
+    - Single PR with clear scope
+    - Quality checks (spelling, links, formatting)
+    - Review for accuracy and clarity
+    - Monitoring for doc health
+
+    Safety features (always included):
+    - ✅ Spelling and grammar checks
+    - ✅ Link validation
+    - ✅ Formatting verification
+    - ✅ Technical accuracy review
+    - ✅ PR monitoring
+    - ✅ Post-publish verification"
+
+   :phases
+   [:writing        ; Write documentation
+    :review         ; Technical + editorial review
+    :validation     ; Check links, formatting, spelling
+    :pr-review      ; Create PR, get approvals
+    :post-merge]    ; Verify docs render correctly
+
+   :characteristics
+   {:iteration-speed :fast          ; Quick turnaround
+    :review-depth :editorial        ; Technical + editorial
+    :planning-rigor :minimal        ; Light planning
+    :pr-strategy :single-pr         ; One PR per doc change
+    :risk-tolerance :medium}        ; Docs are lower risk
+
+   :when-to-use
+   ["Writing documentation"
+    "Updating README or guides"
+    "Adding code comments"
+    "Creating tutorials"
+    "Documentation-only changes"]}
+
+  :experiment
+  {:name "Experimental Workflow"
+   :id :experiment-v1
+   :description
+   "Rapid prototyping with safety guardrails.
+
+    Approach:
+    - Explore → Validate → Decide cycle
+    - Feature branch (no merge to main initially)
+    - Quick iteration, tolerate rough edges
+    - Decision checkpoint before production
+    - If viable → promote to feature workflow
+
+    Safety features (always included):
+    - ✅ Isolated feature branch
+    - ✅ Basic linting (can be relaxed)
+    - ✅ Decision checkpoint before merge
+    - ✅ PR review if promoted
+    - ✅ Clear experiment vs production boundary"
+
+   :phases
+   [:exploration    ; Rapid prototyping
+    :validation     ; Test feasibility
+    :decision       ; Go/no-go checkpoint
+    :cleanup        ; If go: clean up for production
+    :promotion]     ; Promote to feature workflow or discard
+
+   :characteristics
+   {:iteration-speed :very-fast     ; Rapid prototyping
+    :review-depth :minimal          ; Focus on feasibility
+    :planning-rigor :none           ; Explore first
+    :pr-strategy :feature-branch    ; No main merge initially
+    :risk-tolerance :high}          ; Experiments can fail
+
+   :when-to-use
+   ["Prototyping new ideas"
+    "Testing feasibility"
+    "Exploring alternatives"
+    "Spike solutions"
+    "Research and discovery"]}
+
+  :implementation-plan
+  {:phase-1-workflow-definitions
+   {:title "Define New Workflow Structures"
+    :deliverables
+    ["Create workflows/bugfix-v1.edn"
+     "Create workflows/feature-v1.edn"
+     "Create workflows/refactor-v1.edn"
+     "Create workflows/docs-v1.edn"
+     "Create workflows/experiment-v1.edn"
+     "Each workflow includes full phase definitions"
+     "Safety features documented in metadata"]
+
+    :files-to-create
+    ["components/workflow/resources/workflows/bugfix-v1.edn"
+     "components/workflow/resources/workflows/feature-v1.edn"
+     "components/workflow/resources/workflows/refactor-v1.edn"
+     "components/workflow/resources/workflows/docs-v1.edn"
+     "components/workflow/resources/workflows/experiment-v1.edn"]
+
+    :structure-template
+    {:workflow/id :bugfix-v1
+     :workflow/name "Bugfix Workflow"
+     :workflow/description "Fast iteration for bug fixes"
+     :workflow/version "1.0.0"
+     :workflow/characteristics {:iteration-speed :fast
+                                :review-depth :automated
+                                :planning-rigor :minimal}
+     :workflow/safety-features
+     [:test-coverage :linting :pr-monitoring :review-gates]
+     :workflow/phases
+     [{:phase/id :diagnosis
+       :phase/name "Diagnosis"
+       :phase/description "Analyze error and identify root cause"
+       :phase/agent-role :diagnostician
+       :phase/outputs [:root-cause-analysis :reproduction-steps]
+       :phase/safety-checks [:linting-passed]}
+      {:phase/id :reproduction
+       :phase/name "Reproduction"
+       :phase/description "Create minimal failing test"
+       :phase/agent-role :test-engineer
+       :phase/outputs [:failing-test]
+       :phase/safety-checks [:test-actually-fails]}
+      ;; ... more phases
+      ]}}
+
+   :phase-2-selector-redesign
+   {:title "Redesign Workflow Selector"
+    :deliverables
+    ["Update bases/cli/src/ai/miniforge/cli/workflow_selector.clj"
+     "New selection rules for use-case workflows"
+     "Remove simple/lean/canonical rules"
+     "Add intent-based matching (bugfix, feature, refactor, docs, experiment)"
+     "Confidence scoring for each workflow"
+     "Fallback to :feature-v1 (safest general-purpose)"]
+
+    :selection-algorithm
+    {:rules
+     [{:conditions [[:type :bugfix]
+                    [:keywords #{:bug :fix :regression}]]
+       :select :bugfix-v1
+       :confidence :high
+       :reason "Bug fix detected from type or keywords"}
+
+      {:conditions [[:type :refactoring]
+                    [:keywords #{:refactor :stratified-design}]
+                    [:constraints #{:rule-720 :rule-210}]]
+       :select :refactor-v1
+       :confidence :high
+       :reason "Refactoring detected from type, keywords, or constraints"}
+
+      {:conditions [[:type :docs]
+                    [:keywords #{:documentation :docs-only}]
+                    [:file-scope #{:markdown-only :readme-only}]]
+       :select :docs-v1
+       :confidence :high
+       :reason "Documentation-only change detected"}
+
+      {:conditions [[:keywords #{:experiment :prototype :spike :explore}]]
+       :select :experiment-v1
+       :confidence :medium
+       :reason "Experimental nature detected"}
+
+      {:conditions [[:type :feature]
+                    [:keywords #{:feature :new-functionality}]
+                    [:default true]]
+       :select :feature-v1
+       :confidence :medium
+       :reason "Feature development (default for unknown types)"}]
+
+     :default-workflow :feature-v1
+     :default-reason "Safe general-purpose workflow with all safety features"}}
+
+   :phase-3-migration
+   {:title "Migrate Existing Workflows and Specs"
+    :deliverables
+    ["Create migration map: simple→feature, lean→feature, canonical→refactor"
+     "Update all existing workflow specs in work/"
+     "Deprecate old workflow files"
+     "Add migration warnings to workflow loader"]
+
+    :migration-strategy
+    {:simple-sdlc-v1 :feature-v1
+     :lean-sdlc-v1 :feature-v1
+     :canonical-sdlc-v1 :refactor-v1}
+
+    :files-to-update
+    ["work/*.edn - Update any specs with old workflow types"
+     "components/workflow/resources/workflows/simple-sdlc-v1.edn - DEPRECATE"
+     "components/workflow/resources/workflows/lean-sdlc-v1.edn - DEPRECATE"
+     "components/workflow/resources/workflows/canonical-sdlc-v1.edn - DEPRECATE"]
+
+    :deprecation-period "90 days with migration warnings"}}
+
+  :technical-details
+  {:workflow-structure
+   "Each workflow is a self-contained EDN file with:
+   - Workflow metadata (id, name, version, description)
+   - Characteristics (iteration speed, review depth, planning rigor)
+   - Safety features (always present, documented explicitly)
+   - Phase definitions (phase graph with dependencies)
+   - Agent role assignments per phase
+   - Success criteria and exit conditions"
+
+   :safety-by-default
+   "ALL workflows include these safety features (no exceptions):
+   - Test coverage requirements (may vary by workflow)
+   - Linting and code quality checks
+   - PR creation and monitoring
+   - Review gates (automated or human)
+   - Post-merge verification
+
+   The difference between workflows is HOW these are applied:
+   - :bugfix-v1: Fast iteration, automated checks, single PR
+   - :feature-v1: Comprehensive testing, design review, multi-PR allowed
+   - :refactor-v1: Behavior preservation, stratification, phased PRs
+   - :docs-v1: Editorial review, link validation, quick turnaround
+   - :experiment-v1: Isolated branch, decision checkpoint, promotion path"
+
+   :selection-confidence
+   "Workflow selector returns confidence score:
+   - :high (>90%) - Clear match from explicit type or strong keywords
+   - :medium (70-90%) - Inferred from description or context
+   - :low (<70%) - Fallback to default :feature-v1
+
+   Always show reasoning to user:
+   'ℹ️  Auto-selected workflow: bugfix-v1 (high confidence)
+       Reason: Bug fix detected from :type :bugfix
+       Override with :workflow/type in your spec'"
+
+   :backward-compatibility
+   "Graceful migration path:
+   - Old workflow types trigger deprecation warning
+   - Automatic mapping to new workflow types
+   - 90-day deprecation period before removal
+   - Migration guide in documentation
+   - Specs can opt-in early with :workflow/type :bugfix-v1"}
+
+  :testing-strategy
+  {:unit-tests
+   ["Test workflow selector rules for each use case"
+    "Verify safety features present in all workflows"
+    "Test migration mapping for old workflow types"
+    "Validate workflow file structure"]
+
+   :integration-tests
+   ["Run each workflow end-to-end with test specs"
+    "Verify PR creation and monitoring works"
+    "Test phase transitions and dependencies"
+    "Validate safety gates prevent unsafe merges"]
+
+   :dogfooding
+   ["Use :bugfix-v1 for small bug fixes"
+    "Use :feature-v1 for new components"
+    "Use :refactor-v1 for stratified design work"
+    "Use :docs-v1 for documentation updates"
+    "Use :experiment-v1 for prototypes"
+    "Collect feedback on workflow selection accuracy"
+    "Measure time-to-PR and merge success rate"]}
+
+  :documentation
+  {:user-guide
+   "workflows/README.md - Comprehensive guide:
+   - When to use each workflow (decision tree)
+   - Safety features explained
+   - How to override workflow selection
+   - Examples for each workflow type
+   - Migration guide from old workflows"
+
+   :developer-guide
+   "docs/architecture/workflows.md - Technical details:
+   - Workflow file structure
+   - Phase graph execution model
+   - Safety feature implementation
+   - Adding new workflow types
+   - Selection algorithm internals"}
+
+  :success-metrics
+  ["✅ All workflows include safety features by default"
+   "✅ Workflow selection accuracy >90% on test corpus"
+   "✅ Zero workflows skip tests or PR monitoring"
+   "✅ User feedback: workflow names match mental models"
+   "✅ Migration from old workflows seamless"
+   "✅ Dogfooding successful for all workflow types"
+   "✅ Documentation comprehensive and clear"]
+
+  :constraints
+  ["Must work in Babashka (no JVM-only dependencies)"
+   "All files follow Rule 720 (≤400 lines)"
+   "Stratified design (Rule 210)"
+   "Backward compatibility during migration period"
+   "No breaking changes for existing running workflows"
+   "Safety features NEVER optional or skippable"]
+
+  :risks-and-mitigations
+  [{:risk "Users miss the old simple workflow for quick tasks"
+    :severity :medium
+    :mitigation ":experiment-v1 provides fast iteration for prototypes, :bugfix-v1 for quick fixes. Both include safety but optimized for speed."}
+
+   {:risk "Workflow selection picks wrong workflow"
+    :severity :medium
+    :mitigation "Show confidence score and reasoning, easy override with :workflow/type, collect feedback to improve rules"}
+
+   {:risk "Migration breaks existing workflows mid-execution"
+    :severity :high
+    :mitigation "Running workflows continue with old definitions, only new workflows use new types. 90-day deprecation period."}
+
+   {:risk "Safety features slow down development"
+    :severity :low
+    :mitigation "Safety features are non-negotiable. Optimize them (parallel tests, fast linters) but never skip them."}]
+
+  :competitive-advantage
+  "This is a critical differentiator. Other workflow engines treat safety as
+  optional or advanced. We build it in by default, making it IMPOSSIBLE to
+  accidentally skip tests or PR monitoring.
+
+  Our workflows match how developers think (bugfix, feature, refactor, docs,
+  experiment) rather than abstract complexity levels. This reduces cognitive
+  load and increases adoption.
+
+  The safety-by-default approach builds trust - teams can confidently use
+  miniforge knowing it won't merge untested code or skip review gates."
+
+  :deliverables
+  ["5 new workflow definition files (bugfix, feature, refactor, docs, experiment)"
+   "Updated workflow selector with use-case matching"
+   "Migration guide and deprecation warnings"
+   "Comprehensive user and developer documentation"
+   "Integration tests for all workflows"
+   "Dogfooding validation across multiple use cases"]
+
+  :workflow/type :feature-v1  ; Use new feature workflow to build this!
+  :workflow/version "latest"}}

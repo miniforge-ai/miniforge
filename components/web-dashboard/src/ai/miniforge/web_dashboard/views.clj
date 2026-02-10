@@ -19,7 +19,7 @@
    No build step required - pure server-side rendering."
   (:require
    [hiccup.page :as page]
-   [hiccup.core :refer [html]]
+   [hiccup2.core :refer [html]]
    [clojure.string :as str]
    [ai.miniforge.web-dashboard.components :as c]))
 
@@ -41,12 +41,9 @@
     [:div.dashboard
      [:aside.sidebar
       [:div.logo
-       [:pre.ascii-logo
-        "╔═╗╦╔╗╔╦╔═╗╔═╗╦═╗╔═╗╔═╗
-"
-        "║║║║║║║║╠╣ ║ ║╠╦╝║ ╦║╣
-"
-        "╩ ╩╩╝╚╝╩╚  ╚═╝╩╚═╚═╝╚═╝"]]
+       [:img {:src "/img/miniforge_logo.png"
+              :alt "Miniforge"
+              :style "width: 100%; height: auto;"}]]
       [:nav.nav
        [:a.nav-item {:href "/" :class "active"} [:span.icon "▸"] "Dashboard"]
        [:a.nav-item {:href "/fleet"} [:span.icon "▸"] "PR Fleet"]
@@ -61,54 +58,13 @@
       [:header.header
        [:h1.page-title title]
        [:div.header-actions
+        [:button.btn.btn-sm.btn-ghost
+         {:onclick "window.miniforge.cycleTheme()"
+          :title "Cycle theme (Ctrl+Shift+T)"}
+         "◐ Theme"]
         [:button.btn.btn-sm.btn-ghost {:onclick "location.reload()"} "↻ Refresh"]]]
       [:div.content body]]]
-    [:script {:type "text/javascript"}
-     "
-     // WebSocket connection for real-time updates
-     const wsUrl = 'ws://' + window.location.host + '/ws';
-     let ws;
-     const indicator = document.getElementById('ws-indicator');
-     const wsText = document.getElementById('ws-text');
-     
-     function connect() {
-       ws = new WebSocket(wsUrl);
-       
-       ws.onopen = () => {
-         indicator.className = 'status-dot connected';
-         wsText.textContent = 'Live';
-       };
-       
-       ws.onclose = () => {
-         indicator.className = 'status-dot disconnected';
-         wsText.textContent = 'Disconnected';
-         setTimeout(connect, 3000);
-       };
-       
-       ws.onerror = () => {
-         indicator.className = 'status-dot error';
-         wsText.textContent = 'Error';
-       };
-       
-       ws.onmessage = (event) => {
-         const msg = JSON.parse(event.data);
-         
-         // Trigger htmx refresh for relevant sections
-         if (msg['event/type']) {
-           if (msg['event/type'].includes('workflow')) {
-             htmx.trigger('#workflows-section', 'refresh');
-           }
-           if (msg.type === 'state') {
-             htmx.trigger('#stats-section', 'refresh');
-             htmx.trigger('#fleet-section', 'refresh');
-             htmx.trigger('#risk-section', 'refresh');
-           }
-         }
-       };
-     }
-     
-     connect();
-     "]]))
+    [:script {:src "/js/app.js"}]]))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Dashboard view components
@@ -406,6 +362,20 @@
          [:td (if (:started-at wf)
                 (str (.format (java.text.SimpleDateFormat. "HH:mm") (:started-at wf)))
                 "—")]])]]]))
+
+(defn workflows-view
+  "Workflows list page view."
+  [workflows]
+  (layout "Workflows"
+   [:div.workflows-page
+    [:header.page-header
+     [:h1 "Workflows"]
+     [:p.subtitle (str (count workflows) " total workflows")]]
+    [:section.workflows-section
+     {:hx-get "/api/workflows"
+      :hx-trigger "refresh from:body, every 5s"
+      :hx-swap "innerHTML"}
+     (workflow-list-fragment workflows)]]))
 
 (defn workflow-detail-view
   "Detailed workflow view."

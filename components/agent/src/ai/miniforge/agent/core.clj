@@ -14,6 +14,11 @@
    [ai.miniforge.tool.interface :as tool]
    [ai.miniforge.logging.interface :as log]))
 
+;; Module-level logger for agent operations
+(def ^:private default-logger
+  "Default logger for agent module-level operations."
+  (log/create-logger {:min-level :info :output :edn}))
+
 ;------------------------------------------------------------------------------ Layer 0
 ;; Role configurations and defaults
 
@@ -328,19 +333,19 @@ Output execution logs and status reports."})
                           :require-local (:privacy-required opts)}))]
 
         (when selection
-          (log/info ::model-auto-selected
-                    "Model automatically selected for agent"
-                    {:role role
-                     :task-type (:task-type selection)
-                     :model (:model selection)
-                     :confidence (:confidence selection)})
+          (log/info default-logger :agent ::model-auto-selected
+                    {:message "Model automatically selected for agent"
+                     :data {:role role
+                            :task-type (:task-type selection)
+                            :model (:model selection)
+                            :confidence (:confidence selection)}})
           {:model (:model-id selection)
            :selection selection}))
       (catch Exception e
-        (log/warn ::model-selection-failed
-                  "Model selection failed, using default"
-                  {:role role
-                   :error (ex-message e)})
+        (log/warn default-logger :agent ::model-selection-failed
+                  {:message "Model selection failed, using default"
+                   :data {:role role
+                          :error (ex-message e)}})
         nil))))
 
 (defn create-agent
