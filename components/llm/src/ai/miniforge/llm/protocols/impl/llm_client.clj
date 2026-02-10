@@ -4,7 +4,7 @@
    [clojure.string :as str]
    [cheshire.core :as json]
    [babashka.process :as p]
-   [babashka.http-client :as http]
+   [org.httpkit.client :as http]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.response.interface :as response])
@@ -169,10 +169,9 @@
    Returns HTTP response map or anomaly map on exception."
   [url headers body]
   (try
-    (http/post url
-               {:headers headers
-                :body (json/generate-string body)
-                :throw false})
+    @(http/post url
+                {:headers headers
+                 :body (json/generate-string body)})
     (catch Exception e
       (response/make-anomaly
        :anomalies/unavailable
