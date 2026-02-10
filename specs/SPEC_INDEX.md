@@ -190,8 +190,10 @@ These documents provide guidance, examples, and context but do NOT define contra
 
 ### Vision & Positioning
 
-- [informative/software-factory-vision.md](informative/software-factory-vision.md) - Product vision and differentiation
 - [informative/operational-modes.md](informative/operational-modes.md) - OSS vs Paid operational differences
+
+> Product strategy documents (pricing, roadmap, competitive positioning) are maintained
+> in the private [miniforge-fleet](https://github.com/miniforge-ai/miniforge-fleet) repository.
 
 ### Future Workflows
 
@@ -206,7 +208,6 @@ These documents provide guidance, examples, and context but do NOT define contra
 ### Roadmaps (Experimental/Future)
 
 - [informative/learning-meta-loop.md](informative/learning-meta-loop.md) - Future learning system (post-OSS)
-- [informative/oss-paid-roadmap.md](informative/oss-paid-roadmap.md) - Product roadmap and go-to-market
 
 ---
 
@@ -239,7 +240,7 @@ Documents superseded by normative specs. Retained for reference during migration
 
 - [deprecated/BUILD_PLAN.md](deprecated/BUILD_PLAN.md) - Superseded by informative roadmap
 - [deprecated/BUILD_PLAN_REVISED.md](deprecated/BUILD_PLAN_REVISED.md) - Content extracted to N2, N3, N6
-- [deprecated/OSS_PAID_ROADMAP.md](deprecated/OSS_PAID_ROADMAP.md) - Superseded by informative/oss-paid-roadmap.md
+- [deprecated/OSS_PAID_ROADMAP.md](deprecated/OSS_PAID_ROADMAP.md) - Superseded; strategy docs moved to private repo
 - [deprecated/REVISED_TIMELINE.md](deprecated/REVISED_TIMELINE.md) - Merged into roadmap
 - [deprecated/AGENT_STATUS_STREAMING.md](deprecated/AGENT_STATUS_STREAMING.md) - Content extracted to N3
 

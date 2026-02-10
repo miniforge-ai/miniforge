@@ -412,13 +412,13 @@
   "Start the fleet daemon."
   [_m]
   (print-info "Starting fleet daemon...")
-  (println "TODO: Implement fleet daemon"))
+  (println "TODO: Fleet daemon is an enterprise extension point (see miniforge-fleet)"))
 
 (defn fleet-stop-cmd
   "Stop the fleet daemon."
   [_m]
   (print-info "Stopping fleet daemon...")
-  (println "TODO: Implement fleet daemon"))
+  (println "TODO: Fleet daemon is an enterprise extension point (see miniforge-fleet)"))
 
 (defn fleet-status-cmd
   "Show fleet status summary."
