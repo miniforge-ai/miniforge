@@ -127,7 +127,8 @@
    :spec/constraints (or (:constraints spec) [])
    :spec/tags (or (:tags spec) [])
    ;; Preserve workflow metadata for custom workflow selection
-   :spec/workflow-type (or (:workflow/type spec) :simple)
+   ;; Don't set a default - let workflow selector/recommender decide
+   :spec/workflow-type (:workflow/type spec)
    :spec/workflow-version (or (:workflow/version spec) "latest")
    ;; Pass through all other spec keys (like :task/*)
    :spec/raw-data spec})
