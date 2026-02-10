@@ -180,7 +180,7 @@
            (str (colorize :magenta (str "wf-" (subs (str workflow-id) 0 8))) " "))
          (or message (pr-str (dissoc event :event/timestamp :event/type :workflow/id))))))
 
-;;------------------------------------------------------------------------------ Layer 3: Tailing
+;;------------------------------------------------------------------------------ Layer 3: File Tailing
 
 (defn tail-file
   "Tail a file and print each new line.
@@ -220,6 +220,71 @@
       (finally
         (.close raf)))))
 
+;;------------------------------------------------------------------------------ Layer 4: Tailing Helpers
+
+(defn- show-last-n-lines
+  "Show last N lines from a file without following.
+
+   Arguments:
+     file-path - Path to file
+     parse-fn - Function to parse each line
+     format-fn - Function to format parsed entry
+     lines - Number of lines to show
+     filter-fn - Optional predicate to filter entries"
+  [file-path parse-fn format-fn lines & [filter-fn]]
+  (let [file (io/file file-path)
+        filter-fn (or filter-fn (constantly true))]
+    (with-open [rdr (io/reader file)]
+      (doseq [line (take-last lines (line-seq rdr))]
+        (when-let [entry (parse-fn line)]
+          (when (filter-fn entry)
+            (println (format-fn entry))))))))
+
+(defn- print-stream-header
+  "Print header for stream tailing.
+
+   Arguments:
+     icon - Icon to show (e.g., 📋 or 📊)
+     label - Stream label (e.g., 'logs' or 'events')
+     file-path - Path being tailed
+     extra-info - Optional extra info to display (e.g., filter)"
+  [icon label file-path & [extra-info]]
+  (println (colorize :cyan (str icon " Tailing " label ": " file-path)))
+  (when extra-info
+    (println (colorize :gray extra-info)))
+  (println (colorize :gray (apply str (repeat 80 "─")))))
+
+(defn- tail-stream-file
+  "Generic file tailing for logs/events.
+
+   Arguments:
+     opts - Map with:
+       :file-path - Path to file
+       :parse-fn - Function to parse line
+       :format-fn - Function to format entry
+       :filter-fn - Optional predicate
+       :lines - Lines to show initially
+       :follow - Whether to tail -f
+       :icon - Header icon
+       :label - Header label
+       :extra-info - Extra header info"
+  [{:keys [file-path parse-fn format-fn filter-fn lines follow icon label extra-info]
+    :or {lines 10 follow true filter-fn (constantly true)}}]
+  (if (.exists (io/file file-path))
+    (do
+      (print-stream-header icon label file-path extra-info)
+      (if follow
+        (tail-file file-path
+                   (fn [line]
+                     (when-let [entry (parse-fn line)]
+                       (when (filter-fn entry)
+                         (format-fn entry))))
+                   {:lines lines})
+        (show-last-n-lines file-path parse-fn format-fn lines filter-fn)))
+    (println (colorize :yellow (str "File not found: " file-path)))))
+
+;;------------------------------------------------------------------------------ Layer 5: Stream Tailing
+
 (defn tail-logs
   "Tail MiniForge logs.
 
@@ -245,23 +310,13 @@
 
       ;; Tail specific workflow
       target-file
-      (if (.exists (io/file target-file))
-        (do
-          (println (colorize :cyan (str "📋 Tailing logs: " target-file)))
-          (println (colorize :gray (apply str (repeat 80 "─"))))
-          (if follow
-            (tail-file target-file
-                       (fn [line]
-                         (when-let [entry (parse-log-line line)]
-                           (format-log-entry entry)))
-                       {:lines lines})
-            ;; Just show last N lines
-            (let [file (io/file target-file)]
-              (with-open [rdr (io/reader file)]
-                (doseq [line (take-last lines (line-seq rdr))]
-                  (when-let [entry (parse-log-line line)]
-                    (println (format-log-entry entry))))))))
-        (println (colorize :yellow (str "Log file not found: " target-file))))
+      (tail-stream-file {:file-path target-file
+                         :parse-fn parse-log-line
+                         :format-fn format-log-entry
+                         :lines lines
+                         :follow follow
+                         :icon "📋"
+                         :label "logs"})
 
       ;; No logs found
       :else
@@ -282,7 +337,11 @@
         target-file (cond
                       file file
                       workflow-id (event-file-path workflow-id)
-                      :else (first event-files))]
+                      :else (first event-files))
+        filter-fn (if filter
+                    (fn [event] (= (:event/type event) filter))
+                    (constantly true))
+        extra-info (when filter (str "Filter: " filter))]
     (cond
       ;; Tail all workflows
       all
@@ -295,33 +354,49 @@
 
       ;; Tail specific workflow
       target-file
-      (if (.exists (io/file target-file))
-        (do
-          (println (colorize :cyan (str "📊 Tailing events: " target-file)))
-          (when filter
-            (println (colorize :gray (str "Filter: " filter))))
-          (println (colorize :gray (apply str (repeat 80 "─"))))
-          (if follow
-            (tail-file target-file
-                       (fn [line]
-                         (when-let [event (parse-log-line line)]
-                           (when (or (not filter) (= (:event/type event) filter))
-                             (format-event event))))
-                       {:lines lines})
-            ;; Just show last N events
-            (let [file (io/file target-file)]
-              (with-open [rdr (io/reader file)]
-                (doseq [line (take-last lines (line-seq rdr))]
-                  (when-let [event (parse-log-line line)]
-                    (when (or (not filter) (= (:event/type event) filter))
-                      (println (format-event event)))))))))
-        (println (colorize :yellow (str "Event file not found: " target-file))))
+      (tail-stream-file {:file-path target-file
+                         :parse-fn parse-log-line
+                         :format-fn format-event
+                         :filter-fn filter-fn
+                         :lines lines
+                         :follow follow
+                         :icon "📊"
+                         :label "events"
+                         :extra-info extra-info})
 
       ;; No events found
       :else
       (println (colorize :yellow "No event files found in ~/.miniforge/events")))))
 
-;;------------------------------------------------------------------------------ Layer 4: CLI Commands
+;;------------------------------------------------------------------------------ Layer 6: Command Helpers
+
+(defn- list-files-command
+  "List files with sizes.
+
+   Arguments:
+     find-fn - Function to find files
+     label - Label for output (e.g., 'log files')"
+  [find-fn label]
+  (let [files (find-fn)]
+    (if (seq files)
+      (do
+        (println (colorize :cyan (str "Available " label ":")))
+        (doseq [f files]
+          (let [size-mb (/ (.length (io/file f)) 1024.0 1024.0)]
+            (println (str "  " f " (" (format "%.2f" size-mb) " MB)")))))
+      (println (colorize :yellow (str "No " label " found"))))))
+
+(defn- cat-file-command
+  "Display contents of a file.
+
+   Arguments:
+     file - File path to display"
+  [file]
+  (if file
+    (println (slurp file))
+    (println (colorize :red "Error: --file required for 'cat' command"))))
+
+;;------------------------------------------------------------------------------ Layer 7: CLI Commands
 
 (defn logs-command
   "Handle 'mf logs' command.
@@ -334,27 +409,14 @@
   [{:keys [subcommand workflow-id file lines follow all] :or {subcommand "tail" lines 10 follow true}}]
   (case subcommand
     "tail" (tail-logs {:workflow-id workflow-id :all all :file file :lines lines :follow follow})
-
-    "list" (let [files (find-log-files)]
-             (if (seq files)
-               (do
-                 (println (colorize :cyan "Available log files:"))
-                 (doseq [f files]
-                   (let [size-mb (/ (.length (io/file f)) 1024.0 1024.0)]
-                     (println (str "  " f " (" (format "%.2f" size-mb) " MB)")))))
-               (println (colorize :yellow "No log files found"))))
-
-    "cat" (if file
-            (println (slurp file))
-            (println (colorize :red "Error: --file required for 'cat' command")))
-
+    "list" (list-files-command find-log-files "log files")
+    "cat" (cat-file-command file)
     "cleanup" (let [logs-dir (str (System/getProperty "user.home") "/.miniforge/logs")
                     deleted (requiring-resolve 'ai.miniforge.logging.core/cleanup-old-rotated-logs)]
                 (if deleted
                   (let [count (deleted logs-dir 7)]
                     (println (colorize :green (str "Cleaned up " count " old rotated log files"))))
                   (println (colorize :yellow "Cleanup not available"))))
-
     (println (colorize :red (str "Unknown subcommand: " subcommand)))))
 
 (defn events-command
@@ -367,20 +429,8 @@
   [{:keys [subcommand workflow-id file lines follow filter all] :or {subcommand "tail" lines 20 follow true}}]
   (case subcommand
     "tail" (tail-events {:workflow-id workflow-id :all all :file file :lines lines :follow follow :filter filter})
-
-    "list" (let [files (find-event-stream-files)]
-             (if (seq files)
-               (do
-                 (println (colorize :cyan "Available event files:"))
-                 (doseq [f files]
-                   (let [size-mb (/ (.length (io/file f)) 1024.0 1024.0)]
-                     (println (str "  " f " (" (format "%.2f" size-mb) " MB)")))))
-               (println (colorize :yellow "No event files found"))))
-
-    "cat" (if file
-            (println (slurp file))
-            (println (colorize :red "Error: --file required for 'cat' command")))
-
+    "list" (list-files-command find-event-stream-files "event files")
+    "cat" (cat-file-command file)
     (println (colorize :red (str "Unknown subcommand: " subcommand)))))
 
 ;;------------------------------------------------------------------------------ Public API
