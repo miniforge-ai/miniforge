@@ -99,6 +99,27 @@
                    :success? (:success? result)
                    :timestamp (java.time.Instant/now)}))
 
+(defn- discover-dashboard
+  "Auto-discover dashboard from well-known location.
+   Returns dashboard URL or nil if not found/running."
+  []
+  (try
+    (let [discovery-file (str (System/getProperty "user.home") "/.miniforge/dashboard.port")]
+      (when (.exists (java.io.File. discovery-file))
+        (let [info (json/parse-string (slurp discovery-file) true)
+              port (:port info)
+              url (str "http://localhost:" port)]
+          ;; Verify dashboard is actually running
+          (try
+            (require '[org.httpkit.client :as http])
+            (when-let [http-ns (find-ns 'org.httpkit.client)]
+              (when-let [get-fn (ns-resolve http-ns 'get)]
+                (let [response @(get-fn (str url "/health") {:timeout 1000})]
+                  (when (= 200 (:status response))
+                    url))))
+            (catch Exception _ nil)))))
+    (catch Exception _ nil)))
+
 (defn- connect-to-dashboard
   "Connect to dashboard via WebSocket for event streaming.
    Returns event-stream map with :websocket connection, or nil if connection fails."
@@ -260,8 +281,9 @@
          max-phases (or (:max-phases opts) 50)
          ;; Control state for dashboard commands
          control-state (atom {:paused false :stopped false :adjustments {}})
-         ;; Connect to dashboard if URL provided, otherwise use in-memory event stream
-         event-stream (or (when-let [dashboard-url (:dashboard-url opts)]
+         ;; Auto-discover dashboard or use explicit URL, fall back to in-memory
+         dashboard-url (or (:dashboard-url opts) (discover-dashboard))
+         event-stream (or (when dashboard-url
                             (connect-to-dashboard dashboard-url control-state))
                           (:event-stream opts))
 

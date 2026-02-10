@@ -291,6 +291,34 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Server lifecycle
 
+(defn- write-discovery-file!
+  "Write dashboard discovery file for auto-connect."
+  [port]
+  (try
+    (let [discovery-dir (str (System/getProperty "user.home") "/.miniforge")
+          discovery-file (str discovery-dir "/dashboard.port")
+          info {:port port
+                :pid (-> (java.lang.management.ManagementFactory/getRuntimeMXBean)
+                         (.getName)
+                         (clojure.string/split #"@")
+                         first
+                         Long/parseLong)
+                :started (str (java.time.Instant/now))}]
+      (.mkdirs (io/file discovery-dir))
+      (spit discovery-file (json/generate-string info {:pretty true}))
+      (println "📡 Workflows will auto-discover dashboard at port" port))
+    (catch Exception e
+      (println "Warning: Could not write discovery file:" (.getMessage e)))))
+
+(defn- delete-discovery-file!
+  "Remove dashboard discovery file on shutdown."
+  []
+  (try
+    (let [discovery-file (str (System/getProperty "user.home") "/.miniforge/dashboard.port")]
+      (when (.exists (io/file discovery-file))
+        (.delete (io/file discovery-file))))
+    (catch Exception _ nil)))
+
 (defn start-server!
   "Start HTTP server with WebSocket support.
 
@@ -310,6 +338,9 @@
         actual-port (if (zero? port)
                       (.getLocalPort (:server-socket @server))
                       port)]
+    ;; Write discovery file for auto-connect
+    (write-discovery-file! actual-port)
+
     (println "┌─────────────────────────────────────────────────────┐")
     (println "│ Miniforge Web Dashboard                             │")
     (println "│ Production-ready fleet control interface            │")
@@ -325,6 +356,7 @@
   "Stop HTTP server."
   [{:keys [server]}]
   (when server
+    (delete-discovery-file!)
     (server :timeout 100)
     (println "Web dashboard stopped")))
 
