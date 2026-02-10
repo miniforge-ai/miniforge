@@ -1,24 +1,23 @@
-{:description "Patterns that indicate agent system bugs (Claude Code internal errors)"
- :type :agent-backend
+{:type :agent-backend
+ :vendor "Claude Code"
  :patterns
  [{:regex "classifyHandoffIfNeeded is not defined"
-   :vendor "Claude Code"
-   :description "Missing agent function definition"}
-  {:regex "ReferenceError:.*agent.*is not defined"
-   :vendor "Claude Code"
-   :description "Agent reference error"}
-  {:regex "TypeError:.*agent\\..*is not a function"
-   :vendor "Claude Code"
-   :description "Agent type error"}
-  {:regex "Cannot read property.*of undefined"
-   :vendor "Claude Code"
-   :description "Undefined property access"}
+   :description "Agent handoff classification function missing"}
+  {:regex "ReferenceError: agentCleanup is not defined"
+   :description "Agent cleanup function missing"}
+  {:regex "TypeError: agent\\.handoff is not a function"
+   :description "Agent handoff method not a function"}
+  {:regex "Cannot read property 'handoff' of undefined"
+   :description "Agent handoff property access on undefined"}
   {:regex "null toolResult received"
-   :vendor "Claude Code"
-   :description "Null tool result"}
+   :description "Tool execution returned null result"}
   {:regex "agent is undefined"
-   :vendor "Claude Code"
-   :description "Agent undefined"}
+   :description "Agent object is undefined"}
   {:regex "handoff failed for agent"
-   :vendor "Claude Code"
-   :description "Agent handoff failure"}]}
+   :description "Agent handoff operation failed"}
+  {:regex "ReferenceError.*is not defined"
+   :description "JavaScript reference error in agent code"}
+  {:regex "TypeError.*is not a function"
+   :description "JavaScript type error in agent code"}
+  {:regex "Cannot read property.*of undefined"
+   :description "Property access on undefined in agent code"}]}

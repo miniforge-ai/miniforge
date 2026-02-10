@@ -1,27 +1,27 @@
-{:description "Patterns that indicate user code errors"
- :type :task-code
+{:type :task-code
+ :vendor "miniforge"
  :patterns
- [{:regex "Syntax error"
-   :vendor "miniforge"
-   :description "Syntax error in code"}
-  {:regex "Compilation failed"
-   :vendor "miniforge"
-   :description "Compilation failure"}
-  {:regex "linting took.*errors:"
-   :vendor "miniforge"
-   :description "Linting errors"}
-  {:regex "test suite failed"
-   :vendor "miniforge"
+ [{:regex "Syntax error in.*\\.clj"
+   :description "Clojure syntax error"}
+  {:regex "Compilation failed with \\d+ errors"
+   :description "Compilation errors"}
+  {:regex "linting took \\d+ms, errors: \\d+"
+   :description "Linting errors found"}
+  {:regex "test suite failed: \\d+ assertions"
    :description "Test failures"}
   {:regex "Could not resolve namespace"
-   :vendor "miniforge"
    :description "Namespace resolution error"}
   {:regex "No such file or directory"
-   :vendor "miniforge"
-   :description "File not found"}
-  {:regex "Unexpected token"
-   :vendor "miniforge"
-   :description "Unexpected token in code"}
+   :description "File not found error"}
+  {:regex "Unexpected token at line \\d+"
+   :description "Parsing error"}
+  {:regex "Parse error: missing closing parenthesis"
+   :description "Parenthesis mismatch"}
+  {:regex "Syntax error"
+   :description "General syntax error"}
   {:regex "Parse error"
-   :vendor "miniforge"
-   :description "Parse error"}]}
+   :description "General parse error"}
+  {:regex "Compilation error"
+   :description "General compilation error"}
+  {:regex "Test failed"
+   :description "Test failure"}]}
