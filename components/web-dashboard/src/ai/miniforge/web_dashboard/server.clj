@@ -131,7 +131,7 @@
    :headers {"Content-Type" "text/html; charset=utf-8"}
    :body (if (string? hiccup-data)
            hiccup-data
-           (html hiccup-data))})
+           (str (html hiccup-data)))})
 
 (defn- json-response
   "Return JSON response."
