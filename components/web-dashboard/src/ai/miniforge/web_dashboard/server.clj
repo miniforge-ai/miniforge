@@ -142,8 +142,9 @@
                             (catch Exception e
                               (println "Error handling WebSocket message:" (.getMessage e)))))}))))
 
-(defn- create-events-ws-handler [state workflow-connections]
+(defn- create-events-ws-handler
   "WebSocket handler for workflow processes to publish events."
+  [state workflow-connections]
   (fn [req]
     (http/as-channel req
                      {:on-open
@@ -298,11 +299,7 @@
     (let [discovery-dir (str (System/getProperty "user.home") "/.miniforge")
           discovery-file (str discovery-dir "/dashboard.port")
           info {:port port
-                :pid (-> (java.lang.management.ManagementFactory/getRuntimeMXBean)
-                         (.getName)
-                         (clojure.string/split #"@")
-                         first
-                         Long/parseLong)
+                :pid (.pid (java.lang.ProcessHandle/current))
                 :started (str (java.time.Instant/now))}]
       (.mkdirs (io/file discovery-dir))
       (spit discovery-file (json/generate-string info {:pretty true}))
@@ -323,12 +320,12 @@
   "Start HTTP server with WebSocket support.
 
    Options:
-   - :port - Port to listen on (default 8080)
+   - :port - Port to listen on (default 7878)
    - :event-stream - Event stream atom for subscribing to workflow events
    - :pr-train-manager - PR train manager instance
    - :repo-dag-manager - Repo DAG manager instance"
   [{:keys [port event-stream pr-train-manager repo-dag-manager]
-    :or {port 8080}}]
+    :or {port 7878}}]
   (let [state (state/create-state {:event-stream event-stream
                                    :pr-train-manager pr-train-manager
                                    :repo-dag-manager repo-dag-manager

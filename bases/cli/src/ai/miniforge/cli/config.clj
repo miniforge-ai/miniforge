@@ -27,7 +27,9 @@
    :artifacts {:dir (str (fs/home) "/.miniforge/artifacts")}
    :meta-loop {:enabled true
                :max-convergence-iterations 10
-               :convergence-threshold 0.95}})
+               :convergence-threshold 0.95}
+   :dashboard {:port 7878
+               :auto-open false}})
 
 (defn- style
   "Apply terminal styling using ANSI escape codes."

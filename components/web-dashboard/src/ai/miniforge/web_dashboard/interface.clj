@@ -30,13 +30,13 @@
   "Start the web dashboard server.
 
    Options:
-   - :port - Port to listen on (default 8080)
+   - :port - Port to listen on (default 7878)
    - :event-stream - Event stream atom for subscribing to workflow events
 
    Returns: server handle (use with stop!)
 
    Example:
-     (def server (start! {:port 8080 :event-stream my-stream}))"
+     (def server (start! {:port 7878 :event-stream my-stream}))"
   [opts]
   (server/start-server! opts))
 
@@ -60,6 +60,6 @@
    Returns: port number (integer)
 
    Example:
-     (get-port server) ;=> 8080"
+     (get-port server) ;=> 7878"
   [server]
   (server/get-server-port server))
