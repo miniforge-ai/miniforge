@@ -38,31 +38,36 @@
     [:script {:src "https://unpkg.com/htmx.org@2.0.0"}]
     [:script {:src "https://unpkg.com/htmx-ext-ws@2.0.0/ws.js"}]]
    [:body
+    ;; Top banner with logo, navigation, and actions
+    [:header.top-banner
+     [:div.banner-content
+      [:div.banner-left
+       [:div.logo-container
+        [:img.banner-logo {:src "/img/miniforge_logo.png"
+                           :alt "Miniforge"}]
+        [:div.logo-tagline "an industrial software factory that fits on your desk"]]]
+      [:nav.banner-nav
+       [:a.nav-link {:href "/"} "Dashboard"]
+       [:a.nav-link {:href "/fleet"} "PR Fleet"]
+       [:a.nav-link {:href "/dag"} "DAG Kanban"]
+       [:a.nav-link {:href "/evidence"} "Evidence"]
+       [:a.nav-link {:href "/workflows"} "Workflows"]]
+      [:div.banner-right
+       [:div.ws-status
+        [:span#ws-indicator.status-dot.disconnected]
+        [:span#ws-text.ws-text "Connected"]]
+       [:button.btn.btn-sm.btn-ghost
+        {:onclick "window.miniforge.cycleTheme()"
+         :title "Cycle theme (Ctrl+Shift+T)"}
+        "◐ Theme"]
+       [:button.btn.btn-sm.btn-ghost
+        {:onclick "location.reload()"}
+        "↻ Refresh"]]]]
+    ;; Main content area
     [:div.dashboard
-     [:aside.sidebar
-      [:div.logo
-       [:img {:src "/img/miniforge_logo.png"
-              :alt "Miniforge"}]
-       [:div.logo-tagline "an industrial software factory that fits on your desk"]]
-      [:nav.nav
-       [:a.nav-item {:href "/" :class "active"} [:span.icon "▸"] "Dashboard"]
-       [:a.nav-item {:href "/fleet"} [:span.icon "▸"] "PR Fleet"]
-       [:a.nav-item {:href "/dag"} [:span.icon "▸"] "DAG Kanban"]
-       [:a.nav-item {:href "/evidence"} [:span.icon "▸"] "Evidence"]
-       [:a.nav-item {:href "/workflows"} [:span.icon "▸"] "Workflows"]]
-      [:div.ws-status
-       [:span.label "WebSocket:"]
-       [:span#ws-indicator.status-dot.disconnected]
-       [:span#ws-text "Connecting..."]]]
      [:main.main
-      [:header.header
-       [:h1.page-title title]
-       [:div.header-actions
-        [:button.btn.btn-sm.btn-ghost
-         {:onclick "window.miniforge.cycleTheme()"
-          :title "Cycle theme (Ctrl+Shift+T)"}
-         "◐ Theme"]
-        [:button.btn.btn-sm.btn-ghost {:onclick "location.reload()"} "↻ Refresh"]]]
+      [:div.page-header
+       [:h1.page-title title]]
       [:div.content body]]]
     [:script {:src "/js/app.js"}]]))
 
