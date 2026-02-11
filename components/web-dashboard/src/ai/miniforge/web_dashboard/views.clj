@@ -216,7 +216,7 @@
             (c/progress-bar
              (int (* 100 (/ (count (filter #(= :merged (:pr/status %)) (:train/prs train)))
                            (max 1 (count (:train/prs train))))))
-             {:variant (if (seq (:train/blocking-prs train)) :error :success)})]])]]]))))
+             {:variant (if (seq (:train/blocking-prs train)) :error :success)})]])]]])))
 
 (defn fleet-view
   "Fleet management view showing all PR trains."
@@ -381,7 +381,7 @@
            [:td (c/progress-bar (:progress wf))]
            [:td (if (:started-at wf)
                   (str (.format (java.text.SimpleDateFormat. "HH:mm") (:started-at wf)))
-                  "—")]])]]]))))
+                  "—")]])]]])))
 
 (defn workflows-view
   "Workflows list page view."
