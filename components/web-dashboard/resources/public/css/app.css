@@ -1115,6 +1115,13 @@ tbody td {
   color: var(--text-tertiary);
 }
 
+.empty-actions {
+  display: flex;
+  gap: var(--space-sm);
+  justify-content: center;
+  margin-top: var(--space-md);
+}
+
 /* Fleet view */
 .fleet-header {
   margin-bottom: var(--space-lg);
@@ -1143,6 +1150,12 @@ tbody td {
 .pr-count,
 .repo-count {
   font-weight: 500;
+}
+
+.fleet-actions {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
 }
 
 .fleet-table .train-name {

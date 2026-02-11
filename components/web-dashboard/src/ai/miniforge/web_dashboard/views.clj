@@ -200,9 +200,12 @@
      [:div.empty-state
       [:div.empty-icon "🚂"]
       [:h3 "No PR Trains Yet"]
-      [:p "Create your first PR train to orchestrate multi-repository changes."]
-      (c/button "+ Create Train" {:variant :primary
-                                   :onclick "alert('Train creation UI coming soon')"})]
+      [:p "Get started by running a workflow, or let Miniforge discover and coordinate your existing PRs."]
+      [:div.empty-actions
+       (c/button "+ Run Workflow" {:variant :primary
+                                    :onclick "location.href='/workflows'"})
+       (c/button "Coordinate My PRs" {:variant :secondary
+                                       :onclick "alert('PR coordination coming soon')"})]]
      [:div.train-table
       [:table.fleet-table
        [:thead
@@ -247,8 +250,15 @@
        [:span.summary-divider "•"]
        [:span.repo-count (str (get-in fleet-state [:summary :repos] 0) " repos")]]
       [:div.fleet-actions
-       (c/button "+ Create Train" {:variant :primary
-                                    :onclick "alert('Train creation UI coming soon!')"})]]]
+       (c/button "+ Run Workflow" {:variant :primary
+                                    :onclick "location.href='/workflows'"
+                                    :title "Execute a defined workflow spec"})
+       (c/button "Coordinate My PRs" {:variant :secondary
+                                       :onclick "alert('PR coordination: Review repos → Create trains → Setup monitoring')"
+                                       :title "Auto-discover PRs and create trains from DAGs"})
+       (c/button "Review All PRs" {:variant :ghost
+                                    :onclick "alert('PR review: Kick off review workflows for all outstanding PRs')"
+                                    :title "Run automated PR review workflows"})]]]
     [:div#trains-section
      {:hx-get "/api/trains"
       :hx-trigger "refresh from:body, every 5s"
