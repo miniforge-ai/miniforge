@@ -14,17 +14,19 @@
 
 (ns ai.miniforge.web-dashboard.views
   "Production-ready server-side rendered views for web dashboard.
-  
+
    Tableau-inspired dense visualization with terminal aesthetic.
    No build step required - pure server-side rendering."
   (:require
    [hiccup.page :as page]
-   [hiccup2.core :refer [html]]
-   [clojure.string :as str]
-   [ai.miniforge.web-dashboard.components :as c]))
+   [ai.miniforge.web-dashboard.views.dashboard :as dashboard]
+   [ai.miniforge.web-dashboard.views.fleet :as fleet]
+   [ai.miniforge.web-dashboard.views.dag :as dag]
+   [ai.miniforge.web-dashboard.views.evidence :as evidence]
+   [ai.miniforge.web-dashboard.views.workflows :as workflows]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Layout
+;; Layout and shared utilities
 
 (defn- title->pane
   "Convert page title to pane keyword for filter context."
@@ -130,457 +132,35 @@
     [:script {:src "/js/filters.js"}])))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Dashboard view components
+;; Public API - Re-exports from subdirectories
 
-(defn stats-fragment
-  "Stats cards fragment for htmx updates."
-  [stats]
-  (html
-   [:div.stats-grid
-    (c/stat-card (str (get-in stats [:trains :active]))
-                 "Active Trains"
-                 {:trend (if (> (get-in stats [:trains :active]) 0) :up :neutral)
-                  :href "/fleet"})
-    (c/stat-card (str (get-in stats [:prs :ready]))
-                 "Ready to Merge"
-                 {:trend (if (> (get-in stats [:prs :ready]) 0) :up :neutral)
-                  :href "/fleet"})
-    (c/stat-card (str (get-in stats [:prs :blocked]))
-                 "Blocked PRs"
-                 {:trend (if (> (get-in stats [:prs :blocked]) 0) :down :neutral)
-                  :href "/fleet"})
-    (c/stat-card (str (get-in stats [:health :critical]))
-                 "Critical Risks"
-                 {:trend (if (> (get-in stats [:health :critical]) 0) :down :neutral)
-                  :href "/dag"})]))
+;; Dashboard views
+(def stats-fragment dashboard/stats-fragment)
+(def risk-analysis-fragment dashboard/risk-analysis-fragment)
+(def activity-fragment dashboard/activity-fragment)
+(def fleet-grid-fragment dashboard/fleet-grid-fragment)
+(defn dashboard-view [state]
+  (dashboard/dashboard-view layout state))
 
-(defn risk-analysis-fragment
-  "Risk analysis fragment for htmx updates."
-  [risk-data]
-  (html
-   [:div.risk-panel
-    [:h3.section-title "AI Risk Analysis"]
-    [:div.risk-summary
-     [:div.risk-badge.risk-high (str (get-in risk-data [:summary :high]) " High")]
-     [:div.risk-badge.risk-medium (str (get-in risk-data [:summary :medium]) " Medium")]
-     [:div.risk-badge.risk-low (str (get-in risk-data [:summary :low]) " Low")]]
-    [:div.risk-list
-     (for [risk (take 5 (:risks risk-data))]
-       [:div.risk-item {:class (str "risk-" (name (:risk-level risk)))}
-        [:div.risk-header
-         [:span.risk-score (:risk-score risk)]
-         [:span.risk-name (:train-name risk)]]
-        [:div.risk-factors
-         (for [factor (:factors risk)]
-           [:span.risk-factor {:class (str "severity-" (name (:severity factor)))}
-            (str (name (:type factor)) ": " (:count factor))])]])]]))
+;; Fleet views
+(def train-list-fragment fleet/train-list-fragment)
+(defn fleet-view [fleet-state]
+  (fleet/fleet-view layout fleet-state))
+(defn train-detail-view [train]
+  (fleet/train-detail-view layout train))
 
-(defn activity-fragment
-  "Recent activity fragment for htmx updates."
-  [activities]
-  (html
-   [:div.activity-feed
-    [:h3.section-title "Recent Activity"]
-    [:div.activity-list
-     (for [activity (take 10 activities)]
-       [:div.activity-item
-        [:span.activity-time
-         (if (:timestamp activity)
-           (str (.format (java.text.SimpleDateFormat. "HH:mm:ss")
-                        (:timestamp activity)))
-           "—")]
-        [:span.activity-message (:message activity)]
-        [:a.activity-link {:href (str "/train/" (:train-id activity))} "→"]])]]))
+;; DAG views
+(def filter-modal-fragment dag/filter-modal-fragment)
+(defn dag-kanban-view [state]
+  (dag/dag-kanban-view layout state))
 
-(defn fleet-grid-fragment
-  "Fleet status grid fragment for htmx updates."
-  [fleet-state]
-  (html
-   [:div.fleet-grid
-    [:h3.section-title (str "Fleet Status (" (count (:trains fleet-state)) " trains)")]
-    [:div.repo-groups
-     (for [[repo prs] (take 10 (:repos fleet-state))]
-       [:div.repo-group
-        [:div.repo-name repo]
-        [:div.pr-count (str (count prs) " PRs")]])]]))
+;; Evidence views
+(defn evidence-view [state]
+  (evidence/evidence-view layout state))
 
-(defn dashboard-view
-  "Main dashboard view with high information density."
-  [state]
-  (layout "Dashboard"
-   [:div.dashboard-grid
-    ;; Stats section
-    [:section#stats-section.section
-     {:hx-get "/api/stats"
-      :hx-trigger "refresh from:body, every 5s"
-      :hx-swap "innerHTML"}
-     (stats-fragment (:stats state))]
-    
-    ;; Risk analysis section
-    [:section#risk-section.section
-     {:hx-get "/api/risk"
-      :hx-trigger "refresh from:body, every 10s"
-      :hx-swap "innerHTML"}
-     (risk-analysis-fragment (:risk state))]
-    
-    ;; Fleet overview
-    [:section#fleet-section.section
-     {:hx-get "/api/fleet/grid"
-      :hx-trigger "refresh from:body, every 5s"
-      :hx-swap "innerHTML"}
-     (fleet-grid-fragment (:fleet state))]
-    
-    ;; Recent activity
-    [:section#activity-section.section
-     {:hx-get "/api/activity"
-      :hx-trigger "refresh from:body, every 3s"
-      :hx-swap "innerHTML"}
-     (activity-fragment (:activity state))]]))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Fleet view (PR train management)
-
-(defn train-list-fragment
-  "Train list fragment for htmx updates."
-  [trains]
-  (html
-   (if (empty? trains)
-     [:div.empty-state
-      [:div.empty-icon "🚂"]
-      [:h3 "No PR Trains Yet"]
-      [:p "Get started by running a workflow, or let Miniforge discover and coordinate your existing PRs."]
-      [:div.empty-actions
-       (c/button "+ Run Workflow" {:variant :primary
-                                    :onclick "location.href='/workflows'"})
-       (c/button "Coordinate My PRs" {:variant :secondary
-                                       :onclick "alert('PR coordination coming soon')"})]]
-     [:div.train-table
-      [:table.fleet-table
-       [:thead
-        [:tr
-         [:th "Train Name"]
-         [:th "Status"]
-         [:th "PRs"]
-         [:th "Ready"]
-         [:th "Blocked"]
-         [:th "Progress"]]]
-       [:tbody
-        (for [train trains]
-          [:tr.train-row {:onclick (str "location.href='/train/" (:train/id train) "'")}
-           [:td.train-name (:train/name train)]
-           [:td (c/badge (name (:train/status train))
-                        {:variant (case (:train/status train)
-                                   :merged :success
-                                   :merging :info
-                                   :failed :error
-                                   :reviewing :warning
-                                   :neutral)})]
-           [:td.train-stat (count (:train/prs train))]
-           [:td.train-stat (count (:train/ready-to-merge train))]
-           [:td.train-stat (count (:train/blocking-prs train))]
-           [:td.train-progress
-            (c/progress-bar
-             (int (* 100 (/ (count (filter #(= :merged (:pr/status %)) (:train/prs train)))
-                           (max 1 (count (:train/prs train))))))
-             {:variant (if (seq (:train/blocking-prs train)) :error :success)})]])]]])))
-
-(defn fleet-view
-  "Fleet management view showing all PR trains."
-  [fleet-state]
-  (layout "PR Fleet"
-   [:div.fleet-view
-    [:div.fleet-header
-     [:div.fleet-title-row
-      [:div.fleet-summary
-       [:span.train-count (str (get-in fleet-state [:summary :active-trains] 0) " trains")]
-       [:span.summary-divider "•"]
-       [:span.pr-count (str (get-in fleet-state [:summary :total-prs] 0) " PRs")]
-       [:span.summary-divider "•"]
-       [:span.repo-count (str (get-in fleet-state [:summary :repos] 0) " repos")]]
-      [:div.fleet-actions
-       (c/button "+ Run Workflow" {:variant :primary
-                                    :onclick "location.href='/workflows'"
-                                    :title "Execute a defined workflow spec"})
-       (c/button "Coordinate My PRs" {:variant :secondary
-                                       :onclick "alert('PR coordination: Review repos → Create trains → Setup monitoring')"
-                                       :title "Auto-discover PRs and create trains from DAGs"})
-       (c/button "Review All PRs" {:variant :ghost
-                                    :onclick "alert('PR review: Kick off review workflows for all outstanding PRs')"
-                                    :title "Run automated PR review workflows"})]]]
-    [:div#trains-section
-     {:hx-get "/api/trains"
-      :hx-trigger "refresh from:body, every 5s"
-      :hx-swap "innerHTML"}
-     (train-list-fragment (:trains fleet-state))]]))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Train detail view
-
-(defn train-detail-view
-  "Detailed view of a single PR train."
-  [train]
-  (if (:error train)
-    (layout "Error" [:div.error (:error train)])
-    (layout (str "Train: " (:train/name train))
-     [:div.train-detail
-      [:div.train-detail-header
-       [:div.train-info
-        [:h2 (:train/name train)]
-        [:p.train-description (:train/description train)]]
-       [:div.train-actions
-        (c/button "Pause" {:variant :ghost
-                             :onclick (str "fetch('/api/train/action?train-id="
-                                          (:train/id train)
-                                          "&action=pause', {method: 'POST'})")})
-        (c/button "Merge Next" {:variant :primary
-                                  :onclick (str "fetch('/api/train/action?train-id="
-                                               (:train/id train)
-                                               "&action=merge-next', {method: 'POST'})")})]]
-      
-      [:div.train-detail-grid
-       ;; PR list
-       [:section.prs-section
-        [:h3 "Pull Requests"]
-        [:div.pr-list
-         (for [pr (sort-by :pr/merge-order (:train/prs train))]
-           [:div.pr-card {:class (name (:pr/status pr))}
-            [:div.pr-header
-             [:span.pr-number (str "#" (:pr/number pr))]
-             [:span.pr-repo (:pr/repo pr)]
-             (c/badge (name (:pr/status pr)))]
-            [:div.pr-title (:pr/title pr)]
-            [:div.pr-details
-             [:span.pr-ci (str "CI: " (name (:pr/ci-status pr)))]
-             (when (seq (:pr/depends-on pr))
-               [:span.pr-deps (str "Depends: " (str/join ", " (:pr/depends-on pr)))])]])]]
-       
-       ;; Merge graph
-       [:section.graph-section
-        [:h3 "Merge Order"]
-        [:div.merge-graph
-         (for [[idx pr] (map-indexed vector (sort-by :pr/merge-order (:train/prs train)))]
-           [:div.graph-node
-            [:div.node-order (str (inc idx))]
-            [:div.node-content
-             [:span.node-number (str "#" (:pr/number pr))]
-             [:span.node-status (c/status-dot (:pr/status pr))]]])]]]])))
-
-;------------------------------------------------------------------------------ Layer 4
-;; DAG Kanban view
-
-(defn filter-modal-fragment
-  "Filter selection modal content with faceted counts."
-  [{:keys [filters facets scope _pane] :or {filters [] facets {} scope "local"}}]
-  [:div.filter-modal
-   [:div.filter-modal-overlay {:onclick "this.parentElement.remove()"}]
-   [:div.filter-modal-content
-    [:div.filter-modal-header
-     [:h3 (str "Add " (if (= scope "global") "Global" "Pane-Local") " Filter")]
-     [:button.filter-modal-close
-      {:onclick "this.parentElement.parentElement.parentElement.remove()"
-       :title "Close"}
-      "×"]]
-    [:div.filter-modal-body
-     (if (empty? filters)
-       [:p.empty-message "No filters available for this pane."]
-       (for [filter-spec filters]
-         (let [filter-id (:filter/id filter-spec)
-               filter-label (:filter/label filter-spec)
-               filter-type (:filter/type filter-spec)
-               facet-counts (get facets filter-id)]
-           [:div.filter-section {:key (str filter-id)}
-            [:h4.filter-section-title filter-label]
-            [:div.filter-options
-             (case filter-type
-               :enum
-               ;; Show options with counts
-               (if (= :dynamic (:filter/values filter-spec))
-                 ;; Dynamic values from facets
-                 (for [[value count] facet-counts]
-                   [:label.filter-option {:key (str filter-id "-" value)}
-                    [:input {:type "checkbox"
-                             :name (str "filter-" (name filter-id))
-                             :value (str value)
-                             :onchange (str "window.miniforge.filters.addFilter('"
-                                          (name filter-id) "', ':=', '" value "', '" scope "')")}]
-                    [:span (str value (when count (str " (" count ")")))]
-                    ])
-                 ;; Static values
-                 (for [value (:filter/values filter-spec)]
-                   (let [count (get facet-counts value)]
-                     [:label.filter-option {:key (str filter-id "-" value)}
-                      [:input {:type "checkbox"
-                               :name (str "filter-" (name filter-id))
-                               :value (name value)
-                               :onchange (str "window.miniforge.filters.addFilter('"
-                                            (name filter-id) "', ':=', '" (name value) "', '" scope "')")}]
-                      [:span (str (name value) (when count (str " (" count ")")))]])))
-
-               :bool
-               [:div.filter-option
-                [:label
-                 [:input {:type "checkbox"
-                          :name (str "filter-" (name filter-id))
-                          :onchange (str "window.miniforge.filters.addFilter('"
-                                       (name filter-id) "', ':=', this.checked, '" scope "')")}]
-                 [:span "Yes"]]]
-
-               :text
-               [:input.filter-text-input
-                {:type "text"
-                 :placeholder (str "Search " filter-label "...")
-                 :onchange (str "if(this.value) window.miniforge.filters.addFilter('"
-                              (name filter-id) "', ':text-search', this.value, '" scope "')")}]
-
-               ;; Default
-               [:span "Unsupported filter type: " (name filter-type)])]])))]
-    [:div.filter-modal-footer
-     [:button.btn.btn-sm.btn-ghost
-      {:onclick "this.parentElement.parentElement.parentElement.remove()"}
-      "Done"]]]])
-
-(defn dag-kanban-view
-  "Task status kanban board for workflow visualization."
-  [state]
-  (layout "Task Status"
-   [:div.kanban-view
-    [:div.kanban-header
-     [:div.kanban-title-row
-      [:h2 "Workflow Tasks"]
-      [:div.kanban-filter-bar
-       [:div#filter-chips.filter-chips
-        ;; Active filter chips will be added here dynamically via JavaScript]
-       [:div.filter-actions
-        [:button.btn.btn-sm.btn-ghost.filter-add
-         {:hx-get "/api/filter-fields"
-          :hx-target "#filter-modal-container"
-          :hx-swap "innerHTML"
-          :title "Add filter"}
-         "+ Filter"]]]]]
-    ;; Filter modal container
-    [:div#filter-modal-container]
-    [:div.kanban-board
-     (for [status [:blocked :ready :running :done]]
-       [:div.kanban-column {:class (name status)}
-        [:div.column-header
-         [:h3 (str/upper-case (name status))]
-         [:span.column-count
-          (count (filter #(= status (:status %)) (:tasks state)))]]
-        [:div.column-content
-         (for [task (filter #(= status (:status %)) (:tasks state))]
-           [:div.kanban-card
-            [:div.card-header
-             [:span.card-id (str (:repo task) " #" (:id task))]
-             (when (seq (:dependencies task))
-               [:span.card-deps (str "↓ " (count (:dependencies task)))])]
-            [:div.card-title (:title task)]
-            [:div.card-footer
-             [:a.card-link {:href (str "/train/" (:train-id task))} "View Train →"]]])]])]]]))
-
-;------------------------------------------------------------------------------ Layer 5
-;; Evidence view
-
-(defn evidence-view
-  "Evidence artifacts view."
-  [state]
-  (layout "Evidence"
-   [:div.evidence-view
-    [:div.evidence-header
-     [:h2 "Evidence Bundles"]
-     [:p.subtitle "Audit trail for all merged PRs"]]
-    [:div.evidence-list
-     (for [train (:trains state)]
-       [:div.evidence-item
-        [:div.evidence-info
-         [:h4 (:train-name train)]
-         [:span.evidence-meta
-          (str (:pr-count train) " PRs • "
-               (if (:has-evidence train) "Evidence available" "No evidence"))]]
-        (when (:has-evidence train)
-          [:button.btn.btn-sm.btn-ghost
-           {:onclick (str "location.href='/api/evidence/" (:evidence-bundle-id train) "'")}
-           "View Bundle →"])])]]))
-
-;------------------------------------------------------------------------------ Layer 6
 ;; Workflow views
-
-(defn workflow-list-fragment
-  "Workflow list fragment for htmx updates."
-  [workflows]
-  (html
-   (if (empty? workflows)
-     [:div.empty-state
-      [:div.empty-icon "⚙️"]
-      [:h3 "No Workflows Yet"]
-      [:p "Workflows will appear here when you run: "]
-      [:code.empty-code "miniforge workflow run examples/workflows/simple.edn"]
-      [:p.empty-hint "Try running a workflow to see real-time progress tracking."]]
-     [:div.workflow-list
-      [:table.workflow-table
-       [:thead
-        [:tr
-         [:th "Status"]
-         [:th "Name"]
-         [:th "Phase"]
-         [:th "Progress"]
-         [:th "Started"]]]
-       [:tbody
-        (for [wf workflows]
-          [:tr.workflow-row {:onclick (str "location.href='/workflow/" (:id wf) "'")}
-           [:td (c/status-dot (:status wf))]
-           [:td (:name wf)]
-           [:td (:phase wf)]
-           [:td (c/progress-bar (:progress wf))]
-           [:td (if (:started-at wf)
-                  (str (.format (java.text.SimpleDateFormat. "HH:mm") (:started-at wf)))
-                  "—")]])]]])))
-
-(defn workflows-view
-  "Workflows list page view."
-  [workflows]
-  (layout "Workflows"
-   [:div.workflows-page
-    [:section.workflows-section
-     [:div.workflows-header
-      [:span.workflows-count (str (count workflows) " " (if (= 1 (count workflows)) "workflow" "workflows"))]]
-     [:div#workflows-content
-      {:hx-get "/api/workflows"
-       :hx-trigger "refresh from:body, every 5s"
-       :hx-swap "innerHTML"}
-      (workflow-list-fragment workflows)]]]))
-
-(defn workflow-detail-view
-  "Detailed workflow view."
-  [workflow]
-  (if (:error workflow)
-    (layout "Error" [:div.error (:error workflow)])
-    (layout (str "Workflow: " (:name workflow))
-     [:div.workflow-detail
-      [:div.workflow-header
-       [:h2 (:name workflow)]
-       [:div.workflow-controls
-        [:button.btn.btn-sm
-         {:onclick "sendWorkflowCommand('pause')"
-          :title "Pause workflow execution"}
-         "⏸ Pause"]
-        [:button.btn.btn-sm
-         {:onclick "sendWorkflowCommand('resume')"
-          :title "Resume paused workflow"}
-         "▶ Resume"]
-        [:button.btn.btn-sm
-         {:onclick "sendWorkflowCommand('stop')"
-          :title "Stop workflow"
-          :style "color: var(--color-status-error);"}
-         "⏹ Stop"]]]
-      [:div.workflow-info
-       [:span (c/badge (name (:status workflow))
-                      {:variant (case (:status workflow)
-                                 :completed :success
-                                 :running :info
-                                 :failed :error
-                                 :neutral)})]
-       [:span (str "Phase: " (:phase workflow))]
-       [:span (str "Progress: " (:progress workflow) "%")]]
-      [:div.workflow-output
-       [:h3 "Output"]
-       [:pre.output-text "Workflow output would appear here..."]]])))
+(def workflow-list-fragment workflows/workflow-list-fragment)
+(defn workflows-view [wfs]
+  (workflows/workflows-view layout wfs))
+(defn workflow-detail-view [workflow]
+  (workflows/workflow-detail-view layout workflow))
