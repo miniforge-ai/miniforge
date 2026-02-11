@@ -11,6 +11,10 @@
   "Capability levels from lowest to highest"
   [:poor :fair :good :excellent :exceptional])
 
+(def speed-levels
+  "Speed capability levels from slowest to fastest"
+  [:slow :moderate :balanced :fast :very-fast])
+
 (def model-registry
   "Comprehensive registry of all supported models with their capabilities."
   {;; ========== Anthropic Claude Models ==========
@@ -428,6 +432,22 @@
            (filter (fn [[_k v]]
                      (let [model-level (get-in v [:capabilities capability])
                            model-idx (.indexOf capability-levels model-level)]
+                       (and (>= model-idx 0)
+                            (>= model-idx level-idx)))))
+           (map first)
+           (into [])))))
+
+(defn get-models-by-speed
+  "Get models meeting or exceeding a speed level.
+   Example: (get-models-by-speed :fast)
+   Returns: [:haiku-4.5 :gemini-2.0-flash ...]"
+  [min-speed]
+  (let [level-idx (.indexOf speed-levels min-speed)]
+    (when (>= level-idx 0)
+      (->> model-registry
+           (filter (fn [[_k v]]
+                     (let [model-speed (get-in v [:capabilities :speed])
+                           model-idx (.indexOf speed-levels model-speed)]
                        (and (>= model-idx 0)
                             (>= model-idx level-idx)))))
            (map first)

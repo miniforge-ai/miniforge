@@ -37,11 +37,14 @@
       (is (some #{:sonnet-4.5} exceptional))
       (is (some #{:gpt-5.3-codex} exceptional))))
 
-  ;; FIXME: Speed capability test disabled - get-models-by-capability only works
-  ;; with capability-levels [:poor :fair :good :excellent :exceptional]
-  ;; but speed uses [:slow :moderate :balanced :fast :very-fast]
-  ;; TODO: Either fix get-models-by-capability to handle speed or create separate function
-  )
+  (testing "Query by speed capability"
+    (let [fast (registry/get-models-by-speed :fast)]
+      (is (seq fast))
+      (is (some #{:haiku-4.5} fast)))
+
+    (let [very-fast (registry/get-models-by-speed :very-fast)]
+      (is (seq very-fast))
+      (is (some #{:gemini-2.0-flash} very-fast)))))
 
 (deftest test-get-models-by-use-case
   (testing "Query by code-implementation use-case"
