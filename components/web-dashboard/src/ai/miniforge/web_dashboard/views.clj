@@ -76,16 +76,20 @@
    [:div.stats-grid
     (c/stat-card (str (get-in stats [:trains :active]))
                  "Active Trains"
-                 {:trend (if (> (get-in stats [:trains :active]) 0) :up :neutral)})
+                 {:trend (if (> (get-in stats [:trains :active]) 0) :up :neutral)
+                  :href "/fleet"})
     (c/stat-card (str (get-in stats [:prs :ready]))
                  "Ready to Merge"
-                 {:trend (if (> (get-in stats [:prs :ready]) 0) :up :neutral)})
+                 {:trend (if (> (get-in stats [:prs :ready]) 0) :up :neutral)
+                  :href "/fleet"})
     (c/stat-card (str (get-in stats [:prs :blocked]))
                  "Blocked PRs"
-                 {:trend (if (> (get-in stats [:prs :blocked]) 0) :down :neutral)})
+                 {:trend (if (> (get-in stats [:prs :blocked]) 0) :down :neutral)
+                  :href "/fleet"})
     (c/stat-card (str (get-in stats [:health :critical]))
                  "Critical Risks"
-                 {:trend (if (> (get-in stats [:health :critical]) 0) :down :neutral)})]))
+                 {:trend (if (> (get-in stats [:health :critical]) 0) :down :neutral)
+                  :href "/dag"})]))
 
 (defn risk-analysis-fragment
   "Risk analysis fragment for htmx updates."

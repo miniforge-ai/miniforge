@@ -186,30 +186,28 @@ body {
 }
 
 .logo {
-  margin-bottom: var(--space-lg);
-  padding: var(--space-sm);
-  background: linear-gradient(135deg, #f5e6d3 0%, #e8d5b7 100%);
-  border-radius: 8px;
-  border: 2px solid var(--color-brand-primary);
-  box-shadow: var(--shadow-md);
-  text-align: center;
+  margin-bottom: var(--space-md);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
 }
 
 .logo img {
-  max-width: 100%;
-  height: auto;
-  display: block;
-  margin: 0 auto;
+  height: 32px;
+  width: auto;
 }
 
 .logo-tagline {
   font-family: 'Roboto Condensed', sans-serif;
-  font-size: 0.75rem;
-  color: #5d4e42;
-  margin-top: var(--space-xs);
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  font-weight: 500;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.3px;
+  line-height: 1.2;
+  font-weight: 400;
 }
 
 .nav {
@@ -357,8 +355,17 @@ body {
   border-radius: 4px;
   padding: var(--space-md);
   display: flex;
+  cursor: pointer;
+  transition: all 0.2s ease;
   flex-direction: column;
   gap: var(--space-xs);
+}
+
+.stat-card:hover {
+  background: var(--bg-hover);
+  border-color: var(--color-brand-primary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
 
 .stat-value {
@@ -403,6 +410,52 @@ body {
 
 .stat-trend.neutral {
   color: var(--text-muted);
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+thead th {
+  text-align: left;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-tertiary);
+  border-bottom: 2px solid var(--border-color);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+}
+
+tbody tr {
+  border-bottom: 1px solid var(--border-color);
+  transition: background 0.15s ease;
+  cursor: pointer;
+}
+
+tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+tbody td {
+  padding: var(--space-sm) var(--space-md);
+}
+
+.page-header {
+  margin-bottom: var(--space-lg);
+}
+
+.page-header h1 {
+  margin-bottom: var(--space-xs);
+}
+
+.page-header .subtitle {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
 }
 
 /* Risk analysis */

@@ -87,10 +87,12 @@
    Options:
    - :trend - :up, :down, :neutral (optional)
    - :class - additional CSS classes
+   - :href - navigation link (optional)
 
-   Example: (stat-card \"47\" \"PRs\" {:trend :up})"
-  [value label & [{:keys [trend] :as opts}]]
-  [:div {:class (build-class opts "stat-card")}
+   Example: (stat-card \"47\" \"PRs\" {:trend :up :href \"/fleet\"})"
+  [value label & [{:keys [trend href] :as opts}]]
+  [:div (merge {:class (build-class opts "stat-card")}
+               (when href {:onclick (str "location.href='" href "'")}))
    [:div.stat-value value]
    [:div.stat-label label]
    (when trend
