@@ -935,6 +935,118 @@ tbody td {
   white-space: nowrap;
 }
 
+/* Global vs local filter styling */
+.filter-chip-global {
+  background: color-mix(in srgb, var(--color-brand-primary) 15%, var(--bg-tertiary));
+  border-color: var(--color-brand-primary);
+}
+
+.filter-chip-global .filter-label::before {
+  content: "🌐 ";
+  opacity: 0.7;
+}
+
+.filter-chip-local {
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+}
+
+.filter-chip-local .filter-label::before {
+  content: "📍 ";
+  opacity: 0.5;
+}
+
+/* Filter chip menu */
+.filter-chip-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.filter-chip-menu-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 var(--space-xs);
+  transition: color 0.15s ease;
+}
+
+.filter-chip-menu-btn:hover {
+  color: var(--text-primary);
+}
+
+.filter-chip-menu-items {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: var(--shadow-md);
+  min-width: 180px;
+  z-index: 100;
+  margin-top: var(--space-xs);
+}
+
+.filter-chip-menu-items.show {
+  display: block;
+}
+
+.filter-chip-menu-items button {
+  display: block;
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: none;
+  border: none;
+  text-align: left;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.filter-chip-menu-items button:hover {
+  background: var(--bg-hover);
+}
+
+/* Global filter bar */
+.global-filter-bar {
+  position: sticky;
+  top: 0;
+  background: var(--bg-secondary);
+  border-bottom: 2px solid var(--border-color);
+  padding: var(--space-sm) var(--space-xl);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.global-filter-bar-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Pane filter section */
+.pane-filter-section {
+  margin-bottom: var(--space-md);
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.pane-filter-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-sm);
+}
+
 /* Filter modal */
 .filter-modal {
   position: fixed;

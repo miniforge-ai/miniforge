@@ -64,8 +64,35 @@
          :title "Cycle theme (Ctrl+Shift+T)"}
         "◐ Theme"]
        [:button.btn.btn-sm.btn-ghost
+        {:onclick "window.miniforge.filters && window.miniforge.filters.shareCurrentView()"
+         :title "Share current view"}
+        "🔗 Share"]
+       [:button.btn.btn-sm.btn-ghost
+        {:onclick "window.miniforge.cycleTheme()"
+         :title "Cycle theme (Ctrl+Shift+T)"}
+        "◐ Theme"]
+       [:button.btn.btn-sm.btn-ghost
         {:onclick "location.reload()"}
         "↻ Refresh"]]]]
+    ;; Global filter bar
+    [:div.global-filter-bar
+     [:span.global-filter-bar-label "Global Filters:"]
+     [:div#global-filter-chips.filter-chips]
+     [:div.filter-actions
+      [:button.btn.btn-sm.btn-ghost
+       {:onclick "window.miniforge.filters && window.miniforge.filters.clearFilters('global')"
+        :title "Clear global filters"}
+       "Clear"]
+      [:button.btn.btn-sm.btn-ghost.filter-add
+       {:hx-get "/api/filter-fields?scope=global"
+        :hx-target "#filter-modal-container"
+        :hx-swap "innerHTML"
+        :title "Add global filter"}
+       "+ Filter"]
+      [:button.btn.btn-sm.btn-ghost
+       {:onclick "const name = prompt('Save view as:'); if (name && window.miniforge.filters) window.miniforge.filters.saveView(name)"
+        :title "Save current filter set"}
+       "💾 Save View"]]]
     ;; Sidebar + Main content area
     [:div.dashboard
      [:aside.sidebar
@@ -89,7 +116,10 @@
       [:div.page-header
        [:h1.page-title title]]
       [:div.content body]]]
-    [:script {:src "/js/app.js"}]]))
+    ;; Filter modal container
+    [:div#filter-modal-container]
+    [:script {:src "/js/app.js"}]
+    [:script {:src "/js/filters.js"}]]))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Dashboard view components
