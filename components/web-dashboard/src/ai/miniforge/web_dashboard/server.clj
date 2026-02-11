@@ -56,7 +56,7 @@
   (if-let [resource (io/resource (str "public" path))]
     {:status 200
      :headers {"Content-Type" (get-content-type path)}
-     :body (slurp resource)}
+     :body (io/input-stream resource)}
     {:status 404
      :headers {"Content-Type" "text/plain"}
      :body "Not Found"}))
