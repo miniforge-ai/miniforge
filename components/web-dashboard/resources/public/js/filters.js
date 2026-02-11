@@ -48,17 +48,24 @@ function isFilterActive(filterId, value, scope = 'global') {
 }
 
 function toggleFilter(filterId, value, scope, checked) {
+  console.log(`toggleFilter: ${filterId}=${value}, scope=${scope}, checked=${checked}`);
+
   if (checked) {
     addFilter(filterId, ':=', value, scope);
   } else {
-    // Remove this specific filter value
+    // Remove filter - for boolean filters, remove any value; for others, remove specific value
     const targetClauses = scope === 'global'
       ? filterState.global.clauses
       : filterState.panes[currentPane].clauses;
 
-    const newClauses = targetClauses.filter(c =>
-      !(c['filter/id'] === filterId && String(c.value) === String(value))
-    );
+    const newClauses = targetClauses.filter(c => {
+      // For boolean filters (value === 'true'), remove entire filter
+      if (value === 'true') {
+        return c['filter/id'] !== filterId;
+      }
+      // For other filters, remove only the specific value
+      return !(c['filter/id'] === filterId && String(c.value) === String(value));
+    });
 
     if (scope === 'global') {
       filterState.global.clauses = newClauses;
@@ -69,17 +76,42 @@ function toggleFilter(filterId, value, scope, checked) {
     persistState();
     applyFilters();
   }
+
+  console.log('Filter state after toggle:', filterState);
 }
 
 function initializeFilterCheckboxes() {
   // Set checked state for all filter checkboxes based on current filter state
   document.querySelectorAll('.filter-checkbox').forEach(checkbox => {
     const filterId = checkbox.dataset.filterId;
-    const value = checkbox.value;
+    const value = checkbox.value || 'true'; // Boolean checkboxes may not have explicit value
     const scope = checkbox.dataset.scope;
 
-    if (filterId && value && scope) {
-      checkbox.checked = isFilterActive(filterId, value, scope);
+    if (filterId && scope) {
+      // For boolean filters, check if ANY value exists for this filter
+      const clauses = scope === 'global'
+        ? filterState.global.clauses
+        : filterState.panes[currentPane].clauses;
+
+      const hasFilter = clauses.some(c => c['filter/id'] === filterId);
+      checkbox.checked = hasFilter;
+    }
+  });
+
+  // Also initialize text inputs
+  document.querySelectorAll('.filter-text-input').forEach(input => {
+    const filterId = input.dataset.filterId;
+    const scope = input.dataset.scope;
+
+    if (filterId && scope) {
+      const clauses = scope === 'global'
+        ? filterState.global.clauses
+        : filterState.panes[currentPane].clauses;
+
+      const existingFilter = clauses.find(c => c['filter/id'] === filterId);
+      if (existingFilter) {
+        input.value = existingFilter.value;
+      }
     }
   });
 }
@@ -395,21 +427,35 @@ function applyFilters() {
 // UI rendering
 
 function renderFilterChips() {
+  console.log('renderFilterChips called');
   const globalContainer = document.getElementById('global-filter-chips');
   const localContainer = document.getElementById('filter-chips'); // Pane-local container
+
+  console.log('Global container:', globalContainer);
+  console.log('Local container:', localContainer);
+  console.log('Global filters:', filterState.global.clauses);
+  console.log('Local filters:', filterState.panes[currentPane]?.clauses);
 
   if (globalContainer) {
     globalContainer.innerHTML = '';
     filterState.global.clauses.forEach(clause => {
-      globalContainer.appendChild(createFilterChip(clause, 'global'));
+      const chip = createFilterChip(clause, 'global');
+      console.log('Adding global chip:', clause, chip);
+      globalContainer.appendChild(chip);
     });
+  } else {
+    console.warn('Global filter chips container not found!');
   }
 
   if (localContainer) {
     localContainer.innerHTML = '';
     filterState.panes[currentPane].clauses.forEach(clause => {
-      localContainer.appendChild(createFilterChip(clause, 'local'));
+      const chip = createFilterChip(clause, 'local');
+      console.log('Adding local chip:', clause, chip);
+      localContainer.appendChild(chip);
     });
+  } else {
+    console.log('Local filter chips container not found (may not be on this pane)');
   }
 }
 

@@ -85,21 +85,25 @@
                [:div.filter-option
                 [:label
                  [:input {:type "checkbox"
+                          :class "filter-checkbox"
                           :name (str "filter-" (name filter-id))
-                          :onchange (str "window.miniforge.filters.addFilter('"
-                                       (name filter-id) "', ':=', this.checked, '" scope "'); "
-                                       "document.getElementById('filter-modal-container').innerHTML = ''; "
-                                       "window.miniforge.filters.renderFilterChips();")}]
+                          :data-filter-id (name filter-id)
+                          :data-scope scope
+                          :onchange (str "window.miniforge.filters.toggleFilter('"
+                                       (name filter-id) "', 'true', '" scope "', this.checked);")}]
                  [:span "Yes"]]]
 
                :text
                [:input.filter-text-input
                 {:type "text"
+                 :class "filter-text-input"
                  :placeholder (str "Search " filter-label "...")
-                 :onchange (str "if(this.value) { window.miniforge.filters.addFilter('"
-                              (name filter-id) "', ':text-search', this.value, '" scope "'); "
-                              "document.getElementById('filter-modal-container').innerHTML = ''; "
-                              "window.miniforge.filters.renderFilterChips(); }")}]
+                 :data-filter-id (name filter-id)
+                 :data-scope scope
+                 :onchange (str "if(this.value) { "
+                              "window.miniforge.filters.toggleFilter('"
+                              (name filter-id) "', this.value, '" scope "', true); "
+                              "}")}]
 
                ;; Default
                [:span "Unsupported filter type: " (name filter-type)])]])))]
