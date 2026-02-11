@@ -338,7 +338,7 @@ function applyFilters() {
 
 function renderFilterChips() {
   const globalContainer = document.getElementById('global-filter-chips');
-  const localContainer = document.getElementById('local-filter-chips');
+  const localContainer = document.getElementById('filter-chips'); // Pane-local container
 
   if (globalContainer) {
     globalContainer.innerHTML = '';

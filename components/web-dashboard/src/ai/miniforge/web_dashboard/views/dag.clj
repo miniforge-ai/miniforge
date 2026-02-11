@@ -54,7 +54,9 @@
                              :name (str "filter-" (name filter-id))
                              :value (str value)
                              :onchange (str "window.miniforge.filters.addFilter('"
-                                          (name filter-id) "', ':=', '" value "', '" scope "')")}]
+                                          (name filter-id) "', ':=', '" value "', '" scope "'); "
+                                          "document.getElementById('filter-modal-container').innerHTML = ''; "
+                                          "window.miniforge.filters.renderFilterChips();")}]
                     [:span (str value (when count (str " (" count ")")))]
                     ])
                  ;; Static values
@@ -65,7 +67,9 @@
                                :name (str "filter-" (name filter-id))
                                :value (name value)
                                :onchange (str "window.miniforge.filters.addFilter('"
-                                            (name filter-id) "', ':=', '" (name value) "', '" scope "')")}]
+                                            (name filter-id) "', ':=', '" (name value) "', '" scope "'); "
+                                            "document.getElementById('filter-modal-container').innerHTML = ''; "
+                                            "window.miniforge.filters.renderFilterChips();")}]
                       [:span (str (name value) (when count (str " (" count ")")))]])))
 
                :bool
@@ -74,15 +78,19 @@
                  [:input {:type "checkbox"
                           :name (str "filter-" (name filter-id))
                           :onchange (str "window.miniforge.filters.addFilter('"
-                                       (name filter-id) "', ':=', this.checked, '" scope "')")}]
+                                       (name filter-id) "', ':=', this.checked, '" scope "'); "
+                                       "document.getElementById('filter-modal-container').innerHTML = ''; "
+                                       "window.miniforge.filters.renderFilterChips();")}]
                  [:span "Yes"]]]
 
                :text
                [:input.filter-text-input
                 {:type "text"
                  :placeholder (str "Search " filter-label "...")
-                 :onchange (str "if(this.value) window.miniforge.filters.addFilter('"
-                              (name filter-id) "', ':text-search', this.value, '" scope "')")}]
+                 :onchange (str "if(this.value) { window.miniforge.filters.addFilter('"
+                              (name filter-id) "', ':text-search', this.value, '" scope "'); "
+                              "document.getElementById('filter-modal-container').innerHTML = ''; "
+                              "window.miniforge.filters.renderFilterChips(); }")}]
 
                ;; Default
                [:span "Unsupported filter type: " (name filter-type)])]])))]
