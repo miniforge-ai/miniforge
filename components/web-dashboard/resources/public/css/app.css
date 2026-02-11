@@ -790,12 +790,106 @@ tbody td {
   color: var(--text-secondary);
 }
 
+/* Kanban view */
+.kanban-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.kanban-header {
+  margin-bottom: var(--space-lg);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.kanban-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-lg);
+}
+
+.kanban-title-row h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: var(--text-primary);
+}
+
+/* Filter bar with chips */
+.kanban-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.filter-chips {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  transition: all 0.15s ease;
+}
+
+.filter-chip:hover {
+  background: var(--bg-hover);
+  border-color: var(--color-brand-primary);
+}
+
+.filter-label {
+  font-weight: 500;
+}
+
+.filter-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all 0.15s ease;
+}
+
+.filter-remove:hover {
+  background: var(--color-status-error);
+  color: white;
+}
+
+.filter-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.filter-add {
+  white-space: nowrap;
+}
+
 /* Kanban board */
 .kanban-board {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: var(--space-md);
-  height: 100%;
+  flex: 1;
+  overflow: hidden;
 }
 
 .kanban-column {

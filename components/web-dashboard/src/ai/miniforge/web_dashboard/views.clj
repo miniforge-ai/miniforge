@@ -306,12 +306,24 @@
   (layout "DAG Kanban"
    [:div.kanban-view
     [:div.kanban-header
-     [:h2 "Task Status by Dependency Graph"]
-     [:div.kanban-filters
-      [:select.filter-select
-       [:option "All Repos"]
-       (for [repo (set (map :repo (:tasks state)))]
-         [:option repo])]]]
+     [:div.kanban-title-row
+      [:h2 "Task Dependency Graph"]
+      [:div.kanban-filter-bar
+       [:div.filter-chips
+        ;; Active filter chips (example - would be dynamic)
+        [:div.filter-chip
+         [:span.filter-label "All Repos"]
+         [:button.filter-remove {:onclick "removeFilter('repo')"
+                                 :title "Remove filter"} "×"]]
+        [:div.filter-chip
+         [:span.filter-label "PR Trains"]
+         [:button.filter-remove {:onclick "removeFilter('type')"
+                                 :title "Remove filter"} "×"]]]
+       [:div.filter-actions
+        [:button.btn.btn-sm.btn-ghost.filter-add
+         {:onclick "showFilterMenu()"
+          :title "Add filter"}
+         "+ Filter"]]]]]
     [:div.kanban-board
      (for [status [:blocked :ready :running :done]]
        [:div.kanban-column {:class (name status)}
