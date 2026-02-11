@@ -330,6 +330,62 @@
 ;------------------------------------------------------------------------------ Layer 4
 ;; DAG Kanban view
 
+(defn filter-modal-fragment
+  "Filter selection modal content (loaded via htmx)."
+  [filter-fields]
+  [:div.filter-modal
+   [:div.filter-modal-overlay {:onclick "this.parentElement.remove()"}]
+   [:div.filter-modal-content
+    [:div.filter-modal-header
+     [:h3 "Add Filter"]
+     [:button.filter-modal-close
+      {:onclick "this.parentElement.parentElement.parentElement.remove()"
+       :title "Close"}
+      "×"]]
+    [:div.filter-modal-body
+     ;; Repositories section
+     (when (seq (:repos filter-fields))
+       [:div.filter-section
+        [:h4.filter-section-title "Repository"]
+        [:div.filter-options
+         (for [repo (:repos filter-fields)]
+           [:label.filter-option
+            [:input {:type "checkbox"
+                     :name "filter-repo"
+                     :value (:id repo)
+                     :onchange (str "window.miniforge.addFilterChip('Repo: " (:label repo) "', 'repo', '" (:id repo) "')")}]
+            [:span (:label repo)]])]])
+
+     ;; Trains section
+     (when (seq (:trains filter-fields))
+       [:div.filter-section
+        [:h4.filter-section-title "Train"]
+        [:div.filter-options
+         (for [train (:trains filter-fields)]
+           [:label.filter-option
+            [:input {:type "checkbox"
+                     :name "filter-train"
+                     :value (:id train)
+                     :onchange (str "window.miniforge.addFilterChip('" (:label train) "', 'train', '" (:id train) "')")}]
+            [:span (:label train)]])]])
+
+     ;; Status section
+     (when (seq (:statuses filter-fields))
+       [:div.filter-section
+        [:h4.filter-section-title "Status"]
+        [:div.filter-options
+         (for [status (:statuses filter-fields)]
+           [:label.filter-option
+            [:input {:type "checkbox"
+                     :name "filter-status"
+                     :value (:id status)
+                     :onchange (str "window.miniforge.addFilterChip('Status: " (:label status) "', 'status', '" (:id status) "')")}]
+            [:span (:label status)]])]])]
+    [:div.filter-modal-footer
+     [:button.btn.btn-sm.btn-ghost
+      {:onclick "this.parentElement.parentElement.parentElement.remove()"}
+      "Done"]]]])
+
 (defn dag-kanban-view
   "Task status kanban board for workflow visualization."
   [state]
@@ -339,23 +395,17 @@
      [:div.kanban-title-row
       [:h2 "Workflow Tasks"]
       [:div.kanban-filter-bar
-       [:div.filter-chips
-        ;; Active filter chips (example - would be dynamic)
-        ;; These would be populated dynamically based on active filters
-        ;; For now, showing examples with disabled state
-        [:div.filter-chip {:style "display:none;"}
-         [:span.filter-label "All Repos"]
-         [:button.filter-remove {:onclick "this.parentElement.remove()"
-                                 :title "Remove filter"} "×"]]
-        [:div.filter-chip {:style "display:none;"}
-         [:span.filter-label "PR Trains"]
-         [:button.filter-remove {:onclick "this.parentElement.remove()"
-                                 :title "Remove filter"} "×"]]]
+       [:div#filter-chips.filter-chips
+        ;; Active filter chips will be added here dynamically via JavaScript]
        [:div.filter-actions
         [:button.btn.btn-sm.btn-ghost.filter-add
-         {:onclick "alert('Filter UI: Select repo, workflow type, status, etc.')"
+         {:hx-get "/api/filter-fields"
+          :hx-target "#filter-modal-container"
+          :hx-swap "innerHTML"
           :title "Add filter"}
          "+ Filter"]]]]]
+    ;; Filter modal container
+    [:div#filter-modal-container]
     [:div.kanban-board
      (for [status [:blocked :ready :running :done]]
        [:div.kanban-column {:class (name status)}
@@ -372,7 +422,7 @@
                [:span.card-deps (str "↓ " (count (:dependencies task)))])]
             [:div.card-title (:title task)]
             [:div.card-footer
-             [:a.card-link {:href (str "/train/" (:train-id task))} "View Train →"]]])]])]]))
+             [:a.card-link {:href (str "/train/" (:train-id task))} "View Train →"]]])]])]]]))
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Evidence view

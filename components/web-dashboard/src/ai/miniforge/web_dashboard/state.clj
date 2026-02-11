@@ -13,7 +13,9 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.web-dashboard.state
-  "State management for web dashboard with integration to PR trains and DAGs.")
+  "State management for web dashboard with integration to PR trains and DAGs."
+  (:require
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; State atom creation
@@ -289,6 +291,27 @@
                  trains)}))
 
 ;------------------------------------------------------------------------------ Layer 8
+;; Filter fields
+
+(defn get-filter-fields
+  "Get available filter fields for Task Status view."
+  [state]
+  (let [dag-state (get-dag-state state)
+        trains (:trains dag-state)
+        tasks (:tasks dag-state)
+        repos (distinct (map :repo tasks))
+        statuses [:ready :running :done :blocked]]
+    {:repos (map (fn [repo] {:id repo :label repo}) repos)
+     :trains (map (fn [train]
+                   {:id (:train/id train)
+                    :label (:train/name train)})
+                 trains)
+     :statuses (map (fn [status]
+                     {:id (name status)
+                      :label (str/capitalize (name status))})
+                   statuses)}))
+
+;------------------------------------------------------------------------------ Layer 9
 ;; Composite state
 
 (defn get-dashboard-state

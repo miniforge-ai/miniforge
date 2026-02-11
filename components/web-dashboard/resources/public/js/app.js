@@ -55,12 +55,72 @@ function sendWorkflowCommand(command, params = {}) {
   console.log('Sent workflow command:', command);
 }
 
+// Filter management
+const activeFilters = new Map();
+
+function addFilterChip(label, type, value) {
+  const filterKey = `${type}:${value}`;
+
+  // Avoid duplicates
+  if (activeFilters.has(filterKey)) {
+    return;
+  }
+
+  activeFilters.set(filterKey, { label, type, value });
+
+  // Create filter chip element
+  const filterChipsContainer = document.getElementById('filter-chips');
+  if (!filterChipsContainer) return;
+
+  const chip = document.createElement('div');
+  chip.className = 'filter-chip';
+  chip.setAttribute('data-filter-key', filterKey);
+  chip.innerHTML = `
+    <span class="filter-label">${label}</span>
+    <button class="filter-remove" onclick="window.miniforge.removeFilterChip('${filterKey}')" title="Remove filter">×</button>
+  `;
+
+  filterChipsContainer.appendChild(chip);
+
+  // Close the filter modal after adding
+  const modal = document.querySelector('.filter-modal');
+  if (modal) {
+    modal.remove();
+  }
+
+  // Trigger filter update
+  applyFilters();
+}
+
+function removeFilterChip(filterKey) {
+  activeFilters.delete(filterKey);
+
+  const chip = document.querySelector(`[data-filter-key="${filterKey}"]`);
+  if (chip) {
+    chip.remove();
+  }
+
+  applyFilters();
+}
+
+function applyFilters() {
+  // TODO: Implement actual filtering logic
+  // For now, just log the active filters
+  console.log('Active filters:', Array.from(activeFilters.entries()));
+
+  // Trigger kanban board update
+  document.body.dispatchEvent(new CustomEvent('refresh'));
+}
+
 // Export functions for global use
 window.miniforge = {
   switchTheme,
   cycleTheme,
   getCurrentTheme: () => document.documentElement.getAttribute('data-theme') || 'dark',
-  sendWorkflowCommand
+  sendWorkflowCommand,
+  addFilterChip,
+  removeFilterChip,
+  getActiveFilters: () => Array.from(activeFilters.entries())
 };
 
 // WebSocket connection management

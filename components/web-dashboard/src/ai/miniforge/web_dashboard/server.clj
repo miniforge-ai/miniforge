@@ -292,6 +292,11 @@
     (state/train-action! state train-id action)
     (json-response {:success true})))
 
+(defn- handle-api-filter-fields
+  "API: Get available filter fields for Task Status view."
+  [state]
+  (html-response (views/filter-modal-fragment (state/get-filter-fields state))))
+
 (defn- handle-static
   "Static file handler."
   [uri]
@@ -365,6 +370,9 @@
 
           (= uri "/api/train/action")
           (handle-api-train-action state params)
+
+          (= uri "/api/filter-fields")
+          (handle-api-filter-fields state)
 
           ;; Static files
           (or (.startsWith uri "/css/")
