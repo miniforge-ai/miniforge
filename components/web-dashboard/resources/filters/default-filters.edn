@@ -1,0 +1,115 @@
+;; Default filter specifications for web dashboard
+;; These define the filterable fields available across all panes
+
+[;; =============================================================================
+ ;; Global Context Filters
+ ;; These filters apply across multiple panes and persist across pane switches
+ ;; =============================================================================
+
+ {:filter/id :repository
+  :filter/label "Repository"
+  :filter/type :enum
+  :filter/scope :global
+  :filter/applicable-to #{:task-status :fleet :evidence :workflows}
+  :filter/value {:kind :path :path [:repo]}
+  :filter/values :dynamic}
+
+ {:filter/id :train-name
+  :filter/label "Train"
+  :filter/type :enum
+  :filter/scope :global
+  :filter/applicable-to #{:task-status :fleet :evidence}
+  :filter/value {:kind :path :path [:train/name]}
+  :filter/values :dynamic}
+
+ {:filter/id :current-phase
+  :filter/label "Current Phase"
+  :filter/type :enum
+  :filter/scope :global
+  :filter/applicable-to #{:task-status :workflows}
+  :filter/value {:kind :path :path [:execution/current-phase]}
+  :filter/values [:plan :implement :test :verify :release]}
+
+ {:filter/id :has-review
+  :filter/label "Has Review"
+  :filter/type :bool
+  :filter/scope :global
+  :filter/applicable-to #{:task-status :workflows}
+  :filter/value {:kind :derived :derived/id :derived/has-review}}
+
+ {:filter/id :has-testing
+  :filter/label "Has Testing"
+  :filter/type :bool
+  :filter/scope :global
+  :filter/applicable-to #{:task-status :workflows}
+  :filter/value {:kind :derived :derived/id :derived/has-testing}}
+
+ {:filter/id :text-search
+  :filter/label "Search"
+  :filter/type :text
+  :filter/scope :global
+  :filter/applicable-to #{:task-status :fleet :evidence :workflows}
+  :filter/value {:kind :multi-path
+                 :paths [[:train/name]
+                         [:repo]
+                         [:pr/title]
+                         [:title]]}}
+
+ ;; =============================================================================
+ ;; Pane-Local Analysis Filters: Task Status
+ ;; These filters are specific to the Task Status kanban view
+ ;; =============================================================================
+
+ {:filter/id :task-status
+  :filter/label "Status"
+  :filter/type :enum
+  :filter/scope :local
+  :filter/applicable-to #{:task-status}
+  :filter/value {:kind :path :path [:status]}
+  :filter/values [:ready :running :done :blocked]}
+
+ {:filter/id :has-dependencies
+  :filter/label "Has Dependencies"
+  :filter/type :bool
+  :filter/scope :local
+  :filter/applicable-to #{:task-status}
+  :filter/value {:kind :derived :derived/id :derived/has-dependencies}}
+
+ ;; =============================================================================
+ ;; Pane-Local Analysis Filters: Workflows
+ ;; These filters are specific to the Workflows view
+ ;; =============================================================================
+
+ {:filter/id :workflow-complexity
+  :filter/label "Complexity"
+  :filter/type :enum
+  :filter/scope :local
+  :filter/applicable-to #{:workflows}
+  :filter/value {:kind :path :path [:workflow/complexity]}
+  :filter/values [:simple :medium :complex]}
+
+ {:filter/id :phase-count
+  :filter/label "Phase Count"
+  :filter/type :number-range
+  :filter/scope :local
+  :filter/applicable-to #{:workflows}
+  :filter/value {:kind :derived :derived/id :derived/phase-count}}
+
+ ;; =============================================================================
+ ;; Pane-Local Analysis Filters: Evidence
+ ;; These filters are specific to the Evidence bundles view
+ ;; =============================================================================
+
+ {:filter/id :has-evidence
+  :filter/label "Has Evidence"
+  :filter/type :bool
+  :filter/scope :local
+  :filter/applicable-to #{:evidence}
+  :filter/value {:kind :derived :derived/id :derived/has-evidence}}
+
+ {:filter/id :is-completed
+  :filter/label "Completed"
+  :filter/type :bool
+  :filter/scope :local
+  :filter/applicable-to #{:evidence}
+  :filter/value {:kind :derived :derived/id :derived/is-completed}}]

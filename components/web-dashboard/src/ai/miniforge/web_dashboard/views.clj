@@ -26,10 +26,22 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Layout
 
+(defn- title->pane
+  "Convert page title to pane keyword for filter context."
+  [title]
+  (case title
+    "Task Status" :task-status
+    "PR Fleet" :fleet
+    "Evidence" :evidence
+    "Workflows" :workflows
+    "Dashboard" :dashboard
+    :task-status))
+
 (defn- layout
   "Main page layout with htmx and WebSocket."
   [title & body]
-  (page/html5
+  (let [current-pane (title->pane title)]
+    (page/html5
    [:head
     [:meta {:charset "utf-8"}]
     [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
@@ -80,7 +92,7 @@
         :title "Clear global filters"}
        "Clear"]
       [:button.btn.btn-sm.btn-ghost.filter-add
-       {:hx-get "/api/filter-fields?scope=global"
+       {:hx-get (str "/api/filter-fields?scope=global&pane=" (name current-pane))
         :hx-target "#filter-modal-container"
         :hx-swap "innerHTML"
         :title "Add global filter"}
@@ -111,11 +123,11 @@
      [:main.main
       [:div.page-header
        [:h1.page-title title]]
-      [:div.content body]]]
+      (into [:div.content] body)]]]
     ;; Filter modal container
     [:div#filter-modal-container]
     [:script {:src "/js/app.js"}]
-    [:script {:src "/js/filters.js"}]]))
+    [:script {:src "/js/filters.js"}])))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Dashboard view components

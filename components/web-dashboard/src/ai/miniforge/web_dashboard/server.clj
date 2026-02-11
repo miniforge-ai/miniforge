@@ -25,7 +25,7 @@
    [hiccup2.core :refer [html]]
    [ai.miniforge.web-dashboard.views :as views]
    [ai.miniforge.web-dashboard.state :as state]
-   [ai.miniforge.web-dashboard.filters :as filters]))
+   [ai.miniforge.web-dashboard.filters-new :as filters]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Static file serving
