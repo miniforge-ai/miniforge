@@ -181,33 +181,42 @@
   "Train list fragment for htmx updates."
   [trains]
   (html
-   [:div.train-list
-    (for [train trains]
-      [:div.train-card {:onclick (str "location.href='/train/" (:train/id train) "'")}
-       [:div.train-header
-        [:h4.train-name (:train/name train)]
-        (c/badge (name (:train/status train))
-                {:variant (case (:train/status train)
-                           :merged :success
-                           :merging :info
-                           :failed :error
-                           :reviewing :warning
-                           :neutral)})]
-       [:div.train-stats
-        [:div.stat
-         [:span.stat-label "PRs"]
-         [:span.stat-value (count (:train/prs train))]]
-        [:div.stat
-         [:span.stat-label "Ready"]
-         [:span.stat-value (count (:train/ready-to-merge train))]]
-        [:div.stat
-         [:span.stat-label "Blocked"]
-         [:span.stat-value (count (:train/blocking-prs train))]]]
-       [:div.train-progress
-        (c/progress-bar
-         (int (* 100 (/ (count (filter #(= :merged (:pr/status %)) (:train/prs train)))
-                       (max 1 (count (:train/prs train))))))
-         {:variant (if (seq (:train/blocking-prs train)) :error :success)})]])]))
+   (if (empty? trains)
+     [:div.empty-state
+      [:div.empty-icon "🚂"]
+      [:h3 "No PR Trains Yet"]
+      [:p "Create your first PR train to orchestrate multi-repository changes."]
+      (c/button "+ Create Train" {:variant :primary
+                                   :onclick "alert('Train creation UI coming soon')"})]
+     [:div.train-table
+      [:table.fleet-table
+       [:thead
+        [:tr
+         [:th "Train Name"]
+         [:th "Status"]
+         [:th "PRs"]
+         [:th "Ready"]
+         [:th "Blocked"]
+         [:th "Progress"]]]
+       [:tbody
+        (for [train trains]
+          [:tr.train-row {:onclick (str "location.href='/train/" (:train/id train) "'")}
+           [:td.train-name (:train/name train)]
+           [:td (c/badge (name (:train/status train))
+                        {:variant (case (:train/status train)
+                                   :merged :success
+                                   :merging :info
+                                   :failed :error
+                                   :reviewing :warning
+                                   :neutral)})]
+           [:td.train-stat (count (:train/prs train))]
+           [:td.train-stat (count (:train/ready-to-merge train))]
+           [:td.train-stat (count (:train/blocking-prs train))]
+           [:td.train-progress
+            (c/progress-bar
+             (int (* 100 (/ (count (filter #(= :merged (:pr/status %)) (:train/prs train)))
+                           (max 1 (count (:train/prs train))))))
+             {:variant (if (seq (:train/blocking-prs train)) :error :success)})]])]]]))))
 
 (defn fleet-view
   "Fleet management view showing all PR trains."
@@ -215,17 +224,17 @@
   (layout "PR Fleet"
    [:div.fleet-view
     [:div.fleet-header
-     [:div.fleet-summary
-      [:h2 "PR Train Fleet"]
-      [:div.summary-stats
-       [:span (str (get-in fleet-state [:summary :active-trains]) " active trains")]
-       [:span " • "]
-       [:span (str (get-in fleet-state [:summary :total-prs]) " total PRs")]
-       [:span " • "]
-       [:span (str (get-in fleet-state [:summary :repos]) " repos")]]]
-     [:div.fleet-actions
-      (c/button "Create Train" {:variant :primary})]]
-    [:section#trains-section.section
+     [:div.fleet-title-row
+      [:div.fleet-summary
+       [:span.train-count (str (get-in fleet-state [:summary :active-trains] 0) " trains")]
+       [:span.summary-divider "•"]
+       [:span.pr-count (str (get-in fleet-state [:summary :total-prs] 0) " PRs")]
+       [:span.summary-divider "•"]
+       [:span.repo-count (str (get-in fleet-state [:summary :repos] 0) " repos")]]
+      [:div.fleet-actions
+       (c/button "+ Create Train" {:variant :primary
+                                    :onclick "alert('Train creation UI coming soon!')"})]]]
+    [:div#trains-section
      {:hx-get "/api/trains"
       :hx-trigger "refresh from:body, every 5s"
       :hx-swap "innerHTML"}
@@ -347,39 +356,46 @@
   "Workflow list fragment for htmx updates."
   [workflows]
   (html
-   [:div.workflow-list
-    [:table.workflow-table
-     [:thead
-      [:tr
-       [:th "Status"]
-       [:th "Name"]
-       [:th "Phase"]
-       [:th "Progress"]
-       [:th "Started"]]]
-     [:tbody
-      (for [wf workflows]
-        [:tr.workflow-row {:onclick (str "location.href='/workflow/" (:id wf) "'")}
-         [:td (c/status-dot (:status wf))]
-         [:td (:name wf)]
-         [:td (:phase wf)]
-         [:td (c/progress-bar (:progress wf))]
-         [:td (if (:started-at wf)
-                (str (.format (java.text.SimpleDateFormat. "HH:mm") (:started-at wf)))
-                "—")]])]]]))
+   (if (empty? workflows)
+     [:div.empty-state
+      [:div.empty-icon "⚙️"]
+      [:h3 "No Workflows Yet"]
+      [:p "Workflows will appear here when you run: "]
+      [:code.empty-code "miniforge workflow run examples/workflows/simple.edn"]
+      [:p.empty-hint "Try running a workflow to see real-time progress tracking."]]
+     [:div.workflow-list
+      [:table.workflow-table
+       [:thead
+        [:tr
+         [:th "Status"]
+         [:th "Name"]
+         [:th "Phase"]
+         [:th "Progress"]
+         [:th "Started"]]]
+       [:tbody
+        (for [wf workflows]
+          [:tr.workflow-row {:onclick (str "location.href='/workflow/" (:id wf) "'")}
+           [:td (c/status-dot (:status wf))]
+           [:td (:name wf)]
+           [:td (:phase wf)]
+           [:td (c/progress-bar (:progress wf))]
+           [:td (if (:started-at wf)
+                  (str (.format (java.text.SimpleDateFormat. "HH:mm") (:started-at wf)))
+                  "—")]])]]]))))
 
 (defn workflows-view
   "Workflows list page view."
   [workflows]
   (layout "Workflows"
    [:div.workflows-page
-    [:header.page-header
-     [:h1 "Workflows"]
-     [:p.subtitle (str (count workflows) " total workflows")]]
     [:section.workflows-section
-     {:hx-get "/api/workflows"
-      :hx-trigger "refresh from:body, every 5s"
-      :hx-swap "innerHTML"}
-     (workflow-list-fragment workflows)]]))
+     [:div.workflows-header
+      [:span.workflows-count (str (count workflows) " " (if (= 1 (count workflows)) "workflow" "workflows"))]]
+     [:div#workflows-content
+      {:hx-get "/api/workflows"
+       :hx-trigger "refresh from:body, every 5s"
+       :hx-swap "innerHTML"}
+      (workflow-list-fragment workflows)]]]))
 
 (defn workflow-detail-view
   "Detailed workflow view."

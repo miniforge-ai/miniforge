@@ -197,7 +197,7 @@ body {
 }
 
 .logo img {
-  height: 32px;
+  height: 48px;
   width: auto;
 }
 
@@ -927,6 +927,109 @@ tbody td {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border-color);
+}
+
+/* Empty states */
+.empty-state {
+  text-align: center;
+  padding: var(--space-xxl) var(--space-xl);
+  color: var(--text-secondary);
+}
+
+.empty-icon {
+  font-size: 4rem;
+  margin-bottom: var(--space-md);
+  opacity: 0.5;
+}
+
+.empty-state h3 {
+  color: var(--text-primary);
+  margin-bottom: var(--space-sm);
+  font-size: 1.25rem;
+}
+
+.empty-state p {
+  margin-bottom: var(--space-md);
+  line-height: 1.6;
+}
+
+.empty-code {
+  display: inline-block;
+  background: var(--bg-tertiary);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: 4px;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 0.85rem;
+  margin: var(--space-sm) 0;
+}
+
+.empty-hint {
+  font-size: 0.85rem;
+  color: var(--text-tertiary);
+}
+
+/* Fleet view */
+.fleet-header {
+  margin-bottom: var(--space-lg);
+}
+
+.fleet-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.fleet-summary {
+  display: flex;
+  gap: var(--space-md);
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.summary-divider {
+  color: var(--text-tertiary);
+}
+
+.train-count,
+.pr-count,
+.repo-count {
+  font-weight: 500;
+}
+
+.fleet-table .train-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.fleet-table .train-stat {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.fleet-table .train-progress {
+  width: 200px;
+}
+
+/* Workflows view */
+.workflows-section {
+  margin-top: var(--space-lg);
+}
+
+.workflows-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-md);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.workflows-count {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  font-weight: 500;
 }
 
 /* Responsive */
