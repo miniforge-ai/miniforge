@@ -128,10 +128,10 @@
         ;; Active filter chips will be added here dynamically via JavaScript]
        [:div.filter-actions
         [:button.btn.btn-sm.btn-ghost.filter-add
-         {:hx-get "/api/filter-fields"
+         {:hx-get "/api/filter-fields?scope=local&pane=task-status"
           :hx-target "#filter-modal-container"
           :hx-swap "innerHTML"
-          :title "Add filter"}
+          :title "Add pane-local filter"}
          "+ Filter"]]]]]
     ;; Filter modal container
     [:div#filter-modal-container]
