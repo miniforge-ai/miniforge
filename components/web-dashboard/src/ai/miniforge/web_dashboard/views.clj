@@ -43,7 +43,7 @@
       [:div.logo
        [:img {:src "/img/miniforge_logo.png"
               :alt "Miniforge"}]
-       [:div.logo-tagline "An agentic SDLC / fleet-control platform"]]
+       [:div.logo-tagline "an industrial software factory that fits on your desk"]]
       [:nav.nav
        [:a.nav-item {:href "/" :class "active"} [:span.icon "▸"] "Dashboard"]
        [:a.nav-item {:href "/fleet"} [:span.icon "▸"] "PR Fleet"]
