@@ -1513,3 +1513,223 @@ tbody td {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================================================
+   Filter System Enhancements - Visual Hierarchy & State
+   ========================================================================= */
+
+/* Scope indicators in modal header */
+.scope-icon {
+  font-size: 1.2em;
+  margin-right: 0.25rem;
+}
+
+.scope-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-weight: 500;
+  margin-left: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.scope-badge-global {
+  background: #c8e6c9;
+  color: #2e7d32;
+  border: 1px solid #4CAF50;
+}
+
+.scope-badge-local {
+  background: #bbdefb;
+  color: #1565c0;
+  border: 1px solid #2196F3;
+}
+
+/* Filter chips - improved visual hierarchy */
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 0.875rem;
+  margin: 4px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+/* Global filter chips - green theme */
+.filter-chip-global {
+  background: #c8e6c9;
+  color: #1b5e20;
+  border: 1.5px solid #4CAF50;
+}
+
+.filter-chip-global:hover {
+  background: #a5d6a7;
+  box-shadow: 0 2px 4px rgba(76, 175, 80, 0.3);
+}
+
+/* Local/pane filter chips - blue theme */
+.filter-chip-local {
+  background: #bbdefb;
+  color: #0d47a1;
+  border: 1.5px solid #2196F3;
+}
+
+.filter-chip-local:hover {
+  background: #90caf9;
+  box-shadow: 0 2px 4px rgba(33, 150, 243, 0.3);
+}
+
+/* Filter chip remove button */
+.filter-remove {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1.3em;
+  line-height: 1;
+  padding: 0 4px;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.filter-remove:hover {
+  opacity: 1;
+}
+
+/* Filter chip animation */
+.chip-removing {
+  animation: chip-fade-out 0.3s ease forwards;
+}
+
+@keyframes chip-fade-out {
+  to {
+    opacity: 0;
+    transform: scale(0.8);
+    margin: 0;
+    padding: 0;
+  }
+}
+
+/* Global filter bar styling */
+.global-filter-bar {
+  background: linear-gradient(135deg, #f5f5f5 0%, #ffffff 100%);
+  border-bottom: 2px solid #4CAF50;
+  padding: var(--space-md) var(--space-lg);
+  margin-bottom: var(--space-md);
+}
+
+/* Filter section visual hierarchy */
+.filter-section {
+  padding: var(--space-md);
+  margin-bottom: var(--space-md);
+  border-radius: var(--radius-md);
+  border-left: 4px solid transparent;
+}
+
+.filter-section-global {
+  border-left-color: #4CAF50;
+  background: linear-gradient(90deg, rgba(200, 230, 201, 0.15) 0%, transparent 100%);
+}
+
+.filter-section-local {
+  border-left-color: #2196F3;
+  background: linear-gradient(90deg, rgba(187, 222, 251, 0.15) 0%, transparent 100%);
+}
+
+/* Filter modal improvements */
+.filter-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-lg);
+  border-bottom: 2px solid var(--border-color);
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.filter-modal-header h3 {
+  flex: 1;
+  margin: 0;
+  display: flex;
+  align-items: center;
+}
+
+/* Filter options - better touch targets and visual feedback */
+.filter-option {
+  display: flex;
+  align-items: center;
+  padding: var(--space-sm) var(--space-md);
+  margin: var(--space-xs) 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.2s;
+  min-height: 44px; /* WCAG touch target size */
+}
+
+.filter-option:hover {
+  background-color: var(--hover-bg);
+}
+
+.filter-option input[type="checkbox"] {
+  margin-right: var(--space-sm);
+  cursor: pointer;
+  width: 18px;
+  height: 18px;
+}
+
+.filter-option span {
+  flex: 1;
+  user-select: none;
+}
+
+/* Checked state visual feedback */
+.filter-checkbox:checked + span {
+  font-weight: 600;
+  color: var(--primary-color);
+}
+
+/* Filter actions */
+.filter-actions {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+/* Pane label in chips */
+.pane-label {
+  font-size: 0.7rem;
+  opacity: 0.8;
+  font-weight: 400;
+  margin-left: 4px;
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+}
+
+/* Filter count badges */
+.filter-count {
+  display: inline-block;
+  background: var(--accent-color);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-left: 0.5rem;
+}
+
+/* Clear all button */
+.clear-filters-btn {
+  color: var(--error-color);
+  transition: all 0.2s;
+}
+
+.clear-filters-btn:hover {
+  background-color: rgba(244, 67, 54, 0.1);
+}
+

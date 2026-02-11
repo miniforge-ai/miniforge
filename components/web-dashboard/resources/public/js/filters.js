@@ -37,6 +37,53 @@ function getCurrentPane() {
   return currentPane;
 }
 
+function isFilterActive(filterId, value, scope = 'global') {
+  const clauses = scope === 'global'
+    ? filterState.global.clauses
+    : filterState.panes[currentPane].clauses;
+
+  return clauses.some(c =>
+    c['filter/id'] === filterId && String(c.value) === String(value)
+  );
+}
+
+function toggleFilter(filterId, value, scope, checked) {
+  if (checked) {
+    addFilter(filterId, ':=', value, scope);
+  } else {
+    // Remove this specific filter value
+    const targetClauses = scope === 'global'
+      ? filterState.global.clauses
+      : filterState.panes[currentPane].clauses;
+
+    const newClauses = targetClauses.filter(c =>
+      !(c['filter/id'] === filterId && String(c.value) === String(value))
+    );
+
+    if (scope === 'global') {
+      filterState.global.clauses = newClauses;
+    } else {
+      filterState.panes[currentPane].clauses = newClauses;
+    }
+
+    persistState();
+    applyFilters();
+  }
+}
+
+function initializeFilterCheckboxes() {
+  // Set checked state for all filter checkboxes based on current filter state
+  document.querySelectorAll('.filter-checkbox').forEach(checkbox => {
+    const filterId = checkbox.dataset.filterId;
+    const value = checkbox.value;
+    const scope = checkbox.dataset.scope;
+
+    if (filterId && value && scope) {
+      checkbox.checked = isFilterActive(filterId, value, scope);
+    }
+  });
+}
+
 //------------------------------------------------------------------------------ Layer 1
 // Filter operations
 
@@ -47,10 +94,21 @@ function addFilter(filterId, op, value, scope = 'global') {
     value: value
   };
 
-  if (scope === 'global') {
-    filterState.global.clauses.push(clause);
-  } else {
-    filterState.panes[currentPane].clauses.push(clause);
+  // Check if filter already exists to avoid duplicates
+  const targetClauses = scope === 'global'
+    ? filterState.global.clauses
+    : filterState.panes[currentPane].clauses;
+
+  const exists = targetClauses.some(c =>
+    c['filter/id'] === filterId && c.value === value
+  );
+
+  if (!exists) {
+    if (scope === 'global') {
+      filterState.global.clauses.push(clause);
+    } else {
+      filterState.panes[currentPane].clauses.push(clause);
+    }
   }
 
   persistState();
@@ -438,12 +496,39 @@ if (document.readyState === 'loading') {
   init();
 }
 
+// Watch for filter modal content changes and initialize checkboxes
+const modalObserver = new MutationObserver((mutations) => {
+  mutations.forEach((mutation) => {
+    if (mutation.addedNodes.length) {
+      mutation.addedNodes.forEach((node) => {
+        if (node.classList && node.classList.contains('filter-modal')) {
+          initializeFilterCheckboxes();
+        }
+      });
+    }
+  });
+});
+
+// Start observing the filter modal container
+document.addEventListener('DOMContentLoaded', () => {
+  const modalContainer = document.getElementById('filter-modal-container');
+  if (modalContainer) {
+    modalObserver.observe(modalContainer, {
+      childList: true,
+      subtree: true
+    });
+  }
+});
+
 // Export API
 window.miniforge = window.miniforge || {};
 window.miniforge.filters = {
   getFilterState,
   setCurrentPane,
   getCurrentPane,
+  isFilterActive,
+  toggleFilter,
+  initializeFilterCheckboxes,
   addFilter,
   removeFilter,
   promoteToGlobal,

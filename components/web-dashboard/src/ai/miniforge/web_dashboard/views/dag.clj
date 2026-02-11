@@ -27,7 +27,14 @@
    [:div.filter-modal-overlay {:onclick "this.parentElement.remove()"}]
    [:div.filter-modal-content
     [:div.filter-modal-header
-     [:h3 (str "Add " (if (= scope "global") "Global" "Pane-Local") " Filter")]
+     [:h3
+      (if (= scope "global")
+        [:span [:span.scope-icon "🌐"] " Add Global Filter"]
+        [:span [:span.scope-icon "📊"] " Add Pane Filter"])]
+     [:div.scope-badge {:class (if (= scope "global") "scope-badge-global" "scope-badge-local")}
+      (if (= scope "global")
+        "Applies to all panes"
+        "This pane only")]
      [:button.filter-modal-close
       {:onclick "this.parentElement.parentElement.parentElement.remove()"
        :title "Close"}
@@ -51,12 +58,13 @@
                  (for [[value count] facet-counts]
                    [:label.filter-option {:key (str filter-id "-" value)}
                     [:input {:type "checkbox"
+                             :class "filter-checkbox"
                              :name (str "filter-" (name filter-id))
                              :value (str value)
-                             :onchange (str "window.miniforge.filters.addFilter('"
-                                          (name filter-id) "', ':=', '" value "', '" scope "'); "
-                                          "document.getElementById('filter-modal-container').innerHTML = ''; "
-                                          "window.miniforge.filters.renderFilterChips();")}]
+                             :data-filter-id (name filter-id)
+                             :data-scope scope
+                             :onchange (str "window.miniforge.filters.toggleFilter('"
+                                          (name filter-id) "', '" value "', '" scope "', this.checked);")}]
                     [:span (str value (when count (str " (" count ")")))]
                     ])
                  ;; Static values
@@ -64,12 +72,13 @@
                    (let [count (get facet-counts value)]
                      [:label.filter-option {:key (str filter-id "-" value)}
                       [:input {:type "checkbox"
+                               :class "filter-checkbox"
                                :name (str "filter-" (name filter-id))
                                :value (name value)
-                               :onchange (str "window.miniforge.filters.addFilter('"
-                                            (name filter-id) "', ':=', '" (name value) "', '" scope "'); "
-                                            "document.getElementById('filter-modal-container').innerHTML = ''; "
-                                            "window.miniforge.filters.renderFilterChips();")}]
+                               :data-filter-id (name filter-id)
+                               :data-scope scope
+                               :onchange (str "window.miniforge.filters.toggleFilter('"
+                                            (name filter-id) "', '" (name value) "', '" scope "', this.checked);")}]
                       [:span (str (name value) (when count (str " (" count ")")))]])))
 
                :bool
