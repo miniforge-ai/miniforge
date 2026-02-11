@@ -70,11 +70,21 @@
     [:div.dashboard
      [:aside.sidebar
       [:nav.nav
-       [:a.nav-item {:href "/" :class "active"} [:span.icon "▸"] "Dashboard"]
-       [:a.nav-item {:href "/fleet"} [:span.icon "▸"] "PR Fleet"]
-       [:a.nav-item {:href "/dag"} [:span.icon "▸"] "DAG Kanban"]
-       [:a.nav-item {:href "/evidence"} [:span.icon "▸"] "Evidence"]
-       [:a.nav-item {:href "/workflows"} [:span.icon "▸"] "Workflows"]]]
+       [:a.nav-item {:href "/"
+                     :class (when (= title "Dashboard") "active")}
+        [:span.icon "▸"] "Dashboard"]
+       [:a.nav-item {:href "/fleet"
+                     :class (when (= title "PR Fleet") "active")}
+        [:span.icon "▸"] "PR Fleet"]
+       [:a.nav-item {:href "/dag"
+                     :class (when (= title "DAG Kanban") "active")}
+        [:span.icon "▸"] "DAG Kanban"]
+       [:a.nav-item {:href "/evidence"
+                     :class (when (= title "Evidence") "active")}
+        [:span.icon "▸"] "Evidence"]
+       [:a.nav-item {:href "/workflows"
+                     :class (when (= title "Workflows") "active")}
+        [:span.icon "▸"] "Workflows"]]]
      [:main.main
       [:div.page-header
        [:h1.page-title title]]

@@ -791,11 +791,14 @@ tbody td {
 
 .btn-ghost {
   background: transparent;
-  border-color: transparent;
+  border-color: var(--border-color);
+  color: var(--text-secondary);
 }
 
 .btn-ghost:hover {
   background: var(--bg-hover);
+  border-color: var(--color-brand-primary);
+  color: var(--text-primary);
 }
 
 .btn-sm {
