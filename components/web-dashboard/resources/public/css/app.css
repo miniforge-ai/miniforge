@@ -187,20 +187,29 @@ body {
 
 .logo {
   margin-bottom: var(--space-lg);
-  padding: var(--space-md);
-  background: linear-gradient(135deg, var(--bg-tertiary) 0%, var(--bg-secondary) 100%);
+  padding: var(--space-sm);
+  background: linear-gradient(135deg, #f5e6d3 0%, #e8d5b7 100%);
   border-radius: 8px;
   border: 2px solid var(--color-brand-primary);
   box-shadow: var(--shadow-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  text-align: center;
 }
 
 .logo img {
   max-width: 100%;
   height: auto;
-  filter: drop-shadow(0 0 8px var(--color-brand-secondary));
+  display: block;
+  margin: 0 auto;
+}
+
+.logo-tagline {
+  font-family: 'Roboto Condensed', sans-serif;
+  font-size: 0.75rem;
+  color: #5d4e42;
+  margin-top: var(--space-xs);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-weight: 500;
 }
 
 .nav {

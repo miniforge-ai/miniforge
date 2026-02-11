@@ -42,8 +42,8 @@
      [:aside.sidebar
       [:div.logo
        [:img {:src "/img/miniforge_logo.png"
-              :alt "Miniforge"
-              :style "width: 100%; height: auto;"}]]
+              :alt "Miniforge"}]
+       [:div.logo-tagline "An agentic SDLC / fleet-control platform"]]
       [:nav.nav
        [:a.nav-item {:href "/" :class "active"} [:span.icon "▸"] "Dashboard"]
        [:a.nav-item {:href "/fleet"} [:span.icon "▸"] "PR Fleet"]
