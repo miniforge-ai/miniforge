@@ -1,5 +1,6 @@
 {:description "Backend setup and configuration errors"
  :type :external
+ :vendor "External Service"
  :patterns
  [{:id :codex-permission-error
    :regex "Codex cannot access session files.*permission denied"

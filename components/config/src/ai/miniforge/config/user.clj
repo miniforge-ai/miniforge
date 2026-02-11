@@ -51,7 +51,9 @@
                         :workaround-auto-apply true
                         :backend-auto-switch true
                         :backend-health-threshold 0.90
-                        :backend-switch-cooldown-ms 1800000}}))
+                        :backend-switch-cooldown-ms 1800000}
+         :dashboard {:port 7878
+                     :auto-open false}}))
     ;; Fallback if resource not found
     {:llm {:backend :claude
            :model "claude-sonnet-4-20250514"
@@ -71,11 +73,13 @@
                        :prefer-speed false
                        :allow-downgrade true
                        :require-local false}
-     :self-healing {:enabled true
-                    :workaround-auto-apply true
-                    :backend-auto-switch true
-                    :backend-health-threshold 0.90
-                    :backend-switch-cooldown-ms 1800000}}))
+         :self-healing {:enabled true
+                        :workaround-auto-apply true
+                        :backend-auto-switch true
+                        :backend-health-threshold 0.90
+                        :backend-switch-cooldown-ms 1800000}
+         :dashboard {:port 7878
+                     :auto-open false}}))
 
 (def default-config
   "Default configuration values loaded from resources/config/default-user-config.edn"

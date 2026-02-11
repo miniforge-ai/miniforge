@@ -452,7 +452,9 @@
    Provides 5 N5 views: workflow list, detail, evidence, artifacts, DAG kanban."
   [m]
   (let [{:keys [port open]} (get-opts m)
-        port (or port 8080)]
+        port (or port
+                 (get-in (config/load-config) [:dashboard :port])
+                 7878)]
     (try
       ;; Conditionally require web-dashboard (may not be on classpath in Babashka)
       (require '[ai.miniforge.web-dashboard.interface :as dashboard])
@@ -845,7 +847,8 @@ Examples:
            :input {:alias :i}
            :input-json {}
            :output {:coerce :keyword :alias :o :default :pretty}
-           :quiet {:coerce :boolean :alias :q}}}
+           :quiet {:coerce :boolean :alias :q}
+           :dashboard-url {:coerce :string :alias :d}}}
 
    {:cmds ["workflow" "list"]
     :fn workflow-list-cmd}
