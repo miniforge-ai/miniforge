@@ -60,12 +60,8 @@
         [:span#ws-indicator.status-dot.disconnected]
         [:span#ws-text.ws-text "Connected"]]
        [:button.btn.btn-sm.btn-ghost
-        {:onclick "window.miniforge.cycleTheme()"
-         :title "Cycle theme (Ctrl+Shift+T)"}
-        "◐ Theme"]
-       [:button.btn.btn-sm.btn-ghost
         {:onclick "window.miniforge.filters && window.miniforge.filters.shareCurrentView()"
-         :title "Share current view"}
+         :title "Share or bookmark current view"}
         "🔗 Share"]
        [:button.btn.btn-sm.btn-ghost
         {:onclick "window.miniforge.cycleTheme()"
@@ -361,56 +357,71 @@
 ;; DAG Kanban view
 
 (defn filter-modal-fragment
-  "Filter selection modal content (loaded via htmx)."
-  [filter-fields]
+  "Filter selection modal content with faceted counts."
+  [{:keys [filters facets scope _pane] :or {filters [] facets {} scope "local"}}]
   [:div.filter-modal
    [:div.filter-modal-overlay {:onclick "this.parentElement.remove()"}]
    [:div.filter-modal-content
     [:div.filter-modal-header
-     [:h3 "Add Filter"]
+     [:h3 (str "Add " (if (= scope "global") "Global" "Pane-Local") " Filter")]
      [:button.filter-modal-close
       {:onclick "this.parentElement.parentElement.parentElement.remove()"
        :title "Close"}
       "×"]]
     [:div.filter-modal-body
-     ;; Repositories section
-     (when (seq (:repos filter-fields))
-       [:div.filter-section
-        [:h4.filter-section-title "Repository"]
-        [:div.filter-options
-         (for [repo (:repos filter-fields)]
-           [:label.filter-option
-            [:input {:type "checkbox"
-                     :name "filter-repo"
-                     :value (:id repo)
-                     :onchange (str "window.miniforge.addFilterChip('Repo: " (:label repo) "', 'repo', '" (:id repo) "')")}]
-            [:span (:label repo)]])]])
+     (if (empty? filters)
+       [:p.empty-message "No filters available for this pane."]
+       (for [filter-spec filters]
+         (let [filter-id (:filter/id filter-spec)
+               filter-label (:filter/label filter-spec)
+               filter-type (:filter/type filter-spec)
+               facet-counts (get facets filter-id)]
+           [:div.filter-section {:key (str filter-id)}
+            [:h4.filter-section-title filter-label]
+            [:div.filter-options
+             (case filter-type
+               :enum
+               ;; Show options with counts
+               (if (= :dynamic (:filter/values filter-spec))
+                 ;; Dynamic values from facets
+                 (for [[value count] facet-counts]
+                   [:label.filter-option {:key (str filter-id "-" value)}
+                    [:input {:type "checkbox"
+                             :name (str "filter-" (name filter-id))
+                             :value (str value)
+                             :onchange (str "window.miniforge.filters.addFilter('"
+                                          (name filter-id) "', ':=', '" value "', '" scope "')")}]
+                    [:span (str value (when count (str " (" count ")")))]
+                    ])
+                 ;; Static values
+                 (for [value (:filter/values filter-spec)]
+                   (let [count (get facet-counts value)]
+                     [:label.filter-option {:key (str filter-id "-" value)}
+                      [:input {:type "checkbox"
+                               :name (str "filter-" (name filter-id))
+                               :value (name value)
+                               :onchange (str "window.miniforge.filters.addFilter('"
+                                            (name filter-id) "', ':=', '" (name value) "', '" scope "')")}]
+                      [:span (str (name value) (when count (str " (" count ")")))]])))
 
-     ;; Trains section
-     (when (seq (:trains filter-fields))
-       [:div.filter-section
-        [:h4.filter-section-title "Train"]
-        [:div.filter-options
-         (for [train (:trains filter-fields)]
-           [:label.filter-option
-            [:input {:type "checkbox"
-                     :name "filter-train"
-                     :value (:id train)
-                     :onchange (str "window.miniforge.addFilterChip('" (:label train) "', 'train', '" (:id train) "')")}]
-            [:span (:label train)]])]])
+               :bool
+               [:div.filter-option
+                [:label
+                 [:input {:type "checkbox"
+                          :name (str "filter-" (name filter-id))
+                          :onchange (str "window.miniforge.filters.addFilter('"
+                                       (name filter-id) "', ':=', this.checked, '" scope "')")}]
+                 [:span "Yes"]]]
 
-     ;; Status section
-     (when (seq (:statuses filter-fields))
-       [:div.filter-section
-        [:h4.filter-section-title "Status"]
-        [:div.filter-options
-         (for [status (:statuses filter-fields)]
-           [:label.filter-option
-            [:input {:type "checkbox"
-                     :name "filter-status"
-                     :value (:id status)
-                     :onchange (str "window.miniforge.addFilterChip('Status: " (:label status) "', 'status', '" (:id status) "')")}]
-            [:span (:label status)]])]])]
+               :text
+               [:input.filter-text-input
+                {:type "text"
+                 :placeholder (str "Search " filter-label "...")
+                 :onchange (str "if(this.value) window.miniforge.filters.addFilter('"
+                              (name filter-id) "', ':text-search', this.value, '" scope "')")}]
+
+               ;; Default
+               [:span "Unsupported filter type: " (name filter-type)])]])))]
     [:div.filter-modal-footer
      [:button.btn.btn-sm.btn-ghost
       {:onclick "this.parentElement.parentElement.parentElement.remove()"}

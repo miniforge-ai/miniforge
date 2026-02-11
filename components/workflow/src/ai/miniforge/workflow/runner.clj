@@ -25,7 +25,8 @@
    - Health monitoring (monitoring namespace)
 
    Provides the main run-pipeline entry point."
-  (:require [ai.miniforge.phase.interface :as phase]
+  (:require [clojure.string :as str]
+            [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.execution :as exec]
@@ -129,7 +130,7 @@
       (require '[org.httpkit.client :as http])
       (when-let [http-ns (find-ns 'org.httpkit.client)]
         (when-let [websocket-fn (ns-resolve http-ns 'websocket)]
-          (let [ws-url (clojure.string/replace dashboard-url #"^http" "ws")
+          (let [ws-url (str/replace dashboard-url #"^http" "ws")
                 ws-url (str ws-url "/ws/events")
                 ws (websocket-fn ws-url
                                  {:on-open (fn [_ws] (println "Connected to dashboard:" ws-url))
@@ -148,10 +149,9 @@
                                                       :stop (do
                                                               (swap! control-state assoc :stopped true)
                                                               (println "⏹  Workflow stopped by dashboard"))
-                                                      :adjust (do
-                                                                (when-let [params (:params command)]
-                                                                  (swap! control-state update :adjustments merge params)
-                                                                  (println "⚙  Workflow parameters adjusted:" params)))
+                                                      :adjust (when-let [params (:params command)]
+                                                                (swap! control-state update :adjustments merge params)
+                                                                (println "⚙  Workflow parameters adjusted:" params))
                                                       (println "Unknown command:" (:command command))))
                                                   (catch Exception e
                                                     (println "Error handling dashboard command:" (.getMessage e)))))})]

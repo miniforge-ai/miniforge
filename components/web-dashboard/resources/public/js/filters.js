@@ -276,17 +276,25 @@ function updateURL() {
 function shareCurrentView() {
   updateURL();
   const url = window.location.href;
+  const isLocalhost = window.location.hostname === 'localhost' ||
+                     window.location.hostname === '127.0.0.1' ||
+                     window.location.hostname === '';
 
-  // Copy to clipboard
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(url).then(() => {
-      alert('Shareable link copied to clipboard!');
-    }).catch(err => {
-      console.error('Failed to copy link:', err);
-      prompt('Copy this link:', url);
-    });
+  if (isLocalhost) {
+    // For localhost, just notify that URL is updated for bookmarking
+    alert('✓ Filter state saved to URL\n\nBookmark this page to save your current view.\nThe URL has been updated with your filter settings.');
   } else {
-    prompt('Copy this link:', url);
+    // For remote servers, copy shareable link to clipboard
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url).then(() => {
+        alert('✓ Shareable link copied to clipboard!\n\nShare this URL with your team to show them your current filter view.');
+      }).catch(err => {
+        console.error('Failed to copy link:', err);
+        prompt('Copy this shareable link:', url);
+      });
+    } else {
+      prompt('Copy this shareable link:', url);
+    }
   }
 }
 

@@ -24,7 +24,8 @@
    [clojure.java.io :as io]
    [hiccup2.core :refer [html]]
    [ai.miniforge.web-dashboard.views :as views]
-   [ai.miniforge.web-dashboard.state :as state]))
+   [ai.miniforge.web-dashboard.state :as state]
+   [ai.miniforge.web-dashboard.filters :as filters]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Static file serving
@@ -124,6 +125,24 @@
     (catch Exception e
       (println "Error handling WebSocket message:" (.getMessage e)))))
 
+(defn- handle-workflow-event
+  "Handle incoming event from workflow process.
+   Publishes event to dashboard's event stream."
+  [state data]
+  (try
+    (let [event (json/parse-string data true)]
+      ;; Publish event to dashboard's event stream
+      (when-let [es (:event-stream @state)]
+        (try
+          (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
+            (when es-ns
+              (when-let [publish! (ns-resolve es-ns 'publish!)]
+                (publish! es event))))
+          (catch Exception e
+            (println "Error publishing workflow event:" (.getMessage e))))))
+    (catch Exception e
+      (println "Error parsing workflow event:" (.getMessage e)))))
+
 (defn- create-ws-handler
   "Create WebSocket handler with event streaming and workflow control."
   [state workflow-connections]
@@ -167,19 +186,7 @@
 
                       :on-receive
                       (fn [_ch data]
-                        (try
-                          (let [event (json/parse-string data true)]
-                            ;; Publish event to dashboard's event stream
-                            (when-let [es (:event-stream @state)]
-                              (try
-                                (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
-                                  (when es-ns
-                                    (when-let [publish! (ns-resolve es-ns 'publish!)]
-                                      (publish! es event))))
-                                (catch Exception e
-                                  (println "Error publishing workflow event:" (.getMessage e))))))
-                          (catch Exception e
-                            (println "Error parsing workflow event:" (.getMessage e)))))})))
+                        (handle-workflow-event state data))})))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; HTTP response helpers
@@ -208,6 +215,21 @@
    :body "Not Found"})
 
 ;------------------------------------------------------------------------------ Layer 2.5
+;; Filter parsing
+
+(defn- parse-filter-ast
+  "Parse filter AST from request parameters.
+
+   Expects JSON-encoded filter AST in 'filters' parameter."
+  [params]
+  (try
+    (when-let [filters-json (get params "filters")]
+      (json/parse-string filters-json true))
+    (catch Exception e
+      (println "Error parsing filter AST:" (.getMessage e))
+      nil)))
+
+;------------------------------------------------------------------------------ Layer 3
 ;; Route handlers
 
 (defn- handle-health
@@ -240,8 +262,14 @@
 
 (defn- handle-dag
   "DAG Kanban view."
-  [state]
-  (html-response (views/dag-kanban-view (state/get-dag-state state))))
+  [state params]
+  (let [dag-state (state/get-dag-state state)
+        filter-ast (parse-filter-ast params)
+        filtered-tasks (if filter-ast
+                        (filters/apply-filters (:tasks dag-state) filter-ast :task-status)
+                        (:tasks dag-state))
+        filtered-state (assoc dag-state :tasks filtered-tasks)]
+    (html-response (views/dag-kanban-view filtered-state))))
 
 (defn- handle-workflows
   "Workflows list view."
@@ -293,9 +321,29 @@
     (json-response {:success true})))
 
 (defn- handle-api-filter-fields
-  "API: Get available filter fields for Task Status view."
-  [state]
-  (html-response (views/filter-modal-fragment (state/get-filter-fields state))))
+  "API: Get available filter fields with faceted counts."
+  [state params]
+  (let [scope (get params "scope" "local")
+        pane (keyword (get params "pane" "task-status"))
+        ;; Get applicable filters for the pane
+        applicable-filters (filters/get-applicable-filters pane)
+        filters-to-show (if (= scope "global")
+                         (:global applicable-filters)
+                         (:local applicable-filters))
+        ;; Get data for computing facets
+        data (case pane
+               :task-status (:tasks (state/get-dag-state state))
+               :workflows (state/get-workflows state)
+               :evidence (:trains (state/get-evidence-state state))
+               :fleet (:trains (state/get-fleet-state state))
+               [])
+        ;; Compute facets for each filter
+        facets (filters/compute-all-facets data pane)]
+    (html-response (views/filter-modal-fragment
+                    {:filters filters-to-show
+                     :facets facets
+                     :scope scope
+                     :pane pane}))))
 
 (defn- handle-static
   "Static file handler."
@@ -341,7 +389,7 @@
           (handle-evidence state)
 
           (= uri "/dag")
-          (handle-dag state)
+          (handle-dag state params)
 
           (= uri "/workflows")
           (handle-workflows state)
@@ -372,7 +420,7 @@
           (handle-api-train-action state params)
 
           (= uri "/api/filter-fields")
-          (handle-api-filter-fields state)
+          (handle-api-filter-fields state params)
 
           ;; Static files
           (or (.startsWith uri "/css/")
