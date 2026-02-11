@@ -77,8 +77,8 @@
                      :class (when (= title "PR Fleet") "active")}
         [:span.icon "▸"] "PR Fleet"]
        [:a.nav-item {:href "/dag"
-                     :class (when (= title "DAG Kanban") "active")}
-        [:span.icon "▸"] "DAG Kanban"]
+                     :class (when (= title "Task Status") "active")}
+        [:span.icon "▸"] "Task Status"]
        [:a.nav-item {:href "/evidence"
                      :class (when (= title "Evidence") "active")}
         [:span.icon "▸"] "Evidence"]
@@ -331,27 +331,29 @@
 ;; DAG Kanban view
 
 (defn dag-kanban-view
-  "DAG-based kanban board for task visualization."
+  "Task status kanban board for workflow visualization."
   [state]
-  (layout "DAG Kanban"
+  (layout "Task Status"
    [:div.kanban-view
     [:div.kanban-header
      [:div.kanban-title-row
-      [:h2 "Task Dependency Graph"]
+      [:h2 "Workflow Tasks"]
       [:div.kanban-filter-bar
        [:div.filter-chips
         ;; Active filter chips (example - would be dynamic)
-        [:div.filter-chip
+        ;; These would be populated dynamically based on active filters
+        ;; For now, showing examples with disabled state
+        [:div.filter-chip {:style "display:none;"}
          [:span.filter-label "All Repos"]
-         [:button.filter-remove {:onclick "removeFilter('repo')"
+         [:button.filter-remove {:onclick "this.parentElement.remove()"
                                  :title "Remove filter"} "×"]]
-        [:div.filter-chip
+        [:div.filter-chip {:style "display:none;"}
          [:span.filter-label "PR Trains"]
-         [:button.filter-remove {:onclick "removeFilter('type')"
+         [:button.filter-remove {:onclick "this.parentElement.remove()"
                                  :title "Remove filter"} "×"]]]
        [:div.filter-actions
         [:button.btn.btn-sm.btn-ghost.filter-add
-         {:onclick "showFilterMenu()"
+         {:onclick "alert('Filter UI: Select repo, workflow type, status, etc.')"
           :title "Add filter"}
          "+ Filter"]]]]]
     [:div.kanban-board

@@ -58,16 +58,16 @@
 
 /* Light theme: Industrial daylight */
 [data-theme="light"] {
-  /* Backgrounds - warm creams and tans */
-  --bg-primary: #f5f1ed;
-  --bg-secondary: #e8e0d5;
-  --bg-tertiary: #ddd4c7;
-  --bg-hover: #d4c5b9;
+  /* Backgrounds - cool blues and greys */
+  --bg-primary: #f5f7fa;
+  --bg-secondary: #e3e8ef;
+  --bg-tertiary: #d1dae6;
+  --bg-hover: #c5d0e0;
 
-  /* Text - rich browns */
-  --text-primary: #2b2320;
-  --text-secondary: #4a3f3a;
-  --text-muted: #6d5d52;
+  /* Text - deep blues and greys */
+  --text-primary: #1a2332;
+  --text-secondary: #3d4f66;
+  --text-muted: #5a6b7f;
 
   /* Brand accent - burnt orange (consistent across themes) */
   --color-brand-primary: #d84315;
@@ -89,12 +89,12 @@
   --color-kanban-running: #f9a825;
   --color-kanban-done: #558b2f;
 
-  --border-color: #c7b8a8;
+  --border-color: #bfc9d9;
   --border-active: var(--color-brand-primary);
 
-  --shadow-sm: 0 1px 3px rgba(43,35,32,0.1);
-  --shadow-md: 0 4px 6px rgba(43,35,32,0.15);
-  --shadow-lg: 0 10px 20px rgba(43,35,32,0.2);
+  --shadow-sm: 0 1px 3px rgba(26,35,50,0.1);
+  --shadow-md: 0 4px 6px rgba(26,35,50,0.15);
+  --shadow-lg: 0 10px 20px rgba(26,35,50,0.2);
 }
 
 /* High contrast theme: Maximum accessibility */
