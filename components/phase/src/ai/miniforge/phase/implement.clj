@@ -96,9 +96,17 @@
               :task/constraints (:constraints input)
               :task/plan plan-result} ; Pass plan output to implementer
 
+        ;; Create streaming callback for agent output
+        on-chunk (when-let [es (:event-stream ctx)]
+                   (when-let [create-cb (requiring-resolve
+                                         'ai.miniforge.event-stream.interface/create-streaming-callback)]
+                     (create-cb es (:execution/id ctx) :implement
+                                {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)})))
+        agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
+
         ;; Invoke agent
         result (try
-                 (agent/invoke implementer-agent task ctx)
+                 (agent/invoke implementer-agent task agent-ctx)
                  (catch Exception e
                    (response/failure e)))]
 

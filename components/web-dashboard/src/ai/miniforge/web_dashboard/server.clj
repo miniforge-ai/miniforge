@@ -78,7 +78,7 @@
               (subscribe! event-stream subscriber-id
                           (fn [event]
                             (try
-                              (http/send! ch (json/generate-string event))
+                              (http/send! ch (json/generate-string {:type :event :data event}))
                               (catch Exception e
                                 (println "Error sending event to WebSocket:" (.getMessage e)))))))))
         (catch Exception e
@@ -650,6 +650,30 @@
                      :scope scope
                      :pane pane}))))
 
+(defn- handle-api-events
+  "API: Query raw events from event stream."
+  [state params]
+  (let [workflow-id (when-let [wid (param-value params :workflow-id nil)]
+                      (try (parse-uuid wid) (catch Exception _ nil)))
+        event-type (when-let [et (param-value params :event-type nil)]
+                     (keyword et))
+        since (param-value params :since nil)
+        limit (try (Integer/parseInt (str (param-value params :limit "100")))
+                   (catch Exception _ 100))
+        events (state/get-events state {:workflow-id workflow-id
+                                        :event-type event-type
+                                        :since since
+                                        :limit (min limit 500)})]
+    (json-response events)))
+
+(defn- handle-api-workflow-events
+  "API: Query events for a specific workflow."
+  [state workflow-id]
+  (let [wid (try (parse-uuid workflow-id) (catch Exception _ nil))]
+    (if wid
+      (json-response (state/get-events state {:workflow-id wid :limit 500}))
+      (json-response {:error "Invalid workflow ID"}))))
+
 (defn- handle-static
   "Static file handler."
   [uri]
@@ -730,6 +754,16 @@
 
           (= uri "/api/filter-fields")
           (handle-api-filter-fields state params)
+
+          (= uri "/api/events")
+          (handle-api-events state params)
+
+          (.startsWith uri "/api/workflow/")
+          (let [rest-uri (subs uri 14)
+                [wf-id segment] (str/split rest-uri #"/" 2)]
+            (if (= segment "events")
+              (handle-api-workflow-events state wf-id)
+              (not-found-response)))
 
           ;; Static files
           (or (.startsWith uri "/css/")

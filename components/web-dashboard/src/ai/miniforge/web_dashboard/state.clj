@@ -264,6 +264,50 @@
     (or (first (filter #(= (str (:id %)) id) workflows))
         {:error "Workflow not found"})))
 
+(defn get-events
+  "Query raw events from event stream with optional filtering.
+
+   Options:
+   - :workflow-id  Filter by workflow UUID
+   - :event-type   Filter by event type keyword
+   - :since        Filter events after this timestamp (ISO-8601 string)
+   - :limit        Max events to return (default 100)"
+  [state {:keys [workflow-id event-type since limit] :or {limit 100}}]
+  (try
+    (if-let [stream (:event-stream @state)]
+      (let [es-ns (or (find-ns 'ai.miniforge.event-stream.interface)
+                      (do (require 'ai.miniforge.event-stream.interface)
+                          (find-ns 'ai.miniforge.event-stream.interface)))]
+        (if es-ns
+          (let [get-events-fn (ns-resolve es-ns 'get-events)
+                all-events (get-events-fn stream)
+                since-inst (when since
+                             (try (java.time.Instant/parse since)
+                                  (catch Exception _ nil)))
+                filtered (->> all-events
+                              (filter (fn [e]
+                                        (and (or (nil? workflow-id)
+                                                 (= workflow-id (wf-id e)))
+                                             (or (nil? event-type)
+                                                 (= event-type (:event/type e)))
+                                             (or (nil? since-inst)
+                                                 (when-let [ts (:event/timestamp e)]
+                                                   (let [evt-inst (cond
+                                                                    (instance? java.time.Instant ts) ts
+                                                                    (string? ts) (try (java.time.Instant/parse ts)
+                                                                                      (catch Exception _ nil))
+                                                                    :else nil)]
+                                                     (and evt-inst (.isAfter evt-inst since-inst))))))))
+                              reverse
+                              (take limit)
+                              vec)]
+            filtered)
+          []))
+      [])
+    (catch Exception e
+      (println "Error querying events:" (.getMessage e))
+      [])))
+
 ;------------------------------------------------------------------------------ Layer 6
 ;; Dashboard state
 

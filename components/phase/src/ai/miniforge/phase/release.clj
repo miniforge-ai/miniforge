@@ -27,6 +27,30 @@
             [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Event stream helpers (optional dependency)
+
+(defn- emit-phase-started!
+  "Emit phase-started event if event-stream is available in context."
+  [ctx phase]
+  (when-let [event-stream (:event-stream ctx)]
+    (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
+      (when-let [phase-started (requiring-resolve 'ai.miniforge.event-stream.interface/phase-started)]
+        (let [workflow-id (:execution/id ctx)]
+          (publish! event-stream (phase-started event-stream workflow-id phase)))))))
+
+(defn- emit-phase-completed!
+  "Emit phase-completed event if event-stream is available in context."
+  [ctx phase _result]
+  (when-let [event-stream (:event-stream ctx)]
+    (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
+      (when-let [phase-completed (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
+        (let [workflow-id (:execution/id ctx)
+              outcome (if (= :completed (get-in ctx [:phase :status])) :success :failure)
+              duration-ms (get-in ctx [:phase :duration-ms])]
+          (publish! event-stream (phase-completed event-stream workflow-id phase
+                                                   {:outcome outcome :duration-ms duration-ms})))))))
+
+;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
 
 (def default-config
@@ -92,6 +116,8 @@
    - Commit changes
    - Push branch and create PR (if enabled)"
   [ctx]
+  ;; Emit phase started event
+  (emit-phase-started! ctx :release)
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
@@ -155,21 +181,24 @@
         release-metrics (or (:release/metrics release-data) {})
         metrics (merge {:tokens 0 :duration-ms duration-ms} release-metrics)
         iterations (get-in ctx [:phase :iterations] 1)
-        pr-info (get-in ctx [:workflow/pr-info])]
-    (-> ctx
-        (assoc-in [:phase :ended-at] end-time)
-        (assoc-in [:phase :duration-ms] duration-ms)
-        (assoc-in [:phase :status] :completed)
-        (assoc-in [:phase :metrics] metrics)
-        (assoc-in [:metrics :release :duration-ms] duration-ms)
-        (assoc-in [:metrics :release :repair-cycles] (dec iterations))
-        ;; Include PR info in metrics for evidence bundle
-        (cond-> pr-info
-          (assoc-in [:metrics :release :pr-info] pr-info))
-        (update-in [:execution :phases-completed] (fnil conj []) :release)
-        ;; Merge agent metrics into execution metrics
-        (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
-        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))))
+        pr-info (get-in ctx [:workflow/pr-info])
+        updated-ctx (-> ctx
+                        (assoc-in [:phase :ended-at] end-time)
+                        (assoc-in [:phase :duration-ms] duration-ms)
+                        (assoc-in [:phase :status] :completed)
+                        (assoc-in [:phase :metrics] metrics)
+                        (assoc-in [:metrics :release :duration-ms] duration-ms)
+                        (assoc-in [:metrics :release :repair-cycles] (dec iterations))
+                        ;; Include PR info in metrics for evidence bundle
+                        (cond-> pr-info
+                          (assoc-in [:metrics :release :pr-info] pr-info))
+                        (update-in [:execution :phases-completed] (fnil conj []) :release)
+                        ;; Merge agent metrics into execution metrics
+                        (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
+                        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
+    ;; Emit phase completed event
+    (emit-phase-completed! updated-ctx :release result)
+    updated-ctx))
 
 (defn- error-release
   "Handle release phase errors."
