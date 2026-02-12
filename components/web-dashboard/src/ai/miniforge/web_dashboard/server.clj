@@ -28,7 +28,9 @@
    [ai.miniforge.web-dashboard.server.responses :as responses]
    [ai.miniforge.web-dashboard.server.filters :as filters]
    [ai.miniforge.web-dashboard.server.websocket :as websocket]
-   [ai.miniforge.web-dashboard.server.handlers :as handlers]))
+   [ai.miniforge.web-dashboard.server.handlers :as handlers]
+   [ai.miniforge.web-dashboard.watcher :as watcher]
+   [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Discovery file
@@ -184,7 +186,10 @@
    - :repo-dag-manager - Repo DAG manager instance"
   [{:keys [port event-stream pr-train-manager repo-dag-manager]
     :or {port 7878}}]
-  (let [state (state/create-state {:event-stream event-stream
+  (let [;; Create dashboard-local event stream with NO file sinks to prevent write-back loop.
+        ;; The watcher reads from ~/.miniforge/events/ and publishes to this in-memory-only stream.
+        dashboard-event-stream (or event-stream (es/create-event-stream {:sinks []}))
+        state (state/create-state {:event-stream dashboard-event-stream
                                    :pr-train-manager pr-train-manager
                                    :repo-dag-manager repo-dag-manager
                                    :start-time (System/currentTimeMillis)})
@@ -192,7 +197,13 @@
         server (http/run-server handler {:port port})
         actual-port (if (zero? port)
                       (.getLocalPort (:server-socket @server))
-                      port)]
+                      port)
+        ;; Start file watcher to tail-follow event files
+        events-dir (str (System/getProperty "user.home") "/.miniforge/events")
+        watcher-cleanup (watcher/start-watcher!
+                         events-dir
+                         (fn [event]
+                           (es/publish! dashboard-event-stream event)))]
     ;; Write discovery file for auto-connect
     (write-discovery-file! actual-port)
 
@@ -202,14 +213,18 @@
     (println "├─────────────────────────────────────────────────────┤")
     (println  "│ URL: http://localhost:" actual-port (apply str (repeat (- 28 (count (str actual-port))) " ")) "│")
     (println  "│ WebSocket: ws://localhost:" actual-port "/ws" (apply str (repeat (- 21 (count (str actual-port))) " ")) "│")
+    (println  "│ Events: " events-dir (apply str (repeat (max 1 (- 40 (count events-dir))) " ")) "│")
     (println "└─────────────────────────────────────────────────────┘")
     {:server server
      :port actual-port
-     :state state}))
+     :state state
+     :watcher-cleanup watcher-cleanup}))
 
 (defn stop-server!
-  "Stop HTTP server."
-  [{:keys [server]}]
+  "Stop HTTP server and watcher."
+  [{:keys [server watcher-cleanup]}]
+  (when watcher-cleanup
+    (watcher-cleanup))
   (when server
     (delete-discovery-file!)
     (server :timeout 100)

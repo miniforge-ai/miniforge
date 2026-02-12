@@ -278,13 +278,10 @@
           workflow-input (context/spec->workflow-input enriched-spec)
           artifact-store (create-artifact-store quiet)
           event-stream (es/create-event-stream)
-          ;; Auto-discover and bridge to running dashboard
-          dashboard-url (dashboard/discover-dashboard-url)
-          dashboard-cleanup (dashboard/bridge-events-to-dashboard! event-stream dashboard-url quiet)
           workflow-id (or (get-in enriched-spec [:spec/metadata :session-id]) (random-uuid))
           ;; Control state for dashboard commands (pause/resume/stop)
           control-state (atom {:paused false :stopped false :adjustments {}})
-          command-poller-cleanup (dashboard/start-command-poller! dashboard-url workflow-id control-state)
+          command-poller-cleanup (dashboard/start-command-poller! workflow-id control-state)
           ;; Create workflow-specific LLM client for execution
           llm-client (context/create-llm-client workflow spec quiet)
           callbacks (create-phase-callbacks quiet)
@@ -303,6 +300,7 @@
           [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)]
       (when-not quiet
         (display/print-workflow-header (keyword (str "adhoc-" (hash spec))) "adhoc" quiet))
+      (dashboard/print-dashboard-status! quiet)
       (try
         (execute-with-events {:run-pipeline run-pipeline
                               :workflow workflow
@@ -314,11 +312,7 @@
                               :sandbox-cleanup sandbox-cleanup
                               :opts opts})
         (finally
-          (when command-poller-cleanup (command-poller-cleanup))
-          (when dashboard-cleanup
-            ;; Brief pause to let final events (cancelled/failed) flush to dashboard
-            (Thread/sleep 500)
-            (dashboard-cleanup)))))
+          (when command-poller-cleanup (command-poller-cleanup)))))
     (catch Exception e
       (when-not quiet
         (println (display/colorize :red (str "\n❌ Workflow execution failed: " (ex-message e)))))

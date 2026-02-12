@@ -16,6 +16,7 @@
   "HTTP route handlers for views and API endpoints."
   (:require
    [clojure.string :as str]
+   [clojure.java.io :as io]
    [cheshire.core :as json]
    [ai.miniforge.web-dashboard.server.responses :as responses]
    [ai.miniforge.web-dashboard.server.filters :as filters]
@@ -272,12 +273,33 @@
                  [])]
     (responses/html-response (views/workflow-detail-panel workflow events))))
 
+(defn- write-command-file!
+  "Atomic write of a command file to ~/.miniforge/commands/<workflow-id>/<timestamp>.edn.
+   Writes to .tmp then renames for atomicity."
+  [workflow-id command]
+  (try
+    (let [commands-dir (io/file (System/getProperty "user.home")
+                                ".miniforge" "commands" (str workflow-id))
+          timestamp (System/currentTimeMillis)
+          target-file (io/file commands-dir (str timestamp ".edn"))
+          tmp-file (io/file commands-dir (str timestamp ".edn.tmp"))
+          command-data {:command (keyword command) :timestamp timestamp}]
+      (.mkdirs commands-dir)
+      (spit tmp-file (pr-str command-data))
+      (.renameTo tmp-file target-file))
+    (catch Exception _
+      ;; Best-effort — fall through to in-memory enqueue
+      nil)))
+
 (defn handle-api-workflow-command
   "API: Enqueue a control command for a workflow."
   [state workflow-id body]
   (try
     (let [data (json/parse-string body true)
           command (or (:command data) "unknown")]
+      ;; Write command file for CLI filesystem polling
+      (write-command-file! workflow-id command)
+      ;; Keep in-memory enqueue for state tracking
       (state/enqueue-command! state workflow-id command)
       (responses/json-response {:status "queued" :command command :workflow-id workflow-id}))
     (catch Exception e
