@@ -129,7 +129,12 @@
     ;; Filter modal container
     [:div#filter-modal-container]
     [:script {:src "/js/app.js"}]
-    [:script {:src "/js/filters.js"}])))
+    [:script {:src "/js/filters/runtime.js"}]
+    [:script {:src "/js/filters/state.js"}]
+    [:script {:src "/js/filters/persistence.js"}]
+    [:script {:src "/js/filters/apply.js"}]
+    [:script {:src "/js/filters/ui.js"}]
+    [:script {:src "/js/filters/init.js"}])))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Public API - Re-exports from subdirectories
