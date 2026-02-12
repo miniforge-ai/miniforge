@@ -204,24 +204,91 @@ function handleWebSocketMessage(data) {
   switch (data.type) {
     case 'init':
       console.log('Received initial state:', data.data);
-      // htmx will handle state updates
+      // Trigger initial refresh so htmx sections load fresh data
+      document.body.dispatchEvent(new CustomEvent('refresh'));
       break;
 
     case 'state':
       console.log('State update:', data.data);
-      // Trigger htmx refresh for affected sections
       document.body.dispatchEvent(new CustomEvent('refresh'));
       break;
 
     case 'event':
-      console.log('Event received:', data.data);
-      // Trigger htmx refresh for relevant sections
-      document.body.dispatchEvent(new CustomEvent('refresh'));
+      handleWorkflowEvent(data.data);
       break;
 
     default:
       console.log('Unknown message type:', data.type);
   }
+}
+
+// Toast notification system
+function showToast(message, type = 'info', duration = 5000) {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.style.cssText = 'position:fixed;top:60px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;';
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.style.cssText = 'padding:10px 16px;border-radius:6px;font-size:13px;color:#fff;opacity:0;transition:opacity 0.3s;max-width:360px;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+
+  const colors = { info: '#2196F3', success: '#4CAF50', error: '#f44336', warning: '#ff9800' };
+  toast.style.background = colors[type] || colors.info;
+  toast.textContent = message;
+
+  container.appendChild(toast);
+  requestAnimationFrame(() => { toast.style.opacity = '1'; });
+
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+
+// Handle individual workflow events
+function handleWorkflowEvent(event) {
+  if (!event) return;
+
+  const eventType = event['event/type'] || event.event_type;
+
+  switch (eventType) {
+    case 'workflow/started':
+      showToast('Workflow started: ' + (event['workflow/spec']?.name || 'unknown'), 'info');
+      break;
+
+    case 'workflow/phase-started':
+      showToast('Phase started: ' + (event['workflow/phase'] || 'unknown'), 'info');
+      break;
+
+    case 'workflow/phase-completed': {
+      const outcome = event['phase/outcome'] || 'completed';
+      const type = outcome === 'success' ? 'success' : 'warning';
+      showToast('Phase completed: ' + (event['workflow/phase'] || 'unknown'), type);
+      break;
+    }
+
+    case 'workflow/completed':
+      showToast('Workflow completed', 'success');
+      break;
+
+    case 'workflow/failed':
+      showToast('Workflow failed: ' + (event['workflow/failure-reason'] || 'unknown error'), 'error', 8000);
+      break;
+
+    // agent/chunk events are high-frequency — don't toast, just refresh
+    case 'agent/chunk':
+      break;
+
+    default:
+      break;
+  }
+
+  // Trigger htmx refresh for all data-bound sections
+  document.body.dispatchEvent(new CustomEvent('refresh'));
 }
 
 // Initialize WebSocket on page load

@@ -28,6 +28,30 @@
             [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Event stream helpers (optional dependency)
+
+(defn- emit-phase-started!
+  "Emit phase-started event if event-stream is available in context."
+  [ctx phase]
+  (when-let [event-stream (:event-stream ctx)]
+    (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
+      (when-let [phase-started (requiring-resolve 'ai.miniforge.event-stream.interface/phase-started)]
+        (let [workflow-id (:execution/id ctx)]
+          (publish! event-stream (phase-started event-stream workflow-id phase)))))))
+
+(defn- emit-phase-completed!
+  "Emit phase-completed event if event-stream is available in context."
+  [ctx phase _result]
+  (when-let [event-stream (:event-stream ctx)]
+    (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
+      (when-let [phase-completed (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
+        (let [workflow-id (:execution/id ctx)
+              outcome (if (= :completed (get-in ctx [:phase :status])) :success :failure)
+              duration-ms (get-in ctx [:phase :duration-ms])]
+          (publish! event-stream (phase-completed event-stream workflow-id phase
+                                                   {:outcome outcome :duration-ms duration-ms})))))))
+
+;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
 
 (def default-config
@@ -51,6 +75,8 @@
    Generates tests for code artifacts, runs them,
    checks coverage thresholds."
   [ctx]
+  ;; Emit phase started event
+  (emit-phase-started! ctx :verify)
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
@@ -72,9 +98,17 @@
         ;; Build task using canonical builder
         task (task/verify-task code-artifact input)
 
+        ;; Create streaming callback for agent output
+        on-chunk (when-let [es (:event-stream ctx)]
+                   (when-let [create-cb (requiring-resolve
+                                         'ai.miniforge.event-stream.interface/create-streaming-callback)]
+                     (create-cb es (:execution/id ctx) :verify
+                                {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)})))
+        agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
+
         ;; Invoke agent
         result (try
-                 (agent/invoke tester-agent task ctx)
+                 (agent/invoke tester-agent task agent-ctx)
                  (catch Exception e
                    (response/failure e)))]
 
@@ -97,18 +131,21 @@
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
         metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
-        iterations (get-in ctx [:phase :iterations] 1)]
-    (-> ctx
-        (assoc-in [:phase :ended-at] end-time)
-        (assoc-in [:phase :duration-ms] duration-ms)
-        (assoc-in [:phase :status] :completed)
-        (assoc-in [:phase :metrics] metrics)
-        (assoc-in [:metrics :verification :duration-ms] duration-ms)
-        (assoc-in [:metrics :verification :repair-cycles] (dec iterations))
-        (update-in [:execution :phases-completed] (fnil conj []) :verify)
-        ;; Merge agent metrics into execution metrics
-        (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
-        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))))
+        iterations (get-in ctx [:phase :iterations] 1)
+        updated-ctx (-> ctx
+                        (assoc-in [:phase :ended-at] end-time)
+                        (assoc-in [:phase :duration-ms] duration-ms)
+                        (assoc-in [:phase :status] :completed)
+                        (assoc-in [:phase :metrics] metrics)
+                        (assoc-in [:metrics :verification :duration-ms] duration-ms)
+                        (assoc-in [:metrics :verification :repair-cycles] (dec iterations))
+                        (update-in [:execution :phases-completed] (fnil conj []) :verify)
+                        ;; Merge agent metrics into execution metrics
+                        (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
+                        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
+    ;; Emit phase completed event
+    (emit-phase-completed! updated-ctx :verify result)
+    updated-ctx))
 
 (defn- error-verify
   "Handle verification phase errors.

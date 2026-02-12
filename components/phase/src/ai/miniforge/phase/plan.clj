@@ -92,9 +92,17 @@
               :task/intent (:intent input)
               :task/constraints (:constraints input)}
 
+        ;; Create streaming callback for agent output
+        on-chunk (when-let [es (:event-stream ctx)]
+                   (when-let [create-cb (requiring-resolve
+                                         'ai.miniforge.event-stream.interface/create-streaming-callback)]
+                     (create-cb es (:execution/id ctx) :plan
+                                {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)})))
+        agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
+
         ;; Invoke agent (this will call LLM and do actual work)
         result (try
-                 (agent/invoke planner-agent task ctx)
+                 (agent/invoke planner-agent task agent-ctx)
                  (catch Exception e
                    (response/failure e)))]
 
