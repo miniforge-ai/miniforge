@@ -325,11 +325,16 @@
   [state params]
   (let [scope (get params "scope" "local")
         pane (keyword (get params "pane" "task-status"))
-        ;; Get applicable filters for the pane
-        applicable-filters (filters/get-applicable-filters pane)
+        ;; For global scope: ONLY show global filters (never local)
+        ;; For local scope: ONLY show local filters for this pane
         filters-to-show (if (= scope "global")
-                         (:global applicable-filters)
-                         (:local applicable-filters))
+                          ;; Global: get ALL global filters, ignore pane
+                          (filter #(= :global (:filter/scope %))
+                                  (filters/get-filter-specs))
+                          ;; Local: get only local filters for this pane
+                          (filter #(and (= :local (:filter/scope %))
+                                        (contains? (:filter/applicable-to %) pane))
+                                  (filters/get-filter-specs)))
         ;; Get data for computing facets
         data (case pane
                :task-status (:tasks (state/get-dag-state state))
