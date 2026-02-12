@@ -90,14 +90,18 @@
 (defn get-applicable-filters
   "Get all filters applicable to a pane, grouped by scope.
 
+   For global filters: Returns ALL global filters (they apply everywhere).
+   For local filters: Returns only filters applicable to the specific pane.
+
    Returns:
-   {:global [...global filter specs...]
-    :local  [...local filter specs...]}"
+   {:global [...all global filter specs...]
+    :local  [...local filter specs for this pane...]}"
   [pane]
-  (let [specs (get-filter-specs)
-        applicable (filter #(contains? (:filter/applicable-to %) pane) specs)]
-    {:global (filter #(= :global (:filter/scope %)) applicable)
-     :local (filter #(= :local (:filter/scope %)) applicable)}))
+  (let [specs (get-filter-specs)]
+    {:global (filter #(= :global (:filter/scope %)) specs)
+     :local (filter #(and (= :local (:filter/scope %))
+                         (contains? (:filter/applicable-to %) pane))
+                   specs)}))
 
 (defn get-filter-spec-by-id
   "Get a filter spec by its ID."
