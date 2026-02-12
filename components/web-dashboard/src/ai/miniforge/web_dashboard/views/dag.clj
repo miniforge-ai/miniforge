@@ -96,6 +96,77 @@
         (cloud-option filter-id scope value (get facet-counts value))
         (enum-option filter-id scope option-value (get facet-counts value) cloud?)))))
 
+(defn- bool-filter-options
+  [filter-id scope]
+  [:div.filter-option
+   [:label
+    [:input {:type "checkbox"
+             :class "filter-checkbox"
+             :name (str "filter-" (name filter-id))
+             :data-filter-id (name filter-id)
+             :data-scope scope
+             :onchange (str "window.miniforge.filters.toggleFilter('"
+                          (name filter-id) "', true, '" scope "', this.checked);")}]
+    [:span "Yes"]]])
+
+(defn- text-filter-input
+  [filter-id filter-label scope filter-spec]
+  (let [text-op (if (= :multi-path (get-in filter-spec [:filter/value :kind]))
+                  ":text-search"
+                  ":contains")]
+    [:input.filter-text-input
+     {:type "text"
+      :class "filter-text-input"
+      :placeholder (str "Search " filter-label "...")
+      :data-filter-id (name filter-id)
+      :data-scope scope
+      :onchange (str "window.miniforge.filters.setTextFilter('"
+                   (name filter-id) "', '" scope "', this.value, '" text-op "');")}]))
+
+(defn- filter-options-fragment
+  [filter-spec scope facet-counts cloud?]
+  (let [filter-id (:filter/id filter-spec)
+        filter-label (:filter/label filter-spec)
+        filter-type (:filter/type filter-spec)]
+    (case filter-type
+      :enum
+      (if (= :dynamic (:filter/values filter-spec))
+        (dynamic-enum-options filter-id scope filter-label facet-counts cloud?)
+        (static-enum-options filter-id scope (:filter/values filter-spec) facet-counts cloud?))
+
+      :bool
+      (bool-filter-options filter-id scope)
+
+      :text
+      (text-filter-input filter-id filter-label scope filter-spec)
+
+      [:span "Unsupported filter type: " (name filter-type)])))
+
+(defn- filter-section-fragment
+  [filter-spec facets scope]
+  (let [filter-id (:filter/id filter-spec)
+        filter-label (:filter/label filter-spec)
+        filter-type (:filter/type filter-spec)
+        facet-counts (get facets filter-id)
+        cloud? (and (= scope "global") (= filter-type :enum))
+        section-class (str "filter-section"
+                           (when (= scope "global") " filter-section-global-compact")
+                           (when (= scope "local") " filter-section-local-compact"))]
+    [:div {:class section-class
+           :key (str filter-id)}
+     [:h4.filter-section-title filter-label]
+     [:div {:class (str "filter-options" (when cloud? " filter-options-cloud"))}
+      (filter-options-fragment filter-spec scope facet-counts cloud?)]]))
+
+(defn- filter-modal-body-fragment
+  [filters facets scope]
+  (if (empty? filters)
+    [:p.empty-message (if (= scope "global")
+                        "No global filter fields configured."
+                        "No filters available for this pane.")]
+    (for [filter-spec filters]
+      (filter-section-fragment filter-spec facets scope))))
+
 (defn filter-modal-fragment
   "Filter selection modal content with faceted counts."
   [{:keys [filters facets scope _pane] :or {filters [] facets {} scope "local"}}]
@@ -116,55 +187,7 @@
        :title "Close"}
       "×"]]
     [:div.filter-modal-body
-     (if (empty? filters)
-       [:p.empty-message (if (= scope "global")
-                           "No global filter fields configured."
-                           "No filters available for this pane.")]
-       (for [filter-spec filters]
-         (let [filter-id (:filter/id filter-spec)
-               filter-label (:filter/label filter-spec)
-               filter-type (:filter/type filter-spec)
-               facet-counts (get facets filter-id)
-               cloud? (and (= scope "global") (= filter-type :enum))
-               text-op (if (= :multi-path (get-in filter-spec [:filter/value :kind]))
-                         ":text-search"
-                         ":contains")
-               section-class (str "filter-section"
-                                  (when (= scope "global") " filter-section-global-compact")
-                                  (when (= scope "local") " filter-section-local-compact"))]
-           [:div {:class section-class
-                  :key (str filter-id)}
-            [:h4.filter-section-title filter-label]
-            [:div {:class (str "filter-options" (when cloud? " filter-options-cloud"))}
-             (case filter-type
-               :enum
-               (if (= :dynamic (:filter/values filter-spec))
-                 (dynamic-enum-options filter-id scope filter-label facet-counts cloud?)
-                 (static-enum-options filter-id scope (:filter/values filter-spec) facet-counts cloud?))
-
-               :bool
-               [:div.filter-option
-                [:label
-                 [:input {:type "checkbox"
-                          :class "filter-checkbox"
-                          :name (str "filter-" (name filter-id))
-                          :data-filter-id (name filter-id)
-                          :data-scope scope
-                          :onchange (str "window.miniforge.filters.toggleFilter('"
-                                       (name filter-id) "', true, '" scope "', this.checked);")}]
-                 [:span "Yes"]]]
-
-               :text
-               [:input.filter-text-input
-                {:type "text"
-                 :class "filter-text-input"
-                 :placeholder (str "Search " filter-label "...")
-                 :data-filter-id (name filter-id)
-                 :data-scope scope
-                 :onchange (str "window.miniforge.filters.setTextFilter('"
-                              (name filter-id) "', '" scope "', this.value, '" text-op "');")}]
-
-               [:span "Unsupported filter type: " (name filter-type)])]])))]
+     (filter-modal-body-fragment filters facets scope)]
     [:div.filter-modal-footer
      [:button.btn.btn-sm.btn-ghost
       {:onclick "this.parentElement.parentElement.parentElement.remove()"}
