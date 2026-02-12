@@ -23,6 +23,8 @@
    Agent: :implementer
    Default gates: [:syntax :lint]"
   (:require [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.phase.file-context :as file-ctx]
+            [ai.miniforge.phase.agent-behavior :as agent-beh]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.response.interface :as response]))
 
@@ -88,13 +90,26 @@
         ;; Read from execution phase results where plan phase stored its output
         ;; Phase results contain the full phase map, so extract :result :output
         plan-result (get-in ctx [:execution/phase-results :plan :result :output])
+
+        ;; Load existing file contents for agent visibility
+        worktree-path (or (:worktree-path ctx) (System/getProperty "user.dir"))
+        files-in-scope (or (get-in input [:context :files-in-scope])
+                           (get-in input [:intent :scope]))
+        existing-files (file-ctx/load-files-in-scope worktree-path files-in-scope)
+
+        ;; Load agent-behavior addendum from policy rules
+        behavior-addendum (agent-beh/load-and-filter-behaviors
+                            :implement {:task {:task/intent (:intent input)}})
+
         task {:task/id (random-uuid)
               :task/type :implement
               :task/description (:description input)
               :task/title (:title input)
               :task/intent (:intent input)
               :task/constraints (:constraints input)
-              :task/plan plan-result} ; Pass plan output to implementer
+              :task/plan plan-result
+              :task/existing-files existing-files
+              :task/behavior-addendum behavior-addendum}
 
         ;; Create streaming callback for agent output
         on-chunk (when-let [es (:event-stream ctx)]
@@ -143,7 +158,10 @@
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
     ;; Emit phase completed event
     (emit-phase-completed! updated-ctx :implement result)
-    updated-ctx))
+    ;; Add skip metadata when work was already implemented
+    (cond-> updated-ctx
+      (= :already-implemented (:status result))
+      (assoc-in [:phase :skipped-reason] :already-implemented))))
 
 (defn- error-implement
   "Handle implementation phase errors.

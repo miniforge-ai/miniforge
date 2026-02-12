@@ -94,15 +94,44 @@
           "rs" "rust"
           most-common))))
 
+(defn- format-existing-files
+  "Format existing file contents for inclusion in the user prompt.
+
+   Arguments:
+   - files - Vector of {:path :content :truncated? :lines} maps
+
+   Returns:
+   - Formatted markdown string, or nil if no files"
+  [files]
+  (when (seq files)
+    (str "\n\n## Existing Files in Scope\n\n"
+         "The following files already exist. Review them before generating code.\n"
+         (->> files
+              (map (fn [{:keys [path content truncated?]}]
+                     (str "\n### " path
+                          (when truncated? " (truncated)")
+                          "\n```\n" content "\n```")))
+              (str/join "\n")))))
+
 (defn- task->text
-  "Convert a task to text for the LLM."
+  "Convert a task to text for the LLM.
+   Includes plan and intent when available for richer context."
   [task]
   (cond
     (string? task) task
-    (map? task) (or (:task/description task)
-                    (:description task)
-                    (:content task)
-                    (pr-str task))
+    (map? task) (let [desc (or (:task/description task)
+                               (:description task)
+                               (:content task))
+                      plan (:task/plan task)
+                      intent (:task/intent task)
+                      parts (cond-> []
+                              desc (conj desc)
+                              plan (conj (str "\n\n## Plan\n\n" (if (string? plan) plan (pr-str plan))))
+                              (and intent (map? intent))
+                              (conj (str "\n\n## Intent\n\n" (pr-str intent))))]
+                  (if (seq parts)
+                    (str/join "" parts)
+                    (pr-str task)))
     :else (str task)))
 
 (defn- parse-code-response
@@ -240,17 +269,25 @@
         (let [llm-client (or (:llm-backend opts) (:llm-backend context))
               on-chunk (:on-chunk context)
               task-text (task->text input)
+              ;; Append behavior addendum to system prompt if present
+              effective-system-prompt (str @implementer-system-prompt
+                                          (or (:task/behavior-addendum input) ""))
+              ;; Include existing files and already-implemented escape hatch
               user-prompt (str "Implement the following task:\n\n"
                                task-text
+                               (format-existing-files (:task/existing-files input))
                                "\n\nOutput your code as a Clojure map following the format in your system prompt. "
-                               "Include full file contents, not placeholders.")]
+                               "Include full file contents, not placeholders."
+                               "\n\nIf the task is already fully implemented in the existing files, respond with:\n"
+                               "```clojure\n{:status :already-implemented\n"
+                               " :summary \"Brief explanation of why no changes are needed\"}\n```")]
           (if llm-client
             ;; Use the real LLM with streaming if callback provided
             (let [response (if on-chunk
                              (llm/chat-stream llm-client user-prompt on-chunk
-                                              {:system @implementer-system-prompt})
+                                              {:system effective-system-prompt})
                              (llm/chat llm-client user-prompt
-                                       {:system @implementer-system-prompt}))
+                                       {:system effective-system-prompt}))
                   tokens (or (:tokens response) 0)]
               (log/info logger :implementer :implementer/llm-called
                         {:data {:success (llm/success? response)
@@ -258,31 +295,44 @@
                                 :streaming? (boolean on-chunk)}})
               (if (llm/success? response)
                 (let [content (llm/get-content response)
-                      parsed (parse-code-response content)
-                      ;; Try multiple parsing strategies
-                      code (or parsed
-                               (when-let [files (extract-code-blocks content)]
-                                 {:code/id (random-uuid)
-                                  :code/files files
-                                  :code/tests-needed? true
-                                  :code/summary "Implementation from code blocks"
-                                  :code/created-at (java.util.Date.)})
-                               (make-fallback-code task-text))
-                      ;; Ensure proper ID and language
-                      code-with-meta (-> code
-                                         (update :code/id #(or % (random-uuid)))
-                                         (assoc :code/language (extract-language (:code/files code) context))
-                                         (assoc :code/created-at (java.util.Date.)))
-                      lang (:code/language code-with-meta)]
-                  {:status :success
-                   :output code-with-meta
-                   :artifact code-with-meta
-                   :tokens tokens
-                   :metrics {:files-created (count (filter #(= :create (:action %)) (:code/files code-with-meta)))
-                             :files-modified (count (filter #(= :modify (:action %)) (:code/files code-with-meta)))
-                             :files-deleted (count (filter #(= :delete (:action %)) (:code/files code-with-meta)))
-                             :language lang
-                             :tokens tokens}})
+                      parsed (parse-code-response content)]
+                  ;; Check for already-implemented response
+                  (if (= :already-implemented (:status parsed))
+                    {:status :already-implemented
+                     :output {:code/id (random-uuid)
+                              :code/files []
+                              :code/summary (:summary parsed)
+                              :code/language nil
+                              :code/tests-needed? false
+                              :code/created-at (java.util.Date.)}
+                     :summary (:summary parsed)
+                     :metrics {:tokens tokens
+                               :files-created 0
+                               :skipped-reason :already-implemented}}
+                    ;; Normal code artifact parsing
+                    (let [code (or parsed
+                                   (when-let [files (extract-code-blocks content)]
+                                     {:code/id (random-uuid)
+                                      :code/files files
+                                      :code/tests-needed? true
+                                      :code/summary "Implementation from code blocks"
+                                      :code/created-at (java.util.Date.)})
+                                   (make-fallback-code task-text))
+                          ;; Ensure proper ID and language
+                          code-with-meta (-> code
+                                             (update :code/id #(or % (random-uuid)))
+                                             (assoc :code/language (extract-language (:code/files code) context))
+                                             (assoc :code/created-at (java.util.Date.)))
+                          lang (:code/language code-with-meta)]
+                      {:status :success
+                       :output code-with-meta
+                       :artifact code-with-meta
+                       :tokens tokens
+                       :metrics {:files-created (count (filter #(= :create (:action %)) (:code/files code-with-meta)))
+                                 :files-modified (count (filter #(= :modify (:action %)) (:code/files code-with-meta)))
+                                 :files-deleted (count (filter #(= :delete (:action %)) (:code/files code-with-meta)))
+                                 :language lang
+                                 :tokens tokens}})))
                 ;; LLM call failed
                 (let [fallback (make-fallback-code task-text)]
                   {:status :error
