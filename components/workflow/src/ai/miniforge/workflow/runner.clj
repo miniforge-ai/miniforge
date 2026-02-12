@@ -25,7 +25,8 @@
    - Health monitoring (monitoring namespace)
 
    Provides the main run-pipeline entry point."
-  (:require [ai.miniforge.phase.interface :as phase]
+  (:require [clojure.string :as str]
+            [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.execution :as exec]
@@ -120,6 +121,29 @@
             (catch Exception _ nil)))))
     (catch Exception _ nil)))
 
+(defn- handle-dashboard-command
+  "Handle incoming control command from dashboard.
+   Updates control-state based on command type."
+  [control-state msg]
+  (try
+    (let [command (json/parse-string msg true)]
+      (case (:command command)
+        :pause (do
+                 (swap! control-state assoc :paused true)
+                 (println "⏸  Workflow paused by dashboard"))
+        :resume (do
+                  (swap! control-state assoc :paused false)
+                  (println "▶  Workflow resumed by dashboard"))
+        :stop (do
+                (swap! control-state assoc :stopped true)
+                (println "⏹  Workflow stopped by dashboard"))
+        :adjust (when-let [params (:params command)]
+                  (swap! control-state update :adjustments merge params)
+                  (println "⚙  Workflow parameters adjusted:" params))
+        (println "Unknown command:" (:command command))))
+    (catch Exception e
+      (println "Error handling dashboard command:" (.getMessage e)))))
+
 (defn- connect-to-dashboard
   "Connect to dashboard via WebSocket for event streaming.
    Returns event-stream map with :websocket connection, or nil if connection fails."
@@ -129,32 +153,14 @@
       (require '[org.httpkit.client :as http])
       (when-let [http-ns (find-ns 'org.httpkit.client)]
         (when-let [websocket-fn (ns-resolve http-ns 'websocket)]
-          (let [ws-url (clojure.string/replace dashboard-url #"^http" "ws")
+          (let [ws-url (str/replace dashboard-url #"^http" "ws")
                 ws-url (str ws-url "/ws/events")
                 ws (websocket-fn ws-url
                                  {:on-open (fn [_ws] (println "Connected to dashboard:" ws-url))
                                   :on-close (fn [_ws _status] (println "Disconnected from dashboard"))
                                   :on-error (fn [_ws error] (println "Dashboard WebSocket error:" error))
                                   :on-receive (fn [_ws msg]
-                                                (try
-                                                  (let [command (json/parse-string msg true)]
-                                                    (case (:command command)
-                                                      :pause (do
-                                                               (swap! control-state assoc :paused true)
-                                                               (println "⏸  Workflow paused by dashboard"))
-                                                      :resume (do
-                                                                (swap! control-state assoc :paused false)
-                                                                (println "▶  Workflow resumed by dashboard"))
-                                                      :stop (do
-                                                              (swap! control-state assoc :stopped true)
-                                                              (println "⏹  Workflow stopped by dashboard"))
-                                                      :adjust (do
-                                                                (when-let [params (:params command)]
-                                                                  (swap! control-state update :adjustments merge params)
-                                                                  (println "⚙  Workflow parameters adjusted:" params)))
-                                                      (println "Unknown command:" (:command command))))
-                                                  (catch Exception e
-                                                    (println "Error handling dashboard command:" (.getMessage e)))))})]
+                                                (handle-dashboard-command control-state msg))})]
             {:websocket ws
              :dashboard-url dashboard-url
              :control-state control-state})))

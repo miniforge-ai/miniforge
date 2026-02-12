@@ -21,10 +21,12 @@
   (:require
    [org.httpkit.server :as http]
    [cheshire.core :as json]
+   [clojure.string :as str]
    [clojure.java.io :as io]
    [hiccup2.core :refer [html]]
    [ai.miniforge.web-dashboard.views :as views]
-   [ai.miniforge.web-dashboard.state :as state]))
+   [ai.miniforge.web-dashboard.state :as state]
+   [ai.miniforge.web-dashboard.filters-new :as filters]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Static file serving
@@ -56,7 +58,7 @@
   (if-let [resource (io/resource (str "public" path))]
     {:status 200
      :headers {"Content-Type" (get-content-type path)}
-     :body (slurp resource)}
+     :body (io/input-stream resource)}
     {:status 404
      :headers {"Content-Type" "text/plain"}
      :body "Not Found"}))
@@ -124,6 +126,40 @@
     (catch Exception e
       (println "Error handling WebSocket message:" (.getMessage e)))))
 
+(defn- handle-workflow-event
+  "Handle incoming event from workflow process.
+   Publishes event to dashboard's event stream."
+  [state data]
+  (try
+    (let [event (json/parse-string data true)
+          normalized-event (cond-> event
+                             (or (:workflow/id event) (:workflow-id event))
+                             (assoc :workflow/id (or (:workflow/id event) (:workflow-id event)))
+
+                             (or (:event/timestamp event) (:timestamp event))
+                             (assoc :event/timestamp (or (:event/timestamp event) (:timestamp event)))
+
+                             (or (:workflow/phase event) (:phase event))
+                             (assoc :workflow/phase (or (:workflow/phase event) (:phase event)))
+
+                             (or (:workflow/status event) (:status event))
+                             (assoc :workflow/status (or (:workflow/status event) (:status event)))
+
+                             (or (:workflow/spec event) (:workflow-spec event))
+                             (assoc :workflow/spec (or (:workflow/spec event) (:workflow-spec event))))
+          normalized-event (dissoc normalized-event :workflow-id :timestamp :phase :status :workflow-spec)]
+      ;; Publish event to dashboard's event stream
+      (when-let [es (:event-stream @state)]
+        (try
+          (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
+            (when es-ns
+              (when-let [publish! (ns-resolve es-ns 'publish!)]
+                (publish! es normalized-event))))
+          (catch Exception e
+            (println "Error publishing workflow event:" (.getMessage e))))))
+    (catch Exception e
+      (println "Error parsing workflow event:" (.getMessage e)))))
+
 (defn- create-ws-handler
   "Create WebSocket handler with event streaming and workflow control."
   [state workflow-connections]
@@ -167,19 +203,7 @@
 
                       :on-receive
                       (fn [_ch data]
-                        (try
-                          (let [event (json/parse-string data true)]
-                            ;; Publish event to dashboard's event stream
-                            (when-let [es (:event-stream @state)]
-                              (try
-                                (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
-                                  (when es-ns
-                                    (when-let [publish! (ns-resolve es-ns 'publish!)]
-                                      (publish! es event))))
-                                (catch Exception e
-                                  (println "Error publishing workflow event:" (.getMessage e))))))
-                          (catch Exception e
-                            (println "Error parsing workflow event:" (.getMessage e)))))})))
+                        (handle-workflow-event state data))})))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; HTTP response helpers
@@ -208,6 +232,162 @@
    :body "Not Found"})
 
 ;------------------------------------------------------------------------------ Layer 2.5
+;; Filter parsing
+
+(defn- param-value
+  "Read request parameter by keyword or string key."
+  [params key default]
+  (or (get params key)
+      (when (keyword? key) (get params (name key)))
+      (when (string? key) (get params (keyword key)))
+      default))
+
+(defn- ->keyword
+  "Convert string/keyword value to keyword when possible."
+  [v]
+  (cond
+    (keyword? v) v
+    (string? v) (let [trimmed (str/trim v)
+                      cleaned (if (str/starts-with? trimmed ":")
+                                (subs trimmed 1)
+                                trimmed)]
+                  (when-not (str/blank? cleaned)
+                    (keyword cleaned)))
+    :else nil))
+
+(defn- parse-bool
+  "Parse boolean-like string values."
+  [v]
+  (cond
+    (boolean? v) v
+    (string? v) (case (str/lower-case (str/trim v))
+                  "true" true
+                  "false" false
+                  v)
+    :else v))
+
+(defn- decode-url-part
+  "Decode a URL query-string key/value."
+  [s]
+  (java.net.URLDecoder/decode (str s) "UTF-8"))
+
+(defn- query-string->params
+  "Parse raw query-string into a string-keyed map."
+  [query-string]
+  (if (str/blank? query-string)
+    {}
+    (reduce
+     (fn [acc pair]
+       (let [[k v] (str/split pair #"=" 2)
+             key (decode-url-part k)
+             value (decode-url-part (or v ""))]
+         (assoc acc key value)))
+     {}
+     (remove str/blank? (str/split query-string #"&")))))
+
+(defn- normalize-op
+  "Normalize operation token to keyword."
+  [op]
+  (let [token (str/lower-case (str/trim (str op)))]
+    (case token
+      ":=" :=
+      "=" :=
+      ":!=" :!=
+      "!=" :!=
+      ":in" :in
+      "in" :in
+      ":contains" :contains
+      "contains" :contains
+      ":text-search" :text-search
+      "text-search" :text-search
+      ":<" :<
+      "<" :<
+      ":>" :>
+      ">" :>
+      ":<=" :<=
+      "<=" :<=
+      ":>=" :>=
+      ">=" :>=
+      ":between" :between
+      "between" :between
+      :=)))
+
+(defn- normalize-ast-op
+  "Normalize AST boolean operator."
+  [op]
+  (let [token (str/lower-case (str/trim (str op)))]
+    (case token
+      ":and" :and
+      "and" :and
+      ":or" :or
+      "or" :or
+      ":not" :not
+      "not" :not
+      :and)))
+
+(defn- normalize-filter-value
+  "Coerce clause value based on filter spec type/value configuration."
+  [spec value]
+  (let [filter-type (:filter/type spec)
+        filter-values (:filter/values spec)]
+    (cond
+      (= filter-type :bool)
+      (parse-bool value)
+
+      (and (= filter-type :enum)
+           (vector? filter-values)
+           (every? keyword? filter-values)
+           (string? value))
+      (or (some #(when (= (name %) (str/replace value #"^:" "")) %) filter-values)
+          value)
+
+      (and (= filter-type :enum)
+           (string? value)
+           (str/starts-with? (str/trim value) ":"))
+      (->keyword value)
+
+      :else value)))
+
+(defn- normalize-filter-clause
+  "Normalize a single JSON clause to evaluator-friendly shape."
+  [clause]
+  (let [filter-id (->keyword (or (:filter/id clause)
+                                 (get clause "filter/id")))
+        spec (when filter-id (filters/get-filter-spec-by-id filter-id))
+        value (or (:value clause) (get clause "value"))
+        op (or (:op clause) (get clause "op"))]
+    {:filter/id filter-id
+     :op (normalize-op op)
+     :value (if spec
+              (normalize-filter-value spec value)
+              value)}))
+
+(defn- normalize-filter-ast
+  "Normalize JSON AST from browser before evaluation."
+  [ast]
+  (let [clauses (or (:clauses ast) (get ast "clauses") [])]
+    {:op (normalize-ast-op (or (:op ast) (get ast "op")))
+     :clauses (->> clauses
+                   (map normalize-filter-clause)
+                   (filter :filter/id)
+                   vec)}))
+
+(defn- parse-filter-ast
+  "Parse filter AST from request parameters.
+
+   Expects JSON-encoded filter AST in 'filters' parameter."
+  [params]
+  (try
+    (when-let [filters-json (param-value params :filters nil)]
+      (normalize-filter-ast
+       (if (string? filters-json)
+         (json/parse-string filters-json true)
+         filters-json)))
+    (catch Exception e
+      (println "Error parsing filter AST:" (.getMessage e))
+      nil)))
+
+;------------------------------------------------------------------------------ Layer 3
 ;; Route handlers
 
 (defn- handle-health
@@ -240,8 +420,14 @@
 
 (defn- handle-dag
   "DAG Kanban view."
-  [state]
-  (html-response (views/dag-kanban-view (state/get-dag-state state))))
+  [state params]
+  (let [dag-state (state/get-dag-state state)
+        filter-ast (parse-filter-ast params)
+        filtered-tasks (if filter-ast
+                        (filters/apply-filters (:tasks dag-state) filter-ast :task-status)
+                        (:tasks dag-state))
+        filtered-state (assoc dag-state :tasks filtered-tasks)]
+    (html-response (views/dag-kanban-view filtered-state))))
 
 (defn- handle-workflows
   "Workflows list view."
@@ -254,43 +440,215 @@
   (html-response (views/workflow-detail-view
                   (state/get-workflow-detail state workflow-id))))
 
+(defn- maybe-apply-filters
+  [items filter-ast pane]
+  (if filter-ast
+    (filters/apply-filters items filter-ast pane)
+    items))
+
+(defn- filtered-fleet-trains
+  [state filter-ast]
+  (maybe-apply-filters (:trains (state/get-fleet-state state)) filter-ast :fleet))
+
+(defn- filtered-workflow-runs
+  [state filter-ast]
+  (maybe-apply-filters (state/get-workflows state) filter-ast :workflows))
+
+(defn- train-risk-score
+  [train]
+  (let [ci-penalty (case (:pr/ci-status train (:ci-status train))
+                     :failed 30
+                     :running 5
+                     :pending 10
+                     0)
+        dep-penalty (* 3 (count (:pr/depends-on train [])))
+        status-penalty (case (:pr/status train (:train/status train))
+                         :changes-requested 15
+                         :reviewing 5
+                         :merging 10
+                         0)
+        blocking-penalty (* 5 (count (:train/blocking-prs train [])))]
+    (min 100 (+ ci-penalty dep-penalty status-penalty blocking-penalty))))
+
+(defn- stats-from
+  [trains workflows]
+  (let [risk-scores (map train-risk-score trains)]
+    {:trains {:total (count trains)
+              :active (count (filter #(#{:open :reviewing :merging} (:train/status %)) trains))}
+     :prs {:total (reduce + 0 (map #(count (:train/prs %)) trains))
+           :ready (reduce + 0 (map #(count (:train/ready-to-merge %)) trains))
+           :blocked (reduce + 0 (map #(count (:train/blocking-prs %)) trains))}
+     :health {:healthy (count (filter #(< % 20) risk-scores))
+              :warning (count (filter #(and (>= % 20) (< % 50)) risk-scores))
+              :critical (count (filter #(>= % 50) risk-scores))}
+     :workflows {:total (count workflows)
+                 :running (count (filter #(= :running (:status %)) workflows))
+                 :completed (count (filter #(= :completed (:status %)) workflows))}}))
+
+(defn- risk-analysis-from
+  [trains]
+  (let [risks (map (fn [train]
+                     (let [score (train-risk-score train)]
+                       {:train-id (:train/id train)
+                        :train-name (:train/name train)
+                        :risk-score score
+                        :risk-level (cond
+                                      (< score 20) :low
+                                      (< score 50) :medium
+                                      :else :high)
+                        :factors (cond-> []
+                                   (seq (:train/blocking-prs train))
+                                   (conj {:type :blocking-prs
+                                          :count (count (:train/blocking-prs train))
+                                          :severity :high})
+
+                                   (some #(= :failed (:pr/ci-status %)) (:train/prs train))
+                                   (conj {:type :ci-failures
+                                          :count (count (filter #(= :failed (:pr/ci-status %)) (:train/prs train)))
+                                          :severity :high})
+
+                                   (> (count (:train/prs train)) 5)
+                                   (conj {:type :large-train
+                                          :count (count (:train/prs train))
+                                          :severity :medium}))}))
+                   trains)]
+    {:risks (sort-by :risk-score > risks)
+     :summary {:high (count (filter #(= :high (:risk-level %)) risks))
+               :medium (count (filter #(= :medium (:risk-level %)) risks))
+               :low (count (filter #(= :low (:risk-level %)) risks))}}))
+
+(defn- filtered-activity
+  [state trains filter-ast]
+  (let [activities (state/get-recent-activity state)]
+    (if filter-ast
+      (let [allowed-train-ids (set (keep :train/id trains))]
+        (filter #(contains? allowed-train-ids (:train-id %)) activities))
+      activities)))
+
 (defn- handle-api-stats
   "API: Dashboard stats fragment (for htmx updates)."
-  [state]
-  (html-response (views/stats-fragment (state/get-stats state))))
+  [state params]
+  (let [filter-ast (parse-filter-ast params)
+        trains (filtered-fleet-trains state filter-ast)
+        workflows (filtered-workflow-runs state filter-ast)]
+    (html-response (views/stats-fragment (stats-from trains workflows)))))
 
 (defn- handle-api-fleet-grid
   "API: Fleet status grid fragment (for htmx updates)."
-  [state]
-  (html-response (views/fleet-grid-fragment (state/get-fleet-state state))))
+  [state params]
+  (let [filter-ast (parse-filter-ast params)
+        fleet-state (state/get-fleet-state state)
+        filtered-trains (filtered-fleet-trains state filter-ast)
+        filtered-fleet-state (assoc fleet-state
+                                    :trains filtered-trains
+                                    :repos (group-by identity
+                                                     (mapcat #(map :pr/repo (:train/prs %))
+                                                             filtered-trains)))]
+    (html-response (views/fleet-grid-fragment filtered-fleet-state))))
 
 (defn- handle-api-trains
   "API: PR Train list fragment (for htmx updates)."
-  [state]
-  (html-response (views/train-list-fragment (state/get-trains state))))
+  [state params]
+  (let [filter-ast (parse-filter-ast params)
+        filtered-trains (filtered-fleet-trains state filter-ast)]
+    (html-response (views/train-list-fragment filtered-trains))))
 
 (defn- handle-api-risk
   "API: Risk analysis fragment (for htmx updates)."
-  [state]
-  (html-response (views/risk-analysis-fragment (state/get-risk-analysis state))))
+  [state params]
+  (let [filter-ast (parse-filter-ast params)
+        trains (filtered-fleet-trains state filter-ast)]
+    (html-response (views/risk-analysis-fragment (risk-analysis-from trains)))))
 
 (defn- handle-api-activity
   "API: Recent activity fragment (for htmx updates)."
-  [state]
-  (html-response (views/activity-fragment (state/get-recent-activity state))))
+  [state params]
+  (let [filter-ast (parse-filter-ast params)
+        trains (filtered-fleet-trains state filter-ast)]
+    (html-response (views/activity-fragment (filtered-activity state trains filter-ast)))))
 
 (defn- handle-api-workflows
   "API: Workflow list fragment (for htmx updates)."
-  [state]
-  (html-response (views/workflow-list-fragment (state/get-workflows state))))
+  [state params]
+  (let [filter-ast (parse-filter-ast params)
+        workflows (state/get-workflows state)
+        filtered-workflows (if filter-ast
+                             (filters/apply-filters workflows filter-ast :workflows)
+                             workflows)]
+    (html-response (views/workflow-list-fragment filtered-workflows))))
+
+(defn- handle-api-evidence-list
+  "API: Evidence list fragment (for htmx updates)."
+  [state params]
+  (let [filter-ast (parse-filter-ast params)
+        evidence-items (:trains (state/get-evidence-state state))
+        filtered-items (if filter-ast
+                         (filters/apply-filters evidence-items filter-ast :evidence)
+                         evidence-items)]
+    (html-response (views/evidence-list-fragment filtered-items))))
 
 (defn- handle-api-train-action
   "API: Train action handler."
   [state params]
-  (let [action (get params :action)
-        train-id (get params :train-id)]
+  (let [action (param-value params :action nil)
+        train-id (param-value params :train-id nil)]
     (state/train-action! state train-id action)
     (json-response {:success true})))
+
+(defn- pane-data
+  "Get pane data used for facet computation/filtering."
+  [state pane]
+  (case pane
+    :task-status (:tasks (state/get-dag-state state))
+    :workflows (state/get-workflows state)
+    :evidence (:trains (state/get-evidence-state state))
+    :fleet (:trains (state/get-fleet-state state))
+    []))
+
+(defn- normalize-facet-counts
+  "Normalize facet output into a map."
+  [facets]
+  (cond
+    (map? facets) facets
+    (sequential? facets) (into {} facets)
+    :else {}))
+
+(defn- compute-global-facets
+  "Compute facet counts for global filters across all applicable panes."
+  [state global-filters]
+  (into {}
+        (map (fn [spec]
+               (let [filter-id (:filter/id spec)
+                     per-pane (for [pane (sort (:filter/applicable-to spec))]
+                                (normalize-facet-counts
+                                 (filters/compute-facets (pane-data state pane) filter-id pane)))
+                     merged (apply merge-with + (cons {} per-pane))
+                     top-facets (->> merged
+                                     (sort-by val >)
+                                     (take 40))]
+                 [filter-id top-facets]))
+             global-filters)))
+
+(defn- handle-api-filter-fields
+  "API: Get available filter fields with faceted counts."
+  [state params]
+  (let [scope (str/lower-case (str (param-value params :scope "local")))
+        pane (or (->keyword (param-value params :pane "task-status"))
+                 :task-status)
+        all-filters (filters/get-filter-specs)
+        filters-to-show (if (= scope "global")
+                          (filter #(= :global (:filter/scope %)) all-filters)
+                          (filter #(and (= :local (:filter/scope %))
+                                        (contains? (:filter/applicable-to %) pane))
+                                  all-filters))
+        facets (if (= scope "global")
+                 (compute-global-facets state filters-to-show)
+                 (filters/compute-all-facets (pane-data state pane) pane))]
+    (html-response (views/filter-modal-fragment
+                    {:filters filters-to-show
+                     :facets facets
+                     :scope scope
+                     :pane pane}))))
 
 (defn- handle-static
   "Static file handler."
@@ -308,7 +666,8 @@
         events-ws-handler (create-events-ws-handler state workflow-connections)]
     (fn [req]
       (let [uri (:uri req)
-            params (:params req)]
+            params (merge (query-string->params (:query-string req))
+                          (:params req))]
         (cond
           ;; WebSocket for UI clients
           (= uri "/ws")
@@ -336,7 +695,7 @@
           (handle-evidence state)
 
           (= uri "/dag")
-          (handle-dag state)
+          (handle-dag state params)
 
           (= uri "/workflows")
           (handle-workflows state)
@@ -346,25 +705,31 @@
 
           ;; API endpoints (htmx fragments)
           (= uri "/api/stats")
-          (handle-api-stats state)
+          (handle-api-stats state params)
 
           (= uri "/api/fleet/grid")
-          (handle-api-fleet-grid state)
+          (handle-api-fleet-grid state params)
 
           (= uri "/api/trains")
-          (handle-api-trains state)
+          (handle-api-trains state params)
 
           (= uri "/api/risk")
-          (handle-api-risk state)
+          (handle-api-risk state params)
 
           (= uri "/api/activity")
-          (handle-api-activity state)
+          (handle-api-activity state params)
 
           (= uri "/api/workflows")
-          (handle-api-workflows state)
+          (handle-api-workflows state params)
+
+          (= uri "/api/evidence/list")
+          (handle-api-evidence-list state params)
 
           (= uri "/api/train/action")
           (handle-api-train-action state params)
+
+          (= uri "/api/filter-fields")
+          (handle-api-filter-fields state params)
 
           ;; Static files
           (or (.startsWith uri "/css/")
