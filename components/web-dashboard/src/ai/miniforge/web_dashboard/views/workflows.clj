@@ -21,6 +21,19 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Workflow fragments
 
+(defn- format-time
+  [ts]
+  (let [date (cond
+               (instance? java.util.Date ts) ts
+               (instance? java.time.Instant ts) (java.util.Date/from ts)
+               (string? ts) (try
+                              (java.util.Date/from (java.time.Instant/parse ts))
+                              (catch Exception _ nil))
+               :else nil)]
+    (if date
+      (str (.format (java.text.SimpleDateFormat. "HH:mm") date))
+      "—")))
+
 (defn workflow-list-fragment
   "Workflow list fragment for htmx updates."
   [workflows]
@@ -48,9 +61,7 @@
            [:td (:name wf)]
            [:td (:phase wf)]
            [:td (c/progress-bar (:progress wf))]
-           [:td (if (:started-at wf)
-                  (str (.format (java.text.SimpleDateFormat. "HH:mm") (:started-at wf)))
-                  "—")]])]]])))
+           [:td (format-time (:started-at wf))]])]]])))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Workflow list view

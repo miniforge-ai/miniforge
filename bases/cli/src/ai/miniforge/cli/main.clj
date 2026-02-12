@@ -685,7 +685,7 @@
 (defn workflow-run-cmd
   "Execute a workflow by ID."
   [m]
-  (let [{:keys [workflow-id version input input-json output quiet]} (get-opts m)]
+  (let [{:keys [workflow-id version input input-json output quiet dashboard-url]} (get-opts m)]
     (if-not workflow-id
       (print-error "Usage: miniforge workflow run <workflow-id> [options]")
       (try
@@ -695,7 +695,8 @@
           :input input
           :input-json input-json
           :output (or output :pretty)
-          :quiet (boolean quiet)})
+          :quiet (boolean quiet)
+          :dashboard-url dashboard-url})
         (catch Exception e
           (print-error (str "Workflow execution failed: " (ex-message e))))))))
 

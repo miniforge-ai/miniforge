@@ -131,14 +131,30 @@
    Publishes event to dashboard's event stream."
   [state data]
   (try
-    (let [event (json/parse-string data true)]
+    (let [event (json/parse-string data true)
+          normalized-event (cond-> event
+                             (or (:workflow/id event) (:workflow-id event))
+                             (assoc :workflow/id (or (:workflow/id event) (:workflow-id event)))
+
+                             (or (:event/timestamp event) (:timestamp event))
+                             (assoc :event/timestamp (or (:event/timestamp event) (:timestamp event)))
+
+                             (or (:workflow/phase event) (:phase event))
+                             (assoc :workflow/phase (or (:workflow/phase event) (:phase event)))
+
+                             (or (:workflow/status event) (:status event))
+                             (assoc :workflow/status (or (:workflow/status event) (:status event)))
+
+                             (or (:workflow/spec event) (:workflow-spec event))
+                             (assoc :workflow/spec (or (:workflow/spec event) (:workflow-spec event))))
+          normalized-event (dissoc normalized-event :workflow-id :timestamp :phase :status :workflow-spec)]
       ;; Publish event to dashboard's event stream
       (when-let [es (:event-stream @state)]
         (try
           (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
             (when es-ns
               (when-let [publish! (ns-resolve es-ns 'publish!)]
-                (publish! es event))))
+                (publish! es normalized-event))))
           (catch Exception e
             (println "Error publishing workflow event:" (.getMessage e))))))
     (catch Exception e

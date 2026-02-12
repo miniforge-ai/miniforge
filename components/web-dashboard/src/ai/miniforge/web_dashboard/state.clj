@@ -159,28 +159,96 @@
 ;------------------------------------------------------------------------------ Layer 5
 ;; Workflow state
 
+(defn- normalize-ts
+  "Normalize timestamp inputs to java.util.Date for UI rendering."
+  [ts]
+  (cond
+    (instance? java.util.Date ts)
+    ts
+
+    (instance? java.time.Instant ts)
+    (java.util.Date/from ts)
+
+    (string? ts)
+    (try
+      (java.util.Date/from (java.time.Instant/parse ts))
+      (catch Exception _ nil))
+
+    :else nil))
+
+(defn- wf-id
+  [event]
+  (or (:workflow/id event) (:workflow-id event)))
+
+(defn- wf-name-from-started
+  [started id]
+  (or (get-in started [:workflow/spec :name])
+      (get-in started [:workflow-spec :name])
+      (get-in started [:spec :name])
+      (str "Workflow " (subs (str id) 0 (min 8 (count (str id)))))))
+
+(defn- wf-phase
+  [events started]
+  (or (:workflow/phase started)
+      (:phase started)
+      (some->> events
+               (filter #(#{:workflow/phase-started :workflow/phase-completed} (:event/type %)))
+               (sort-by #(or (:event/timestamp %) (:timestamp %)))
+               last
+               ((fn [e] (or (:workflow/phase e) (:phase e)))))
+      "unknown"))
+
+(defn- wf-status
+  [completed failed]
+  (cond
+    failed :failed
+    completed (case (or (:workflow/status completed) (:status completed))
+                :success :completed
+                :completed :completed
+                :failure :failed
+                :failed :failed
+                :cancelled :failed
+                :completed)
+    :else :running))
+
 (defn get-workflows
   "Get workflows from event stream."
   [state]
   (try
     (if-let [stream (:event-stream @state)]
-      (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
+      (let [es-ns (or (find-ns 'ai.miniforge.event-stream.interface)
+                      (do (require 'ai.miniforge.event-stream.interface)
+                          (find-ns 'ai.miniforge.event-stream.interface)))]
         (if es-ns
           (let [get-events (ns-resolve es-ns 'get-events)
                 events (get-events stream)]
             (->> events
-                 (filter #(#{:workflow/started :workflow/completed} (:event/type %)))
-                 (group-by #(or (:workflow-id %) (:workflow/id %)))
+                 (filter #(#{:workflow/started
+                             :workflow/phase-started
+                             :workflow/phase-completed
+                             :workflow/completed
+                             :workflow/failed}
+                           (:event/type %)))
+                 (filter (comp some? wf-id))
+                 (group-by wf-id)
                  (map (fn [[id wf-events]]
                         (let [started (first (filter #(= :workflow/started (:event/type %)) wf-events))
-                              completed (first (filter #(= :workflow/completed (:event/type %)) wf-events))]
+                              completed (first (filter #(= :workflow/completed (:event/type %)) wf-events))
+                              failed (first (filter #(= :workflow/failed (:event/type %)) wf-events))
+                              started-ts (or (:event/timestamp started)
+                                             (:timestamp started))
+                              completed-ts (or (:event/timestamp completed)
+                                               (:timestamp completed))]
                           {:id id
-                           :name (get-in started [:spec :name] (str "Workflow " (subs (str id) 0 8)))
-                           :status (if completed :completed :running)
-                           :phase (get-in started [:phase] "unknown")
-                           :progress (if completed 100 50)
-                           :started-at (:timestamp started)
-                           :completed-at (:timestamp completed)})))
+                           :name (wf-name-from-started started id)
+                           :status (wf-status completed failed)
+                           :phase (wf-phase wf-events started)
+                           :progress (if (or completed failed) 100 50)
+                           :started-at (normalize-ts started-ts)
+                           :completed-at (normalize-ts completed-ts)})))
+                 (sort-by (fn [wf]
+                            (some-> (:started-at wf) .getTime))
+                          #(compare (or %2 0) (or %1 0)))
                  (take 50)
                  vec))
           []))
