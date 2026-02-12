@@ -105,26 +105,30 @@
     [:section#stats-section.section
      {:hx-get "/api/stats"
       :hx-trigger "refresh from:body, every 5s"
-      :hx-swap "innerHTML"}
+      :hx-swap "innerHTML"
+      :data-filter-refresh "true"}
      (stats-fragment (:stats state))]
 
     ;; Risk analysis section
     [:section#risk-section.section
      {:hx-get "/api/risk"
       :hx-trigger "refresh from:body, every 10s"
-      :hx-swap "innerHTML"}
+      :hx-swap "innerHTML"
+      :data-filter-refresh "true"}
      (risk-analysis-fragment (:risk state))]
 
     ;; Fleet overview
     [:section#fleet-section.section
      {:hx-get "/api/fleet/grid"
       :hx-trigger "refresh from:body, every 5s"
-      :hx-swap "innerHTML"}
+      :hx-swap "innerHTML"
+      :data-filter-refresh "true"}
      (fleet-grid-fragment (:fleet state))]
 
     ;; Recent activity
     [:section#activity-section.section
      {:hx-get "/api/activity"
       :hx-trigger "refresh from:body, every 3s"
-      :hx-swap "innerHTML"}
+      :hx-swap "innerHTML"
+      :data-filter-refresh "true"}
      (activity-fragment (:activity state))]]))

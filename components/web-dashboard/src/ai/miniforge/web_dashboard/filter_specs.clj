@@ -11,25 +11,57 @@
 (def derived-fields
   "Registry of derived field extractors.
    Maps derived-id -> extraction function."
-  {:derived/has-testing
-   (fn [item] (boolean (some #(= :test (:phase/id %))
-                             (get-in item [:workflow/phases] []))))
+  {:derived/entity-status
+   (fn [item]
+     (or (:status item)
+         (:train/status item)
+         (get-in item [:execution/status])))
+
+   :derived/repository
+   (fn [item]
+     (or (:repo item)
+         (:pr/repo item)
+         (some-> item :train/prs first :pr/repo)))
+
+   :derived/train-name
+   (fn [item]
+     (or (:train/name item)
+         (:train-name item)))
+
+   :derived/has-testing
+   (fn [item]
+     (boolean (some #(= :test (:phase/id %))
+                    (get-in item [:workflow/phases] []))))
 
    :derived/has-review
-   (fn [item] (boolean (some #(= :verify (:phase/id %))
-                             (get-in item [:workflow/phases] []))))
+   (fn [item]
+     (boolean (some #(= :verify (:phase/id %))
+                    (get-in item [:workflow/phases] []))))
 
    :derived/phase-count
-   (fn [item] (count (get-in item [:workflow/phases] [])))
+   (fn [item]
+     (count (get-in item [:workflow/phases] [])))
 
    :derived/has-evidence
-   (fn [item] (boolean (:train/evidence-bundle-id item)))
+   (fn [item]
+     (boolean (or (:train/evidence-bundle-id item)
+                  (:evidence-bundle-id item))))
 
    :derived/is-completed
-   (fn [item] (= :completed (get-in item [:execution/status])))
+   (fn [item]
+     (or (= :completed (:status item))
+         (= :merged (:train/status item))
+         (= :completed (get-in item [:execution/status]))))
 
    :derived/has-dependencies
-   (fn [item] (seq (:dependencies item)))})
+   (fn [item]
+     (boolean (or (seq (:dependencies item))
+                  (seq (:pr/depends-on item))
+                  (some (comp seq :pr/depends-on) (:train/prs item)))))
+
+   :derived/has-blocking-prs
+   (fn [item]
+     (boolean (seq (:train/blocking-prs item))))})
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Spec loading

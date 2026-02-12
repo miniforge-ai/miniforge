@@ -61,10 +61,13 @@
   (layout "Workflows"
    [:div.workflows-page
     [:section.workflows-section
-     [:div.workflows-header
-      [:span.workflows-count (str (count workflows) " " (if (= 1 (count workflows)) "workflow" "workflows"))]
-      ;; Local filter bar for this pane
-      [:div.workflows-filter-bar
+     [:div.workflows-header.aggregate-header
+      [:div.workflows-title-group
+       [:h2 "Workflow Runs"]
+       [:p.subtitle "Live execution history and status across active workflows"]
+       [:span.workflows-count
+        (str (count workflows) " " (if (= 1 (count workflows)) "workflow" "workflows"))]]
+      [:div.pane-filter-toolbar
        [:div#filter-chips.filter-chips]
        [:div.filter-actions
         [:button.btn.btn-sm.btn-ghost.filter-add
@@ -72,13 +75,12 @@
           :hx-target "#filter-modal-container"
           :hx-swap "innerHTML"
           :title "Add pane-local filter"}
-         "+ Filter"]]]]
-     ;; Filter modal container
-     [:div#filter-modal-container]
+         "Filter"]]]]
      [:div#workflows-content
       {:hx-get "/api/workflows"
        :hx-trigger "refresh from:body, every 5s"
-       :hx-swap "innerHTML"}
+       :hx-swap "innerHTML"
+       :data-filter-refresh "true"}
       (workflow-list-fragment workflows)]]]))
 
 ;------------------------------------------------------------------------------ Layer 2

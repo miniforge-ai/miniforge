@@ -28,9 +28,24 @@ function getFilterState() {
   return filterState;
 }
 
+function ensurePaneState(pane) {
+  if (!filterState.panes[pane]) {
+    filterState.panes[pane] = { op: 'and', clauses: [] };
+  }
+}
+
+function syncPaneFromDOM() {
+  const pane = document.body?.dataset?.currentPane;
+  if (pane && filterState.panes[pane]) {
+    currentPane = pane;
+  }
+}
+
 function setCurrentPane(pane) {
-  currentPane = pane;
-  persistState();
+  if (pane && filterState.panes[pane]) {
+    currentPane = pane;
+    persistState();
+  }
 }
 
 function getCurrentPane() {
@@ -48,8 +63,6 @@ function isFilterActive(filterId, value, scope = 'global') {
 }
 
 function toggleFilter(filterId, value, scope, checked) {
-  console.log(`toggleFilter: ${filterId}=${value}, scope=${scope}, checked=${checked}`);
-
   if (checked) {
     addFilter(filterId, ':=', value, scope);
   } else {
@@ -59,8 +72,8 @@ function toggleFilter(filterId, value, scope, checked) {
       : filterState.panes[currentPane].clauses;
 
     const newClauses = targetClauses.filter(c => {
-      // For boolean filters (value === 'true'), remove entire filter
-      if (value === 'true') {
+      // For boolean filters, remove entire filter by id.
+      if (value === true || value === 'true') {
         return c['filter/id'] !== filterId;
       }
       // For other filters, remove only the specific value
@@ -76,24 +89,79 @@ function toggleFilter(filterId, value, scope, checked) {
     persistState();
     applyFilters();
   }
+}
 
-  console.log('Filter state after toggle:', filterState);
+function setTextFilter(filterId, scope, value, op = ':contains') {
+  const targetClauses = scope === 'global'
+    ? filterState.global.clauses
+    : filterState.panes[currentPane].clauses;
+
+  const nextClauses = targetClauses.filter(c => c['filter/id'] !== filterId);
+  const trimmed = value?.trim();
+
+  if (trimmed) {
+    nextClauses.push({
+      'filter/id': filterId,
+      op: op,
+      value: trimmed
+    });
+  }
+
+  if (scope === 'global') {
+    filterState.global.clauses = nextClauses;
+  } else {
+    filterState.panes[currentPane].clauses = nextClauses;
+  }
+
+  persistState();
+  applyFilters();
+}
+
+function toggleCloudFilter(button) {
+  if (!button) {
+    return;
+  }
+
+  const filterId = button.dataset.filterId;
+  const filterValue = button.dataset.filterValue;
+  const scope = button.dataset.scope || 'global';
+
+  if (!filterId) {
+    return;
+  }
+
+  const active = isFilterActive(filterId, filterValue, scope);
+  toggleFilter(filterId, filterValue, scope, !active);
+}
+
+function syncCloudOptionButtons() {
+  document.querySelectorAll('.filter-option-cloud-btn').forEach(button => {
+    const filterId = button.dataset.filterId;
+    const filterValue = button.dataset.filterValue;
+    const scope = button.dataset.scope || 'global';
+    const active = isFilterActive(filterId, filterValue, scope);
+    button.classList.toggle('active', active);
+  });
 }
 
 function initializeFilterCheckboxes() {
   // Set checked state for all filter checkboxes based on current filter state
   document.querySelectorAll('.filter-checkbox').forEach(checkbox => {
     const filterId = checkbox.dataset.filterId;
-    const value = checkbox.value || 'true'; // Boolean checkboxes may not have explicit value
     const scope = checkbox.dataset.scope;
+    const hasExplicitValue = checkbox.hasAttribute('value');
+    const checkboxValue = checkbox.value;
 
     if (filterId && scope) {
-      // For boolean filters, check if ANY value exists for this filter
       const clauses = scope === 'global'
         ? filterState.global.clauses
         : filterState.panes[currentPane].clauses;
 
-      const hasFilter = clauses.some(c => c['filter/id'] === filterId);
+      const hasFilter = hasExplicitValue
+        ? clauses.some(c =>
+          c['filter/id'] === filterId && String(c.value) === String(checkboxValue)
+        )
+        : clauses.some(c => c['filter/id'] === filterId);
       checkbox.checked = hasFilter;
     }
   });
@@ -114,6 +182,8 @@ function initializeFilterCheckboxes() {
       }
     }
   });
+
+  syncCloudOptionButtons();
 }
 
 //------------------------------------------------------------------------------ Layer 1
@@ -147,15 +217,21 @@ function addFilter(filterId, op, value, scope = 'global') {
   applyFilters();
 }
 
-function removeFilter(filterId, scope = 'global') {
+function removeFilter(filterId, scope = 'global', value = null) {
+  const shouldKeepClause = (clause) => {
+    if (clause['filter/id'] !== filterId) {
+      return true;
+    }
+    if (value === null || typeof value === 'undefined') {
+      return false;
+    }
+    return String(clause.value) !== String(value);
+  };
+
   if (scope === 'global') {
-    filterState.global.clauses = filterState.global.clauses.filter(
-      c => c['filter/id'] !== filterId
-    );
+    filterState.global.clauses = filterState.global.clauses.filter(shouldKeepClause);
   } else {
-    filterState.panes[currentPane].clauses = filterState.panes[currentPane].clauses.filter(
-      c => c['filter/id'] !== filterId
-    );
+    filterState.panes[currentPane].clauses = filterState.panes[currentPane].clauses.filter(shouldKeepClause);
   }
 
   persistState();
@@ -293,6 +369,8 @@ function loadState() {
     if (storedPane) {
       currentPane = storedPane;
     }
+
+    ['task-status', 'fleet', 'evidence', 'workflows'].forEach(ensurePaneState);
   } catch (e) {
     console.error('Failed to load filter state:', e);
   }
@@ -325,29 +403,28 @@ function encodeFiltersToURL() {
 
 function decodeFiltersFromURL() {
   const params = new URLSearchParams(window.location.search);
+  const gf = params.get('gf');
+  const pf = params.get('pf');
+  const pane = params.get('pane');
 
   try {
     // Decode global filters
-    const gf = params.get('gf');
     if (gf) {
       filterState.global = JSON.parse(atob(gf));
     }
 
     // Decode pane filters
-    const pf = params.get('pf');
-    const pane = params.get('pane') || currentPane;
-    if (pf && filterState.panes[pane]) {
-      filterState.panes[pane] = JSON.parse(atob(pf));
+    const nextPane = pane || currentPane;
+    if (pf && filterState.panes[nextPane]) {
+      filterState.panes[nextPane] = JSON.parse(atob(pf));
     }
 
     // Set current pane
-    if (pane) {
-      currentPane = pane;
+    if (nextPane && filterState.panes[nextPane]) {
+      currentPane = nextPane;
     }
 
-    persistState();
-    applyFilters();
-    return true;
+    return Boolean(gf || pf || pane);
   } catch (e) {
     console.error('Failed to decode filters from URL:', e);
     return false;
@@ -392,6 +469,8 @@ function shareCurrentView() {
 // Filter application (triggers server-side filtering or client-side)
 
 function applyFilters() {
+  ensurePaneState(currentPane);
+
   // Merge global and pane-local filters
   const combined = {
     op: 'and',
@@ -406,12 +485,23 @@ function applyFilters() {
   params.set('filters', JSON.stringify(combined));
   params.set('pane', currentPane);
 
-  // Update all htmx elements
-  document.querySelectorAll('[hx-get]').forEach(el => {
+  // Update htmx elements that declare they participate in filtering.
+  const refreshTargets = document.querySelectorAll('[data-filter-refresh="true"][hx-get]');
+  refreshTargets.forEach(el => {
     const url = new URL(el.getAttribute('hx-get'), window.location.origin);
     url.search = params.toString();
     el.setAttribute('hx-get', url.pathname + '?' + url.search);
   });
+
+  // DAG page currently renders server-side only, so refresh via URL when needed.
+  if (refreshTargets.length === 0 && window.location.pathname === '/dag') {
+    const currentQuery = window.location.search.replace(/^\?/, '');
+    const nextQuery = params.toString();
+    if (currentQuery !== nextQuery) {
+      window.location.replace(`${window.location.pathname}?${nextQuery}`);
+      return;
+    }
+  }
 
   // Trigger refresh
   document.body.dispatchEvent(new CustomEvent('refresh'));
@@ -427,36 +517,32 @@ function applyFilters() {
 // UI rendering
 
 function renderFilterChips() {
-  console.log('renderFilterChips called');
   const globalContainer = document.getElementById('global-filter-chips');
   const localContainer = document.getElementById('filter-chips'); // Pane-local container
-
-  console.log('Global container:', globalContainer);
-  console.log('Local container:', localContainer);
-  console.log('Global filters:', filterState.global.clauses);
-  console.log('Local filters:', filterState.panes[currentPane]?.clauses);
 
   if (globalContainer) {
     globalContainer.innerHTML = '';
     filterState.global.clauses.forEach(clause => {
       const chip = createFilterChip(clause, 'global');
-      console.log('Adding global chip:', clause, chip);
       globalContainer.appendChild(chip);
     });
-  } else {
-    console.warn('Global filter chips container not found!');
   }
 
   if (localContainer) {
     localContainer.innerHTML = '';
     filterState.panes[currentPane].clauses.forEach(clause => {
       const chip = createFilterChip(clause, 'local');
-      console.log('Adding local chip:', clause, chip);
       localContainer.appendChild(chip);
     });
-  } else {
-    console.log('Local filter chips container not found (may not be on this pane)');
   }
+
+  syncCloudOptionButtons();
+}
+
+function escapeJSString(value) {
+  return String(value)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'");
 }
 
 function createFilterChip(clause, scope) {
@@ -471,13 +557,14 @@ function createFilterChip(clause, scope) {
 
   const menu = document.createElement('div');
   menu.className = 'filter-chip-menu';
+  const encodedValue = escapeJSString(clause.value);
   menu.innerHTML = `
     <button class="filter-chip-menu-btn" onclick="event.stopPropagation(); this.nextElementSibling.classList.toggle('show')">⋮</button>
     <div class="filter-chip-menu-items">
       ${scope === 'local' ? '<button onclick="window.miniforge.filters.promoteToGlobal(\'' + clause['filter/id'] + '\')">📌 Pin to Global</button>' : ''}
       ${scope === 'global' ? '<button onclick="window.miniforge.filters.demoteToLocal(\'' + clause['filter/id'] + '\')">📍 Make Pane-Local</button>' : ''}
       <button onclick="window.miniforge.filters.showCopyMenu(\'' + clause['filter/id'] + '\')">📋 Copy to Pane</button>
-      <button onclick="window.miniforge.filters.removeFilter(\'' + clause['filter/id'] + '\', \'' + scope + '\')">🗑️ Remove</button>
+      <button onclick="window.miniforge.filters.removeFilter(\'' + clause['filter/id'] + '\', \'' + scope + '\', \'' + encodedValue + '\')">🗑️ Remove</button>
     </div>
   `;
 
@@ -485,7 +572,7 @@ function createFilterChip(clause, scope) {
   removeBtn.className = 'filter-remove';
   removeBtn.textContent = '×';
   removeBtn.title = 'Remove filter';
-  removeBtn.onclick = () => removeFilter(clause['filter/id'], scope);
+  removeBtn.onclick = () => removeFilter(clause['filter/id'], scope, clause.value);
 
   chip.appendChild(label);
   chip.appendChild(menu);
@@ -497,14 +584,20 @@ function createFilterChip(clause, scope) {
 function formatFilterLabel(clause) {
   const id = clause['filter/id'];
   const value = clause.value;
+  const normalizeDisplay = (v) => {
+    if (typeof v === 'string' && v.startsWith(':')) {
+      return v.slice(1);
+    }
+    return v;
+  };
 
   // Format based on filter type
   if (typeof value === 'boolean') {
     return `${id}: ${value ? 'Yes' : 'No'}`;
   } else if (Array.isArray(value)) {
-    return `${id}: ${value.join(', ')}`;
+    return `${id}: ${value.map(normalizeDisplay).join(', ')}`;
   } else {
-    return `${id}: ${value}`;
+    return `${id}: ${normalizeDisplay(value)}`;
   }
 }
 
@@ -531,8 +624,19 @@ function showCopyMenu(filterId) {
 
 function init() {
   loadState();
-  decodeFiltersFromURL();
-  renderFilterChips();
+  syncPaneFromDOM();
+  ensurePaneState(currentPane);
+
+  const hasURLState = decodeFiltersFromURL();
+  const hasLocalState = filterState.global.clauses.length > 0 ||
+    (filterState.panes[currentPane]?.clauses?.length || 0) > 0;
+
+  persistState();
+  if (hasURLState || hasLocalState) {
+    applyFilters();
+  } else {
+    renderFilterChips();
+  }
 }
 
 // Initialize on page load
@@ -574,7 +678,9 @@ window.miniforge.filters = {
   getCurrentPane,
   isFilterActive,
   toggleFilter,
+  setTextFilter,
   initializeFilterCheckboxes,
+  toggleCloudFilter,
   addFilter,
   removeFilter,
   promoteToGlobal,

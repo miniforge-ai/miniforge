@@ -74,7 +74,7 @@
   [layout fleet-state]
   (layout "PR Fleet"
    [:div.fleet-view
-    [:div.fleet-header
+    [:div.fleet-header.aggregate-header
      [:div.fleet-title-row
       [:div.fleet-summary
        [:span.train-count (str (get-in fleet-state [:summary :active-trains] 0) " trains")]
@@ -92,8 +92,7 @@
        (c/button "Review All PRs" {:variant :ghost
                                     :onclick "alert('PR review: Kick off review workflows for all outstanding PRs')"
                                     :title "Run automated PR review workflows"})]]
-     ;; Local filter bar for this pane
-     [:div.fleet-filter-bar
+     [:div.pane-filter-toolbar
       [:div#filter-chips.filter-chips]
       [:div.filter-actions
        [:button.btn.btn-sm.btn-ghost.filter-add
@@ -101,13 +100,12 @@
          :hx-target "#filter-modal-container"
          :hx-swap "innerHTML"
          :title "Add pane-local filter"}
-        "+ Filter"]]]]
-    ;; Filter modal container
-    [:div#filter-modal-container]
+        "Filter"]]]]
     [:div#trains-section
      {:hx-get "/api/trains"
       :hx-trigger "refresh from:body, every 5s"
-      :hx-swap "innerHTML"}
+      :hx-swap "innerHTML"
+      :data-filter-refresh "true"}
      (train-list-fragment (:trains fleet-state))]]))
 
 ;------------------------------------------------------------------------------ Layer 2

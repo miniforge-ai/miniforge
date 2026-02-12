@@ -51,7 +51,7 @@
     [:link {:rel "stylesheet" :href "/css/app.css"}]
     [:script {:src "https://unpkg.com/htmx.org@2.0.0"}]
     [:script {:src "https://unpkg.com/htmx-ext-ws@2.0.0/ws.js"}]]
-   [:body
+   [:body {:data-current-pane (name current-pane)}
     ;; Top banner with large logo and actions
     [:header.top-banner
      [:div.banner-content
@@ -94,11 +94,11 @@
         :title "Clear global filters"}
        "Clear"]
       [:button.btn.btn-sm.btn-ghost.filter-add
-       {:hx-get (str "/api/filter-fields?scope=global&pane=" (name current-pane))
+       {:hx-get "/api/filter-fields?scope=global"
         :hx-target "#filter-modal-container"
         :hx-swap "innerHTML"
         :title "Add global filter"}
-       "+ Filter"]
+       "Filter"]
       [:button.btn.btn-sm.btn-ghost
        {:onclick "const name = prompt('Save view as:'); if (name && window.miniforge.filters) window.miniforge.filters.saveView(name)"
         :title "Save current filter set"}
@@ -155,6 +155,7 @@
   (dag/dag-kanban-view layout state))
 
 ;; Evidence views
+(def evidence-list-fragment evidence/evidence-list-fragment)
 (defn evidence-view [state]
   (evidence/evidence-view layout state))
 

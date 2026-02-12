@@ -16,30 +16,18 @@
   "Evidence artifacts view for audit trails.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Evidence view
+;; Evidence fragments
 
-(defn evidence-view
-  "Evidence artifacts view."
-  [layout state]
-  (layout "Evidence"
-   [:div.evidence-view
-    [:div.evidence-header
-     [:h2 "Evidence Bundles"]
-     [:p.subtitle "Audit trail for all merged PRs"]
-     ;; Local filter bar for this pane
-     [:div.evidence-filter-bar
-      [:div#filter-chips.filter-chips]
-      [:div.filter-actions
-       [:button.btn.btn-sm.btn-ghost.filter-add
-        {:hx-get "/api/filter-fields?scope=local&pane=evidence"
-         :hx-target "#filter-modal-container"
-         :hx-swap "innerHTML"
-         :title "Add pane-local filter"}
-        "+ Filter"]]]]
-    ;; Filter modal container
-    [:div#filter-modal-container]
+(defn evidence-list-fragment
+  "Evidence list fragment for htmx updates."
+  [trains]
+  (if (empty? trains)
+    [:div.empty-state
+     [:div.empty-icon "🧾"]
+     [:h3 "No Evidence Bundles Yet"]
+     [:p "Evidence bundles appear as trains complete and publish artifacts."]]
     [:div.evidence-list
-     (for [train (:trains state)]
+     (for [train trains]
        [:div.evidence-item
         [:div.evidence-info
          [:h4 (:train-name train)]
@@ -49,4 +37,32 @@
         (when (:has-evidence train)
           [:button.btn.btn-sm.btn-ghost
            {:onclick (str "location.href='/api/evidence/" (:evidence-bundle-id train) "'")}
-           "View Bundle →"])])]]))
+           "View Bundle →"])])]))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Evidence view
+
+(defn evidence-view
+  "Evidence artifacts view."
+  [layout state]
+  (layout "Evidence"
+   [:div.evidence-view
+    [:div.evidence-header.aggregate-header
+     [:div.evidence-title-group
+      [:h2 "Evidence Bundles"]
+      [:p.subtitle "Audit trail for all merged PRs"]]
+     [:div.pane-filter-toolbar
+      [:div#filter-chips.filter-chips]
+      [:div.filter-actions
+       [:button.btn.btn-sm.btn-ghost.filter-add
+        {:hx-get "/api/filter-fields?scope=local&pane=evidence"
+         :hx-target "#filter-modal-container"
+         :hx-swap "innerHTML"
+         :title "Add pane-local filter"}
+        "Filter"]]]]
+    [:div#evidence-content
+     {:hx-get "/api/evidence/list"
+      :hx-trigger "refresh from:body, every 5s"
+      :hx-swap "innerHTML"
+      :data-filter-refresh "true"}
+     (evidence-list-fragment (:trains state))]]))
