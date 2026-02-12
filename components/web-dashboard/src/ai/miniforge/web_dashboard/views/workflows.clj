@@ -62,7 +62,19 @@
    [:div.workflows-page
     [:section.workflows-section
      [:div.workflows-header
-      [:span.workflows-count (str (count workflows) " " (if (= 1 (count workflows)) "workflow" "workflows"))]]
+      [:span.workflows-count (str (count workflows) " " (if (= 1 (count workflows)) "workflow" "workflows"))]
+      ;; Local filter bar for this pane
+      [:div.workflows-filter-bar
+       [:div#filter-chips.filter-chips]
+       [:div.filter-actions
+        [:button.btn.btn-sm.btn-ghost.filter-add
+         {:hx-get "/api/filter-fields?scope=local&pane=workflows"
+          :hx-target "#filter-modal-container"
+          :hx-swap "innerHTML"
+          :title "Add pane-local filter"}
+         "+ Filter"]]]]
+     ;; Filter modal container
+     [:div#filter-modal-container]
      [:div#workflows-content
       {:hx-get "/api/workflows"
        :hx-trigger "refresh from:body, every 5s"

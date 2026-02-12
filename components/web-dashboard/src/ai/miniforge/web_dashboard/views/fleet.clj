@@ -91,7 +91,19 @@
                                        :title "Auto-discover PRs and create trains from DAGs"})
        (c/button "Review All PRs" {:variant :ghost
                                     :onclick "alert('PR review: Kick off review workflows for all outstanding PRs')"
-                                    :title "Run automated PR review workflows"})]]]
+                                    :title "Run automated PR review workflows"})]]
+     ;; Local filter bar for this pane
+     [:div.fleet-filter-bar
+      [:div#filter-chips.filter-chips]
+      [:div.filter-actions
+       [:button.btn.btn-sm.btn-ghost.filter-add
+        {:hx-get "/api/filter-fields?scope=local&pane=fleet"
+         :hx-target "#filter-modal-container"
+         :hx-swap "innerHTML"
+         :title "Add pane-local filter"}
+        "+ Filter"]]]]
+    ;; Filter modal container
+    [:div#filter-modal-container]
     [:div#trains-section
      {:hx-get "/api/trains"
       :hx-trigger "refresh from:body, every 5s"

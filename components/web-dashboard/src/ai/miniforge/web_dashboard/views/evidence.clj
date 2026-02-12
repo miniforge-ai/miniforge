@@ -25,7 +25,19 @@
    [:div.evidence-view
     [:div.evidence-header
      [:h2 "Evidence Bundles"]
-     [:p.subtitle "Audit trail for all merged PRs"]]
+     [:p.subtitle "Audit trail for all merged PRs"]
+     ;; Local filter bar for this pane
+     [:div.evidence-filter-bar
+      [:div#filter-chips.filter-chips]
+      [:div.filter-actions
+       [:button.btn.btn-sm.btn-ghost.filter-add
+        {:hx-get "/api/filter-fields?scope=local&pane=evidence"
+         :hx-target "#filter-modal-container"
+         :hx-swap "innerHTML"
+         :title "Add pane-local filter"}
+        "+ Filter"]]]]
+    ;; Filter modal container
+    [:div#filter-modal-container]
     [:div.evidence-list
      (for [train (:trains state)]
        [:div.evidence-item
