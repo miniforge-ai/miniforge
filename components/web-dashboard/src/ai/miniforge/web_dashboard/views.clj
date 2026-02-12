@@ -49,8 +49,8 @@
     [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
     [:title (str "Miniforge | " title)]
     [:link {:rel "stylesheet" :href "/css/app.css"}]
-    [:script {:src "https://unpkg.com/htmx.org@2.0.0"}]
-    [:script {:src "https://unpkg.com/htmx-ext-ws@2.0.0/ws.js"}]]
+    [:script {:src "/js/htmx.min.js"}]
+    [:script {:src "/js/htmx-ws.js"}]]
    [:body {:data-current-pane (name current-pane)}
     ;; Top banner with large logo and actions
     [:header.top-banner
@@ -166,7 +166,10 @@
 
 ;; Workflow views
 (def workflow-list-fragment workflows/workflow-list-fragment)
+(def workflow-summary-fragment dashboard/workflow-summary-fragment)
+(def workflow-events-fragment workflows/workflow-events-fragment)
+(def workflow-detail-panel workflows/workflow-detail-panel)
 (defn workflows-view [wfs]
   (workflows/workflows-view layout wfs))
-(defn workflow-detail-view [workflow]
-  (workflows/workflow-detail-view layout workflow))
+(defn workflow-detail-view [workflow events]
+  (workflows/workflow-detail-view layout workflow events))

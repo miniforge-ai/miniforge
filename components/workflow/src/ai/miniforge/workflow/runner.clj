@@ -285,13 +285,10 @@
   ([workflow input opts]
    (let [pipeline (build-pipeline workflow)
          max-phases (or (:max-phases opts) 50)
-         ;; Control state for dashboard commands
-         control-state (atom {:paused false :stopped false :adjustments {}})
-         ;; Auto-discover dashboard or use explicit URL, fall back to in-memory
-         dashboard-url (or (:dashboard-url opts) (discover-dashboard))
-         event-stream (or (when dashboard-url
-                            (connect-to-dashboard dashboard-url control-state))
-                          (:event-stream opts))
+         ;; Control state for dashboard commands — caller can provide their own
+         control-state (or (:control-state opts)
+                           (atom {:paused false :stopped false :adjustments {}}))
+         event-stream (:event-stream opts)
 
          ;; Wrap callbacks to publish events
          callbacks {:on-phase-start (fn [ctx interceptor]
@@ -305,10 +302,12 @@
                                          (when-let [cb (:on-phase-complete opts)]
                                            (cb ctx interceptor result)))}
 
+         skip-lifecycle? (:skip-lifecycle-events opts)
          initial-ctx (ctx/create-context workflow input opts)]
 
-     ;; Publish workflow started event
-     (publish-workflow-started! event-stream initial-ctx)
+     ;; Publish workflow started event (unless caller already did)
+     (when-not skip-lifecycle?
+       (publish-workflow-started! event-stream initial-ctx))
 
      (let [final-ctx
            (if (empty? pipeline)
@@ -331,8 +330,9 @@
                  (recur (execute-single-iteration pipeline context callbacks iteration control-state)
                         (inc iteration)))))]
 
-       ;; Publish workflow completed event
-       (publish-workflow-completed! event-stream final-ctx)
+       ;; Publish workflow completed event (unless caller already does)
+       (when-not skip-lifecycle?
+         (publish-workflow-completed! event-stream final-ctx))
        final-ctx))))
 
 ;------------------------------------------------------------------------------ Rich Comment

@@ -106,8 +106,9 @@
   [response-text]
   (try
     ;; Try to extract JSON from response (may have markdown code blocks)
+    ;; Use (?s) flag so . matches newlines — LLM JSON typically spans multiple lines
     (let [json-text (if (str/includes? response-text "```")
-                      (second (re-find #"```(?:json)?\s*(\{.*?\})\s*```" response-text))
+                      (second (re-find #"(?s)```(?:json)?\s*(\{.*?\})\s*```" response-text))
                       response-text)
           parsed (json/parse-string (or json-text response-text) true)]
       ;; Convert workflow string to keyword

@@ -112,12 +112,31 @@ function applyFilters() {
   document.body.dispatchEvent(new CustomEvent('refresh'));
 }
 
+// Post workflow command via HTTP (GraalVM-safe, no WebSocket needed)
+function postWorkflowCommand(workflowId, command) {
+  fetch('/api/workflow/' + workflowId + '/command', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: command })
+  })
+  .then(r => r.json())
+  .then(data => {
+    showToast('Command sent: ' + command, 'info', 3000);
+    console.log('Command queued:', data);
+  })
+  .catch(err => {
+    showToast('Failed to send command: ' + err.message, 'error');
+    console.error('Error sending command:', err);
+  });
+}
+
 // Export functions for global use
 window.miniforge = {
   switchTheme,
   cycleTheme,
   getCurrentTheme: () => document.documentElement.getAttribute('data-theme') || 'dark',
   sendWorkflowCommand,
+  postWorkflowCommand,
   addFilterChip,
   removeFilterChip,
   getActiveFilters: () => Array.from(activeFilters.entries())
@@ -203,9 +222,8 @@ function updateConnectionStatus(status) {
 function handleWebSocketMessage(data) {
   switch (data.type) {
     case 'init':
-      console.log('Received initial state:', data.data);
-      // Trigger initial refresh so htmx sections load fresh data
-      document.body.dispatchEvent(new CustomEvent('refresh'));
+      console.log('WebSocket connected, SSR data is current');
+      // No refresh needed — page already has server-rendered data
       break;
 
     case 'state':

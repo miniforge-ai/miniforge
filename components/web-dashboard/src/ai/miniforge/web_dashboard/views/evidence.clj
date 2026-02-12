@@ -18,26 +18,60 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Evidence fragments
 
+(defn- status-badge [status]
+  (let [label (if (keyword? status) (name status) (str status))]
+    [:span.wf-badge {:class (str "badge-" label)} label]))
+
+(defn- workflow-evidence-item [wf]
+  [:div.evidence-item
+   [:div.evidence-info
+    [:h4 (:workflow-name wf)]
+    [:span.evidence-meta
+     (status-badge (:status wf))
+     (when (:completed-at wf)
+       (str " completed " (:completed-at wf)))]]
+   [:div.evidence-actions
+    (if (:has-evidence wf)
+      [:button.btn.btn-sm.btn-ghost
+       {:onclick (str "location.href='/api/evidence/" (:evidence-bundle-id wf) "'")}
+       "View Bundle"]
+      [:span.evidence-pending "Pending"])]])
+
+(defn- train-evidence-item [train]
+  [:div.evidence-item
+   [:div.evidence-info
+    [:h4 (:train-name train)]
+    [:span.evidence-meta
+     (str (:pr-count train) " PRs"
+          (if (:has-evidence train) " | Evidence available" ""))]]
+   (when (:has-evidence train)
+     [:button.btn.btn-sm.btn-ghost
+      {:onclick (str "location.href='/api/evidence/" (:evidence-bundle-id train) "'")}
+      "View Bundle"])])
+
 (defn evidence-list-fragment
-  "Evidence list fragment for htmx updates."
-  [trains]
-  (if (empty? trains)
-    [:div.empty-state
-     [:div.empty-icon "🧾"]
-     [:h3 "No Evidence Bundles Yet"]
-     [:p "Evidence bundles appear as trains complete and publish artifacts."]]
-    [:div.evidence-list
-     (for [train trains]
-       [:div.evidence-item
-        [:div.evidence-info
-         [:h4 (:train-name train)]
-         [:span.evidence-meta
-          (str (:pr-count train) " PRs • "
-               (if (:has-evidence train) "Evidence available" "No evidence"))]]
-        (when (:has-evidence train)
-          [:button.btn.btn-sm.btn-ghost
-           {:onclick (str "location.href='/api/evidence/" (:evidence-bundle-id train) "'")}
-           "View Bundle →"])])]))
+  "Evidence list fragment for htmx updates.
+   Accepts either a vector (legacy: train items only) or a map with :trains and :workflows."
+  [state]
+  (let [trains (if (map? state) (:trains state) state)
+        workflows (when (map? state) (:workflows state))
+        has-items (or (seq trains) (seq workflows))]
+    (if-not has-items
+      [:div.empty-state
+       [:div.empty-icon "§"]
+       [:h3 "No Evidence Bundles Yet"]
+       [:p "Evidence bundles appear as workflows complete and publish artifacts."]]
+      [:div.evidence-list
+       (when (seq workflows)
+         (list
+          [:h3.evidence-section-title "Workflow Evidence"]
+          (for [wf workflows]
+            (workflow-evidence-item wf))))
+       (when (seq trains)
+         (list
+          [:h3.evidence-section-title "PR Train Evidence"]
+          (for [train trains]
+            (train-evidence-item train))))])))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Evidence view
@@ -50,7 +84,7 @@
     [:div.evidence-header.aggregate-header
      [:div.evidence-title-group
       [:h2 "Evidence Bundles"]
-      [:p.subtitle "Audit trail for all merged PRs"]]
+      [:p.subtitle "Audit trail for workflows and merged PRs"]]
      [:div.pane-filter-toolbar
       [:div#filter-chips.filter-chips]
       [:div.filter-actions
@@ -62,7 +96,7 @@
         "Filter"]]]]
     [:div#evidence-content
      {:hx-get "/api/evidence/list"
-      :hx-trigger "refresh from:body, every 5s"
+      :hx-trigger "refresh from:body, every 10s"
       :hx-swap "innerHTML"
       :data-filter-refresh "true"}
-     (evidence-list-fragment (:trains state))]]))
+     (evidence-list-fragment state)]]))
