@@ -13,424 +13,55 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.web-dashboard.state
-  "State management for web dashboard with integration to PR trains and DAGs."
+  "State management for web dashboard — thin re-export from sub-namespaces."
   (:require
-   [clojure.string :as str]))
+   [ai.miniforge.web-dashboard.state.core :as core]
+   [ai.miniforge.web-dashboard.state.trains :as trains]
+   [ai.miniforge.web-dashboard.state.workflows :as workflows]
+   [ai.miniforge.web-dashboard.state.fleet :as fleet]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; State atom creation
+;; Re-exports from sub-namespaces
 
-(defn create-state
-  "Create dashboard state atom."
-  [opts]
-  (atom (merge {:event-stream nil
-                :pr-train-manager nil
-                :repo-dag-manager nil
-                :start-time (System/currentTimeMillis)}
-               opts)))
+;; core
+(def create-state core/create-state)
+(def get-uptime core/get-uptime)
+
+;; trains
+(def get-trains trains/get-trains)
+(def get-train-detail trains/get-train-detail)
+(def train-action! trains/train-action!)
+(def get-dags trains/get-dags)
+(def get-dag-state trains/get-dag-state)
+
+;; workflows
+(def get-workflows workflows/get-workflows)
+(def get-workflow-detail workflows/get-workflow-detail)
+(def get-events workflows/get-events)
+(def enqueue-command! workflows/enqueue-command!)
+(def dequeue-commands! workflows/dequeue-commands!)
+
+;; fleet
+(def calculate-risk-score fleet/calculate-risk-score)
+(def compute-stats fleet/compute-stats)
+(def compute-risk-analysis fleet/compute-risk-analysis)
+(def get-fleet-state fleet/get-fleet-state)
+(def get-risk-analysis fleet/get-risk-analysis)
+(def get-recent-activity fleet/get-recent-activity)
+(def get-evidence-state fleet/get-evidence-state)
 
 ;------------------------------------------------------------------------------ Layer 1
-;; State accessors
-
-(defn get-uptime
-  "Get server uptime in milliseconds."
-  [state]
-  (- (System/currentTimeMillis) (:start-time @state)))
-
-(defn- safe-call
-  "Safely call a function from a namespace, returning default on error."
-  [ns-sym fn-sym & args]
-  (try
-    (when-let [ns (find-ns ns-sym)]
-      (when-let [f (ns-resolve ns fn-sym)]
-        (apply f args)))
-    (catch Exception e
-      (println "Error calling" fn-sym ":" (.getMessage e))
-      nil)))
-
-;------------------------------------------------------------------------------ Layer 2
-;; PR Train state
-
-(defn get-trains
-  "Get all PR trains."
-  [state]
-  (if-let [mgr (:pr-train-manager @state)]
-    (or (safe-call 'ai.miniforge.pr-train.interface 'list-trains mgr) [])
-    []))
-
-(defn get-train-detail
-  "Get detailed view of a PR train."
-  [state train-id]
-  (if-let [mgr (:pr-train-manager @state)]
-    (or (safe-call 'ai.miniforge.pr-train.interface 'get-train mgr (parse-uuid train-id))
-        {:error "Train not found"})
-    {:error "PR train manager not available"}))
-
-(defn train-action!
-  "Execute action on a PR train."
-  [state train-id action]
-  (when-let [mgr (:pr-train-manager @state)]
-    (let [tid (parse-uuid train-id)]
-      (case action
-        "pause" (safe-call 'ai.miniforge.pr-train.interface 'pause-train mgr tid "Manual pause")
-        "resume" (safe-call 'ai.miniforge.pr-train.interface 'resume-train mgr tid)
-        "merge-next" (safe-call 'ai.miniforge.pr-train.interface 'merge-next mgr tid)
-        nil))))
-
-;------------------------------------------------------------------------------ Layer 3
-;; DAG state
-
-(defn get-dags
-  "Get all repository DAGs."
-  [state]
-  (if-let [mgr (:repo-dag-manager @state)]
-    (or (safe-call 'ai.miniforge.repo-dag.interface 'get-all-dags mgr) [])
-    []))
-
-(defn get-dag-state
-  "Get DAG kanban state for visualization."
-  [state]
-  (let [dags (get-dags state)
-        trains (get-trains state)]
-    {:dags dags
-     :trains trains
-     :repos (mapcat :dag/repos dags)
-     :tasks (mapcat (fn [train]
-                      (map (fn [pr]
-                             {:id (:pr/number pr)
-                              :repo (:pr/repo pr)
-                              :title (:pr/title pr)
-                              :status (case (:pr/status pr)
-                                        (:draft :open) :ready
-                                        :reviewing :running
-                                        :merged :done
-                                        :failed :blocked
-                                        :blocked)
-                              :train-id (:train/id train)
-                              :dependencies (:pr/depends-on pr)})
-                           (:train/prs train)))
-                    trains)}))
-
-;------------------------------------------------------------------------------ Layer 4
-;; Fleet state aggregation
-
-(defn- calculate-risk-score
-  "Calculate AI-powered risk score for a train or PR."
-  [entity]
-  (let [base-score 0
-        ;; Factor 1: CI status
-        ci-penalty (case (:pr/ci-status entity (:ci-status entity))
-                     :failed 30
-                     :running 5
-                     :pending 10
-                     0)
-        ;; Factor 2: Number of dependencies
-        dep-penalty (* 3 (count (:pr/depends-on entity [])))
-        ;; Factor 3: Status
-        status-penalty (case (:pr/status entity (:train/status entity))
-                        :changes-requested 15
-                        :reviewing 5
-                        :merging 10
-                        0)
-        ;; Factor 4: Blocking PRs
-        blocking-penalty (* 5 (count (:train/blocking-prs entity [])))]
-    (min 100 (+ base-score ci-penalty dep-penalty status-penalty blocking-penalty))))
-
-(defn get-fleet-state
-  "Get aggregated fleet state across all repos and trains."
-  [state]
-  (let [trains (get-trains state)
-        dags (get-dags state)
-        total-prs (reduce + 0 (map #(count (:train/prs %)) trains))
-        active-trains (filter #(#{:open :reviewing :merging} (:train/status %)) trains)
-        repos (set (mapcat #(map :pr/repo (:train/prs %)) trains))]
-    {:summary {:total-trains (count trains)
-               :active-trains (count active-trains)
-               :total-prs total-prs
-               :repos (count repos)
-               :dags (count dags)}
-     :trains trains
-     :repos (group-by identity (mapcat #(map :pr/repo (:train/prs %)) trains))
-     :health {:healthy (count (filter #(< (calculate-risk-score %) 20) trains))
-              :warning (count (filter #(and (>= (calculate-risk-score %) 20)
-                                           (< (calculate-risk-score %) 50)) trains))
-              :critical (count (filter #(>= (calculate-risk-score %) 50) trains))}}))
-
-;------------------------------------------------------------------------------ Layer 5
-;; Workflow state
-
-(defn- normalize-ts
-  "Normalize timestamp inputs to java.util.Date for UI rendering."
-  [ts]
-  (cond
-    (instance? java.util.Date ts)
-    ts
-
-    (instance? java.time.Instant ts)
-    (java.util.Date/from ts)
-
-    (string? ts)
-    (try
-      (java.util.Date/from (java.time.Instant/parse ts))
-      (catch Exception _ nil))
-
-    :else nil))
-
-(defn- wf-id
-  [event]
-  (or (:workflow/id event) (:workflow-id event)))
-
-(defn- wf-name-from-started
-  [started id]
-  (or (get-in started [:workflow/spec :name])
-      (get-in started [:workflow-spec :name])
-      (get-in started [:spec :name])
-      (str "Workflow " (subs (str id) 0 (min 8 (count (str id)))))))
-
-(defn- wf-phase
-  [events started]
-  (or (:workflow/phase started)
-      (:phase started)
-      (some->> events
-               (filter #(#{:workflow/phase-started :workflow/phase-completed} (:event/type %)))
-               (sort-by #(or (:event/timestamp %) (:timestamp %)))
-               last
-               ((fn [e] (or (:workflow/phase e) (:phase e)))))
-      "unknown"))
-
-(defn- wf-status
-  [completed failed]
-  (cond
-    failed :failed
-    completed (case (or (:workflow/status completed) (:status completed))
-                :success :completed
-                :completed :completed
-                :failure :failed
-                :failed :failed
-                :cancelled :failed
-                :completed)
-    :else :running))
-
-(defn get-workflows
-  "Get workflows from event stream."
-  [state]
-  (try
-    (if-let [stream (:event-stream @state)]
-      (let [es-ns (or (find-ns 'ai.miniforge.event-stream.interface)
-                      (do (require 'ai.miniforge.event-stream.interface)
-                          (find-ns 'ai.miniforge.event-stream.interface)))]
-        (if es-ns
-          (let [get-events (ns-resolve es-ns 'get-events)
-                events (get-events stream)]
-            (->> events
-                 (filter #(#{:workflow/started
-                             :workflow/phase-started
-                             :workflow/phase-completed
-                             :workflow/completed
-                             :workflow/failed}
-                           (:event/type %)))
-                 (filter (comp some? wf-id))
-                 (group-by wf-id)
-                 (map (fn [[id wf-events]]
-                        (let [started (first (filter #(= :workflow/started (:event/type %)) wf-events))
-                              completed (first (filter #(= :workflow/completed (:event/type %)) wf-events))
-                              failed (first (filter #(= :workflow/failed (:event/type %)) wf-events))
-                              started-ts (or (:event/timestamp started)
-                                             (:timestamp started))
-                              completed-ts (or (:event/timestamp completed)
-                                               (:timestamp completed))]
-                          {:id id
-                           :name (wf-name-from-started started id)
-                           :status (wf-status completed failed)
-                           :phase (wf-phase wf-events started)
-                           :progress (if (or completed failed) 100 50)
-                           :started-at (normalize-ts started-ts)
-                           :completed-at (normalize-ts completed-ts)})))
-                 (sort-by (fn [wf]
-                            (some-> (:started-at wf) .getTime))
-                          #(compare (or %2 0) (or %1 0)))
-                 (take 50)
-                 vec))
-          []))
-      [])
-    (catch Exception e
-      (println "Error getting workflows:" (.getMessage e))
-      [])))
-
-(defn get-workflow-detail
-  "Get workflow detail."
-  [state id]
-  (let [workflows (get-workflows state)]
-    (or (first (filter #(= (str (:id %)) id) workflows))
-        {:error "Workflow not found"})))
-
-(defn get-events
-  "Query raw events from event stream with optional filtering.
-
-   Options:
-   - :workflow-id  Filter by workflow UUID
-   - :event-type   Filter by event type keyword
-   - :since        Filter events after this timestamp (ISO-8601 string)
-   - :limit        Max events to return (default 100)"
-  [state {:keys [workflow-id event-type since limit] :or {limit 100}}]
-  (try
-    (if-let [stream (:event-stream @state)]
-      (let [es-ns (or (find-ns 'ai.miniforge.event-stream.interface)
-                      (do (require 'ai.miniforge.event-stream.interface)
-                          (find-ns 'ai.miniforge.event-stream.interface)))]
-        (if es-ns
-          (let [get-events-fn (ns-resolve es-ns 'get-events)
-                all-events (get-events-fn stream)
-                since-inst (when since
-                             (try (java.time.Instant/parse since)
-                                  (catch Exception _ nil)))
-                filtered (->> all-events
-                              (filter (fn [e]
-                                        (and (or (nil? workflow-id)
-                                                 (= workflow-id (wf-id e)))
-                                             (or (nil? event-type)
-                                                 (= event-type (:event/type e)))
-                                             (or (nil? since-inst)
-                                                 (when-let [ts (:event/timestamp e)]
-                                                   (let [evt-inst (cond
-                                                                    (instance? java.time.Instant ts) ts
-                                                                    (string? ts) (try (java.time.Instant/parse ts)
-                                                                                      (catch Exception _ nil))
-                                                                    :else nil)]
-                                                     (and evt-inst (.isAfter evt-inst since-inst))))))))
-                              reverse
-                              (take limit)
-                              vec)]
-            filtered)
-          []))
-      [])
-    (catch Exception e
-      (println "Error querying events:" (.getMessage e))
-      [])))
-
-;------------------------------------------------------------------------------ Layer 6
-;; Dashboard state
-
-(defn get-stats
-  "Get high-level dashboard statistics."
-  [state]
-  (let [fleet (get-fleet-state state)
-        workflows (get-workflows state)]
-    {:trains {:total (get-in fleet [:summary :total-trains])
-              :active (get-in fleet [:summary :active-trains])}
-     :prs {:total (get-in fleet [:summary :total-prs])
-           :ready (reduce + 0 (map #(count (:train/ready-to-merge %)) (:trains fleet)))
-           :blocked (reduce + 0 (map #(count (:train/blocking-prs %)) (:trains fleet)))}
-     :health {:healthy (get-in fleet [:health :healthy])
-              :warning (get-in fleet [:health :warning])
-              :critical (get-in fleet [:health :critical])}
-     :workflows {:total (count workflows)
-                 :running (count (filter #(= :running (:status %)) workflows))
-                 :completed (count (filter #(= :completed (:status %)) workflows))}}))
-
-(defn get-risk-analysis
-  "Get AI-powered risk analysis for fleet."
-  [state]
-  (let [trains (get-trains state)
-        risks (map (fn [train]
-                    (let [score (calculate-risk-score train)]
-                      {:train-id (:train/id train)
-                       :train-name (:train/name train)
-                       :risk-score score
-                       :risk-level (cond
-                                     (< score 20) :low
-                                     (< score 50) :medium
-                                     :else :high)
-                       :factors (cond-> []
-                                  (seq (:train/blocking-prs train))
-                                  (conj {:type :blocking-prs
-                                         :count (count (:train/blocking-prs train))
-                                         :severity :high})
-
-                                  (some #(= :failed (:pr/ci-status %)) (:train/prs train))
-                                  (conj {:type :ci-failures
-                                         :count (count (filter #(= :failed (:pr/ci-status %)) (:train/prs train)))
-                                         :severity :high})
-
-                                  (> (count (:train/prs train)) 5)
-                                  (conj {:type :large-train
-                                         :count (count (:train/prs train))
-                                         :severity :medium}))}))
-                  trains)]
-    {:risks (sort-by :risk-score > risks)
-     :summary {:high (count (filter #(= :high (:risk-level %)) risks))
-               :medium (count (filter #(= :medium (:risk-level %)) risks))
-               :low (count (filter #(= :low (:risk-level %)) risks))}}))
-
-;------------------------------------------------------------------------------ Layer 7
-;; Activity tracking
-
-(defn get-recent-activity
-  "Get recent activity across fleet.
-"
-  [state]
-  (try
-    (let [trains (get-trains state)
-          train-events (mapcat (fn [train]
-                                 (map (fn [pr]
-                                        {:type :pr-status
-                                         :timestamp (:train/updated-at train)
-                                         :train-id (:train/id train)
-                                         :train-name (:train/name train)
-                                         :pr-number (:pr/number pr)
-                                         :status (:pr/status pr)
-                                         :message (str "PR #" (:pr/number pr) " " (name (:pr/status pr)))})
-                                      (:train/prs train)))
-                               trains)]
-      (->> train-events
-           (sort-by :timestamp #(compare %2 %1))
-           (take 20)
-           vec))
-    (catch Exception e
-      (println "Error getting recent activity:" (.getMessage e))
-      [])))
-
-(defn get-evidence-state
-  "Get evidence artifacts state."
-  [state]
-  (let [trains (get-trains state)]
-    {:trains (map (fn [train]
-                   {:train-id (:train/id train)
-                    :train-name (:train/name train)
-                    :evidence-bundle-id (:train/evidence-bundle-id train)
-                    :pr-count (count (:train/prs train))
-                    :has-evidence (some? (:train/evidence-bundle-id train))})
-                 trains)}))
-
-;------------------------------------------------------------------------------ Layer 8
-;; Filter fields
-
-(defn get-filter-fields
-  "Get available filter fields for Task Status view."
-  [state]
-  (let [dag-state (get-dag-state state)
-        trains (:trains dag-state)
-        tasks (:tasks dag-state)
-        repos (distinct (map :repo tasks))
-        statuses [:ready :running :done :blocked]]
-    {:repos (map (fn [repo] {:id repo :label repo}) repos)
-     :trains (map (fn [train]
-                   {:id (:train/id train)
-                    :label (:train/name train)})
-                 trains)
-     :statuses (map (fn [status]
-                     {:id (name status)
-                      :label (str/capitalize (name status))})
-                   statuses)}))
-
-;------------------------------------------------------------------------------ Layer 9
 ;; Composite state
 
 (defn get-dashboard-state
-  "Get complete dashboard state for initial load."
+  "Get complete dashboard state for initial load.
+   Computes shared data once to avoid redundant calls."
   [state]
-  {:stats (get-stats state)
-   :fleet (get-fleet-state state)
-   :risk (get-risk-analysis state)
-   :activity (get-recent-activity state)
-   :workflows (take 10 (get-workflows state))})
+  (let [fleet-data (get-fleet-state state)
+        trains (:trains fleet-data)
+        wfs (get-workflows state)]
+    {:stats (compute-stats trains wfs)
+     :fleet fleet-data
+     :risk (get-risk-analysis state)
+     :activity (get-recent-activity state)
+     :workflows (take 10 wfs)}))
