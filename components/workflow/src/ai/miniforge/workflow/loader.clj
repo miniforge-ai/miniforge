@@ -41,10 +41,28 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Resource loading
 
+(defn- find-latest-versioned-resource
+  "Scan classpath for the highest versioned workflow file matching workflow-id.
+   Looks for workflows/<workflow-id>-v*.edn files and returns the path with
+   the highest version number."
+  [workflow-id]
+  (when-let [workflows-dir (io/resource "workflows")]
+    (let [prefix (str (name workflow-id) "-v")
+          dir-file (io/file (.getPath workflows-dir))]
+      (when (.isDirectory dir-file)
+        (->> (.listFiles dir-file)
+             (filter #(.isFile %))
+             (filter #(let [n (.getName %)]
+                        (and (.startsWith n prefix) (.endsWith n ".edn"))))
+             (sort-by #(.getName %) (comp - compare))
+             first
+             (#(when % (str "workflows/" (.getName %)))))))))
+
 (defn load-from-resource
   "Load workflow config from classpath resources.
    Looks for workflows/<workflow-id>-v<version>.edn first,
-   then falls back to workflows/<workflow-id>.edn
+   then falls back to workflows/<workflow-id>.edn,
+   then scans for highest versioned file when version is 'latest'.
 
    Arguments:
    - workflow-id: Workflow identifier (keyword)
@@ -56,12 +74,14 @@
         versioned-path (str "workflows/" (name workflow-id) "-v" version ".edn")
         ;; Fallback to non-versioned: workflows/standard-sdlc.edn
         base-path (str "workflows/" (name workflow-id) ".edn")
-        ;; Try versioned first, then base
+        ;; Try versioned first, then base, then scan for latest version
         resource-path (or (when (and version (not= version "latest"))
                            (when (io/resource versioned-path)
                              versioned-path))
-                         base-path)]
-    (when-let [resource (io/resource resource-path)]
+                         (when (io/resource base-path)
+                           base-path)
+                         (find-latest-versioned-resource workflow-id))]
+    (when-let [resource (when resource-path (io/resource resource-path))]
       (try
         (with-open [rdr (io/reader resource)]
           (edn/read (java.io.PushbackReader. rdr)))

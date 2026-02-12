@@ -14,6 +14,9 @@
         ;; TUI/CLI interaction library (BB-compatible)
         io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}
 
+        ;; HTTP client (BB-compatible, GraalVM-safe)
+        org.babashka/http-client {:mvn/version "0.4.22"}
+
         ;; Web server dependencies (BB-compatible)
         ;; http-kit and hiccup are bundled with Babashka
         http-kit/http-kit {:mvn/version "2.8.0"}

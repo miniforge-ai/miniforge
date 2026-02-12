@@ -25,8 +25,7 @@
    - Health monitoring (monitoring namespace)
 
    Provides the main run-pipeline entry point."
-  (:require [clojure.string :as str]
-            [ai.miniforge.phase.interface :as phase]
+  (:require [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.execution :as exec]
@@ -48,7 +47,7 @@
           (when-let [http-ns (find-ns 'org.httpkit.client)]
             (when-let [ws (:websocket event-stream)]
               (when-let [send-fn (ns-resolve http-ns 'send!)]
-                (send-fn ws (cheshire.core/generate-string event)))))
+                (send-fn ws (json/generate-string event)))))
           (catch Exception e
             (println "Warning: Failed to send event via WebSocket:" (.getMessage e))))
 
@@ -99,74 +98,6 @@
                    :phase phase-name
                    :success? (:success? result)
                    :timestamp (java.time.Instant/now)}))
-
-(defn- discover-dashboard
-  "Auto-discover dashboard from well-known location.
-   Returns dashboard URL or nil if not found/running."
-  []
-  (try
-    (let [discovery-file (str (System/getProperty "user.home") "/.miniforge/dashboard.port")]
-      (when (.exists (java.io.File. discovery-file))
-        (let [info (json/parse-string (slurp discovery-file) true)
-              port (:port info)
-              url (str "http://localhost:" port)]
-          ;; Verify dashboard is actually running
-          (try
-            (require '[org.httpkit.client :as http])
-            (when-let [http-ns (find-ns 'org.httpkit.client)]
-              (when-let [get-fn (ns-resolve http-ns 'get)]
-                (let [response @(get-fn (str url "/health") {:timeout 1000})]
-                  (when (= 200 (:status response))
-                    url))))
-            (catch Exception _ nil)))))
-    (catch Exception _ nil)))
-
-(defn- handle-dashboard-command
-  "Handle incoming control command from dashboard.
-   Updates control-state based on command type."
-  [control-state msg]
-  (try
-    (let [command (json/parse-string msg true)]
-      (case (:command command)
-        :pause (do
-                 (swap! control-state assoc :paused true)
-                 (println "⏸  Workflow paused by dashboard"))
-        :resume (do
-                  (swap! control-state assoc :paused false)
-                  (println "▶  Workflow resumed by dashboard"))
-        :stop (do
-                (swap! control-state assoc :stopped true)
-                (println "⏹  Workflow stopped by dashboard"))
-        :adjust (when-let [params (:params command)]
-                  (swap! control-state update :adjustments merge params)
-                  (println "⚙  Workflow parameters adjusted:" params))
-        (println "Unknown command:" (:command command))))
-    (catch Exception e
-      (println "Error handling dashboard command:" (.getMessage e)))))
-
-(defn- connect-to-dashboard
-  "Connect to dashboard via WebSocket for event streaming.
-   Returns event-stream map with :websocket connection, or nil if connection fails."
-  [dashboard-url control-state]
-  (when dashboard-url
-    (try
-      (require '[org.httpkit.client :as http])
-      (when-let [http-ns (find-ns 'org.httpkit.client)]
-        (when-let [websocket-fn (ns-resolve http-ns 'websocket)]
-          (let [ws-url (str/replace dashboard-url #"^http" "ws")
-                ws-url (str ws-url "/ws/events")
-                ws (websocket-fn ws-url
-                                 {:on-open (fn [_ws] (println "Connected to dashboard:" ws-url))
-                                  :on-close (fn [_ws _status] (println "Disconnected from dashboard"))
-                                  :on-error (fn [_ws error] (println "Dashboard WebSocket error:" error))
-                                  :on-receive (fn [_ws msg]
-                                                (handle-dashboard-command control-state msg))})]
-            {:websocket ws
-             :dashboard-url dashboard-url
-             :control-state control-state})))
-      (catch Exception e
-        (println "Warning: Could not connect to dashboard:" (.getMessage e))
-        nil))))
 
 ;------------------------------------------------------------------------------ Layer 0: Pipeline helpers
 
@@ -285,13 +216,10 @@
   ([workflow input opts]
    (let [pipeline (build-pipeline workflow)
          max-phases (or (:max-phases opts) 50)
-         ;; Control state for dashboard commands
-         control-state (atom {:paused false :stopped false :adjustments {}})
-         ;; Auto-discover dashboard or use explicit URL, fall back to in-memory
-         dashboard-url (or (:dashboard-url opts) (discover-dashboard))
-         event-stream (or (when dashboard-url
-                            (connect-to-dashboard dashboard-url control-state))
-                          (:event-stream opts))
+         ;; Control state for dashboard commands — caller can provide their own
+         control-state (or (:control-state opts)
+                           (atom {:paused false :stopped false :adjustments {}}))
+         event-stream (:event-stream opts)
 
          ;; Wrap callbacks to publish events
          callbacks {:on-phase-start (fn [ctx interceptor]
@@ -305,10 +233,12 @@
                                          (when-let [cb (:on-phase-complete opts)]
                                            (cb ctx interceptor result)))}
 
+         skip-lifecycle? (:skip-lifecycle-events opts)
          initial-ctx (ctx/create-context workflow input opts)]
 
-     ;; Publish workflow started event
-     (publish-workflow-started! event-stream initial-ctx)
+     ;; Publish workflow started event (unless caller already did)
+     (when-not skip-lifecycle?
+       (publish-workflow-started! event-stream initial-ctx))
 
      (let [final-ctx
            (if (empty? pipeline)
@@ -331,8 +261,9 @@
                  (recur (execute-single-iteration pipeline context callbacks iteration control-state)
                         (inc iteration)))))]
 
-       ;; Publish workflow completed event
-       (publish-workflow-completed! event-stream final-ctx)
+       ;; Publish workflow completed event (unless caller already does)
+       (when-not skip-lifecycle?
+         (publish-workflow-completed! event-stream final-ctx))
        final-ctx))))
 
 ;------------------------------------------------------------------------------ Rich Comment
