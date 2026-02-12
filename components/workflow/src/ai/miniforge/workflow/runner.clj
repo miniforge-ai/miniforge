@@ -29,7 +29,8 @@
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.execution :as exec]
-            [ai.miniforge.workflow.monitoring :as monitoring]))
+            [ai.miniforge.workflow.monitoring :as monitoring]
+            [cheshire.core :as json]))
 
 ;------------------------------------------------------------------------------ Layer -1: Event publishing
 
@@ -46,7 +47,7 @@
           (when-let [http-ns (find-ns 'org.httpkit.client)]
             (when-let [ws (:websocket event-stream)]
               (when-let [send-fn (ns-resolve http-ns 'send!)]
-                (send-fn ws (cheshire.core/generate-string event)))))
+                (send-fn ws (json/generate-string event)))))
           (catch Exception e
             (println "Warning: Failed to send event via WebSocket:" (.getMessage e))))
 
