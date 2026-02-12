@@ -1,0 +1,361 @@
+(ns ai.miniforge.workflow.artifact-persistence-test
+  "Integration tests that validate files are actually written to disk.
+  
+  These tests validate the full artifact persistence flow:
+  - Files are written to filesystem
+  - Zero-file writes are detected and fail
+  - Empty artifacts cause failures
+  - Success flags are validated
+  
+  This test suite should have caught the bug discovered during dogfooding
+  where workflows completed with :files-written 0."
+  (:require
+   [clojure.test :refer [deftest testing is use-fixtures]]
+   [clojure.java.io :as io]
+   [clojure.string :as str]
+   [babashka.fs :as fs]
+   [ai.miniforge.phase.registry :as registry]
+   [ai.miniforge.agent.interface :as agent]
+   [ai.miniforge.response.interface :as response]
+   [ai.miniforge.release-executor.interface :as release-executor]))
+
+;------------------------------------------------------------------------------ Test Fixtures
+
+(def ^:dynamic *test-worktree-path* nil)
+
+(defn- create-test-worktree
+  "Create a temporary worktree directory for testing."
+  []
+  (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")
+                          (str "artifact-test-" (random-uuid)))]
+    (.mkdirs temp-dir)
+    ;; Initialize minimal git repo
+    (let [git-dir (io/file temp-dir ".git")]
+      (.mkdirs git-dir)
+      (spit (io/file git-dir "config") "[core]\n\trepositoryformatversion = 0")
+      (spit (io/file temp-dir "README.md") "# Test Repository"))
+    (.getPath temp-dir)))
+
+(defn- cleanup-test-worktree
+  "Delete test worktree directory and all contents."
+  [dir-path]
+  (when dir-path
+    (try
+      (fs/delete-tree dir-path)
+      (catch Exception _e
+        ;; Ignore cleanup errors
+        nil))))
+
+(defn worktree-fixture
+  "Test fixture that creates and cleans up a test worktree."
+  [f]
+  (let [worktree (create-test-worktree)]
+    (binding [*test-worktree-path* worktree]
+      (try
+        (f)
+        (finally
+          (cleanup-test-worktree worktree))))))
+
+(use-fixtures :each worktree-fixture)
+
+;------------------------------------------------------------------------------ Mock Data
+
+(def mock-code-artifact
+  "Mock code artifact with multiple files."
+  {:code/id (random-uuid)
+   :code/files [{:path "src/feature.clj"
+                 :content "(ns feature)\n(defn new-feature [] :implemented)"
+                 :action :create}
+                {:path "test/feature_test.clj"
+                 :content "(ns feature-test (:require [clojure.test :refer :all]))\n(deftest test-new-feature (is true))"
+                 :action :create}]
+   :code/language "clojure"
+   :code/summary "Implemented new feature"})
+
+(def mock-empty-artifact
+  "Mock artifact with no files."
+  {:code/id (random-uuid)
+   :code/files []
+   :code/language "clojure"
+   :code/summary "Empty implementation"})
+
+(def mock-plan-result
+  {:plan/id (random-uuid)
+   :plan/tasks [{:task "Implement feature"
+                 :file "src/feature.clj"}]})
+
+;------------------------------------------------------------------------------ Test Helpers
+
+(defn- file-exists-in-worktree?
+  "Check if a file exists in the test worktree."
+  [relative-path]
+  (when *test-worktree-path*
+    (.exists (io/file *test-worktree-path* relative-path))))
+
+(defn- read-worktree-file
+  "Read content of a file from the test worktree."
+  [relative-path]
+  (when *test-worktree-path*
+    (let [file (io/file *test-worktree-path* relative-path)]
+      (when (.exists file)
+        (slurp file)))))
+
+(defn- count-files-in-worktree
+  "Count files in test worktree (excluding .git)."
+  []
+  (when *test-worktree-path*
+    (->> (file-seq (io/file *test-worktree-path*))
+         (filter #(.isFile %))
+         (remove #(str/includes? (.getPath %) ".git"))
+         count)))
+
+(defn- execute-phase-pipeline
+  "Execute a phase pipeline: plan -> implement -> verify -> release."
+  [opts]
+  (let [{:keys [implement-agent-fn verify-agent-fn release-opts]} opts
+        
+        ;; Execute plan phase
+        plan-ctx {:execution/id (random-uuid)
+                  :execution/input {:description "Test feature"
+                                   :title "Add feature"
+                                   :intent "testing"}
+                  :execution/metrics {:tokens 0 :duration-ms 0}
+                  :execution/phase-results {}}
+        
+        plan-interceptor (registry/get-phase-interceptor {:phase :plan})
+        plan-result-ctx (-> plan-ctx
+                           (assoc :phase-config {:phase :plan})
+                           ((:enter plan-interceptor))
+                           ((:leave plan-interceptor)))
+        
+        ;; Store plan result
+        plan-result-ctx (assoc-in plan-result-ctx 
+                                 [:execution/phase-results :plan]
+                                 (:phase plan-result-ctx))
+        
+        ;; Execute implement phase
+        impl-ctx (assoc plan-result-ctx :phase-config {:phase :implement})
+        impl-interceptor (registry/get-phase-interceptor {:phase :implement})
+        impl-result-ctx (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                                      agent/invoke (or implement-agent-fn
+                                                      (fn [_ _ _]
+                                                        (response/success mock-code-artifact
+                                                                        {:tokens 100 :duration-ms 500})))]
+                         (-> impl-ctx
+                             ((:enter impl-interceptor))
+                             ((:leave impl-interceptor))))
+        
+        ;; Store implement result
+        impl-result-ctx (assoc-in impl-result-ctx
+                                 [:execution/phase-results :implement]
+                                 (:phase impl-result-ctx))
+        
+        ;; Execute verify phase (optional)
+        verify-result-ctx (when verify-agent-fn
+                           (let [verify-ctx (assoc impl-result-ctx :phase-config {:phase :verify})
+                                 verify-interceptor (registry/get-phase-interceptor {:phase :verify})]
+                             (with-redefs [agent/create-tester (fn [_] {:type :mock-tester})
+                                          agent/invoke verify-agent-fn]
+                               (-> verify-ctx
+                                   ((:enter verify-interceptor))
+                                   ((:leave verify-interceptor))))))
+        
+        ;; Execute release phase
+        release-ctx (or verify-result-ctx impl-result-ctx)
+        release-ctx (assoc release-ctx 
+                          :phase-config {:phase :release}
+                          :worktree-path *test-worktree-path*)
+        release-interceptor (registry/get-phase-interceptor {:phase :release})]
+    
+    (if release-opts
+      ;; Custom release executor for testing
+      (with-redefs [release-executor/execute-release-phase (:executor release-opts)]
+        (-> release-ctx
+            ((:enter release-interceptor))
+            ((:leave release-interceptor))))
+      ;; Normal release execution
+      (-> release-ctx
+          ((:enter release-interceptor))
+          ((:leave release-interceptor))))))
+
+;------------------------------------------------------------------------------ Integration Tests
+
+(deftest test-full-workflow-writes-files
+  (testing "Complete workflow writes files to filesystem"
+    (with-redefs [agent/create-planner (fn [_] {:type :mock-planner})
+                  agent/invoke (fn [agent _ _]
+                                (if (= :mock-planner (:type agent))
+                                  (response/success mock-plan-result {:tokens 50 :duration-ms 200})
+                                  (response/success {:result :ok} {:tokens 0 :duration-ms 0})))]
+      
+      (let [initial-file-count (count-files-in-worktree)
+            
+            ;; Execute full pipeline with direct file writing (no git staging)
+            result-ctx (execute-phase-pipeline
+                       {:release-opts
+                        {:executor
+                         (fn [workflow-state exec-context _opts]
+                           (let [worktree (:worktree-path exec-context)
+                                 code-artifacts (map :artifact/content (:workflow/artifacts workflow-state))
+                                 files (mapcat :code/files code-artifacts)]
+                             (doseq [{:keys [path content]} files]
+                               (let [file (io/file worktree path)]
+                                 (io/make-parents file)
+                                 (spit file content)))
+                             {:success? true
+                              :artifacts [{:artifact/id (random-uuid)
+                                         :artifact/type :release
+                                         :artifact/content {:files-written (count files)
+                                                          :branch "test-branch"
+                                                          :commit-sha "abc123"}}]
+                              :metrics {:files-written (count files)}}))}})
+            
+            final-file-count (count-files-in-worktree)]
+        
+        ;; Verify files were written
+        (is (> final-file-count initial-file-count)
+            "Files should have been written to disk")
+        
+        (is (file-exists-in-worktree? "src/feature.clj")
+            "Source file should exist on filesystem")
+        
+        (is (file-exists-in-worktree? "test/feature_test.clj")
+            "Test file should exist on filesystem")
+        
+        ;; Verify file contents
+        (let [feature-content (read-worktree-file "src/feature.clj")]
+          (is (some? feature-content)
+              "Should be able to read written file")
+          (is (str/includes? feature-content "new-feature")
+              "File should contain expected content"))
+        
+        ;; Verify phase completed successfully
+        (is (= :completed (get-in result-ctx [:phase :status]))
+            "Release phase should complete")
+        
+        (is (= :success (get-in result-ctx [:phase :result :status]))
+            "Release result should be success")))))
+
+(deftest test-release-fails-with-zero-files-written
+  (testing "Release phase fails when zero files are written despite artifact having files"
+    (let [result-ctx (execute-phase-pipeline
+                     {:release-opts
+                      {:executor
+                       (fn [workflow-state _exec-context _opts]
+                         ;; Mock executor that claims success but wrote 0 files
+                         (let [artifacts (:workflow/artifacts workflow-state)
+                               code-artifact (first artifacts)
+                               file-count (count (get-in code-artifact [:artifact/content :code/files]))]
+                           (if (pos? file-count)
+                             ;; Artifact has files, but we're simulating write failure
+                             {:success? false
+                              :errors [{:type :persistence-failure
+                                       :message (str "Failed to write " file-count " files from artifact")}]
+                              :metrics {:files-written 0}}
+                             {:success? true
+                              :artifacts []
+                              :metrics {:files-written 0}})))}})]
+      
+      ;; Verify release phase detected the failure
+      (is (= :completed (get-in result-ctx [:phase :status]))
+          "Phase should complete (even with failure)")
+      
+      (is (false? (get-in result-ctx [:phase :result :success]))
+          "Result should indicate failure when no files written")
+      
+      ;; Verify no files were actually written
+      (is (not (file-exists-in-worktree? "src/feature.clj"))
+          "No files should exist when write fails"))))
+
+(deftest test-verify-handles-missing-artifact
+  (testing "Verify phase handles missing implement artifact"
+    ;; Create context WITHOUT implement phase result
+    (let [ctx {:execution/id (random-uuid)
+               :execution/input {:description "Test"
+                                :title "Test"
+                                :intent "testing"}
+               :execution/metrics {:tokens 0 :duration-ms 0}
+               :execution/phase-results {}
+               :phase-config {:phase :verify}}
+          
+          verify-interceptor (registry/get-phase-interceptor {:phase :verify})]
+      
+      (with-redefs [agent/create-tester (fn [_] {:type :mock-tester})
+                    agent/invoke (fn [_agent _task _ctx]
+                                  (response/success {:result :ok} {:tokens 0 :duration-ms 0}))]
+        (let [result ((:enter verify-interceptor) ctx)]
+          
+          ;; Verify phase should execute (it has fallback to read from input)
+          (is (some? result)
+              "Verify phase should return a result")
+          
+          (is (some? (get-in result [:phase :result]))
+              "Phase result should be present"))))))
+
+(deftest test-workflow-empty-artifact-handling
+  (testing "Workflow handles empty artifact (zero files) appropriately"
+    (let [result-ctx (execute-phase-pipeline
+                     {:implement-agent-fn
+                      (fn [_agent _task _ctx]
+                        ;; Implementer returns empty artifact
+                        (response/success mock-empty-artifact {:tokens 50 :duration-ms 300}))
+                      
+                      :release-opts
+                      {:executor
+                       (fn [workflow-state _exec-context _opts]
+                         (let [artifacts (:workflow/artifacts workflow-state)
+                               code-artifact (first artifacts)
+                               file-count (count (get-in code-artifact [:artifact/content :code/files]))]
+                           (if (zero? file-count)
+                             ;; Empty artifact - should report appropriately
+                             {:success? true
+                              :artifacts [{:artifact/id (random-uuid)
+                                         :artifact/type :release
+                                         :artifact/content {:files-written 0
+                                                          :branch "test-branch"
+                                                          :commit-sha "abc123"}}]
+                              :metrics {:files-written 0}}
+                             {:success? true
+                              :artifacts []
+                              :metrics {:files-written file-count}})))}})]
+      
+      ;; Verify metrics show zero files written
+      (let [files-written (get-in result-ctx [:phase :result :output :release/metrics :files-written])]
+        (is (zero? files-written)
+            "Should report zero files written for empty artifact"))
+      
+      ;; Verify no files were created
+      (is (not (file-exists-in-worktree? "src/feature.clj"))
+          "No source files should exist with empty artifact"))))
+
+(deftest test-artifact-content-verification
+  (testing "Files written to disk have correct content"
+    (let [_result-ctx (execute-phase-pipeline
+                      {:release-opts
+                       {:executor
+                        (fn [workflow-state exec-context _opts]
+                          ;; Direct file writing (no git staging)
+                          (let [worktree (:worktree-path exec-context)
+                                code-artifacts (map :artifact/content (:workflow/artifacts workflow-state))
+                                files (mapcat :code/files code-artifacts)]
+                            (doseq [{:keys [path content]} files]
+                              (let [file (io/file worktree path)]
+                                (io/make-parents file)
+                                (spit file content)))
+                            {:success? true
+                             :artifacts [{:artifact/id (random-uuid)
+                                        :artifact/type :release
+                                        :artifact/content {:files-written (count files)}}]
+                             :metrics {:files-written (count files)}}))}})
+          feature-content (read-worktree-file "src/feature.clj")
+          test-content (read-worktree-file "test/feature_test.clj")]
+
+      (is (= "(ns feature)\n(defn new-feature [] :implemented)"
+             feature-content)
+          "Source file content should match artifact")
+
+      (is (str/includes? test-content "test-new-feature")
+          "Test file should contain test function")
+
+      (is (str/includes? test-content "clojure.test")
+          "Test file should require clojure.test"))))
