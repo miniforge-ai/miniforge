@@ -312,3 +312,4 @@
   [state workflow-id]
   (let [commands (state/dequeue-commands! state workflow-id)]
     (responses/json-response {:commands commands})))
+

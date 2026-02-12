@@ -31,7 +31,7 @@
           (finally
             (.close raf)))))))
 
-(defn- parse-edn-line
+(defn parse-edn-line
   "Parse a single EDN line, returning nil on parse failure."
   [line]
   (try

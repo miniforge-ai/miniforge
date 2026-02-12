@@ -146,8 +146,9 @@ window.miniforge = {
 let ws = null;
 let reconnectTimer = null;
 let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 10;
-const RECONNECT_DELAY = 3000;
+// Exponential backoff with full jitter, no hard cap on attempts
+const BASE_RECONNECT_DELAY = 1000;   // 1s initial
+const MAX_RECONNECT_DELAY = 30000;   // 30s cap
 
 function connectWebSocket() {
   const wsUrl = `ws://${window.location.host}/ws`;
@@ -159,6 +160,12 @@ function connectWebSocket() {
       console.log('WebSocket connected');
       reconnectAttempts = 0;
       updateConnectionStatus('connected');
+      // Request current state to catch up on events missed while disconnected
+      try {
+        ws.send(JSON.stringify({ action: 'refresh' }));
+      } catch (e) {
+        console.error('Error sending refresh request:', e);
+      }
     };
 
     ws.onclose = () => {
@@ -192,13 +199,14 @@ function scheduleReconnect() {
     clearTimeout(reconnectTimer);
   }
 
-  if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-    reconnectAttempts++;
-    console.log(`Reconnecting in ${RECONNECT_DELAY}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
-    reconnectTimer = setTimeout(connectWebSocket, RECONNECT_DELAY);
-  } else {
-    console.error('Max reconnection attempts reached');
-  }
+  reconnectAttempts++;
+  updateConnectionStatus('reconnecting');
+  // Exponential backoff capped at MAX_RECONNECT_DELAY, with full jitter
+  const expDelay = BASE_RECONNECT_DELAY * Math.pow(2, Math.min(reconnectAttempts, 5));
+  const cappedDelay = Math.min(MAX_RECONNECT_DELAY, expDelay);
+  const delay = Math.random() * cappedDelay;
+  console.log(`Reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts})`);
+  reconnectTimer = setTimeout(connectWebSocket, delay);
 }
 
 function updateConnectionStatus(status) {
@@ -213,6 +221,7 @@ function updateConnectionStatus(status) {
     const statusLabels = {
       connected: 'Connected',
       disconnected: 'Disconnected',
+      reconnecting: 'Reconnecting...',
       error: 'Error'
     };
     statusText.textContent = statusLabels[status] || status;

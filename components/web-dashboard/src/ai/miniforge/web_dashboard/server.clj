@@ -29,7 +29,9 @@
    [ai.miniforge.web-dashboard.server.filters :as filters]
    [ai.miniforge.web-dashboard.server.websocket :as websocket]
    [ai.miniforge.web-dashboard.server.handlers :as handlers]
+   [ai.miniforge.web-dashboard.server.archive :as archive-handlers]
    [ai.miniforge.web-dashboard.watcher :as watcher]
+   [ai.miniforge.web-dashboard.archive :as archive]
    [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -151,6 +153,21 @@
           (= uri "/api/events")
           (handlers/handle-api-events state params)
 
+          (= uri "/api/archived-workflows")
+          (archive-handlers/handle-archived-workflows state params)
+
+          (and (= uri "/api/archive/retention") (= :post (:request-method req)))
+          (archive-handlers/handle-retention state (slurp (:body req)))
+
+          (.startsWith uri "/api/archive/")
+          (let [[wf-id segment] (str/split (subs uri (count "/api/archive/")) #"/" 2)]
+            (case segment
+              "events" (archive-handlers/handle-archived-workflow-events state wf-id)
+              "delete" (if (= :post (:request-method req))
+                         (archive-handlers/handle-delete state wf-id)
+                         (responses/not-found-response))
+              (responses/not-found-response)))
+
           (.startsWith uri "/api/workflow/")
           (let [rest-uri (subs uri 14)
                 [wf-id segment] (str/split rest-uri #"/" 2)]
@@ -204,6 +221,17 @@
                          events-dir
                          (fn [event]
                            (es/publish! dashboard-event-stream event)))]
+    ;; Launch background archive scan
+    (let [archive-state (:archived-workflows @state)
+          loading?      (:archive-loading? @state)]
+      (future
+        (archive/scan-archive!
+         events-dir
+         (fn [summary] (swap! archive-state assoc (str (:id summary)) summary))
+         (fn []
+           (reset! loading? false)
+           (println "Archive scan complete:" (count @archive-state) "workflows found")))))
+
     ;; Write discovery file for auto-connect
     (write-discovery-file! actual-port)
 

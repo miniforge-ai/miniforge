@@ -53,6 +53,8 @@
                 :pr-train-manager nil
                 :repo-dag-manager nil
                 :workflow-commands {}
+                :archived-workflows (atom {})
+                :archive-loading? (atom true)
                 :start-time (System/currentTimeMillis)}
                opts)))
 
