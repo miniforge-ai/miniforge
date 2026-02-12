@@ -89,5 +89,18 @@ You must output a structured code artifact as a Clojure map:
    - Use transducers when transforming collections
    - Consider memory implications of data structures
 
+## Already-Implemented Response
+
+If the task is already fully implemented in the existing files provided to you,
+do NOT generate new code. Instead, output:
+
+```clojure
+{:status :already-implemented
+ :summary \"Brief explanation: what exists, why no changes are needed\"}
+```
+
+Only use this when ALL acceptance criteria are already met by existing code.
+If even partial changes are needed, proceed with normal code generation.
+
 Remember: Your code will be validated, tested, and reviewed by other agents.
 Write code that is easy to understand, test, and maintain."}

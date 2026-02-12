@@ -1,0 +1,23 @@
+;; Built-in policy pack for miniforge agent behaviors.
+;; Loaded from the classpath by ai.miniforge.phase.agent-behavior.
+
+{:pack/id "ai.miniforge/builtin-agent-behaviors"
+ :pack/name "Miniforge Built-in Agent Behaviors"
+ :pack/version "2026.02.12"
+ :pack/description "Built-in rules that inject behavioral guidance into agent prompts. These rules use :rule/agent-behavior to influence how agents respond, rather than detecting violations in artifacts."
+ :pack/author "miniforge.ai"
+ :pack/license "Apache-2.0"
+ :pack/categories [{:id "900" :name "Agent Behavior" :description "Rules governing agent prompt behaviors"}]
+ :pack/rules
+ [{:rule/id :400-check-existing-work
+   :rule/title "Check Existing Work Before Implementing"
+   :rule/description "Instructs the implementer agent to examine existing files before generating code. Prevents duplicate implementations when tasks are already done."
+   :rule/severity :info
+   :rule/category "900"
+   :rule/applies-to {:phases [:implement]}
+   :rule/detection {:type :custom}
+   :rule/enforcement {:action :audit
+                      :message "Agent should check existing files before implementing"}
+   :rule/agent-behavior "BEFORE generating any code, carefully examine all existing files provided in the context. If the task described is already fully implemented in those files (all acceptance criteria met, no missing functionality), respond with {:status :already-implemented :summary \"...\"} instead of generating new code. Only generate code when changes are actually needed."}]
+ :pack/created-at #inst "2026-02-12T00:00:00.000Z"
+ :pack/updated-at #inst "2026-02-12T00:00:00.000Z"}
