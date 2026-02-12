@@ -1,0 +1,140 @@
+{:title "Add Artifact Persistence Integration Tests"
+ :description
+ "The artifact persistence bug (fix-artifact-persistence.spec.edn) was fixed in
+  commits 57a0c29 and 7f93a14, which corrected phase handoff paths and added
+  handoff_test.clj. However, the original spec called for comprehensive integration
+  tests that validate actual filesystem persistence and failure modes. These were
+  not created. This spec covers only the missing test tasks.
+
+  What exists:
+  - handoff_test.clj: validates artifact data flows between phases in-memory
+  - verify_test.clj: basic verify phase tests
+
+  What's missing:
+  - Integration tests that validate files are written to disk
+  - Failure-mode tests for empty artifacts, zero files written, success=false
+  - Phase-level unit tests for implement/release artifact validation
+
+  When done, push a PR for review."
+
+ :intent
+ {:type :test
+  :scope ["components/workflow/test/ai/miniforge/workflow/artifact_persistence_test.clj"
+          "components/phase/test/ai/miniforge/phase/verify_test.clj"
+          "components/phase/test/ai/miniforge/phase/release_test.clj"]}
+
+ :constraints
+ ["Test-only change — no production code modifications"
+  "Tests must validate actual filesystem changes (use temp dirs)"
+  "Mock LLM/agent calls but exercise real phase and release-executor code paths"
+  "Follow existing test patterns: deftest, testing, with-redefs, is with messages"
+  "All existing tests must continue to pass (bb test)"
+  "Pre-commit hooks must pass on final commit"
+  "Push a PR to GitHub when tests are green"]
+
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :plan/tasks
+ [{:task/id :create-persistence-integration-tests
+   :task/description
+   "Create: components/workflow/test/ai/miniforge/workflow/artifact_persistence_test.clj
+
+    Read first to understand patterns:
+    - components/workflow/test/ai/miniforge/workflow/handoff_test.clj (context setup, mocking)
+    - components/phase/src/ai/miniforge/phase/release.clj (what release does)
+    - components/release-executor/src/ai/miniforge/release_executor/core.clj (file writing)
+    - components/release-executor/src/ai/miniforge/release_executor/files.clj (write-and-stage-files!)
+
+    Tests to create:
+
+    1. test-release-writes-files-to-disk
+       - Create a temp directory
+       - Build a context with a mock implement result containing :code/files
+       - Execute release phase (or release-executor directly) against temp dir
+       - Assert files physically exist on filesystem
+       - Assert file contents match what was in the artifact
+       - Assert metrics show :files-written > 0
+       - Clean up temp dir
+
+    2. test-release-creates-parent-directories
+       - Artifact contains files in nested paths (e.g. src/ai/miniforge/foo/bar.clj)
+       - Assert parent directories are created automatically
+       - Assert files exist at correct nested paths
+
+    3. test-release-handles-file-actions
+       - Test :create action — file is created
+       - Test :modify action — existing file is overwritten
+       - Test :delete action — existing file is removed
+       - Each action verified on filesystem
+
+    4. test-release-fails-with-empty-artifact
+       - Context has implement result with {:code/files []}
+       - Release should either fail or report :files-written 0
+       - Workflow should not silently succeed
+
+    5. test-workflow-fails-when-success-false
+       - Mock a phase to return {:status :failure :success false}
+       - Verify workflow runner propagates the failure
+       - Error message should include which phase failed"
+   :task/type :test
+   :task/dependencies []}
+
+  {:task/id :add-release-phase-unit-tests
+   :task/description
+   "Create or extend: components/phase/test/ai/miniforge/phase/release_test.clj
+
+    Read first:
+    - components/phase/src/ai/miniforge/phase/release.clj
+    - components/phase/test/ai/miniforge/phase/verify_test.clj (for test patterns)
+
+    Tests to add:
+
+    1. test-release-extracts-artifact-from-context
+       - Build context with implement result at expected path
+       - Assert release phase finds and uses the artifact
+
+    2. test-release-returns-files-written-metrics
+       - Mock release-executor to return known metrics
+       - Assert release phase result includes :files-written count
+
+    3. test-release-handles-missing-implement-result
+       - Context has no :implement in :execution/phase-results
+       - Assert release phase produces a clear error, not NPE"
+   :task/type :test
+   :task/dependencies []}
+
+  {:task/id :add-verify-phase-artifact-tests
+   :task/description
+   "Extend: components/phase/test/ai/miniforge/phase/verify_test.clj
+
+    Read first:
+    - components/phase/src/ai/miniforge/phase/verify.clj (how it reads artifact)
+    - components/phase/test/ai/miniforge/phase/verify_test.clj (existing tests)
+
+    Tests to add:
+
+    1. test-verify-reads-artifact-from-implement-result
+       - Build context with implement result containing code artifact
+       - Assert verify phase extracts code and passes it to tester agent
+
+    2. test-verify-handles-missing-artifact-gracefully
+       - Context has implement result with no :output
+       - Assert verify phase behavior (fail or fallback, document which)"
+   :task/type :test
+   :task/dependencies []}
+
+  {:task/id :run-tests-and-push-pr
+   :task/description
+   "Validate and ship:
+    1. Run bb test — all tests must pass (existing + new)
+    2. Run bb pre-commit — must pass
+    3. Create branch: test/artifact-persistence-integration
+    4. Commit with message: 'test(persistence): add integration tests for artifact filesystem persistence'
+    5. Push branch and create PR targeting main
+    6. PR title: 'test(persistence): add artifact persistence integration tests'
+    7. PR body should list the new test files and what each test validates"
+   :task/type :test
+   :task/dependencies [:create-persistence-integration-tests
+                       :add-release-phase-unit-tests
+                       :add-verify-phase-artifact-tests]}]}
