@@ -14,11 +14,6 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; File reading
 
-(def ^:private edn-readers
-  "Reader map for EDN parsing with #inst and #uuid support."
-  {'inst #(java.util.Date. (.getTime (java.time.Instant/parse %)))
-   'uuid #(java.util.UUID/fromString %)})
-
 (defn- read-new-lines
   "Read new lines from file starting at byte offset.
    Returns [new-offset lines] where lines is a vector of strings."
@@ -41,7 +36,7 @@
   [line]
   (try
     (when (and line (not= "" (.trim ^String line)))
-      (edn/read-string {:readers edn-readers} line))
+      (edn/read-string line))
     (catch Exception _
       nil)))
 
@@ -74,11 +69,25 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Watcher lifecycle
 
+(defn- initialize-offsets
+  "Scan existing .edn files and set offsets to end-of-file.
+   This skips historical data so the watcher only sees new events."
+  [events-dir]
+  (let [dir (io/file events-dir)]
+    (if (and (.exists dir) (.isDirectory dir))
+      (->> (.listFiles dir)
+           (filter #(.endsWith (.getName ^java.io.File %) ".edn"))
+           (reduce (fn [acc ^java.io.File file]
+                     (assoc acc (.getPath file) (.length file)))
+                   {}))
+      {})))
+
 (defn start-watcher!
   "Start a daemon thread that polls events dir every 500ms.
    Publishes parsed events via publish-fn.
 
-   On startup, reads all existing files from offset 0 (backfills full history).
+   On startup, seeks to end of all existing files (skips history).
+   Only new bytes appended after startup and new files are published.
 
    Arguments:
      events-dir  - Path to ~/.miniforge/events directory
@@ -87,7 +96,7 @@
    Returns: cleanup function that stops the watcher."
   [events-dir publish-fn]
   (let [running (atom true)
-        offsets (atom {})
+        offsets (atom (initialize-offsets events-dir))
         thread (Thread.
                 (fn []
                   (while @running

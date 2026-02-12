@@ -15,16 +15,29 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Auto-discovery
 
+(defn- pid-alive?
+  "Check if a process with the given PID is still running."
+  [pid]
+  (try
+    (when pid
+      (.isPresent (java.lang.ProcessHandle/of (long pid))))
+    (catch Exception _ false)))
+
 (defn discover-dashboard-url
   "Auto-discover running dashboard from ~/.miniforge/dashboard.port.
-   Returns dashboard URL string or nil. No health check — just reads the file."
+   Returns dashboard URL string or nil. Verifies the dashboard PID is alive
+   and cleans up stale discovery files from crashed processes."
   []
   (try
-    (let [discovery-file (str (System/getProperty "user.home") "/.miniforge/dashboard.port")]
-      (when (.exists (java.io.File. discovery-file))
+    (let [discovery-file (java.io.File. (str (System/getProperty "user.home") "/.miniforge/dashboard.port"))]
+      (when (.exists discovery-file)
         (let [info (json/parse-string (slurp discovery-file) true)
-              port (:port info)]
-          (str "http://localhost:" port))))
+              port (:port info)
+              pid (:pid info)]
+          (if (pid-alive? pid)
+            (str "http://localhost:" port)
+            ;; Stale file from crashed dashboard — clean up
+            (do (.delete discovery-file) nil)))))
     (catch Exception _ nil)))
 
 ;------------------------------------------------------------------------------ Layer 1
