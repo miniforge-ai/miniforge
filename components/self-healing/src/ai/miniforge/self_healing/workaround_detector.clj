@@ -76,7 +76,7 @@
                     error-result
                     (or (:message error-result)
                         (when (instance? Exception error-result)
-                          (.getMessage error-result))
+                          (ex-message error-result))
                         (str error-result)))]
     (first (filter #(matches-workaround-pattern? error-msg %) workaround-patterns))))
 
@@ -154,7 +154,7 @@
        :exit-code exit-code})
     (catch Exception e
       {:success? false
-       :error (.getMessage e)})))
+       :error (ex-message e)})))
 
 (defn- apply-shell-workaround
   "Apply shell command workaround.

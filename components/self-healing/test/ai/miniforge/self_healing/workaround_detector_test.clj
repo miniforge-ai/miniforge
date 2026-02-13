@@ -137,7 +137,7 @@
                    :description "Test with denial"
                    :workaround {:type :backend-switch
                                 :to-backend :codex
-                                :requires-sudo false
+                                :requires-sudo true
                                 :auto-apply false}}
           prompt-fn (fn [_msg _opts] "no")
           result (detector/apply-workaround pattern prompt-fn)]

@@ -99,6 +99,26 @@
                    :success? (:success? result)
                    :timestamp (java.time.Instant/now)}))
 
+(defn- check-backend-health-at-boundary!
+  "Check backend health at phase boundary. Returns switch-result or nil."
+  [event-stream context]
+  (try
+    (when-let [check-fn (requiring-resolve
+                          'ai.miniforge.self-healing.interface/check-backend-health-and-switch)]
+      (let [backend (or (get-in context [:execution/opts :llm-backend :config :backend])
+                        :anthropic)
+            sh-ctx {:llm {:backend backend}
+                    :config (get-in context [:execution/opts :self-healing-config])}
+            switch-result (check-fn sh-ctx)]
+        (when (:switched? switch-result)
+          (when-let [emit-fn (requiring-resolve
+                               'ai.miniforge.self-healing.interface/emit-backend-switch-event)]
+            (publish-event! event-stream (emit-fn sh-ctx switch-result)))
+          switch-result)))
+    (catch Exception e
+      (println "Warning: Self-healing health check failed:" (ex-message e))
+      nil)))
+
 ;------------------------------------------------------------------------------ Layer 0: Pipeline helpers
 
 (defn build-pipeline
@@ -191,11 +211,16 @@
       (monitoring/handle-meta-agent-halt context health-check ctx/transition-to-failed)
 
       ;; Healthy or warning - continue execution
-      (-> (exec/execute-phase-step pipeline context callbacks
-                                   ctx/merge-metrics
-                                   ctx/transition-to-completed
-                                   ctx/transition-to-failed)
-          (monitoring/clear-transient-state)))))
+      (let [phase-ctx (-> (exec/execute-phase-step pipeline context callbacks
+                                                   ctx/merge-metrics
+                                                   ctx/transition-to-completed
+                                                   ctx/transition-to-failed)
+                          (monitoring/clear-transient-state))
+            event-stream (get-in phase-ctx [:execution/opts :event-stream])
+            switch-result (check-backend-health-at-boundary! event-stream phase-ctx)]
+        (if switch-result
+          (assoc phase-ctx :self-healing/backend-switch switch-result)
+          phase-ctx)))))
 
 ;------------------------------------------------------------------------------ Layer 2: Main entry point
 
