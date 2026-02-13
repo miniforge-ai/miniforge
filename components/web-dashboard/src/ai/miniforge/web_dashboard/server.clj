@@ -131,6 +131,21 @@
           (= uri "/api/fleet/grid")
           (handlers/handle-api-fleet-grid state params)
 
+          (= uri "/api/fleet/repos")
+          (handlers/handle-api-fleet-repos state)
+
+          (and (= uri "/api/fleet/repos/add")
+               (= (:request-method req) :post))
+          (handlers/handle-api-fleet-add-repo state params)
+
+          (and (= uri "/api/fleet/repos/discover")
+               (= (:request-method req) :post))
+          (handlers/handle-api-fleet-discover state params)
+
+          (and (= uri "/api/fleet/prs/sync")
+               (= (:request-method req) :post))
+          (handlers/handle-api-fleet-sync state)
+
           (= uri "/api/trains")
           (handlers/handle-api-trains state params)
 
