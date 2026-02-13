@@ -79,6 +79,14 @@
   ;; This is the canonical location where workflow runner stores phase outputs
   ;; Phase results contain the full phase map, so extract :result :output
   (let [implement-result (get-in ctx [:execution/phase-results :implement :result :output])
+        _ (when-not implement-result
+            (throw (ex-info "Release phase has no code artifact from implement phase"
+                            {:phase :release
+                             :implement-status (get-in ctx [:execution/phase-results :implement :result :status])
+                             :hint "Implement phase may have failed or produced no output"})))
+        _ (when (and (map? implement-result) (empty? (:code/files implement-result)))
+            (throw (ex-info "Release phase received code artifact with zero files"
+                            {:phase :release :artifact-id (:code/id implement-result)})))
         code-artifacts (if-let [artifacts (:artifacts implement-result)]
                          (map (fn [a] {:artifact/type :code
                                        :artifact/content a})

@@ -42,7 +42,8 @@
                     (= :code (:artifact/type %))))
        (map (fn [artifact]
               (or (:artifact/content artifact)
-                  (:content artifact))))))
+                  (:content artifact))))
+       (remove nil?)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pipeline steps
@@ -59,6 +60,8 @@
         (log/warn logger :release-executor :no-code-artifacts
                   {:message "No code artifacts found to release"}))
       (fail state :no-code-artifacts "No code artifacts found in workflow state"))
+    (every? #(empty? (:code/files %)) (:code-artifacts state))
+    (fail state :no-code-files "Code artifacts contain no files")
     :else state))
 
 (defn- step-check-gh-auth [state]
@@ -102,18 +105,24 @@
   (if (failed? state)
     state
     (let [{:keys [worktree-path code-artifacts logger sandbox? executor environment-id]} state
-          result (if sandbox?
-                   (sandbox/write-and-stage-files! executor environment-id code-artifacts)
-                   (files/write-and-stage-files! worktree-path code-artifacts logger))]
-      (if (:success? result)
-        (assoc state :write-metrics (:metrics result))
-        (do
-          (when logger
-            (log/error logger :release-executor :write-stage-failed
-                       {:data {:errors (:errors result)}}))
-          (assoc state
-                 :failure {:type :write-stage-failed :errors (:errors result)}
-                 :write-metrics (:metrics result)))))))
+          all-files (mapcat :code/files code-artifacts)]
+      (if (empty? all-files)
+        (fail state :no-files-to-write "No files in code artifacts")
+        (let [result (if sandbox?
+                       (sandbox/write-and-stage-files! executor environment-id code-artifacts)
+                       (files/write-and-stage-files! worktree-path code-artifacts logger))]
+          (if (:success? result)
+            (let [total-ops (get-in result [:metrics :total-operations] 0)]
+              (if (zero? total-ops)
+                (fail state :no-files-written "Expected files but wrote 0")
+                (assoc state :write-metrics (:metrics result))))
+            (do
+              (when logger
+                (log/error logger :release-executor :write-stage-failed
+                           {:data {:errors (:errors result)}}))
+              (assoc state
+                     :failure {:type :write-stage-failed :errors (:errors result)}
+                     :write-metrics (:metrics result)))))))))
 
 (defn- step-commit [state]
   (if (failed? state)

@@ -90,7 +90,9 @@
    Returns updated phase-result with :phase/status and :phase/gate-errors if gates fail."
   [interceptor phase-result ctx]
   (let [gate-keywords (get-in interceptor [:config :gates] [])
-        artifact (:artifact phase-result)]
+        artifact (or (:artifact phase-result)
+                     (get-in phase-result [:result :artifact])
+                     (get-in phase-result [:result :output]))]
     (if (and (seq gate-keywords) artifact)
       (let [gate-result (gate/check-gates gate-keywords artifact ctx)]
         (if (:passed? gate-result)

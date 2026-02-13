@@ -268,7 +268,7 @@
           "No files should exist when write fails"))))
 
 (deftest test-verify-handles-missing-artifact
-  (testing "Verify phase handles missing implement artifact"
+  (testing "Verify phase fails fast when no code artifact is available"
     ;; Create context WITHOUT implement phase result
     (let [ctx {:execution/id (random-uuid)
                :execution/input {:description "Test"
@@ -277,56 +277,35 @@
                :execution/metrics {:tokens 0 :duration-ms 0}
                :execution/phase-results {}
                :phase-config {:phase :verify}}
-          
+
           verify-interceptor (registry/get-phase-interceptor {:phase :verify})]
-      
+
       (with-redefs [agent/create-tester (fn [_] {:type :mock-tester})
                     agent/invoke (fn [_agent _task _ctx]
                                   (response/success {:result :ok} {:tokens 0 :duration-ms 0}))]
-        (let [result ((:enter verify-interceptor) ctx)]
-          
-          ;; Verify phase should execute (it has fallback to read from input)
-          (is (some? result)
-              "Verify phase should return a result")
-          
-          (is (some? (get-in result [:phase :result]))
-              "Phase result should be present"))))))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Verify phase received no code artifact"
+                              ((:enter verify-interceptor) ctx))
+            "Verify should throw when no code artifact is available")))))
 
 (deftest test-workflow-empty-artifact-handling
-  (testing "Workflow handles empty artifact (zero files) appropriately"
-    (let [result-ctx (execute-phase-pipeline
-                     {:implement-agent-fn
-                      (fn [_agent _task _ctx]
-                        ;; Implementer returns empty artifact
-                        (response/success mock-empty-artifact {:tokens 50 :duration-ms 300}))
-                      
-                      :release-opts
-                      {:executor
-                       (fn [workflow-state _exec-context _opts]
-                         (let [artifacts (:workflow/artifacts workflow-state)
-                               code-artifact (first artifacts)
-                               file-count (count (get-in code-artifact [:artifact/content :code/files]))]
-                           (if (zero? file-count)
-                             ;; Empty artifact - should report appropriately
-                             {:success? true
-                              :artifacts [{:artifact/id (random-uuid)
-                                         :artifact/type :release
-                                         :artifact/content {:files-written 0
-                                                          :branch "test-branch"
-                                                          :commit-sha "abc123"}}]
-                              :metrics {:files-written 0}}
-                             {:success? true
-                              :artifacts []
-                              :metrics {:files-written file-count}})))}})]
-      
-      ;; Verify metrics show zero files written
-      (let [files-written (get-in result-ctx [:phase :result :output :release/metrics :files-written])]
-        (is (zero? files-written)
-            "Should report zero files written for empty artifact"))
-      
-      ;; Verify no files were created
-      (is (not (file-exists-in-worktree? "src/feature.clj"))
-          "No source files should exist with empty artifact"))))
+  (testing "Workflow fails fast when code artifact has zero files"
+    ;; With fail-fast validation, release phase throws on empty :code/files
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Release phase received code artifact with zero files"
+                          (execute-phase-pipeline
+                           {:implement-agent-fn
+                            (fn [_agent _task _ctx]
+                              ;; Implementer returns empty artifact
+                              (response/success mock-empty-artifact {:tokens 50 :duration-ms 300}))
+
+                            :release-opts
+                            {:executor
+                             (fn [_workflow-state _exec-context _opts]
+                               {:success? true
+                                :artifacts []
+                                :metrics {:files-written 0}})}}))
+        "Release should throw when code artifact has empty files")))
 
 (deftest test-artifact-content-verification
   (testing "Files written to disk have correct content"

@@ -212,29 +212,15 @@
               "Release should succeed when verification passes"))))))
 
 (deftest release-handles-zero-files-artifact-test
-  (testing "release phase handles artifact with zero files"
-    (with-redefs [release-executor/execute-release-phase
-                  (fn [_workflow-state _exec-context _opts]
-                    ;; No files to write
-                    {:success? true
-                     :artifacts [{:artifact/id (random-uuid)
-                                :artifact/type :release
-                                :artifact/content {:files-written 0
-                                                 :branch "test-branch"
-                                                 :commit-sha "abc123"}}]
-                     :metrics {:files-written 0}})]
-      (let [ctx (-> (create-base-context)
-                   (assoc-in [:execution/phase-results :implement :result :output :code/files] []))
-            ctx-with-config (assoc ctx :phase-config {:phase :release})
-            interceptor (registry/get-phase-interceptor {:phase :release})
-            result ((:enter interceptor) ctx-with-config)]
-        
-        ;; Phase completes (it's up to workflow to decide if 0 files is an error)
-        (is (= :success (get-in result [:phase :result :status]))
-            "Release should complete with zero files")
-        
-        (is (zero? (get-in result [:phase :result :output :release/metrics :files-written] -1))
-            "Should report zero files written")))))
+  (testing "release phase fails fast when code artifact has zero files"
+    (let [ctx (-> (create-base-context)
+                  (assoc-in [:execution/phase-results :implement :result :output :code/files] []))
+          ctx-with-config (assoc ctx :phase-config {:phase :release})
+          interceptor (registry/get-phase-interceptor {:phase :release})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Release phase received code artifact with zero files"
+                            ((:enter interceptor) ctx-with-config))
+          "Release should fail fast when code artifact has empty files"))))
 
 (deftest release-includes-pr-info-test
   (testing "release phase includes PR info in result"

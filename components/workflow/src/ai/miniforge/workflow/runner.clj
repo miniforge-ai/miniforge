@@ -49,7 +49,7 @@
               (when-let [send-fn (ns-resolve http-ns 'send!)]
                 (send-fn ws (json/generate-string event)))))
           (catch Exception e
-            (println "Warning: Failed to send event via WebSocket:" (.getMessage e))))
+            (println "Warning: Failed to send event via WebSocket:" (ex-message e))))
 
         ;; In-memory event stream (same process)
         :else
@@ -58,7 +58,7 @@
             (when-let [publish! (ns-resolve es-ns 'publish!)]
               (publish! event-stream event)))))
       (catch Exception e
-        (println "Warning: Failed to publish event:" (.getMessage e))))))
+        (println "Warning: Failed to publish event:" (ex-message e))))))
 
 (defn- publish-workflow-started!
   "Publish workflow started event."

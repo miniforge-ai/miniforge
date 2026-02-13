@@ -89,9 +89,8 @@
 
         ;; Build task from workflow input and previous phase results
         input (get-in ctx [:execution/input])
-        implement-result (get-in ctx [:phase :result]) ; From implement phase
-        verify-result (or (get-in ctx [:phases :verify :result])
-                          (get-in ctx [:previous-phase :result]))
+        implement-result (get-in ctx [:execution/phase-results :implement :result :output])
+        verify-result (get-in ctx [:execution/phase-results :verify :result :output])
         task {:task/id (random-uuid)
               :task/type :review
               :task/description (:description input)

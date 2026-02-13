@@ -90,7 +90,7 @@
             "Phase should return a result")))))
 
 (deftest verify-with-missing-implement-result-test
-  (testing "verify phase when implement phase result is completely missing"
+  (testing "verify phase fails fast when implement phase result is completely missing"
     (with-redefs [agent/create-tester (fn [_] {:type :mock-tester})
                   agent/invoke (fn [_agent _task _ctx]
                                 (response/success {:test/passed? true}
@@ -98,15 +98,11 @@
       (let [ctx (-> (create-base-context)
                    ;; NO implement phase result at all
                    (assoc :phase-config {:phase :verify}))
-            interceptor (registry/get-phase-interceptor {:phase :verify})
-            result ((:enter interceptor) ctx)]
-        
-        ;; Phase has fallback to read from input if implement is missing
-        (is (some? result)
-            "Verify should return a result even without implement")
-        
-        (is (some? (get-in result [:phase :result]))
-            "Phase result should be present")))))
+            interceptor (registry/get-phase-interceptor {:phase :verify})]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Verify phase received no code artifact"
+                              ((:enter interceptor) ctx))
+            "Verify should throw when no code artifact is available")))))
 
 (deftest verify-descriptive-error-on-agent-failure-test
   (testing "verify phase provides descriptive error when agent fails"

@@ -143,12 +143,14 @@
         end-time (System/currentTimeMillis)
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
+        agent-status (:status result)
+        phase-status (if (= :error agent-status) :failed :completed)
         metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
         iterations (get-in ctx [:phase :iterations] 1)
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
-                        (assoc-in [:phase :status] :completed)
+                        (assoc-in [:phase :status] phase-status)
                         (assoc-in [:phase :metrics] metrics)
                         (assoc-in [:metrics :implementation :duration-ms] duration-ms)
                         (assoc-in [:metrics :implementation :repair-cycles] (dec iterations))
@@ -156,11 +158,15 @@
                         ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
+    ;; Warn if result has no output and isn't already-implemented
+    (when (and (not= :already-implemented agent-status)
+               (nil? (:output result)))
+      (println "WARNING: implement phase result has no :output — artifact may be nil"))
     ;; Emit phase completed event
     (emit-phase-completed! updated-ctx :implement result)
     ;; Add skip metadata when work was already implemented
     (cond-> updated-ctx
-      (= :already-implemented (:status result))
+      (= :already-implemented agent-status)
       (assoc-in [:phase :skipped-reason] :already-implemented))))
 
 (defn- error-implement
