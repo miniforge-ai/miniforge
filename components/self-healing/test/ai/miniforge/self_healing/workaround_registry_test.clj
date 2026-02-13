@@ -29,11 +29,15 @@
 
 (defn cleanup-test-registry
   [f]
-  (try
-    (f)
-    (finally
+  (with-redefs [registry/workaround-registry-path (constantly test-registry-path)]
+    (try
+      ;; Clean before test to ensure isolation
       (when (.exists (io/file test-registry-path))
-        (.delete (io/file test-registry-path))))))
+        (.delete (io/file test-registry-path)))
+      (f)
+      (finally
+        (when (.exists (io/file test-registry-path))
+          (.delete (io/file test-registry-path)))))))
 
 (use-fixtures :each cleanup-test-registry)
 

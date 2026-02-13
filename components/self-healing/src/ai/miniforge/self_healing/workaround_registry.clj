@@ -113,7 +113,7 @@
   [workaround]
   (let [registry (load-workarounds)
         id (or (:id workaround) (java.util.UUID/randomUUID))
-        now (java.time.Instant/now)
+        now (str (java.time.Instant/now))
         new-workaround (merge {:id id
                                :success-count 0
                                :failure-count 0
@@ -144,7 +144,7 @@
       (let [workaround (nth workarounds idx)
             updated (-> workaround
                        (update (if success? :success-count :failure-count) inc)
-                       (assoc :last-used (java.time.Instant/now)))
+                       (assoc :last-used (str (java.time.Instant/now))))
             total (+ (:success-count updated) (:failure-count updated))
             confidence (if (> total 0)
                         (double (/ (:success-count updated) total))

@@ -67,11 +67,11 @@
         result)
       (catch Exception e
         (log/error logger :agent :agent/invoke-failed
-                   {:message (.getMessage e)
+                   {:message (ex-message e)
                     :data {:role role
                            :duration-ms (- (System/currentTimeMillis) start-time)}})
         {:status :error
-         :error (.getMessage e)
+         :error (ex-message e)
          :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}}))))
 
 (defn validate-impl

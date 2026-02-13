@@ -62,7 +62,7 @@
    :gate-type :unknown
    :passed? false
    :errors [{:type :gate-exception
-             :message (str "Gate execution failed: " (.getMessage exception))}]
+             :message (str "Gate execution failed: " (ex-message exception))}]
    :duration-ms duration})
 
 (defn- run-single-gate
@@ -86,7 +86,7 @@
         (let [duration (- (System/currentTimeMillis) gate-start)]
           (log/error logger :reviewer :reviewer/gate-error
                      {:data {:gate-idx idx
-                             :error (.getMessage e)}})
+                             :error (ex-message e)}})
           (create-exception-feedback gate idx e duration))))))
 
 (defn- run-gates-on-artifact

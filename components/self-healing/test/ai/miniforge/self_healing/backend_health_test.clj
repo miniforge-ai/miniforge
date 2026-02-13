@@ -261,4 +261,4 @@
     (let [health-data (health/load-health)
           backend-stats (get-in health-data [:backends :anthropic])]
       (is (some? (:last-failure backend-stats)))
-      (is (instance? java.time.Instant (:last-failure backend-stats))))))
+      (is (string? (:last-failure backend-stats))))))

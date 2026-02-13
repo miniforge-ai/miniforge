@@ -138,7 +138,7 @@
                          (assoc :successful-calls new-successful)
                          (assoc :success-rate new-success-rate)
                          (assoc :last-failure (when-not success?
-                                                (java.time.Instant/now))))
+                                                (str (java.time.Instant/now)))))
         new-health (assoc-in health [:backends backend-key] updated-stats)]
     (save-health! new-health)
     updated-stats))
@@ -187,7 +187,10 @@
          cooldown-until (get-in health [:switch-cooldowns backend-key])]
      (when cooldown-until
        (let [now (java.time.Instant/now)
-             cooldown-end (.plusMillis cooldown-until cooldown-ms)]
+             instant (if (string? cooldown-until)
+                       (java.time.Instant/parse cooldown-until)
+                       cooldown-until)
+             cooldown-end (.plusMillis instant cooldown-ms)]
          (.isBefore now cooldown-end))))))
 
 (defn select-best-backend
@@ -235,14 +238,14 @@
          now (java.time.Instant/now)
          from-key (keyword from-backend)
          to-key (keyword to-backend)
-         cooldown-until now
+         cooldown-until-str (str now)
          updated-health (-> health
-                           (assoc-in [:switch-cooldowns from-key] cooldown-until)
+                           (assoc-in [:switch-cooldowns from-key] cooldown-until-str)
                            (assoc :default-backend to-key))]
      (save-health! updated-health)
      {:from from-key
       :to to-key
-      :cooldown-until cooldown-until
+      :cooldown-until now
       :cooldown-ms cooldown-ms})))
 
 ;;------------------------------------------------------------------------------ Layer 3

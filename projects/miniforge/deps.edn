@@ -39,6 +39,8 @@
         ai.miniforge/reporting {:local/root "../../components/reporting"}
         ;; Event streaming and observability
         ai.miniforge/event-stream {:local/root "../../components/event-stream"}
+        ;; Self-healing: workaround detection, backend health tracking
+        ai.miniforge/self-healing {:local/root "../../components/self-healing"}
         ;; TUI framework and views
         ai.miniforge/tui-engine {:local/root "../../components/tui-engine"}
         ai.miniforge/tui-views {:local/root "../../components/tui-views"}

@@ -411,6 +411,25 @@ Output execution logs and status reports."})
       :agent/memory (:memory-id agent)
       :agent/config (:config agent)})))
 
+(defn- record-backend-health!
+  "Record backend call success/failure via self-healing (optional dep)."
+  [context success?]
+  (try
+    (when-let [record-fn (requiring-resolve 'ai.miniforge.self-healing.interface/record-backend-call!)]
+      (let [backend (or (get-in context [:llm-backend :config :backend]) :anthropic)]
+        (record-fn backend success?)))
+    (catch Exception _ nil)))
+
+(defn- try-self-healing-on-failure
+  "Attempt workaround when agent execution fails. Returns {:retry? bool} or nil."
+  [exception]
+  (try
+    (when-let [detect-fn (requiring-resolve 'ai.miniforge.self-healing.interface/detect-and-apply-workaround)]
+      (let [result (detect-fn exception {})]
+        (when (and (:workaround-found? result) (:applied? result) (:success? result))
+          {:retry? true :workaround-result result})))
+    (catch Exception _ nil)))
+
 (defrecord DefaultExecutor [logger memory-store]
   protocol/AgentExecutor
   (execute [_this agent task context]
@@ -435,23 +454,47 @@ Output execution logs and status reports."})
 
           ;; Execute
           result (try
-                   (protocol/invoke initialized-agent task exec-context)
+                   (let [invoke-result (protocol/invoke initialized-agent task exec-context)]
+                     (record-backend-health! exec-context true)
+                     invoke-result)
                    (catch Exception e
+                     (record-backend-health! exec-context false)
                      (let [;; Try to classify the error if agent-runtime is available
                            error-classification (try
                                                  (let [classifier (requiring-resolve 'ai.miniforge.agent-runtime.interface/classify-error)]
                                                    (when classifier
                                                      (classifier e {:task-id task-id})))
-                                                 (catch Exception _ nil))]
-                       {:success false
-                        :error (.getMessage e)
-                        :exception-type (type e)
-                        :anomaly (response/from-exception e)
-                        :error-classification error-classification
-                        :outputs []
-                        :decisions [:execution-error]
-                        :signals [:task-failed]
-                        :metrics (make-metrics)})))
+                                                 (catch Exception _ nil))
+                           healing (try-self-healing-on-failure e)]
+                       (if (:retry? healing)
+                         ;; Workaround applied — retry once
+                         (try
+                           (let [retry-result (protocol/invoke initialized-agent task exec-context)]
+                             (record-backend-health! exec-context true)
+                             (assoc retry-result :self-healing/workaround-applied true))
+                           (catch Exception retry-e
+                             (record-backend-health! exec-context false)
+                             {:success false
+                              :error (ex-message retry-e)
+                              :exception-type (type retry-e)
+                              :anomaly (response/from-exception retry-e)
+                              :error-classification error-classification
+                              :self-healing/workaround-applied true
+                              :self-healing/retry-failed true
+                              :outputs []
+                              :decisions [:execution-error]
+                              :signals [:task-failed]
+                              :metrics (make-metrics)}))
+                         ;; No workaround — return error (existing behavior)
+                         {:success false
+                          :error (ex-message e)
+                          :exception-type (type e)
+                          :anomaly (response/from-exception e)
+                          :error-classification error-classification
+                          :outputs []
+                          :decisions [:execution-error]
+                          :signals [:task-failed]
+                          :metrics (make-metrics)}))))
 
           ;; Validate output
           validation (protocol/validate agent result exec-context)
