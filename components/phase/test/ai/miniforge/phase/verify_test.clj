@@ -69,7 +69,10 @@
                                 {:success true
                                  :output mock-test-artifact
                                  :metrics {:tokens 100 :duration-ms 500}})]
-      (let [ctx (create-base-context)
+      (let [ctx (-> (create-base-context)
+                    (assoc-in [:execution/phase-results :implement]
+                              {:result {:status :success
+                                        :output mock-code-artifact}}))
             ctx-with-config (assoc ctx :phase-config {:phase :verify})
             result (#'verify/enter-verify ctx-with-config)]
 

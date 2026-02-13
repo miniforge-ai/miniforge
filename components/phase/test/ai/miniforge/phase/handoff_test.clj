@@ -291,20 +291,14 @@
             "Should accumulate token metrics from all phases")))))
 
 (deftest handoff-with-missing-artifact-test
-  (testing "Verify phase handles missing implement artifact"
+  (testing "Verify phase fails fast when no implement artifact is available"
     (with-redefs [agent/create-tester (fn [_] {:type :mock-tester})
-                  ;; Mock that doesn't assert on missing artifacts
                   agent/invoke (fn [_agent _task _ctx]
-                                 ;; Just return success without assertions
                                  (response/success {:result :ok} {:tokens 0 :duration-ms 0}))]
 
-      ;; Create context WITHOUT implement phase result
-      (let [ctx (create-base-context)
-            result (execute-phase-enter :verify ctx)]
-
-        ;; Verify phase should execute even without implement result
-        ;; (it has fallback to read from input if implement is missing)
-        (is (some? result)
-            "Verify phase should return a result")
-        (is (some? (get-in result [:phase :result]))
-            "Phase result should be present")))))
+      ;; Create context WITHOUT implement phase result — verify should throw
+      (let [ctx (create-base-context)]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Verify phase received no code artifact"
+                              (execute-phase-enter :verify ctx))
+            "Verify phase should throw when no code artifact is available")))))

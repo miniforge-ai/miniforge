@@ -95,6 +95,12 @@
         code-artifact (or implement-result
                          (:task/code-artifact input)
                          (:code-artifact input))
+        ;; Fail fast if no code artifact is available
+        _ (when-not code-artifact
+            (throw (ex-info "Verify phase received no code artifact from implement phase"
+                            {:phase :verify
+                             :available-keys (keys (get-in ctx [:execution/phase-results :implement :result]))
+                             :hint "Check implement phase agent result"})))
         ;; Build task using canonical builder
         task (task/verify-task code-artifact input)
 
