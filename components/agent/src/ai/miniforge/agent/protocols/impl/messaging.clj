@@ -217,6 +217,14 @@
 ;------------------------------------------------------------------------------ Layer 5
 ;; InterAgentMessaging protocol implementations
 
+(defn- publish-to-event-stream!
+  "Publish an event to the event stream if available (no hard dep on event-stream)."
+  [agent-messaging event]
+  (try
+    (when-let [stream (:event-stream agent-messaging)]
+      ((requiring-resolve 'ai.miniforge.event-stream.interface/publish!) stream event))
+    (catch Exception _ nil)))
+
 (defn send-message-impl
   "Send message from agent to another agent.
    Returns {:message message-map :event event-map}"
@@ -236,6 +244,8 @@
     ;; Route message
     (let [routed-msg (route-message-impl router message)
           event (create-message-sent-event routed-msg)]
+      ;; Publish to event stream if available
+      (publish-to-event-stream! agent-messaging event)
       {:message routed-msg
        :event event})))
 

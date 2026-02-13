@@ -270,3 +270,179 @@
           output (with-out-str
                    (callback {:delta "test" :done? false}))]
       (is (= "test" output)))))
+
+;; --------------------------------------------------------------------------- New N3 event constructors
+
+(deftest agent-lifecycle-event-constructors-test
+  (testing "agent-started creates event with agent-id and optional context"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          event (es/agent-started stream wf-id :planner {:budget 10000})]
+      (is (= :agent/started (:event/type event)))
+      (is (= :planner (:agent/id event)))
+      (is (= {:budget 10000} (:agent/context event)))
+      (is (uuid? (:event/id event)))))
+
+  (testing "agent-completed creates event with optional result"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          event (es/agent-completed stream wf-id :implementer {:tokens-used 5000})]
+      (is (= :agent/completed (:event/type event)))
+      (is (= :implementer (:agent/id event)))
+      (is (= {:tokens-used 5000} (:agent/result event)))))
+
+  (testing "agent-failed creates event with optional error"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          event (es/agent-failed stream wf-id :reviewer {:message "timeout"})]
+      (is (= :agent/failed (:event/type event)))
+      (is (= :reviewer (:agent/id event)))
+      (is (= {:message "timeout"} (:agent/error event))))))
+
+(deftest gate-lifecycle-event-constructors-test
+  (testing "gate-started creates event"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          event (es/gate-started stream wf-id :lint)]
+      (is (= :gate/started (:event/type event)))
+      (is (= :lint (:gate/id event)))))
+
+  (testing "gate-passed creates event with duration"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          event (es/gate-passed stream wf-id :syntax 150)]
+      (is (= :gate/passed (:event/type event)))
+      (is (= :syntax (:gate/id event)))
+      (is (= 150 (:gate/duration-ms event)))))
+
+  (testing "gate-failed creates event with violations"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          violations [{:line 10 :message "unused var"}]
+          event (es/gate-failed stream wf-id :lint violations)]
+      (is (= :gate/failed (:event/type event)))
+      (is (= :lint (:gate/id event)))
+      (is (= violations (:gate/violations event))))))
+
+(deftest tool-lifecycle-event-constructors-test
+  (testing "tool-invoked creates event"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          event (es/tool-invoked stream wf-id :implementer :tools/read-file {:path "src/core.clj"})]
+      (is (= :tool/invoked (:event/type event)))
+      (is (= :implementer (:agent/id event)))
+      (is (= :tools/read-file (:tool/id event)))
+      (is (= {:path "src/core.clj"} (:tool/params-summary event)))))
+
+  (testing "tool-completed creates event"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          event (es/tool-completed stream wf-id :implementer :tools/write-file {:success true})]
+      (is (= :tool/completed (:event/type event)))
+      (is (= :tools/write-file (:tool/id event)))
+      (is (= {:success true} (:tool/result-summary event))))))
+
+(deftest milestone-event-constructor-test
+  (testing "milestone-reached creates event"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          event (es/milestone-reached stream wf-id :tests-passing "All 42 tests pass")]
+      (is (= :workflow/milestone-reached (:event/type event)))
+      (is (= :tests-passing (:milestone/id event)))
+      (is (= "All 42 tests pass" (:message event))))))
+
+(deftest task-lifecycle-event-constructors-test
+  (testing "task-state-changed creates event with from/to states"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          dag-id (random-uuid)
+          task-id (random-uuid)
+          event (es/task-state-changed stream wf-id dag-id task-id :pending :ready)]
+      (is (= :task/state-changed (:event/type event)))
+      (is (= dag-id (:dag/id event)))
+      (is (= task-id (:task/id event)))
+      (is (= :pending (:task/from-state event)))
+      (is (= :ready (:task/to-state event)))))
+
+  (testing "task-frontier-entered creates event"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          event (es/task-frontier-entered stream wf-id (random-uuid) (random-uuid) 3)]
+      (is (= :task/frontier-entered (:event/type event)))
+      (is (= 3 (:task/frontier-size event)))))
+
+  (testing "task-skip-propagated creates event"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          cause (random-uuid)
+          event (es/task-skip-propagated stream wf-id (random-uuid) (random-uuid) cause)]
+      (is (= :task/skip-propagated (:event/type event)))
+      (is (= cause (:task/cause-task event))))))
+
+(deftest inter-agent-message-event-constructors-test
+  (testing "inter-agent-message-sent creates event"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          event (es/inter-agent-message-sent stream wf-id :planner :implementer :suggestion)]
+      (is (= :agent/message-sent (:event/type event)))
+      (is (= :planner (:from-agent/id event)))
+      (is (= :implementer (:to-agent/id event)))
+      (is (= :suggestion (:message/type event)))))
+
+  (testing "inter-agent-message-received creates event"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          event (es/inter-agent-message-received stream wf-id :planner :implementer)]
+      (is (= :agent/message-received (:event/type event)))
+      (is (= :planner (:from-agent/id event)))
+      (is (= :implementer (:to-agent/id event))))))
+
+(deftest listener-event-constructors-test
+  (testing "listener-attached creates event"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          lid (random-uuid)
+          event (es/listener-attached stream wf-id lid :dashboard :observe)]
+      (is (= :listener/attached (:event/type event)))
+      (is (= lid (:listener/id event)))
+      (is (= :dashboard (:listener/type event)))
+      (is (= :observe (:listener/capability event)))))
+
+  (testing "listener-detached creates event"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          lid (random-uuid)
+          event (es/listener-detached stream wf-id lid "timeout")]
+      (is (= :listener/detached (:event/type event)))
+      (is (= lid (:listener/id event)))
+      (is (= "timeout" (:listener/reason event)))))
+
+  (testing "annotation-created creates event"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          lid (random-uuid)
+          event (es/annotation-created stream wf-id lid :warning "slow response")]
+      (is (= :annotation/created (:event/type event)))
+      (is (= lid (:listener/id event)))
+      (is (= :warning (:annotation/type event)))
+      (is (= "slow response" (:annotation/content event))))))
+
+(deftest control-action-event-constructors-test
+  (testing "control-action-requested creates event"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          aid (random-uuid)
+          event (es/control-action-requested stream wf-id aid :pause {:principal "admin"})]
+      (is (= :control-action/requested (:event/type event)))
+      (is (= aid (:action/id event)))
+      (is (= :pause (:action/type event)))
+      (is (= {:principal "admin"} (:action/requester event)))))
+
+  (testing "control-action-executed creates event"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          aid (random-uuid)
+          event (es/control-action-executed stream wf-id aid {:status :success})]
+      (is (= :control-action/executed (:event/type event)))
+      (is (= aid (:action/id event)))
+      (is (= {:status :success} (:action/result event))))))

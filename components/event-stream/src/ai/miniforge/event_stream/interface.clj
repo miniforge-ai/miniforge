@@ -47,7 +47,9 @@
      (publish! stream (phase-completed stream workflow-id :plan {:outcome :success}))
      (publish! stream (workflow-completed stream workflow-id :success))"
   (:require
-   [ai.miniforge.event-stream.core :as core]))
+   [ai.miniforge.event-stream.core :as core]
+   [ai.miniforge.event-stream.listeners :as listeners]
+   [ai.miniforge.event-stream.control :as control]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event stream lifecycle
@@ -317,7 +319,168 @@
   [stream workflow-id agent-id model request-id & [metrics]]
   (core/llm-response stream workflow-id agent-id model request-id metrics))
 
+;------------------------------------------------------------------------------ Layer 2b
+;; Agent lifecycle event constructors
+
+(defn agent-started
+  "Create an agent/started event."
+  [stream workflow-id agent-id & [context]]
+  (core/agent-started stream workflow-id agent-id context))
+
+(defn agent-completed
+  "Create an agent/completed event."
+  [stream workflow-id agent-id & [result]]
+  (core/agent-completed stream workflow-id agent-id result))
+
+(defn agent-failed
+  "Create an agent/failed event."
+  [stream workflow-id agent-id & [error]]
+  (core/agent-failed stream workflow-id agent-id error))
+
+;------------------------------------------------------------------------------ Layer 2c
+;; Gate lifecycle event constructors
+
+(defn gate-started
+  "Create a gate/started event."
+  [stream workflow-id gate-id & [artifact-summary]]
+  (core/gate-started stream workflow-id gate-id artifact-summary))
+
+(defn gate-passed
+  "Create a gate/passed event."
+  [stream workflow-id gate-id & [duration-ms]]
+  (core/gate-passed stream workflow-id gate-id duration-ms))
+
+(defn gate-failed
+  "Create a gate/failed event."
+  [stream workflow-id gate-id & [violations]]
+  (core/gate-failed stream workflow-id gate-id violations))
+
+;------------------------------------------------------------------------------ Layer 2d
+;; Tool lifecycle event constructors
+
+(defn tool-invoked
+  "Create a tool/invoked event."
+  [stream workflow-id agent-id tool-id & [params-summary]]
+  (core/tool-invoked stream workflow-id agent-id tool-id params-summary))
+
+(defn tool-completed
+  "Create a tool/completed event."
+  [stream workflow-id agent-id tool-id & [result-summary]]
+  (core/tool-completed stream workflow-id agent-id tool-id result-summary))
+
+;------------------------------------------------------------------------------ Layer 2e
+;; Milestone event constructor
+
+(defn milestone-reached
+  "Create a workflow/milestone-reached event."
+  [stream workflow-id milestone-id & [description]]
+  (core/milestone-reached stream workflow-id milestone-id description))
+
+;------------------------------------------------------------------------------ Layer 2f
+;; Task lifecycle (DAG) event constructors
+
+(defn task-state-changed
+  "Create a task/state-changed event."
+  [stream workflow-id dag-id task-id from-state to-state & [context]]
+  (core/task-state-changed stream workflow-id dag-id task-id from-state to-state context))
+
+(defn task-frontier-entered
+  "Create a task/frontier-entered event."
+  [stream workflow-id dag-id task-id & [frontier-size]]
+  (core/task-frontier-entered stream workflow-id dag-id task-id frontier-size))
+
+(defn task-skip-propagated
+  "Create a task/skip-propagated event."
+  [stream workflow-id dag-id task-id & [cause-task]]
+  (core/task-skip-propagated stream workflow-id dag-id task-id cause-task))
+
+;------------------------------------------------------------------------------ Layer 2g
+;; Inter-agent messaging event constructors
+
+(defn inter-agent-message-sent
+  "Create an agent/message-sent event."
+  [stream workflow-id from-agent to-agent & [message-type]]
+  (core/inter-agent-message-sent stream workflow-id from-agent to-agent message-type))
+
+(defn inter-agent-message-received
+  "Create an agent/message-received event."
+  [stream workflow-id from-agent to-agent & [message-type]]
+  (core/inter-agent-message-received stream workflow-id from-agent to-agent message-type))
+
+;------------------------------------------------------------------------------ Layer 2h
+;; Listener lifecycle event constructors (N8)
+
+(defn listener-attached
+  "Create a listener/attached event."
+  [stream workflow-id listener-id & [listener-type capability]]
+  (core/listener-attached stream workflow-id listener-id listener-type capability))
+
+(defn listener-detached
+  "Create a listener/detached event."
+  [stream workflow-id listener-id & [reason]]
+  (core/listener-detached stream workflow-id listener-id reason))
+
+(defn annotation-created
+  "Create an annotation/created event."
+  [stream workflow-id listener-id annotation-type & [content]]
+  (core/annotation-created stream workflow-id listener-id annotation-type content))
+
+;------------------------------------------------------------------------------ Layer 2i
+;; Control action event constructors (N8)
+
+(defn control-action-requested
+  "Create a control-action/requested event."
+  [stream workflow-id action-id action-type & [requester]]
+  (core/control-action-requested stream workflow-id action-id action-type requester))
+
+(defn control-action-executed
+  "Create a control-action/executed event."
+  [stream workflow-id action-id & [result]]
+  (core/control-action-executed stream workflow-id action-id result))
+
 ;------------------------------------------------------------------------------ Layer 3
+;; Listener management API (N8)
+
+(defn register-listener!
+  "Register a listener with capability level.
+   See ai.miniforge.event-stream.listeners for full docs."
+  [stream listener-spec]
+  (listeners/register-listener! stream listener-spec))
+
+(defn deregister-listener!
+  "Deregister a listener and remove its subscription."
+  [stream listener-id & [reason]]
+  (listeners/deregister-listener! stream listener-id reason))
+
+(defn list-listeners
+  "List all registered listeners."
+  [stream]
+  (listeners/list-listeners stream))
+
+(defn submit-annotation!
+  "Submit an advisory annotation (requires :advise or :control capability)."
+  [stream listener-id annotation]
+  (listeners/submit-annotation! stream listener-id annotation))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Control action API (N8)
+
+(defn create-control-action
+  "Create a structured control action."
+  [action-type target requester & [opts]]
+  (control/create-control-action action-type target requester opts))
+
+(defn authorize-action
+  "Check RBAC authorization for a control action."
+  [roles action requester]
+  (control/authorize-action roles action requester))
+
+(defn execute-control-action!
+  "Execute an authorized control action with event emission."
+  [stream action execution-fn]
+  (control/execute-control-action! stream action execution-fn))
+
+;------------------------------------------------------------------------------ Layer 4
 ;; Convenience functions
 
 (defn create-streaming-callback

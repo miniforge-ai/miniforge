@@ -162,6 +162,19 @@ Output execution logs and status reports."})
    :iterations 0
    :llm-calls 0})
 
+(defn- execution-failure
+  "Build a canonical execution failure response from an exception.
+   Uses response/failure as the base and merges domain-specific agent keys."
+  [^Throwable e & [extra]]
+  (merge (response/failure (ex-message e)
+                           {:data {:exception-type (str (type e))}})
+         {:anomaly (response/from-exception e)
+          :outputs []
+          :decisions [:execution-error]
+          :signals [:task-failed]
+          :metrics (make-metrics)}
+         extra))
+
 (defn update-metrics
   "Update metrics with new values."
   [metrics {:keys [input-tokens output-tokens duration-ms cost]}]
@@ -258,13 +271,13 @@ Output execution logs and status reports."})
     ;; Default repair - wrap invalid output
     (if (empty? errors)
       {:repaired output :changes [] :success true}
-      {:repaired {:success false
-                  :outputs []
-                  :decisions [:repair-failed]
-                  :signals [:validation-error]
-                  :metrics (make-metrics)
-                  :original output
-                  :errors errors}
+      {:repaired (merge (response/failure "Repair failed")
+                        {:original output
+                         :errors errors
+                         :outputs []
+                         :decisions [:repair-failed]
+                         :signals [:validation-error]
+                         :metrics (make-metrics)})
        :changes [:wrapped-invalid-output]
        :success false}))
 
@@ -474,27 +487,13 @@ Output execution logs and status reports."})
                              (assoc retry-result :self-healing/workaround-applied true))
                            (catch Exception retry-e
                              (record-backend-health! exec-context false)
-                             {:success false
-                              :error (ex-message retry-e)
-                              :exception-type (type retry-e)
-                              :anomaly (response/from-exception retry-e)
-                              :error-classification error-classification
-                              :self-healing/workaround-applied true
-                              :self-healing/retry-failed true
-                              :outputs []
-                              :decisions [:execution-error]
-                              :signals [:task-failed]
-                              :metrics (make-metrics)}))
+                             (execution-failure retry-e
+                                                {:error-classification error-classification
+                                                 :self-healing/workaround-applied true
+                                                 :self-healing/retry-failed true})))
                          ;; No workaround — return error (existing behavior)
-                         {:success false
-                          :error (ex-message e)
-                          :exception-type (type e)
-                          :anomaly (response/from-exception e)
-                          :error-classification error-classification
-                          :outputs []
-                          :decisions [:execution-error]
-                          :signals [:task-failed]
-                          :metrics (make-metrics)}))))
+                         (execution-failure e
+                                            {:error-classification error-classification})))))
 
           ;; Validate output
           validation (protocol/validate agent result exec-context)

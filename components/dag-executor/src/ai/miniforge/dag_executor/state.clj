@@ -362,6 +362,18 @@
                          :new-status (get-in result [:run/tasks task-id :task/status])}}))
     result))
 
+(defn- emit-task-state-event!
+  "Emit task/state-changed event via requiring-resolve (no hard dep on event-stream)."
+  [run-state task-id from-status to-status]
+  (try
+    (when-let [stream (get-in run-state [:run/config :event-stream])]
+      (when-let [publish-fn (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
+        (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/task-state-changed)]
+          (let [workflow-id (get-in run-state [:run/config :workflow-id])
+                dag-id (:dag/id run-state)]
+            (publish-fn stream (constructor stream workflow-id dag-id task-id from-status to-status))))))
+    (catch Exception _ nil)))
+
 (defn transition-task!
   "Atomically transition a task to a new status within a run atom.
    Returns result with updated run state or error."
@@ -372,15 +384,17 @@
       (result/err :task-not-found
                   (str "Task " task-id " not found in run")
                   {:task-id task-id})
-      (let [transition-result (transition-task task-state new-status)]
+      (let [from-status (:task/status task-state)
+            transition-result (transition-task task-state new-status)]
         (if (result/ok? transition-result)
           (do
             (swap! run-atom update-run-task task-id (constantly (:data transition-result)))
+            (emit-task-state-event! @run-atom task-id from-status new-status)
             (when logger
               (log/info logger :dag-executor :task/transitioned
                         {:message "Task status changed"
                          :data {:task-id task-id
-                                :from (:task/status task-state)
+                                :from from-status
                                 :to new-status}}))
             (result/ok @run-atom))
           (do

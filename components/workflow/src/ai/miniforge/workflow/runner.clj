@@ -61,24 +61,50 @@
         (println "Warning: Failed to publish event:" (ex-message e))))))
 
 (defn- publish-workflow-started!
-  "Publish workflow started event."
+  "Publish workflow started event using N3-compliant constructor."
   [event-stream context]
-  (publish-event! event-stream
-                  {:event/type :workflow/started
-                   :workflow-id (:execution/id context)
-                   :workflow-spec (select-keys (:execution/workflow context)
-                                               [:workflow/id :workflow/version])
-                   :timestamp (java.time.Instant/now)}))
+  (when event-stream
+    (try
+      (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-started)]
+        (publish-event! event-stream
+                        (constructor event-stream
+                                     (:execution/id context)
+                                     (select-keys (:execution/workflow context)
+                                                  [:workflow/id :workflow/version]))))
+      (catch Exception _
+        ;; Fallback to ad-hoc event if constructor not available
+        (publish-event! event-stream
+                        {:event/type :workflow/started
+                         :workflow-id (:execution/id context)
+                         :workflow-spec (select-keys (:execution/workflow context)
+                                                     [:workflow/id :workflow/version])
+                         :timestamp (java.time.Instant/now)})))))
 
 (defn- publish-workflow-completed!
-  "Publish workflow completed event."
+  "Publish workflow completed/failed event using N3-compliant constructor."
   [event-stream context]
-  (publish-event! event-stream
-                  {:event/type :workflow/completed
-                   :workflow-id (:execution/id context)
-                   :status (:execution/status context)
-                   :metrics (:execution/metrics context)
-                   :timestamp (java.time.Instant/now)}))
+  (when event-stream
+    (try
+      (let [status (:execution/status context)
+            wf-id (:execution/id context)
+            duration-ms (get-in context [:execution/metrics :duration-ms])]
+        (if (= status :failed)
+          (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-failed)]
+            (publish-event! event-stream
+                            (constructor event-stream wf-id
+                                         {:message "Workflow failed"
+                                          :errors (:execution/errors context)})))
+          (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-completed)]
+            (publish-event! event-stream
+                            (constructor event-stream wf-id status duration-ms)))))
+      (catch Exception _
+        ;; Fallback to ad-hoc event
+        (publish-event! event-stream
+                        {:event/type :workflow/completed
+                         :workflow-id (:execution/id context)
+                         :status (:execution/status context)
+                         :metrics (:execution/metrics context)
+                         :timestamp (java.time.Instant/now)})))))
 
 (defn- publish-phase-started!
   "Publish phase started event."

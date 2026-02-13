@@ -1,6 +1,7 @@
 (ns ai.miniforge.tool.interface-test
   (:require [clojure.test :as test :refer [deftest testing is]]
-            [ai.miniforge.tool.interface :as tool]))
+            [ai.miniforge.tool.interface :as tool]
+            [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures
@@ -268,6 +269,35 @@
 
   (testing "get-error extracts error"
     (is (= {:type "err"} (tool/get-error {:success false :error {:type "err"}})))))
+
+;; Event emission wiring tests
+
+(deftest tool-emits-events-on-execution-test
+  (testing "tool emits tool/invoked and tool/completed events when event-stream is in context"
+    (let [stream (es/create-event-stream {:sinks []})
+          wf-id (random-uuid)
+          context {:event-stream stream
+                   :workflow/id wf-id
+                   :agent/id :test-agent}
+          my-tool (tool/create-tool
+                   {:id :test/evented
+                    :parameters {:message {:type :string :required true}}
+                    :handler echo-handler})
+          result (tool/execute my-tool {:message "Hello"} context)
+          events (es/get-events stream)]
+      (is (tool/success? result))
+      (is (some #(= :tool/invoked (:event/type %)) events))
+      (is (some #(= :tool/completed (:event/type %)) events)))))
+
+(deftest tool-works-without-event-stream-test
+  (testing "tool executes normally without event-stream in context"
+    (let [my-tool (tool/create-tool
+                   {:id :test/no-stream
+                    :parameters {:message {:type :string :required true}}
+                    :handler echo-handler})
+          result (tool/execute my-tool {:message "Hello"} {})]
+      (is (tool/success? result))
+      (is (= "Hello" (tool/get-result result))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

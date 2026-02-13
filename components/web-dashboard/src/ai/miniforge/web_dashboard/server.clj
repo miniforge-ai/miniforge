@@ -161,6 +161,41 @@
           (= uri "/api/evidence/list")
           (handlers/handle-api-evidence-list state params)
 
+          ;; Evidence detail: /api/evidence/<workflow-id>
+          (and (.startsWith uri "/api/evidence/")
+               (not= uri "/api/evidence/list"))
+          (let [workflow-id (subs uri 15)]
+            (handlers/handle-api-evidence-detail state workflow-id))
+
+          ;; Artifact endpoints: /api/artifacts/<id> and /api/artifacts/<id>/provenance
+          (.startsWith uri "/api/artifacts/")
+          (let [rest-uri (subs uri 16)
+                [artifact-id segment] (str/split rest-uri #"/" 2)]
+            (case segment
+              "provenance" (handlers/handle-api-artifact-provenance state artifact-id)
+              (handlers/handle-api-artifact-detail state artifact-id)))
+
+          ;; Listener endpoints
+          (and (= uri "/api/listeners") (= (:request-method req) :get))
+          (handlers/handle-api-listeners-list state)
+
+          (and (= uri "/api/listeners") (= (:request-method req) :post))
+          (handlers/handle-api-listener-register state (slurp (:body req)))
+
+          (and (.startsWith uri "/api/listeners/")
+               (not= (:request-method req) :delete)
+               (.endsWith uri "/annotate")
+               (= (:request-method req) :post))
+          (let [;; /api/listeners/<id>/annotate
+                rest-uri (subs uri 16)
+                listener-id (first (str/split rest-uri #"/" 2))]
+            (handlers/handle-api-listener-annotate state listener-id (slurp (:body req))))
+
+          (and (.startsWith uri "/api/listeners/")
+               (= (:request-method req) :delete))
+          (let [listener-id (subs uri 16)]
+            (handlers/handle-api-listener-deregister state listener-id))
+
           (= uri "/api/train/action")
           (handlers/handle-api-train-action state params)
 
@@ -192,7 +227,7 @@
               "events" (handlers/handle-api-workflow-events state wf-id)
               "panel" (handlers/handle-api-workflow-panel state wf-id)
               "command" (if (= :post (:request-method req))
-                          (handlers/handle-api-workflow-command state wf-id (slurp (:body req)))
+                          (handlers/handle-api-workflow-command-v2 state wf-id (slurp (:body req)))
                           (responses/not-found-response))
               "commands" (handlers/handle-api-workflow-commands-poll state wf-id)
               (responses/not-found-response)))

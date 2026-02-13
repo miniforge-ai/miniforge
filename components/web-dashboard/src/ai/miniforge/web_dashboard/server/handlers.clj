@@ -25,6 +25,27 @@
    [ai.miniforge.web-dashboard.filters-new :as filters-new]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Anomaly/response helpers (via requiring-resolve, no hard dep on response component)
+
+(defn- make-anomaly
+  "Create an anomaly map via response/make-anomaly."
+  [category message & [context]]
+  ((requiring-resolve 'ai.miniforge.response.interface/make-anomaly)
+   category message (or context {})))
+
+(defn- from-exception
+  "Convert an exception to an anomaly map via response/from-exception."
+  [^Throwable e]
+  ((requiring-resolve 'ai.miniforge.response.interface/from-exception) e))
+
+(defn- anomaly-http-response
+  "Translate an anomaly map to a Ring HTTP response.
+   Body is JSON-encoded for wire transport."
+  [anomaly-map]
+  (let [raw ((requiring-resolve 'ai.miniforge.response.interface/anomaly->http-response) anomaly-map)]
+    (update raw :body json/generate-string)))
+
+;------------------------------------------------------------------------------ Layer 0
 ;; Filter helpers
 
 (defn- maybe-apply-filters
@@ -330,12 +351,179 @@
       (state/enqueue-command! state workflow-id command)
       (responses/json-response {:status "queued" :command command :workflow-id workflow-id}))
     (catch Exception e
-      {:status 400
-       :headers {"Content-Type" "application/json"}
-       :body (json/generate-string {:error (str "Bad request: " (ex-message e))})})))
+      (anomaly-http-response
+       (make-anomaly :anomalies/incorrect
+                     (str "Bad request: " (ex-message e))
+                     {:workflow-id workflow-id})))))
 
 (defn handle-api-workflow-commands-poll
   "API: Poll and dequeue pending commands for a workflow."
   [state workflow-id]
   (let [commands (state/dequeue-commands! state workflow-id)]
     (responses/json-response {:commands commands})))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Evidence/Artifact API handlers (N5)
+
+(defn handle-api-evidence-detail
+  "API: Get evidence bundle detail for a workflow."
+  [state workflow-id]
+  (try
+    (let [wid (try (parse-uuid workflow-id) (catch Exception _ nil))
+          evidence-state (state/get-evidence-state state)
+          wf-evidence (->> (concat (:trains evidence-state) (:workflows evidence-state))
+                           (filter #(or (= (str (:workflow/id %)) workflow-id)
+                                        (= (str (:id %)) workflow-id)))
+                           first)
+          events (when wid (state/get-events state {:workflow-id wid :limit 500}))
+          gate-events (filter #(#{:gate/started :gate/passed :gate/failed}
+                                (:event/type %)) events)]
+      (responses/json-response
+       {:status "success"
+        :workflow-id workflow-id
+        :evidence wf-evidence
+        :gate-results gate-events
+        :event-count (count events)}))
+    (catch Exception e
+      (anomaly-http-response (from-exception e)))))
+
+(defn handle-api-artifact-detail
+  "API: Get artifact detail by ID."
+  [_state artifact-id]
+  (try
+    (let [artifact (try
+                     (when-let [get-fn (requiring-resolve 'ai.miniforge.artifact.interface/get-artifact)]
+                       (get-fn artifact-id))
+                     (catch Exception _ nil))]
+      (if artifact
+        (responses/json-response {:status "success" :artifact artifact})
+        (anomaly-http-response
+         (make-anomaly :anomalies/not-found
+                       "Artifact not found or artifact store not available"
+                       {:artifact-id artifact-id}))))
+    (catch Exception e
+      (anomaly-http-response (from-exception e)))))
+
+(defn handle-api-artifact-provenance
+  "API: Get provenance chain for an artifact."
+  [_state artifact-id]
+  (try
+    (let [provenance (try
+                       (when-let [prov-fn (requiring-resolve 'ai.miniforge.artifact.interface/get-provenance)]
+                         (prov-fn artifact-id))
+                       (catch Exception _ nil))]
+      (if provenance
+        (responses/json-response {:status "success" :artifact-id artifact-id :provenance provenance})
+        (anomaly-http-response
+         (make-anomaly :anomalies/not-found
+                       "Provenance not available"
+                       {:artifact-id artifact-id}))))
+    (catch Exception e
+      (anomaly-http-response (from-exception e)))))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Listener API handlers (N8)
+
+(defn handle-api-listeners-list
+  "API: List active listeners."
+  [state]
+  (try
+    (let [es (:event-stream @state)
+          listeners (when es
+                      ((requiring-resolve 'ai.miniforge.event-stream.interface/list-listeners) es))]
+      (responses/json-response {:listeners (or listeners [])}))
+    (catch Exception e
+      (anomaly-http-response (from-exception e)))))
+
+(defn handle-api-listener-register
+  "API: Register a new listener."
+  [state body]
+  (try
+    (let [data (json/parse-string body true)
+          es (:event-stream @state)
+          listener-spec {:listener/type (keyword (or (:type data) "watcher"))
+                         :listener/capability (keyword (or (:capability data) "observe"))
+                         :listener/identity {:principal (or (:principal data) "anonymous")}
+                         :listener/filters (when-let [f (:filters data)]
+                                             {:workflow-ids (mapv parse-uuid (or (:workflow-ids f) []))
+                                              :event-types (mapv keyword (or (:event-types f) []))})
+                         :listener/callback (fn [_event] nil) ; HTTP listeners poll
+                         :listener/options (:options data)}
+          register-fn (requiring-resolve 'ai.miniforge.event-stream.interface/register-listener!)
+          listener-id (register-fn es listener-spec)]
+      (responses/json-response {:listener-id (str listener-id) :status "registered"}))
+    (catch Exception e
+      (anomaly-http-response (from-exception e)))))
+
+(defn handle-api-listener-deregister
+  "API: Deregister a listener."
+  [state listener-id-str]
+  (try
+    (let [es (:event-stream @state)
+          listener-id (parse-uuid listener-id-str)
+          deregister-fn (requiring-resolve 'ai.miniforge.event-stream.interface/deregister-listener!)]
+      (deregister-fn es listener-id)
+      (responses/json-response {:status "deregistered" :listener-id listener-id-str}))
+    (catch Exception e
+      (anomaly-http-response (from-exception e)))))
+
+(defn handle-api-listener-annotate
+  "API: Submit an annotation from a listener."
+  [state listener-id-str body]
+  (try
+    (let [data (json/parse-string body true)
+          es (:event-stream @state)
+          listener-id (parse-uuid listener-id-str)
+          annotation {:annotation/type (keyword (or (:type data) "note"))
+                      :annotation/content (:content data)
+                      :annotation/workflow-id (when-let [wid (:workflow-id data)]
+                                                (parse-uuid wid))}
+          submit-fn (requiring-resolve 'ai.miniforge.event-stream.interface/submit-annotation!)]
+      (submit-fn es listener-id annotation)
+      (responses/json-response {:status "created"}))
+    (catch Exception e
+      (anomaly-http-response (from-exception e)))))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Structured control action handler (N8)
+
+(defn handle-api-workflow-command-v2
+  "API: Enqueue a structured control action for a workflow.
+   Accepts both legacy {:command :pause} and structured {:action/type :pause ...} formats."
+  [state workflow-id body]
+  (try
+    (let [data (json/parse-string body true)]
+      (if (:action/type data)
+        ;; New structured control action
+        (let [es (:event-stream @state)
+              create-fn (requiring-resolve 'ai.miniforge.event-stream.interface/create-control-action)
+              auth-fn (requiring-resolve 'ai.miniforge.event-stream.interface/authorize-action)
+              exec-fn (requiring-resolve 'ai.miniforge.event-stream.interface/execute-control-action!)
+              roles @(requiring-resolve 'ai.miniforge.event-stream.control/default-roles)
+              action-type (keyword (:action/type data))
+              requester (or (:action/requester data)
+                            {:principal "dashboard" :role :operator})
+              action (create-fn action-type
+                                {:target-type :workflow :target-id workflow-id}
+                                requester
+                                {:justification (:action/justification data)
+                                 :parameters (:action/parameters data)})
+              auth-result (auth-fn roles action requester)]
+          (if (:authorized? auth-result)
+            (let [result (exec-fn es action
+                                  (fn [act]
+                                    ;; Execute via existing command infrastructure
+                                    (let [cmd (name (:action/type act))]
+                                      (write-command-file! workflow-id cmd)
+                                      (state/enqueue-command! state workflow-id cmd)
+                                      {:command cmd :workflow-id workflow-id})))]
+              (responses/json-response {:status "executed" :result result}))
+            (anomaly-http-response
+             (or (:anomaly auth-result)
+                 (make-anomaly :anomalies/forbidden
+                               (:reason auth-result)
+                               {:action-type action-type})))))
+        ;; Legacy command format — delegate to existing handler
+        (handle-api-workflow-command state workflow-id body)))
+    (catch Exception e
+      (anomaly-http-response (from-exception e)))))

@@ -90,10 +90,11 @@
         (sink event)
         (catch Exception e
           (when logger
-            (log/warn logger :event-stream :sink-error
-                     {:message "Event sink failed"
-                      :data {:event-type (:event/type event)
-                             :error (.getMessage e)}})))))
+            (let [anomaly (response/from-exception e)]
+              (log/warn logger :event-stream :sink-error
+                       {:message "Event sink failed"
+                        :data {:event-type (:event/type event)
+                               :anomaly anomaly}}))))))
 
     ;; In-memory event log
     (swap! stream update :events conj event)
@@ -106,11 +107,12 @@
             (callback event)
             (catch Exception e
               (when logger
-                (log/error logger :event-stream :event/callback-error
-                           {:message "Event callback failed"
-                            :data {:subscriber-id sub-id
-                                   :event-type (:event/type event)
-                                   :error (.getMessage e)}})))))))
+                (let [anomaly (response/from-exception e)]
+                  (log/error logger :event-stream :event/callback-error
+                             {:message "Event callback failed"
+                              :data {:subscriber-id sub-id
+                                     :event-type (:event/type event)
+                                     :anomaly anomaly}}))))))))
     (when logger
       (log/debug logger :event-stream :event/published
                  {:message "Event published"
@@ -245,6 +247,158 @@
         (:total-tokens metrics) (assoc :llm/total-tokens (:total-tokens metrics))
         (:duration-ms metrics) (assoc :llm/duration-ms (:duration-ms metrics))
         (:cost-usd metrics) (assoc :llm/cost-usd (:cost-usd metrics)))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Agent lifecycle events
+
+(defn agent-started [stream workflow-id agent-id & [context]]
+  (-> (create-envelope stream :agent/started workflow-id
+                       (str "Agent " (name agent-id) " started"))
+      (assoc :agent/id agent-id)
+      (cond-> context (assoc :agent/context context))))
+
+(defn agent-completed [stream workflow-id agent-id & [result]]
+  (-> (create-envelope stream :agent/completed workflow-id
+                       (str "Agent " (name agent-id) " completed"))
+      (assoc :agent/id agent-id)
+      (cond-> result (assoc :agent/result result))))
+
+(defn agent-failed [stream workflow-id agent-id & [error]]
+  (-> (create-envelope stream :agent/failed workflow-id
+                       (str "Agent " (name agent-id) " failed"))
+      (assoc :agent/id agent-id)
+      (cond-> error (assoc :agent/error error))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Gate lifecycle events
+
+(defn gate-started [stream workflow-id gate-id & [artifact-summary]]
+  (-> (create-envelope stream :gate/started workflow-id
+                       (str "Gate " (name gate-id) " started"))
+      (assoc :gate/id gate-id)
+      (cond-> artifact-summary (assoc :gate/artifact-summary artifact-summary))))
+
+(defn gate-passed [stream workflow-id gate-id & [duration-ms]]
+  (-> (create-envelope stream :gate/passed workflow-id
+                       (str "Gate " (name gate-id) " passed"))
+      (assoc :gate/id gate-id)
+      (cond-> duration-ms (assoc :gate/duration-ms duration-ms))))
+
+(defn gate-failed [stream workflow-id gate-id & [violations]]
+  (-> (create-envelope stream :gate/failed workflow-id
+                       (str "Gate " (name gate-id) " failed"))
+      (assoc :gate/id gate-id)
+      (cond-> violations (assoc :gate/violations violations))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Tool lifecycle events
+
+(defn tool-invoked [stream workflow-id agent-id tool-id & [params-summary]]
+  (-> (create-envelope stream :tool/invoked workflow-id
+                       (str "Tool " (name tool-id) " invoked by " (name agent-id)))
+      (assoc :agent/id agent-id
+             :tool/id tool-id)
+      (cond-> params-summary (assoc :tool/params-summary params-summary))))
+
+(defn tool-completed [stream workflow-id agent-id tool-id & [result-summary]]
+  (-> (create-envelope stream :tool/completed workflow-id
+                       (str "Tool " (name tool-id) " completed"))
+      (assoc :agent/id agent-id
+             :tool/id tool-id)
+      (cond-> result-summary (assoc :tool/result-summary result-summary))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Milestone event
+
+(defn milestone-reached [stream workflow-id milestone-id & [description]]
+  (-> (create-envelope stream :workflow/milestone-reached workflow-id
+                       (or description (str "Milestone " (name milestone-id) " reached")))
+      (assoc :milestone/id milestone-id)))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Task lifecycle (DAG) events
+
+(defn task-state-changed [stream workflow-id dag-id task-id from-state to-state & [context]]
+  (-> (create-envelope stream :task/state-changed workflow-id
+                       (str "Task " task-id " " (name from-state) " -> " (name to-state)))
+      (assoc :dag/id dag-id
+             :task/id task-id
+             :task/from-state from-state
+             :task/to-state to-state)
+      (cond-> context (assoc :task/context context))))
+
+(defn task-frontier-entered [stream workflow-id dag-id task-id & [frontier-size]]
+  (-> (create-envelope stream :task/frontier-entered workflow-id
+                       (str "Task " task-id " entered frontier"))
+      (assoc :dag/id dag-id
+             :task/id task-id)
+      (cond-> frontier-size (assoc :task/frontier-size frontier-size))))
+
+(defn task-skip-propagated [stream workflow-id dag-id task-id & [cause-task]]
+  (-> (create-envelope stream :task/skip-propagated workflow-id
+                       (str "Task " task-id " skip propagated"))
+      (assoc :dag/id dag-id
+             :task/id task-id)
+      (cond-> cause-task (assoc :task/cause-task cause-task))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Inter-agent messaging events
+
+(defn inter-agent-message-sent [stream workflow-id from-agent to-agent & [message-type]]
+  (-> (create-envelope stream :agent/message-sent workflow-id
+                       (str (name from-agent) " -> " (name to-agent)
+                            (when message-type (str " (" (name message-type) ")"))))
+      (assoc :from-agent/id from-agent
+             :to-agent/id to-agent)
+      (cond-> message-type (assoc :message/type message-type))))
+
+(defn inter-agent-message-received [stream workflow-id from-agent to-agent & [message-type]]
+  (-> (create-envelope stream :agent/message-received workflow-id
+                       (str (name to-agent) " <- " (name from-agent)
+                            (when message-type (str " (" (name message-type) ")"))))
+      (assoc :from-agent/id from-agent
+             :to-agent/id to-agent)
+      (cond-> message-type (assoc :message/type message-type))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Listener lifecycle events (N8)
+
+(defn listener-attached [stream workflow-id listener-id & [listener-type capability]]
+  (-> (create-envelope stream :listener/attached workflow-id
+                       (str "Listener " listener-id " attached"))
+      (assoc :listener/id listener-id)
+      (cond->
+        listener-type (assoc :listener/type listener-type)
+        capability (assoc :listener/capability capability))))
+
+(defn listener-detached [stream workflow-id listener-id & [reason]]
+  (-> (create-envelope stream :listener/detached workflow-id
+                       (str "Listener " listener-id " detached"))
+      (assoc :listener/id listener-id)
+      (cond-> reason (assoc :listener/reason reason))))
+
+(defn annotation-created [stream workflow-id listener-id annotation-type & [content]]
+  (-> (create-envelope stream :annotation/created workflow-id
+                       (str "Annotation from " listener-id ": " (name annotation-type)))
+      (assoc :listener/id listener-id
+             :annotation/type annotation-type)
+      (cond-> content (assoc :annotation/content content))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Control action events (N8)
+
+(defn control-action-requested [stream workflow-id action-id action-type & [requester]]
+  (-> (create-envelope stream :control-action/requested workflow-id
+                       (str "Control action " (name action-type) " requested"))
+      (assoc :action/id action-id
+             :action/type action-type)
+      (cond-> requester (assoc :action/requester requester))))
+
+(defn control-action-executed [stream workflow-id action-id & [result]]
+  (-> (create-envelope stream :control-action/executed workflow-id
+                       (str "Control action " action-id " executed"))
+      (assoc :action/id action-id)
+      (cond-> result (assoc :action/result result))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

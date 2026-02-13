@@ -89,6 +89,20 @@
   (list-tools [this] "List all registered tools.")
   (find-tools [this query] "Find tools matching query."))
 
+(defn- emit-tool-event!
+  "Emit a tool lifecycle event via requiring-resolve (no hard dep on event-stream)."
+  [context tool-id event-type & [extra]]
+  (try
+    (when-let [stream (:event-stream context)]
+      (when-let [publish-fn (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
+        (let [wf-id (:workflow/id context)
+              agent-id (:agent/id context)
+              constructor (case event-type
+                            :invoked (requiring-resolve 'ai.miniforge.event-stream.interface/tool-invoked)
+                            :completed (requiring-resolve 'ai.miniforge.event-stream.interface/tool-completed))]
+          (publish-fn stream (constructor stream wf-id agent-id tool-id extra)))))
+    (catch Exception _ nil)))
+
 (defrecord FunctionTool [id name description parameters handler metadata]
   Tool
   (tool-id [_this] id)
@@ -99,6 +113,7 @@
      :parameters parameters
      :metadata metadata})
   (execute [_this params context]
+    (emit-tool-event! context id :invoked (select-keys params (take 5 (keys params))))
     (let [start-ms (System/currentTimeMillis)
           validation (validate-params parameters params)
           result (if (:valid? validation)
@@ -120,6 +135,10 @@
           end-ms (System/currentTimeMillis)
           invocation (tracking/build-invocation id params start-ms end-ms result)]
       (tracking/record-invocation context invocation)
+      (emit-tool-event! context id :completed
+                        (if (:success result)
+                          {:success true}
+                          {:success false :error-type (get-in result [:error :type])}))
       result))
   (validate-args [_this args]
     (validate-params parameters args))
