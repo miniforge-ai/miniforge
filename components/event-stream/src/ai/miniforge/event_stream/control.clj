@@ -7,7 +7,8 @@
 
    RBAC roles define which action types are permitted per target category."
   (:require
-   [ai.miniforge.event-stream.core :as core]))
+   [ai.miniforge.event-stream.core :as core]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; RBAC role definitions
@@ -81,10 +82,18 @@
         permitted-actions (get role-perms category #{})]
     (cond
       (nil? role-perms)
-      {:authorized? false :reason (str "Unknown role: " role)}
+      {:authorized? false
+       :reason (str "Unknown role: " role)
+       :anomaly (response/make-anomaly :anomalies/not-found
+                                        (str "Unknown role: " role)
+                                        {:role role})}
 
       (nil? category)
-      {:authorized? false :reason (str "Unknown target type: " target-type)}
+      {:authorized? false
+       :reason (str "Unknown target type: " target-type)
+       :anomaly (response/make-anomaly :anomalies/incorrect
+                                        (str "Unknown target type: " target-type)
+                                        {:target-type target-type})}
 
       (contains? permitted-actions action-type)
       {:authorized? true :reason "Action permitted by role"}
@@ -92,7 +101,13 @@
       :else
       {:authorized? false
        :reason (str "Role " (name role) " cannot perform " (name action-type)
-                    " on " (name target-type))})))
+                    " on " (name target-type))
+       :anomaly (response/make-anomaly :anomalies/forbidden
+                                        (str "Role " (name role) " cannot perform "
+                                             (name action-type) " on " (name target-type))
+                                        {:role role
+                                         :action-type action-type
+                                         :target-type target-type})})))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Control action execution
@@ -118,10 +133,9 @@
     ;; Execute
     (let [result (try
                    (let [r (execution-fn action)]
-                     {:status :success :result r})
+                     (response/success r))
                    (catch Exception e
-                     {:status :failure
-                      :result {:error (.getMessage e)}}))]
+                     (response/failure (.getMessage e) {:data (ex-data e)})))]
       ;; Emit executed event
       (core/publish! stream
                      (core/control-action-executed

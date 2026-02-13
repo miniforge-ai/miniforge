@@ -10,7 +10,8 @@
    The registry wraps event-stream subscription with capability metadata and
    enforcement."
   (:require
-   [ai.miniforge.event-stream.core :as core]))
+   [ai.miniforge.event-stream.core :as core]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants
@@ -53,8 +54,11 @@
     ;; Validate capability
     (when-not (contains? capability-levels capability)
       (throw (ex-info "Invalid capability level"
-                      {:capability capability
-                       :valid capability-levels})))
+                      {:anomaly (response/make-anomaly
+                                 :anomalies/incorrect
+                                 (str "Invalid capability level: " capability)
+                                 {:capability capability
+                                  :valid capability-levels})})))
     ;; Build filter function from listener filters
     (let [filter-fn (cond
                       (nil? filters) (constantly true)
@@ -130,12 +134,19 @@
   [stream listener-id annotation]
   (let [listener (get-listener stream listener-id)]
     (when-not listener
-      (throw (ex-info "Listener not found" {:listener-id listener-id})))
+      (throw (ex-info "Listener not found"
+                      {:anomaly (response/make-anomaly
+                                 :anomalies/not-found
+                                 (str "Listener not found: " listener-id)
+                                 {:listener-id listener-id})})))
     (when-not (capability-sufficient? (:listener/capability listener) :advise)
       (throw (ex-info "Insufficient capability for annotation"
-                      {:listener-id listener-id
-                       :capability (:listener/capability listener)
-                       :required :advise})))
+                      {:anomaly (response/make-anomaly
+                                 :anomalies/forbidden
+                                 "Insufficient capability for annotation"
+                                 {:listener-id listener-id
+                                  :capability (:listener/capability listener)
+                                  :required :advise})})))
     (let [event (core/annotation-created
                  stream
                  (:annotation/workflow-id annotation)

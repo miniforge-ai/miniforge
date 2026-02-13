@@ -2,7 +2,8 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.event-stream.interface :as es]
-   [ai.miniforge.event-stream.control :as control]))
+   [ai.miniforge.event-stream.control :as control]
+   [ai.miniforge.response.interface :as response]))
 
 (deftest create-control-action-test
   (testing "creates action with required fields"
@@ -80,7 +81,17 @@
                   {:principal "unknown" :role :intern})
           result (es/authorize-action
                   control/default-roles action {:role :intern})]
-      (is (false? (:authorized? result))))))
+      (is (false? (:authorized? result)))))
+
+  (testing "unauthorized result includes anomaly"
+    (let [action (es/create-control-action
+                  :rollback
+                  {:target-type :workflow :target-id (random-uuid)}
+                  {:principal "ops" :role :operator})
+          result (es/authorize-action
+                  control/default-roles action {:role :operator})]
+      (is (false? (:authorized? result)))
+      (is (response/anomaly-map? (:anomaly result))))))
 
 (deftest execute-control-action-test
   (testing "successful execution emits events and returns success"
@@ -95,7 +106,7 @@
                   stream action
                   (fn [_act] {:paused true}))]
       (is (= :success (:status result)))
-      (is (= {:paused true} (:result result)))
+      (is (= {:paused true} (:output result)))
       ;; Should have emitted requested + executed events
       (let [action-events (filter #(#{:control-action/requested :control-action/executed}
                                      (:event/type %)) @events)]
@@ -112,8 +123,8 @@
           result (es/execute-control-action!
                   stream action
                   (fn [_act] (throw (ex-info "Rollback failed" {}))))]
-      (is (= :failure (:status result)))
-      (is (string? (get-in result [:result :error]))))))
+      (is (false? (:success result)))
+      (is (string? (get-in result [:error :message]))))))
 
 (deftest default-roles-test
   (testing "operator has expected workflow permissions"

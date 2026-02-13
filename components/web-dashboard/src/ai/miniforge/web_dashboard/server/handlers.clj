@@ -349,40 +349,44 @@
   (try
     (let [wid (try (parse-uuid workflow-id) (catch Exception _ nil))
           evidence-state (state/get-evidence-state state)
-          ;; Find matching workflow evidence
           wf-evidence (->> (concat (:trains evidence-state) (:workflows evidence-state))
                            (filter #(or (= (str (:workflow/id %)) workflow-id)
                                         (= (str (:id %)) workflow-id)))
                            first)
-          ;; Get events for this workflow from event stream
           events (when wid (state/get-events state {:workflow-id wid :limit 500}))
-          ;; Extract evidence-related events
           gate-events (filter #(#{:gate/started :gate/passed :gate/failed}
                                 (:event/type %)) events)]
       (responses/json-response
-       {:workflow-id workflow-id
+       {:status "success"
+        :workflow-id workflow-id
         :evidence wf-evidence
         :gate-results gate-events
         :event-count (count events)}))
     (catch Exception e
-      (responses/json-response {:error (str "Failed to fetch evidence: " (.getMessage e))}))))
+      {:status 500
+       :headers {"Content-Type" "application/json"}
+       :body (json/generate-string {:status "error"
+                                    :error (.getMessage e)})})))
 
 (defn handle-api-artifact-detail
   "API: Get artifact detail by ID."
   [_state artifact-id]
   (try
-    ;; Query artifact store via requiring-resolve
     (let [artifact (try
                      (when-let [get-fn (requiring-resolve 'ai.miniforge.artifact.interface/get-artifact)]
                        (get-fn artifact-id))
                      (catch Exception _ nil))]
       (if artifact
-        (responses/json-response {:artifact artifact})
-        (responses/json-response {:artifact-id artifact-id
-                                  :status "not-found"
-                                  :message "Artifact not found or artifact store not available"})))
+        (responses/json-response {:status "success" :artifact artifact})
+        {:status 404
+         :headers {"Content-Type" "application/json"}
+         :body (json/generate-string {:status "not-found"
+                                      :artifact-id artifact-id
+                                      :message "Artifact not found or artifact store not available"})}))
     (catch Exception e
-      (responses/json-response {:error (str "Failed to fetch artifact: " (.getMessage e))}))))
+      {:status 500
+       :headers {"Content-Type" "application/json"}
+       :body (json/generate-string {:status "error" :error (.getMessage e)})})))
 
 (defn handle-api-artifact-provenance
   "API: Get provenance chain for an artifact."
@@ -393,12 +397,16 @@
                          (prov-fn artifact-id))
                        (catch Exception _ nil))]
       (if provenance
-        (responses/json-response {:artifact-id artifact-id :provenance provenance})
-        (responses/json-response {:artifact-id artifact-id
-                                  :status "not-found"
-                                  :message "Provenance not available"})))
+        (responses/json-response {:status "success" :artifact-id artifact-id :provenance provenance})
+        {:status 404
+         :headers {"Content-Type" "application/json"}
+         :body (json/generate-string {:status "not-found"
+                                      :artifact-id artifact-id
+                                      :message "Provenance not available"})}))
     (catch Exception e
-      (responses/json-response {:error (str "Failed to fetch provenance: " (.getMessage e))}))))
+      {:status 500
+       :headers {"Content-Type" "application/json"}
+       :body (json/generate-string {:status "error" :error (.getMessage e)})})))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Listener API handlers (N8)
@@ -484,8 +492,7 @@
               create-fn (requiring-resolve 'ai.miniforge.event-stream.interface/create-control-action)
               auth-fn (requiring-resolve 'ai.miniforge.event-stream.interface/authorize-action)
               exec-fn (requiring-resolve 'ai.miniforge.event-stream.interface/execute-control-action!)
-              roles (get (deref (requiring-resolve 'ai.miniforge.event-stream.control/default-roles)) :_not-derefable
-                         ((requiring-resolve 'ai.miniforge.event-stream.control/default-roles)))
+              roles @(requiring-resolve 'ai.miniforge.event-stream.control/default-roles)
               action-type (keyword (:action/type data))
               requester (or (:action/requester data)
                             {:principal "dashboard" :role :operator})
@@ -506,7 +513,11 @@
               (responses/json-response {:status "executed" :result result}))
             {:status 403
              :headers {"Content-Type" "application/json"}
-             :body (json/generate-string {:error "Unauthorized" :reason (:reason auth-result)})}))
+             :body (json/generate-string {:error "Unauthorized"
+                                          :reason (:reason auth-result)
+                                          :anomaly (when-let [a (:anomaly auth-result)]
+                                                     {:category (str (:anomaly/category a))
+                                                      :message (:anomaly/message a)})})}))
         ;; Legacy command format — delegate to existing handler
         (handle-api-workflow-command state workflow-id body)))
     (catch Exception e
