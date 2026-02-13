@@ -90,10 +90,11 @@
         (sink event)
         (catch Exception e
           (when logger
-            (log/warn logger :event-stream :sink-error
-                     {:message "Event sink failed"
-                      :data {:event-type (:event/type event)
-                             :error (.getMessage e)}})))))
+            (let [anomaly (response/from-exception e)]
+              (log/warn logger :event-stream :sink-error
+                       {:message "Event sink failed"
+                        :data {:event-type (:event/type event)
+                               :anomaly anomaly}}))))))
 
     ;; In-memory event log
     (swap! stream update :events conj event)
@@ -106,11 +107,12 @@
             (callback event)
             (catch Exception e
               (when logger
-                (log/error logger :event-stream :event/callback-error
-                           {:message "Event callback failed"
-                            :data {:subscriber-id sub-id
-                                   :event-type (:event/type event)
-                                   :error (.getMessage e)}})))))))
+                (let [anomaly (response/from-exception e)]
+                  (log/error logger :event-stream :event/callback-error
+                             {:message "Event callback failed"
+                              :data {:subscriber-id sub-id
+                                     :event-type (:event/type event)
+                                     :anomaly anomaly}}))))))))
     (when logger
       (log/debug logger :event-stream :event/published
                  {:message "Event published"

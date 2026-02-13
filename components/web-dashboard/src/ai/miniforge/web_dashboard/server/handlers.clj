@@ -25,6 +25,27 @@
    [ai.miniforge.web-dashboard.filters-new :as filters-new]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Anomaly/response helpers (via requiring-resolve, no hard dep on response component)
+
+(defn- make-anomaly
+  "Create an anomaly map via response/make-anomaly."
+  [category message & [context]]
+  ((requiring-resolve 'ai.miniforge.response.interface/make-anomaly)
+   category message (or context {})))
+
+(defn- from-exception
+  "Convert an exception to an anomaly map via response/from-exception."
+  [^Throwable e]
+  ((requiring-resolve 'ai.miniforge.response.interface/from-exception) e))
+
+(defn- anomaly-http-response
+  "Translate an anomaly map to a Ring HTTP response.
+   Body is JSON-encoded for wire transport."
+  [anomaly-map]
+  (let [raw ((requiring-resolve 'ai.miniforge.response.interface/anomaly->http-response) anomaly-map)]
+    (update raw :body json/generate-string)))
+
+;------------------------------------------------------------------------------ Layer 0
 ;; Filter helpers
 
 (defn- maybe-apply-filters
@@ -330,9 +351,10 @@
       (state/enqueue-command! state workflow-id command)
       (responses/json-response {:status "queued" :command command :workflow-id workflow-id}))
     (catch Exception e
-      {:status 400
-       :headers {"Content-Type" "application/json"}
-       :body (json/generate-string {:error (str "Bad request: " (ex-message e))})})))
+      (anomaly-http-response
+       (make-anomaly :anomalies/incorrect
+                     (str "Bad request: " (ex-message e))
+                     {:workflow-id workflow-id})))))
 
 (defn handle-api-workflow-commands-poll
   "API: Poll and dequeue pending commands for a workflow."
@@ -363,10 +385,7 @@
         :gate-results gate-events
         :event-count (count events)}))
     (catch Exception e
-      {:status 500
-       :headers {"Content-Type" "application/json"}
-       :body (json/generate-string {:status "error"
-                                    :error (.getMessage e)})})))
+      (anomaly-http-response (from-exception e)))))
 
 (defn handle-api-artifact-detail
   "API: Get artifact detail by ID."
@@ -378,15 +397,12 @@
                      (catch Exception _ nil))]
       (if artifact
         (responses/json-response {:status "success" :artifact artifact})
-        {:status 404
-         :headers {"Content-Type" "application/json"}
-         :body (json/generate-string {:status "not-found"
-                                      :artifact-id artifact-id
-                                      :message "Artifact not found or artifact store not available"})}))
+        (anomaly-http-response
+         (make-anomaly :anomalies/not-found
+                       "Artifact not found or artifact store not available"
+                       {:artifact-id artifact-id}))))
     (catch Exception e
-      {:status 500
-       :headers {"Content-Type" "application/json"}
-       :body (json/generate-string {:status "error" :error (.getMessage e)})})))
+      (anomaly-http-response (from-exception e)))))
 
 (defn handle-api-artifact-provenance
   "API: Get provenance chain for an artifact."
@@ -398,15 +414,12 @@
                        (catch Exception _ nil))]
       (if provenance
         (responses/json-response {:status "success" :artifact-id artifact-id :provenance provenance})
-        {:status 404
-         :headers {"Content-Type" "application/json"}
-         :body (json/generate-string {:status "not-found"
-                                      :artifact-id artifact-id
-                                      :message "Provenance not available"})}))
+        (anomaly-http-response
+         (make-anomaly :anomalies/not-found
+                       "Provenance not available"
+                       {:artifact-id artifact-id}))))
     (catch Exception e
-      {:status 500
-       :headers {"Content-Type" "application/json"}
-       :body (json/generate-string {:status "error" :error (.getMessage e)})})))
+      (anomaly-http-response (from-exception e)))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Listener API handlers (N8)
@@ -420,7 +433,7 @@
                       ((requiring-resolve 'ai.miniforge.event-stream.interface/list-listeners) es))]
       (responses/json-response {:listeners (or listeners [])}))
     (catch Exception e
-      (responses/json-response {:error (str "Failed to list listeners: " (.getMessage e))}))))
+      (anomaly-http-response (from-exception e)))))
 
 (defn handle-api-listener-register
   "API: Register a new listener."
@@ -440,9 +453,7 @@
           listener-id (register-fn es listener-spec)]
       (responses/json-response {:listener-id (str listener-id) :status "registered"}))
     (catch Exception e
-      {:status 400
-       :headers {"Content-Type" "application/json"}
-       :body (json/generate-string {:error (str "Failed to register listener: " (.getMessage e))})})))
+      (anomaly-http-response (from-exception e)))))
 
 (defn handle-api-listener-deregister
   "API: Deregister a listener."
@@ -454,9 +465,7 @@
       (deregister-fn es listener-id)
       (responses/json-response {:status "deregistered" :listener-id listener-id-str}))
     (catch Exception e
-      {:status 400
-       :headers {"Content-Type" "application/json"}
-       :body (json/generate-string {:error (str "Failed to deregister: " (.getMessage e))})})))
+      (anomaly-http-response (from-exception e)))))
 
 (defn handle-api-listener-annotate
   "API: Submit an annotation from a listener."
@@ -473,9 +482,7 @@
       (submit-fn es listener-id annotation)
       (responses/json-response {:status "created"}))
     (catch Exception e
-      {:status 400
-       :headers {"Content-Type" "application/json"}
-       :body (json/generate-string {:error (str "Annotation failed: " (.getMessage e))})})))
+      (anomaly-http-response (from-exception e)))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Structured control action handler (N8)
@@ -511,16 +518,12 @@
                                       (state/enqueue-command! state workflow-id cmd)
                                       {:command cmd :workflow-id workflow-id})))]
               (responses/json-response {:status "executed" :result result}))
-            {:status 403
-             :headers {"Content-Type" "application/json"}
-             :body (json/generate-string {:error "Unauthorized"
-                                          :reason (:reason auth-result)
-                                          :anomaly (when-let [a (:anomaly auth-result)]
-                                                     {:category (str (:anomaly/category a))
-                                                      :message (:anomaly/message a)})})}))
+            (anomaly-http-response
+             (or (:anomaly auth-result)
+                 (make-anomaly :anomalies/forbidden
+                               (:reason auth-result)
+                               {:action-type action-type})))))
         ;; Legacy command format — delegate to existing handler
         (handle-api-workflow-command state workflow-id body)))
     (catch Exception e
-      {:status 400
-       :headers {"Content-Type" "application/json"}
-       :body (json/generate-string {:error (str "Bad request: " (.getMessage e))})})))
+      (anomaly-http-response (from-exception e)))))
