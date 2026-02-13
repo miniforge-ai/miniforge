@@ -127,6 +127,7 @@
                             "ai.miniforge.observer.interface-integration-test"
                             "ai.miniforge.task.interface-integration-test"
                             "ai.miniforge.release-executor.artifact-validation-integration-test"]
+                            "ai.miniforge.web-dashboard.fleet-onboarding-integration-test"]
                  require-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
                  run-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
                  expr (str "(require 'clojure.test" require-expr ") "

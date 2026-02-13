@@ -22,6 +22,15 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Fleet fragments
 
+(defn- fleet-action-onclick
+  [action]
+  (case action
+    :add-repo "window.miniforge.fleet.addRepo()"
+    :discover-repos "window.miniforge.fleet.discoverRepos()"
+    :sync-prs "window.miniforge.fleet.syncPrs()"
+    :discover-sync "window.miniforge.fleet.discoverAndSync()"
+    ""))
+
 (defn train-list-fragment
   "Train list fragment for htmx updates."
   [trains]
@@ -34,8 +43,8 @@
       [:div.empty-actions
        (c/button "+ Run Workflow" {:variant :primary
                                     :onclick "location.href='/workflows'"})
-       (c/button "Coordinate My PRs" {:variant :secondary
-                                       :onclick "alert('PR coordination coming soon')"})]]
+       (c/button "Discover + Sync" {:variant :secondary
+                                    :onclick (fleet-action-onclick :discover-sync)})]]
      [:div.train-table
       [:table.fleet-table
        [:thead
@@ -81,14 +90,22 @@
        [:span.summary-divider "•"]
        [:span.pr-count (str (get-in fleet-state [:summary :total-prs] 0) " PRs")]
        [:span.summary-divider "•"]
-       [:span.repo-count (str (get-in fleet-state [:summary :repos] 0) " repos")]]
+       [:span.repo-count (str (get-in fleet-state [:summary :repos] 0) " repos with PRs")]
+       [:span.summary-divider "•"]
+       [:span.repo-count (str (get-in fleet-state [:summary :configured-repos] 0) " configured")]]
       [:div.fleet-actions
        (c/button "+ Run Workflow" {:variant :primary
                                     :onclick "location.href='/workflows'"
                                     :title "Execute a defined workflow spec"})
-       (c/button "Coordinate My PRs" {:variant :secondary
-                                       :onclick "alert('PR coordination: Review repos → Create trains → Setup monitoring')"
-                                       :title "Auto-discover PRs and create trains from DAGs"})
+       (c/button "+ Repo" {:variant :secondary
+                           :onclick (fleet-action-onclick :add-repo)
+                           :title "Add a repository to fleet configuration"})
+       (c/button "Discover Repos" {:variant :secondary
+                                    :onclick (fleet-action-onclick :discover-repos)
+                                    :title "Discover repositories via GitHub CLI"})
+       (c/button "Sync PRs" {:variant :secondary
+                              :onclick (fleet-action-onclick :sync-prs)
+                              :title "Import open provider PRs into PR trains"})
        (c/button "Review All PRs" {:variant :ghost
                                     :onclick "alert('PR review: Kick off review workflows for all outstanding PRs')"
                                     :title "Run automated PR review workflows"})]]
