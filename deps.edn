@@ -154,6 +154,7 @@
                        "components/event-stream/test"
                        "components/tui-engine/test"
                        "components/tui-views/test"
+                       "components/web-dashboard/test"
                        "components/self-healing/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
@@ -188,6 +189,7 @@
                       ai.miniforge/event-stream {:local/root "components/event-stream"}
                       ai.miniforge/tui-engine {:local/root "components/tui-engine"}
                       ai.miniforge/tui-views {:local/root "components/tui-views"}
+                      ai.miniforge/web-dashboard {:local/root "components/web-dashboard"}
                       ai.miniforge/self-healing {:local/root "components/self-healing"}}}
 
   :conformance {:extra-paths ["development/test"
