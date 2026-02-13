@@ -17,7 +17,8 @@
   (:require
    [ai.miniforge.web-dashboard.state.core :as core]
    [ai.miniforge.web-dashboard.state.trains :as trains]
-   [ai.miniforge.web-dashboard.state.workflows :as workflows]))
+   [ai.miniforge.web-dashboard.state.workflows :as workflows]
+   [ai.miniforge.web-dashboard.state.archive :as archive]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure scoring and computation
@@ -146,11 +147,11 @@
            (take 20)
            vec))
     (catch Exception e
-      (println "Error getting recent activity:" (.getMessage e))
+      (println "Error getting recent activity:" (ex-message e))
       [])))
 
 (defn get-evidence-state
-  "Get evidence artifacts state from both PR trains and workflow completions."
+  "Get evidence artifacts state from PR trains, live workflows, and archived workflows."
   [state]
   (let [trains (trains/get-trains state)
         train-evidence (map (fn [train]
@@ -161,16 +162,29 @@
                                :pr-count (count (:train/prs train))
                                :has-evidence (some? (:train/evidence-bundle-id train))})
                             trains)
+        ;; Live workflows from event stream
         wfs (workflows/get-workflows state)
-        wf-evidence (keep (fn [wf]
-                            (when (#{:completed :failed} (:status wf))
-                              {:source :workflow
-                               :workflow-id (:id wf)
-                               :workflow-name (:name wf)
-                               :evidence-bundle-id (:evidence-bundle-id wf)
-                               :status (:status wf)
-                               :completed-at (:completed-at wf)
-                               :has-evidence (some? (:evidence-bundle-id wf))}))
-                          wfs)]
+        live-evidence (keep (fn [wf]
+                              (when (#{:completed :failed} (:status wf))
+                                {:source :workflow
+                                 :workflow-id (:id wf)
+                                 :workflow-name (:name wf)
+                                 :evidence-bundle-id (:evidence-bundle-id wf)
+                                 :status (:status wf)
+                                 :completed-at (:completed-at wf)
+                                 :has-evidence (some? (:evidence-bundle-id wf))}))
+                            wfs)
+        ;; Archived workflows (completed/failed only)
+        archived (archive/get-archived-workflows state)
+        archived-evidence (keep (fn [wf]
+                                  (when (#{:completed :failed} (:status wf))
+                                    {:source :archived
+                                     :workflow-id (:id wf)
+                                     :workflow-name (:name wf)
+                                     :evidence-bundle-id (:evidence-bundle-id wf)
+                                     :status (:status wf)
+                                     :completed-at (:completed-at wf)
+                                     :has-evidence (some? (:evidence-bundle-id wf))}))
+                                archived)]
     {:trains train-evidence
-     :workflows (vec wf-evidence)}))
+     :workflows (vec (concat live-evidence archived-evidence))}))

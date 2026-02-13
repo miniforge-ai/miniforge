@@ -45,4 +45,4 @@
     (catch Exception e
       {:status 400
        :headers {"Content-Type" "application/json"}
-       :body (json/generate-string {:error (str "Bad request: " (.getMessage e))})})))
+       :body (json/generate-string {:error (str "Bad request: " (ex-message e))})})))

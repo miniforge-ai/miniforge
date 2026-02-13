@@ -83,7 +83,7 @@
             (println "Invalid filter specs:" (schema/explain-filter-spec specs))
             []))))
     (catch Exception e
-      (println "Error loading filter specs:" (.getMessage e))
+      (println "Error loading filter specs:" (ex-message e))
       [])))
 
 ;; Atom holding loaded filter specifications

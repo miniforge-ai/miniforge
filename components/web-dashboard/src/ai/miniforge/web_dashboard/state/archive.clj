@@ -24,8 +24,9 @@
   (if-let [d (normalize-ts ts)] (.getTime d) 0))
 
 (defn- exclude-live-ids
-  "Remove any archived workflows whose IDs also appear in the live list."
-  [archived-vals live-workflows]
+  "Remove any archived workflows whose IDs also appear in the live list.
+   Arg order supports ->> threading: live-workflows first, archived-vals last."
+  [live-workflows archived-vals]
   (let [live-ids (->> live-workflows (map (comp str :id)) set)]
     (remove #(contains? live-ids (str (:id %))) archived-vals)))
 

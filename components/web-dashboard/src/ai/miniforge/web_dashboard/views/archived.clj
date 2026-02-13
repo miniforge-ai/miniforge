@@ -72,7 +72,7 @@
            [:div.workflow-card-body
             {:id (str "arch-panel-" wf-id)
              :hx-get (str "/api/archive/" wf-id "/events")
-             :hx-trigger "toggle once"
+             :hx-trigger "toggle once from:closest details"
              :hx-swap "innerHTML"}
             [:div.loading-spinner "Loading events..."]]
            [:div.workflow-card-actions

@@ -150,8 +150,10 @@
   [state params]
   (let [filter-ast (filters/parse-filter-ast params)
         trains (filtered-fleet-trains state filter-ast)
-        workflows (filtered-workflow-runs state filter-ast)]
-    (responses/html-response (views/stats-fragment (state/compute-stats trains workflows)))))
+        live-workflows (filtered-workflow-runs state filter-ast)
+        archived-workflows (state/get-archived-workflows state)
+        all-workflows (concat live-workflows archived-workflows)]
+    (responses/html-response (views/stats-fragment (state/compute-stats trains all-workflows)))))
 
 (defn handle-api-fleet-grid
   "API: Fleet status grid fragment (for htmx updates)."
@@ -305,7 +307,7 @@
     (catch Exception e
       {:status 400
        :headers {"Content-Type" "application/json"}
-       :body (json/generate-string {:error (str "Bad request: " (.getMessage e))})})))
+       :body (json/generate-string {:error (str "Bad request: " (ex-message e))})})))
 
 (defn handle-api-workflow-commands-poll
   "API: Poll and dequeue pending commands for a workflow."

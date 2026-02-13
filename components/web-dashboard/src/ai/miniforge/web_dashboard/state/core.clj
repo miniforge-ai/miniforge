@@ -40,7 +40,7 @@
       (when-let [f (ns-resolve ns fn-sym)]
         (apply f args)))
     (catch Exception e
-      (println "Error calling" fn-sym ":" (.getMessage e))
+      (println "Error calling" fn-sym ":" (ex-message e))
       nil)))
 
 ;------------------------------------------------------------------------------ Layer 1

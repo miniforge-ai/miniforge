@@ -178,5 +178,5 @@
          (json/parse-string filters-json true)
          filters-json)))
     (catch Exception e
-      (println "Error parsing filter AST:" (.getMessage e))
+      (println "Error parsing filter AST:" (ex-message e))
       nil)))
