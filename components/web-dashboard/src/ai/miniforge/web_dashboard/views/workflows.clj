@@ -145,7 +145,7 @@
       (workflow-events-fragment events)]]]))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Workflow list view
+;; Page views
 
 (defn workflows-view
   "Workflows list page view."
@@ -173,7 +173,24 @@
       {:hx-get "/api/workflows"
        :hx-trigger "refresh[!document.querySelector('.workflow-card[open]')] from:body"
        :hx-swap "innerHTML"}
-      (workflow-list-fragment workflows)]]]))
+      (workflow-list-fragment workflows)]]
+
+    ;; Archived section — loads in background, static data
+    [:section.archived-section
+     [:div.archived-header
+      [:h3 "Archived Workflows"]
+      [:button.btn.btn-sm.btn-ghost
+       {:hx-post "/api/archive/retention"
+        :hx-vals "{\"max_age_days\": 30}"
+        :hx-confirm "Delete archived workflows older than 30 days?"
+        :hx-target "#archived-content"
+        :hx-swap "innerHTML"}
+       "Clean up (30d+)"]]
+     [:div#archived-content
+      {:hx-get "/api/archived-workflows"
+       :hx-trigger "load"
+       :hx-swap "innerHTML"}
+      [:div.loading-spinner "Scanning archive..."]]]]))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Workflow detail view (direct URL fallback)

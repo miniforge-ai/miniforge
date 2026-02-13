@@ -205,7 +205,7 @@ Commands:
 
   status [id]         Show workflow status
 
-  dashboard           Start workflow monitoring dashboard (default port: 8080)
+  dashboard           Start workflow monitoring dashboard (default port: 7878)
     --port N          Port number
     --open            Open browser automatically
 
@@ -256,7 +256,7 @@ Note:
 Examples:
   miniforge doctor
   miniforge run feature.spec.edn
-  miniforge web                        # Start web dashboard (port 8080)
+  miniforge web                        # Start web dashboard (port 7878)
   miniforge web --port 3000 --open     # Custom port, auto-open browser
   miniforge tui                        # Start terminal UI (requires miniforge-tui)
   miniforge workflow list
@@ -291,7 +291,7 @@ Examples:
    ;; Monitoring commands
    {:cmds ["web"]
     :fn web-cmd
-    :spec {:port {:coerce :int :alias :p :default 8080}
+    :spec {:port {:coerce :int :alias :p :default 7878}
            :open {:coerce :boolean :alias :o}}}
 
    {:cmds ["tui"]

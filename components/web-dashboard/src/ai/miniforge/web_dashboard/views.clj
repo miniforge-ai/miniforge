@@ -23,7 +23,8 @@
    [ai.miniforge.web-dashboard.views.fleet :as fleet]
    [ai.miniforge.web-dashboard.views.dag :as dag]
    [ai.miniforge.web-dashboard.views.evidence :as evidence]
-   [ai.miniforge.web-dashboard.views.workflows :as workflows]))
+   [ai.miniforge.web-dashboard.views.workflows :as workflows]
+   [ai.miniforge.web-dashboard.views.archived :as archived]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Layout and shared utilities
@@ -169,6 +170,7 @@
 (def workflow-summary-fragment dashboard/workflow-summary-fragment)
 (def workflow-events-fragment workflows/workflow-events-fragment)
 (def workflow-detail-panel workflows/workflow-detail-panel)
+(def archived-workflow-list-fragment archived/archived-workflow-list-fragment)
 (defn workflows-view [wfs]
   (workflows/workflows-view layout wfs))
 (defn workflow-detail-view [workflow events]

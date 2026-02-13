@@ -18,7 +18,8 @@
    [ai.miniforge.web-dashboard.state.core :as core]
    [ai.miniforge.web-dashboard.state.trains :as trains]
    [ai.miniforge.web-dashboard.state.workflows :as workflows]
-   [ai.miniforge.web-dashboard.state.fleet :as fleet]))
+   [ai.miniforge.web-dashboard.state.fleet :as fleet]
+   [ai.miniforge.web-dashboard.state.archive :as archive]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Re-exports from sub-namespaces
@@ -40,6 +41,12 @@
 (def get-events workflows/get-events)
 (def enqueue-command! workflows/enqueue-command!)
 (def dequeue-commands! workflows/dequeue-commands!)
+;; archive
+(def archive-loading? archive/archive-loading?)
+(def get-archived-workflows archive/get-archived-workflows)
+(def get-archived-workflow-events archive/get-archived-workflow-events)
+(def delete-archived-workflow! archive/delete-archived-workflow!)
+(def apply-retention! archive/apply-retention!)
 
 ;; fleet
 (def calculate-risk-score fleet/calculate-risk-score)
