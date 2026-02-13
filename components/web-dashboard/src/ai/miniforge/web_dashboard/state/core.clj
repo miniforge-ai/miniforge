@@ -52,6 +52,8 @@
   (atom (merge {:event-stream nil
                 :pr-train-manager nil
                 :repo-dag-manager nil
+                :fleet/default-dag-id nil
+                :fleet/repo-trains {}
                 :workflow-commands {}
                 :archived-workflows (atom {})
                 :archive-loading? (atom true)

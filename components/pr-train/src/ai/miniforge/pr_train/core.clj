@@ -349,12 +349,12 @@
 (defn list-trains
   "List all trains in a manager.
 
-   Returns vector of train summaries: [{:train/id :train/name :train/status}]"
+   Returns full train maps."
   [manager]
   (->> @(:trains manager)
        vals
-       (mapv #(select-keys % [:train/id :train/name :train/status
-                              :train/progress :train/created-at]))))
+       (sort-by :train/created-at)
+       vec))
 
 (defn find-trains-by-status
   "Find trains with a given status.

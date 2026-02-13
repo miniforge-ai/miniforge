@@ -34,6 +34,10 @@
 (def train-action! trains/train-action!)
 (def get-dags trains/get-dags)
 (def get-dag-state trains/get-dag-state)
+(def get-configured-repos trains/get-configured-repos)
+(def add-configured-repo! trains/add-configured-repo!)
+(def discover-configured-repos! trains/discover-configured-repos!)
+(def sync-configured-repos! trains/sync-configured-repos!)
 
 ;; workflows
 (def get-workflows workflows/get-workflows)

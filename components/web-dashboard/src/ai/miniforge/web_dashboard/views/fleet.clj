@@ -34,8 +34,8 @@
       [:div.empty-actions
        (c/button "+ Run Workflow" {:variant :primary
                                     :onclick "location.href='/workflows'"})
-       (c/button "Coordinate My PRs" {:variant :secondary
-                                       :onclick "alert('PR coordination coming soon')"})]]
+       (c/button "Discover + Sync" {:variant :secondary
+                                    :onclick "fetch('/api/fleet/repos/discover', { method: 'POST' }).then(r => r.json()).then(res => { if (res.success) { return fetch('/api/fleet/prs/sync', { method: 'POST' }); } throw new Error(res.error || 'Discovery failed'); }).then(r => r.json()).then(syncRes => { if (syncRes.success) { alert('Discovery and PR sync completed.'); document.body.dispatchEvent(new CustomEvent('refresh')); } else { alert('Sync error: ' + (syncRes.error || 'Unable to synchronize PRs')); } }).catch(err => alert('Error: ' + err.message));"})]]
      [:div.train-table
       [:table.fleet-table
        [:thead
@@ -81,14 +81,22 @@
        [:span.summary-divider "•"]
        [:span.pr-count (str (get-in fleet-state [:summary :total-prs] 0) " PRs")]
        [:span.summary-divider "•"]
-       [:span.repo-count (str (get-in fleet-state [:summary :repos] 0) " repos")]]
+       [:span.repo-count (str (get-in fleet-state [:summary :repos] 0) " repos with PRs")]
+       [:span.summary-divider "•"]
+       [:span.repo-count (str (get-in fleet-state [:summary :configured-repos] 0) " configured")]]
       [:div.fleet-actions
        (c/button "+ Run Workflow" {:variant :primary
                                     :onclick "location.href='/workflows'"
                                     :title "Execute a defined workflow spec"})
-       (c/button "Coordinate My PRs" {:variant :secondary
-                                       :onclick "alert('PR coordination: Review repos → Create trains → Setup monitoring')"
-                                       :title "Auto-discover PRs and create trains from DAGs"})
+       (c/button "+ Repo" {:variant :secondary
+                           :onclick "const repo = prompt('Repository (owner/name):'); if (repo) { fetch('/api/fleet/repos/add?repo=' + encodeURIComponent(repo), { method: 'POST' }).then(r => r.json()).then(res => { if (res.success) { alert((res['added?'] ? 'Added: ' : 'Already configured: ') + (res.repo || repo)); document.body.dispatchEvent(new CustomEvent('refresh')); } else { alert('Error: ' + (res.error || 'Unable to add repo')); } }).catch(err => alert('Error: ' + err.message)); }"
+                           :title "Add a repository to fleet configuration"})
+       (c/button "Discover Repos" {:variant :secondary
+                                    :onclick "const owner = prompt('Owner/org (leave blank for current user):', '') || ''; const suffix = owner.trim() ? ('?owner=' + encodeURIComponent(owner.trim())) : ''; fetch('/api/fleet/repos/discover' + suffix, { method: 'POST' }).then(r => r.json()).then(res => { if (res.success) { alert('Discovered ' + (res.discovered || 0) + ' repos, added ' + (res.added || 0) + '.'); document.body.dispatchEvent(new CustomEvent('refresh')); } else { alert('Error: ' + (res.error || 'Repository discovery failed')); } }).catch(err => alert('Error: ' + err.message));"
+                                    :title "Discover repositories via GitHub CLI"})
+       (c/button "Sync PRs" {:variant :secondary
+                              :onclick "fetch('/api/fleet/prs/sync', { method: 'POST' }).then(r => r.json()).then(res => { if (res.success) { const s = res.summary || {}; alert('Synced repos: ' + (res.synced || 0) + ', tracked PRs: ' + (s['tracked-prs'] || 0)); document.body.dispatchEvent(new CustomEvent('refresh')); } else { alert('Error: ' + (res.error || ('Sync failed for ' + (res.failed || 0) + ' repo(s)'))); document.body.dispatchEvent(new CustomEvent('refresh')); } }).catch(err => alert('Error: ' + err.message));"
+                              :title "Import open provider PRs into PR trains"})
        (c/button "Review All PRs" {:variant :ghost
                                     :onclick "alert('PR review: Kick off review workflows for all outstanding PRs')"
                                     :title "Run automated PR review workflows"})]]

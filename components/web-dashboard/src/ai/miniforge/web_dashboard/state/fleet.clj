@@ -102,6 +102,7 @@
                (fn [state]
                  (let [trains (trains/get-trains state)
                        dags (trains/get-dags state)
+                       configured-repos (trains/get-configured-repos state)
                        total-prs (reduce + 0 (map #(count (:train/prs %)) trains))
                        active-trains (filter #(#{:open :reviewing :merging} (:train/status %)) trains)
                        repos (set (mapcat #(map :pr/repo (:train/prs %)) trains))]
@@ -109,8 +110,10 @@
                               :active-trains (count active-trains)
                               :total-prs total-prs
                               :repos (count repos)
+                              :configured-repos (count configured-repos)
                               :dags (count dags)}
                     :trains trains
+                    :configured-repos configured-repos
                     :repos (group-by identity (mapcat #(map :pr/repo (:train/prs %)) trains))
                     :health {:healthy (count (filter #(< (calculate-risk-score %) 20) trains))
                              :warning (count (filter #(and (>= (calculate-risk-score %) 20)

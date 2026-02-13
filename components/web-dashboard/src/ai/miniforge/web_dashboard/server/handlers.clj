@@ -217,6 +217,31 @@
     (state/train-action! state train-id action)
     (responses/json-response {:success true})))
 
+(defn handle-api-fleet-repos
+  "API: Get configured fleet repositories."
+  [state]
+  (responses/json-response {:success true
+                            :repos (state/get-configured-repos state)}))
+
+(defn handle-api-fleet-add-repo
+  "API: Add one configured repository (owner/name)."
+  [state params]
+  (let [repo (filters/param-value params :repo nil)
+        result (state/add-configured-repo! state repo)]
+    (responses/json-response result)))
+
+(defn handle-api-fleet-discover
+  "API: Discover repositories from provider and add to fleet config."
+  [state params]
+  (let [owner (filters/param-value params :owner nil)
+        result (state/discover-configured-repos! state {:owner owner})]
+    (responses/json-response result)))
+
+(defn handle-api-fleet-sync
+  "API: Sync configured repositories and import open PRs into trains."
+  [state]
+  (responses/json-response (state/sync-configured-repos! state)))
+
 (defn handle-api-filter-fields
   "API: Get available filter fields with faceted counts."
   [state params]
@@ -312,4 +337,3 @@
   [state workflow-id]
   (let [commands (state/dequeue-commands! state workflow-id)]
     (responses/json-response {:commands commands})))
-
