@@ -62,13 +62,16 @@
 
 (defn get-dashboard-state
   "Get complete dashboard state for initial load.
-   Computes shared data once to avoid redundant calls."
+   Computes shared data once to avoid redundant calls.
+   Combines live and archived workflows for stats and summaries."
   [state]
   (let [fleet-data (get-fleet-state state)
         trains (:trains fleet-data)
-        wfs (get-workflows state)]
-    {:stats (compute-stats trains wfs)
+        live-wfs (get-workflows state)
+        archived-wfs (get-archived-workflows state)
+        all-wfs (concat live-wfs archived-wfs)]
+    {:stats (compute-stats trains all-wfs)
      :fleet fleet-data
      :risk (get-risk-analysis state)
      :activity (get-recent-activity state)
-     :workflows (take 10 wfs)}))
+     :workflows (take 10 (if (seq live-wfs) live-wfs archived-wfs))}))

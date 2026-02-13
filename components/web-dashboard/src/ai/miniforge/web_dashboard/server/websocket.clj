@@ -36,9 +36,9 @@
                             (try
                               (http/send! ch (json/generate-string {:type :event :data event}))
                               (catch Exception e
-                                (println "Error sending event to WebSocket:" (.getMessage e)))))))))
+                                (println "Error sending event to WebSocket:" (ex-message e)))))))))
         (catch Exception e
-          (println "Error subscribing to event stream:" (.getMessage e)))))))
+          (println "Error subscribing to event stream:" (ex-message e)))))))
 
 (defn- unsubscribe-client!
   "Unsubscribe WebSocket client from event stream."
@@ -51,7 +51,7 @@
             (let [unsubscribe! (ns-resolve es-ns 'unsubscribe!)]
               (unsubscribe! event-stream subscriber-id))))
         (catch Exception e
-          (println "Error unsubscribing from event stream:" (.getMessage e)))))))
+          (println "Error unsubscribing from event stream:" (ex-message e)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Message handling
@@ -76,13 +76,13 @@
             (try
               (http/send! workflow-ch (json/generate-string msg))
               (catch Exception e
-                (println "Error sending command to workflow:" (.getMessage e))))))
+                (println "Error sending command to workflow:" (ex-message e))))))
 
         ;; Unknown message
         :else
         (http/send! ch (json/generate-string {:error "Unknown action"}))))
     (catch Exception e
-      (println "Error handling WebSocket message:" (.getMessage e)))))
+      (println "Error handling WebSocket message:" (ex-message e)))))
 
 (defn handle-workflow-event
   "Handle incoming event from workflow process.
@@ -119,9 +119,9 @@
               (when-let [publish! (ns-resolve es-ns 'publish!)]
                 (publish! es normalized-event))))
           (catch Exception e
-            (println "Error publishing workflow event:" (.getMessage e))))))
+            (println "Error publishing workflow event:" (ex-message e))))))
     (catch Exception e
-      (println "Error parsing workflow event:" (.getMessage e)))))
+      (println "Error parsing workflow event:" (ex-message e)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Handler constructors

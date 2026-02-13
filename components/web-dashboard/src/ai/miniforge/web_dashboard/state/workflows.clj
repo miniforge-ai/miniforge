@@ -141,7 +141,7 @@
                              [])
                            [])
                          (catch Exception e
-                           (println "Error getting workflows:" (.getMessage e))
+                           (println "Error getting workflows:" (ex-message e))
                            []))]
             (swap! cache assoc [state] {:value result :time now})
             result))))))
@@ -190,7 +190,7 @@
         [])
       [])
     (catch Exception e
-      (println "Error querying events:" (.getMessage e))
+      (println "Error querying events:" (ex-message e))
       [])))
 
 ;------------------------------------------------------------------------------ Layer 2

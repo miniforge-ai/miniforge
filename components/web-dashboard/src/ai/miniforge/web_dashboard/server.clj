@@ -50,7 +50,7 @@
       (spit discovery-file (json/generate-string info {:pretty true}))
       (println "📡 Workflows will auto-discover dashboard at port" port))
     (catch Exception e
-      (println "Warning: Could not write discovery file:" (.getMessage e)))))
+      (println "Warning: Could not write discovery file:" (ex-message e)))))
 
 (defn- delete-discovery-file!
   "Remove dashboard discovery file on shutdown."
@@ -91,7 +91,7 @@
               {:status 202 :headers {"Content-Type" "application/json"} :body "{\"status\":\"accepted\"}"})
             (catch Exception e
               {:status 400 :headers {"Content-Type" "application/json"}
-               :body (json/generate-string {:error (str "Bad request: " (.getMessage e))})}))
+               :body (json/generate-string {:error (str "Bad request: " (ex-message e))})}))
 
           ;; Health check
           (= uri "/health")
@@ -121,7 +121,9 @@
 
           ;; API endpoints (htmx fragments)
           (= uri "/api/dashboard/workflows")
-          (responses/html-response (views/workflow-summary-fragment (take 5 (state/get-workflows state))))
+          (let [live (state/get-workflows state)
+                wfs (if (seq live) live (state/get-archived-workflows state))]
+            (responses/html-response (views/workflow-summary-fragment (take 5 wfs))))
 
           (= uri "/api/stats")
           (handlers/handle-api-stats state params)
