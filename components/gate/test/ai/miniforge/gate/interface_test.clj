@@ -4,6 +4,7 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.gate.interface :as gate]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.event-stream.interface :as es]
    ;; Require implementations to register methods
    [ai.miniforge.gate.syntax]
    [ai.miniforge.gate.lint]
@@ -173,3 +174,35 @@
     (let [chain (gate/check-gates-chain [] {} {})]
       (is (response/succeeded? chain))
       (is (empty? (response/operations chain))))))
+
+;; ============================================================================
+;; Event emission wiring tests
+;; ============================================================================
+
+(deftest check-gate-emits-events-on-pass-test
+  (testing "check-gate emits gate/started and gate/passed when gate passes"
+    (let [stream (es/create-event-stream {:sinks []})
+          wf-id (random-uuid)
+          ctx {:event-stream stream :workflow/id wf-id}
+          _result (gate/check-gate :syntax {:content "(+ 1 2)"} ctx)
+          events (es/get-events stream)]
+      (is (some #(= :gate/started (:event/type %)) events))
+      (is (some #(= :gate/passed (:event/type %)) events))
+      (is (not (some #(= :gate/failed (:event/type %)) events))))))
+
+(deftest check-gate-emits-events-on-fail-test
+  (testing "check-gate emits gate/started and gate/failed when gate fails"
+    (let [stream (es/create-event-stream {:sinks []})
+          wf-id (random-uuid)
+          ctx {:event-stream stream :workflow/id wf-id}
+          _result (gate/check-gate :syntax {:content "(+ 1 2"} ctx)
+          events (es/get-events stream)]
+      (is (some #(= :gate/started (:event/type %)) events))
+      (is (some #(= :gate/failed (:event/type %)) events))
+      (is (not (some #(= :gate/passed (:event/type %)) events))))))
+
+(deftest check-gate-works-without-event-stream-test
+  (testing "check-gate still works when no event-stream in context"
+    (let [result (gate/check-gate :syntax {:content "(+ 1 2)"} {})]
+      (is (:passed? result))
+      (is (= :syntax (:gate result))))))

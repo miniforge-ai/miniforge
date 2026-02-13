@@ -62,6 +62,19 @@
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Gate operations
 
+(defn- emit-gate-event!
+  "Emit a gate lifecycle event via requiring-resolve (no hard dep on event-stream)."
+  [ctx gate-kw event-type & [extra]]
+  (try
+    (when-let [stream (get ctx :event-stream)]
+      (when-let [publish-fn (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
+        (let [constructor (case event-type
+                            :started (requiring-resolve 'ai.miniforge.event-stream.interface/gate-started)
+                            :passed (requiring-resolve 'ai.miniforge.event-stream.interface/gate-passed)
+                            :failed (requiring-resolve 'ai.miniforge.event-stream.interface/gate-failed))]
+          (publish-fn stream (constructor stream (:workflow/id ctx) gate-kw extra)))))
+    (catch Exception _ nil)))
+
 (defn check-gate
   "Run gate check on an artifact.
 
@@ -73,16 +86,24 @@
    Returns:
      {:passed? bool :errors [...] :gate gate-kw}"
   [gate-kw artifact ctx]
-  (let [{:keys [check]} (get-gate gate-kw)]
+  (let [{:keys [check]} (get-gate gate-kw)
+        start-ms (System/currentTimeMillis)]
+    (emit-gate-event! ctx gate-kw :started)
     (try
-      (let [result (check artifact ctx)]
-        (assoc result :gate gate-kw))
+      (let [result (check artifact ctx)
+            result (assoc result :gate gate-kw)]
+        (if (:passed? result)
+          (emit-gate-event! ctx gate-kw :passed (- (System/currentTimeMillis) start-ms))
+          (emit-gate-event! ctx gate-kw :failed (:errors result)))
+        result)
       (catch Exception ex
-        {:passed? false
-         :gate gate-kw
-         :errors [{:type :check-error
-                   :message (ex-message ex)
-                   :data (ex-data ex)}]}))))
+        (let [result {:passed? false
+                      :gate gate-kw
+                      :errors [{:type :check-error
+                                :message (ex-message ex)
+                                :data (ex-data ex)}]}]
+          (emit-gate-event! ctx gate-kw :failed (:errors result))
+          result)))))
 
 (defn repair-gate
   "Attempt to repair gate failures.
@@ -99,9 +120,14 @@
   (let [{:keys [repair]} (get-gate gate-kw)]
     (if repair
       (try
-        (let [result (repair artifact errors ctx)]
-          (assoc result :gate gate-kw))
+        (let [result (repair artifact errors ctx)
+              result (assoc result :gate gate-kw)]
+          (if (:success? result)
+            (emit-gate-event! ctx gate-kw :passed)
+            (emit-gate-event! ctx gate-kw :failed (:errors result)))
+          result)
         (catch Exception ex
+          (emit-gate-event! ctx gate-kw :failed [{:type :repair-error :message (ex-message ex)}])
           (schema/exception-failure :artifact ex {:gate gate-kw :artifact artifact})))
       (schema/failure :artifact {:message "No repair function for gate"}
                       {:gate gate-kw :artifact artifact}))))
