@@ -20,6 +20,7 @@
    [clojure.java.shell :as shell]
    [clojure.string :as str]
    [cheshire.core :as json]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.web-dashboard.state.core :as core]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -45,6 +46,36 @@
 
 (def ^:private pending-check-states
   #{"PENDING" "QUEUED" "IN_PROGRESS" "WAITING" "REQUESTED"})
+
+(defn- result-success
+  [data]
+  (merge {:success? true
+          :success true}
+         data))
+
+(defn- result-failure
+  ([message]
+   (result-failure message nil))
+  ([message data]
+   (merge {:success? false
+           :success false
+           :error message
+           :anomaly (response/make-anomaly :anomalies/fault message)}
+          data)))
+
+(defn- result-exception
+  ([message ex]
+   (result-exception message ex nil))
+  ([message ex data]
+   (merge {:success? false
+           :success false
+           :error message
+           :anomaly (response/from-exception ex)}
+          data)))
+
+(defn- gh-error-message
+  [out err]
+  (str/trim (if (str/blank? err) out err)))
 
 (defn- load-fleet-config
   []
@@ -86,12 +117,14 @@
   (let [repo* (normalize-repo-slug repo)]
     (cond
       (str/blank? repo*)
-      {:success false
-       :error "Repository is required. Use owner/name."}
+      (result-failure
+       "Repository is required. Use owner/name."
+       {:repo repo*})
 
       (not (valid-repo-slug? repo*))
-      {:success false
-       :error "Invalid repository format. Expected owner/name."}
+      (result-failure
+       "Invalid repository format. Expected owner/name."
+       {:repo repo*})
 
       :else
       (let [cfg (load-fleet-config)
@@ -103,10 +136,10 @@
             next-repos (if exists? repos (conj repos repo*))
             next-cfg (assoc-in cfg [:fleet :repos] (vec (distinct next-repos)))]
         (save-fleet-config! next-cfg)
-        {:success true
-         :added? (not exists?)
-         :repo repo*
-         :repos (:fleet next-cfg)}))))
+        (result-success
+         {:added? (not exists?)
+          :repo repo*
+          :repos (get-in next-cfg [:fleet :repos])})))))
 
 (defn- run-gh
   [& args]
@@ -120,13 +153,16 @@
   (let [{:keys [success? out err]} (run-gh "api" endpoint)]
     (if success?
       (try
-        {:success? true
-         :data (json/parse-string out true)}
+        (result-success
+         {:data (json/parse-string out true)})
         (catch Exception e
-          {:success? false
-           :error (str "Failed to parse provider response: " (.getMessage e))}))
-      {:success? false
-       :error (str/trim (if (str/blank? err) out err))})))
+          (result-exception
+           "Failed to parse provider response."
+           e
+           {:endpoint endpoint})))
+      (result-failure
+       (gh-error-message out err)
+       {:endpoint endpoint}))))
 
 (defn discover-configured-repos!
   "Discover repositories from GitHub and add them to fleet config.
@@ -142,8 +178,7 @@
                    "user/repos?per_page=100")
         result (gh-api-json endpoint)]
     (if-not (:success? result)
-      {:success false
-       :error (:error result)}
+      result
       (let [repos (->> (:data result)
                        (keep :full_name)
                        (map normalize-repo-slug)
@@ -160,12 +195,12 @@
             added (vec (remove (set existing) merged))
             next-cfg (assoc-in cfg [:fleet :repos] merged)]
         (save-fleet-config! next-cfg)
-        {:success true
-         :owner owner*
-         :discovered (count repos)
-         :added (count added)
-         :repos merged
-         :added-repos added}))))
+        (result-success
+         {:owner owner*
+          :discovered (count repos)
+          :added (count added)
+          :repos merged
+          :added-repos added})))))
 
 (defn- pr-status-from-provider
   [pr]
@@ -196,6 +231,31 @@
       (seq entries) :pending
       :else :pending)))
 
+(defn- provider-pr->train-pr
+  [pr]
+  {:pr/number (:number pr)
+   :pr/title (:title pr)
+   :pr/url (:url pr)
+   :pr/branch (:headRefName pr)
+   :pr/status (pr-status-from-provider pr)
+   :pr/ci-status (check-rollup->ci-status (:statusCheckRollup pr))})
+
+(defn- parse-provider-pr-list
+  [repo out]
+  (try
+    (let [rows (json/parse-string out true)]
+      (result-success
+       {:repo repo
+        :prs (->> rows
+                  (map provider-pr->train-pr)
+                  (sort-by :pr/number)
+                  vec)}))
+    (catch Exception e
+      (result-exception
+       (str "Failed to parse PR list for " repo ".")
+       e
+       {:repo repo}))))
+
 (defn- fetch-open-prs
   [repo]
   (let [{:keys [success? out err]} (run-gh "pr" "list"
@@ -203,24 +263,10 @@
                                             "--state" "open"
                                             "--json" "number,title,url,state,headRefName,isDraft,reviewDecision,statusCheckRollup")]
     (if-not success?
-      {:success? false
-       :error (str/trim (if (str/blank? err) out err))}
-      (try
-        (let [rows (json/parse-string out true)]
-          {:success? true
-           :prs (->> rows
-                     (map (fn [pr]
-                            {:pr/number (:number pr)
-                             :pr/title (:title pr)
-                             :pr/url (:url pr)
-                             :pr/branch (:headRefName pr)
-                             :pr/status (pr-status-from-provider pr)
-                             :pr/ci-status (check-rollup->ci-status (:statusCheckRollup pr))}))
-                     (sort-by :pr/number)
-                     vec)})
-        (catch Exception e
-          {:success? false
-           :error (str "Failed to parse PR list for " repo ": " (.getMessage e))})))))
+      (result-failure
+       (gh-error-message out err)
+       {:repo repo})
+      (parse-provider-pr-list repo out))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; PR Train and DAG state
@@ -329,52 +375,75 @@
         (swap! state assoc-in [:fleet/repo-trains repo] train-id)
         train-id))))
 
+(defn- prs->status-map
+  [prs]
+  (into {}
+        (map (fn [pr]
+               [(:pr/number pr)
+                {:pr/status (:pr/status pr)
+                 :pr/ci-status (:pr/ci-status pr)}])
+             prs)))
+
+(defn- train-sync-plan
+  [before-train prs]
+  (let [open-numbers (set (map :pr/number prs))
+        existing-numbers (set (map :pr/number (:train/prs before-train)))]
+    {:to-add (->> prs
+                  (remove #(contains? existing-numbers (:pr/number %)))
+                  vec)
+     :to-remove (->> existing-numbers
+                     (remove open-numbers)
+                     vec)
+     :status-map (prs->status-map prs)}))
+
+(defn- add-prs!
+  [mgr train-id repo prs]
+  (doseq [pr prs]
+    (core/safe-call 'ai.miniforge.pr-train.interface 'add-pr
+                    mgr train-id repo (:pr/number pr) (:pr/url pr)
+                    (:pr/branch pr) (:pr/title pr))))
+
+(defn- remove-prs!
+  [mgr train-id pr-nums]
+  (doseq [pr-num pr-nums]
+    (core/safe-call 'ai.miniforge.pr-train.interface 'remove-pr mgr train-id pr-num)))
+
+(defn- apply-sync-plan!
+  [mgr train-id repo {:keys [to-add to-remove status-map]}]
+  ;; Side effects are intentionally ordered: membership first, then status, then dependency linking.
+  (add-prs! mgr train-id repo to-add)
+  (remove-prs! mgr train-id to-remove)
+  (core/safe-call 'ai.miniforge.pr-train.interface 'sync-pr-status mgr train-id status-map)
+  (core/safe-call 'ai.miniforge.pr-train.interface 'link-prs mgr train-id))
+
 (defn- sync-repo-prs-into-train!
   [state repo]
   (let [fetch-result (fetch-open-prs repo)]
     (if-not (:success? fetch-result)
-      {:success? false
-       :repo repo
-       :error (:error fetch-result)}
+      (merge fetch-result {:repo repo})
       (if-let [mgr (:pr-train-manager @state)]
         (if-let [train-id (ensure-repo-train! state repo)]
           (let [dag-id (ensure-default-dag-id! state)
                 _ (ensure-repo-in-dag! state dag-id repo)
                 prs (:prs fetch-result)
-                open-numbers (set (map :pr/number prs))
                 before-train (or (core/safe-call 'ai.miniforge.pr-train.interface 'get-train mgr train-id)
                                  {:train/prs []})
-                existing-numbers (set (map :pr/number (:train/prs before-train)))
-                to-add (->> prs (remove #(contains? existing-numbers (:pr/number %))) vec)
-                to-remove (->> existing-numbers (remove open-numbers) vec)
-                _ (doseq [pr to-add]
-                    (core/safe-call 'ai.miniforge.pr-train.interface 'add-pr
-                                    mgr train-id repo (:pr/number pr) (:pr/url pr) (:pr/branch pr)
-                                    (:pr/title pr)))
-                _ (doseq [pr-num to-remove]
-                    (core/safe-call 'ai.miniforge.pr-train.interface 'remove-pr mgr train-id pr-num))
-                status-map (into {}
-                                 (map (fn [pr]
-                                        [(:pr/number pr)
-                                         {:pr/status (:pr/status pr)
-                                          :pr/ci-status (:pr/ci-status pr)}])
-                                      prs))
-                _ (core/safe-call 'ai.miniforge.pr-train.interface 'sync-pr-status mgr train-id status-map)
-                _ (core/safe-call 'ai.miniforge.pr-train.interface 'link-prs mgr train-id)
+                sync-plan (train-sync-plan before-train prs)
+                _ (apply-sync-plan! mgr train-id repo sync-plan)
                 after-train (core/safe-call 'ai.miniforge.pr-train.interface 'get-train mgr train-id)]
-            {:success? true
-             :repo repo
-             :train-id train-id
-             :added (count to-add)
-             :removed (count to-remove)
-             :open-prs (count prs)
-             :tracked-prs (count (:train/prs after-train))})
-          {:success? false
-           :repo repo
-           :error "Unable to create or locate PR train for repository."})
-        {:success? false
-         :repo repo
-         :error "PR train manager is not available."}))))
+            (result-success
+             {:repo repo
+              :train-id train-id
+              :added (count (:to-add sync-plan))
+              :removed (count (:to-remove sync-plan))
+              :open-prs (count prs)
+              :tracked-prs (count (:train/prs after-train))}))
+          (result-failure
+           "Unable to create or locate PR train for repository."
+           {:repo repo}))
+        (result-failure
+         "PR train manager is not available."
+         {:repo repo})))))
 
 (defn sync-configured-repos!
   "Sync configured repositories into PR trains and ingest open PRs from provider."
@@ -382,27 +451,37 @@
   (let [repos (get-configured-repos state)]
     (cond
       (empty? repos)
-      {:success false
-       :error "No repositories configured. Add one or discover repositories first."
-       :repos []}
+      (result-failure
+       "No repositories configured. Add one or discover repositories first."
+       {:repos []})
 
       (nil? (:pr-train-manager @state))
-      {:success false
-       :error "PR train manager is not available in this runtime."
-       :repos repos}
+      (result-failure
+       "PR train manager is not available in this runtime."
+       {:repos repos})
 
       :else
       (let [results (mapv #(sync-repo-prs-into-train! state %) repos)
             ok (filter :success? results)
             failed (remove :success? results)]
-        {:success (empty? failed)
-         :repos repos
-         :synced (count ok)
-         :failed (count failed)
-         :results results
-         :summary {:added-prs (reduce + 0 (map :added ok))
-                   :removed-prs (reduce + 0 (map :removed ok))
-                   :tracked-prs (reduce + 0 (map :tracked-prs ok))}}))))
+        (if (empty? failed)
+          (result-success
+           {:repos repos
+            :synced (count ok)
+            :failed 0
+            :results results
+            :summary {:added-prs (reduce + 0 (map :added ok))
+                      :removed-prs (reduce + 0 (map :removed ok))
+                      :tracked-prs (reduce + 0 (map :tracked-prs ok))}})
+          (result-failure
+           (str "Sync failed for " (count failed) " configured repos.")
+           {:repos repos
+            :synced (count ok)
+            :failed (count failed)
+            :results results
+            :summary {:added-prs (reduce + 0 (map :added ok))
+                      :removed-prs (reduce + 0 (map :removed ok))
+                      :tracked-prs (reduce + 0 (map :tracked-prs ok))}}))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; DAG composite state

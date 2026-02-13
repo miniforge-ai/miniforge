@@ -130,6 +130,93 @@ function postWorkflowCommand(workflowId, command) {
   });
 }
 
+function dispatchRefresh() {
+  document.body.dispatchEvent(new CustomEvent('refresh'));
+}
+
+function postJson(url) {
+  return fetch(url, { method: 'POST' }).then((r) => r.json());
+}
+
+function apiErrorMessage(res, fallback) {
+  return (res && (res.error || res.message)) || fallback;
+}
+
+function fleetAddRepo() {
+  const repo = prompt('Repository (owner/name):');
+  if (!repo) return;
+
+  postJson('/api/fleet/repos/add?repo=' + encodeURIComponent(repo))
+    .then((res) => {
+      if (res.success) {
+        const prefix = res['added?'] ? 'Added: ' : 'Already configured: ';
+        showToast(prefix + (res.repo || repo), 'success');
+        dispatchRefresh();
+        return;
+      }
+      showToast('Error: ' + apiErrorMessage(res, 'Unable to add repo'), 'error');
+    })
+    .catch((err) => showToast('Error: ' + err.message, 'error'));
+}
+
+function fleetDiscoverRepos() {
+  const owner = prompt('Owner/org (leave blank for current user):', '') || '';
+  const suffix = owner.trim() ? ('?owner=' + encodeURIComponent(owner.trim())) : '';
+
+  postJson('/api/fleet/repos/discover' + suffix)
+    .then((res) => {
+      if (res.success) {
+        showToast(
+          'Discovered ' + (res.discovered || 0) + ' repos, added ' + (res.added || 0) + '.',
+          'success'
+        );
+        dispatchRefresh();
+        return;
+      }
+      showToast('Error: ' + apiErrorMessage(res, 'Repository discovery failed'), 'error');
+    })
+    .catch((err) => showToast('Error: ' + err.message, 'error'));
+}
+
+function fleetSyncPrs() {
+  postJson('/api/fleet/prs/sync')
+    .then((res) => {
+      if (res.success) {
+        const summary = res.summary || {};
+        showToast(
+          'Synced repos: ' + (res.synced || 0) + ', tracked PRs: ' + (summary['tracked-prs'] || 0),
+          'success'
+        );
+      } else {
+        showToast(
+          'Error: ' + apiErrorMessage(res, 'Sync failed for ' + (res.failed || 0) + ' repo(s)'),
+          'error'
+        );
+      }
+      dispatchRefresh();
+    })
+    .catch((err) => showToast('Error: ' + err.message, 'error'));
+}
+
+function fleetDiscoverAndSync() {
+  postJson('/api/fleet/repos/discover')
+    .then((res) => {
+      if (!res.success) {
+        throw new Error(apiErrorMessage(res, 'Discovery failed'));
+      }
+      return postJson('/api/fleet/prs/sync');
+    })
+    .then((syncRes) => {
+      if (syncRes.success) {
+        showToast('Discovery and PR sync completed.', 'success');
+      } else {
+        showToast('Sync error: ' + apiErrorMessage(syncRes, 'Unable to synchronize PRs'), 'error');
+      }
+      dispatchRefresh();
+    })
+    .catch((err) => showToast('Error: ' + err.message, 'error'));
+}
+
 // Export functions for global use
 window.miniforge = {
   switchTheme,
@@ -139,7 +226,13 @@ window.miniforge = {
   postWorkflowCommand,
   addFilterChip,
   removeFilterChip,
-  getActiveFilters: () => Array.from(activeFilters.entries())
+  getActiveFilters: () => Array.from(activeFilters.entries()),
+  fleet: {
+    addRepo: fleetAddRepo,
+    discoverRepos: fleetDiscoverRepos,
+    syncPrs: fleetSyncPrs,
+    discoverAndSync: fleetDiscoverAndSync
+  }
 };
 
 // WebSocket connection management

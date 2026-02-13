@@ -22,6 +22,15 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Fleet fragments
 
+(defn- fleet-action-onclick
+  [action]
+  (case action
+    :add-repo "window.miniforge.fleet.addRepo()"
+    :discover-repos "window.miniforge.fleet.discoverRepos()"
+    :sync-prs "window.miniforge.fleet.syncPrs()"
+    :discover-sync "window.miniforge.fleet.discoverAndSync()"
+    ""))
+
 (defn train-list-fragment
   "Train list fragment for htmx updates."
   [trains]
@@ -35,7 +44,7 @@
        (c/button "+ Run Workflow" {:variant :primary
                                     :onclick "location.href='/workflows'"})
        (c/button "Discover + Sync" {:variant :secondary
-                                    :onclick "fetch('/api/fleet/repos/discover', { method: 'POST' }).then(r => r.json()).then(res => { if (res.success) { return fetch('/api/fleet/prs/sync', { method: 'POST' }); } throw new Error(res.error || 'Discovery failed'); }).then(r => r.json()).then(syncRes => { if (syncRes.success) { alert('Discovery and PR sync completed.'); document.body.dispatchEvent(new CustomEvent('refresh')); } else { alert('Sync error: ' + (syncRes.error || 'Unable to synchronize PRs')); } }).catch(err => alert('Error: ' + err.message));"})]]
+                                    :onclick (fleet-action-onclick :discover-sync)})]]
      [:div.train-table
       [:table.fleet-table
        [:thead
@@ -89,13 +98,13 @@
                                     :onclick "location.href='/workflows'"
                                     :title "Execute a defined workflow spec"})
        (c/button "+ Repo" {:variant :secondary
-                           :onclick "const repo = prompt('Repository (owner/name):'); if (repo) { fetch('/api/fleet/repos/add?repo=' + encodeURIComponent(repo), { method: 'POST' }).then(r => r.json()).then(res => { if (res.success) { alert((res['added?'] ? 'Added: ' : 'Already configured: ') + (res.repo || repo)); document.body.dispatchEvent(new CustomEvent('refresh')); } else { alert('Error: ' + (res.error || 'Unable to add repo')); } }).catch(err => alert('Error: ' + err.message)); }"
+                           :onclick (fleet-action-onclick :add-repo)
                            :title "Add a repository to fleet configuration"})
        (c/button "Discover Repos" {:variant :secondary
-                                    :onclick "const owner = prompt('Owner/org (leave blank for current user):', '') || ''; const suffix = owner.trim() ? ('?owner=' + encodeURIComponent(owner.trim())) : ''; fetch('/api/fleet/repos/discover' + suffix, { method: 'POST' }).then(r => r.json()).then(res => { if (res.success) { alert('Discovered ' + (res.discovered || 0) + ' repos, added ' + (res.added || 0) + '.'); document.body.dispatchEvent(new CustomEvent('refresh')); } else { alert('Error: ' + (res.error || 'Repository discovery failed')); } }).catch(err => alert('Error: ' + err.message));"
+                                    :onclick (fleet-action-onclick :discover-repos)
                                     :title "Discover repositories via GitHub CLI"})
        (c/button "Sync PRs" {:variant :secondary
-                              :onclick "fetch('/api/fleet/prs/sync', { method: 'POST' }).then(r => r.json()).then(res => { if (res.success) { const s = res.summary || {}; alert('Synced repos: ' + (res.synced || 0) + ', tracked PRs: ' + (s['tracked-prs'] || 0)); document.body.dispatchEvent(new CustomEvent('refresh')); } else { alert('Error: ' + (res.error || ('Sync failed for ' + (res.failed || 0) + ' repo(s)'))); document.body.dispatchEvent(new CustomEvent('refresh')); } }).catch(err => alert('Error: ' + err.message));"
+                              :onclick (fleet-action-onclick :sync-prs)
                               :title "Import open provider PRs into PR trains"})
        (c/button "Review All PRs" {:variant :ghost
                                     :onclick "alert('PR review: Kick off review workflows for all outstanding PRs')"
