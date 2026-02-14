@@ -111,11 +111,11 @@
       (display/print-info "Press 'q' to quit, '?' for help")
       (println)
       (try
-        (let [es (requiring-resolve 'ai.miniforge.event-stream.interface)
-              tui (requiring-resolve 'ai.miniforge.tui-views.interface)
-              create-stream (ns-resolve es 'create-event-stream)
-              start-tui! (ns-resolve tui 'start-tui!)
-              event-stream (create-stream)]
+        (require 'ai.miniforge.event-stream.interface)
+        (require 'ai.miniforge.tui-views.interface)
+        (let [create-stream (resolve 'ai.miniforge.event-stream.interface/create-event-stream)
+              start-tui!    (resolve 'ai.miniforge.tui-views.interface/start-tui!)
+              event-stream  (create-stream)]
           ;; Start TUI (blocks until quit)
           (start-tui! event-stream))
         (catch Exception e
