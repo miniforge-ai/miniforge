@@ -17,166 +17,19 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.cli.spec-parser
-  "Parse workflow specification files (YAML, EDN, JSON).
+  "CLI entry point for spec parsing.
 
-   Converts user-provided workflow specs into the canonical workflow format
-   expected by the workflow engine."
+   Delegates to the spec-parser component for all parsing, normalization,
+   and validation. This thin wrapper exists so existing CLI callers don't
+   need to change their require paths."
   (:require
-   [ai.miniforge.knowledge.interface :as knowledge]
-   [babashka.fs :as fs]
-   [cheshire.core :as json]
-   [clojure.edn :as edn]
-   [clojure.string :as str]))
+   [ai.miniforge.spec-parser.interface :as spec-parser]))
 
-;------------------------------------------------------------------------------ Layer 0
-;; File format detection
-
-(defn- detect-format
-  "Detect file format from extension."
-  [path]
-  (let [ext (fs/extension path)]
-    (case ext
-      "yaml" :yaml
-      "yml"  :yaml
-      "edn"  :edn
-      "json" :json
-      "md"   :markdown
-      (throw (ex-info (str "Unsupported file format: " ext)
-                      {:path path :extension ext})))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Format-specific parsers
-
-(defn- parse-yaml
-  "Parse YAML file content."
-  [_content]
-  ;; For now, use basic parsing that works in Babashka
-  ;; In future, can add full YAML parser when needed
-  (throw (ex-info "YAML support coming soon - use EDN or JSON for now"
-                  {:format :yaml
-                   :workaround "Convert your YAML to EDN or JSON"})))
-
-(defn- parse-edn
-  "Parse EDN file content."
-  [content]
-  (try
-    (edn/read-string content)
-    (catch Exception e
-      (throw (ex-info "Failed to parse EDN file"
-                      {:error (ex-message e)} e)))))
-
-(defn- parse-json
-  "Parse JSON file content."
-  [content]
-  (try
-    (json/parse-string content true)
-    (catch Exception e
-      (throw (ex-info "Failed to parse JSON file"
-                      {:error (ex-message e)} e)))))
-
-(defn- parse-markdown
-  "Parse Markdown file with YAML frontmatter.
-   Frontmatter contains structured spec data, body is optional context."
-  [content]
-  (let [parsed (knowledge/split-frontmatter content)]
-    (when-not parsed
-      (throw (ex-info "Markdown file must have YAML frontmatter (---)"
-                      {:hint "Add frontmatter with title, description, etc."})))
-    (let [frontmatter (knowledge/parse-yaml-frontmatter (:frontmatter parsed))
-          body (:body parsed)]
-      ;; If there's body content beyond title, use it to extend description
-      (cond-> frontmatter
-        (and body (not (str/blank? body)))
-        (update :description
-                #(str % "\n\n" (str/trim body)))))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Spec normalization
-
-(defn- warn-task-namespace
-  "Emit deprecation warning when :task/* keys are used in spec files."
-  [spec]
-  (when (some #(and (keyword? %) (= "task" (namespace %))) (keys spec))
-    (binding [*out* *err*]
-      (println "DEPRECATION WARNING: :task/* keys in spec files are deprecated.")
-      (println "  Use :spec/* keys instead (e.g. :spec/title, :spec/description).")
-      (println "  See examples/workflows/README.md for the canonical format."))))
-
-(defn- normalize-spec
-  "Normalize parsed spec to canonical workflow format.
-
-   Accepts three input styles with priority ordering:
-     1. :spec/* namespaced (canonical)   — pass through
-     2. :task/* namespaced (transitional) — translate with deprecation warning
-     3. Unnamespaced (legacy)            — translate
-
-   Output format (workflow engine):
-     {:spec/title \"...\"
-      :spec/description \"...\"
-      :spec/intent {:type :refactor :scope [...]}
-      :spec/constraints [...]
-      :spec/acceptance-criteria [...]
-      :spec/code-artifact {...}
-      :spec/repo-url \"...\"
-      :spec/branch \"...\"
-      :spec/llm-backend :anthropic
-      :spec/sandbox true
-      :spec/plan-tasks [...]
-      :spec/raw-data <original-input>}"
-  [spec]
-  (when-not (map? spec)
-    (throw (ex-info "Workflow spec must be a map"
-                    {:spec spec})))
-
-  (warn-task-namespace spec)
-
-  ;; Triple-or extraction: :spec/* > :task/* > unnamespaced
-  (let [title       (or (:spec/title spec) (:task/title spec) (:title spec))
-        description (or (:spec/description spec) (:task/description spec) (:description spec))
-        intent      (or (:spec/intent spec) (:task/intent spec) (:intent spec))
-        constraints (or (:spec/constraints spec) (:task/constraints spec) (:constraints spec))
-        tags        (or (:spec/tags spec) (:tags spec))
-        accept-crit (or (:spec/acceptance-criteria spec) (:task/acceptance-criteria spec) (:acceptance-criteria spec))
-        code-art    (or (:spec/code-artifact spec) (:task/code-artifact spec) (:code-artifact spec))
-        repo-url    (or (:spec/repo-url spec) (:repo-url spec))
-        branch      (or (:spec/branch spec) (:branch spec))
-        llm-backend (or (:spec/llm-backend spec) (:llm-backend spec))
-        sandbox     (or (:spec/sandbox spec) (:sandbox spec))
-        plan-tasks  (or (:spec/plan-tasks spec) (:plan/tasks spec))]
-
-    (when-not title
-      (throw (ex-info "Workflow spec must have a title (:spec/title, :task/title, or :title)"
-                      {:spec spec})))
-
-    (when-not description
-      (throw (ex-info "Workflow spec must have a description (:spec/description, :task/description, or :description)"
-                      {:spec spec})))
-
-    ;; Normalize to namespaced keys for workflow engine
-    (cond-> {:spec/title title
-             :spec/description description
-             :spec/intent (or intent {:type :general})
-             :spec/constraints (or constraints [])
-             :spec/tags (or tags [])
-             ;; Preserve workflow metadata for custom workflow selection
-             ;; Don't set a default - let workflow selector/recommender decide
-             :spec/workflow-type (:workflow/type spec)
-             :spec/workflow-version (or (:workflow/version spec) "latest")
-             ;; Pass through all other spec keys as raw-data
-             :spec/raw-data spec}
-      accept-crit (assoc :spec/acceptance-criteria accept-crit)
-      code-art    (assoc :spec/code-artifact code-art)
-      repo-url    (assoc :spec/repo-url repo-url)
-      branch      (assoc :spec/branch branch)
-      llm-backend (assoc :spec/llm-backend llm-backend)
-      (some? sandbox) (assoc :spec/sandbox sandbox)
-      plan-tasks  (assoc :spec/plan-tasks plan-tasks))))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Public API
+;------------------------------------------------------------------------------ Public API
+;; Thin delegation to spec-parser component
 
 (defn parse-spec-file
-  "Parse a workflow specification file and normalize to canonical format.
+  "Parse a workflow specification file and normalize to canonical :spec/* format.
 
    Supported formats:
    - .edn      - Clojure EDN (recommended)
@@ -184,79 +37,18 @@
    - .md       - Markdown with YAML frontmatter
    - .yaml/.yml - YAML (coming soon)
 
-   Returns normalized spec map ready for workflow engine, decorated with:
-   - :spec/provenance - Source file metadata (Layer 0 decoration)
-
-   Example EDN spec (canonical :spec/* format):
-     {:spec/title \"Refactor logging component\"
-      :spec/description \"Extract structured logging to separate component\"
-      :spec/intent {:type :refactor
-                    :scope [\"components/logging/src\"]}
-      :spec/constraints [\"no-breaking-changes\"
-                         \"maintain-test-coverage\"]
-      :workflow/type :full-sdlc}
-
-   Legacy formats (:task/* and unnamespaced) are also accepted with
-   automatic translation. :task/* keys emit a deprecation warning.
-
-   Example Markdown spec:
-     ---
-     title: Refactor logging component
-     description: Extract structured logging to separate component
-     intent:
-       type: refactor
-       scope: [components/logging/src]
-     constraints: [no-breaking-changes, maintain-test-coverage]
-     ---
-
-   Throws ex-info on:
-   - File not found
-   - Unsupported format
-   - Parse errors
-   - Invalid spec schema"
+   Returns normalized spec map ready for workflow engine."
   [path]
-  (when-not (fs/exists? path)
-    (throw (ex-info (str "Spec file not found: " path)
-                    {:path path})))
-
-  (let [format (detect-format path)
-        content (slurp path)
-        parsed (case format
-                 :yaml     (parse-yaml content)
-                 :edn      (parse-edn content)
-                 :json     (parse-json content)
-                 :markdown (parse-markdown content))
-        normalized (normalize-spec parsed)]
-
-    ;; Layer 0 decoration: Add provenance at parse time
-    (assoc normalized
-           :spec/provenance
-           {:source-file (str path)
-            :source-format format
-            :loaded-at (java.util.Date.)
-            :file-size (.length (fs/file path))})))
+  (spec-parser/parse-spec-file path))
 
 (defn validate-spec
-  "Validate that a spec has all required fields.
+  "Validate a normalized spec against the Malli SpecPayload schema.
 
    Returns:
    - {:valid? true} if valid
    - {:valid? false :errors [...]} if invalid"
   [spec]
-  (let [errors (cond-> []
-                 (not (:spec/title spec))
-                 (conj "Missing :title field")
-
-                 (not (:spec/description spec))
-                 (conj "Missing :description field")
-
-                 (and (:spec/intent spec)
-                      (not (:type (:spec/intent spec))))
-                 (conj "Intent must have :type field"))]
-
-    (if (empty? errors)
-      {:valid? true}
-      {:valid? false :errors errors})))
+  (spec-parser/validate-spec spec))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

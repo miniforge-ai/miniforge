@@ -15,11 +15,8 @@ mf run examples/workflows/test-simple-function.edn
 ## Spec Format
 
 Workflow specs use **fully-namespaced `:spec/*` keywords** to describe user intent.
-The spec parser accepts three input styles (with priority ordering):
-
-1. `:spec/*` namespaced (canonical) -- pass through
-2. `:task/*` namespaced (deprecated) -- translated with deprecation warning
-3. Unnamespaced (legacy) -- translated
+The spec parser validates input against a Malli schema (`SpecInput`)
+and normalizes to a `SpecPayload` with defaults applied.
 
 ### Canonical Format
 
@@ -42,7 +39,7 @@ The spec parser accepts three input styles (with priority ordering):
  :workflow/version         "2.0.0"
 
  ;; === Pre-decomposed plan (optional) ===
- :plan/tasks              [{:task/id :do-thing
+ :spec/plan-tasks         [{:task/id :do-thing
                             :task/description "..."
                             :task/type :implement
                             :task/dependencies []}]
@@ -149,7 +146,7 @@ decomposes specs into tasks.
 When you run a workflow from a spec file, miniforge:
 
 1. **Parses and validates** the spec file against the pipeline schema
-2. **Normalizes** the spec to canonical `:spec/*` format (translating `:task/*` and unnamespaced keys)
+2. **Normalizes** the spec to canonical `:spec/*` format with defaults
 3. **Creates workflow context** with:
    - Provenance: source file, format, timestamp
    - Environment: cwd, git info, files-in-scope
@@ -210,31 +207,6 @@ Real-world example: generating tests for code that miniforge generated for itsel
    ```bash
    mf run my-workflow.edn
    ```
-
-## Migration from `:task/*` Format
-
-If you have specs using the deprecated `:task/*` namespace:
-
-1. Rename spec fields to `:spec/*` namespace:
-   - `:task/title` -> `:spec/title`
-   - `:task/description` -> `:spec/description`
-   - `:task/intent` -> `:spec/intent`
-   - `:task/constraints` -> `:spec/constraints`
-   - `:task/acceptance-criteria` -> `:spec/acceptance-criteria`
-   - `:task/code-artifact` -> `:spec/code-artifact`
-
-2. Drop the `:task/` namespace from free-form context keys:
-   - `:task/diagnostic-steps` -> `:diagnostic-steps`
-   - `:task/common-fixes` -> `:common-fixes`
-   - `:task/workflow-steps` -> `:workflow-steps`
-   - etc.
-
-3. Keep `:workflow/*` keys unchanged (`:workflow/type`, `:workflow/version`)
-
-4. Keep `:task/*` keys inside `:plan/tasks` entries unchanged (they ARE tasks)
-
-The normalizer accepts `:task/*` keys with a deprecation warning, so existing
-specs continue to work during the transition period.
 
 ## Next Steps
 

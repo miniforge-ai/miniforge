@@ -15,6 +15,7 @@
         ai.miniforge/loop {:local/root "../../components/loop"}
         ai.miniforge/observer {:local/root "../../components/observer"}
         ai.miniforge/knowledge {:local/root "../../components/knowledge"}
+        ai.miniforge/spec-parser {:local/root "../../components/spec-parser"}
         ai.miniforge/policy {:local/root "../../components/policy"}
         ai.miniforge/heuristic {:local/root "../../components/heuristic"}
         ai.miniforge/response {:local/root "../../components/response"}
