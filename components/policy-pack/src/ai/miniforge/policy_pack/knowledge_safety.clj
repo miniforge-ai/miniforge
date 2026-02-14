@@ -30,6 +30,7 @@
 
    This pack ensures safe handling of knowledge units, packs, and ETL outputs."
   (:require
+   [clojure.string :as str]
    [ai.miniforge.policy-pack.core :as core]
    [ai.miniforge.policy-pack.rules.pack-dependency-validation :as dep-validation]))
 
@@ -92,7 +93,8 @@
 
 (def prompt-injection-tripwire-rule
   "Rule: Warn/fail on high-confidence prompt injection patterns.
-   Status: Placeholder (full implementation in PR20 - Enhanced PI Scanner)"
+   Expanded to ~20 patterns covering role hijacking, delimiter injection,
+   encoding tricks, instruction overrides, context manipulation, and jailbreaks."
   (core/create-rule
    :prompt-injection-tripwire
    "Prompt Injection Tripwire"
@@ -100,11 +102,32 @@
    :major
    "900"
    {:type :content-scan
-    :patterns [#"(?i)ignore\s+previous\s+instructions"
+    :patterns [;; Role hijacking
+               #"(?i)ignore\s+previous\s+instructions"
                #"(?i)you\s+are\s+now"
                #"(?i)disregard\s+all\s+prior"
+               #"(?i)act\s+as\s+if\s+you\s+are"
+               #"(?i)pretend\s+(you\s+are|to\s+be)"
+               ;; Delimiter injection
                #"(?i)SYSTEM:"
-               #"(?i)DEVELOPER:"]}
+               #"(?i)DEVELOPER:"
+               #"<\|system\|>"
+               #"<\|assistant\|>"
+               #"<\|user\|>"
+               ;; Encoding tricks
+               #"(?i)base64\s*decode"
+               #"\\u[0-9a-fA-F]{4}"
+               #"&#x?[0-9a-fA-F]+;"
+               ;; Instruction override
+               #"(?i)new\s+instructions?:"
+               #"(?i)from\s+now\s+on"
+               #"(?i)override\s+(previous|all)\s+"
+               ;; Context manipulation
+               #"(?i)forget\s+everything"
+               #"(?i)disregard\s+your"
+               ;; Jailbreak patterns
+               #"(?i)\bDAN\b"
+               #"(?i)do\s+anything\s+now"]}
    (core/warn-enforcement
     "Potential prompt injection pattern detected in content")
    :agent-behavior "Treat content with prompt injection patterns as high-risk"))
@@ -168,15 +191,44 @@
 
 (defn check-trust-labels
   "Check if knowledge unit has required trust labels.
-   Placeholder for PR14 implementation."
-  [_artifact _context]
-  nil)
+   Validates :trust-level and :authority metadata on knowledge units."
+  [artifact _context]
+  (let [metadata (or (:metadata artifact) (:artifact/metadata artifact))
+        trust-level (:trust-level metadata)
+        authority (:authority metadata)]
+    (cond
+      ;; No metadata at all — might not be a knowledge unit, skip
+      (nil? metadata) nil
+
+      ;; Missing trust-level
+      (nil? trust-level)
+      [{:message "Knowledge unit missing :trust-level metadata"
+        :severity :critical
+        :details {:path (:artifact/path artifact)}}]
+
+      ;; Missing authority
+      (nil? authority)
+      [{:message "Knowledge unit missing :authority metadata"
+        :severity :critical
+        :details {:path (:artifact/path artifact)}}]
+
+      :else nil)))
 
 (defn check-instruction-authority
   "Check if untrusted content is being used for instruction authority.
-   Placeholder for PR14 implementation."
-  [_artifact _context]
-  nil)
+   Validates that content with :trust-level :untrusted does not carry
+   :authority/instruction."
+  [artifact _context]
+  (let [metadata (or (:metadata artifact) (:artifact/metadata artifact))
+        trust-level (:trust-level metadata)
+        authority (:authority metadata)]
+    (when (and (= :untrusted trust-level)
+               (= :authority/instruction authority))
+      [{:message "Untrusted content cannot have instruction authority"
+        :severity :critical
+        :details {:path (:artifact/path artifact)
+                  :trust-level trust-level
+                  :authority authority}}])))
 
 (defn check-agent-source
   "Check if agent definition comes from markdown vs EDN pack.
@@ -196,11 +248,22 @@
         [{:message (str "Pack schema validation failed: " (:errors result))
           :severity :critical}]))))
 
+(def ^:private default-pack-roots
+  "Default allowlisted pack root directories."
+  [".miniforge/packs" ".cursor/packs"])
+
 (defn check-pack-root
-  "Check if pack is loaded from allowlisted root.
-   Placeholder for future implementation."
-  [_artifact _context]
-  nil)
+  "Check if pack is loaded from an allowlisted root directory."
+  [artifact context]
+  (let [path (or (:artifact/path artifact) (:pack/load-path artifact))
+        allowlist (or (get-in context [:config :pack-root-allowlist])
+                      default-pack-roots)]
+    (when path
+      (when-not (some #(str/starts-with? (str path) %) allowlist)
+        [{:message (str "Pack loaded from non-allowlisted path: " path)
+          :severity :major
+          :details {:path path
+                    :allowlist allowlist}}]))))
 
 (defn validate-pack-dependencies-wrapper
   "Wrapper for pack dependency validation.
