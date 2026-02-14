@@ -20,7 +20,9 @@
   "Mode switching and command buffer manipulation.
 
    Pure functions for switching between normal/command/search modes.
-   Layer 3.")
+   Layer 3."
+  (:require
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Mode switching
@@ -32,7 +34,8 @@
   (assoc model :mode :search :command-buf "/" :search-results []))
 
 (defn exit-mode [model]
-  (assoc model :mode :normal :command-buf "" :search-results []))
+  (assoc model :mode :normal :command-buf "" :search-results []
+         :filtered-indices nil))
 
 (defn command-append [model ch]
   (update model :command-buf str ch))
@@ -42,3 +45,23 @@
     (if (> (count buf) 1)
       (assoc model :command-buf (subs buf 0 (dec (count buf))))
       (exit-mode model))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Search filtering
+
+(defn compute-search-results
+  "Filter workflows matching search query (case-insensitive substring match).
+   Sets :filtered-indices on the model."
+  [model]
+  (let [query (subs (:command-buf model) 1) ; strip leading "/"
+        workflows (:workflows model)]
+    (if (str/blank? query)
+      (assoc model :filtered-indices nil)
+      (let [matches (set (keep-indexed
+                           (fn [idx wf]
+                             (when (str/includes?
+                                     (str/lower-case (or (:name wf) ""))
+                                     (str/lower-case query))
+                               idx))
+                           workflows))]
+        (assoc model :filtered-indices matches :selected-idx 0)))))

@@ -42,8 +42,10 @@
     :failed   " ✗"
     ""))
 
-(defn- format-phase-node [{:keys [phase status]}]
-  {:label (str (name phase) (status-suffix status))
+(defn- format-phase-node [{:keys [phase status iteration total-iterations]}]
+  {:label (str (name phase) (status-suffix status)
+               (when (and iteration total-iterations)
+                 (str " [" iteration "/" total-iterations "]")))
    :depth 0
    :expandable? false})
 
@@ -104,7 +106,23 @@
         (layout/split-v [c r] (/ (- r 2.0) r)
           (fn [[mc mr]]
             (layout/split-h [mc mr] 0.35
-              (fn [size] (render-phase-list phases size))
+              ;; Left panel: intent box (5 rows) + phases
+              (fn [[lc lr]]
+                (layout/split-v [lc lr] (/ 5.0 lr)
+                  ;; Intent box
+                  (fn [[ic ir]]
+                    (layout/box [ic ir]
+                      {:title "Intent" :border :single :fg :default
+                       :content-fn
+                       (fn [[bc br]]
+                         (let [intent (get-in model [:detail :evidence :intent])
+                               intent-type (or (some-> intent :type name) "task")
+                               desc (or (:description intent) "No intent")]
+                           (layout/text [bc br]
+                             (str intent-type ": " desc)
+                             {:fg :default})))}))
+                  ;; Phase tree
+                  (fn [size] (render-phase-list phases size))))
               (fn [size] (render-agent-output agent output size))))
           render-footer)))))
 

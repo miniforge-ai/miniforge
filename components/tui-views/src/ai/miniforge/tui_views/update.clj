@@ -28,39 +28,57 @@
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update.navigation :as nav]
    [ai.miniforge.tui-views.update.events :as events]
-   [ai.miniforge.tui-views.update.mode :as mode]))
+   [ai.miniforge.tui-views.update.mode :as mode]
+   [ai.miniforge.tui-views.update.command :as command]))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Input message handling
 
 (defn- handle-normal-input [model key]
-  (case key
-    :key/j         (nav/navigate-down model)
-    :key/k         (nav/navigate-up model)
-    :key/down      (nav/navigate-down model)
-    :key/up        (nav/navigate-up model)
-    :key/g         (nav/navigate-top model)
-    :key/G         (nav/navigate-bottom model)
-    :key/enter     (nav/enter-detail model)
-    :key/escape    (nav/go-back model)
-    :key/l         (nav/enter-detail model)
-    :key/h         (nav/go-back model)
-    :key/colon     (mode/enter-command-mode model)
-    :key/slash     (mode/enter-search-mode model)
-    :key/d1        (nav/switch-view model :workflow-list model/views)
-    :key/d2        (nav/switch-view model :workflow-detail model/views)
-    :key/d3        (nav/switch-view model :evidence model/views)
-    :key/d4        (nav/switch-view model :artifact-browser model/views)
-    :key/d5        (nav/switch-view model :dag-kanban model/views)
-    :key/q         (assoc model :quit? true)
-    ;; Unknown key -- no-op
-    model))
+  ;; When help overlay is visible, only allow dismiss keys
+  (if (:help-visible? model)
+    (case key
+      :key/question  (nav/toggle-help model)
+      :key/escape    (nav/toggle-help model)
+      :key/q         (assoc model :quit? true)
+      ;; All other keys blocked while help is showing
+      model)
+    ;; Normal mode - full key handling
+    (case key
+      :key/j         (nav/navigate-down model)
+      :key/k         (nav/navigate-up model)
+      :key/down      (nav/navigate-down model)
+      :key/up        (nav/navigate-up model)
+      :key/g         (nav/navigate-top model)
+      :key/G         (nav/navigate-bottom model)
+      :key/enter     (nav/enter-detail model)
+      :key/escape    (nav/go-back model)
+      :key/l         (nav/enter-detail model)
+      :key/h         (nav/go-back model)
+      :key/colon     (mode/enter-command-mode model)
+      :key/slash     (mode/enter-search-mode model)
+      :key/r         (nav/refresh model)
+      :key/b         (nav/switch-view model :dag-kanban model/views)
+      :key/e         (nav/switch-view model :evidence model/views)
+      :key/a         (nav/switch-view model :artifact-browser model/views)
+      :key/question  (nav/toggle-help model)
+      :key/space     (nav/toggle-expand model)
+      :key/d1        (nav/switch-view model :workflow-list model/views)
+      :key/d2        (nav/switch-view model :workflow-detail model/views)
+      :key/d3        (nav/switch-view model :evidence model/views)
+      :key/d4        (nav/switch-view model :artifact-browser model/views)
+      :key/d5        (nav/switch-view model :dag-kanban model/views)
+      :key/d6        (nav/switch-view model :pr-fleet model/views)
+      :key/d7        (nav/switch-view model :pr-detail model/views)
+      :key/d8        (nav/switch-view model :train-view model/views)
+      :key/q         (assoc model :quit? true)
+      ;; Unknown key -- no-op
+      model)))
 
 (defn- handle-command-input [model key]
   (case key
     :key/escape   (mode/exit-mode model)
-    :key/enter    (-> model
-                      (assoc :flash-message (str "Executed: " (:command-buf model)))
+    :key/enter    (-> (command/execute-command model (:command-buf model))
                       mode/exit-mode)
     :key/backspace (mode/command-backspace model)
     ;; Character input
@@ -74,7 +92,9 @@
     :key/enter    (mode/exit-mode model)
     :key/backspace (mode/command-backspace model)
     (if (and (map? key) (= :char (:type key)))
-      (mode/command-append model (:char key))
+      (-> model
+          (mode/command-append (:char key))
+          mode/compute-search-results)
       model)))
 
 ;------------------------------------------------------------------------------ Layer 5

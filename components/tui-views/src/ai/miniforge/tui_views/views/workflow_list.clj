@@ -39,20 +39,40 @@
     :blocked "◐"
     "○"))
 
+(defn- format-progress-bar
+  "Create a Unicode text progress bar for table cells."
+  [pct width]
+  (let [pct (or pct 0)
+        bar-w (max 1 (- width 5))
+        filled (int (/ (* pct bar-w) 100))]
+    (str (apply str (repeat filled \u2588))
+         (apply str (repeat (- bar-w filled) \u2591))
+         (format " %3d%%" pct))))
+
 (defn- format-workflow-row
   "Transform workflow data into table row format."
   [wf]
   {:status-char (status-char (:status wf))
    :name (:name wf)
    :phase (some-> (:phase wf) name)
-   :progress-str (str (:progress wf 0) "%")
+   :progress-str (format-progress-bar (:progress wf 0) 20)
    :agent-msg (when-let [agent (first (vals (:agents wf)))]
                 (when-let [msg (:message agent)]
                   (subs msg 0 (min 16 (count msg)))))})
 
-(defn- render-title-bar [[cols rows]]
-  (layout/text [cols rows] " MINIFORGE │ Workflows"
-               {:fg :cyan :bold? true}))
+(defn- filter-workflows
+  "Filter workflows by search indices, or return all if no filter active."
+  [workflows filtered-indices]
+  (if filtered-indices
+    (vec (keep-indexed (fn [i wf] (when (contains? filtered-indices i) wf)) workflows))
+    workflows))
+
+(defn- render-title-bar [workflow-count last-updated [cols rows]]
+  (layout/text [cols rows]
+    (str " MINIFORGE │ Workflows [" workflow-count "]"
+         (when last-updated
+           (str " │ " (.format (java.text.SimpleDateFormat. "HH:mm:ss") last-updated))))
+    {:fg :cyan :bold? true}))
 
 (defn- render-table [workflows selected [cols rows]]
   (if (empty? workflows)
@@ -78,11 +98,12 @@
    model: full app model
    [cols rows]: available screen area"
   [model [cols rows]]
-  (let [workflows (:workflows model)
+  (let [all-workflows (:workflows model)
+        workflows (filter-workflows all-workflows (:filtered-indices model))
         selected (:selected-idx model)
         flash (:flash-message model)]
     (layout/split-v [cols rows] (/ 2.0 rows)
-      (fn [size] (render-title-bar size))
+      (fn [size] (render-title-bar (count all-workflows) (:last-updated model) size))
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)
           (fn [size] (render-table workflows selected size))

@@ -49,50 +49,73 @@
     (update-fn model)
     model))
 
+;; Timestamp wrapper
+
+(defn- with-timestamp
+  "Wrap a handler result with :last-updated timestamp."
+  [model]
+  (assoc model :last-updated (java.util.Date.)))
+
 ;; Event handlers
 
 (defn handle-workflow-added [model {:keys [workflow-id name spec]}]
   (let [wf (model/make-workflow {:id workflow-id
                                   :name (or name (:name spec))
                                   :status :running})]
-    (update model :workflows conj wf)))
+    (-> (update model :workflows conj wf)
+        with-timestamp)))
 
 (defn handle-phase-changed [model {:keys [workflow-id phase]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
-    (cond-> model
-      idx (assoc-in [:workflows idx :phase] phase)
-      true (update-detail-if-active workflow-id
-             #(update-in % [:detail :phases] conj {:phase phase :status :running})))))
+    (-> (cond-> model
+          idx (assoc-in [:workflows idx :phase] phase)
+          true (update-detail-if-active workflow-id
+                 #(update-in % [:detail :phases] conj {:phase phase :status :running})))
+        with-timestamp)))
 
 (defn handle-phase-done [model {:keys [workflow-id]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
-    (update-workflow-at model idx
-      #(update % :progress (fn [p] (min 100 (+ (or p 0) 20)))))))
+    (-> (update-workflow-at model idx
+          #(update % :progress (fn [p] (min 100 (+ (or p 0) 20)))))
+        with-timestamp)))
 
 (defn handle-agent-status [model {:keys [workflow-id agent status message]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
-    (cond-> model
-      idx (assoc-in [:workflows idx :agents agent] {:status status :message message})
-      true (update-detail-if-active workflow-id
-             #(assoc-in % [:detail :current-agent] {:agent agent :status status :message message})))))
+    (-> (cond-> model
+          idx (assoc-in [:workflows idx :agents agent] {:status status :message message})
+          true (update-detail-if-active workflow-id
+                 #(assoc-in % [:detail :current-agent] {:agent agent :status status :message message})))
+        with-timestamp)))
 
 (defn handle-agent-output [model {:keys [workflow-id delta]}]
-  (update-detail-if-active model workflow-id
-    #(update-in % [:detail :agent-output] str delta)))
+  (-> (update-detail-if-active model workflow-id
+        #(update-in % [:detail :agent-output] str delta))
+      with-timestamp))
 
 (defn handle-workflow-done [model {:keys [workflow-id status]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
-    (update-workflow-at model idx
-      #(-> %
-           (assoc :status (or status :success))
-           (assoc :progress 100)))))
+    (-> (update-workflow-at model idx
+          #(-> %
+               (assoc :status (or status :success))
+               (assoc :progress 100)))
+        with-timestamp)))
 
 (defn handle-workflow-failed [model {:keys [workflow-id error]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
-    (update-workflow-at model idx
-      #(-> %
-           (assoc :status :failed)
-           (assoc :error error)))))
+    (-> (update-workflow-at model idx
+          #(-> %
+               (assoc :status :failed)
+               (assoc :error error)))
+        with-timestamp)))
 
-(defn handle-gate-result [model _payload]
-  model)
+(defn handle-gate-result [model {:keys [workflow-id gate passed?] :as payload}]
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
+    (-> (cond-> model
+          idx (update-in [:workflows idx :gate-results] conj payload)
+          (not passed?)
+          (assoc :flash-message (str "Gate FAILED: " (when gate (name gate))))
+          true (update-detail-if-active workflow-id
+                 (fn [m]
+                   (update-in m [:detail :evidence :validation :results]
+                              (fnil conj []) payload))))
+        with-timestamp)))

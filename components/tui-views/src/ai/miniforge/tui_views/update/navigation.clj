@@ -27,8 +27,10 @@
 
 (defn list-count [model]
   (case (:view model)
-    :workflow-list (count (:workflows model))
+    :workflow-list    (count (:workflows model))
     :artifact-browser (count (get-in model [:detail :artifacts]))
+    :pr-fleet         (count (:pr-items model))
+    :train-view       (count (get-in model [:detail :selected-train :train/prs]))
     0))
 
 (defn navigate-up [model]
@@ -49,24 +51,72 @@
 ;; View navigation
 
 (defn enter-detail [model]
-  (let [workflows (:workflows model)
-        idx (:selected-idx model)]
-    (if-let [wf (get workflows idx)]
-      (-> model
-          (assoc :view :workflow-detail)
-          (assoc-in [:detail :workflow-id] (:id wf))
-          (assoc :selected-idx 0))
-      model)))
+  (case (:view model)
+    :workflow-list
+    (let [workflows (:workflows model)
+          idx (:selected-idx model)]
+      (if-let [wf (get workflows idx)]
+        (-> model
+            (assoc :view :workflow-detail)
+            (assoc-in [:detail :workflow-id] (:id wf))
+            (assoc :selected-idx 0))
+        model))
+
+    :pr-fleet
+    (let [prs (:pr-items model)
+          idx (:selected-idx model)]
+      (if-let [pr (get prs idx)]
+        (-> model
+            (assoc :view :pr-detail)
+            (assoc-in [:detail :selected-pr] pr)
+            (assoc :selected-idx 0))
+        model))
+
+    :train-view
+    (let [prs (get-in model [:detail :selected-train :train/prs])
+          idx (:selected-idx model)]
+      (if-let [pr (get (vec prs) idx)]
+        (-> model
+            (assoc :view :pr-detail)
+            (assoc-in [:detail :selected-pr] pr)
+            (assoc :selected-idx 0))
+        model))
+
+    ;; Default: no-op
+    model))
 
 (defn go-back [model]
   (case (:view model)
-    :workflow-detail (assoc model :view :workflow-list :selected-idx 0)
-    :evidence        (assoc model :view :workflow-detail :selected-idx 0)
+    :workflow-detail  (assoc model :view :workflow-list :selected-idx 0)
+    :evidence         (assoc model :view :workflow-detail :selected-idx 0)
     :artifact-browser (assoc model :view :workflow-detail :selected-idx 0)
     :dag-kanban       (assoc model :view :workflow-list :selected-idx 0)
+    :pr-fleet         (assoc model :view :workflow-list :selected-idx 0)
+    :pr-detail        (assoc model :view :pr-fleet :selected-idx 0)
+    :train-view       (assoc model :view :pr-fleet :selected-idx 0)
     model))
 
 (defn switch-view [model view-key views]
   (if (some #{view-key} views)
     (assoc model :view view-key :selected-idx 0 :scroll-offset 0)
     model))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Action helpers
+
+(defn refresh [model]
+  (assoc model
+         :flash-message "Refreshed"
+         :last-updated (java.util.Date.)))
+
+(defn toggle-help [model]
+  (update model :help-visible? not))
+
+(defn toggle-expand [model]
+  (let [idx (:selected-idx model)]
+    (update-in model [:detail :expanded-nodes]
+               (fn [nodes]
+                 (let [nodes (or nodes #{})]
+                   (if (contains? nodes idx)
+                     (disj nodes idx)
+                     (conj nodes idx)))))))

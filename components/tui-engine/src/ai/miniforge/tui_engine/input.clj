@@ -42,6 +42,15 @@
    \3     :key/d3
    \4     :key/d4
    \5     :key/d5
+   \6     :key/d6
+   \7     :key/d7
+   \8     :key/d8
+   \r     :key/r
+   \b     :key/b
+   \e     :key/e
+   \a     :key/a
+   \v     :key/v
+   \c     :key/c
    \/     :key/slash
    \:     :key/colon
    \space :key/space

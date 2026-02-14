@@ -28,7 +28,11 @@
    [ai.miniforge.tui-views.views.workflow-detail :as wf-detail]
    [ai.miniforge.tui-views.views.evidence :as evidence]
    [ai.miniforge.tui-views.views.artifact-browser :as artifact-browser]
-   [ai.miniforge.tui-views.views.dag-kanban :as dag-kanban]))
+   [ai.miniforge.tui-views.views.dag-kanban :as dag-kanban]
+   [ai.miniforge.tui-views.views.pr-fleet :as pr-fleet]
+   [ai.miniforge.tui-views.views.pr-detail :as pr-detail]
+   [ai.miniforge.tui-views.views.train-view :as train-view]
+   [ai.miniforge.tui-views.views.help :as help]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; View dispatch
@@ -42,6 +46,9 @@
     :evidence         (evidence/render model size)
     :artifact-browser (artifact-browser/render model size)
     :dag-kanban       (dag-kanban/render model size)
+    :pr-fleet         (pr-fleet/render model size)
+    :pr-detail        (pr-detail/render model size)
+    :train-view       (train-view/render model size)
     ;; Fallback
     (layout/text size "Unknown view")))
 
@@ -69,13 +76,18 @@
           content-rows (if cmd-active? (dec rows) rows)
           ;; Render main view
           content (render-active-view model [cols content-rows])]
-      (if cmd-active?
-        ;; Build full-size buffer: content on top, command bar on last row
-        (let [buf (layout/make-buffer [cols rows])
-              buf (layout/blit buf content 0 0)
-              cmd-bar (render-command-bar [cols 1] model)]
-          (layout/blit buf cmd-bar 0 (dec rows)))
-        content))))
+      ;; Build base buffer
+      (let [base (if cmd-active?
+                   (let [buf (layout/make-buffer [cols rows])
+                         buf (layout/blit buf content 0 0)
+                         cmd-bar (render-command-bar [cols 1] model)]
+                     (layout/blit buf cmd-bar 0 (dec rows)))
+                   content)]
+        ;; Overlay help if visible
+        (if (:help-visible? model)
+          (let [help-buf (help/render [cols rows])]
+            (layout/blit base help-buf 0 0))
+          base)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

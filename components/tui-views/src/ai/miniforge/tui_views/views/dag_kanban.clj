@@ -35,28 +35,33 @@
 ;; Task grouping
 
 (defn- group-tasks-by-status
-  "Group workflow tasks into kanban columns."
+  "Group workflow tasks into 6 kanban columns matching N2 task states."
   [workflows]
   (let [all-wfs (or workflows [])
-        blocked (filterv #(= :blocked (:status %)) all-wfs)
-        pending (filterv #(= :pending (:status %)) all-wfs)
-        running (filterv #(= :running (:status %)) all-wfs)
-        done (filterv #(#{:success :completed} (:status %)) all-wfs)
-        failed (filterv #(= :failed (:status %)) all-wfs)]
+        blocked   (filterv #(= :blocked (:status %)) all-wfs)
+        ready     (filterv #(#{:ready :pending} (:status %)) all-wfs)
+        active    (filterv #(#{:running :implementing :pr-opening :responding} (:status %)) all-wfs)
+        in-review (filterv #(#{:ci-running :review-pending} (:status %)) all-wfs)
+        merging   (filterv #(#{:ready-to-merge :merging} (:status %)) all-wfs)
+        done      (filterv #(#{:merged :success :completed :failed :skipped} (:status %)) all-wfs)]
     [{:title "BLOCKED"
       :color :red
       :cards (mapv (fn [wf] {:label (:name wf) :status :blocked}) blocked)}
-     {:title "PENDING"
+     {:title "READY"
       :color :yellow
-      :cards (mapv (fn [wf] {:label (:name wf) :status :pending}) pending)}
-     {:title "RUNNING"
+      :cards (mapv (fn [wf] {:label (:name wf) :status :ready}) ready)}
+     {:title "ACTIVE"
       :color :cyan
-      :cards (mapv (fn [wf] {:label (:name wf) :status :running}) running)}
+      :cards (mapv (fn [wf] {:label (:name wf) :status :running}) active)}
+     {:title "IN REVIEW"
+      :color :magenta
+      :cards (mapv (fn [wf] {:label (:name wf) :status :review}) in-review)}
+     {:title "MERGING"
+      :color :blue
+      :cards (mapv (fn [wf] {:label (:name wf) :status :merging}) merging)}
      {:title "DONE"
       :color :green
-      :cards (concat
-              (mapv (fn [wf] {:label (:name wf) :status :success}) done)
-              (mapv (fn [wf] {:label (:name wf) :status :failed}) failed))}]))
+      :cards (mapv (fn [wf] {:label (:name wf) :status (or (:status wf) :success)}) done)}]))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Rendering

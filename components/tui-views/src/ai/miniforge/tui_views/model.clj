@@ -30,33 +30,46 @@
   "Create the initial application model.
 
    Model shape:
-   {:view          kw           ; Active view (:workflow-list :workflow-detail :evidence :artifact-browser :dag-kanban)
+   {:view          kw           ; Active view (see `views` vector below)
     :workflows     [...]        ; Vector of workflow summary maps
+    :trains        [...]        ; Vector of train summary maps (N9)
+    :pr-items      [...]        ; Flat list of PR work items across trains (N9)
     :selected-idx  int          ; Selected item in current list
     :scroll-offset int          ; Scroll offset for long lists
     :detail        map          ; Drill-down state for detail views
     :mode          kw           ; :normal :command :search
     :command-buf   str          ; Command/search input buffer
     :search-results [...]       ; Fuzzy search results
+    :filtered-indices set       ; Set of matching workflow indices during search (nil = show all)
     :last-updated  inst         ; Timestamp of last data update
     :flash-message str          ; Temporary status bar message
+    :help-visible? bool         ; Whether help overlay is shown
     :theme         kw}          ; Active theme name"
   []
   {:view          :workflow-list
    :workflows     []
+   :trains        []
+   :pr-items      []
    :selected-idx  0
    :scroll-offset 0
-   :detail        {:workflow-id nil
-                   :phases      []
-                   :current-agent nil
-                   :agent-output ""
-                   :evidence    nil
-                   :artifacts   []}
+   :detail        {:workflow-id    nil
+                   :phases         []
+                   :current-agent  nil
+                   :agent-output   ""
+                   :evidence       nil
+                   :artifacts      []
+                   :expanded-nodes #{}
+                   :selected-pr    nil
+                   :pr-readiness   nil
+                   :pr-risk        nil
+                   :selected-train nil}
    :mode          :normal
    :command-buf   ""
    :search-results []
+   :filtered-indices nil
    :last-updated  nil
    :flash-message nil
+   :help-visible? false
    :theme         :default})
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -65,27 +78,32 @@
 (defn make-workflow
   "Create a workflow summary map for the model."
   [{:keys [id name status phase progress started-at]}]
-  {:id         id
-   :name       (or name (str "workflow-" (subs (str id) 0 8)))
-   :status     (or status :pending)
-   :phase      phase
-   :progress   (or progress 0)
-   :started-at started-at
-   :agents     {}})
+  {:id           id
+   :name         (or name (str "workflow-" (subs (str id) 0 8)))
+   :status       (or status :pending)
+   :phase        phase
+   :progress     (or progress 0)
+   :started-at   started-at
+   :agents       {}
+   :gate-results []})
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; View predicates
 
 (def views
   "All available views in navigation order."
-  [:workflow-list :workflow-detail :evidence :artifact-browser :dag-kanban])
+  [:workflow-list :workflow-detail :evidence :artifact-browser :dag-kanban
+   :pr-fleet :pr-detail :train-view])
 
 (def view-labels
   {:workflow-list    "Workflows"
    :workflow-detail  "Detail"
    :evidence         "Evidence"
    :artifact-browser "Artifacts"
-   :dag-kanban       "DAG Kanban"})
+   :dag-kanban       "DAG Kanban"
+   :pr-fleet         "PR Fleet"
+   :pr-detail        "PR Detail"
+   :train-view       "Train"})
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

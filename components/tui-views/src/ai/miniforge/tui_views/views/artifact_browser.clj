@@ -25,9 +25,20 @@
    - Size
    - Status"
   (:require
-   [ai.miniforge.tui-engine.interface.layout :as layout]))
+   [ai.miniforge.tui-engine.interface.layout :as layout])
+  (:import
+   [java.text SimpleDateFormat]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Helpers
+
+(defn- format-time [ts]
+  (when ts
+    (try
+      (.format (SimpleDateFormat. "HH:mm:ss") ts)
+      (catch Exception _ ""))))
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Rendering
 
 (defn render
@@ -61,14 +72,18 @@
                  (fn [[ic ir]]
                    (layout/table [ic ir]
                      {:columns [{:key :type :header "Type" :width 10}
-                                {:key :name :header "Name" :width (max 10 (- ic 35))}
+                                {:key :name :header "Name" :width (max 10 (- ic 55))}
+                                {:key :phase :header "Phase" :width 10}
                                 {:key :size :header "Size" :width 8}
-                                {:key :status :header "Status" :width 8}]
+                                {:key :status :header "Status" :width 8}
+                                {:key :time :header "Time" :width 10}]
                       :data (mapv (fn [a]
                                     {:type (some-> (:type a) name)
                                      :name (or (:name a) (:path a) "unnamed")
+                                     :phase (some-> (:phase a) name)
                                      :size (or (:size a) "-")
-                                     :status (some-> (:status a) name)})
+                                     :status (some-> (:status a) name)
+                                     :time (or (format-time (:created-at a)) "")})
                                   artifacts)
                       :selected-row selected}))})))
           ;; Footer

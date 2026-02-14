@@ -95,13 +95,14 @@
                (fn [[ic ir]]
                  (widget/tree [ic ir]
                    {:nodes nodes
-                    :expanded #{0 2 (+ 3 (count (get-in model [:detail :phases])))
-                                (+ 5 (count (get-in model [:detail :phases])))}
+                    :expanded (or (get-in model [:detail :expanded-nodes])
+                                  #{0 2 (+ 3 (count (get-in model [:detail :phases])))
+                                    (+ 5 (count (get-in model [:detail :phases])))})
                     :selected selected}))}))
           ;; Footer
           (fn [[fc fr]]
             (layout/text [fc fr]
-              " j/k:navigate  Enter:expand  Esc:back  1:workflows  q:quit"
+              " j/k:navigate  Space:expand/collapse  Esc:back  1:workflows  q:quit"
               {:fg :default})))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
