@@ -603,7 +603,7 @@
                                 (:signer data)
                                 (keyword (:decision data))
                                 {:reason (:reason data)})]
-          (if (:success result)
+          (if (= :success (:status result))
             (do
               (update-fn mgr (:output result))
               (responses/json-response
