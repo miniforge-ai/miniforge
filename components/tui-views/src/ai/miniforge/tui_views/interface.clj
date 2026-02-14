@@ -26,7 +26,8 @@
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update :as update]
    [ai.miniforge.tui-views.view :as view]
-   [ai.miniforge.tui-views.subscription :as subscription]))
+   [ai.miniforge.tui-views.subscription :as subscription]
+   [ai.miniforge.tui-views.persistence :as persistence]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; TUI lifecycle
@@ -47,9 +48,13 @@
    4. Render the workflow list view
 
    The TUI blocks the calling thread until the user quits (q key)."
-  [event-stream & [{:keys [throttle-ms screen] :or {throttle-ms 1000}}]]
+  [event-stream & [{:keys [throttle-ms screen load-limit]
+                    :or {throttle-ms 1000 load-limit 100}}]]
   (let [app (tui/create-app
-             {:init   model/init-model
+             {:init   (fn []
+                        (persistence/load-workflows-into-model
+                         (model/init-model)
+                         {:limit load-limit}))
               :update update/update-model
               :view   view/root-view
               :screen screen

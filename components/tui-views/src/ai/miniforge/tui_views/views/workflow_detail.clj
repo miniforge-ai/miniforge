@@ -83,7 +83,7 @@
          (widget/scrollable [ic ir]
            {:lines lines
             :offset offset
-            :fg :white})))}))
+            :fg :default})))}))
 
 (defn- render-footer [[cols rows]]
   (layout/text [cols rows]

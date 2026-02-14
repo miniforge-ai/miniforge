@@ -28,7 +28,7 @@
 ;; Cell buffer operations
 
 (def empty-cell
-  "Default empty cell: {:char \\space :fg :white :bg :black :bold? false}"
+  "Default empty cell: {:char \\space :fg :default :bg :default :bold? false}"
   layout/empty-cell)
 
 (def make-buffer

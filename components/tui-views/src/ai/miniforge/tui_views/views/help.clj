@@ -76,7 +76,7 @@
                            (reduce (fn [b [idx line]]
                                      (let [truncated (subs line 0 (min (count line) ic))]
                                        (layout/buf-put-string b 0 idx truncated
-                                                              {:fg :white :bg :black :bold? false})))
+                                                              {:fg :default :bg :default :bold? false})))
                                    buf
                                    (map-indexed vector visible))))})
         full-buf (layout/make-buffer [cols rows])]

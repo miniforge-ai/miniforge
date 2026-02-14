@@ -74,7 +74,7 @@
   (if (>= rows 2)
     (buf/buf-put-string buffer 0 1
                         (apply str (repeat cols \─))
-                        {:fg :default :bg :black :bold? false})
+                        {:fg :default :bg :default :bold? false})
     buffer))
 
 (defn- render-data-cell

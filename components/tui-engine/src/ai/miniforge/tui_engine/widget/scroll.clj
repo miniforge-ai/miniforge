@@ -88,6 +88,6 @@
                     level (max 0 (min 8 level))
                     ch (nth braille-chars level)]
                 (buf/buf-put-char b idx 0
-                                     {:char ch :fg fg :bg :black :bold? false})))
+                                     {:char ch :fg fg :bg :default :bold? false})))
             buffer
             (map-indexed vector visible))))
