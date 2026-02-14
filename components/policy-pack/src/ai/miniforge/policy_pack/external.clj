@@ -61,6 +61,27 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pack selection
 
+(defn- path-matches-glob?
+  "Test a single path against a single glob pattern."
+  [glob-fn glob path]
+  (try (glob-fn glob path) (catch Exception _ false)))
+
+(defn- files-match-globs?
+  "True if any path in `paths` matches any pattern in `globs`."
+  [paths globs]
+  (let [glob-fn @(requiring-resolve 'ai.miniforge.policy-pack.registry/glob-matches?)]
+    (some (fn [path]
+            (some #(path-matches-glob? glob-fn % path) globs))
+          paths)))
+
+(defn- pack-applies?
+  "True if a pack applies to the given changed files.
+   Packs with no :file-globs constraint apply to everything."
+  [changed-files pack]
+  (let [file-globs (get-in pack [:pack/applies-to :file-globs])]
+    (or (not (seq file-globs))
+        (files-match-globs? changed-files file-globs))))
+
 (defn select-applicable-packs
   "Select packs applicable to a PR based on metadata.
 
@@ -71,25 +92,7 @@
    Returns: Vector of applicable packs."
   [packs pr-meta]
   (let [changed-files (get pr-meta :changed-files [])]
-    (filterv
-     (fn [pack]
-       (let [pack-applies-to (get pack :pack/applies-to)]
-         (or (nil? pack-applies-to)
-             ;; No filter = applies to all
-             (empty? pack-applies-to)
-             ;; Check if any changed file matches pack's file globs
-             (let [file-globs (get pack-applies-to :file-globs)]
-               (or (nil? file-globs)
-                   (empty? file-globs)
-                   (some (fn [path]
-                           (some (fn [glob]
-                                   (try
-                                     (let [glob-matches? (requiring-resolve 'ai.miniforge.policy-pack.registry/glob-matches?)]
-                                       (glob-matches? glob path))
-                                     (catch Exception _ false)))
-                                 file-globs))
-                         changed-files))))))
-     packs)))
+    (filterv (partial pack-applies? changed-files) packs)))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Evaluation and reporting
