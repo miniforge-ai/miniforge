@@ -5,55 +5,98 @@
    test coverage, author experience, review staleness, complexity, and
    critical file modifications.
 
-   Layer 0: Risk factors and thresholds
+   All thresholds are configurable via the `default-config` map. Callers can
+   pass an override config to `assess-risk` to tune scoring without code changes.
+
+   Layer 0: Configuration and risk factor definitions
    Layer 1: Factor assessment functions
    Layer 2: Aggregation and risk level classification")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Risk factors and thresholds
+;; Configuration
 
+(def default-config
+  "Default risk assessment configuration. All thresholds and weights are
+   tunable — pass overrides to `assess-risk` via the `:config` key."
+  {:weights {:change-size        0.25
+             :dependency-fanout  0.20
+             :test-coverage-delta 0.15
+             :author-experience  0.10
+             :review-staleness   0.10
+             :complexity-delta   0.10
+             :critical-files     0.10}
+
+   :levels {:critical 0.75
+            :high     0.50
+            :medium   0.25}
+
+   :change-size {:thresholds [1000 500 200 50]
+                 :scores     [1.0  0.75 0.50 0.25]}
+
+   :dependency-fanout {:thresholds [5 3 1]
+                       :scores     [1.0 0.75 0.50]
+                       :exact-one  0.25}
+
+   :test-coverage-delta {:thresholds [-10.0 -5.0 0.0 5.0]
+                         :scores     [1.0   0.75 0.50 0.25]}
+
+   :author-experience {:tiers [{:min-total 50 :min-recent 10 :score 0.0}
+                               {:min-total 20 :min-recent 5  :score 0.25}
+                               {:min-total 5  :min-recent 0  :score 0.50}
+                               {:min-total 1  :min-recent 0  :score 0.75}]
+                       :default 1.0}
+
+   :review-staleness {:thresholds [168 72 24 4]
+                      :scores     [1.0 0.75 0.50 0.25]}
+
+   :complexity-delta {:thresholds [20 10 5 0]
+                      :scores     [1.0 0.75 0.50 0.25]}
+
+   :critical-files {:patterns [#"(?i)terraform.*state"
+                               #"(?i)\.env"
+                               #"(?i)credentials"
+                               #"(?i)secrets?"
+                               #"(?i)migration"
+                               #"(?i)schema\.sql"
+                               #"(?i)Dockerfile"
+                               #"(?i)\.github/workflows"
+                               #"(?i)ci\.ya?ml"]
+                    :thresholds [3 1]
+                    :scores     [1.0 0.75]
+                    :exact-one  0.50}})
+
+;; Derived public vars for backward compatibility and external use
 (def risk-factors
   "Risk factor definitions with weights."
-  {:change-size        {:weight 0.25 :description "Lines added/removed"}
-   :dependency-fanout  {:weight 0.20 :description "Number of dependent PRs"}
-   :test-coverage-delta {:weight 0.15 :description "Change in test coverage"}
-   :author-experience  {:weight 0.10 :description "Author's familiarity with codebase"}
-   :review-staleness   {:weight 0.10 :description "Time since last review activity"}
-   :complexity-delta   {:weight 0.10 :description "Change in cyclomatic complexity"}
-   :critical-files     {:weight 0.10 :description "Modifications to critical files"}})
+  (into {} (map (fn [[k v]] [k {:weight v :description (name k)}])
+                (:weights default-config))))
 
 (def risk-levels
   "Risk level thresholds."
-  {:critical 0.75
-   :high     0.50
-   :medium   0.25})
+  (:levels default-config))
 
-(def ^:private critical-file-patterns
-  "File patterns considered critical (high risk when modified)."
-  [#"(?i)terraform.*state"
-   #"(?i)\.env"
-   #"(?i)credentials"
-   #"(?i)secrets?"
-   #"(?i)migration"
-   #"(?i)schema\.sql"
-   #"(?i)Dockerfile"
-   #"(?i)\.github/workflows"
-   #"(?i)ci\.ya?ml"])
+;------------------------------------------------------------------------------ Layer 0
+;; Threshold scoring helper
+
+(defn- score-by-thresholds
+  "Score a value against descending thresholds. Returns the score for the first
+   threshold exceeded, or 0.0 if none match."
+  [value thresholds scores compare-fn]
+  (or (some (fn [[threshold score]]
+              (when (compare-fn value threshold) score))
+            (map vector thresholds scores))
+      0.0))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Factor assessment functions — each returns {:value any :score 0.0-1.0 :explanation str}
 
 (defn- assess-change-size
   "Assess risk from change size. Larger changes = higher risk."
-  [pr-data]
+  [pr-data cfg]
   (let [{:keys [additions deletions]} (get pr-data :change-size {:additions 0 :deletions 0})
         total (+ (or additions 0) (or deletions 0))
-        score (cond
-                (> total 1000) 1.0
-                (> total 500)  0.75
-                (> total 200)  0.50
-                (> total 50)   0.25
-                :else          0.0)]
+        {:keys [thresholds scores]} (:change-size cfg)
+        score (score-by-thresholds total thresholds scores >)]
     {:value {:additions additions :deletions deletions :total total}
      :score score
      :explanation (str total " lines changed"
@@ -61,29 +104,23 @@
 
 (defn- assess-dependency-fanout
   "Assess risk from dependency fanout. More dependents = higher risk."
-  [_train pr]
+  [_train pr cfg]
   (let [blocks (:pr/blocks pr [])
         fanout (count blocks)
-        score (cond
-                (> fanout 5) 1.0
-                (> fanout 3) 0.75
-                (> fanout 1) 0.50
-                (= fanout 1) 0.25
-                :else        0.0)]
+        {:keys [thresholds scores exact-one]} (:dependency-fanout cfg)
+        score (if (= fanout 1)
+                exact-one
+                (score-by-thresholds fanout thresholds scores >))]
     {:value fanout
      :score score
      :explanation (str fanout " downstream PRs depend on this")}))
 
 (defn- assess-test-coverage-delta
   "Assess risk from test coverage changes. Decreased coverage = higher risk."
-  [pr-data]
+  [pr-data cfg]
   (let [delta (get pr-data :test-coverage-delta 0.0)
-        score (cond
-                (< delta -10.0) 1.0
-                (< delta -5.0)  0.75
-                (< delta 0.0)   0.50
-                (< delta 5.0)   0.25
-                :else           0.0)]
+        {:keys [thresholds scores]} (:test-coverage-delta cfg)
+        score (score-by-thresholds delta thresholds scores <)]
     {:value delta
      :score score
      :explanation (if (neg? delta)
@@ -92,61 +129,54 @@
 
 (defn- assess-author-experience
   "Assess risk from author experience. Less experience = higher risk."
-  [author-history]
+  [author-history cfg]
   (let [commits (get author-history :total-commits 0)
         recent (get author-history :recent-commits 0)
-        score (cond
-                (and (> commits 50) (> recent 10)) 0.0
-                (and (> commits 20) (> recent 5))  0.25
-                (> commits 5)                       0.50
-                (> commits 0)                       0.75
-                :else                               1.0)]
+        {:keys [tiers default]} (:author-experience cfg)
+        score (or (some (fn [{:keys [min-total min-recent score]}]
+                          (when (and (> commits (or min-total 0))
+                                     (> recent (or min-recent 0)))
+                            score))
+                        tiers)
+                  default)]
     {:value {:total-commits commits :recent-commits recent}
      :score score
      :explanation (str commits " total commits, " recent " recent")}))
 
 (defn- assess-review-staleness
   "Assess risk from review staleness. Stale reviews = higher risk."
-  [pr-data]
+  [pr-data cfg]
   (let [hours (get pr-data :hours-since-last-review 0)
-        score (cond
-                (> hours 168) 1.0    ; > 1 week
-                (> hours 72)  0.75   ; > 3 days
-                (> hours 24)  0.50   ; > 1 day
-                (> hours 4)   0.25   ; > 4 hours
-                :else         0.0)]
+        {:keys [thresholds scores]} (:review-staleness cfg)
+        score (score-by-thresholds hours thresholds scores >)]
     {:value hours
      :score score
      :explanation (str hours " hours since last review")}))
 
 (defn- assess-complexity-delta
   "Assess risk from complexity changes. Increased complexity = higher risk."
-  [pr-data]
+  [pr-data cfg]
   (let [delta (get pr-data :complexity-delta 0)
-        score (cond
-                  (> delta 20) 1.0
-                  (> delta 10) 0.75
-                  (> delta 5)  0.50
-                  (> delta 0)  0.25
-                  :else        0.0)]
-      {:value delta
-       :score score
-       :explanation (str "Complexity " (if (pos? delta) "increased" "changed")
-                         " by " delta)}))
+        {:keys [thresholds scores]} (:complexity-delta cfg)
+        score (score-by-thresholds delta thresholds scores >)]
+    {:value delta
+     :score score
+     :explanation (str "Complexity " (if (pos? delta) "increased" "changed")
+                       " by " delta)}))
 
 (defn- assess-critical-files
   "Assess risk from modifications to critical files."
-  [pr-data]
+  [pr-data cfg]
   (let [changed-files (get pr-data :changed-files [])
+        patterns (:patterns (:critical-files cfg))
         critical (filter (fn [path]
-                           (some #(re-find % path) critical-file-patterns))
+                           (some #(re-find % path) patterns))
                          changed-files)
         count-critical (count critical)
-        score (cond
-                (> count-critical 3) 1.0
-                (> count-critical 1) 0.75
-                (= count-critical 1) 0.50
-                :else                0.0)]
+        {:keys [thresholds scores exact-one]} (:critical-files cfg)
+        score (if (= count-critical 1)
+                exact-one
+                (score-by-thresholds count-critical thresholds scores >))]
     {:value {:critical-files critical :count count-critical}
      :score score
      :explanation (if (pos? count-critical)
@@ -158,12 +188,13 @@
 
 (defn score->level
   "Convert risk score to risk level keyword."
-  [score]
-  (cond
-    (>= score (:critical risk-levels)) :critical
-    (>= score (:high risk-levels))     :high
-    (>= score (:medium risk-levels))   :medium
-    :else                              :low))
+  ([score] (score->level score (:levels default-config)))
+  ([score levels]
+   (cond
+     (>= score (:critical levels)) :critical
+     (>= score (:high levels))     :high
+     (>= score (:medium levels))   :medium
+     :else                         :low)))
 
 (defn assess-risk
   "Assess overall risk for a PR.
@@ -174,34 +205,39 @@
    - pr-data - Map with :change-size, :test-coverage-delta, :changed-files,
                :hours-since-last-review, :complexity-delta
    - author-history - Map with :total-commits, :recent-commits
+   - opts - Optional map with :config to override default-config
 
    Returns:
    {:risk/score float
     :risk/level :low|:medium|:high|:critical
     :risk/factors [{:factor kw :weight float :value any :score float :explanation str}]}"
-  [train pr pr-data author-history]
-  (let [assessments {:change-size       (assess-change-size pr-data)
-                     :dependency-fanout  (assess-dependency-fanout train pr)
-                     :test-coverage-delta (assess-test-coverage-delta pr-data)
-                     :author-experience  (assess-author-experience author-history)
-                     :review-staleness   (assess-review-staleness pr-data)
-                     :complexity-delta   (assess-complexity-delta pr-data)
-                     :critical-files     (assess-critical-files pr-data)}
-        factors (mapv (fn [[factor-key {:keys [weight]}]]
-                        (let [{:keys [value score explanation]} (get assessments factor-key)]
-                          {:factor factor-key
-                           :weight weight
-                           :value value
-                           :score score
-                           :explanation explanation}))
-                      risk-factors)
-        total-score (reduce + 0.0
-                            (map (fn [{:keys [weight score]}]
-                                   (* weight score))
-                                 factors))]
-    {:risk/score total-score
-     :risk/level (score->level total-score)
-     :risk/factors factors}))
+  ([train pr pr-data author-history]
+   (assess-risk train pr pr-data author-history {}))
+  ([train pr pr-data author-history opts]
+   (let [cfg (merge default-config (:config opts))
+         weights (:weights cfg)
+         assessments {:change-size        (assess-change-size pr-data cfg)
+                      :dependency-fanout  (assess-dependency-fanout train pr cfg)
+                      :test-coverage-delta (assess-test-coverage-delta pr-data cfg)
+                      :author-experience  (assess-author-experience author-history cfg)
+                      :review-staleness   (assess-review-staleness pr-data cfg)
+                      :complexity-delta   (assess-complexity-delta pr-data cfg)
+                      :critical-files     (assess-critical-files pr-data cfg)}
+         factors (mapv (fn [[factor-key weight]]
+                         (let [{:keys [value score explanation]} (get assessments factor-key)]
+                           {:factor factor-key
+                            :weight weight
+                            :value value
+                            :score score
+                            :explanation explanation}))
+                       weights)
+         total-score (reduce + 0.0
+                             (map (fn [{:keys [weight score]}]
+                                    (* weight score))
+                                  factors))]
+     {:risk/score total-score
+      :risk/level (score->level total-score (:levels cfg))
+      :risk/factors factors})))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
@@ -215,5 +251,14 @@
     :hours-since-last-review 48
     :complexity-delta 8}
    {:total-commits 15 :recent-commits 3})
+
+  ;; With custom config — stricter thresholds
+  (assess-risk
+   {:train/prs []}
+   {:pr/number 1 :pr/blocks []}
+   {:change-size {:additions 100 :deletions 50}}
+   {}
+   {:config {:change-size {:thresholds [500 200 100 25]
+                           :scores     [1.0 0.75 0.50 0.25]}}})
 
   :leave-this-here)
