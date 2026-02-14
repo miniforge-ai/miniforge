@@ -1,11 +1,11 @@
 ;; Specification: Add conversation resolution to PR lifecycle
 
-{:title "Add PR Conversation Resolution Capability"
+{:spec/title "Add PR Conversation Resolution Capability"
  :version "1.0.0"
  :type :enhancement
  :component "pr-lifecycle"
 
- :description
+ :spec/description
  "When miniforge creates a fix PR addressing review feedback, it should:
   1. Link the fix PR to the original conversation
   2. Resolve the conversation thread in the parent PR
@@ -113,7 +113,7 @@
    "Test resolve-conversation with mock GraphQL"
    "Test link-fix-pr-to-comment end-to-end with test repo"]}
 
- :acceptance-criteria
+ :spec/acceptance-criteria
  [{:criterion "After creating fix PR, conversation is resolved"
    :verification "Check isResolved=true in GraphQL query"}
 

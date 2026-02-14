@@ -16,7 +16,7 @@
       (catch Exception _ nil))))
 
 (defn- infer-repo-url [spec enriched-spec]
-  (or (get-in spec [:spec/raw-data :repo-url])
+  (or (:spec/repo-url spec)
       (get-in enriched-spec [:spec/context :repo-url])
       (try
         (str/trim (:out (p/shell {:out :string :err :string :continue true}
@@ -24,7 +24,7 @@
         (catch Exception _ nil))))
 
 (defn- infer-branch [spec enriched-spec]
-  (or (get-in spec [:spec/raw-data :branch])
+  (or (:spec/branch spec)
       (get-in enriched-spec [:spec/context :git-branch])
       "main"))
 

@@ -16,14 +16,14 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-{:title "Decompose Large Test Files"
- :description
+{:spec/title "Decompose Large Test Files"
+ :spec/description
  "Split 5 large test files (2398 lines total) into 20 smaller, focused test files.
   Each source file contains tests organized by layer comments, which should guide
   the split into separate files. This is a pure mechanical extraction with no
   logic changes."
 
- :intent
+ :spec/intent
  {:type :refactor
   :scope ["components/agent/test/ai/miniforge/agent/messaging_test.clj"
           "components/policy-pack/test/ai/miniforge/policy_pack/rules/pack_dependency_validation_test.clj"
@@ -31,7 +31,7 @@
           "components/pr-train/test/ai/miniforge/pr_train/state_test.clj"
           "components/pr-train/test/ai/miniforge/pr_train/interface_test.clj"]}
 
- :constraints
+ :spec/constraints
  ["No logic changes - pure mechanical extraction"
   "Each new file gets its own ns declaration with only needed requires"
   "Small fixtures/helpers duplicated per file (typically 5-15 lines)"

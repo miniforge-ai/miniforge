@@ -13,13 +13,13 @@
  :workflow/type :diagnostic-and-fix
  :workflow/version "1.0.0"
 
- :task/title "Diagnose and fix hanging test"
- :task/description
+ :spec/title "Diagnose and fix hanging test"
+ :spec/description
  "When tests hang during execution, systematically identify the problematic test
   and fix the underlying issue. Tests may hang in any git worktree or branch,
   and may be caused by syntax errors, blocking operations, or resource issues."
 
- :task/intent
+ :spec/intent
  "Quickly identify and resolve hanging tests to unblock CI/CD pipeline and
   development workflow by:
   - Identifying which specific test is hanging
@@ -28,7 +28,7 @@
   - Applying the appropriate fix
   - Verifying the fix works"
 
- :task/diagnostic-steps
+ :diagnostic-steps
  ["Step 1: Identify the hanging test
    - Check test runner output for the last test that started
    - Look for namespace/test name in console output
@@ -58,7 +58,7 @@
        (deftest inner-test  ;; <-- WRONG: deftest cannot be nested
          ...))"]
 
- :task/common-fixes
+ :common-fixes
  {"Nested deftest forms"
   "Move inner deftest to top level (same indentation as other deftests).
    This is the most common cause of hanging tests."
@@ -81,14 +81,14 @@
    - Use take with lazy sequences
    - Add timeout guards"}
 
- :task/constraints
+ :spec/constraints
  ["Fix must not break other tests"
   "Maintain test coverage and assertions"
   "Follow existing code style and patterns"
   "Document the fix if it's non-obvious"
   "Run tests after fix to verify resolution"]
 
- :task/acceptance-criteria
+ :spec/acceptance-criteria
  ["Hanging test is identified (namespace and test name)"
   "Root cause is diagnosed and documented"
   "Fix is applied to the test file"
@@ -96,7 +96,7 @@
   "All tests pass (or only expected failures remain)"
   "Fix is committed with descriptive commit message"]
 
- :task/workflow-steps
+ :workflow-steps
  ["1. IDENTIFY: Find which test is hanging by checking test output"
   "2. LOCATE: Find the test file using glob/grep"
   "3. ANALYZE: Read the test file and identify the issue"
@@ -104,7 +104,7 @@
   "5. VERIFY: Run tests to confirm they complete successfully"
   "6. COMMIT: Commit the fix with clear description"]
 
- :task/example
+ :example
  "Real example (2026-01-29): LLM streaming tests hanging
 
   Issue: ai.miniforge.llm.interface-test was hanging indefinitely
@@ -126,14 +126,14 @@
   Result: Brick tests now pass in 2 seconds. Streaming needs integration tests
   with real CLI to validate it actually works with the timeout fix."
 
- :task/prevention-tips
+ :prevention-tips
  ["Use IDE/editor with Clojure syntax checking (e.g., Cursive, Calva)"
   "Run tests locally before pushing to avoid CI hangs"
   "Add test timeouts for integration tests that use external resources"
   "Use linting tools (e.g., clj-kondo) to catch structural issues"
   "Review test code for proper structure during code review"]
 
- :task/related-rules
+ :related-rules
  ["Rule 715: Pre-commit discipline (run tests before commit)"
   "Polylith testing practices: Keep tests fast and isolated"
   "Use test fixtures for proper setup/teardown"]}

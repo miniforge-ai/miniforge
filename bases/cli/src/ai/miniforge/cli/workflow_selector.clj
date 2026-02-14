@@ -32,11 +32,11 @@
 ;; Spec feature extraction
 
 (defn- extract-type
-  "Extract task type from spec."
+  "Extract task type from spec.
+   After normalization, :spec/intent is guaranteed to be set."
   [spec]
   (or (get-in spec [:spec/intent :type])
       (get-in spec [:spec/raw-data :type])
-      (:type spec)
       :unknown))
 
 (defn- extract-implementation-plan
@@ -66,14 +66,8 @@
 (defn- extract-description-keywords
   "Extract significant keywords from spec description."
   [spec]
-  (let [desc (str/lower-case (or (:spec/description spec)
-                                  (get-in spec [:spec/raw-data :description])
-                                  (:description spec)
-                                  ""))
-        title (str/lower-case (or (:spec/title spec)
-                                   (get-in spec [:spec/raw-data :title])
-                                   (:title spec)
-                                   ""))]
+  (let [desc (str/lower-case (or (:spec/description spec) ""))
+        title (str/lower-case (or (:spec/title spec) ""))]
     (set (concat
           (when (or (str/includes? desc "refactor")
                     (str/includes? title "refactor"))
@@ -116,10 +110,7 @@
 (defn- extract-constraints-mentions
   "Extract constraint mentions from spec."
   [spec]
-  (let [constraints (or (:spec/constraints spec)
-                        (get-in spec [:spec/raw-data :constraints])
-                        (:constraints spec)
-                        [])]
+  (let [constraints (or (:spec/constraints spec) [])]
     (set (concat
           (when (some #(or (str/includes? (str/lower-case (str %)) "rule 720")
                            (str/includes? (str/lower-case (str %)) "≤400"))

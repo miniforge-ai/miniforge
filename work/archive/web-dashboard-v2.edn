@@ -12,9 +12,9 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-{:title "Web Dashboard v2 - Complete & Polished"
+{:spec/title "Web Dashboard v2 - Complete & Polished"
  :version "2.0.0"
- :description
+ :spec/description
  "Build a production-ready web dashboard that combines:
   - 5 N5 views (workflow list/detail, evidence, artifacts, DAG kanban)
   - 3 N9 PR views (PR fleet, PR detail, train view)
@@ -22,7 +22,7 @@
   - Tableau-inspired dense, informative visualizations
   - Server-side rendering + htmx (no build step for Homebrew deployment)"
 
- :intent
+ :spec/intent
  {:type :feature-complete
   :scope ["Polished, production-ready web dashboard"
           "Dense information display (Tableau-inspired)"
@@ -52,7 +52,7 @@
     "Rule 210-clojure.mdc (stratification)"
     "Rule 720-pr-layering (PR sizing)"]}}
 
- :constraints
+ :spec/constraints
  ["Server-side rendering only (no ClojureScript, no build step)"
   "Hiccup 2.0.0-RC3 for HTML generation"
   "htmx 2.0.0 for dynamic updates"

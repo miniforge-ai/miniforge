@@ -1,11 +1,11 @@
 ;; Self-Healing Workaround System
 
-{:title "Self-Healing Workaround Detection and Backend Fallback"
+{:spec/title "Self-Healing Workaround Detection and Backend Fallback"
  :version "1.0.0"
  :type :enhancement
  :priority :critical
 
- :description
+ :spec/description
  "Implement self-healing behavior when vendor bugs block miniforge operation.
   When errors occur, automatically search for known workarounds, apply them,
   and track reliability metrics to switch backends when one becomes unreliable.
@@ -322,7 +322,7 @@
    "Test rollback when workaround fails"
    "Test cooldown prevents thrashing"]}
 
- :acceptance-criteria
+ :spec/acceptance-criteria
  [{:criterion "Known workarounds auto-applied"
    :verification "Hit classifyHandoffIfNeeded error, workaround applied automatically"}
 
