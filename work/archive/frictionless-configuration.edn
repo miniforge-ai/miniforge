@@ -1,11 +1,11 @@
 ;; Frictionless Configuration System
 
-{:title "Frictionless Configuration: Backends, Workflows, and Settings"
+{:spec/title "Frictionless Configuration: Backends, Workflows, and Settings"
  :version "1.0.0"
  :type :enhancement
  :priority :critical
 
- :description
+ :spec/description
  "Make miniforge configuration simple, discoverable, and frictionless. Users
   should be able to set backends (Codex, Claude, etc.), configure workflows,
   and manage settings without reading docs or editing config files.
@@ -18,7 +18,7 @@
 
   This is unacceptable UX. Configuration must be paramount, simple, frictionless."
 
- :intent
+ :spec/intent
  {:type :user-experience-overhaul
   :scope ["LLM backend management"
           "Configuration discovery and CLI"
@@ -361,7 +361,7 @@
    "Test with missing API keys (helpful errors)"
    "Test config edit opens $EDITOR"]}
 
- :acceptance-criteria
+ :spec/acceptance-criteria
  [{:criterion "Multiple backends supported"
    :verification "Claude, Codex, OpenAI, Cursor, Ollama, Echo all work"}
 

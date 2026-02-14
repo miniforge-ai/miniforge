@@ -1,5 +1,5 @@
-{:title "Wire up agent invocation in phase interceptors"
- :description "Phase interceptors are currently stubs that only record metadata. Need to invoke agents and get real work done.
+{:spec/title "Wire up agent invocation in phase interceptors"
+ :spec/description "Phase interceptors are currently stubs that only record metadata. Need to invoke agents and get real work done.
 
 Current problem:
 - Phase interceptors (plan.clj, implement.clj, etc.) have stub :enter functions
@@ -39,14 +39,14 @@ Success criteria:
 - Agent outputs stored in phase results
 - All tests pass"
 
- :intent {:type :feature
+ :spec/intent {:type :feature
           :scope ["components/phase/src/ai/miniforge/phase/plan.clj"
                   "components/phase/src/ai/miniforge/phase/implement.clj"
                   "components/phase/src/ai/miniforge/phase/verify.clj"
                   "components/phase/src/ai/miniforge/phase/review.clj"
                   "components/phase/src/ai/miniforge/phase/release.clj"]}
 
- :constraints ["use-existing-agent-interface"
+ :spec/constraints ["use-existing-agent-interface"
                "preserve-interceptor-pattern"
                "track-metrics-properly"
                "handle-errors-gracefully"

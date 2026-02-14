@@ -12,51 +12,75 @@ mf run examples/workflows/implement-feature.edn
 mf run examples/workflows/test-simple-function.edn
 ```
 
-## Pipeline Format (v1.0.0)
+## Spec Format
 
-All workflows now use the standardized **pipeline format**. This format provides:
+Workflow specs use **fully-namespaced `:spec/*` keywords** to describe user intent.
+The spec parser accepts three input styles (with priority ordering):
 
-- Clear versioning and type discrimination
-- Structured task specification
-- Support for different workflow types (full-sdlc, test-only, etc.)
-- Consistent validation and execution semantics
+1. `:spec/*` namespaced (canonical) -- pass through
+2. `:task/*` namespaced (deprecated) -- translated with deprecation warning
+3. Unnamespaced (legacy) -- translated
 
-### Required Fields
+### Canonical Format
 
 ```clojure
-{:workflow/spec-version "1.0.0"    ; Required: spec format version
- :workflow/type :full-sdlc         ; Required: workflow type
- :workflow/version "2.0.0"         ; Required: workflow execution version
+{;; === Required ===
+ :spec/title              "One-line summary"
+ :spec/description        "Detailed prose description..."
 
- :task/title "..."                 ; Required: human-readable task title
- :task/description "..."           ; Required: detailed task description
- :task/intent "..."                ; Required: structured intent
- :task/constraints [...]           ; Required: constraint list
- :task/acceptance-criteria [...]}  ; Optional: success criteria
+ ;; === Recommended ===
+ :spec/intent             "What kind of work and why..."
+ :spec/constraints        ["constraint-1" "constraint-2"]
+ :spec/acceptance-criteria ["criterion-1" "criterion-2"]
+
+ ;; === Optional ===
+ :spec/tags               [:tag1 :tag2]
+ :spec/code-artifact      {:code/id ... :code/files [...]}  ; for test-only workflows
+
+ ;; === Workflow selection ===
+ :workflow/type            :full-sdlc
+ :workflow/version         "2.0.0"
+
+ ;; === Pre-decomposed plan (optional) ===
+ :plan/tasks              [{:task/id :do-thing
+                            :task/description "..."
+                            :task/type :implement
+                            :task/dependencies []}]
+
+ ;; === Operational overrides ===
+ :spec/repo-url           "https://..."     ; git repo URL
+ :spec/branch             "feat/my-branch"  ; target branch
+ :spec/llm-backend        :anthropic        ; LLM provider override
+ :spec/sandbox            true              ; run in Docker sandbox
+
+ ;; === Free-form context (any unnamespaced keys pass through) ===
+ :context                 {:supporting-docs ["..."] :real-world-example "..."}
+ :diagnostic-steps        ["step 1" "step 2"]
+ ;; ... any additional keys agents may need
+ }
 ```
+
+### Domain Namespaces
+
+| Domain | Namespace | Who Authors | What It Represents |
+|--------|-----------|-------------|-------------------|
+| **Spec** | `:spec/*` | Users (via prose or EDN) | Intent -- what the user wants and why |
+| **Task** | `:task/*` | System (planner output) | Work units -- decomposed executable items |
+| **Workflow** | `:workflow/*` | System (config files) | Process -- how the system executes |
+
+A spec is not a task. A spec expresses intent and constraints. The system
+decomposes specs into tasks.
 
 ### Workflow Types
 
 - `:full-sdlc` - Complete software development lifecycle
-  - Phases: plan → implement → verify → review → release
+  - Phases: plan, implement, verify, review, release
   - Use for: new features, refactoring, bug fixes
 
 - `:test-only` - Test generation only
   - Phases: verify only
   - Use for: adding tests to existing code
-  - Requires: `:task/code-artifact` with code to test
-
-### Field Descriptions
-
-- **:workflow/spec-version** - Always "1.0.0" for current format
-- **:workflow/type** - Determines which phases execute (`:full-sdlc` or `:test-only`)
-- **:workflow/version** - Workflow execution engine version (currently "2.0.0")
-- **:task/title** - Brief, descriptive title (50-80 characters recommended)
-- **:task/description** - Detailed explanation of what should be accomplished
-- **:task/intent** - Why this task matters and what it achieves (goals, benefits)
-- **:task/constraints** - Vector of strings describing requirements and limitations
-- **:task/acceptance-criteria** - Vector of strings defining success (optional but recommended)
-- **:task/code-artifact** - For test-only workflows: code to generate tests for
+  - Requires: `:spec/code-artifact` with code to test
 
 ### Full SDLC Example
 
@@ -66,19 +90,19 @@ All workflows now use the standardized **pipeline format**. This format provides
  :workflow/type :full-sdlc
  :workflow/version "2.0.0"
 
- :task/title "Refactor logging component"
- :task/description
+ :spec/title "Refactor logging component"
+ :spec/description
  "Extract structured logging helpers to a separate module for better reusability"
 
- :task/intent
+ :spec/intent
  "Improve code organization by consolidating scattered logging utilities"
 
- :task/constraints
+ :spec/constraints
  ["No breaking changes to existing public API"
   "Maintain 100% test coverage"
   "Follow polylith architecture rules"]
 
- :task/acceptance-criteria
+ :spec/acceptance-criteria
  ["Logging utilities consolidated in components/logging/src"
   "All components use the new logging module"
   "Existing tests pass without modification"
@@ -93,20 +117,20 @@ All workflows now use the standardized **pipeline format**. This format provides
  :workflow/type :test-only
  :workflow/version "2.0.0"
 
- :task/title "Generate tests for string utility functions"
- :task/description
+ :spec/title "Generate tests for string utility functions"
+ :spec/description
  "Create comprehensive tests for string manipulation functions"
 
- :task/intent
+ :spec/intent
  "Generate unit tests covering all edge cases including nil, empty strings, etc."
 
- :task/constraints
+ :spec/constraints
  ["Use clojure.test framework"
   "Test all edge cases"
   "Aim for 100% code coverage"]
 
  ;; Code artifact with actual content
- :task/code-artifact
+ :spec/code-artifact
  {:code/id #uuid "12345678-1234-1234-1234-123456789abc"
   :code/language "clojure"
   :code/files
@@ -114,7 +138,7 @@ All workflows now use the standardized **pipeline format**. This format provides
     :action :test-existing
     :content "(ns utils.string ...) ..."}]}
 
- :task/acceptance-criteria
+ :spec/acceptance-criteria
  ["Tests verify nil handling"
   "Tests cover all edge cases"
   "All tests pass when run"]}
@@ -125,14 +149,15 @@ All workflows now use the standardized **pipeline format**. This format provides
 When you run a workflow from a spec file, miniforge:
 
 1. **Parses and validates** the spec file against the pipeline schema
-2. **Creates workflow context** with:
+2. **Normalizes** the spec to canonical `:spec/*` format (translating `:task/*` and unnamespaced keys)
+3. **Creates workflow context** with:
    - Provenance: source file, format, timestamp
    - Environment: cwd, git info, files-in-scope
    - Metadata: session-id, iteration, parent-task-id
-3. **Executes phases** based on workflow type:
-   - `:full-sdlc`: plan → implement → verify → review → release
+4. **Executes phases** based on workflow type:
+   - `:full-sdlc`: plan, implement, verify, review, release
    - `:test-only`: verify only (test generation)
-4. **Generates evidence bundle** documenting execution:
+5. **Generates evidence bundle** documenting execution:
    - All phase results and artifacts
    - Agent decisions and reasoning
    - Metrics (tokens, duration, costs)
@@ -169,16 +194,16 @@ Real-world example: generating tests for code that miniforge generated for itsel
    ```
 
 2. **Update required fields**
-   - Change `:task/title` to describe your task
-   - Write detailed `:task/description`
-   - Clarify `:task/intent` (why this matters)
-   - List `:task/constraints` (requirements, limitations)
-   - Add `:task/acceptance-criteria` (how to measure success)
+   - Change `:spec/title` to describe your task
+   - Write detailed `:spec/description`
+   - Clarify `:spec/intent` (why this matters)
+   - List `:spec/constraints` (requirements, limitations)
+   - Add `:spec/acceptance-criteria` (how to measure success)
 
 3. **Choose workflow type**
    - Use `:full-sdlc` for implementation tasks
    - Use `:test-only` for test generation
-   - Ensure `:task/code-artifact` is present for test-only
+   - Ensure `:spec/code-artifact` is present for test-only
 
 4. **Run your workflow**
 
@@ -186,25 +211,30 @@ Real-world example: generating tests for code that miniforge generated for itsel
    mf run my-workflow.edn
    ```
 
-## Migration from Old Format
+## Migration from `:task/*` Format
 
-If you have workflows in the old format (simple EDN/JSON without `:workflow/*` fields):
+If you have specs using the deprecated `:task/*` namespace:
 
-1. Add required workflow fields:
-   - `:workflow/spec-version "1.0.0"`
-   - `:workflow/type :full-sdlc`
-   - `:workflow/version "2.0.0"`
+1. Rename spec fields to `:spec/*` namespace:
+   - `:task/title` -> `:spec/title`
+   - `:task/description` -> `:spec/description`
+   - `:task/intent` -> `:spec/intent`
+   - `:task/constraints` -> `:spec/constraints`
+   - `:task/acceptance-criteria` -> `:spec/acceptance-criteria`
+   - `:task/code-artifact` -> `:spec/code-artifact`
 
-2. Rename top-level fields to `:task/*` namespace:
-   - `:title` → `:task/title`
-   - `:description` → `:task/description`
-   - `:intent` → `:task/intent` (flatten to string)
-   - `:constraints` → `:task/constraints`
-   - `:tags` → (remove, no longer used)
+2. Drop the `:task/` namespace from free-form context keys:
+   - `:task/diagnostic-steps` -> `:diagnostic-steps`
+   - `:task/common-fixes` -> `:common-fixes`
+   - `:task/workflow-steps` -> `:workflow-steps`
+   - etc.
 
-3. Add `:task/acceptance-criteria` if applicable
+3. Keep `:workflow/*` keys unchanged (`:workflow/type`, `:workflow/version`)
 
-See the examples in this directory for reference implementations.
+4. Keep `:task/*` keys inside `:plan/tasks` entries unchanged (they ARE tasks)
+
+The normalizer accepts `:task/*` keys with a deprecation warning, so existing
+specs continue to work during the transition period.
 
 ## Next Steps
 

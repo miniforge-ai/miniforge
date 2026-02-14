@@ -10,13 +10,13 @@
  :workflow/type :full-sdlc
  :workflow/version "2.0.0"
 
- :task/title "Improve web dashboard UI/UX based on user feedback"
- :task/description
+ :spec/title "Improve web dashboard UI/UX based on user feedback"
+ :spec/description
  "Improve the web dashboard user interface to address specific UI/UX issues
   identified during initial user testing. Focus on making the interface more
   intuitive, professional, and data-dense."
 
- :task/intent
+ :spec/intent
  "Create a polished dashboard experience that:
   - Presents PR train fleet data in a clear, table-like format
   - Makes empty states obvious and actionable
@@ -24,7 +24,7 @@
   - Ensures consistent spacing and alignment
   - Provides clear calls-to-action for creating new trains"
 
- :task/constraints
+ :spec/constraints
  ["Maintain the mid-century industrial design aesthetic"
   "Keep all existing functionality working"
   "Ensure theme-aware styling (dark/light/high-contrast)"
@@ -34,7 +34,7 @@
   "Include proper empty states for zero-data views"
   "Test with and without data"]
 
- :task/acceptance-criteria
+ :spec/acceptance-criteria
  ["PR Fleet view shows trains in a table/grid format (excel-like)"
   "'Create Train' action uses a professional button or + icon"
   "Empty state shows helpful message and prominent 'Create Train' button"

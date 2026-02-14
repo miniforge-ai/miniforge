@@ -18,7 +18,8 @@
 
 (defn- extract-wf-name
   [event wf-id]
-  (or (get-in event [:workflow/spec :title])
+  (or (get-in event [:workflow/spec :spec/title])
+      (get-in event [:workflow/spec :title])
       (get-in event [:workflow/spec :name])
       (get-in event [:workflow-spec :title])
       (get-in event [:workflow-spec :name])

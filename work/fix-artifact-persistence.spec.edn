@@ -1,5 +1,5 @@
-{:title "Fix Workflow Artifact Persistence Bug"
- :description
+{:spec/title "Fix Workflow Artifact Persistence Bug"
+ :spec/description
  "The workflow system generates code artifacts in-memory but fails to persist
   them to disk. The release phase completes with :success false and 0 files
   written, yet the workflow continues and marks all phases as completed. This
@@ -14,7 +14,7 @@
 
   This is a critical bug that prevents any workflow from producing actual results."
 
- :intent
+ :spec/intent
  {:type :bug-fix
   :scope ["components/workflow/src/ai/miniforge/workflow/runner.clj"
           "components/phase/src/ai/miniforge/phase/implement.clj"
@@ -23,7 +23,7 @@
           "components/artifact/src/ai/miniforge/artifact/interface.clj"
           "components/workflow/test/ai/miniforge/workflow/artifact_persistence_test.clj"]}
 
- :constraints
+ :spec/constraints
  ["Fix must be backward compatible with existing workflows"
   "Tests must validate actual file system changes"
   "Fail loudly and early when artifact persistence fails"

@@ -1,12 +1,12 @@
 ;; Codex CLI Integration
 
-{:title "Integrate Codex CLI Backend"
+{:spec/title "Integrate Codex CLI Backend"
  :version "1.0.0"
  :type :enhancement
  :priority :high
  :pr-comment "PR #153: CONFIG-SYSTEM.md:74"
 
- :description
+ :spec/description
  "Replace HTTP API implementation for Codex backend with proper CLI integration.
   Codex has both a desktop app and CLI (`codex-cli 0.98.0`) installed on the dev
   machine. The CLI provides non-interactive execution similar to Claude CLI with
@@ -112,7 +112,7 @@
   :remove-codex-http "Delete HTTP client code for :codex (lines 138-212)"
   :update-docs "CONFIG-SYSTEM.md: Change Codex from API to CLI"}
 
- :acceptance-criteria
+ :spec/acceptance-criteria
  [{:criterion "Codex backend uses CLI not HTTP API"
    :verification "Check backends definition uses cmd=codex"}
 

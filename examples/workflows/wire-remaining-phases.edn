@@ -1,5 +1,5 @@
-{:title "Wire up remaining phase interceptors (verify, review, release)"
- :description "Complete the phase interceptor migration by wiring up agent invocation in the remaining 3 phases.
+{:spec/title "Wire up remaining phase interceptors (verify, review, release)"
+ :spec/description "Complete the phase interceptor migration by wiring up agent invocation in the remaining 3 phases.
 
 We successfully wired plan.clj and implement.clj - now need to apply the same pattern to:
 - verify.clj
@@ -46,12 +46,12 @@ Reference:
 - components/agent/src/ai/miniforge/agent/tester.clj (has create-tester)
 - components/agent/src/ai/miniforge/agent/reviewer.clj (has create-reviewer)"
 
- :intent {:type :feature
+ :spec/intent {:type :feature
           :scope ["components/phase/src/ai/miniforge/phase/verify.clj"
                   "components/phase/src/ai/miniforge/phase/review.clj"
                   "components/phase/src/ai/miniforge/phase/release.clj"]}
 
- :constraints ["follow-established-pattern"
+ :spec/constraints ["follow-established-pattern"
                "use-specialized-agents"
                "track-metrics-properly"
                "no-breaking-changes"

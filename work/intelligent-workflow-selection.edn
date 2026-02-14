@@ -1,11 +1,11 @@
 ;; Intelligent Workflow Selection
 
-{:title "Intelligent Workflow Selection from Spec Characteristics"
+{:spec/title "Intelligent Workflow Selection from Spec Characteristics"
  :version "1.0.0"
  :type :enhancement
  :priority :high
 
- :description
+ :spec/description
  "Automatically select the appropriate workflow based on spec characteristics
   instead of requiring users to know which workflow to specify. This eliminates
   a pit of failure where users must understand workflow types to run their specs.
@@ -16,7 +16,7 @@
   Solution: Analyze spec content and intelligently select the right workflow,
   with user override option."
 
- :intent
+ :spec/intent
  {:type :user-experience-improvement
   :scope ["Workflow selection automation"
           "Spec analysis and classification"
@@ -268,7 +268,7 @@
     :expected-workflow :lean-sdlc-v1
     :key-indicators ["Type :test or :demo" "Small scope"]}]}
 
- :acceptance-criteria
+ :spec/acceptance-criteria
  [{:criterion "Specs without :spec/workflow-type get intelligent selection"
    :verification "Run emojui spec without workflow-type, verify canonical-sdlc-v1 selected"}
 

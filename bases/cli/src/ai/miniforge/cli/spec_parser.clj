@@ -93,45 +93,84 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Spec normalization
 
+(defn- warn-task-namespace
+  "Emit deprecation warning when :task/* keys are used in spec files."
+  [spec]
+  (when (some #(and (keyword? %) (= "task" (namespace %))) (keys spec))
+    (binding [*out* *err*]
+      (println "DEPRECATION WARNING: :task/* keys in spec files are deprecated.")
+      (println "  Use :spec/* keys instead (e.g. :spec/title, :spec/description).")
+      (println "  See examples/workflows/README.md for the canonical format."))))
+
 (defn- normalize-spec
   "Normalize parsed spec to canonical workflow format.
 
-   Input spec schema (user-provided):
-     {:title \"...\"
-      :description \"...\"
-      :intent {:type :refactor :scope [...]}
-      :constraints [...]}
+   Accepts three input styles with priority ordering:
+     1. :spec/* namespaced (canonical)   — pass through
+     2. :task/* namespaced (transitional) — translate with deprecation warning
+     3. Unnamespaced (legacy)            — translate
 
    Output format (workflow engine):
      {:spec/title \"...\"
       :spec/description \"...\"
       :spec/intent {:type :refactor :scope [...]}
-      :spec/constraints [...]}"
+      :spec/constraints [...]
+      :spec/acceptance-criteria [...]
+      :spec/code-artifact {...}
+      :spec/repo-url \"...\"
+      :spec/branch \"...\"
+      :spec/llm-backend :anthropic
+      :spec/sandbox true
+      :spec/plan-tasks [...]
+      :spec/raw-data <original-input>}"
   [spec]
   (when-not (map? spec)
     (throw (ex-info "Workflow spec must be a map"
                     {:spec spec})))
 
-  (when-not (:title spec)
-    (throw (ex-info "Workflow spec must have :title"
-                    {:spec spec})))
+  (warn-task-namespace spec)
 
-  (when-not (:description spec)
-    (throw (ex-info "Workflow spec must have :description"
-                    {:spec spec})))
+  ;; Triple-or extraction: :spec/* > :task/* > unnamespaced
+  (let [title       (or (:spec/title spec) (:task/title spec) (:title spec))
+        description (or (:spec/description spec) (:task/description spec) (:description spec))
+        intent      (or (:spec/intent spec) (:task/intent spec) (:intent spec))
+        constraints (or (:spec/constraints spec) (:task/constraints spec) (:constraints spec))
+        tags        (or (:spec/tags spec) (:tags spec))
+        accept-crit (or (:spec/acceptance-criteria spec) (:task/acceptance-criteria spec) (:acceptance-criteria spec))
+        code-art    (or (:spec/code-artifact spec) (:task/code-artifact spec) (:code-artifact spec))
+        repo-url    (or (:spec/repo-url spec) (:repo-url spec))
+        branch      (or (:spec/branch spec) (:branch spec))
+        llm-backend (or (:spec/llm-backend spec) (:llm-backend spec))
+        sandbox     (or (:spec/sandbox spec) (:sandbox spec))
+        plan-tasks  (or (:spec/plan-tasks spec) (:plan/tasks spec))]
 
-  ;; Normalize to namespaced keys for workflow engine
-  {:spec/title (:title spec)
-   :spec/description (:description spec)
-   :spec/intent (or (:intent spec) {:type :general})
-   :spec/constraints (or (:constraints spec) [])
-   :spec/tags (or (:tags spec) [])
-   ;; Preserve workflow metadata for custom workflow selection
-   ;; Don't set a default - let workflow selector/recommender decide
-   :spec/workflow-type (:workflow/type spec)
-   :spec/workflow-version (or (:workflow/version spec) "latest")
-   ;; Pass through all other spec keys (like :task/*)
-   :spec/raw-data spec})
+    (when-not title
+      (throw (ex-info "Workflow spec must have a title (:spec/title, :task/title, or :title)"
+                      {:spec spec})))
+
+    (when-not description
+      (throw (ex-info "Workflow spec must have a description (:spec/description, :task/description, or :description)"
+                      {:spec spec})))
+
+    ;; Normalize to namespaced keys for workflow engine
+    (cond-> {:spec/title title
+             :spec/description description
+             :spec/intent (or intent {:type :general})
+             :spec/constraints (or constraints [])
+             :spec/tags (or tags [])
+             ;; Preserve workflow metadata for custom workflow selection
+             ;; Don't set a default - let workflow selector/recommender decide
+             :spec/workflow-type (:workflow/type spec)
+             :spec/workflow-version (or (:workflow/version spec) "latest")
+             ;; Pass through all other spec keys as raw-data
+             :spec/raw-data spec}
+      accept-crit (assoc :spec/acceptance-criteria accept-crit)
+      code-art    (assoc :spec/code-artifact code-art)
+      repo-url    (assoc :spec/repo-url repo-url)
+      branch      (assoc :spec/branch branch)
+      llm-backend (assoc :spec/llm-backend llm-backend)
+      (some? sandbox) (assoc :spec/sandbox sandbox)
+      plan-tasks  (assoc :spec/plan-tasks plan-tasks))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Public API
@@ -148,13 +187,17 @@
    Returns normalized spec map ready for workflow engine, decorated with:
    - :spec/provenance - Source file metadata (Layer 0 decoration)
 
-   Example EDN spec:
-     {:title \"Refactor logging component\"
-      :description \"Extract structured logging to separate component\"
-      :intent {:type :refactor
-               :scope [\"components/logging/src\"]}
-      :constraints [\"no-breaking-changes\"
-                    \"maintain-test-coverage\"]}
+   Example EDN spec (canonical :spec/* format):
+     {:spec/title \"Refactor logging component\"
+      :spec/description \"Extract structured logging to separate component\"
+      :spec/intent {:type :refactor
+                    :scope [\"components/logging/src\"]}
+      :spec/constraints [\"no-breaking-changes\"
+                         \"maintain-test-coverage\"]
+      :workflow/type :full-sdlc}
+
+   Legacy formats (:task/* and unnamespaced) are also accepted with
+   automatic translation. :task/* keys emit a deprecation warning.
 
    Example Markdown spec:
      ---
