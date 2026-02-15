@@ -29,7 +29,10 @@
 | Local-only execution (no external deps except LLM) | **Implemented** | Polylith local deps, file-based storage |
 | Deterministic reproducibility | **Partial** | workflow replay exists; full determinism needs verification |
 
-**Gap summary:** Architecture is structurally complete. Main gaps are in *wiring completeness* — ensuring every state transition emits events, every workflow completion produces evidence, and the trust model is enforced end-to-end.
+**Gap summary:** Architecture is structurally complete. Main gaps are in
+*wiring completeness* — ensuring every state transition emits events, every
+workflow completion produces evidence, and the trust model is enforced
+end-to-end.
 
 ---
 
@@ -52,7 +55,9 @@
 | Workflow resumption from last successful phase | **Partial** | Exists in workflow; completeness needs verification |
 | Spec validation before execution | **Partial** | Need to verify all validations |
 
-**Gap summary:** Execution model is well-implemented. Gaps are in *enforcement completeness* — verifying budget limits, capability contracts, and resumption are fully wired.
+**Gap summary:** Execution model is well-implemented. Gaps are in
+*enforcement completeness* — verifying budget limits, capability contracts,
+and resumption are fully wired.
 
 ---
 
@@ -84,7 +89,10 @@
 | <=10ms emission latency, >=100 subscriptions | **Partial** | Architecture supports it; not benchmarked |
 | `:pr/id` correlation for external PRs | **Stub** | PR model exists; correlation key not yet standardized |
 
-**Gap summary:** Core event stream infrastructure is solid. Main gaps: (1) **many event types not yet emitted** (gates, tools, inter-agent, ETL, OPSV, listeners, external PRs), (2) **review winsock channel vs HTTP/SSE needs**, (3) event schema validation on emission.
+**Gap summary:** Core event stream infrastructure is solid. Main gaps:
+(1) **many event types not yet emitted** (gates, tools, inter-agent, ETL,
+OPSV, listeners, external PRs), (2) **review winsock channel vs HTTP/SSE
+needs**, (3) event schema validation on emission.
 
 ---
 
@@ -107,7 +115,10 @@
 | External PR read-only evaluation | **Stub** | Policy pack exists; read-only mode for external PRs not yet implemented |
 | Pack semantic versioning | **Partial** | Version field exists; enforcement needs verification |
 
-**Gap summary:** Policy-pack and gate infrastructure exist. Main gaps: (1) **Kubernetes diff parsing**, (2) **knowledge-safety pack** with full tripwire detection, (3) **pack dependency management**, (4) **OPSV-specific gates**, (5) external PR read-only evaluation mode.
+**Gap summary:** Policy-pack and gate infrastructure exist. Main gaps:
+(1) **Kubernetes diff parsing**, (2) **knowledge-safety pack** with full
+tripwire detection, (3) **pack dependency management**,
+(4) **OPSV-specific gates**, (5) external PR read-only evaluation mode.
 
 ---
 
@@ -135,7 +146,10 @@
 | SSE streaming | **Partial** | Winsock bidirectional may supersede one-way SSE; needs review |
 | Config file + env vars | **Partial** | config component exists |
 
-**Gap summary:** CLI base, TUI engine, and TUI views all exist. Main gaps: (1) **review winsock channel sufficiency vs HTTP API**, (2) many CLI commands may not be fully wired, (3) TUI views need to be connected to live event streams.
+**Gap summary:** CLI base, TUI engine, and TUI views all exist. Main gaps:
+(1) **review winsock channel sufficiency vs HTTP API**, (2) many CLI
+commands may not be fully wired, (3) TUI views need to be connected to
+live event streams.
 
 ---
 
@@ -156,7 +170,9 @@
 | Control action evidence | **Stub** | Not yet implemented |
 | External PR evidence | **Stub** | PR model exists; evidence artifact generation needs implementation |
 
-**Gap summary:** Evidence bundle core is solid. Gaps: (1) **sensitive data scanning**, (2) **compliance metadata**, (3) OPSV/control/external-PR evidence types.
+**Gap summary:** Evidence bundle core is solid. Gaps:
+(1) **sensitive data scanning**, (2) **compliance metadata**,
+(3) OPSV/control/external-PR evidence types.
 
 ---
 
@@ -173,7 +189,9 @@
 | APPLY_ALLOWED disabled by default | **Missing** | Not implemented |
 | OPSV evidence per N6 | **Missing** | Not implemented |
 
-**Gap summary:** **OPSV is entirely unimplemented.** This is the largest single gap. The infrastructure exists (workflow, gates, evidence, event-stream) but no OPSV-specific code has been written.
+**Gap summary:** **OPSV is entirely unimplemented.** This is the largest
+single gap. The infrastructure exists (workflow, gates, evidence,
+event-stream) but no OPSV-specific code has been written.
 
 ---
 
@@ -193,7 +211,10 @@
 | Audit logging for all control actions | **Stub** | Evidence bundle exists; control action recording not wired |
 | Listener budget controls | **Missing** | Not implemented |
 
-**Gap summary:** **OCI is mostly unimplemented.** The event-stream subscription mechanism provides the foundation, but the governance layer (RBAC, capability enforcement, multi-party approval, privacy, retention) is absent.
+**Gap summary:** **OCI is mostly unimplemented.** The event-stream
+subscription mechanism provides the foundation, but the governance layer
+(RBAC, capability enforcement, multi-party approval, privacy, retention)
+is absent.
 
 ---
 
@@ -215,7 +236,11 @@
 | Credential encryption + rotation | **Missing** | Not implemented |
 | Per-repo config (`.miniforge/config.edn`) | **Stub** | Config component exists; per-repo overrides need verification |
 
-**Gap summary:** PR train and repo DAG foundations exist. Main gaps: (1) **full PR Work Item model** with readiness/risk/policy, (2) **automation tier enforcement**, (3) **provider-native check publishing**, (4) **read-only policy evaluation**, (5) credential management.
+**Gap summary:** PR train and repo DAG foundations exist. Main gaps:
+(1) **full PR Work Item model** with readiness/risk/policy,
+(2) **automation tier enforcement**,
+(3) **provider-native check publishing**,
+(4) **read-only policy evaluation**, (5) credential management.
 
 ---
 

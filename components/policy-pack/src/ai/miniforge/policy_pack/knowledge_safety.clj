@@ -28,10 +28,12 @@
    - pack-root-allowlist
    - pack-dependency-validation
 
-   All detection patterns and thresholds are stored as data in
-   `default-config` and can be overridden at pack creation time."
+   All detection patterns and thresholds are loaded from
+   resources/config/governance/knowledge-safety.edn and can be
+   overridden at pack creation time."
   (:require
    [clojure.string :as str]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.policy-pack.core :as core]
    [ai.miniforge.policy-pack.rules.pack-dependency-validation :as dep-validation]))
 
@@ -39,54 +41,11 @@
 ;; Configuration — all tunable data in one place
 
 (def default-config
-  "Default knowledge safety configuration. All patterns, thresholds, and
-   metadata are pure data. Override by passing a custom config to
-   `create-knowledge-safety-pack`."
-  {:pack-id      "ai.miniforge/knowledge-safety"
-   :pack-version "2026.01.25"
-   :pack-author  "miniforge.ai"
-   :pack-license "Apache-2.0"
-
-   :pack-roots [".miniforge/packs" ".cursor/packs"]
-
-   :injection-patterns
-   {;; Role hijacking — attempts to reassign the model's identity
-    :role-hijacking
-    [#"(?i)ignore\s+previous\s+instructions"
-     #"(?i)you\s+are\s+now"
-     #"(?i)disregard\s+all\s+prior"
-     #"(?i)act\s+as\s+if\s+you\s+are"
-     #"(?i)pretend\s+(you\s+are|to\s+be)"]
-
-    ;; Delimiter injection — fake system/assistant/user boundaries
-    :delimiter-injection
-    [#"(?i)SYSTEM:"
-     #"(?i)DEVELOPER:"
-     #"<\|system\|>"
-     #"<\|assistant\|>"
-     #"<\|user\|>"]
-
-    ;; Encoding tricks — obfuscated payloads
-    :encoding-tricks
-    [#"(?i)base64\s*decode"
-     #"\\u[0-9a-fA-F]{4}"
-     #"&#x?[0-9a-fA-F]+;"]
-
-    ;; Instruction override — attempts to replace active instructions
-    :instruction-override
-    [#"(?i)new\s+instructions?:"
-     #"(?i)from\s+now\s+on"
-     #"(?i)override\s+(previous|all)\s+"]
-
-    ;; Context manipulation — attempts to wipe context
-    :context-manipulation
-    [#"(?i)forget\s+everything"
-     #"(?i)disregard\s+your"]
-
-    ;; Jailbreak — known jailbreak trigger phrases
-    :jailbreak
-    [#"(?i)\bDAN\b"
-     #"(?i)do\s+anything\s+now"]}})
+  "Default knowledge safety configuration loaded from
+   resources/config/governance/knowledge-safety.edn.
+   All patterns, thresholds, and metadata are pure data. Override by
+   passing a custom config to `create-knowledge-safety-pack`."
+  (config/load-governance-config :knowledge-safety))
 
 ;; Convenience accessors for backward compatibility
 (def pack-id (:pack-id default-config))

@@ -5,65 +5,23 @@
    test coverage, author experience, review staleness, complexity, and
    critical file modifications.
 
-   All thresholds are configurable via the `default-config` map. Callers can
-   pass an override config to `assess-risk` to tune scoring without code changes.
+   All thresholds are loaded from resources/config/governance/risk.edn and can
+   be overridden by passing a config to `assess-risk`.
 
    Layer 0: Configuration and risk factor definitions
    Layer 1: Factor assessment functions
-   Layer 2: Aggregation and risk level classification")
+   Layer 2: Aggregation and risk level classification"
+  (:require
+   [ai.miniforge.config.interface :as config]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration
 
 (def default-config
-  "Default risk assessment configuration. All thresholds and weights are
-   tunable — pass overrides to `assess-risk` via the `:config` key."
-  {:weights {:change-size        0.25
-             :dependency-fanout  0.20
-             :test-coverage-delta 0.15
-             :author-experience  0.10
-             :review-staleness   0.10
-             :complexity-delta   0.10
-             :critical-files     0.10}
-
-   :levels {:critical 0.75
-            :high     0.50
-            :medium   0.25}
-
-   :change-size {:thresholds [1000 500 200 50]
-                 :scores     [1.0  0.75 0.50 0.25]}
-
-   :dependency-fanout {:thresholds [5 3 1]
-                       :scores     [1.0 0.75 0.50]
-                       :exact-one  0.25}
-
-   :test-coverage-delta {:thresholds [-10.0 -5.0 0.0 5.0]
-                         :scores     [1.0   0.75 0.50 0.25]}
-
-   :author-experience {:tiers [{:min-total 50 :min-recent 10 :score 0.0}
-                               {:min-total 20 :min-recent 5  :score 0.25}
-                               {:min-total 5  :min-recent 0  :score 0.50}
-                               {:min-total 1  :min-recent 0  :score 0.75}]
-                       :default 1.0}
-
-   :review-staleness {:thresholds [168 72 24 4]
-                      :scores     [1.0 0.75 0.50 0.25]}
-
-   :complexity-delta {:thresholds [20 10 5 0]
-                      :scores     [1.0 0.75 0.50 0.25]}
-
-   :critical-files {:patterns [#"(?i)terraform.*state"
-                               #"(?i)\.env"
-                               #"(?i)credentials"
-                               #"(?i)secrets?"
-                               #"(?i)migration"
-                               #"(?i)schema\.sql"
-                               #"(?i)Dockerfile"
-                               #"(?i)\.github/workflows"
-                               #"(?i)ci\.ya?ml"]
-                    :thresholds [3 1]
-                    :scores     [1.0 0.75]
-                    :exact-one  0.50}})
+  "Default risk assessment configuration loaded from resources/config/governance/risk.edn.
+   All thresholds and weights are tunable — pass overrides to `assess-risk`
+   via the `:config` key."
+  (config/load-governance-config :risk))
 
 ;; Derived public vars for backward compatibility and external use
 (def risk-factors

@@ -236,6 +236,9 @@
    [:pack/trust-level {:optional true} TrustLevel]
    [:pack/authority {:optional true} AuthorityChannel]
 
+   ;; Config overrides (governance config tuning from trusted packs)
+   [:pack/config-overrides {:optional true} [:map-of :keyword :map]]
+
    ;; Dependencies
    [:pack/extends {:optional true} [:vector PackDependency]]
 

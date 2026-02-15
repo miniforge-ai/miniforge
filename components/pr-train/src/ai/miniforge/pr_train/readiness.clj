@@ -4,45 +4,23 @@
    Replaces boolean `ready-to-merge?` with a weighted numeric score
    that accounts for dependency state, CI, approvals, gates, age, and staleness.
 
-   All scoring parameters are stored as data in `default-config` and can
-   be overridden at call time by passing a custom config.
+   All scoring parameters are loaded from resources/config/governance/readiness.edn
+   and can be overridden at call time by passing a custom config.
 
    Layer 0: Configuration (data)
    Layer 1: Factor scoring functions
    Layer 2: Aggregation and explainability"
-)
+  (:require
+   [ai.miniforge.config.interface :as config]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration — all tunable data in one place
 
 (def default-config
-  "Default readiness scoring configuration. All weights, thresholds, and
-   score maps are pure data. Override by passing a custom config to
-   `compute-readiness-score` and `explain-readiness`."
-  {:weights {:deps-merged       0.30
-             :ci-passed         0.25
-             :approved          0.20
-             :gates-passed      0.15
-             :age-penalty       0.05
-             :staleness-penalty 0.05}
-
-   :merge-threshold 0.85
-
-   :ci-scores {:passed  1.0
-               :running 0.5
-               :pending 0.5
-               :skipped 0.75
-               :failed  0.0}
-
-   :approval-scores {:approved          1.0
-                     :merged            1.0
-                     :merging           1.0
-                     :reviewing         0.5
-                     :changes-requested 0.25}
-
-   :age {:max-days 14}
-
-   :staleness {:max-hours 72}})
+  "Default readiness scoring configuration loaded from resources/config/governance/readiness.edn.
+   All weights, thresholds, and score maps are pure data. Override by passing
+   a custom config to `compute-readiness-score` and `explain-readiness`."
+  (config/load-governance-config :readiness))
 
 ;; Backward-compatible aliases
 (def readiness-weights (:weights default-config))

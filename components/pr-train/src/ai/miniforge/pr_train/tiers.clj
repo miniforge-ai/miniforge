@@ -11,35 +11,22 @@
    | 2    | yes           | yes         | Risk <= medium, readiness >= 0.90  |
    | 3    | yes           | yes         | Risk <= high, readiness >= 0.75    |
 
-   Tier definitions are pure data and can be overridden by passing a custom
-   definitions map to `tier-allows?` and related functions.
+   Tier definitions are loaded from resources/config/governance/tiers.edn
+   and can be overridden by passing a custom definitions map to `tier-allows?`
+   and related functions.
 
    Layer 0: Tier definitions (data)
-   Layer 1: Tier enforcement functions")
+   Layer 1: Tier enforcement functions"
+  (:require
+   [ai.miniforge.config.interface :as config]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Tier definitions — pure data, no code
 
 (def default-tier-definitions
-  "Default automation tier constraint definitions."
-  {:tier-0 {:auto-approve? false
-            :auto-merge?   false
-            :description   "Human-only: no automation"
-            :constraints   {}}
-   :tier-1 {:auto-approve? false
-            :auto-merge?   true
-            :description   "Human approves, system merges"
-            :constraints   {}}
-   :tier-2 {:auto-approve? true
-            :auto-merge?   true
-            :description   "Full automation with tight guardrails"
-            :constraints   {:max-risk-level :medium
-                            :min-readiness  0.90}}
-   :tier-3 {:auto-approve? true
-            :auto-merge?   true
-            :description   "Full automation with relaxed guardrails"
-            :constraints   {:max-risk-level :high
-                            :min-readiness  0.75}}})
+  "Default automation tier constraint definitions loaded from
+   resources/config/governance/tiers.edn."
+  (config/load-governance-config :tiers))
 
 ;; Backward-compatible alias
 (def tier-definitions

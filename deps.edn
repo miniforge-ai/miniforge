@@ -125,6 +125,7 @@
 
   :test {:extra-paths ["development/test"
                        "components/schema/test"
+                       "components/config/test"
                        "components/algorithms/test"
                        "components/response/test"
                        "components/fsm/test"
@@ -161,6 +162,7 @@
                        "components/self-healing/test"
                        "components/spec-parser/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
+                      ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
