@@ -36,7 +36,8 @@
    [ai.miniforge.policy-pack.registry :as registry]
    [ai.miniforge.policy-pack.loader :as loader]
    [ai.miniforge.policy-pack.detection :as detection]
-   [ai.miniforge.policy-pack.core :as core]))
+   [ai.miniforge.policy-pack.core :as core]
+   [ai.miniforge.policy-pack.external :as external]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
@@ -541,6 +542,28 @@
    Example:
      (compare-versions \"2026.01.22\" \"2026.01.15\") ;; => 7"
   registry/compare-versions)
+
+;------------------------------------------------------------------------------ Layer 5
+;; External PR evaluation (N4/N9)
+
+(def evaluate-external-pr
+  "Evaluate an external PR against policy packs in read-only mode.
+
+   Arguments:
+   - packs - Vector of PackManifest maps (or single pack)
+   - pr-data - Map with :diff, :repo, :pr-number, :labels, :changed-files
+
+   Returns:
+   {:evaluation/passed? bool
+    :evaluation/violations [...]
+    :evaluation/summary {:critical N :major N :minor N :info N :total N}
+    :evaluation/artifacts-checked int
+    :evaluation/packs-applied [string]}"
+  external/evaluate-external-pr)
+
+(def parse-pr-diff
+  "Parse a unified diff into artifact maps."
+  external/parse-pr-diff)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

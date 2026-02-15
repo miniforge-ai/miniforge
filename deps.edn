@@ -77,6 +77,8 @@
                        "components/web-dashboard/resources"
                        "components/self-healing/src"
                        "components/self-healing/resources"
+                       "components/spec-parser/src"
+                       "components/spec-parser/resources"
                        "bases/cli/src"
                        "bases/cli/resources"
                        "bases/lsp-mcp-bridge/src"]
@@ -118,6 +120,7 @@
                      ai.miniforge/tui-views {:local/root "components/tui-views"}
                      ai.miniforge/web-dashboard {:local/root "components/web-dashboard"}
                      ai.miniforge/self-healing {:local/root "components/self-healing"}
+                     ai.miniforge/spec-parser {:local/root "components/spec-parser"}
                      ai.miniforge/cli {:local/root "bases/cli"}}}
 
   :test {:extra-paths ["development/test"
@@ -156,7 +159,8 @@
                        "components/tui-engine/test"
                        "components/tui-views/test"
                        "components/web-dashboard/test"
-                       "components/self-healing/test"]
+                       "components/self-healing/test"
+                       "components/spec-parser/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
@@ -192,7 +196,8 @@
                       ai.miniforge/tui-engine {:local/root "components/tui-engine"}
                       ai.miniforge/tui-views {:local/root "components/tui-views"}
                       ai.miniforge/web-dashboard {:local/root "components/web-dashboard"}
-                      ai.miniforge/self-healing {:local/root "components/self-healing"}}}
+                      ai.miniforge/self-healing {:local/root "components/self-healing"}
+                      ai.miniforge/spec-parser {:local/root "components/spec-parser"}}}
 
   :conformance {:extra-paths ["development/test"
                               "tests/conformance"

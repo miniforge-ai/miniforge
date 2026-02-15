@@ -16,8 +16,8 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-{:title "Web Dashboard Component"
- :description
+{:spec/title "Web Dashboard Component"
+ :spec/description
  "Build a web-based dashboard for miniforge that provides real-time visibility
   into workflows, PR trains, policies, and system status.
 
@@ -30,7 +30,7 @@
   The workflow agents will use the existing tui-views component as a reference
   implementation, translating TUI rendering primitives to HTML/CSS/React components."
 
- :intent
+ :spec/intent
  {:type :feature
   :scope ["Create new web-dashboard Polylith component"
           "HTTP server (Clojure backend) with WebSocket support"
@@ -55,7 +55,7 @@
     "Rule 210-clojure.mdc for stratification"
     "Rule 720-pr-layering for PR sizing"]}}
 
- :constraints
+ :spec/constraints
  ["Must be a Polylith component: components/web-dashboard/"
   "HTTP server in Clojure (backend) using http-kit"
   "ClojureScript SPA frontend (re-frame + reagent)"

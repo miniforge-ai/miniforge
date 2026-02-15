@@ -123,7 +123,24 @@
    [:pr/blocks [:vector :pr/number]]
    [:pr/ci-status :pr/ci-status]
    [:pr/gate-results {:optional true} [:vector GateResult]]
-   [:pr/intent {:optional true} TaskIntent]])
+   [:pr/intent {:optional true} TaskIntent]
+
+   ;; Tier 2 governance fields (backward-compatible)
+   [:pr/readiness-score {:optional true} [:double {:min 0.0 :max 1.0}]]
+   [:pr/risk {:optional true}
+    [:map
+     [:risk/score :common/pos-number]
+     [:risk/level [:enum :low :medium :high :critical]]
+     [:risk/factors {:optional true} [:vector [:map-of keyword? any?]]]]]
+   [:pr/automation-tier {:optional true} [:enum :tier-0 :tier-1 :tier-2 :tier-3]]
+   [:pr/derived-state {:optional true}
+    [:map
+     [:age-days :common/non-neg-int]
+     [:staleness-hours :common/non-neg-int]
+     [:change-size {:optional true}
+      [:map
+       [:additions :common/non-neg-int]
+       [:deletions :common/non-neg-int]]]]]])
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Progress schema

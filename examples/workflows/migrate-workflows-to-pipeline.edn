@@ -1,5 +1,5 @@
-{:title "Migrate all workflows to pipeline format"
- :description "Migrate remaining workflows from old :workflow/phases format to new :workflow/pipeline format.
+{:spec/title "Migrate all workflows to pipeline format"
+ :spec/description "Migrate remaining workflows from old :workflow/phases format to new :workflow/pipeline format.
 
 Current state:
 - Validator accepts both formats (just completed)
@@ -56,10 +56,10 @@ Either:
 - Create stub phase implementations, OR
 - Simplify canonical-sdlc to use only registered phases"
 
- :intent {:type :refactor
+ :spec/intent {:type :refactor
           :scope ["components/workflow/resources/workflows/*.edn"]}
 
- :constraints ["maintain-backward-compatibility"
+ :spec/constraints ["maintain-backward-compatibility"
                "validate-all-workflows"
                "test-execution-equivalence"
                "update-documentation"]

@@ -50,8 +50,8 @@
 
    Returns: String summary"
   [spec]
-  (let [title (:spec/title spec (:title spec))
-        description (:spec/description spec (:description spec))
+  (let [title (:spec/title spec)
+        description (:spec/description spec)
         intent (:spec/intent spec)
         constraints (:spec/constraints spec)
         workflow-type (:spec/workflow-type spec)]
@@ -155,7 +155,7 @@
     (response/make-anomaly :anomalies/unavailable
                            "LLM client not available for workflow recommendation"
                            {:operation :recommend-workflow
-                            :spec-title (:spec/title spec (:title spec))})
+                            :spec-title (:spec/title spec)})
     (try
       (let [prompt (build-recommendation-prompt spec available-workflows)
             response-text (call-llm-for-recommendation llm-client prompt)]
@@ -163,7 +163,7 @@
           (response/make-anomaly :anomalies/unavailable
                                  "LLM did not return a response"
                                  {:operation :recommend-workflow
-                                  :spec-title (:spec/title spec (:title spec))})
+                                  :spec-title (:spec/title spec)})
           (if-let [parsed (parse-llm-response response-text)]
             (let [recommendation (assoc parsed :source :llm)]
               ;; Validate against schema

@@ -21,8 +21,8 @@
  :workflow/version "2.0.0"
 
  ;; Required root-level keys for spec validation
- :title "Implement Releaser agent to enable autonomous PR creation"
- :description
+ :spec/title "Implement Releaser agent to enable autonomous PR creation"
+ :spec/description
  "Implement the Releaser agent component that generates commit messages, PR
   descriptions, and PR documentation. Wire it into the release phase to enable
   miniforge to autonomously create PRs.
@@ -38,7 +38,7 @@
 
   That future is now!"
 
- :intent
+ :spec/intent
  {:type :implement
   :scope ["components/agent/src/ai/miniforge/agent/releaser.clj"
           "components/agent/test/ai/miniforge/agent/releaser_test.clj"
@@ -46,7 +46,7 @@
           "components/workflow/src/ai/miniforge/workflow/release.clj"
           "components/agent/src/ai/miniforge/agent/interface.clj"]}
 
- :constraints
+ :spec/constraints
  ["Follow existing agent patterns (see planner.clj, implementer.clj, tester.clj)"
   "Releaser agent creates ReleaseArtifact with commit message, PR description, branch name"
   "System prompt must follow rule 715 for commit messages"
@@ -59,7 +59,7 @@
   "Follow polylith architecture (interface + implementation)"]
 
  ;; Additional metadata (preserved in :spec/raw-data)
- :task/acceptance-criteria
+ :spec/acceptance-criteria
  ["New file: components/agent/src/ai/miniforge/agent/releaser.clj exists"
   "Releaser agent has system prompt for commit/PR message generation"
   "Releaser generates ReleaseArtifact with required fields"
@@ -72,7 +72,7 @@
   "Integration test shows full workflow creates actual PR"
   "Miniforge can now complete this workflow by creating its own PR!"]
 
- :task/technical-details
+ :technical-details
  "Key files to modify/create:
 
   NEW FILES:
@@ -95,7 +95,7 @@
   - Rule 715 in docs/ for commit message format
   - Evidence bundle structure for PR documentation content"
 
- :task/success-metrics
+ :success-metrics
  "After this workflow completes:
   1. Miniforge creates a PR for this very implementation
   2. PR includes /docs/pr/<workflow-id>.md with evidence

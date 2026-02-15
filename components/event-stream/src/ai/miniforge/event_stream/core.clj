@@ -35,7 +35,9 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event envelope constructor
 
-(defn- create-envelope [stream event-type workflow-id message]
+(defn create-envelope
+  "Create an event envelope with sequence numbering."
+  [stream event-type workflow-id message]
   (let [seq-num (get-in @stream [:sequence-numbers workflow-id] 0)]
     (swap! stream assoc-in [:sequence-numbers workflow-id] (inc seq-num))
     {:event/type event-type

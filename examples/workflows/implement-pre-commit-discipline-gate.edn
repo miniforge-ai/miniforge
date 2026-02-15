@@ -12,8 +12,8 @@
  :workflow/type :standard-sdlc
  :workflow/version "2.0.0"
 
- :title "Implement Pre-Commit Discipline Policy Gate"
- :description
+ :spec/title "Implement Pre-Commit Discipline Policy Gate"
+ :spec/description
  "Create a policy gate that enforces .cursor/rules/700-workflows/715-pre-commit-discipline.mdc.
 
   The gate should:
@@ -23,7 +23,7 @@
   4. Flag violations with appropriate severity
   5. Integrate into the workflow execution pipeline"
 
- :intent
+ :spec/intent
  {:type "feature"
   :description "Implement automated enforcement of pre-commit discipline to prevent
   bypass shortcuts without investigation. This addresses the pattern where agents
@@ -37,7 +37,7 @@
   The gate will make this pattern immediately visible during workflow execution,
   giving the meta-agent a chance to intervene before code reaches CI."}
 
- :constraints
+ :spec/constraints
  ["Follow N4 spec §2.0 for policy gate structure"
   "Integrate with existing gate system in components/gate"
   "Use git log analysis to detect --no-verify commits"
@@ -48,7 +48,7 @@
   "Follow Polylith interface patterns"
   "Maintain backward compatibility with existing gates"]
 
- :acceptance-criteria
+ :spec/acceptance-criteria
  ["Gate implementation in components/gate/src/.../pre_commit_discipline.clj"
   "Detects commits made with --no-verify in current branch"
   "Validates [BYPASS-HOOKS: reason] is present in bypassed commits"

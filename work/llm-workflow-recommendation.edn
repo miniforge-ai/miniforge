@@ -1,12 +1,12 @@
 ;; LLM-Based Workflow Recommendation
 
-{:title "Enhance Workflow Selection with LLM Recommendation"
+{:spec/title "Enhance Workflow Selection with LLM Recommendation"
  :version "1.0.0"
  :type :enhancement
  :priority :medium
  :pr-comment "PR #152: workflow_selector.clj:66 and :234"
 
- :description
+ :spec/description
  "Augment the mechanical rule-based workflow selector with LLM-powered
   recommendation. The current implementation does good pattern matching,
   but an LLM can provide deeper semantic understanding of spec intent.
@@ -162,7 +162,7 @@
    "Test LLM recommendation with various backends"
    "Verify fallback when LLM unavailable"]}
 
- :acceptance-criteria
+ :spec/acceptance-criteria
  [{:criterion "Workflow registry centralizes workflow definitions"
    :verification "New workflows can be added without touching selector code"}
 
