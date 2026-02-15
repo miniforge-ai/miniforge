@@ -8,6 +8,7 @@
    RBAC roles define which action types are permitted per target category."
   (:require
    [ai.miniforge.event-stream.core :as core]
+   [ai.miniforge.event-stream.approval :as approval]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -55,14 +56,11 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; RBAC authorization
 
-(defn- target-type->category
-  "Map target type to RBAC category."
-  [target-type]
-  (case target-type
-    :workflow :workflows
-    :agent :agents
-    :fleet :fleet
-    nil))
+(def ^:private target-type->category
+  "Map from target type to RBAC category keyword."
+  {:workflow :workflows
+   :agent    :agents
+   :fleet    :fleet})
 
 (defn authorize-action
   "Check RBAC authorization for a control action.
@@ -141,3 +139,52 @@
                      (core/control-action-executed
                       stream workflow-id action-id result))
       result)))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Approval-aware control action execution
+
+(def ^:private actions-requiring-approval
+  "Action types that require multi-party approval before execution."
+  #{:gate-override :budget-escalation})
+
+(defn requires-approval?
+  "Check if a control action type requires multi-party approval."
+  [action-type]
+  (contains? actions-requiring-approval action-type))
+
+(defn execute-control-action-with-approval!
+  "Execute a control action, checking approval requirements first.
+
+   If the action type requires approval (:gate-override, :budget-escalation),
+   creates an approval request and returns {:status :awaiting-approval}.
+   Otherwise delegates to execute-control-action!.
+
+   Arguments:
+   - stream: Event stream atom
+   - action: Control action map
+   - execution-fn: (fn [action] -> result-map)
+   - approval-opts: Map with :required-signers, :quorum, :approval-manager
+
+   Returns: Result map with :status key."
+  [stream action execution-fn & [approval-opts]]
+  (if (requires-approval? (:action/type action))
+    (let [action-id (:action/id action)
+          signers (get approval-opts :required-signers ["admin"])
+          quorum (get approval-opts :quorum 1)
+          mgr (get approval-opts :approval-manager)
+          req (approval/create-approval-request action-id signers quorum)
+          workflow-id (get-in action [:action/target :target-id])]
+      ;; Store in manager if provided
+      (when mgr
+        (approval/store-approval! mgr req))
+      ;; Emit approval requested event
+      (core/publish! stream
+                     (approval/approval-requested
+                      stream workflow-id (:approval/id req)
+                      action-id signers))
+      {:status :awaiting-approval
+       :approval/id (:approval/id req)
+       :approval/required-signers signers
+       :approval/quorum quorum})
+    ;; No approval needed — execute directly
+    (execute-control-action! stream action execution-fn)))

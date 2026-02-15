@@ -49,7 +49,8 @@
   (:require
    [ai.miniforge.event-stream.core :as core]
    [ai.miniforge.event-stream.listeners :as listeners]
-   [ai.miniforge.event-stream.control :as control]))
+   [ai.miniforge.event-stream.control :as control]
+   [ai.miniforge.event-stream.approval :as approval]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event stream lifecycle
@@ -479,6 +480,65 @@
   "Execute an authorized control action with event emission."
   [stream action execution-fn]
   (control/execute-control-action! stream action execution-fn))
+
+(def requires-approval?
+  "Check if a control action type requires multi-party approval."
+  control/requires-approval?)
+
+(defn execute-control-action-with-approval!
+  "Execute a control action, creating an approval request if required."
+  [stream action execution-fn & [approval-opts]]
+  (control/execute-control-action-with-approval! stream action execution-fn approval-opts))
+
+;------------------------------------------------------------------------------ Layer 3b
+;; Multi-party approval API (N8)
+
+(def approval-succeeded?
+  "Check if an approval builder response succeeded."
+  approval/succeeded?)
+
+(def approval-failed?
+  "Check if an approval builder response failed."
+  approval/failed?)
+
+(def create-approval-request
+  "Create a new approval request.
+   Arguments: action-id, required-signers, quorum, [opts]"
+  approval/create-approval-request)
+
+(defn submit-approval
+  "Submit an approval or rejection for a request."
+  [approval-request signer decision & [opts]]
+  (approval/submit-approval approval-request signer decision opts))
+
+(def check-approval-status
+  "Check the current status of an approval request."
+  approval/check-approval-status)
+
+(defn cancel-approval
+  "Cancel a pending approval request."
+  [approval-request canceller reason]
+  (approval/cancel-approval approval-request canceller reason))
+
+(def create-approval-manager
+  "Create an atom-backed approval manager."
+  approval/create-approval-manager)
+
+(def store-approval!
+  "Store an approval request in the manager."
+  approval/store-approval!)
+
+(def get-approval
+  "Get an approval request by ID."
+  approval/get-approval)
+
+(def update-approval!
+  "Update an approval request in the manager."
+  approval/update-approval!)
+
+(def list-approvals
+  "List all approval requests."
+  approval/list-approvals)
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Convenience functions
