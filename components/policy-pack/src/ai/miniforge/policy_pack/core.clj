@@ -322,7 +322,8 @@
      :blocking (mapv detection/violation->error blocking)
      :require-approval (mapv detection/violation->error approvals)
      :warnings (mapv detection/violation->warning warnings)
-     :audits (mapv detection/violation->warning audits)}))
+     :audits (mapv detection/violation->warning audits)
+     :read-only? (boolean (:read-only? context))}))
 
 (defn check-artifacts
   "Check multiple artifacts against pack rules.
