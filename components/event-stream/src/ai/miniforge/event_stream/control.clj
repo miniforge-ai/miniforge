@@ -56,14 +56,11 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; RBAC authorization
 
-(defn- target-type->category
-  "Map target type to RBAC category."
-  [target-type]
-  (case target-type
-    :workflow :workflows
-    :agent :agents
-    :fleet :fleet
-    nil))
+(def ^:private target-type->category
+  "Map from target type to RBAC category keyword."
+  {:workflow :workflows
+   :agent    :agents
+   :fleet    :fleet})
 
 (defn authorize-action
   "Check RBAC authorization for a control action.
