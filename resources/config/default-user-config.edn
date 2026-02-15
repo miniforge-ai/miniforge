@@ -23,6 +23,10 @@
                  :backend-auto-switch true
                  :backend-health-threshold 0.90
                  :backend-switch-cooldown-ms 1800000}
+  :governance {:readiness {}
+               :risk {}
+               :tiers {}
+               :knowledge-safety {}}
   :observability {:event-sinks [:file]
                   :log-sinks [:file]
                   :rotation {:max-size-mb 10
