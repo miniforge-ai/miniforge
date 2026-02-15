@@ -220,6 +220,22 @@
                          (responses/not-found-response))
               (responses/not-found-response)))
 
+          ;; Approval API endpoints (N8)
+          (and (= uri "/api/approvals") (= (:request-method req) :post))
+          (handlers/handle-api-approval-create state (slurp (:body req)))
+
+          (and (.startsWith uri "/api/approvals/")
+               (.endsWith uri "/sign")
+               (= (:request-method req) :post))
+          (let [rest-uri (subs uri 16)
+                approval-id (first (str/split rest-uri #"/" 2))]
+            (handlers/handle-api-approval-sign state approval-id (slurp (:body req))))
+
+          (and (.startsWith uri "/api/approvals/")
+               (= (:request-method req) :get))
+          (let [approval-id (subs uri 16)]
+            (handlers/handle-api-approval-get state approval-id))
+
           (.startsWith uri "/api/workflow/")
           (let [rest-uri (subs uri 14)
                 [wf-id segment] (str/split rest-uri #"/" 2)]
@@ -263,10 +279,8 @@
                                    :repo-dag-manager repo-dag-manager
                                    :start-time (System/currentTimeMillis)})
         handler (create-handler state)
-        server (http/run-server handler {:port port})
-        actual-port (if (zero? port)
-                      (.getLocalPort (:server-socket @server))
-                      port)
+        server (http/run-server handler {:port port :legacy-return-value? false})
+        actual-port (http/server-port server)
         ;; Start file watcher to tail-follow event files
         events-dir (str (System/getProperty "user.home") "/.miniforge/events")
         watcher-cleanup (watcher/start-watcher!
@@ -307,7 +321,7 @@
     (watcher-cleanup))
   (when server
     (delete-discovery-file!)
-    (server :timeout 100)
+    (http/server-stop! server {:timeout 100})
     (println "Web dashboard stopped")))
 
 (defn get-server-port
