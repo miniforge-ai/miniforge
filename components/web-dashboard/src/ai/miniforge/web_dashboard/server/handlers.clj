@@ -487,6 +487,57 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Structured control action handler (N8)
 
+(def ^:private default-dashboard-requester
+  "Default requester identity when none is provided in the request body."
+  {:principal "dashboard" :role :operator})
+
+(defn- build-control-action
+  "Build a control action map from parsed request data."
+  [data workflow-id]
+  (let [create-fn (requiring-resolve 'ai.miniforge.event-stream.interface/create-control-action)]
+    (create-fn (keyword (:action/type data))
+               {:target-type :workflow :target-id workflow-id}
+               (or (:action/requester data) default-dashboard-requester)
+               {:justification (:action/justification data)
+                :parameters (:action/parameters data)})))
+
+(defn- execute-via-command!
+  "Execution function that bridges control actions to the legacy command system."
+  [state workflow-id action]
+  (let [cmd (name (:action/type action))]
+    (write-command-file! workflow-id cmd)
+    (state/enqueue-command! state workflow-id cmd)
+    {:command cmd :workflow-id workflow-id}))
+
+(defn- execute-authorized-action
+  "Execute a control action that has passed authorization."
+  [state workflow-id action]
+  (let [es (:event-stream @state)
+        exec-fn (requiring-resolve 'ai.miniforge.event-stream.interface/execute-control-action!)
+        result (exec-fn es action (partial execute-via-command! state workflow-id))]
+    (responses/json-response {:status "executed" :result result})))
+
+(defn- authorization-error-response
+  "Build an anomaly response for a failed authorization check."
+  [auth-result action-type]
+  (anomaly-http-response
+   (or (:anomaly auth-result)
+       (make-anomaly :anomalies/forbidden
+                     (:reason auth-result)
+                     {:action-type action-type}))))
+
+(defn- handle-structured-control-action
+  "Handle a structured control action request (has :action/type)."
+  [state workflow-id data]
+  (let [action (build-control-action data workflow-id)
+        roles @(requiring-resolve 'ai.miniforge.event-stream.control/default-roles)
+        requester (:action/requester action)
+        auth-result ((requiring-resolve 'ai.miniforge.event-stream.interface/authorize-action)
+                     roles action requester)]
+    (if (:authorized? auth-result)
+      (execute-authorized-action state workflow-id action)
+      (authorization-error-response auth-result (:action/type action)))))
+
 (defn handle-api-workflow-command-v2
   "API: Enqueue a structured control action for a workflow.
    Accepts both legacy {:command :pause} and structured {:action/type :pause ...} formats."
@@ -494,36 +545,7 @@
   (try
     (let [data (json/parse-string body true)]
       (if (:action/type data)
-        ;; New structured control action
-        (let [es (:event-stream @state)
-              create-fn (requiring-resolve 'ai.miniforge.event-stream.interface/create-control-action)
-              auth-fn (requiring-resolve 'ai.miniforge.event-stream.interface/authorize-action)
-              exec-fn (requiring-resolve 'ai.miniforge.event-stream.interface/execute-control-action!)
-              roles @(requiring-resolve 'ai.miniforge.event-stream.control/default-roles)
-              action-type (keyword (:action/type data))
-              requester (or (:action/requester data)
-                            {:principal "dashboard" :role :operator})
-              action (create-fn action-type
-                                {:target-type :workflow :target-id workflow-id}
-                                requester
-                                {:justification (:action/justification data)
-                                 :parameters (:action/parameters data)})
-              auth-result (auth-fn roles action requester)]
-          (if (:authorized? auth-result)
-            (let [result (exec-fn es action
-                                  (fn [act]
-                                    ;; Execute via existing command infrastructure
-                                    (let [cmd (name (:action/type act))]
-                                      (write-command-file! workflow-id cmd)
-                                      (state/enqueue-command! state workflow-id cmd)
-                                      {:command cmd :workflow-id workflow-id})))]
-              (responses/json-response {:status "executed" :result result}))
-            (anomaly-http-response
-             (or (:anomaly auth-result)
-                 (make-anomaly :anomalies/forbidden
-                               (:reason auth-result)
-                               {:action-type action-type})))))
-        ;; Legacy command format — delegate to existing handler
+        (handle-structured-control-action state workflow-id data)
         (handle-api-workflow-command state workflow-id body)))
     (catch Exception e
       (anomaly-http-response (from-exception e)))))

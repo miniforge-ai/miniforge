@@ -279,10 +279,8 @@
                                    :repo-dag-manager repo-dag-manager
                                    :start-time (System/currentTimeMillis)})
         handler (create-handler state)
-        server (http/run-server handler {:port port})
-        actual-port (if (zero? port)
-                      (.getLocalPort (:server-socket @server))
-                      port)
+        server (http/run-server handler {:port port :legacy-return-value? false})
+        actual-port (http/server-port server)
         ;; Start file watcher to tail-follow event files
         events-dir (str (System/getProperty "user.home") "/.miniforge/events")
         watcher-cleanup (watcher/start-watcher!
@@ -323,7 +321,7 @@
     (watcher-cleanup))
   (when server
     (delete-discovery-file!)
-    (server :timeout 100)
+    (http/server-stop! server {:timeout 100})
     (println "Web dashboard stopped")))
 
 (defn get-server-port
