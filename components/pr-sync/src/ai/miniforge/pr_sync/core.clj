@@ -359,19 +359,38 @@
        (take limit)
        vec))
 
+(defn- viewer-repos-gh-args
+  "Build `gh api graphql` arguments for a page of viewer repositories."
+  [limit acc after]
+  (let [remaining (- limit (count acc))
+        per-page (max 1 (min 100 remaining))]
+    (cond-> ["api" "graphql"
+             "-f" (str "query=" viewer-repos-graphql-query)
+             "-F" (str "perPage=" per-page)]
+      after (conj "-F" (str "after=" after)))))
+
+(defn- parse-viewer-repos-page
+  "Extract normalized repo slugs and pagination info from a GraphQL viewer response."
+  [parsed]
+  (let [nodes (or (get-in parsed [:data :viewer :repositories :nodes] []) [])
+        page-info (or (get-in parsed [:data :viewer :repositories :pageInfo] {}) {})
+        repos (->> nodes
+                   (keep :nameWithOwner)
+                   (map normalize-repo-slug)
+                   (filter valid-repo-slug?)
+                   distinct
+                   vec)]
+    {:repos repos
+     :has-next? (boolean (:hasNextPage page-info))
+     :cursor (:endCursor page-info)}))
+
 (defn- list-viewer-repos
   "List repos visible to the authenticated user across affiliations."
   [limit]
   (try
     (loop [after nil
            acc []]
-      (let [remaining (- limit (count acc))
-            per-page (max 1 (min 100 remaining))
-            args (cond-> ["api" "graphql"
-                          "-f" (str "query=" viewer-repos-graphql-query)
-                          "-F" (str "perPage=" per-page)]
-                   after (conj "-F" (str "after=" after)))
-            result (apply run-gh args)]
+      (let [result (apply run-gh (viewer-repos-gh-args limit acc after))]
         (if-not (:success? result)
           (result-failure (gh-error-message (:out result) (:err result)))
           (let [parsed-result (try
@@ -381,18 +400,8 @@
             (if-let [err (:error parsed-result)]
               (result-failure "Failed to parse repository list."
                               {:error err})
-              (let [parsed (:ok parsed-result)
-                    nodes (or (get-in parsed [:data :viewer :repositories :nodes] []) [])
-                    page-info (or (get-in parsed [:data :viewer :repositories :pageInfo] {}) {})
-                    repos (->> nodes
-                               (keep :nameWithOwner)
-                               (map normalize-repo-slug)
-                               (filter valid-repo-slug?)
-                               distinct
-                               vec)
-                    next-acc (->> (concat acc repos) distinct (take limit) vec)
-                    has-next? (boolean (:hasNextPage page-info))
-                    cursor (:endCursor page-info)]
+              (let [{:keys [repos has-next? cursor]} (parse-viewer-repos-page (:ok parsed-result))
+                    next-acc (->> (concat acc repos) distinct (take limit) vec)]
                 (if (and has-next? cursor (< (count next-acc) limit))
                   (recur cursor next-acc)
                   (result-success {:owner nil :provider :github :repos next-acc}))))))))
