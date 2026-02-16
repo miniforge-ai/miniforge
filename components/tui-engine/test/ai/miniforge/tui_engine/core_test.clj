@@ -107,3 +107,95 @@
       (let [line (screen/mock-read-line mock 0 40)]
         (is (str/includes? line "pressed-j")))
       (screen/stop-screen! mock))))
+
+(deftest cell-level-diffing-test
+  (testing "Second render with identical model writes zero cells (no flash)"
+    (let [mock (screen/create-mock-screen [40 10])
+          app (core/create-app
+               {:init   (fn [] {:label "static"})
+                :update (fn [model _] model)
+                :view   (fn [model [cols rows]]
+                          (layout/text [cols rows] (:label model)))
+                :screen mock})]
+      (screen/start-screen! mock)
+      ;; First render writes all cells
+      (swap! app core/render!)
+      (let [first-count (screen/mock-get-put-count mock)]
+        (is (pos? first-count) "First render should write cells"))
+      ;; Reset counter
+      (screen/mock-reset-put-count! mock)
+      ;; Second render with identical model should write zero cells
+      (swap! app core/render!)
+      (is (zero? (screen/mock-get-put-count mock))
+          "Identical model should produce zero put-string! calls")
+      (screen/stop-screen! mock)))
+
+  (testing "Render after model change only writes changed cells"
+    (let [mock (screen/create-mock-screen [40 10])
+          model-atom (atom {:label "before"})
+          app (core/create-app
+               {:init   (fn [] @model-atom)
+                :update (fn [_ msg] msg)
+                :view   (fn [model [cols rows]]
+                          (layout/text [cols rows] (:label model)))
+                :screen mock})]
+      (screen/start-screen! mock)
+      ;; First render
+      (swap! app core/render!)
+      (screen/mock-reset-put-count! mock)
+      ;; Change model and re-render
+      (core/dispatch! app {:label "after!"})
+      (let [changed-count (screen/mock-get-put-count mock)]
+        ;; Should write fewer cells than a full screen
+        (is (pos? changed-count) "Changed model should write some cells")
+        (is (< changed-count 400) "Should write far fewer than 400 cells (40×10)"))
+      (screen/stop-screen! mock))))
+
+(deftest side-effect-dispatch-test
+  (testing "Side-effect is stripped from model and executed async"
+    (let [effect-result (promise)
+          mock (screen/create-mock-screen [40 10])
+          app (core/create-app
+               {:init   (fn [] {:value "init"})
+                :update (fn [model msg]
+                          (case (first msg)
+                            :trigger (assoc model :side-effect {:type :test-fx}
+                                                  :value "triggered")
+                            :fx-done (assoc model :value (:result (second msg)))
+                            model))
+                :view   (fn [model [cols rows]]
+                          (layout/text [cols rows] (:value model)))
+                :effect-handler
+                (fn [effect]
+                  (deliver effect-result effect)
+                  [:fx-done {:result "from-effect"}])
+                :screen mock})]
+      (screen/start-screen! mock)
+      (core/dispatch! app [:trigger nil])
+      ;; Model should NOT contain :side-effect (stripped by runtime)
+      (is (nil? (:side-effect (core/get-model app))))
+      (is (= "triggered" (:value (core/get-model app))))
+      ;; Wait for effect to complete
+      (let [fx (deref effect-result 2000 :timeout)]
+        (is (= {:type :test-fx} fx)))
+      ;; Wait for effect result dispatch
+      (Thread/sleep 200)
+      (is (= "from-effect" (:value (core/get-model app))))
+      (screen/stop-screen! mock)))
+
+  (testing "No effect-handler means side-effects are silently ignored"
+    (let [mock (screen/create-mock-screen [40 10])
+          app (core/create-app
+               {:init   (fn [] {:value "init"})
+                :update (fn [model _]
+                          (assoc model :side-effect {:type :ignored}
+                                       :value "set"))
+                :view   (fn [model [cols rows]]
+                          (layout/text [cols rows] (:value model)))
+                :screen mock})]
+      (screen/start-screen! mock)
+      (core/dispatch! app [:any nil])
+      ;; Side-effect stripped, value updated, no crash
+      (is (nil? (:side-effect (core/get-model app))))
+      (is (= "set" (:value (core/get-model app))))
+      (screen/stop-screen! mock))))

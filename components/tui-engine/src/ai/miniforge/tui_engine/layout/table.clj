@@ -70,11 +70,11 @@
 
 (defn- render-separator
   "Render horizontal separator line."
-  [buffer cols rows]
+  [buffer cols rows separator-fg]
   (if (>= rows 2)
     (buf/buf-put-string buffer 0 1
                         (apply str (repeat cols \─))
-                        {:fg :default :bg :black :bold? false})
+                        {:fg (or separator-fg :default) :bg :default :bold? false})
     buffer))
 
 (defn- render-data-cell
@@ -108,16 +108,18 @@
    - :selected-row - index of highlighted row (nil for none)
    - :header-fg, :header-bg - Header style
    - :row-fg, :row-bg - Default row style
-   - :selected-fg, :selected-bg - Selected row style"
+   - :selected-fg, :selected-bg - Selected row style
+   - :separator-fg - Separator line color (defaults to header-fg)"
   [[cols rows] & [{:keys [columns data selected-row
-                           header-fg header-bg row-fg row-bg selected-fg selected-bg]
-                    :or {header-fg :cyan header-bg :black
-                         row-fg :white row-bg :black
+                           header-fg header-bg row-fg row-bg
+                           selected-fg selected-bg separator-fg]
+                    :or {header-fg :cyan header-bg :default
+                         row-fg :default row-bg :default
                          selected-fg :white selected-bg :blue}}]]
   (let [col-widths (compute-col-widths columns cols)
         buffer (buf/make-buffer [cols rows])
         buffer (render-header-row buffer columns col-widths header-fg header-bg)
-        buffer (render-separator buffer cols rows)
+        buffer (render-separator buffer cols rows (or separator-fg header-fg))
         visible-rows (take (max 0 (- rows 2)) (or data []))]
     (reduce (fn [b [row-idx row-data]]
               (render-data-row b row-idx row-data columns col-widths rows

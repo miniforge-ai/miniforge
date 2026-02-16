@@ -27,7 +27,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Cell buffer operations
 
-(def empty-cell {:char \space :fg :white :bg :black :bold? false})
+(def empty-cell {:char \space :fg :default :bg :default :bold? false})
 
 (defn make-buffer
   "Create an empty cell buffer of [cols rows]."
@@ -46,7 +46,7 @@
 
 (defn buf-put-string
   "Write a string into the buffer at [col row] with given style."
-  [buf col row text {:keys [fg bg bold?] :or {fg :white bg :black bold? false}}]
+  [buf col row text {:keys [fg bg bold?] :or {fg :default bg :default bold? false}}]
   (reduce (fn [b i]
             (if (< (+ col i) (count (first b)))
               (buf-put-char b (+ col i) row
@@ -98,7 +98,7 @@
   "Render a styled text span into a buffer.
    Truncates to fit within [cols rows]."
   [[cols rows] content & [{:keys [fg bg bold? align]
-                            :or {fg :white bg :black bold? false align :left}}]]
+                            :or {fg :default bg :default bold? false align :left}}]]
   (let [buf (make-buffer [cols rows])
         lines (str/split-lines (or content ""))
         lines (take rows lines)]

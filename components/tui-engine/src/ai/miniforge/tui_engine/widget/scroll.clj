@@ -30,20 +30,28 @@
 (defn scrollable
   "Render a scrollable viewport with scrollbar.
    Options:
-   - :lines   - vector of strings (total content)
-   - :offset  - scroll offset (first visible line index)
-   - :fg, :bg - colors"
-  [[cols rows] & [{:keys [lines offset fg bg]
-                    :or {offset 0 fg :white bg :black}}]]
+   - :lines             - vector of strings (total content)
+   - :offset            - scroll offset (first visible line index)
+   - :fg, :bg           - colors
+   - :highlight-lines   - set of absolute line indices to highlight (search matches)
+   - :current-highlight - absolute line index of current match (brighter highlight)"
+  [[cols rows] & [{:keys [lines offset fg bg highlight-lines current-highlight]
+                    :or {offset 0 fg :white bg :default}}]]
   (let [total (count (or lines []))
         content-w (max 1 (- cols 1)) ; 1 col for scrollbar
         visible (take rows (drop offset (or lines [])))
         buffer (buf/make-buffer [cols rows])
         ;; Render visible lines
         buffer (reduce (fn [b [idx line]]
-                      (let [truncated (subs line 0 (min (count line) content-w))]
+                      (let [abs-line (+ offset idx) ; absolute line index
+                            truncated (subs line 0 (min (count line) content-w))
+                            current? (= abs-line current-highlight)
+                            hl? (and highlight-lines (contains? highlight-lines abs-line))
+                            line-fg (cond current? :white hl? :yellow :else fg)
+                            line-bg (cond current? :blue  hl? :default :else bg)
+                            line-bold? (or current? hl?)]
                         (buf/buf-put-string b 0 idx truncated
-                                               {:fg fg :bg bg :bold? false})))
+                                               {:fg line-fg :bg line-bg :bold? line-bold?})))
                     buffer
                     (map-indexed vector visible))
         ;; Scrollbar
@@ -88,6 +96,6 @@
                     level (max 0 (min 8 level))
                     ch (nth braille-chars level)]
                 (buf/buf-put-char b idx 0
-                                     {:char ch :fg fg :bg :black :bold? false})))
+                                     {:char ch :fg fg :bg :default :bold? false})))
             buffer
             (map-indexed vector visible))))

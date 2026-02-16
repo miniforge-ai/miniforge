@@ -50,7 +50,7 @@
                     text (subs text 0 (min (count text) cols))]
                 (buf/buf-put-string b 0 idx text
                                        {:fg (if sel? selected-fg fg)
-                                        :bg (if sel? selected-bg :black)
+                                        :bg (if sel? selected-bg :default)
                                         :bold? sel?})))
             buffer
             (map-indexed vector visible))))
@@ -82,7 +82,7 @@
   (let [header (subs (str " " title (apply str (repeat avail-w \space)))
                      0 (min avail-w (+ (count title) 2)))]
     (buf/buf-put-string buffer x-offset 0 header
-                        {:fg (or color :white) :bg :black :bold? true})))
+                        {:fg (or color :white) :bg :default :bold? true})))
 
 (defn- render-column-separator
   "Render horizontal separator below header."
@@ -90,7 +90,7 @@
   (if (>= rows 2)
     (buf/buf-put-string buffer x-offset 1
                         (apply str (repeat avail-w \─))
-                        {:fg :default :bg :black :bold? false})
+                        {:fg :default :bg :default :bold? false})
     buffer))
 
 (defn- format-card-line
@@ -109,7 +109,7 @@
       (let [line (format-card-line label status avail-w)]
         (buf/buf-put-string buffer x-offset r line
                             {:fg (get status-colors status :white)
-                             :bg :black :bold? false})))))
+                             :bg :default :bold? false})))))
 
 (defn- render-column
   "Render complete kanban column."

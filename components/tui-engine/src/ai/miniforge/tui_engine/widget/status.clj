@@ -60,10 +60,10 @@
   (let [ch (get status-chars status \?)
         fg (get status-colors status :white)
         buffer (buf/make-buffer [cols 1])
-        buffer (buf/buf-put-char buffer 0 0 {:char ch :fg fg :bg :black :bold? false})]
+        buffer (buf/buf-put-char buffer 0 0 {:char ch :fg fg :bg :default :bold? false})]
     (if (> cols 2)
       (buf/buf-put-string buffer 2 0 (subs label 0 (min (count label) (- cols 2)))
-                             {:fg :white :bg :black :bold? false})
+                             {:fg :default :bg :default :bold? false})
       buffer)))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -78,7 +78,7 @@
   [buffer full-cells bar-width fill-fg]
   (reduce (fn [b i]
             (buf/buf-put-char b i 0
-                              {:char \█ :fg fill-fg :bg :black :bold? false}))
+                              {:char \█ :fg fill-fg :bg :default :bold? false}))
           buffer
           (range (min full-cells bar-width))))
 
@@ -88,7 +88,7 @@
   (if (and (< full-cells bar-width) (pos? frac-idx))
     (buf/buf-put-char buffer full-cells 0
                       {:char (nth bar-chars frac-idx)
-                       :fg fill-fg :bg :black :bold? false})
+                       :fg fill-fg :bg :default :bold? false})
     buffer))
 
 (defn- render-empty-cells
@@ -96,7 +96,7 @@
   [buffer full-cells frac-idx bar-width empty-fg]
   (reduce (fn [b i]
             (buf/buf-put-char b i 0
-                              {:char \░ :fg empty-fg :bg :black :bold? false}))
+                              {:char \░ :fg empty-fg :bg :default :bold? false}))
           buffer
           (range (if (pos? frac-idx) (inc full-cells) full-cells) bar-width)))
 
@@ -105,7 +105,7 @@
   [buffer bar-width label]
   (if label
     (buf/buf-put-string buffer bar-width 0 label
-                        {:fg :white :bg :black :bold? false})
+                        {:fg :default :bg :default :bold? false})
     buffer))
 
 (defn progress-bar
