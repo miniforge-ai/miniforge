@@ -6,5 +6,6 @@
        :auto-add false}
  :tag-patterns {:stable "stable-*"
                 :release "v[0-9]*"}
- :projects {"development" {:alias "dev"}
-            "miniforge"    {:alias "cli"}}}
+ :projects {"development"    {:alias "dev"}
+            "miniforge"      {:alias "cli"}
+            "miniforge-tui"  {:alias "tui"}}}
