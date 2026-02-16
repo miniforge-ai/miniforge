@@ -1,0 +1,118 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+(ns ai.miniforge.pr-sync.status-test
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.pr-sync.status :as status]))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; PR status mapping tests
+
+(deftest pr-status-from-provider-test
+  (testing "Open non-draft PR"
+    (is (= :open (status/pr-status-from-provider
+                   {:state "OPEN" :isDraft false :reviewDecision nil}))))
+
+  (testing "Draft PR"
+    (is (= :draft (status/pr-status-from-provider
+                    {:state "OPEN" :isDraft true :reviewDecision nil}))))
+
+  (testing "Approved PR"
+    (is (= :approved (status/pr-status-from-provider
+                       {:state "OPEN" :isDraft false :reviewDecision "APPROVED"}))))
+
+  (testing "Changes requested"
+    (is (= :changes-requested (status/pr-status-from-provider
+                                {:state "OPEN" :isDraft false :reviewDecision "CHANGES_REQUESTED"}))))
+
+  (testing "Review required"
+    (is (= :reviewing (status/pr-status-from-provider
+                        {:state "OPEN" :isDraft false :reviewDecision "REVIEW_REQUIRED"}))))
+
+  (testing "Closed/merged PR"
+    (is (= :closed (status/pr-status-from-provider
+                     {:state "MERGED" :isDraft false :reviewDecision nil})))
+    (is (= :closed (status/pr-status-from-provider
+                     {:state "CLOSED" :isDraft false :reviewDecision nil})))))
+
+(deftest check-rollup->ci-status-test
+  (testing "All passed"
+    (is (= :passed (status/check-rollup->ci-status
+                     [{:conclusion "SUCCESS"} {:conclusion "SUCCESS"}]))))
+
+  (testing "Any failed"
+    (is (= :failed (status/check-rollup->ci-status
+                     [{:conclusion "SUCCESS"} {:conclusion "FAILURE"}]))))
+
+  (testing "Running checks"
+    (is (= :running (status/check-rollup->ci-status
+                      [{:conclusion "SUCCESS"} {:status "IN_PROGRESS"}]))))
+
+  (testing "Nil rollup"
+    (is (= :pending (status/check-rollup->ci-status nil))))
+
+  (testing "Empty entries"
+    (is (= :pending (status/check-rollup->ci-status [])))))
+
+(deftest provider-pr->train-pr-test
+  (testing "Converts provider PR to train PR shape"
+    (let [pr {:number 42
+              :title "Fix auth"
+              :url "https://github.com/owner/repo/pull/42"
+              :headRefName "fix-auth"
+              :state "OPEN"
+              :isDraft false
+              :reviewDecision "APPROVED"
+              :statusCheckRollup [{:conclusion "SUCCESS"}]}
+          result (status/provider-pr->train-pr pr "owner/repo")]
+      (is (= 42 (:pr/number result)))
+      (is (= "Fix auth" (:pr/title result)))
+      (is (= "https://github.com/owner/repo/pull/42" (:pr/url result)))
+      (is (= "fix-auth" (:pr/branch result)))
+      (is (= :approved (:pr/status result)))
+      (is (= :passed (:pr/ci-status result)))
+      (is (= "owner/repo" (:pr/repo result)))))
+
+  (testing "Without repo arg, :pr/repo is absent"
+    (let [result (status/provider-pr->train-pr {:number 1 :title "X" :state "OPEN"})]
+      (is (nil? (:pr/repo result))))))
+
+(deftest gitlab-mr->train-pr-test
+  (testing "Converts GitLab MR to train PR shape"
+    (let [mr {:iid 34
+              :title "Fix GL"
+              :web_url "https://gitlab.com/team/service/-/merge_requests/34"
+              :source_branch "fix-gl"
+              :state "opened"
+              :draft false
+              :merge_status "can_be_merged"
+              :head_pipeline {:status "success"}}
+          result (status/gitlab-mr->train-pr mr "gitlab:team/service")]
+      (is (= 34 (:pr/number result)))
+      (is (= "Fix GL" (:pr/title result)))
+      (is (= :merge-ready (:pr/status result)))
+      (is (= :passed (:pr/ci-status result)))
+      (is (= "gitlab:team/service" (:pr/repo result)))))
+
+  (testing "Draft MR"
+    (let [result (status/gitlab-mr->train-pr {:iid 1 :title "Draft: WIP" :state "opened"
+                                              :draft true :source_branch "wip"
+                                              :web_url "https://gl.com/x/y/-/merge_requests/1"}
+                                             "gitlab:x/y")]
+      (is (= :draft (:pr/status result))))))
