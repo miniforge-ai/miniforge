@@ -101,7 +101,8 @@
 
 (defn lifted-basis
   "Create a basis where source deps have their primary external
-   dependencies lifted to the top-level (needed for Polylith)."
+   dependencies lifted to the top-level (needed for Polylith).
+   Used for Babashka builds which handle classpath separately."
   []
   (let [default-libs  (:libs (b/create-basis))
         source-dep?   #(not (:mvn/version (get default-libs %)))
@@ -115,6 +116,36 @@
                        default-libs)]
     (-> (b/create-basis {:extra {:deps lifted-deps}})
         (update :libs #(into {} (filter (comp :mvn/version val)) %)))))
+
+(defn jvm-basis
+  "Create a full basis for JVM uberjar builds.
+   Includes all source paths from local/root deps and all MVN libs.
+   Unlike lifted-basis, this preserves Polylith source paths.
+   proj-root: absolute path to the project directory."
+  [proj-root]
+  (let [proj-edn (edn/read-string (slurp (str proj-root "/deps.edn")))
+        ;; Resolve :local/root deps relative to project dir
+        resolved-deps (reduce-kv
+                       (fn [m k v]
+                         (if-let [lr (:local/root v)]
+                           (let [abs (str (fs/absolutize (fs/path proj-root lr)))]
+                             (assoc m k (assoc v :local/root abs)))
+                           (assoc m k v)))
+                       {}
+                       (:deps proj-edn))]
+    (b/create-basis {:project {:deps resolved-deps
+                               :paths (or (:paths proj-edn) [])}})))
+
+(defn source-dirs-from-basis
+  "Extract source directories from a basis with Polylith local deps.
+   Returns all :paths from local/root libs (component/base src dirs)."
+  [basis]
+  (->> (:libs basis)
+       vals
+       (filter :local/root)
+       (mapcat :paths)
+       (filter #(str/ends-with? % "/src"))
+       vec))
 
 (defn build-manifest
   "Generate JAR manifest map."
@@ -332,15 +363,18 @@
                                    {:project project})))
         jar-file (or uber-file (str "target/" project ".jar"))
         manifest (build-manifest project)
-        basis    (binding [b/*project-root* proj-root] (lifted-basis))]
+        basis    (jvm-basis proj-root)]
 
     (println "📦 Building uberjar for" project "...")
     (b/delete {:path class-dir})
 
-    ;; Compile Clojure
-    (b/compile-clj {:basis      basis
-                    :class-dir  class-dir
-                    :compile-opts {:direct-linking true}})
+    ;; Compile Clojure — extract src dirs from local deps for Polylith
+    (let [src-dirs (source-dirs-from-basis basis)]
+      (println "  Compiling" (count src-dirs) "source directories...")
+      (b/compile-clj {:basis      basis
+                      :src-dirs   src-dirs
+                      :class-dir  class-dir
+                      :compile-opts {:direct-linking true}}))
 
     ;; Build uberjar
     (b/uber {:basis     basis
@@ -357,6 +391,7 @@
     (b/delete {:path class-dir})
 
     ;; Write version file
+    (fs/create-dirs (str proj-root "/target"))
     (spit (str proj-root "/target/version.edn")
           (pr-str {:version (version) :jar (fs/file-name jar-file)}))
 
