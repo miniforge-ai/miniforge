@@ -27,7 +27,8 @@
    - Policy (policy check results)"
   (:require
    [ai.miniforge.tui-engine.interface.layout :as layout]
-   [ai.miniforge.tui-engine.interface.widget :as widget]))
+   [ai.miniforge.tui-engine.interface.widget :as widget]
+   [ai.miniforge.tui-views.views.tab-bar :as tab-bar]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Evidence tree construction
@@ -77,32 +78,42 @@
    model: full app model
    [cols rows]: available screen area"
   [model [cols rows]]
-  (let [nodes (build-evidence-tree model)
+  (let [theme (or (:resolved-theme model) {})
+        nodes (build-evidence-tree model)
         selected (:selected-idx model)]
     (layout/split-v [cols rows] (/ 2.0 rows)
-      ;; Title bar
+      ;; Tab bar
       (fn [[c r]]
-        (layout/text [c r] " MINIFORGE │ Evidence Bundle"
-                     {:fg :cyan :bold? true}))
+        (let [wf-id (get-in model [:detail :workflow-id])
+              wf-name (some #(when (= (:id %) wf-id) (:name %))
+                            (:workflows model))]
+          (tab-bar/render model (or wf-name "Evidence") [c r])))
       ;; Content + footer
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)
           ;; Tree view
           (fn [[tc tr]]
             (layout/box [tc tr]
-              {:title "Evidence" :border :single :fg :default
+              {:title "Evidence" :border :single :fg (get theme :border :default)
                :content-fn
                (fn [[ic ir]]
                  (widget/tree [ic ir]
                    {:nodes nodes
-                    :expanded #{0 2 (+ 3 (count (get-in model [:detail :phases])))
-                                (+ 5 (count (get-in model [:detail :phases])))}
+                    :expanded (or (get-in model [:detail :expanded-nodes])
+                                  #{0 2 (+ 3 (count (get-in model [:detail :phases])))
+                                    (+ 5 (count (get-in model [:detail :phases])))})
                     :selected selected}))}))
           ;; Footer
           (fn [[fc fr]]
-            (layout/text [fc fr]
-              " j/k:navigate  Enter:expand  Esc:back  1:workflows  q:quit"
-              {:fg :default})))))))
+            (let [matches (:search-matches model)
+                  match-idx (:search-match-idx model)
+                  match-info (when (seq matches)
+                               (str "MATCH [" (inc (or match-idx 0)) "/"
+                                    (count matches) "] │ "))]
+              (layout/text [fc fr]
+                (str " " (or match-info "")
+                     "j/k:navigate  Space:expand  /:search  n/N:next/prev  Esc:back  q:quit")
+                {:fg (get theme :fg-dim :default)}))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -29,34 +29,40 @@
    assigned agent, and dependency status."
   (:require
    [ai.miniforge.tui-engine.interface.layout :as layout]
-   [ai.miniforge.tui-engine.interface.widget :as widget]))
+   [ai.miniforge.tui-engine.interface.widget :as widget]
+   [ai.miniforge.tui-views.views.tab-bar :as tab-bar]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Task grouping
 
 (defn- group-tasks-by-status
-  "Group workflow tasks into kanban columns."
+  "Group workflow tasks into 6 kanban columns matching N2 task states."
   [workflows]
   (let [all-wfs (or workflows [])
-        blocked (filterv #(= :blocked (:status %)) all-wfs)
-        pending (filterv #(= :pending (:status %)) all-wfs)
-        running (filterv #(= :running (:status %)) all-wfs)
-        done (filterv #(#{:success :completed} (:status %)) all-wfs)
-        failed (filterv #(= :failed (:status %)) all-wfs)]
+        blocked   (filterv #(= :blocked (:status %)) all-wfs)
+        ready     (filterv #(#{:ready :pending} (:status %)) all-wfs)
+        active    (filterv #(#{:running :implementing :pr-opening :responding} (:status %)) all-wfs)
+        in-review (filterv #(#{:ci-running :review-pending} (:status %)) all-wfs)
+        merging   (filterv #(#{:ready-to-merge :merging} (:status %)) all-wfs)
+        done      (filterv #(#{:merged :success :completed :failed :skipped} (:status %)) all-wfs)]
     [{:title "BLOCKED"
       :color :red
       :cards (mapv (fn [wf] {:label (:name wf) :status :blocked}) blocked)}
-     {:title "PENDING"
+     {:title "READY"
       :color :yellow
-      :cards (mapv (fn [wf] {:label (:name wf) :status :pending}) pending)}
-     {:title "RUNNING"
+      :cards (mapv (fn [wf] {:label (:name wf) :status :ready}) ready)}
+     {:title "ACTIVE"
       :color :cyan
-      :cards (mapv (fn [wf] {:label (:name wf) :status :running}) running)}
+      :cards (mapv (fn [wf] {:label (:name wf) :status :running}) active)}
+     {:title "IN REVIEW"
+      :color :magenta
+      :cards (mapv (fn [wf] {:label (:name wf) :status :review}) in-review)}
+     {:title "MERGING"
+      :color :blue
+      :cards (mapv (fn [wf] {:label (:name wf) :status :merging}) merging)}
      {:title "DONE"
       :color :green
-      :cards (concat
-              (mapv (fn [wf] {:label (:name wf) :status :success}) done)
-              (mapv (fn [wf] {:label (:name wf) :status :failed}) failed))}]))
+      :cards (mapv (fn [wf] {:label (:name wf) :status (or (:status wf) :success)}) done)}]))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Rendering
@@ -66,27 +72,27 @@
    model: full app model
    [cols rows]: available screen area"
   [model [cols rows]]
-  (let [columns (group-tasks-by-status (:workflows model))]
+  (let [theme (or (:resolved-theme model) {})
+        columns (group-tasks-by-status (:workflows model))]
     (layout/split-v [cols rows] (/ 2.0 rows)
-      ;; Title bar
+      ;; Tab bar
       (fn [[c r]]
-        (layout/text [c r] " MINIFORGE │ DAG Kanban"
-                     {:fg :cyan :bold? true}))
+        (tab-bar/render model nil [c r]))
       ;; Content + footer
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)
           ;; Kanban board
           (fn [[kc kr]]
             (layout/box [kc kr]
-              {:title "Task Board" :border :single :fg :default
+              {:title "Task Board" :border :single :fg (get theme :border :default)
                :content-fn
                (fn [[ic ir]]
                  (widget/kanban [ic ir] {:columns columns}))}))
           ;; Footer
           (fn [[fc fr]]
             (layout/text [fc fr]
-              " 1:workflows  2:detail  3:evidence  4:artifacts  q:quit"
-              {:fg :default})))))))
+              " Tab:views  1-0:jump  q:quit"
+              {:fg (get theme :fg-dim :default)})))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

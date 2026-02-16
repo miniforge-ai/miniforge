@@ -42,22 +42,24 @@
     :failed   " ✗"
     ""))
 
-(defn- format-phase-node [{:keys [phase status]}]
-  {:label (str (name phase) (status-suffix status))
+(defn- format-phase-node [{:keys [phase status iteration total-iterations]}]
+  {:label (str (name phase) (status-suffix status)
+               (when (and iteration total-iterations)
+                 (str " [" iteration "/" total-iterations "]")))
    :depth 0
    :expandable? false})
 
-(defn- render-title-bar [wf [cols rows]]
+(defn- render-title-bar [theme wf [cols rows]]
   (layout/text [cols rows]
                (str " MINIFORGE │ "
                     (or (:name wf) "Workflow Detail")
                     (when-let [phase (:phase wf)]
                       (str " │ " (name phase))))
-               {:fg :cyan :bold? true}))
+               {:fg (get theme :header :cyan) :bold? true}))
 
-(defn- render-phase-list [phases [cols rows]]
+(defn- render-phase-list [theme phases [cols rows]]
   (layout/box [cols rows]
-    {:title "Phases" :border :single :fg :default
+    {:title "Phases" :border :single :fg (get theme :border :default)
      :content-fn
      (fn [[ic ir]]
        (if (empty? phases)
@@ -66,47 +68,85 @@
            {:nodes (mapv format-phase-node phases)
             :selected 0})))}))
 
-(defn- render-agent-output [agent output [cols rows]]
+(defn- render-agent-output [theme agent output scroll-offset search-matches match-idx [cols rows]]
   (layout/box [cols rows]
     {:title (if agent
               (str (name (:agent agent)) " - " (name (:status agent :idle)))
               "Agent Output")
-     :border :single :fg :default
+     :border :single :fg (get theme :border :default)
      :content-fn
      (fn [[ic ir]]
        (let [lines (if (seq output)
                      (str/split-lines output)
                      ["  Waiting for agent output..."])
-             offset (max 0 (- (count lines) ir))]
+             max-offset (max 0 (- (count lines) ir))
+             ;; nil scroll-offset = auto-scroll to bottom
+             offset (if (some? scroll-offset)
+                      (min scroll-offset max-offset)
+                      max-offset)
+             ;; Build set of line indices that have search matches
+             hl-lines (when (seq search-matches)
+                        (set (map :line-idx search-matches)))
+             current-hl (when match-idx
+                          (:line-idx (get search-matches match-idx)))]
          (widget/scrollable [ic ir]
            {:lines lines
             :offset offset
-            :fg :white})))}))
+            :fg (get theme :fg :default)
+            :highlight-lines hl-lines
+            :current-highlight current-hl})))}))
 
-(defn- render-footer [[cols rows]]
-  (layout/text [cols rows]
-    " Esc:back  3:evidence  4:artifacts  5:dag  j/k:scroll  q:quit"
-    {:fg :default}))
+(defn- render-footer [theme model [cols rows]]
+  (let [matches (:search-matches model)
+        match-idx (:search-match-idx model)
+        match-info (when (seq matches)
+                     (str "MATCH [" (inc (or match-idx 0)) "/"
+                          (count matches) "] │ "))]
+    (layout/text [cols rows]
+      (str " " (or match-info "")
+           "j/k:scroll  /:search  n/N:next/prev  Tab:cycle  Esc:back  q:quit")
+      {:fg (get theme :fg-dim :default)})))
 
 (defn render
   "Render the workflow detail view.
    model: full app model
    [cols rows]: available screen area"
   [model [cols rows]]
-  (let [wf (find-workflow model)
+  (let [theme (or (:resolved-theme model) {})
+        wf (find-workflow model)
         detail (:detail model)
         phases (:phases detail)
         agent (:current-agent detail)
-        output (:agent-output detail)]
+        output (:agent-output detail)
+        scroll-offset (:scroll-offset model)
+        search-matches (:search-matches model)
+        match-idx (:search-match-idx model)]
     (layout/split-v [cols rows] (/ 2.0 rows)
-      (fn [size] (render-title-bar wf size))
+      (fn [size] (render-title-bar theme wf size))
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)
           (fn [[mc mr]]
             (layout/split-h [mc mr] 0.35
-              (fn [size] (render-phase-list phases size))
-              (fn [size] (render-agent-output agent output size))))
-          render-footer)))))
+              ;; Left panel: intent box (5 rows) + phases
+              (fn [[lc lr]]
+                (layout/split-v [lc lr] (/ 5.0 lr)
+                  ;; Intent box
+                  (fn [[ic ir]]
+                    (layout/box [ic ir]
+                      {:title "Intent" :border :single :fg (get theme :border :default)
+                       :content-fn
+                       (fn [[bc br]]
+                         (let [intent (get-in model [:detail :evidence :intent])
+                               intent-type (or (some-> intent :type name) "task")
+                               desc (or (:description intent) "No intent")]
+                           (layout/text [bc br]
+                             (str intent-type ": " desc)
+                             {:fg (get theme :fg :default)})))}))
+                  ;; Phase tree
+                  (fn [size] (render-phase-list theme phases size))))
+              (fn [size] (render-agent-output theme agent output scroll-offset
+                                              search-matches match-idx size))))
+          (partial render-footer theme model))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
