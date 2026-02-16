@@ -35,6 +35,7 @@
 
   (testing "Workflow list with data renders"
     (let [m (-> (model/init-model)
+                (assoc :view :workflow-list)
                 (update/update-model [:msg/workflow-added
                                       {:workflow-id (random-uuid) :name "deploy-v2"}]))
           buf (view/root-view m [80 24])
@@ -46,6 +47,7 @@
   (testing "Detail view renders without error"
     (let [wf-id (random-uuid)
           m (-> (model/init-model)
+                (assoc :view :workflow-list)
                 (update/update-model [:msg/workflow-added {:workflow-id wf-id :name "test"}])
                 (update/update-model [:input :key/enter]))
           buf (view/root-view m [80 24])]
@@ -69,6 +71,27 @@
     (let [m (assoc (model/init-model) :view :dag-kanban)
           buf (view/root-view m [80 24])]
       (is (some? buf)))))
+
+(deftest repo-manager-view-renders-test
+  (testing "Repo manager view renders with empty state"
+    (let [m (assoc (model/init-model) :view :repo-manager)
+          buf (view/root-view m [80 24])
+          strings (layout/buf->strings buf)]
+      (is (some? buf))
+      (is (some #(str/includes? % "No repositories configured") strings))))
+
+  (testing "Repo manager view renders configured repositories"
+    (let [m (-> (model/init-model)
+                (assoc :view :repo-manager
+                       :fleet-repos ["acme/service-a" "gitlab:team/service-b"]
+                       :pr-items [{:pr/repo "acme/service-a"}
+                                  {:pr/repo "acme/service-a"}
+                                  {:pr/repo "gitlab:team/service-b"}]))
+          buf (view/root-view m [100 24])
+          strings (layout/buf->strings buf)]
+      (is (some #(str/includes? % "[Repos (6)]") strings))
+      (is (some #(str/includes? % "acme/service-a") strings))
+      (is (some #(str/includes? % "gitlab:team/service-b") strings)))))
 
 (deftest minimum-terminal-size-test
   (testing "Graceful behavior at minimum size"
@@ -172,9 +195,8 @@
                      (str/includes? % "key")) strings))))
 
   (testing "Help overlay does not appear when help-visible? is false"
-    (let [m (model/init-model)
-          buf (view/root-view m [80 24])
-          strings (layout/buf->strings buf)]
+    (let [m (model/init-model)]
+      (view/root-view m [80 24])
       ;; The word "Help" may appear in status bar, but not as an overlay title
       ;; We just verify the model flag is false
       (is (false? (:help-visible? m))))))

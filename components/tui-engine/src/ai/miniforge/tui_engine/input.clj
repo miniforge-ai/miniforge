@@ -45,9 +45,15 @@
    \6     :key/d6
    \7     :key/d7
    \8     :key/d8
+   \9     :key/d9
+   \0     :key/d0
    \r     :key/r
+   \s     :key/s
    \b     :key/b
    \e     :key/e
+   \f     :key/f
+   \o     :key/o
+   \x     :key/x
    \a     :key/a
    \v     :key/v
    \c     :key/c
@@ -55,20 +61,26 @@
    \:     :key/colon
    \space :key/space
    \tab   :key/tab
-   \?     :key/question})
+   \?     :key/question
+   \y     :key/y
+   \n     :key/n
+   \N     :key/N})
 
 (defn normalize-key
-  "Convert a raw Lanterna key event map to a normalized keyword message.
+  "Convert a raw Lanterna key event map to a normalized message.
 
-   Returns a keyword like :key/j, :key/enter, :key/escape, or
-   {:type :char :char c} for unmapped characters."
+   Character keys return {:key :key/r :char \\r} (mapped) or {:key nil :char \\x}
+   (unmapped). This allows mode-aware dispatching: normal mode uses :key for
+   vi commands, while command/search mode uses :char for text input.
+
+   Special keys return bare keywords: :key/enter, :key/escape, etc."
   [raw-event]
   (when raw-event
     (case (:type raw-event)
       :character
-      (let [ch (:char raw-event)]
-        (or (get char-key-map ch)
-            {:type :char :char ch}))
+      (let [ch (:char raw-event)
+            semantic (get char-key-map ch)]
+        {:key semantic :char ch})
 
       :enter     :key/enter
       :escape    :key/escape
@@ -77,8 +89,9 @@
       :arrow-down :key/down
       :arrow-left :key/left
       :arrow-right :key/right
-      :tab       :key/tab
-      :eof       :key/eof
+      :tab         :key/tab
+      :reverse-tab :key/shift-tab
+      :eof         :key/eof
 
       ;; Unknown key type
       nil)))

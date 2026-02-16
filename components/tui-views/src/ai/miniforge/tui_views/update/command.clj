@@ -24,7 +24,10 @@
    Layer 3."
   (:require
    [clojure.string :as str]
-   [ai.miniforge.tui-views.model :as model]))
+   [ai.miniforge.tui-engine.interface :as engine]
+   [ai.miniforge.tui-views.model :as model]
+   [ai.miniforge.tui-views.update.selection :as sel]
+   [ai.miniforge.pr-sync.interface :as pr-sync]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Command parsing
@@ -35,9 +38,9 @@
   [cmd-str]
   (let [trimmed (str/trim (if (str/starts-with? (or cmd-str "") ":")
                             (subs cmd-str 1)
-                            (or cmd-str "")))]
-    (let [parts (str/split trimmed #"\s+" 2)]
-      [(first parts) (second parts)])))
+                            (or cmd-str "")))
+        parts (str/split trimmed #"\s+" 2)]
+    [(first parts) (second parts)]))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Command handlers
@@ -61,21 +64,254 @@
   (assoc model :help-visible? true))
 
 (defn- cmd-theme [model args]
+  (let [available (keys engine/themes)
+        names-str (str/join ", " (map name available))]
+    (if (str/blank? args)
+      (assoc model :flash-message
+             (str "Current theme: " (name (:theme model))
+                  " | Available: " names-str))
+      (let [theme-kw (keyword args)]
+        (if (contains? engine/themes theme-kw)
+          (assoc model :theme theme-kw
+                 :flash-message (str "Theme: " args))
+          (assoc model :flash-message
+                 (str "Unknown theme: " args
+                      " | Available: " names-str)))))))
+
+;------------------------------------------------------------------------------ Layer 1b
+;; Fleet management commands
+
+(defn- with-fleet-repos
+  [model repos]
+  (let [repos* (vec (or repos []))
+        max-idx (max 0 (dec (count repos*)))
+        idx (or (:selected-idx model) 0)]
+    (assoc model
+           :fleet-repos repos*
+           :selected-idx (min idx max-idx))))
+
+(defn- cmd-add-repo [model args]
   (if (str/blank? args)
-    (assoc model :flash-message (str "Current theme: " (name (:theme model))))
-    (assoc model :theme (keyword args)
-           :flash-message (str "Theme: " args))))
+    (assoc model :flash-message "Usage: :add-repo owner/name OR :add-repo gitlab:group/name")
+    (let [result (pr-sync/add-repo! (str/trim args))]
+      (if (:success? result)
+        (-> (with-fleet-repos model (:repos result))
+            (assoc :flash-message
+                   (if (:added? result)
+                     (str "Added " (:repo result) " to fleet")
+                     (str (:repo result) " already in fleet"))))
+        (assoc model :flash-message (str "Error: " (:error result)))))))
+
+(defn- cmd-remove-repo [model args]
+  (if (str/blank? args)
+    (assoc model :flash-message "Usage: :remove-repo owner/name")
+    (let [result (pr-sync/remove-repo! (str/trim args))]
+      (if (:success? result)
+        (-> (with-fleet-repos model (:repos result))
+            (assoc :flash-message
+                   (if (:removed? result)
+                     (str "Removed " (:repo result) " from fleet")
+                     (str (:repo result) " not in fleet"))))
+        (assoc model :flash-message (str "Error: " (:error result)))))))
+
+(defn- cmd-sync [model _args]
+  ;; Side-effect: sets :side-effect on model for the Elm runtime to execute
+  (assoc model
+         :side-effect {:type :sync-prs}
+         :flash-message "Syncing PRs..."))
+
+(defn- cmd-repos [model _args]
+  (let [repos (or (:fleet-repos model) (pr-sync/get-configured-repos))]
+    (if (seq repos)
+      (assoc model :flash-message
+             (str "Fleet repos (" (count repos) "): "
+                  (str/join ", " repos)))
+      (assoc model :flash-message "No repos configured. Use :add-repo owner/name"))))
+
+(defn- cmd-discover [model args]
+  ;; Side-effect: discovers repos from a GitHub org/user and adds to fleet.
+  ;; :discover org-name   -> discover from org
+  ;; :discover            -> discover from authenticated user
+  (let [owner (when-not (str/blank? args) (str/trim args))]
+    (assoc model
+           :side-effect {:type :discover-repos :owner owner}
+           :flash-message (str "Discovering repos"
+                               (when owner (str " from " owner)) "..."))))
 
 ;------------------------------------------------------------------------------ Layer 2
+;; Batch action handlers (destructive actions prompt for confirmation)
+
+(defn- request-confirmation
+  "Set confirm state on model for destructive actions."
+  [model action label]
+  (let [ids (sel/effective-ids model)]
+    (if (seq ids)
+      (assoc model :confirm {:action action :label label :ids ids})
+      (assoc model :flash-message (str "Nothing to " (name action))))))
+
+(defn- cmd-archive [model _args]
+  (request-confirmation model :archive "Archive"))
+
+(defn- cmd-delete [model _args]
+  (request-confirmation model :delete "Delete"))
+
+(defn- cmd-cancel [model _args]
+  (request-confirmation model :cancel "Cancel"))
+
+(defn- cmd-rerun [model _args]
+  (let [ids (sel/effective-ids model)]
+    (if (seq ids)
+      (-> model
+          (update :workflows
+                  (fn [wfs]
+                    (mapv (fn [wf]
+                            (if (and (contains? ids (:id wf))
+                                     (#{:failed :cancelled} (:status wf)))
+                              (assoc wf :status :pending :progress 0)
+                              wf))
+                          wfs)))
+          (assoc :flash-message (str "Rerunning " (count ids) " workflow(s)"))
+          sel/clear-selection)
+      (assoc model :flash-message "Nothing to rerun"))))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Confirmed action execution
+
+(defn execute-confirmed-action
+  "Execute the action stored in :confirm after user presses 'y'.
+   Pure: (model) -> model'."
+  [model]
+  (let [{:keys [action ids]} (:confirm model)]
+    (case action
+      :delete
+      (-> model
+          (update :workflows
+                  (fn [wfs] (vec (remove #(contains? ids (:id %)) wfs))))
+          (assoc :flash-message (str "Deleted " (count ids) " item(s)")
+                 :selected-idx 0)
+          sel/clear-selection)
+
+      :archive
+      (-> model
+          (update :workflows
+                  (fn [wfs]
+                    (mapv (fn [wf]
+                            (if (contains? ids (:id wf))
+                              (assoc wf :status :archived)
+                              wf))
+                          wfs)))
+          (assoc :flash-message (str "Archived " (count ids) " item(s)"))
+          sel/clear-selection)
+
+      :cancel
+      (-> model
+          (update :workflows
+                  (fn [wfs]
+                    (mapv (fn [wf]
+                            (if (and (contains? ids (:id wf))
+                                     (= :running (:status wf)))
+                              (assoc wf :status :cancelled)
+                              wf))
+                          wfs)))
+          (assoc :flash-message (str "Cancelled " (count ids) " workflow(s)"))
+          sel/clear-selection)
+
+      :remove-repos
+      (let [targets (->> ids (filter string?) distinct vec)
+            result (reduce
+                    (fn [{:keys [repos removed errors]} repo]
+                      (let [r (pr-sync/remove-repo! repo)]
+                        (if (:success? r)
+                          {:repos (:repos r)
+                           :removed (+ removed (if (:removed? r) 1 0))
+                           :errors errors}
+                          {:repos repos
+                           :removed removed
+                           :errors (conj errors (str repo ": " (or (:error r) "unknown error")))})))
+                    {:repos (:fleet-repos model) :removed 0 :errors []}
+                    targets)
+            next-model (-> (with-fleet-repos model (:repos result))
+                           sel/clear-selection)
+            removed (:removed result)
+            failures (count (:errors result))]
+        (assoc next-model
+               :flash-message
+               (cond
+                 (zero? (count targets))
+                 "No repositories selected for removal."
+
+                 (and (pos? removed) (zero? failures))
+                 (str "Removed " removed " repo(s) from fleet")
+
+                 (and (zero? removed) (pos? failures))
+                 (str "Failed to remove selected repos: "
+                      (str/join "; " (:errors result)))
+
+                 :else
+                 (str "Removed " removed " repo(s), " failures " failed"))))
+
+      ;; Unknown action -- no-op
+      model)))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Completion data helpers
+
+(defn- safe-configured-repos
+  []
+  (try
+    (pr-sync/get-configured-repos)
+    (catch Exception _ [])))
+
+(defn- add-repo-completions
+  [model]
+  (let [local-repos (safe-configured-repos)
+        remote-repos (or (:browse-repos model) [])]
+    (->> (concat ["browse"] local-repos remote-repos)
+         (remove str/blank?)
+         distinct
+         sort
+         vec)))
+
+(defn- remove-repo-completions
+  [_]
+  (safe-configured-repos))
+
+(defn- maybe-browse-side-effect
+  [model cmd-name]
+  (when (and (= cmd-name "add-repo")
+             (empty? (:browse-repos model))
+             (not (:browse-repos-loading? model)))
+    {:type :browse-repos :provider :all}))
+
+;------------------------------------------------------------------------------ Layer 4
 ;; Command table and dispatch
 
 (def ^:private commands
-  {"q"       {:handler cmd-quit    :help "Quit the TUI"}
-   "quit"    {:handler cmd-quit    :help "Quit the TUI"}
-   "view"    {:handler cmd-view    :help "Switch to view (e.g. :view evidence)"}
-   "refresh" {:handler cmd-refresh :help "Refresh data"}
-   "help"    {:handler cmd-help    :help "Show help overlay"}
-   "theme"   {:handler cmd-theme   :help "Switch theme (e.g. :theme dark)"}})
+  {"q"           {:handler cmd-quit        :help "Quit the TUI"}
+   "quit"        {:handler cmd-quit        :help "Quit the TUI"}
+   "view"        {:handler cmd-view        :help "Switch to view (e.g. :view evidence)"
+                  :completions (fn [_] (mapv name model/views))}
+   "refresh"     {:handler cmd-refresh     :help "Refresh data"}
+   "help"        {:handler cmd-help        :help "Show help overlay"}
+   "theme"       {:handler cmd-theme       :help "Switch theme (e.g. :theme dark)"
+                  :completions (fn [_] (->> (keys engine/themes)
+                                            (remove #{:default})
+                                            (map name)
+                                            (cons "browse")
+                                            distinct
+                                            sort
+                                            vec))}
+   "archive"     {:handler cmd-archive     :help "Archive selected workflows"}
+   "delete"      {:handler cmd-delete      :help "Delete selected workflows"}
+   "cancel"      {:handler cmd-cancel      :help "Cancel running workflows"}
+   "rerun"       {:handler cmd-rerun       :help "Rerun failed workflows"}
+   "add-repo"    {:handler cmd-add-repo    :help "Add repo to fleet (e.g. :add-repo owner/name or gitlab:group/name)"
+                  :completions add-repo-completions}
+   "remove-repo" {:handler cmd-remove-repo :help "Remove repo from fleet"
+                  :completions remove-repo-completions}
+   "sync"        {:handler cmd-sync        :help "Sync PRs from all fleet repos"}
+   "repos"       {:handler cmd-repos       :help "List configured fleet repos"}
+   "discover"    {:handler cmd-discover    :help "Discover repos from org (e.g. :discover my-org)"}})
 
 (defn execute-command
   "Execute a command string. Returns updated model.
@@ -86,10 +322,45 @@
       (handler model args)
       (assoc model :flash-message (str "Unknown command: " cmd-name)))))
 
+;------------------------------------------------------------------------------ Layer 5
+;; Tab-completion support
+
+(defn complete-command-name
+  "Return matching command names for a partial input.
+   Excludes aliases (e.g. 'q' when 'quit' exists)."
+  [partial]
+  (let [p (str/lower-case (or partial ""))]
+    (->> (keys commands)
+         (filterv #(str/starts-with? % p))
+         sort
+         vec)))
+
+(defn compute-completions
+  "Given a command buffer string, return completions for the current argument.
+   Returns {:cmd cmd-name :completions [str ...] :partial str} or nil."
+  [model cmd-buf]
+  (let [[cmd-name partial-arg] (parse-command cmd-buf)
+        cmd-entry (get commands cmd-name)]
+    (when-let [comp-fn (:completions cmd-entry)]
+      (let [all-completions (comp-fn model)
+            side-effect (maybe-browse-side-effect model cmd-name)
+            filtered (if (str/blank? partial-arg)
+                       all-completions
+                       (filterv #(str/starts-with?
+                                   (str/lower-case %)
+                                   (str/lower-case partial-arg))
+                                all-completions))]
+        {:cmd cmd-name
+         :completions (vec filtered)
+         :partial (or partial-arg "")
+         :side-effect side-effect}))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (def m (model/init-model))
   (execute-command m ":q")
   (execute-command m ":view evidence")
   (execute-command m ":unknown")
+  (complete-command-name "th")
+  (compute-completions m ":theme ")
   :leave-this-here)

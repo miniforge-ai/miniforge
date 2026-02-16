@@ -68,7 +68,8 @@
    model: full app model
    [cols rows]: available screen area"
   [model [cols rows]]
-  (let [pr-data    (get-in model [:detail :selected-pr])
+  (let [theme (or (:resolved-theme model) {})
+        pr-data    (get-in model [:detail :selected-pr])
         readiness  (get-in model [:detail :pr-readiness])
         risk       (get-in model [:detail :pr-risk])
         expanded   (or (get-in model [:detail :expanded-nodes]) #{0})]
@@ -80,7 +81,7 @@
                (when (:pr/repo pr-data) (str (:pr/repo pr-data) " "))
                "#" (:pr/number pr-data "?")
                " " (:pr/title pr-data ""))
-          {:fg :cyan :bold? true}))
+          {:fg (get theme :header :cyan) :bold? true}))
       ;; Body + footer
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)
@@ -90,7 +91,7 @@
               ;; Left: Readiness breakdown
               (fn [[lc lr]]
                 (layout/box [lc lr]
-                  {:title "Readiness" :border :single :fg :default
+                  {:title "Readiness" :border :single :fg (get theme :border :default)
                    :content-fn
                    (fn [[ic ir]]
                      (widget/tree [ic ir]
@@ -103,7 +104,7 @@
                   ;; Risk assessment
                   (fn [[tc tr]]
                     (layout/box [tc tr]
-                      {:title "Risk Assessment" :border :single :fg :default
+                      {:title "Risk Assessment" :border :single :fg (get theme :border :default)
                        :content-fn
                        (fn [[ic ir]]
                          (widget/tree [ic ir]
@@ -113,7 +114,7 @@
                   ;; Gates/Policy
                   (fn [[gc gr]]
                     (layout/box [gc gr]
-                      {:title "Gates & Policy" :border :single :fg :default
+                      {:title "Gates & Policy" :border :single :fg (get theme :border :default)
                        :content-fn
                        (fn [[ic ir]]
                          (widget/tree [ic ir]
@@ -122,7 +123,7 @@
           (fn [[fc fr]]
             (layout/text [fc fr]
               " Esc:back  6:fleet  8:train  Space:expand  q:quit"
-              {:fg :default})))))))
+              {:fg (get theme :fg-dim :default)})))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

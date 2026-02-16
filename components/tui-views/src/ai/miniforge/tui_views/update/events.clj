@@ -119,3 +119,97 @@
                    (update-in m [:detail :evidence :validation :results]
                               (fnil conj []) payload))))
         with-timestamp)))
+
+;------------------------------------------------------------------------------ Layer 3
+;; PR event handlers
+
+(defn handle-prs-synced
+  "Handle result of a :sync-prs side effect.
+   Replaces :pr-items with freshly fetched data."
+  [model {:keys [pr-items]}]
+  (let [prs (or pr-items [])]
+    (-> model
+        (assoc :pr-items (vec prs))
+        (assoc :flash-message (str "Synced " (count prs) " PRs from "
+                                   (count (distinct (map :pr/repo prs))) " repo(s)"))
+        with-timestamp)))
+
+(defn handle-pr-updated
+  "Update a single PR in :pr-items by [repo, number] match."
+  [model {:keys [pr/repo pr/number] :as pr-data}]
+  (let [match? (fn [pr] (and (= (:pr/repo pr) repo) (= (:pr/number pr) number)))]
+    (-> model
+        (update :pr-items
+                (fn [prs]
+                  (mapv (fn [pr]
+                          (if (match? pr)
+                            (merge pr (dissoc pr-data :pr/repo :pr/number))
+                            pr))
+                        (or prs []))))
+        with-timestamp)))
+
+(defn handle-pr-removed
+  "Remove a PR from :pr-items by [repo, number] match."
+  [model {:keys [pr/repo pr/number]}]
+  (-> model
+      (update :pr-items
+              (fn [prs]
+                (vec (remove (fn [pr]
+                               (and (= (:pr/repo pr) repo)
+                                    (= (:pr/number pr) number)))
+                             (or prs [])))))
+      with-timestamp))
+
+(defn handle-repos-discovered
+  "Handle result of a :discover-repos side effect.
+   Shows discovery results and triggers a PR sync."
+  [model {:keys [success? added discovered owner repos error]}]
+  (if success?
+    (assoc model
+           :fleet-repos (vec (or repos (:fleet-repos model) []))
+           :flash-message (str "Discovered " discovered " repo(s)"
+                               (when owner (str " from " owner))
+                               " — " added " new. Syncing PRs...")
+           :side-effect {:type :sync-prs})
+    (assoc model :flash-message (str "Discover failed: " (or error "unknown error")))))
+
+(defn handle-repos-browsed
+  "Handle result of a :browse-repos side effect.
+   Populates :browse-repos cache used by :add-repo completion."
+  [model {:keys [success? repos owner provider warnings error error-source source]}]
+  (if success?
+    (let [repo-list (vec (or repos []))
+          base (assoc model
+                      :browse-repos repo-list
+                      :browse-repos-loading? false)
+          candidate-count (count (model/browse-candidate-repos base))
+          provider-name (name (or provider :github))
+          warnings* (vec (or warnings []))
+          base (if (= source :repo-manager)
+                 (assoc base
+                        :repo-manager-source :browse
+                        :selected-idx 0
+                        :filtered-indices nil
+                        :search-matches []
+                        :search-match-idx nil
+                        :selected-ids #{}
+                        :visual-anchor nil)
+                 base)]
+      (-> base
+          (assoc :flash-message
+                 (str "Loaded " (count repo-list) " remote repo(s)"
+                      " via " provider-name
+                      (when owner (str " from " owner))
+                      " — " candidate-count " new candidate(s)"
+                      (when (seq warnings*)
+                        (str " | warnings: " (count warnings*)))))
+          with-timestamp))
+    (-> model
+        (assoc :browse-repos-loading? false
+               :flash-message (str "Repo browse failed"
+                                   (when error-source (str " (" (name error-source) ")"))
+                                   (when provider (str " [" (name provider) "]"))
+                                   ": "
+                                   (or (some-> error str not-empty)
+                                       "no error details were provided")))
+        with-timestamp)))

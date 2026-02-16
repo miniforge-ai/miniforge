@@ -44,6 +44,7 @@
         ;; TUI framework and views
         ai.miniforge/tui-engine {:local/root "../../components/tui-engine"}
         ai.miniforge/tui-views {:local/root "../../components/tui-views"}
+        ai.miniforge/pr-sync {:local/root "../../components/pr-sync"}
         ;; Web dashboard
         ai.miniforge/web-dashboard {:local/root "../../components/web-dashboard"}
         ;; LSP-to-MCP bridge (separate entry point for Claude Code integration)

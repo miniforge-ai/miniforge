@@ -41,11 +41,17 @@
   "Create a TUI application.
 
    config map:
-   - :init          - (fn [] model) -- returns initial model state
-   - :update        - (fn [model msg] model') -- pure state transition
-   - :view          - (fn [model size] render-tree) -- pure render function
-   - :subscriptions - (fn [app] unsub-fn) -- registers external msg sources
-   - :screen        - Optional: IScreen instance (for testing with MockScreen)
+   - :init           - (fn [] model) -- returns initial model state
+   - :update         - (fn [model msg] model') -- pure state transition
+   - :view           - (fn [model size] render-tree) -- pure render function
+   - :subscriptions  - (fn [app] unsub-fn) -- registers external msg sources
+   - :effect-handler - (fn [effect-map] msg-vector) -- executes side-effects async
+   - :screen         - Optional: IScreen instance (for testing with MockScreen)
+
+   Side-effect protocol:
+   When update returns a model with a :side-effect key, the runtime strips it
+   and calls effect-handler on a background thread. The handler returns a result
+   message that is dispatched back into the update loop.
 
    Returns: app atom suitable for start!, stop!, dispatch!."
   [config]
@@ -107,12 +113,37 @@
    Returns a string representation of the specified row."
   screen/mock-read-line)
 
-;; Style
+;; Style / Themes
 
 (def default-theme
-  "Default color theme for TUI rendering.
-   Map of semantic color names to ANSI color keywords."
+  "Default color theme for TUI rendering (miniforge brand dark).
+   Map of semantic color names to color values (keywords, ints, or [r g b])."
   style/default-theme)
+
+(def dark-theme
+  "Miniforge brand dark: charcoal background, gold/flame accents."
+  style/dark-theme)
+
+(def light-theme
+  "Miniforge brand light: parchment background, ember accents."
+  style/light-theme)
+
+(def high-contrast-theme
+  "High-contrast dark: pure black bg, white fg, bright ANSI accents."
+  style/high-contrast-theme)
+
+(def high-contrast-light-theme
+  "High-contrast light: pure white bg, black fg, bold ANSI accents."
+  style/high-contrast-light-theme)
+
+(def themes
+  "Registry of available themes: {:dark, :light, :high-contrast, :high-contrast-light, :default}."
+  style/themes)
+
+(def get-theme
+  "Resolve a theme keyword to a theme map.
+   (get-theme :dark) => dark-theme, (get-theme :light) => light-theme."
+  style/get-theme)
 
 (def resolve-style
   "Resolve a style map into Lanterna TextCharacter attributes.

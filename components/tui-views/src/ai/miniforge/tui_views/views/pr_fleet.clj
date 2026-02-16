@@ -22,7 +22,8 @@
    Shows PR Work Items across repositories with readiness, risk,
    and policy columns. Derived from event stream and PR Work Item state."
   (:require
-   [ai.miniforge.tui-engine.interface.layout :as layout]))
+   [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.views.tab-bar :as tab-bar]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
@@ -45,6 +46,11 @@
     :low      "low"
     "?"))
 
+(defn- pr-id
+  "Composite ID for a PR item."
+  [pr]
+  [(:pr/repo pr) (:pr/number pr)])
+
 (defn- format-pr-row [pr]
   {:repo    (or (:pr/repo pr) "")
    :number  (str "#" (:pr/number pr))
@@ -57,48 +63,80 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Rendering
 
+(defn- render-pr-table [prs selected selected-ids theme [cols rows]]
+  (if (empty? prs)
+    (layout/text [cols rows]
+                 "  No PRs. Manage repositories in Repos (6) then press r to refresh."
+                 {:fg (get theme :fg :default)})
+    (let [show-sel? (seq selected-ids)
+          sel-w (if show-sel? 3 0)
+          data (mapv (fn [pr]
+                       (cond-> (format-pr-row pr)
+                         show-sel?
+                         (assoc :sel (if (contains? selected-ids (pr-id pr)) "[x]" "[ ]"))))
+                     prs)
+          columns (cond-> []
+                    show-sel? (conj {:key :sel :header "   " :width 3})
+                    true (into [{:key :repo   :header "Repo"      :width 18}
+                                {:key :number :header "PR"        :width 6}
+                                {:key :title  :header "Title"
+                                 :width (max 10 (- cols 68 sel-w))}
+                                {:key :status :header "Status"    :width 12}
+                                {:key :ready  :header "Readiness" :width 15}
+                                {:key :risk   :header "Risk"      :width 6}
+                                {:key :policy :header "Policy"    :width 6}]))]
+      (layout/table [cols rows]
+        {:columns columns :data data :selected-row selected
+         :header-fg (get theme :header :cyan)
+         :row-fg (get theme :row-fg :default)
+         :row-bg (get theme :row-bg :default)
+         :selected-fg (get theme :selected-fg :white)
+         :selected-bg (get theme :selected-bg :blue)}))))
+
+(defn- render-footer [model [cols rows]]
+  (let [theme (or (:resolved-theme model) {})
+        sel-count (count (:selected-ids model))
+        visual? (:visual-anchor model)
+        flash (:flash-message model)]
+    (layout/text [cols rows]
+      (cond
+        (pos? sel-count)
+        (str " " sel-count " selected │ Space:toggle  v:visual  a:all  c:clear  :archive :delete"
+             (when flash (str "  │ " flash)))
+
+        visual?
+        (str " VISUAL │ j/k:extend  Space:toggle  Esc:exit  a:all"
+             (when flash (str "  │ " flash)))
+
+        :else
+        (str " j/k:nav  Enter:detail  Tab:views  /:search  r:refresh (s:alias)  6:repos  q:quit"
+             (when flash (str "  │ " flash))))
+      {:fg (get theme :fg-dim :default)})))
+
 (defn render
   "Render the PR fleet view.
    model: full app model
    [cols rows]: available screen area"
   [model [cols rows]]
-  (let [prs (:pr-items model [])
+  (let [theme (or (:resolved-theme model) {})
+        prs (:pr-items model [])
         selected (:selected-idx model)
+        selected-ids (or (:selected-ids model) #{})
         repo-count (count (distinct (map :pr/repo prs)))
         merge-ready (count (filter #(= :merge-ready (:pr/status %)) prs))]
     (layout/split-v [cols rows] (/ 2.0 rows)
-      ;; Title bar
+      ;; Tab bar
       (fn [[c r]]
-        (layout/text [c r]
-                     (str " MINIFORGE │ PR Fleet"
-                          " [Repos: " repo-count
-                          " | PRs: " (count prs)
-                          " | Ready: " merge-ready "]")
-                     {:fg :cyan :bold? true}))
+        (tab-bar/render model
+                        (str "Repos: " repo-count
+                             " | PRs: " (count prs)
+                             " | Ready: " merge-ready)
+                        [c r]))
       ;; Content + footer
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)
-          ;; Table
-          (fn [[tc tr]]
-            (if (empty? prs)
-              (layout/text [tc tr]
-                           "  No PR work items. Connect a PR train to see data."
-                           {:fg :default})
-              (layout/table [tc tr]
-                {:columns [{:key :repo   :header "Repo"      :width 18}
-                           {:key :number :header "PR"        :width 6}
-                           {:key :title  :header "Title"     :width (max 10 (- tc 68))}
-                           {:key :status :header "Status"    :width 12}
-                           {:key :ready  :header "Readiness" :width 15}
-                           {:key :risk   :header "Risk"      :width 6}
-                           {:key :policy :header "Policy"    :width 6}]
-                 :data (mapv format-pr-row prs)
-                 :selected-row selected})))
-          ;; Footer
-          (fn [[fc fr]]
-            (layout/text [fc fr]
-              " j/k:navigate  Enter:detail  8:train  Esc:back  q:quit"
-              {:fg :default})))))))
+          (fn [size] (render-pr-table prs selected selected-ids theme size))
+          (fn [size] (render-footer model size)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

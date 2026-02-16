@@ -28,7 +28,8 @@
   (:require
    [clojure.java.io :as io]
    [clojure.edn :as edn]
-   [ai.miniforge.tui-views.model :as model]))
+   [ai.miniforge.tui-views.model :as model]
+   [ai.miniforge.pr-sync.interface :as pr-sync]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; EDN line reading
@@ -39,23 +40,6 @@
   [s]
   (try
     (edn/read-string s)
-    (catch Exception _ nil)))
-
-(defn- read-first-line
-  "Read the first line of a file."
-  [file]
-  (try
-    (with-open [rdr (io/reader file)]
-      (first (line-seq rdr)))
-    (catch Exception _ nil)))
-
-(defn- read-last-line
-  "Read the last non-empty line of a file.
-   Uses a reverse scan from the end for efficiency."
-  [file]
-  (try
-    (with-open [rdr (io/reader file)]
-      (last (line-seq rdr)))
     (catch Exception _ nil)))
 
 (defn- read-first-and-last
@@ -175,6 +159,86 @@
           (assoc :flash-message (str "Loaded " (count workflows) " workflows from disk")))
       model)))
 
+;------------------------------------------------------------------------------ Layer 3
+;; PR loading
+
+(defn load-fleet-repos
+  "Load configured fleet repositories from config.
+   Returns vector of normalized repo slugs, or empty vec on error."
+  [& [{:keys [config-path]}]]
+  (try
+    (if config-path
+      (pr-sync/get-configured-repos config-path)
+      (pr-sync/get-configured-repos))
+    (catch Exception _ [])))
+
+(defn load-fleet-repos-into-model
+  "Load configured fleet repos and merge into model."
+  [model & [opts]]
+  (let [repos (load-fleet-repos opts)]
+    (assoc model :fleet-repos (vec repos))))
+
+(defn load-pr-items
+  "Fetch open PRs for all configured fleet repositories.
+   Returns vector of TrainPR maps, or empty vec on error."
+  [& [{:keys [config-path]}]]
+  (try
+    (pr-sync/fetch-all-fleet-prs (when config-path {:config-path config-path}))
+    (catch Exception _ [])))
+
+(defn load-pr-items-into-model
+  "Load PRs from configured repos and merge into model.
+
+   Arguments:
+   - model - The TUI model
+   - opts  - Options: :config-path
+
+   Returns: Updated model with :pr-items populated."
+  [model & [opts]]
+  (let [prs (load-pr-items opts)]
+    (if (seq prs)
+      (-> model
+          (assoc :pr-items (vec prs))
+          (assoc :last-updated (java.util.Date.))
+          (assoc :flash-message (str "Loaded " (count prs) " PRs from "
+                                     (count (distinct (map :pr/repo prs))) " repo(s)")))
+      model)))
+
+(defn discover-repos
+  "Discover repos from a GitHub org/user and add to fleet config.
+   Returns result map from pr-sync/discover-repos!."
+  [owner]
+  (try
+    (pr-sync/discover-repos! {:owner owner})
+    (catch Exception e
+      {:success? false :error (.getMessage e)})))
+
+(defn browse-repos
+  "Browse repositories from providers (read-only).
+   Returns result map from pr-sync/list-org-repos."
+  [& [{:keys [owner limit provider] :or {limit 100 provider :github}}]]
+  (try
+    (pr-sync/list-org-repos (cond-> {}
+                              owner (assoc :owner owner)
+                              provider (assoc :provider provider)
+                              (integer? limit) (assoc :limit limit)))
+    (catch Exception e
+      {:success? false :owner owner :provider provider :error (.getMessage e)})))
+
+(defn load-all-into-model
+  "Load both workflows and PRs into model on startup.
+
+   Arguments:
+   - model - The initial TUI model
+   - opts  - {:limit N :config-path path}
+
+   Returns: Updated model with :workflows and :pr-items populated."
+  [model & [opts]]
+  (-> model
+      (load-workflows-into-model opts)
+      (load-fleet-repos-into-model opts)
+      (load-pr-items-into-model opts)))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Load workflows
@@ -186,5 +250,9 @@
   (def m (load-workflows-into-model (model/init-model)))
   (count (:workflows m))
   (:flash-message m)
+
+  ;; Load PRs
+  (def m2 (load-pr-items-into-model (model/init-model)))
+  (count (:pr-items m2))
 
   :leave-this-here)

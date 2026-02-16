@@ -52,12 +52,31 @@
                     :or {throttle-ms 1000 load-limit 100}}]]
   (let [app (tui/create-app
              {:init   (fn []
-                        (persistence/load-workflows-into-model
+                        (persistence/load-all-into-model
                          (model/init-model)
                          {:limit load-limit}))
               :update update/update-model
               :view   view/root-view
               :screen screen
+              :effect-handler
+              (fn [effect]
+                (case (:type effect)
+                  :sync-prs
+                  (let [prs (persistence/load-pr-items)]
+                    [:msg/prs-synced {:pr-items prs}])
+
+                  :discover-repos
+                  (let [result (persistence/discover-repos (:owner effect))]
+                    [:msg/repos-discovered result])
+
+                  :browse-repos
+                  (let [result (persistence/browse-repos {:owner (:owner effect)
+                                                          :provider (:provider effect)
+                                                          :limit (:limit effect)})]
+                    [:msg/repos-browsed (assoc result :source (:source effect))])
+
+                  ;; Unknown effect type — no-op
+                  nil))
               :subscriptions
               (when event-stream
                 (fn [dispatch-fn]

@@ -31,6 +31,8 @@
         ai.miniforge/gate {:local/root "../../components/gate"}
         ai.miniforge/release-executor {:local/root "../../components/release-executor"}
         ai.miniforge/evidence-bundle {:local/root "../../components/evidence-bundle"}
+        ;; PR sync (fleet config, GitHub fetch, status mapping)
+        ai.miniforge/pr-sync {:local/root "../../components/pr-sync"}
         ;; DAG and PR management
         ai.miniforge/dag-executor {:local/root "../../components/dag-executor"}
         ai.miniforge/pr-lifecycle {:local/root "../../components/pr-lifecycle"}

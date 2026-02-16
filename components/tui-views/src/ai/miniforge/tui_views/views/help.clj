@@ -35,24 +35,39 @@
    "  g/G            Jump to top/bottom"
    "  Enter/l        Drill into detail"
    "  Esc/h          Go back"
+   "  Tab            Cycle views in tier"
    ""
    "Views"
-   "  1  Workflows   2  Detail"
+   "  1  PR Fleet    2  Workflows"
    "  3  Evidence    4  Artifacts"
-   "  5  DAG Kanban  6  PR Fleet"
-   "  7  PR Detail   8  Train"
-   "  b  Kanban      e  Evidence"
-   "  a  Artifacts"
+   "  5  DAG Kanban  6  Repos"
+   "  7  8  9  0 reserved"
+   "  Number keys are level-local (1-0)"
    ""
    "Modes"
    "  :   Command mode"
    "  /   Search (filters list)"
    "  ?   Toggle this help"
-   "  Space  Expand/collapse"
+   "  Space  Select / expand"
+   "  v  Visual select  a  All"
+   ""
+   "Command Mode"
+   "  Tab  Complete command or args"
+   "  Up/Down  Browse completions"
+   "  Enter    Accept / execute"
+   "  Esc      Dismiss / exit"
+   ""
+   "Repos View (6)"
+   "  b  Browse remote repos (GitHub+GitLab)"
+   "  f  Show configured fleet"
+   "  Enter  Add selected from browse"
+   "  x  Remove selected from fleet"
+   "  /  Search  Space/v/a  Select"
    ""
    "Actions"
-   "  r   Refresh data"
-   "  q   Quit"
+   "  r  Refresh/sync   s  Refresh alias (PR/Repos)"
+   "  q  Quit"
+   "  :theme  :discover  :repos"
    ""
    "Press ? or Esc to close"])
 
@@ -62,13 +77,16 @@
 (defn render
   "Render the help overlay as a centered box.
    Returns a cell buffer sized to [cols rows]."
-  [[cols rows]]
-  (let [box-w (min 42 (- cols 4))
+  [model [cols rows]]
+  (let [theme (or (:resolved-theme model) {})
+        border-fg (get theme :border-focus :cyan)
+        text-fg (get theme :fg :default)
+        box-w (min 42 (- cols 4))
         box-h (min (+ 2 (count help-lines)) (- rows 2))
         x-off (max 0 (quot (- cols box-w) 2))
         y-off (max 0 (quot (- rows box-h) 2))
         overlay-buf (layout/box [box-w box-h]
-                      {:title "Help" :border :single :fg :cyan
+                      {:title "Help" :border :single :fg border-fg
                        :content-fn
                        (fn [[ic ir]]
                          (let [buf (layout/make-buffer [ic ir])
@@ -76,7 +94,7 @@
                            (reduce (fn [b [idx line]]
                                      (let [truncated (subs line 0 (min (count line) ic))]
                                        (layout/buf-put-string b 0 idx truncated
-                                                              {:fg :default :bg :default :bold? false})))
+                                                              {:fg text-fg :bg :default :bold? false})))
                                    buf
                                    (map-indexed vector visible))))})
         full-buf (layout/make-buffer [cols rows])]
@@ -84,5 +102,5 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  (layout/buf->strings (render [80 24]))
+  (layout/buf->strings (render {} [80 24]))
   :leave-this-here)

@@ -26,7 +26,8 @@
    - Progress bar
    - Agent status"
   (:require
-   [ai.miniforge.tui-engine.interface.layout :as layout]))
+   [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.views.tab-bar :as tab-bar]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Rendering helpers
@@ -67,47 +68,86 @@
     (vec (keep-indexed (fn [i wf] (when (contains? filtered-indices i) wf)) workflows))
     workflows))
 
-(defn- render-title-bar [workflow-count last-updated [cols rows]]
-  (layout/text [cols rows]
-    (str " MINIFORGE │ Workflows [" workflow-count "]"
-         (when last-updated
-           (str " │ " (.format (java.text.SimpleDateFormat. "HH:mm:ss") last-updated))))
-    {:fg :cyan :bold? true}))
+(defn- render-title-bar [model workflow-count last-updated [cols rows]]
+  (let [context (str "[" workflow-count "]"
+                     (when last-updated
+                       (str " " (.format (java.text.SimpleDateFormat. "HH:mm:ss") last-updated))))]
+    (tab-bar/render model context [cols rows])))
 
-(defn- render-table [workflows selected [cols rows]]
+(defn- render-table [workflows selected selected-ids theme [cols rows]]
   (if (empty? workflows)
     (layout/text [cols rows] "  No active workflows. Waiting for events..."
-                 {:fg :default})
-    (layout/table [cols rows]
-      {:columns [{:key :status-char :header "  " :width 2}
-                 {:key :name :header "Workflow" :width (max 10 (- cols 50))}
-                 {:key :phase :header "Phase" :width 12}
-                 {:key :progress-str :header "Progress" :width 20}
-                 {:key :agent-msg :header "Agent" :width 16}]
-       :data (mapv format-workflow-row workflows)
-       :selected-row selected})))
+                 {:fg (get theme :fg :default)})
+    (let [show-sel? (seq selected-ids)
+          sel-w (if show-sel? 3 0)
+          data (mapv (fn [wf]
+                       (cond-> (format-workflow-row wf)
+                         show-sel?
+                         (assoc :sel (if (contains? selected-ids (:id wf)) "[x]" "[ ]"))))
+                     workflows)
+          columns (cond-> []
+                    show-sel? (conj {:key :sel :header "   " :width 3})
+                    true (into [{:key :status-char :header "  " :width 2}
+                                {:key :name :header "Workflow"
+                                 :width (max 10 (- cols 50 sel-w))}
+                                {:key :phase :header "Phase" :width 12}
+                                {:key :progress-str :header "Progress" :width 20}
+                                {:key :agent-msg :header "Agent" :width 16}]))]
+      (layout/table [cols rows]
+        {:columns columns :data data :selected-row selected
+         :header-fg (get theme :header :cyan)
+         :row-fg (get theme :row-fg :default)
+         :row-bg (get theme :row-bg :default)
+         :selected-fg (get theme :selected-fg :white)
+         :selected-bg (get theme :selected-bg :blue)}))))
 
-(defn- render-footer [flash-message [cols rows]]
-  (layout/text [cols rows]
-    (str " j/k:navigate  Enter:detail  1-5:views  /:search  ::cmd  q:quit"
-         (when flash-message (str "  │ " flash-message)))
-    {:fg :default}))
+(defn- render-footer [model [cols rows]]
+  (let [theme (or (:resolved-theme model) {})
+        sel-count (count (:selected-ids model))
+        visual? (:visual-anchor model)
+        filtered? (:filtered-indices model)
+        filter-count (when filtered? (count filtered?))
+        flash (:flash-message model)
+        filter-tag (when filtered?
+                     (str "FILTER [" filter-count "] │ "))]
+    (layout/text [cols rows]
+      (cond
+        (pos? sel-count)
+        (str " " (when filter-tag filter-tag)
+             sel-count " selected │ Space:toggle  v:visual  a:all  c:clear  :archive :delete :cancel"
+             (when flash (str "  │ " flash)))
+
+        visual?
+        (str " " (when filter-tag filter-tag)
+             "VISUAL │ j/k:extend  Space:toggle  Esc:exit  a:all"
+             (when flash (str "  │ " flash)))
+
+        filtered?
+        (str " " filter-tag
+             "Space:select  a:all  v:visual  Esc:clear filter"
+             (when flash (str "  │ " flash)))
+
+        :else
+        (str " j/k:nav  Enter:detail  Space:select  v:visual  1-0:views  /:search  ::cmd  q:quit"
+             (when flash (str "  │ " flash))))
+      {:fg (get theme :fg-dim :default)})))
 
 (defn render
   "Render the workflow list view.
    model: full app model
    [cols rows]: available screen area"
   [model [cols rows]]
-  (let [all-workflows (:workflows model)
+  (let [theme (or (:resolved-theme model) {})
+        all-workflows (:workflows model)
         workflows (filter-workflows all-workflows (:filtered-indices model))
         selected (:selected-idx model)
-        flash (:flash-message model)]
+        selected-ids (or (:selected-ids model) #{})]
     (layout/split-v [cols rows] (/ 2.0 rows)
-      (fn [size] (render-title-bar (count all-workflows) (:last-updated model) size))
+      (fn [size] (render-title-bar model (count all-workflows) (:last-updated model) size))
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)
-          (fn [size] (render-table workflows selected size))
-          (fn [size] (render-footer flash size)))))))
+          (fn [size] (render-table workflows selected selected-ids theme size))
+          (fn [size] (render-footer model size)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

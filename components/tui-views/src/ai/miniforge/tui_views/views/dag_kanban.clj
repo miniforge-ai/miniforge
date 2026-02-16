@@ -29,7 +29,8 @@
    assigned agent, and dependency status."
   (:require
    [ai.miniforge.tui-engine.interface.layout :as layout]
-   [ai.miniforge.tui-engine.interface.widget :as widget]))
+   [ai.miniforge.tui-engine.interface.widget :as widget]
+   [ai.miniforge.tui-views.views.tab-bar :as tab-bar]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Task grouping
@@ -71,27 +72,27 @@
    model: full app model
    [cols rows]: available screen area"
   [model [cols rows]]
-  (let [columns (group-tasks-by-status (:workflows model))]
+  (let [theme (or (:resolved-theme model) {})
+        columns (group-tasks-by-status (:workflows model))]
     (layout/split-v [cols rows] (/ 2.0 rows)
-      ;; Title bar
+      ;; Tab bar
       (fn [[c r]]
-        (layout/text [c r] " MINIFORGE │ DAG Kanban"
-                     {:fg :cyan :bold? true}))
+        (tab-bar/render model nil [c r]))
       ;; Content + footer
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)
           ;; Kanban board
           (fn [[kc kr]]
             (layout/box [kc kr]
-              {:title "Task Board" :border :single :fg :default
+              {:title "Task Board" :border :single :fg (get theme :border :default)
                :content-fn
                (fn [[ic ir]]
                  (widget/kanban [ic ir] {:columns columns}))}))
           ;; Footer
           (fn [[fc fr]]
             (layout/text [fc fr]
-              " 1:workflows  2:detail  3:evidence  4:artifacts  q:quit"
-              {:fg :default})))))))
+              " Tab:views  1-0:jump  q:quit"
+              {:fg (get theme :fg-dim :default)})))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -50,7 +50,7 @@
                     text (subs text 0 (min (count text) cols))]
                 (buf/buf-put-string b 0 idx text
                                        {:fg (if sel? selected-fg fg)
-                                        :bg (if sel? selected-bg :black)
+                                        :bg (if sel? selected-bg :default)
                                         :bold? sel?})))
             buffer
             (map-indexed vector visible))))
