@@ -22,7 +22,8 @@
    Fleet config management, GitHub PR fetching, and status mapping.
    Both web-dashboard and TUI depend on this interface."
   (:require
-   [ai.miniforge.pr-sync.core :as core]))
+   [ai.miniforge.pr-sync.core :as core]
+   [ai.miniforge.pr-sync.status :as status]))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Fleet config
@@ -81,17 +82,17 @@
   "Map GitHub PR provider data to normalized PR status keyword.
    Input: map with :state, :isDraft, :reviewDecision keys."
   [pr]
-  (core/pr-status-from-provider pr))
+  (status/pr-status-from-provider pr))
 
 (defn check-rollup->ci-status
   "Map GitHub statusCheckRollup to normalized CI status keyword."
   [rollup]
-  (core/check-rollup->ci-status rollup))
+  (status/check-rollup->ci-status rollup))
 
 (defn provider-pr->train-pr
   "Convert a GitHub provider PR map to a normalized TrainPR map."
-  ([pr] (core/provider-pr->train-pr pr))
-  ([pr repo] (core/provider-pr->train-pr pr repo)))
+  ([pr] (status/provider-pr->train-pr pr))
+  ([pr repo] (status/provider-pr->train-pr pr repo)))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Fleet config I/O (lower-level, for direct config access)

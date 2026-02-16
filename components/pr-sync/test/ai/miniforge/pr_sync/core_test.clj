@@ -130,76 +130,7 @@
         (is (not (:removed? result)))))))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
-;; PR status mapping tests
-
-(deftest pr-status-from-provider-test
-  (testing "Open non-draft PR"
-    (is (= :open (core/pr-status-from-provider
-                   {:state "OPEN" :isDraft false :reviewDecision nil}))))
-
-  (testing "Draft PR"
-    (is (= :draft (core/pr-status-from-provider
-                    {:state "OPEN" :isDraft true :reviewDecision nil}))))
-
-  (testing "Approved PR"
-    (is (= :approved (core/pr-status-from-provider
-                       {:state "OPEN" :isDraft false :reviewDecision "APPROVED"}))))
-
-  (testing "Changes requested"
-    (is (= :changes-requested (core/pr-status-from-provider
-                                {:state "OPEN" :isDraft false :reviewDecision "CHANGES_REQUESTED"}))))
-
-  (testing "Review required"
-    (is (= :reviewing (core/pr-status-from-provider
-                        {:state "OPEN" :isDraft false :reviewDecision "REVIEW_REQUIRED"}))))
-
-  (testing "Closed/merged PR"
-    (is (= :closed (core/pr-status-from-provider
-                     {:state "MERGED" :isDraft false :reviewDecision nil})))
-    (is (= :closed (core/pr-status-from-provider
-                     {:state "CLOSED" :isDraft false :reviewDecision nil})))))
-
-(deftest check-rollup->ci-status-test
-  (testing "All passed"
-    (is (= :passed (core/check-rollup->ci-status
-                     [{:conclusion "SUCCESS"} {:conclusion "SUCCESS"}]))))
-
-  (testing "Any failed"
-    (is (= :failed (core/check-rollup->ci-status
-                     [{:conclusion "SUCCESS"} {:conclusion "FAILURE"}]))))
-
-  (testing "Running checks"
-    (is (= :running (core/check-rollup->ci-status
-                      [{:conclusion "SUCCESS"} {:status "IN_PROGRESS"}]))))
-
-  (testing "Nil rollup"
-    (is (= :pending (core/check-rollup->ci-status nil))))
-
-  (testing "Empty entries"
-    (is (= :pending (core/check-rollup->ci-status [])))))
-
-(deftest provider-pr->train-pr-test
-  (testing "Converts provider PR to train PR shape"
-    (let [pr {:number 42
-              :title "Fix auth"
-              :url "https://github.com/owner/repo/pull/42"
-              :headRefName "fix-auth"
-              :state "OPEN"
-              :isDraft false
-              :reviewDecision "APPROVED"
-              :statusCheckRollup [{:conclusion "SUCCESS"}]}
-          result (core/provider-pr->train-pr pr "owner/repo")]
-      (is (= 42 (:pr/number result)))
-      (is (= "Fix auth" (:pr/title result)))
-      (is (= "https://github.com/owner/repo/pull/42" (:pr/url result)))
-      (is (= "fix-auth" (:pr/branch result)))
-      (is (= :approved (:pr/status result)))
-      (is (= :passed (:pr/ci-status result)))
-      (is (= "owner/repo" (:pr/repo result)))))
-
-  (testing "Without repo arg, :pr/repo is absent"
-    (let [result (core/provider-pr->train-pr {:number 1 :title "X" :state "OPEN"})]
-      (is (nil? (:pr/repo result))))))
+;; Integration tests (PR fetching with mocked shell)
 
 (deftest fetch-all-fleet-prs-multi-provider-test
   (testing "Fetches open items from both GitHub and GitLab repositories"

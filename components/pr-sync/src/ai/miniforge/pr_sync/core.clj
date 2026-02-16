@@ -17,16 +17,18 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.pr-sync.core
-  "PR fleet synchronization: GitHub fetch, fleet config, status mapping.
+  "PR fleet synchronization: fleet config I/O and provider CLI interaction.
 
    Shared brick providing PR discovery and fleet repository management.
    Both the web-dashboard and TUI depend on this component.
 
    Layer 0: Constants and pure helpers
    Layer 1: Fleet config I/O
-   Layer 2: GitHub PR status mapping (pure)
-   Layer 3: GitHub CLI interaction (I/O)"
+   Layer 2: Provider CLI interaction (I/O)
+
+   Pure status mapping lives in ai.miniforge.pr-sync.status."
   (:require
+   [ai.miniforge.pr-sync.status :as status]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
@@ -44,15 +46,6 @@
 
 (def ^:private gitlab-repo-slug-pattern
   #"^gitlab:[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+$")
-
-(def ^:private failed-check-conclusions
-  #{"FAILURE" "TIMED_OUT" "CANCELLED" "ACTION_REQUIRED" "STARTUP_FAILURE"})
-
-(def ^:private passing-check-conclusions
-  #{"SUCCESS" "NEUTRAL" "SKIPPED"})
-
-(def ^:private pending-check-states
-  #{"PENDING" "QUEUED" "IN_PROGRESS" "WAITING" "REQUESTED"})
 
 ;------------------------------------------------------------------------------ Layer 0b
 ;; Pure helpers
@@ -199,92 +192,7 @@
                           :repos next-repos}))))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; GitHub PR status mapping (pure functions)
-
-(defn pr-status-from-provider
-  "Map GitHub PR provider data to normalized PR status keyword.
-   Input: map with :state, :isDraft, :reviewDecision keys."
-  [pr]
-  (let [state (some-> (:state pr) str str/upper-case)
-        draft? (boolean (:isDraft pr))
-        decision (some-> (:reviewDecision pr) str str/upper-case)]
-    (cond
-      (and state (not= "OPEN" state)) :closed
-      draft? :draft
-      (= "APPROVED" decision) :approved
-      (= "CHANGES_REQUESTED" decision) :changes-requested
-      (= "REVIEW_REQUIRED" decision) :reviewing
-      :else :open)))
-
-(defn check-rollup->ci-status
-  "Map GitHub statusCheckRollup to normalized CI status keyword."
-  [rollup]
-  (let [entries (cond
-                  (nil? rollup) []
-                  (sequential? rollup) rollup
-                  :else [rollup])
-        conclusions (keep #(some-> (:conclusion %) str str/upper-case) entries)
-        statuses (keep #(some-> (:status %) str str/upper-case) entries)]
-    (cond
-      (some failed-check-conclusions conclusions) :failed
-      (some pending-check-states statuses) :running
-      (and (seq conclusions)
-           (every? passing-check-conclusions conclusions)) :passed
-      (seq entries) :pending
-      :else :pending)))
-
-(defn provider-pr->train-pr
-  "Convert a GitHub provider PR map to a normalized TrainPR map.
-   Adds :pr/repo when repo is provided."
-  ([pr] (provider-pr->train-pr pr nil))
-  ([pr repo]
-   (cond-> {:pr/number    (:number pr)
-            :pr/title     (:title pr)
-            :pr/url       (:url pr)
-            :pr/branch    (:headRefName pr)
-            :pr/status    (pr-status-from-provider pr)
-            :pr/ci-status (check-rollup->ci-status (:statusCheckRollup pr))}
-     repo (assoc :pr/repo repo))))
-
-(defn- gitlab-status
-  [mr]
-  (let [state (some-> (:state mr) str str/lower-case)
-        draft? (or (true? (:draft mr))
-                   (true? (:work_in_progress mr))
-                   (str/starts-with? (str/lower-case (or (:title mr) "")) "draft:"))
-        merge-status (some-> (:merge_status mr) str str/lower-case)
-        conflicts? (true? (:has_conflicts mr))]
-    (cond
-      (not= "opened" state) :closed
-      draft? :draft
-      conflicts? :changes-requested
-      (contains? #{"can_be_merged" "mergeable"} merge-status) :merge-ready
-      :else :open)))
-
-(defn- gitlab-ci-status
-  [mr]
-  (let [status (some-> (or (get-in mr [:head_pipeline :status])
-                           (get-in mr [:pipeline :status]))
-                       str
-                       str/lower-case)]
-    (case status
-      ("success" "passed") :passed
-      ("failed" "canceled" "cancelled" "skipped") :failed
-      ("running" "pending" "created" "preparing" "waiting_for_resource") :running
-      :pending)))
-
-(defn- gitlab-mr->train-pr
-  [mr repo]
-  {:pr/number    (:iid mr)
-   :pr/title     (:title mr)
-   :pr/url       (:web_url mr)
-   :pr/branch    (:source_branch mr)
-   :pr/status    (gitlab-status mr)
-   :pr/ci-status (gitlab-ci-status mr)
-   :pr/repo      repo})
-
-;------------------------------------------------------------------------------ Layer 3
-;; GitHub CLI interaction (I/O)
+;; Provider CLI interaction (I/O)
 
 (defn- run-gh
   "Execute a `gh` CLI command. Returns {:success? bool :out str :err str}."
@@ -316,7 +224,7 @@
            {:repo repo
             :provider :github
             :prs (->> rows
-                      (map #(provider-pr->train-pr % repo))
+                      (map #(status/provider-pr->train-pr % repo))
                       (sort-by :pr/number)
                       vec)}))
         (catch Exception e
@@ -337,7 +245,7 @@
            {:repo repo
             :provider :gitlab
             :prs (->> rows
-                      (map #(gitlab-mr->train-pr % repo))
+                      (map #(status/gitlab-mr->train-pr % repo))
                       (sort-by :pr/number)
                       vec)}))
         (catch Exception e
@@ -673,11 +581,6 @@
   (fetch-open-prs "miniforge-ai/miniforge")
   (fetch-all-fleet-prs)
 
-  ;; Status mapping
-  (pr-status-from-provider {:state "OPEN" :isDraft false :reviewDecision "APPROVED"})
-  ;; => :approved
-
-  (check-rollup->ci-status [{:conclusion "SUCCESS"} {:conclusion "SUCCESS"}])
-  ;; => :passed
+  ;; Status mapping — see ai.miniforge.pr-sync.status
 
   :leave-this-here)
