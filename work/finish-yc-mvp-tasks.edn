@@ -1,0 +1,80 @@
+{:dag-id "miniforge-finish-yc-mvp-2026-02-16"
+ :description "Fast-path execution plan to finish YC MVP demo readiness"
+ :repo "github.com:miniforge-ai/miniforge.git"
+ :base-branch "main"
+
+ :tasks
+ [{:task/id "task-1-demo-fixtures-and-reset"
+   :task/deps #{}
+   :branch "codex/mvp-demo-fixtures"
+   :description "Build deterministic demo fixtures, seed script, and reset flow"
+   :files ["scripts/demo/seed_mvp_demo.clj"
+           "scripts/demo/reset_mvp_demo.clj"
+           "tests/fixtures/demo/"
+           "docs/demo/README.md"]
+   :acceptance-criteria "Fixture seed/reset is idempotent, reset completes in under 2 minutes, and docs/demo/README.md includes exact setup commands."
+   :context "This is the foundation for reliable demos and repeatable testing. Use work/finish-yc-mvp.spec.edn and specs/informative/yc-mvp-demo-script.md as source requirements."
+   :design-rules "Prefer simple Babashka/Clojure scripts, avoid external orchestration dependencies, and keep fixture data deterministic."}
+
+  {:task/id "task-2-n9-reliability"
+   :task/deps #{"task-1-demo-fixtures-and-reset"}
+   :branch "codex/mvp-n9-reliability"
+   :description "Harden fleet repo sync and PR train readiness/blocking surfaces"
+   :files ["components/web-dashboard/src/ai/miniforge/web_dashboard/state/trains.clj"
+           "components/web-dashboard/src/ai/miniforge/web_dashboard/server/handlers.clj"
+           "components/web-dashboard/src/ai/miniforge/web_dashboard/views/fleet.clj"
+           "components/pr-train/src/ai/miniforge/pr_train/"
+           "tests/integration/"]
+   :acceptance-criteria "Fleet sync exposes clear status/errors, readiness and blockers always render, and integration test covers multi-repo train with one blocked dependency."
+   :context "N9 demo must remain stable with transient provider/API failures and partial sync responses."
+   :design-rules "Favor explicit error maps and user-facing status fields over silent retries. Preserve existing endpoints."}
+
+  {:task/id "task-3-live-event-stream-reliability"
+   :task/deps #{"task-1-demo-fixtures-and-reset"}
+   :branch "codex/mvp-event-stream-reliability"
+   :description "Stabilize N3/N5 live workflow event visibility during demo"
+   :files ["components/event-stream/src/ai/miniforge/event_stream/"
+           "components/workflow/src/ai/miniforge/workflow/"
+           "components/web-dashboard/src/ai/miniforge/web_dashboard/server/"
+           "tests/conformance/conformance/event_stream_test.clj"]
+   :acceptance-criteria "Workflow launch emits required lifecycle events, UI receives/render key events, and integration coverage confirms end-to-end sequence visibility."
+   :context "Demo fails if progress appears stalled. Event flow must be obvious in first seconds of run."
+   :design-rules "Do not break N3 envelope or ordering guarantees. Additive instrumentation only."}
+
+  {:task/id "task-4-n8-control-actions"
+   :task/deps #{"task-3-live-event-stream-reliability"}
+   :branch "codex/mvp-control-actions"
+   :description "Polish pause/resume control actions with explicit audit trail"
+   :files ["components/event-stream/src/ai/miniforge/event_stream/control.clj"
+           "components/event-stream/src/ai/miniforge/event_stream/listeners.clj"
+           "components/web-dashboard/src/ai/miniforge/web_dashboard/"
+           "tests/conformance/"
+           "tests/integration/"]
+   :acceptance-criteria "Pause/resume works from control surface, action events are visible in timeline, and tests exist for authorized and unauthorized actions."
+   :context "N8 value in demo is operator control plus governance traceability."
+   :design-rules "Keep authorization checks explicit and testable. No hidden fallbacks for denied actions."}
+
+  {:task/id "task-5-policy-and-evidence-polish"
+   :task/deps #{"task-2-n9-reliability" "task-4-n8-control-actions"}
+   :branch "codex/mvp-evidence-polish"
+   :description "Make gate-to-readiness-to-evidence story deterministic and legible"
+   :files ["components/gate/src/ai/miniforge/gate/"
+           "components/evidence-bundle/src/ai/miniforge/evidence_bundle/"
+           "components/web-dashboard/src/ai/miniforge/web_dashboard/views/"
+           "tests/conformance/"
+           "tests/integration/"]
+   :acceptance-criteria "At least one high-signal gate deterministically affects readiness and evidence output includes intent, checks, violations/remediations, and promotion justification."
+   :context "This is the trust moment in the demo; evidence must answer why safe to merge."
+   :design-rules "Prefer deterministic fixtures over probabilistic gate outcomes. Keep evidence schema compliant with existing contracts."}
+
+  {:task/id "task-6-e2e-runbook-freeze"
+   :task/deps #{"task-5-policy-and-evidence-polish"}
+   :branch "codex/mvp-demo-freeze"
+   :description "Add end-to-end demo verifier, operator runbook, and final freeze docs"
+   :files ["tests/integration/"
+           "docs/demo/yc-mvp-runbook.md"
+           "docs/demo/yc-mvp-checklist.md"
+           "docs/demo/README.md"]
+   :acceptance-criteria "One executable E2E verification path covers full YC narrative, operator docs include preflight + fallback, and final freeze checklist is committed."
+   :context "Single-operator execution requires exact runbook and no ambiguous handoffs."
+   :design-rules "Write concise, command-oriented docs. Optimize for cold-start operation by one person."}]}

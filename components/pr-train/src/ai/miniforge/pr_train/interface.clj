@@ -4,7 +4,10 @@
   (:require
    [ai.miniforge.pr-train.core :as core]
    [ai.miniforge.pr-train.schema :as schema]
-   [ai.miniforge.pr-train.state :as state]))
+   [ai.miniforge.pr-train.state :as state]
+   [ai.miniforge.pr-train.readiness :as readiness]
+   [ai.miniforge.pr-train.risk :as risk]
+   [ai.miniforge.pr-train.tiers :as tiers]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol and schema re-exports
@@ -245,6 +248,43 @@
   "Check if a PR is ready to merge within a train context."
   [train pr]
   (state/ready-to-merge? train pr))
+
+;------------------------------------------------------------------------------ Layer 10
+;; Readiness scoring (N9)
+
+(def compute-readiness-score
+  "Compute weighted readiness score for a PR in a train. Returns double in [0.0, 1.0]."
+  readiness/compute-readiness-score)
+
+(def explain-readiness
+  "Explain readiness score breakdown. Returns map with :readiness/score, :readiness/factors."
+  readiness/explain-readiness)
+
+;------------------------------------------------------------------------------ Layer 11
+;; Risk assessment (N9)
+
+(def assess-risk
+  "Assess overall risk for a PR. Returns {:risk/score :risk/level :risk/factors}."
+  risk/assess-risk)
+
+;------------------------------------------------------------------------------ Layer 12
+;; Automation tiers (N9)
+
+(def get-automation-tier
+  "Get effective automation tier for a repository."
+  tiers/get-automation-tier)
+
+(def tier-allows?
+  "Check if a tier allows a specific operation given readiness and risk."
+  tiers/tier-allows?)
+
+(def can-auto-approve?
+  "Check if a PR can be auto-approved."
+  tiers/can-auto-approve?)
+
+(def can-auto-merge?
+  "Check if a PR can be auto-merged."
+  tiers/can-auto-merge?)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -1,11 +1,11 @@
 ;; Agent Backend Failure Classification and Reporting
 
-{:title "Agent Backend Failure Classification & Graceful Error Handling"
+{:spec/title "Agent Backend Failure Classification & Graceful Error Handling"
  :version "1.0.0"
  :type :enhancement
  :priority :high
 
- :description
+ :spec/description
  "Add intelligent error classification to distinguish agent backend failures from
   task failures. Provide users with clear context, appropriate vendor reporting
   links, and graceful UX when work completed successfully before backend error.
@@ -14,7 +14,7 @@
   agent backend errors are indistinguishable from task failures, leaving users
   confused about what went wrong and who to report to."
 
- :intent
+ :spec/intent
  {:type :error-handling-improvement
   :scope ["Agent task execution error classification"
           "User-facing error messages and reporting"
@@ -304,7 +304,7 @@
    "Test with real agent backend errors when they occur"
    "Verify completed work is shown accurately"]}
 
- :acceptance-criteria
+ :spec/acceptance-criteria
  [{:criterion "All error types correctly classified"
    :verification "Unit tests pass for all pattern matching"}
 

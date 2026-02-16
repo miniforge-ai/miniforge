@@ -1,7 +1,9 @@
 (ns ai.miniforge.config.interface
   "Public interface for configuration management."
   (:require
-   [ai.miniforge.config.user :as user]))
+   [ai.miniforge.config.user :as user]
+   [ai.miniforge.config.governance :as governance]
+   [ai.miniforge.config.digest :as digest]))
 
 ;; Re-export public functions
 (def default-user-config-path user/default-user-config-path)
@@ -46,3 +48,25 @@
   "Merge configurations with precedence."
   [& configs]
   (apply user/merge-configs configs))
+
+;; Governance config functions
+(defn load-governance-config
+  "Load governance config with full merge chain (resource -> profile -> user -> pack -> compile)."
+  ([config-key] (governance/load-governance-config config-key))
+  ([config-key opts] (governance/load-governance-config config-key opts)))
+
+(defn apply-pack-overrides
+  "Apply pack config overrides with safety checks."
+  [config-key base-config pack]
+  (governance/apply-pack-overrides config-key base-config pack))
+
+;; Digest functions
+(defn sha256-hex
+  "Compute SHA-256 hex digest of a string."
+  [content]
+  (digest/sha256-hex content))
+
+(defn verify-governance-file
+  "Verify governance file content against digest manifest."
+  [config-key content]
+  (digest/verify-governance-file config-key content))

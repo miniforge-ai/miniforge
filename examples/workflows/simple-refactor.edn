@@ -11,20 +11,20 @@
  :workflow/type :full-sdlc
  :workflow/version "2.0.0"
 
- :task/title "Refactor logging component"
- :task/description
+ :spec/title "Refactor logging component"
+ :spec/description
  "Extract structured logging helpers to a separate module for better reusability
   across the codebase. Currently, logging utilities are scattered across multiple
   components, leading to inconsistent logging patterns and code duplication."
 
- :task/intent
+ :spec/intent
  "Improve code organization and reusability by:
   - Consolidating scattered logging utilities into a single module
   - Creating a clean, consistent API for structured logging
   - Reducing code duplication across components
   - Maintaining all existing functionality and log output format"
 
- :task/constraints
+ :spec/constraints
  ["No breaking changes to existing public API"
   "Maintain 100% test coverage for logging component"
   "Preserve existing log output format and structure"
@@ -32,7 +32,7 @@
   "Update documentation to reflect new module structure"
   "Follow polylith architecture rules (use interface namespace only)"]
 
- :task/acceptance-criteria
+ :spec/acceptance-criteria
  ["Logging utilities are consolidated in components/logging/src"
   "All components use the new logging module (no duplicated code)"
   "Existing tests pass without modification"

@@ -67,6 +67,13 @@
           :description (:spec/description enriched-spec)
           :intent (:spec/intent enriched-spec)
           :constraints (:spec/constraints enriched-spec)
+          :acceptance-criteria (:spec/acceptance-criteria enriched-spec)
+          :code-artifact (:spec/code-artifact enriched-spec)
+          :plan-tasks (:spec/plan-tasks enriched-spec)
+          :repo-url (:spec/repo-url enriched-spec)
+          :branch (:spec/branch enriched-spec)
+          :llm-backend (:spec/llm-backend enriched-spec)
+          :sandbox (:spec/sandbox enriched-spec)
           :context (:spec/context enriched-spec)
           :metadata (:spec/metadata enriched-spec)
           :provenance (:spec/provenance enriched-spec)}))
@@ -96,7 +103,7 @@
           llm-backend (config/get-llm-backend
                        cfg
                        (or (get-in workflow [:workflow/config :llm-backend])
-                           (get-in spec [:spec/raw-data :llm-backend])))]
+                           (:spec/llm-backend spec)))]
       (when-let [create-client (requiring-resolve 'ai.miniforge.llm.interface/create-client)]
         (create-client {:backend llm-backend})))
     (catch Exception e

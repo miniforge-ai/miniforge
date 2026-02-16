@@ -11,18 +11,18 @@
 ;; doesn't flow to dashboard, and the browser WebSocket handler drops events
 ;; on the floor due to envelope mismatch.
 
-{:title "Finish Event Telemetry & Dashboard Live Wiring"
- :description "Complete the event telemetry pipeline so the dashboard shows real-time
+{:spec/title "Finish Event Telemetry & Dashboard Live Wiring"
+ :spec/description "Complete the event telemetry pipeline so the dashboard shows real-time
    workflow progress — phase transitions, agent streaming output, metrics, and completion.
    Five breaks in the pipeline need fixing: silent phases (verify/review/release emit
    zero events), missing streaming callbacks (agent output never reaches subscribers),
    WebSocket envelope mismatch (browser drops events), no browser-side refresh wiring,
    and no event query API for historical data."
- :intent {:type :implement
+ :spec/intent {:type :implement
           :scope ["components/phase/src"
                   "components/web-dashboard/src"
                   "components/web-dashboard/resources/public/js"]}
- :constraints ["Do not change event-stream core — it's already complete"
+ :spec/constraints ["Do not change event-stream core — it's already complete"
                "Do not change agent component — it already accepts on-chunk"
                "Use requiring-resolve for optional event-stream dependency"
                "Preserve backward compatibility with existing WebSocket consumers"]

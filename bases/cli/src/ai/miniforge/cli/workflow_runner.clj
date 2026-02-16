@@ -296,7 +296,7 @@
                                                         :spec-title (:spec/title spec)
                                                         :control-state control-state
                                                         :skip-lifecycle-events true})
-          sandbox? (or (:sandbox opts) (get-in spec [:spec/raw-data :sandbox]))
+          sandbox? (or (:sandbox opts) (:spec/sandbox spec))
           [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)]
       (when-not quiet
         (display/print-workflow-header (keyword (str "adhoc-" (hash spec))) "adhoc" quiet))

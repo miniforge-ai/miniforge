@@ -11,16 +11,16 @@
  :workflow/type :test-only
  :workflow/version "2.0.0"
 
- :task/title "Generate tests for string utility functions"
- :task/description
+ :spec/title "Generate tests for string utility functions"
+ :spec/description
  "Create comprehensive tests for a simple string utility module that provides
   common string manipulation functions."
 
- :task/intent
+ :spec/intent
  "Generate unit tests covering all edge cases for string utility functions,
   including empty strings, nil values, unicode handling, and boundary conditions."
 
- :task/constraints
+ :spec/constraints
  ["Use clojure.test framework"
   "Test all edge cases (nil, empty string, whitespace only)"
   "Include property-based tests for string reversal"
@@ -28,7 +28,7 @@
   "Tests should be clear and self-documenting"]
 
  ;; Code artifact with actual content inline
- :task/code-artifact
+ :spec/code-artifact
  {:code/id #uuid "12345678-1234-1234-1234-123456789abc"
   :code/language "clojure"
   :code/summary "String utility functions for common text manipulations"
@@ -62,7 +62,7 @@
          (map str/capitalize)
          (str/join \" \"))))"}]}
 
- :task/acceptance-criteria
+ :spec/acceptance-criteria
  ["Tests verify reverse-string handles nil, empty, single char, and multi-char strings"
   "Tests verify truncate handles strings shorter, equal, and longer than max-length"
   "Tests verify capitalize-words handles single words, multiple words, and mixed case"

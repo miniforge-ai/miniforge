@@ -1,11 +1,11 @@
 ;; Intelligent Model Selection
 
-{:title "Intelligent Model Selection Based on Task Characteristics"
+{:spec/title "Intelligent Model Selection Based on Task Characteristics"
  :version "1.0.0"
  :type :enhancement
  :priority :high
 
- :description
+ :spec/description
  "Automatically select the optimal model (Opus 4.6, Sonnet 4.5, Haiku 4.5, etc.)
   based on task characteristics, agent type, and workflow phase. Different tasks
   need different capabilities - complex reasoning requires Opus, execution uses
@@ -793,7 +793,7 @@
    "Test cost calculations"
    "Test model unavailability handling"]}
 
- :acceptance-criteria
+ :spec/acceptance-criteria
  [{:criterion "Models have capability metadata"
    :verification "Query model registry for reasoning capability"}
 

@@ -16,8 +16,8 @@
  :workflow/version "2.0.0"
 
  ;; Required fields for spec parser
- :title "Complete N1 Agent Protocol Implementation"
- :description
+ :spec/title "Complete N1 Agent Protocol Implementation"
+ :spec/description
  "Implement the missing agent protocol methods per N1 spec §2.3:
   - Agent abort() method for graceful termination
   - Tool validate-args and get-schema methods for runtime validation
@@ -27,7 +27,7 @@
   while we monitor its autonomous decision-making, error handling, and
   self-repair mechanisms."
 
- :intent
+ :spec/intent
  {:type "feature"
   :description "Complete the N1 Core Architecture specification implementation by adding
   the missing agent protocol methods. This will:
@@ -43,7 +43,7 @@
   - Validate error detection → pause → self-repair → checkpoint restart flow
   - Ensure evidence bundles capture full provenance and audit trail"}
 
- :constraints
+ :spec/constraints
  ["Follow N1 spec §2.3 agent protocol requirements EXACTLY"
   "Maintain backward compatibility with existing agent implementations"
   "Add comprehensive unit tests for all new protocol methods"
@@ -55,7 +55,7 @@
   "Ensure all gates pass before advancing phases"
   "Generate PR description following miniforge standards"]
 
- :acceptance-criteria
+ :spec/acceptance-criteria
  ["Agent protocol includes abort() method with graceful shutdown"
   "Tool protocol includes validate-args and get-schema methods"
   "Subagent orchestration supports full lifecycle management"

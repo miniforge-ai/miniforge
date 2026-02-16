@@ -11,14 +11,14 @@
  :workflow/type :full-sdlc
  :workflow/version "2.0.0"
 
- :task/title "Implement N3 SSE streaming endpoint"
- :task/description
+ :spec/title "Implement N3 SSE streaming endpoint"
+ :spec/description
  "Add Server-Sent Events (SSE) endpoint for real-time workflow event streaming
   per N3 spec §3.4. This enables clients to subscribe to workflow execution
   events in real-time, including phase transitions, agent decisions, and
   final results."
 
- :task/intent
+ :spec/intent
  "Create a production-ready SSE endpoint that:
   - Streams workflow events in real-time to connected clients
   - Supports event filtering by workflow ID and event type
@@ -26,7 +26,7 @@
   - Follows N3 specification requirements for event streaming
   - Maintains backward compatibility with existing REST API"
 
- :task/constraints
+ :spec/constraints
  ["Follow N3 spec §3.4 event streaming requirements"
   "Maintain backward compatibility with existing API endpoints"
   "Include comprehensive integration tests"
@@ -36,7 +36,7 @@
   "Document API endpoints and event format"
   "Ensure secure authentication for event streams"]
 
- :task/acceptance-criteria
+ :spec/acceptance-criteria
  ["SSE endpoint accepts connections at /api/v1/workflows/{id}/events"
   "Events are streamed in real-time as workflow executes"
   "Clients can filter events by type (phase-transition, agent-decision, etc.)"
