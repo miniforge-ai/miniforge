@@ -1,5 +1,5 @@
 {:dag-id "miniforge-gitlab-support-2026-02-06"
- :description "Add GitLab support to miniforge for MR lifecycle management"
+ :spec/description "Add GitLab support to miniforge for MR lifecycle management"
 
  :tasks
  [{:task/id "task-1-git-provider-protocol"

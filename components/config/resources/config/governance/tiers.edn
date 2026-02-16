@@ -1,0 +1,22 @@
+{:tier-0 {:auto-approve? false
+          :auto-merge?   false
+          :description   "Human-only: no automation"
+          :constraints   {}}
+ :tier-1 {:auto-approve? false
+          :auto-merge?   true
+          :description   "Human approves, system merges"
+          :constraints   {}}
+ :tier-2 {:auto-approve? true
+          :auto-merge?   true
+          :description   "Full automation with tight guardrails"
+          :constraints   {:max-risk-level :medium
+                          :min-readiness  #profile {:default 0.90
+                                                    :strict  0.95
+                                                    :permissive 0.85}}}
+ :tier-3 {:auto-approve? true
+          :auto-merge?   true
+          :description   "Full automation with relaxed guardrails"
+          :constraints   {:max-risk-level :high
+                          :min-readiness  #profile {:default 0.75
+                                                    :strict  0.85
+                                                    :permissive 0.65}}}}

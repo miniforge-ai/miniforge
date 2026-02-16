@@ -487,6 +487,57 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Structured control action handler (N8)
 
+(def ^:private default-dashboard-requester
+  "Default requester identity when none is provided in the request body."
+  {:principal "dashboard" :role :operator})
+
+(defn- build-control-action
+  "Build a control action map from parsed request data."
+  [data workflow-id]
+  (let [create-fn (requiring-resolve 'ai.miniforge.event-stream.interface/create-control-action)]
+    (create-fn (keyword (:action/type data))
+               {:target-type :workflow :target-id workflow-id}
+               (or (:action/requester data) default-dashboard-requester)
+               {:justification (:action/justification data)
+                :parameters (:action/parameters data)})))
+
+(defn- execute-via-command!
+  "Execution function that bridges control actions to the legacy command system."
+  [state workflow-id action]
+  (let [cmd (name (:action/type action))]
+    (write-command-file! workflow-id cmd)
+    (state/enqueue-command! state workflow-id cmd)
+    {:command cmd :workflow-id workflow-id}))
+
+(defn- execute-authorized-action
+  "Execute a control action that has passed authorization."
+  [state workflow-id action]
+  (let [es (:event-stream @state)
+        exec-fn (requiring-resolve 'ai.miniforge.event-stream.interface/execute-control-action!)
+        result (exec-fn es action (partial execute-via-command! state workflow-id))]
+    (responses/json-response {:status "executed" :result result})))
+
+(defn- authorization-error-response
+  "Build an anomaly response for a failed authorization check."
+  [auth-result action-type]
+  (anomaly-http-response
+   (or (:anomaly auth-result)
+       (make-anomaly :anomalies/forbidden
+                     (:reason auth-result)
+                     {:action-type action-type}))))
+
+(defn- handle-structured-control-action
+  "Handle a structured control action request (has :action/type)."
+  [state workflow-id data]
+  (let [action (build-control-action data workflow-id)
+        roles @(requiring-resolve 'ai.miniforge.event-stream.control/default-roles)
+        requester (:action/requester action)
+        auth-result ((requiring-resolve 'ai.miniforge.event-stream.interface/authorize-action)
+                     roles action requester)]
+    (if (:authorized? auth-result)
+      (execute-authorized-action state workflow-id action)
+      (authorization-error-response auth-result (:action/type action)))))
+
 (defn handle-api-workflow-command-v2
   "API: Enqueue a structured control action for a workflow.
    Accepts both legacy {:command :pause} and structured {:action/type :pause ...} formats."
@@ -494,36 +545,95 @@
   (try
     (let [data (json/parse-string body true)]
       (if (:action/type data)
-        ;; New structured control action
-        (let [es (:event-stream @state)
-              create-fn (requiring-resolve 'ai.miniforge.event-stream.interface/create-control-action)
-              auth-fn (requiring-resolve 'ai.miniforge.event-stream.interface/authorize-action)
-              exec-fn (requiring-resolve 'ai.miniforge.event-stream.interface/execute-control-action!)
-              roles @(requiring-resolve 'ai.miniforge.event-stream.control/default-roles)
-              action-type (keyword (:action/type data))
-              requester (or (:action/requester data)
-                            {:principal "dashboard" :role :operator})
-              action (create-fn action-type
-                                {:target-type :workflow :target-id workflow-id}
-                                requester
-                                {:justification (:action/justification data)
-                                 :parameters (:action/parameters data)})
-              auth-result (auth-fn roles action requester)]
-          (if (:authorized? auth-result)
-            (let [result (exec-fn es action
-                                  (fn [act]
-                                    ;; Execute via existing command infrastructure
-                                    (let [cmd (name (:action/type act))]
-                                      (write-command-file! workflow-id cmd)
-                                      (state/enqueue-command! state workflow-id cmd)
-                                      {:command cmd :workflow-id workflow-id})))]
-              (responses/json-response {:status "executed" :result result}))
-            (anomaly-http-response
-             (or (:anomaly auth-result)
-                 (make-anomaly :anomalies/forbidden
-                               (:reason auth-result)
-                               {:action-type action-type})))))
-        ;; Legacy command format — delegate to existing handler
+        (handle-structured-control-action state workflow-id data)
         (handle-api-workflow-command state workflow-id body)))
+    (catch Exception e
+      (anomaly-http-response (from-exception e)))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Multi-party approval API handlers (N8)
+
+(defn handle-api-approval-create
+  "API: Create an approval request.
+   POST /api/approvals  body: {:action-id uuid-str :required-signers [str] :quorum int}"
+  [state body]
+  (try
+    (let [data (json/parse-string body true)
+          action-id (parse-uuid (str (:action-id data)))
+          signers (vec (:required-signers data))
+          quorum (or (:quorum data) (count signers))
+          create-fn (requiring-resolve 'ai.miniforge.event-stream.interface/create-approval-request)
+          store-fn (requiring-resolve 'ai.miniforge.event-stream.interface/store-approval!)
+          mgr-fn (requiring-resolve 'ai.miniforge.event-stream.interface/create-approval-manager)
+          ;; Get or create approval manager from state
+          mgr (or (:approval-manager @state)
+                  (let [m (mgr-fn)]
+                    (swap! state assoc :approval-manager m)
+                    m))
+          approval (create-fn action-id signers quorum
+                              {:expires-in-hours (or (:expires-in-hours data) 24)})]
+      (store-fn mgr approval)
+      (responses/json-response
+       {:status "created"
+        :approval-id (str (:approval/id approval))
+        :expires-at (str (:approval/expires-at approval))}))
+    (catch Exception e
+      (anomaly-http-response (from-exception e)))))
+
+(defn handle-api-approval-get
+  "API: Get approval status.
+   GET /api/approvals/:id"
+  [state approval-id-str]
+  (try
+    (let [approval-id (parse-uuid approval-id-str)
+          get-fn (requiring-resolve 'ai.miniforge.event-stream.interface/get-approval)
+          status-fn (requiring-resolve 'ai.miniforge.event-stream.interface/check-approval-status)
+          mgr (:approval-manager @state)]
+      (if-let [approval (and mgr (get-fn mgr approval-id))]
+        (responses/json-response
+         {:approval-id (str (:approval/id approval))
+          :status (name (status-fn approval))
+          :quorum (:approval/quorum approval)
+          :signatures (count (:approval/signatures approval))
+          :required-signers (:approval/required-signers approval)
+          :expires-at (str (:approval/expires-at approval))})
+        (anomaly-http-response
+         (make-anomaly :anomalies/not-found
+                       "Approval not found"
+                       {:approval-id approval-id-str}))))
+    (catch Exception e
+      (anomaly-http-response (from-exception e)))))
+
+(defn handle-api-approval-sign
+  "API: Submit an approval signature.
+   POST /api/approvals/:id/sign  body: {:signer str :decision \"approve\"|\"reject\" :reason str}"
+  [state approval-id-str body]
+  (try
+    (let [data (json/parse-string body true)
+          approval-id (parse-uuid approval-id-str)
+          get-fn (requiring-resolve 'ai.miniforge.event-stream.interface/get-approval)
+          submit-fn (requiring-resolve 'ai.miniforge.event-stream.interface/submit-approval)
+          update-fn (requiring-resolve 'ai.miniforge.event-stream.interface/update-approval!)
+          mgr (:approval-manager @state)
+          approval (and mgr (get-fn mgr approval-id))]
+      (if-not approval
+        (anomaly-http-response
+         (make-anomaly :anomalies/not-found
+                       "Approval not found"
+                       {:approval-id approval-id-str}))
+        (let [result (submit-fn approval
+                                (:signer data)
+                                (keyword (:decision data))
+                                {:reason (:reason data)})]
+          (if (= :success (:status result))
+            (do
+              (update-fn mgr (:output result))
+              (responses/json-response
+               {:status "signed"
+                :approval-status (name (:approval/status (:output result)))}))
+            (anomaly-http-response
+             (make-anomaly :anomalies/incorrect
+                           (get-in result [:error :message] "Signing failed")
+                           {}))))))
     (catch Exception e
       (anomaly-http-response (from-exception e)))))

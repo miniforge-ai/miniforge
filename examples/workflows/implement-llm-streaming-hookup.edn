@@ -12,8 +12,8 @@
  :workflow/type :standard-sdlc
  :workflow/version "2.0.0"
 
- :title "Implement LLM Streaming Hookup"
- :description
+ :spec/title "Implement LLM Streaming Hookup"
+ :spec/description
  "Wire up token streaming in agents and workflow runner to enable real-time output visibility.
 
   Current state:
@@ -28,7 +28,7 @@
   4. Add tests for streaming behavior in agents
   5. Ensure backward compatibility (streaming is opt-in via context/opts)"
 
- :intent
+ :spec/intent
  {:type "feature"
   :description "Enable real-time streaming of LLM token output to provide progress visibility
   during long-running operations. Currently, LLM interactions are synchronous - users must
@@ -45,7 +45,7 @@
   - Improved user experience for long-running operations
   - Foundation for interactive agent sessions"}
 
- :constraints
+ :spec/constraints
  ["Maintain backward compatibility (streaming is opt-in, not default)"
   "Check for :on-chunk in opts/context before using streaming"
   "Use existing llm/chat-stream API (already implemented)"
@@ -57,7 +57,7 @@
   "No breaking changes to agent protocol"
   "CLI flag: --streaming to enable for mf run command"]
 
- :acceptance-criteria
+ :spec/acceptance-criteria
  ["Agents check for :on-chunk in opts/context"
   "When :on-chunk present, agents use llm/chat-stream instead of llm/chat"
   "When :on-chunk absent, agents use llm/chat (existing behavior)"

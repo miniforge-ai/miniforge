@@ -1,5 +1,5 @@
-{:title "Build N1 conformance test suite"
- :description "Implement complete N1 architecture conformance tests per spec §8.2. This is CRITICAL for verifying miniforge conforms to N1 requirements before we can claim spec compliance.
+{:spec/title "Build N1 conformance test suite"
+ :spec/description "Implement complete N1 architecture conformance tests per spec §8.2. This is CRITICAL for verifying miniforge conforms to N1 requirements before we can claim spec compliance.
 
 Required test coverage:
 1. End-to-end workflow execution test (spec → PR with evidence bundle)
@@ -14,11 +14,11 @@ Success criteria:
 - 100% test pass rate
 - Evidence bundle generated for test workflow"
 
- :intent {:type :feature
+ :spec/intent {:type :feature
           :scope ["tests/conformance/conformance/"
                   "tests/conformance/fixtures/"]}
 
- :constraints ["follow-n1-spec-section-8.2"
+ :spec/constraints ["follow-n1-spec-section-8.2"
                "comprehensive-test-coverage"
                "all-tests-must-pass"
                "use-existing-test-framework"

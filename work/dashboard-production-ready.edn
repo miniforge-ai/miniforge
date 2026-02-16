@@ -1,4 +1,4 @@
-{:title "Build Production-Ready Web Dashboard with High Fidelity"
+{:spec/title "Build Production-Ready Web Dashboard with High Fidelity"
  :version "3.0.0"
  :priority :critical
  :competitive-context
@@ -7,7 +7,7 @@
   a polished, dense, informative dashboard that combines workflow orchestration,
   PR fleet management, and AI-powered insights in one unified interface."
 
- :description
+ :spec/description
  "Build a complete, production-ready web dashboard that showcases miniforge's
   capabilities with professional polish and high information density. This
   should feel like a mature product that enterprises would trust, not a prototype.
@@ -20,7 +20,7 @@
   - Terminal aesthetic that appeals to developers
   - No build step required (server-side rendering for Homebrew)"
 
- :intent
+ :spec/intent
  {:type :feature-complete-production-ready
   :scope ["Complete all 8 views (5 N5 + 3 N9 PR views)"
           "Polished UI with professional design system"
@@ -182,7 +182,7 @@
   Make it shine. Make it feel expensive. Make it something developers WANT
   to show their team. This is what separates us from the competition."
 
- :constraints
+ :spec/constraints
  ["Must work in Babashka (no JVM-only dependencies)"
   "Server-side rendering only (no build step)"
   "All files follow Rule 720 (≤400 lines)"

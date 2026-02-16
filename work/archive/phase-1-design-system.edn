@@ -12,13 +12,13 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-{:title "Web Dashboard Phase 1: Design System & Component Library"
+{:spec/title "Web Dashboard Phase 1: Design System & Component Library"
  :version "1.0.0"
  :parent-spec "work/web-dashboard-v2.edn"
  :phase 1
  :estimated-size "~350 lines"
 
- :description
+ :spec/description
  "Build the foundation for the web dashboard: CSS design system and reusable
   Hiccup component library. This provides the building blocks for all 9 views
   (dashboard, PR fleet, workflow monitoring, etc.).
@@ -26,7 +26,7 @@
   Focus: Clean, maintainable, aesthetic components that capture the terminal
   aesthetic + Tableau-inspired density."
 
- :intent
+ :spec/intent
  {:type :foundation
   :scope ["CSS design system with variables"
           "Reusable Hiccup component library"
@@ -51,7 +51,7 @@
      "components/web-dashboard/src/ai/miniforge/web_dashboard/views.clj - Current views"
      "components/web-dashboard/resources/public/css/app.css - Current CSS"]}}
 
- :constraints
+ :spec/constraints
  ["Each component ≤30 lines of code"
   "Components are pure functions (no side effects, no state)"
   "CSS uses variables for all design tokens"
@@ -349,7 +349,7 @@
      (is (= (button \"Click\" {:variant :primary})
             [:button.btn.btn-primary \"Click\"])))"}
 
- :acceptance-criteria
+ :spec/acceptance-criteria
  [{:criterion "CSS design system complete"
    :verification
    "- All color/spacing/typography tokens defined as CSS variables

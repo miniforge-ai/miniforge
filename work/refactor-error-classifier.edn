@@ -1,12 +1,12 @@
 ;; Refactor Error Classifier
 
-{:title "Refactor Error Classifier into Sub-Namespaces"
+{:spec/title "Refactor Error Classifier into Sub-Namespaces"
  :version "1.0.0"
  :type :refactoring
  :priority :medium
  :pr-comment "PR #152: error_classifier.clj:1"
 
- :description
+ :spec/description
  "Split the error_classifier.clj file (~400 lines) into multiple focused
   sub-namespaces following stratified design principles. Each sub-namespace
   should have a single responsibility and stay under 400 lines per Rule 720."
@@ -165,7 +165,7 @@
    "Verify backward compatibility"
    "Test with real error messages"]}
 
- :acceptance-criteria
+ :spec/acceptance-criteria
  [{:criterion "All files under 400 lines"
    :verification "Check line counts: wc -l *.clj"}
 

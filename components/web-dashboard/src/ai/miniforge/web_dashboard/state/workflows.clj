@@ -41,7 +41,8 @@
 
 (defn- wf-name-from-started
   [started id]
-  (or (get-in started [:workflow/spec :title])
+  (or (get-in started [:workflow/spec :spec/title])
+      (get-in started [:workflow/spec :title])
       (get-in started [:workflow/spec :name])
       (get-in started [:workflow-spec :title])
       (get-in started [:workflow-spec :name])

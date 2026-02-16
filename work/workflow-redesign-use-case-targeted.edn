@@ -1,4 +1,4 @@
-{:title "Redesign Workflows: Use-Case Targeted with Safety by Default"
+{:spec/title "Redesign Workflows: Use-Case Targeted with Safety by Default"
  :version "1.0.0"
  :priority :high
  :context
@@ -15,7 +15,7 @@
   Every workflow includes cognitive safety, testing, PR monitoring, and review
   gates. The difference is in the APPROACH, not the presence of safety features."
 
- :description
+ :spec/description
  "Replace complexity-based workflows (simple, lean, canonical) with use-case
   targeted workflows that match developer intent. Every workflow includes safety
   features by default - the variation is in approach (iteration style, review
@@ -33,7 +33,7 @@
   - Variation is in APPROACH: iteration speed, review depth, planning style
   - Clear mapping from user intent to workflow type"
 
- :intent
+ :spec/intent
  {:type :architectural-redesign
   :scope ["Remove simple/lean/canonical workflows"
           "Implement 5 use-case targeted workflows"

@@ -78,6 +78,8 @@
                        "components/self-healing/src"
                        "components/self-healing/resources"
                        "components/pr-sync/src"
+                       "components/spec-parser/src"
+                       "components/spec-parser/resources"
                        "bases/cli/src"
                        "bases/cli/resources"
                        "bases/lsp-mcp-bridge/src"]
@@ -120,10 +122,12 @@
                      ai.miniforge/web-dashboard {:local/root "components/web-dashboard"}
                      ai.miniforge/self-healing {:local/root "components/self-healing"}
                      ai.miniforge/pr-sync {:local/root "components/pr-sync"}
+                     ai.miniforge/spec-parser {:local/root "components/spec-parser"}
                      ai.miniforge/cli {:local/root "bases/cli"}}}
 
   :test {:extra-paths ["development/test"
                        "components/schema/test"
+                       "components/config/test"
                        "components/algorithms/test"
                        "components/response/test"
                        "components/fsm/test"
@@ -159,7 +163,9 @@
                        "components/web-dashboard/test"
                        "components/self-healing/test"
                        "components/pr-sync/test"]
+                       "components/spec-parser/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
+                      ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
@@ -195,6 +201,7 @@
                       ai.miniforge/web-dashboard {:local/root "components/web-dashboard"}
                       ai.miniforge/self-healing {:local/root "components/self-healing"}
                       ai.miniforge/pr-sync {:local/root "components/pr-sync"}}}
+                      ai.miniforge/spec-parser {:local/root "components/spec-parser"}}}
 
   :conformance {:extra-paths ["development/test"
                               "tests/conformance"
