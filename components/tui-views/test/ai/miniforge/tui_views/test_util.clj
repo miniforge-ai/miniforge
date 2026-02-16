@@ -77,3 +77,25 @@
   "Check if model's mode matches expected."
   [model expected-mode]
   (= expected-mode (:mode model)))
+
+;; Selection assertion helpers
+
+(defn selection-count-is?
+  "Check if model has expected number of selected items."
+  [model expected-count]
+  (= expected-count (count (:selected-ids model))))
+
+(defn has-selection?
+  "Check if model has a specific ID selected."
+  [model id]
+  (contains? (:selected-ids model) id))
+
+(defn visual-mode?
+  "Check if visual mode is active."
+  [model]
+  (some? (:visual-anchor model)))
+
+(defn confirm-active?
+  "Check if a confirmation prompt is active."
+  [model]
+  (some? (:confirm model)))
