@@ -199,6 +199,11 @@ These documents provide guidance, examples, and context but do NOT define contra
 
 - [informative/pr-monitoring-workflow.md](informative/pr-monitoring-workflow.md) - PR monitoring and conflict resolution
 
+### Demo Scripts
+
+- [informative/yc-mvp-demo-script.md](informative/yc-mvp-demo-script.md) -
+  YC-ready MVP demo narrative, flow, and implementation breakdown
+
 ### Architecture & Internals
 
 - [informative/I-ANOMALY-SYSTEM.md](informative/I-ANOMALY-SYSTEM.md) - Canonical error representation and boundary translators
