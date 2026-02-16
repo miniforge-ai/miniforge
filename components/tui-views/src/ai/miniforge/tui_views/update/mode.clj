@@ -79,20 +79,24 @@
             {:line-idx idx :text line})))
       lines)))
 
+(defn- matching-indices
+  "Return set of indices whose item matches query via name-fn."
+  [items name-fn query]
+  (->> items
+       (map-indexed (fn [idx item] [idx (or (name-fn item) "")]))
+       (filter (fn [[_ label]] (str/includes? (str/lower-case label) query)))
+       (map first)
+       set))
+
 (defn- compute-aggregate-search
   "Filter items by name match. Sets :filtered-indices."
   [model query items name-fn]
   (if (str/blank? query)
     (assoc model :filtered-indices nil :search-matches [])
-    (let [q (str/lower-case query)
-          matches (set (keep-indexed
-                         (fn [idx item]
-                           (when (str/includes?
-                                   (str/lower-case (or (name-fn item) ""))
-                                   q)
-                             idx))
-                         items))]
-      (assoc model :filtered-indices matches :selected-idx 0 :search-matches []))))
+    (-> model
+        (assoc :filtered-indices (matching-indices items name-fn (str/lower-case query))
+               :selected-idx 0
+               :search-matches []))))
 
 (defn- compute-detail-search
   "Find matches in scrollable content. Sets :search-matches."
@@ -103,6 +107,29 @@
       (assoc model :search-matches matches
                    :search-match-idx (when (seq matches) 0)
                    :filtered-indices nil))))
+
+(defn- evidence-labels
+  "Build searchable label strings from evidence tree."
+  [model]
+  (let [phases (get-in model [:detail :phases] [])
+        evidence (get-in model [:detail :evidence])]
+    (into []
+      (concat
+        ["Intent"
+         (or (get-in evidence [:intent :description]) "")]
+        ["Phases"]
+        (map #(str (name (:phase %)) " " (name (or (:status %) :pending))) phases)
+        ["Validation"
+         (if (get-in evidence [:validation :passed?])
+           "All gates passed" "Errors")]
+        ["Policy"
+         (if (get-in evidence [:policy :compliant?])
+           "Policy compliant" "Policy violations")]))))
+
+(defn- compute-evidence-search
+  "Search evidence tree node labels."
+  [model query]
+  (compute-detail-search model query (evidence-labels model)))
 
 (defn compute-search-results
   "Dispatch search by current view.
@@ -130,34 +157,7 @@
         (compute-detail-search model query lines))
 
       :evidence
-      (let [phases (get-in model [:detail :phases] [])
-            evidence (get-in model [:detail :evidence])
-            ;; Build searchable text from evidence tree node labels
-            labels (into []
-                     (concat
-                       ["Intent"
-                        (or (get-in evidence [:intent :description]) "")]
-                       ["Phases"]
-                       (map #(str (name (:phase %)) " " (name (or (:status %) :pending))) phases)
-                       ["Validation"
-                        (if (get-in evidence [:validation :passed?])
-                          "All gates passed" "Errors")]
-                       ["Policy"
-                        (if (get-in evidence [:policy :compliant?])
-                          "Policy compliant" "Policy violations")]))]
-        ;; For evidence, matches map to tree node indices
-        (if (str/blank? query)
-          (assoc model :search-matches [] :search-match-idx nil)
-          (let [q (str/lower-case query)
-                matches (into []
-                          (keep-indexed
-                            (fn [idx label]
-                              (when (str/includes? (str/lower-case label) q)
-                                {:line-idx idx :text label})))
-                          labels)]
-            (assoc model :search-matches matches
-                         :search-match-idx (when (seq matches) 0)
-                         :filtered-indices nil))))
+      (compute-evidence-search model query)
 
       :artifact-browser
       (compute-aggregate-search model query

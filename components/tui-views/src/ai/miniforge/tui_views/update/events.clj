@@ -56,68 +56,87 @@
   [model]
   (assoc model :last-updated (java.util.Date.)))
 
+;; Event helpers — extracted to avoid cond-> inside -> antipattern
+
+(defn- apply-phase-change
+  "Update workflow phase in list and detail context."
+  [model idx workflow-id phase]
+  (as-> model m
+    (if idx (assoc-in m [:workflows idx :phase] phase) m)
+    (update-detail-if-active m workflow-id
+      #(update-in % [:detail :phases] conj {:phase phase :status :running}))))
+
+(defn- apply-agent-status-update
+  "Update agent status in workflow list and detail context."
+  [model idx workflow-id agent status message]
+  (let [agent-entry {:status status :message message}]
+    (as-> model m
+      (if idx (assoc-in m [:workflows idx :agents agent] agent-entry) m)
+      (update-detail-if-active m workflow-id
+        #(assoc-in % [:detail :current-agent] (assoc agent-entry :agent agent))))))
+
+(defn- apply-gate-result
+  "Record gate result in workflow list, flash on failure, and update detail."
+  [model idx workflow-id gate passed? payload]
+  (as-> model m
+    (if idx (update-in m [:workflows idx :gate-results] conj payload) m)
+    (if (not passed?)
+      (assoc m :flash-message (str "Gate FAILED: " (when gate (name gate))))
+      m)
+    (update-detail-if-active m workflow-id
+      (fn [m'] (update-in m' [:detail :evidence :validation :results]
+                           (fnil conj []) payload)))))
+
 ;; Event handlers
 
 (defn handle-workflow-added [model {:keys [workflow-id name spec]}]
   (let [wf (model/make-workflow {:id workflow-id
                                   :name (or name (:name spec))
                                   :status :running})]
-    (-> (update model :workflows conj wf)
+    (-> model
+        (update :workflows conj wf)
         with-timestamp)))
 
 (defn handle-phase-changed [model {:keys [workflow-id phase]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
-    (-> (cond-> model
-          idx (assoc-in [:workflows idx :phase] phase)
-          true (update-detail-if-active workflow-id
-                 #(update-in % [:detail :phases] conj {:phase phase :status :running})))
+    (-> model
+        (apply-phase-change idx workflow-id phase)
         with-timestamp)))
 
 (defn handle-phase-done [model {:keys [workflow-id]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
-    (-> (update-workflow-at model idx
-          #(update % :progress (fn [p] (min 100 (+ (or p 0) 20)))))
+    (-> model
+        (update-workflow-at idx #(update % :progress (fn [p] (min 100 (+ (or p 0) 20)))))
         with-timestamp)))
 
 (defn handle-agent-status [model {:keys [workflow-id agent status message]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
-    (-> (cond-> model
-          idx (assoc-in [:workflows idx :agents agent] {:status status :message message})
-          true (update-detail-if-active workflow-id
-                 #(assoc-in % [:detail :current-agent] {:agent agent :status status :message message})))
+    (-> model
+        (apply-agent-status-update idx workflow-id agent status message)
         with-timestamp)))
 
 (defn handle-agent-output [model {:keys [workflow-id delta]}]
-  (-> (update-detail-if-active model workflow-id
+  (-> model
+      (update-detail-if-active workflow-id
         #(update-in % [:detail :agent-output] str delta))
       with-timestamp))
 
 (defn handle-workflow-done [model {:keys [workflow-id status]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
-    (-> (update-workflow-at model idx
-          #(-> %
-               (assoc :status (or status :success))
-               (assoc :progress 100)))
+    (-> model
+        (update-workflow-at idx #(assoc % :status (or status :success) :progress 100))
         with-timestamp)))
 
 (defn handle-workflow-failed [model {:keys [workflow-id error]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
-    (-> (update-workflow-at model idx
-          #(-> %
-               (assoc :status :failed)
-               (assoc :error error)))
+    (-> model
+        (update-workflow-at idx #(assoc % :status :failed :error error))
         with-timestamp)))
 
 (defn handle-gate-result [model {:keys [workflow-id gate passed?] :as payload}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
-    (-> (cond-> model
-          idx (update-in [:workflows idx :gate-results] conj payload)
-          (not passed?)
-          (assoc :flash-message (str "Gate FAILED: " (when gate (name gate))))
-          true (update-detail-if-active workflow-id
-                 (fn [m]
-                   (update-in m [:detail :evidence :validation :results]
-                              (fnil conj []) payload))))
+    (-> model
+        (apply-gate-result idx workflow-id gate passed? payload)
         with-timestamp)))
 
 ;------------------------------------------------------------------------------ Layer 3
@@ -134,30 +153,37 @@
                                    (count (distinct (map :pr/repo prs))) " repo(s)"))
         with-timestamp)))
 
+(defn- pr-match?
+  "True when pr matches by [repo, number]."
+  [repo number pr]
+  (and (= (:pr/repo pr) repo) (= (:pr/number pr) number)))
+
+(defn- merge-matching-pr
+  "Merge updated fields into the PR matching [repo, number]; pass others through."
+  [repo number pr-data prs]
+  (mapv (fn [pr]
+          (if (pr-match? repo number pr)
+            (merge pr (dissoc pr-data :pr/repo :pr/number))
+            pr))
+        (or prs [])))
+
+(defn- remove-matching-pr
+  "Remove the PR matching [repo, number] from the vector."
+  [repo number prs]
+  (into [] (remove #(pr-match? repo number %)) (or prs [])))
+
 (defn handle-pr-updated
   "Update a single PR in :pr-items by [repo, number] match."
   [model {:keys [pr/repo pr/number] :as pr-data}]
-  (let [match? (fn [pr] (and (= (:pr/repo pr) repo) (= (:pr/number pr) number)))]
-    (-> model
-        (update :pr-items
-                (fn [prs]
-                  (mapv (fn [pr]
-                          (if (match? pr)
-                            (merge pr (dissoc pr-data :pr/repo :pr/number))
-                            pr))
-                        (or prs []))))
-        with-timestamp)))
+  (-> model
+      (update :pr-items (partial merge-matching-pr repo number pr-data))
+      with-timestamp))
 
 (defn handle-pr-removed
   "Remove a PR from :pr-items by [repo, number] match."
   [model {:keys [pr/repo pr/number]}]
   (-> model
-      (update :pr-items
-              (fn [prs]
-                (vec (remove (fn [pr]
-                               (and (= (:pr/repo pr) repo)
-                                    (= (:pr/number pr) number)))
-                             (or prs [])))))
+      (update :pr-items (partial remove-matching-pr repo number))
       with-timestamp))
 
 (defn handle-repos-discovered

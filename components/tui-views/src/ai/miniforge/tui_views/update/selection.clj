@@ -41,6 +41,18 @@
 
 ;; ID resolution
 
+(defn- item-at
+  "Get the item at cursor idx, resolving through filtered-indices.
+   Returns nil if index is out of bounds."
+  [model items idx]
+  (when-let [raw-idx (raw-index model idx)]
+    (get items raw-idx)))
+
+(defn- pr-id
+  "Extract selectable ID [repo, number] from a PR map."
+  [pr]
+  (when pr [(:pr/repo pr) (:pr/number pr)]))
+
 (defn item-id-at
   "Get the selectable ID for the item at the given index in the current view.
    Respects filtered-indices when active.
@@ -48,30 +60,22 @@
   [model idx]
   (case (:view model)
     :workflow-list
-    (let [raw-idx (raw-index model idx)]
-      (when raw-idx
-        (:id (get (:workflows model) raw-idx))))
+    (:id (item-at model (:workflows model) idx))
 
     :pr-fleet
-    (let [raw-idx (raw-index model idx)]
-      (when-let [pr (get (:pr-items model) raw-idx)]
-        [(:pr/repo pr) (:pr/number pr)]))
+    (pr-id (item-at model (:pr-items model) idx))
 
     :artifact-browser
-    (let [raw-idx (raw-index model idx)]
-      (when (get (get-in model [:detail :artifacts] []) raw-idx)
-        [:artifact raw-idx]))
+    (when (item-at model (get-in model [:detail :artifacts] []) idx)
+      [:artifact (raw-index model idx)])
 
     :train-view
     (let [prs (vec (sort-by :pr/merge-order
-                     (get-in model [:detail :selected-train :train/prs] [])))
-          raw-idx (raw-index model idx)]
-      (when-let [pr (get prs raw-idx)]
-        [(:pr/repo pr) (:pr/number pr)]))
+                     (get-in model [:detail :selected-train :train/prs] [])))]
+      (pr-id (item-at model prs idx)))
 
     :repo-manager
-    (let [raw-idx (raw-index model idx)]
-      (get (model/repo-manager-items model) raw-idx))
+    (item-at model (model/repo-manager-items model) idx)
 
     nil))
 
@@ -83,18 +87,19 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Individual toggle
 
+(defn- toggle-id
+  "Add id to set if absent, remove if present."
+  [ids id]
+  (let [ids (or ids #{})]
+    (if (contains? ids id) (disj ids id) (conj ids id))))
+
 (defn toggle-selection
   "Toggle selection of item at cursor, then advance cursor down.
    Standard TUI multi-select pattern (like mc/ranger)."
   [model]
   (if-let [id (current-item-id model)]
     (-> model
-        (update :selected-ids
-                (fn [ids]
-                  (let [ids (or ids #{})]
-                    (if (contains? ids id)
-                      (disj ids id)
-                      (conj ids id)))))
+        (update :selected-ids toggle-id id)
         (nav/navigate-down))
     model))
 
