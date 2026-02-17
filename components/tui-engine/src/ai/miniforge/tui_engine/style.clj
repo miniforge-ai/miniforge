@@ -27,7 +27,12 @@
    - Integers  (0–255)              — ANSI-256 indexed colors
    - Vectors   [r g b]              — 24-bit true-color RGB
 
-   Themes are pure data maps — no side effects.")
+   Built-in themes are defined in config/tui/themes.edn (data-driven).
+   Custom themes can be added via ~/.miniforge/themes/*.edn.
+   Themes are pure data maps — no side effects."
+  (:require
+   [clojure.java.io :as io]
+   [clojure.edn :as edn]))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Terminal detection
@@ -161,231 +166,48 @@
                {} theme)))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
-;; Miniforge brand palette
+;; Data-driven theme loading
 ;;
-;; From miniforge.ai brand swatches:
-;;   #595959  (89,89,89)    — dark gray (steel)
-;;   #F2B90C  (242,185,12)  — gold / amber
-;;   #F2541B  (242,84,27)   — orange-red (flame)
-;;   #F2220F  (242,34,15)   — red (hot)
-;;   #D9D9D9  (217,217,217) — light gray (ash)
+;; Built-in themes are loaded from config/tui/themes.edn at namespace init.
+;; Custom themes from ~/.miniforge/themes/*.edn are merged in at startup.
+;; This makes themes extensible like policy packs — drop EDN, get a theme.
 
-(def miniforge-palette
-  "Miniforge brand color palette — RGB values."
-  {:steel     [89 89 89]
-   :gold      [242 185 12]
-   :flame     [242 84 27]
-   :hot       [242 34 15]
-   :ash       [217 217 217]
-   ;; Derived shades
-   :charcoal  [35 30 28]
-   :ember     [180 60 20]
-   :parchment [240 235 225]
-   :warm-gray [120 115 110]
-   :dark-gold [190 145 10]})
+(def ^:private builtin-themes
+  "Load built-in themes from EDN resource."
+  (if-let [r (io/resource "config/tui/themes.edn")]
+    (edn/read-string (slurp r))
+    {}))
 
-;; ─────────────────────────────────────────────────────────────────────────────
-;; Theme definitions
-
-(def dark-theme
-  "Miniforge brand dark: charcoal background, gold/flame accents."
-  (let [p miniforge-palette]
-    {;; Base colors
-     :bg              (:charcoal p)
-     :fg              (:ash p)
-     :fg-dim          (:warm-gray p)
-     :fg-muted        (:steel p)
-
-     ;; Status indicators
-     :status/running  (:gold p)
-     :status/success  :green
-     :status/failed   (:hot p)
-     :status/blocked  (:flame p)
-     :status/pending  (:ash p)
-     :status/skipped  (:steel p)
-
-     ;; UI chrome
-     :border          (:steel p)
-     :border-focus    (:gold p)
-     :title           (:gold p)
-     :title-focus     (:flame p)
-     :header          (:flame p)
-     :row-fg          (:ash p)
-     :row-bg          (:charcoal p)
-     :selected-bg     (:flame p)
-     :selected-fg     :white
-
-     ;; Progress
-     :progress-fill   (:gold p)
-     :progress-empty  (:steel p)
-
-     ;; Kanban columns
-     :kanban/blocked  (:hot p)
-     :kanban/pending  (:gold p)
-     :kanban/running  (:flame p)
-     :kanban/done     :green
-
-     ;; Sparkline
-     :sparkline       (:gold p)
-
-     ;; Command / search bar
-     :command-bg      (:charcoal p)
-     :command-fg      (:gold p)
-     :search-match    (:flame p)}))
-
-(def light-theme
-  "Miniforge brand light: parchment background, ember/brown accents."
-  (let [p miniforge-palette]
-    {;; Base colors
-     :bg              (:parchment p)
-     :fg              (:charcoal p)
-     :fg-dim          (:steel p)
-     :fg-muted        (:warm-gray p)
-
-     ;; Status indicators
-     :status/running  :blue
-     :status/success  :green
-     :status/failed   (:hot p)
-     :status/blocked  (:flame p)
-     :status/pending  (:charcoal p)
-     :status/skipped  (:steel p)
-
-     ;; UI chrome
-     :border          (:warm-gray p)
-     :border-focus    (:flame p)
-     :title           (:ember p)
-     :title-focus     (:flame p)
-     :header          (:ember p)
-     :row-fg          (:charcoal p)
-     :row-bg          (:parchment p)
-     :selected-bg     (:flame p)
-     :selected-fg     :white
-
-     ;; Progress
-     :progress-fill   (:ember p)
-     :progress-empty  (:warm-gray p)
-
-     ;; Kanban columns
-     :kanban/blocked  (:hot p)
-     :kanban/pending  (:gold p)
-     :kanban/running  :blue
-     :kanban/done     :green
-
-     ;; Sparkline
-     :sparkline       (:ember p)
-
-     ;; Command / search bar
-     :command-bg      (:parchment p)
-     :command-fg      (:charcoal p)
-     :search-match    (:flame p)}))
-
-(def high-contrast-theme
-  "High-contrast dark: pure black bg, white fg, bright ANSI accents."
-  {;; Base colors
-   :bg              :black
-   :fg              :white
-   :fg-dim          :cyan
-   :fg-muted        :green
-
-   ;; Status indicators
-   :status/running  :cyan
-   :status/success  :green
-   :status/failed   :red
-   :status/blocked  :yellow
-   :status/pending  :white
-   :status/skipped  :white
-
-   ;; UI chrome
-   :border          :green
-   :border-focus    :cyan
-   :title           :green
-   :title-focus     :cyan
-   :header          :cyan
-   :row-fg          :white
-   :row-bg          :black
-   :selected-bg     :blue
-   :selected-fg     :white
-
-   ;; Progress
-   :progress-fill   :cyan
-   :progress-empty  :white
-
-   ;; Kanban columns
-   :kanban/blocked  :red
-   :kanban/pending  :yellow
-   :kanban/running  :cyan
-   :kanban/done     :green
-
-   ;; Sparkline
-   :sparkline       :cyan
-
-   ;; Command / search bar
-   :command-bg      :black
-   :command-fg      :white
-   :search-match    :yellow})
-
-(def high-contrast-light-theme
-  "High-contrast light: pure white bg, black fg, bold ANSI accents."
-  {;; Base colors
-   :bg              :white
-   :fg              :black
-   :fg-dim          :blue
-   :fg-muted        :magenta
-
-   ;; Status indicators
-   :status/running  :blue
-   :status/success  :green
-   :status/failed   :red
-   :status/blocked  :yellow
-   :status/pending  :black
-   :status/skipped  :black
-
-   ;; UI chrome
-   :border          :blue
-   :border-focus    :magenta
-   :title           :blue
-   :title-focus     :magenta
-   :header          :blue
-   :row-fg          :black
-   :row-bg          :white
-   :selected-bg     :blue
-   :selected-fg     :white
-
-   ;; Progress
-   :progress-fill   :blue
-   :progress-empty  :black
-
-   ;; Kanban columns
-   :kanban/blocked  :red
-   :kanban/pending  :yellow
-   :kanban/running  :blue
-   :kanban/done     :green
-
-   ;; Sparkline
-   :sparkline       :blue
-
-   ;; Command / search bar
-   :command-bg      :white
-   :command-fg      :black
-   :search-match    :red})
+(defn- load-user-themes
+  "Load custom themes from ~/.miniforge/themes/*.edn.
+   Each file should contain a single map: {theme-keyword theme-map}."
+  []
+  (let [dir (io/file (System/getProperty "user.home") ".miniforge" "themes")]
+    (if (and (.exists dir) (.isDirectory dir))
+      (->> (.listFiles dir)
+           (filter #(.endsWith (.getName %) ".edn"))
+           (reduce (fn [acc f]
+                     (try
+                       (merge acc (edn/read-string (slurp f)))
+                       (catch Exception _ acc)))
+                   {}))
+      {})))
 
 (def themes
-  "Registry of available themes."
-  {:dark                 dark-theme
-   :light                light-theme
-   :high-contrast        high-contrast-theme
-   :high-contrast-light  high-contrast-light-theme
-   :default              dark-theme})
+  "Registry of available themes. Built-in + user custom.
+   User themes override built-in themes of the same name."
+  (let [user (load-user-themes)]
+    (merge builtin-themes user {:default (get builtin-themes :dark {})})))
 
 (def default-theme
   "Default theme for miniforge TUI."
-  dark-theme)
+  (get themes :dark {}))
 
 (defn get-theme
   "Resolve a theme keyword to a theme map.
    Falls back to dark-theme for unknown keys."
   [k]
-  (get themes k dark-theme))
+  (get themes k default-theme))
 
 (defn resolve-color
   "Resolve a theme key to a color value (keyword, integer, or [r g b]).
