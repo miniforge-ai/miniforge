@@ -209,12 +209,15 @@
 
 (declare run-glab)
 
-(defn- fetch-open-github-prs
-  [repo]
-  (let [repo* (provider-repo-slug repo)
+(defn- fetch-github-prs
+  "Fetch GitHub PRs by state (:open, :closed, :merged, :all)."
+  [repo state]
+  (let [repo*  (provider-repo-slug repo)
+        gh-state (case state
+                   :merged "merged" :closed "closed" :all "all" "open")
         {:keys [success? out err]} (run-gh "pr" "list"
                                            "--repo" repo*
-                                           "--state" "open"
+                                           "--state" gh-state
                                            "--json" "number,title,url,state,headRefName,isDraft,reviewDecision,statusCheckRollup")]
     (if-not success?
       (result-failure (gh-error-message out err) {:repo repo :provider :github})
@@ -225,12 +228,18 @@
             :provider :github
             :prs (->> rows
                       (map #(status/provider-pr->train-pr % repo))
-                      (remove #(= :closed (:pr/status %)))
                       (sort-by :pr/number)
                       vec)}))
         (catch Exception e
           (result-failure (str "Failed to parse PR list for " repo ".")
                           {:repo repo :provider :github :error (.getMessage e)}))))))
+
+(defn- fetch-open-github-prs
+  [repo]
+  (let [result (fetch-github-prs repo :open)]
+    (if (:success? result)
+      (update result :prs (fn [prs] (vec (remove #(= :closed (:pr/status %)) prs))))
+      result)))
 
 (defn- fetch-open-gitlab-mrs
   [repo]
@@ -263,18 +272,28 @@
     :gitlab (fetch-open-gitlab-mrs repo)
     (fetch-open-github-prs repo)))
 
+(defn fetch-prs-by-state
+  "Fetch PRs for a single repo by state (:open, :closed, :merged, :all).
+   Returns {:success? bool :repo str :prs [TrainPR ...]}."
+  [repo state]
+  (case (repo-provider repo)
+    :gitlab (fetch-open-gitlab-mrs repo) ;; GitLab API only supports opened for now
+    (fetch-github-prs repo state)))
+
 (defn fetch-all-fleet-prs
   "Fetch open PRs for all configured fleet repositories.
    Returns flat vector of TrainPR maps with :pr/repo set.
 
    Options:
-   - :config-path - Override config file path (for testing)"
-  [& [{:keys [config-path]}]]
-  (let [repos (get-configured-repos (or config-path default-fleet-config-path))]
+   - :config-path - Override config file path (for testing)
+   - :state       - :open (default), :closed, :merged, :all"
+  [& [{:keys [config-path state] :or {state :open}}]]
+  (let [repos (get-configured-repos (or config-path default-fleet-config-path))
+        fetch-fn (if (= :open state) fetch-open-prs #(fetch-prs-by-state % state))]
     (if (empty? repos)
       []
       (->> repos
-           (pmap fetch-open-prs)
+           (pmap fetch-fn)
            (filter :success?)
            (mapcat :prs)
            vec))))

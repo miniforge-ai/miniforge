@@ -103,6 +103,16 @@
          :side-effect {:type :sync-prs}
          :flash-message "Syncing PRs..."))
 
+(def ^:private show-states
+  #{"open" "merged" "closed" "all"})
+
+(defn- cmd-show [model args]
+  (let [state-str (some-> args str/trim str/lower-case)
+        state (if (show-states state-str) (keyword state-str) :open)]
+    (assoc model
+           :side-effect {:type :sync-prs :state state}
+           :flash-message (str "Loading " (name state) " PRs..."))))
+
 (defn- cmd-repos [model _args]
   (let [repos (or (:fleet-repos model) (pr-sync/get-configured-repos))]
     (if (seq repos)
@@ -359,6 +369,8 @@
    "remove-repo" {:handler cmd-remove-repo :help "Remove repo from fleet"
                   :completions remove-repo-completions}
    "sync"          {:handler cmd-sync          :help "Sync PRs from all fleet repos"}
+   "show"          {:handler cmd-show          :help "Show PRs by state (open, merged, closed, all)"
+                    :completions (fn [_] ["open" "merged" "closed" "all"])}
    "repos"         {:handler cmd-repos         :help "List configured fleet repos"}
    "discover"      {:handler cmd-discover      :help "Discover repos from org (e.g. :discover my-org)"}
    ;; Train commands

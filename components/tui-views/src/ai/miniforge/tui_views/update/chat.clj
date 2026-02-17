@@ -74,7 +74,7 @@
   [model]
   (if (chat-views (:view model))
     (-> model
-        (assoc :mode :chat)
+        (assoc :mode :chat :command-buf "chat> ")
         (assoc-in [:chat :context] (build-context model))
         (assoc-in [:chat :input-buf] "")
         (assoc-in [:chat :pending?] false))
@@ -83,22 +83,31 @@
 (defn escape
   "Exit chat mode back to normal."
   [model]
-  (assoc model :mode :normal))
+  (assoc model :mode :normal :command-buf ""))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Input handling
 
+(defn- sync-command-buf
+  "Keep :command-buf in sync with chat input for the command bar overlay."
+  [model]
+  (assoc model :command-buf (str "chat> " (get-in model [:chat :input-buf] ""))))
+
 (defn append
   "Append character to chat input buffer."
   [model ch]
-  (update-in model [:chat :input-buf] str ch))
+  (-> model
+      (update-in [:chat :input-buf] str ch)
+      sync-command-buf))
 
 (defn backspace
   "Backspace in chat input buffer."
   [model]
   (let [buf (get-in model [:chat :input-buf] "")]
     (if (pos? (count buf))
-      (assoc-in model [:chat :input-buf] (subs buf 0 (dec (count buf))))
+      (-> model
+          (assoc-in [:chat :input-buf] (subs buf 0 (dec (count buf))))
+          sync-command-buf)
       model)))
 
 (defn send-message

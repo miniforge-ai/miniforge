@@ -36,8 +36,10 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Side-effect handlers — each returns [msg-type payload] or nil
 
-(defn- handle-sync-prs [_effect]
-  [:msg/prs-synced {:pr-items (persistence/load-pr-items)}])
+(defn- handle-sync-prs [effect]
+  (let [state (:state effect)
+        opts  (when state {:state state})]
+    [:msg/prs-synced {:pr-items (persistence/load-pr-items opts)}]))
 
 (defn- handle-discover-repos [effect]
   [:msg/repos-discovered (persistence/discover-repos (:owner effect))])

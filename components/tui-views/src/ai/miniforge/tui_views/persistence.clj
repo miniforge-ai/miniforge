@@ -231,12 +231,19 @@
     (assoc model :fleet-repos (vec repos))))
 
 (defn load-pr-items
-  "Fetch open PRs for all configured fleet repositories.
+  "Fetch PRs for all configured fleet repositories.
    Enriches each PR with readiness and risk from pr-train component.
-   Returns vector of enriched TrainPR maps, or empty vec on error."
-  [& [{:keys [config-path]}]]
+   Returns vector of enriched TrainPR maps, or empty vec on error.
+
+   Options:
+   - :config-path - Override config file path
+   - :state       - :open (default), :closed, :merged, :all"
+  [& [{:keys [config-path state]}]]
   (try
-    (let [prs (pr-sync/fetch-all-fleet-prs (when config-path {:config-path config-path}))]
+    (let [opts (cond-> {}
+                 config-path (assoc :config-path config-path)
+                 state       (assoc :state state))
+          prs (pr-sync/fetch-all-fleet-prs (when (seq opts) opts))]
       (enrich-prs prs))
     (catch Exception _ [])))
 

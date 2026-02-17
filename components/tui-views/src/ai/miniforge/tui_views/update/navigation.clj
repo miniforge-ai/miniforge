@@ -93,8 +93,11 @@
 
     :pr-fleet
     (let [prs (:pr-items model)
+          visible (if-let [fi (:filtered-indices model)]
+                    (vec (keep-indexed (fn [i pr] (when (contains? fi i) pr)) prs))
+                    prs)
           idx (:selected-idx model)]
-      (if-let [pr (get prs idx)]
+      (if-let [pr (get visible idx)]
         (let [pr-id [(:pr/repo pr) (:pr/number pr)]
               needs-policy? (nil? (:pr/policy pr))]
           (cond-> (-> model

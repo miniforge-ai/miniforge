@@ -68,10 +68,16 @@
   [repo]
   (core/fetch-open-prs repo))
 
+(defn fetch-prs-by-state
+  "Fetch PRs for a single repo by state (:open, :closed, :merged, :all).
+   Returns {:success? bool :repo str :prs [TrainPR ...]}."
+  [repo state]
+  (core/fetch-prs-by-state repo state))
+
 (defn fetch-all-fleet-prs
-  "Fetch open PRs for all configured fleet repositories.
+  "Fetch PRs for all configured fleet repositories.
    Returns flat vector of TrainPR maps with :pr/repo set.
-   Options: :config-path."
+   Options: :config-path, :state (:open default, :closed, :merged, :all)."
   ([] (core/fetch-all-fleet-prs))
   ([opts] (core/fetch-all-fleet-prs opts)))
 

@@ -277,7 +277,11 @@
    :action/open-in-browser
    (fn [model]
      (let [url (case (:view model)
-                 :pr-fleet  (get-in (:pr-items model) [(:selected-idx model) :pr/url])
+                 :pr-fleet  (let [prs (:pr-items model [])
+                                  visible (if-let [fi (:filtered-indices model)]
+                                            (vec (keep-indexed (fn [i pr] (when (contains? fi i) pr)) prs))
+                                            prs)]
+                              (:pr/url (get visible (:selected-idx model))))
                  :pr-detail (get-in model [:detail :selected-pr :pr/url])
                  nil)]
        (if url

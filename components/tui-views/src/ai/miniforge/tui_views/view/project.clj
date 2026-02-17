@@ -282,21 +282,29 @@
        (when contribution (str ", c=" (format "%.2f" (double contribution))))
        ")"))
 
+(defn- project-pr-row
+  "Project a single PR into a table row map."
+  [pr]
+  (let [{:keys [readiness risk policy recommend]} (resolve-enrichment pr)]
+    {:_id [(:pr/repo pr) (:pr/number pr)]
+     :repo (or (:pr/repo pr) "")
+     :number (str "#" (:pr/number pr))
+     :title (or (:pr/title pr) "")
+     :status (readiness-indicator (or (:readiness/state readiness) :unknown))
+     :ready (readiness-bar (or (:readiness/score readiness) 0) 15)
+     :risk (risk-label (or (:risk/level risk) :low))
+     :policy (policy-label policy)
+     :recommend (:label recommend)}))
+
 (defn- project-pr-items
-  "Project PR items for the fleet table widget."
+  "Project PR items for the fleet table widget.
+   Respects :filtered-indices from search/filter modes."
   [model]
-  (mapv (fn [pr]
-          (let [{:keys [readiness risk policy recommend]} (resolve-enrichment pr)]
-            {:_id [(:pr/repo pr) (:pr/number pr)]
-             :repo (or (:pr/repo pr) "")
-             :number (str "#" (:pr/number pr))
-             :title (or (:pr/title pr) "")
-             :status (readiness-indicator (or (:readiness/state readiness) :unknown))
-             :ready (readiness-bar (or (:readiness/score readiness) 0) 15)
-             :risk (risk-label (or (:risk/level risk) :low))
-             :policy (policy-label policy)
-             :recommend (:label recommend)}))
-        (:pr-items model [])))
+  (let [prs (:pr-items model [])
+        filtered (if-let [fi (:filtered-indices model)]
+                   (vec (keep-indexed (fn [i pr] (when (contains? fi i) pr)) prs))
+                   prs)]
+    (mapv project-pr-row filtered)))
 
 (defn- resolve-detail-enrichment
   "Resolve enrichment data for the detail view's selected PR.
