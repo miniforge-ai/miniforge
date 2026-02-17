@@ -22,6 +22,7 @@
    Provides the top-level entry points to start and stop the miniforge TUI.
    Wires together the tui-engine (rendering) with domain data (event stream)."
   (:require
+   [clojure.java.browse :as browse]
    [ai.miniforge.tui-engine.interface :as tui]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update :as update]
@@ -79,7 +80,7 @@
                   :open-url
                   (do (when-let [url (:url effect)]
                         (try
-                          (clojure.java.browse/browse-url url)
+                          (browse/browse-url url)
                           (catch Exception _ nil)))
                       nil)
 
