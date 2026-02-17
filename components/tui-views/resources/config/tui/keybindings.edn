@@ -42,7 +42,12 @@
   :key/space     :action/toggle-or-expand
   :key/v         :action/enter-visual-mode
   :key/a         :action/select-all
-  :key/c         :action/clear-selection
+  :key/c         :action/chat-or-clear
+  :key/C         :action/clear-selection
+
+  ;; Filter + Train
+  :key/p         :action/enter-filter-mode
+  :key/t         :action/train-view
 
   ;; View-context actions
   :key/r         :action/refresh-or-sync
@@ -74,6 +79,16 @@
  {:key/escape    :action/exit-mode
   :key/enter     :action/confirm-search
   :key/backspace :action/search-backspace}
+
+ :filter
+ {:key/escape    :action/filter-escape
+  :key/enter     :action/filter-confirm
+  :key/backspace :action/filter-backspace}
+
+ :chat
+ {:key/escape    :action/chat-escape
+  :key/enter     :action/chat-send
+  :key/backspace :action/chat-backspace}
 
  ;; Number keys → view switching (shared across modes)
  :number-keys

@@ -19,11 +19,12 @@
 (ns ai.miniforge.tui-views.update.mode
   "Mode switching and command buffer manipulation.
 
-   Pure functions for switching between normal/command/search modes.
+   Pure functions for switching between normal/command/search/filter modes.
    Layer 3."
   (:require
    [clojure.string :as str]
-   [ai.miniforge.tui-views.model :as model]))
+   [ai.miniforge.tui-views.model :as model]
+   [ai.miniforge.tui-views.update.filter :as filter]))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Mode switching
@@ -166,3 +167,143 @@
 
       ;; Default — no search behavior
       model)))
+
+;------------------------------------------------------------------------------ Layer 5
+;; Filter mode (VS Code cmd+p style palette for PR fleet)
+
+(defn enter-filter-mode
+  "Enter filter mode. Sets mode to :filter with '>' prefix in command bar."
+  [model]
+  (if (= :pr-fleet (:view model))
+    (assoc model :mode :filter :command-buf ">")
+    model))
+
+(defn- filter-query
+  "Extract the filter query from the command buffer (strip '>' prefix)."
+  [model]
+  (let [buf (or (:command-buf model) ">")]
+    (if (str/starts-with? buf ">")
+      (subs buf 1)
+      buf)))
+
+(defn update-filter-results
+  "Recompute filtered indices from the current filter query."
+  [model]
+  (let [query (filter-query model)
+        indices (filter/compute-filter-indices (:pr-items model []) query)]
+    (assoc model
+           :filtered-indices indices
+           :selected-idx 0)))
+
+(defn filter-confirm
+  "Confirm filter: exit to normal mode, keep filter active.
+   Sets :active-filter for display in the header."
+  [model]
+  (let [query (filter-query model)]
+    (-> model
+        (assoc :mode :normal :command-buf "")
+        (assoc :active-filter (when-not (str/blank? query) query)))))
+
+(defn filter-escape
+  "Escape filter: exit to normal mode, clear filter entirely."
+  [model]
+  (-> model
+      (assoc :mode :normal :command-buf ""
+             :filtered-indices nil :selected-idx 0
+             :active-filter nil)))
+
+(defn filter-append
+  "Append character to filter buffer and recompute results."
+  [model ch]
+  (-> model
+      (update :command-buf str ch)
+      update-filter-results))
+
+(defn filter-backspace
+  "Backspace in filter buffer. Exit mode if at '>' prefix."
+  [model]
+  (let [buf (:command-buf model)]
+    (if (> (count buf) 1)
+      (-> model
+          (assoc :command-buf (subs buf 0 (dec (count buf))))
+          update-filter-results)
+      (filter-escape model))))
+
+;------------------------------------------------------------------------------ Layer 6
+;; Chat mode
+
+(defn- build-chat-context
+  "Build context map from current view state for the chat agent."
+  [model]
+  (case (:view model)
+    :pr-detail
+    (let [pr (get-in model [:detail :selected-pr])]
+      {:type :pr-detail
+       :pr pr
+       :readiness (:pr/readiness pr)
+       :risk (:pr/risk pr)
+       :policy (:pr/policy pr)})
+
+    :pr-fleet
+    (let [sel-ids (:selected-ids model #{})
+          prs (if (seq sel-ids)
+                (->> (:pr-items model [])
+                     (filter #(contains? sel-ids [(:pr/repo %) (:pr/number %)]))
+                     vec)
+                [])]
+      {:type :pr-fleet
+       :selected-prs prs
+       :active-filter (:active-filter model)
+       :total-prs (count (:pr-items model []))})
+
+    {:type :unknown :view (:view model)}))
+
+(defn enter-chat-mode
+  "Enter chat mode. Builds context from current view and switches to :chat mode."
+  [model]
+  (if (#{:pr-fleet :pr-detail} (:view model))
+    (let [ctx (build-chat-context model)]
+      (-> model
+          (assoc :mode :chat)
+          (assoc-in [:chat :context] ctx)
+          (assoc-in [:chat :input-buf] "")
+          (assoc-in [:chat :pending?] false)))
+    (assoc model :flash-message "Chat available in PR Fleet or PR Detail views")))
+
+(defn chat-escape
+  "Exit chat mode back to normal."
+  [model]
+  (assoc model :mode :normal))
+
+(defn chat-append
+  "Append character to chat input buffer."
+  [model ch]
+  (update-in model [:chat :input-buf] str ch))
+
+(defn chat-backspace
+  "Backspace in chat input buffer."
+  [model]
+  (let [buf (get-in model [:chat :input-buf] "")]
+    (if (pos? (count buf))
+      (assoc-in model [:chat :input-buf] (subs buf 0 (dec (count buf))))
+      model)))
+
+(defn chat-send
+  "Send the current chat input as a user message.
+   Appends to messages, clears input, sets pending, and fires side-effect."
+  [model]
+  (let [buf (get-in model [:chat :input-buf] "")
+        msg (str/trim buf)]
+    (if (str/blank? msg)
+      model
+      (let [user-msg {:role :user :content msg :timestamp (java.util.Date.)}
+            messages (conj (get-in model [:chat :messages] []) user-msg)
+            context (get-in model [:chat :context] {})]
+        (-> model
+            (assoc-in [:chat :messages] messages)
+            (assoc-in [:chat :input-buf] "")
+            (assoc-in [:chat :pending?] true)
+            (assoc :side-effect {:type :chat-send
+                                 :context context
+                                 :message msg
+                                 :history messages}))))))

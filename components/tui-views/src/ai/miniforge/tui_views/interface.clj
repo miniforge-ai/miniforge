@@ -28,7 +28,9 @@
    [ai.miniforge.tui-views.update :as update]
    [ai.miniforge.tui-views.view :as view]
    [ai.miniforge.tui-views.subscription :as subscription]
-   [ai.miniforge.tui-views.persistence :as persistence]))
+   [ai.miniforge.tui-views.persistence :as persistence]
+   [ai.miniforge.policy-pack.interface :as policy-pack]
+   [ai.miniforge.pr-train.interface :as pr-train]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; TUI lifecycle
@@ -51,7 +53,8 @@
    The TUI blocks the calling thread until the user quits (q key)."
   [event-stream & [{:keys [throttle-ms screen load-limit]
                     :or {throttle-ms 1000 load-limit 100}}]]
-  (let [app (tui/create-app
+  (let [train-mgr (pr-train/create-manager)
+        app (tui/create-app
              {:init   (fn []
                         (persistence/load-all-into-model
                          (model/init-model)
@@ -83,6 +86,128 @@
                           (browse/browse-url url)
                           (catch Exception _ nil)))
                       nil)
+
+                  :evaluate-policy
+                  (try
+                    (let [packs (persistence/load-policy-packs)
+                          pr-data (:pr effect)
+                          pr-id (:pr-id effect)
+                          result (policy-pack/evaluate-external-pr
+                                  packs pr-data)]
+                      [:msg/policy-evaluated {:pr-id pr-id :result result}])
+                    (catch Exception e
+                      [:msg/policy-evaluated {:pr-id (:pr-id effect)
+                                              :result {:evaluation/passed? nil
+                                                       :evaluation/error (.getMessage e)}}]))
+
+                  ;; Train side-effects
+                  :create-train
+                  (try
+                    (let [dag-id (java.util.UUID/randomUUID)
+                          train-id (pr-train/create-train train-mgr (:name effect) dag-id
+                                                          (or (:description effect) ""))]
+                      [:msg/train-created {:train-id train-id :train-name (:name effect)}])
+                    (catch Exception e
+                      [:msg/side-effect-error {:type :create-train :error (.getMessage e)}]))
+
+                  :add-to-train
+                  (try
+                    (let [train-id (:train-id effect)
+                          prs (:prs effect)]
+                      (doseq [pr prs]
+                        (pr-train/add-pr train-mgr train-id
+                                         (:pr/repo pr)
+                                         (:pr/number pr)
+                                         (or (:pr/url pr) "")
+                                         (or (:pr/branch pr) "")
+                                         (or (:pr/title pr) "")))
+                      (let [train (pr-train/get-train train-mgr train-id)]
+                        [:msg/prs-added-to-train {:train train :added (count prs)}]))
+                    (catch Exception e
+                      [:msg/side-effect-error {:type :add-to-train :error (.getMessage e)}]))
+
+                  :merge-next
+                  (try
+                    (let [train-id (:train-id effect)
+                          result (pr-train/merge-next train-mgr train-id)]
+                      (if result
+                        [:msg/merge-started {:pr-number (:pr-number result)
+                                             :train (:train result)}]
+                        [:msg/side-effect-error {:type :merge-next
+                                                 :error "No PRs ready to merge"}]))
+                    (catch Exception e
+                      [:msg/side-effect-error {:type :merge-next :error (.getMessage e)}]))
+
+                  ;; Batch action side-effects
+                  :review-prs
+                  (try
+                    (let [packs (persistence/load-policy-packs)
+                          results (mapv (fn [pr]
+                                          (let [pr-id [(:pr/repo pr) (:pr/number pr)]
+                                                result (try
+                                                         (policy-pack/evaluate-external-pr packs pr)
+                                                         (catch Exception e
+                                                           {:evaluation/passed? nil
+                                                            :evaluation/error (.getMessage e)}))]
+                                            {:pr-id pr-id :result result}))
+                                        (:prs effect))]
+                      [:msg/review-completed {:results results}])
+                    (catch Exception e
+                      [:msg/side-effect-error {:type :review-prs :error (.getMessage e)}]))
+
+                  :remediate-prs
+                  ;; Placeholder — remediation goes through pr-lifecycle
+                  (let [prs (:prs effect)
+                        fixable (count (filter #(seq (get-in % [:pr/policy :evaluation/violations])) prs))]
+                    [:msg/remediation-completed {:fixed 0 :failed fixable
+                                                :message "Remediation via pr-lifecycle not yet wired"}])
+
+                  :decompose-pr
+                  ;; Placeholder — decomposition analysis
+                  (let [pr (:pr effect)
+                        pr-id [(:pr/repo pr) (:pr/number pr)]]
+                    [:msg/decomposition-started {:pr-id pr-id
+                                                :plan {:sub-prs []
+                                                       :message "Decomposition analysis not yet wired"}}])
+
+                  ;; Chat side-effects
+                  :chat-send
+                  ;; v1: Placeholder — orchestrator workflow dispatch
+                  ;; Full implementation routes through orchestrator/execute-workflow
+                  ;; with chat context, PR data, and conversation history.
+                  (let [msg (:message effect)
+                        ctx (:context effect)
+                        ctx-type (:type ctx)]
+                    (try
+                      [:msg/chat-response
+                       {:content (str "Chat integration pending orchestrator wiring.\n\n"
+                                      "Context: " (name (or ctx-type :unknown)) "\n"
+                                      "Your message: " msg "\n\n"
+                                      (case ctx-type
+                                        :pr-detail
+                                        (let [pr (:pr ctx)]
+                                          (str "PR: " (:pr/repo pr) "#" (:pr/number pr)
+                                               " — " (:pr/title pr) "\n"
+                                               "I can help analyze this PR's risk, readiness, "
+                                               "and policy compliance once orchestrator is connected."))
+                                        :pr-fleet
+                                        (let [n (count (:selected-prs ctx))]
+                                          (str (if (pos? n)
+                                                 (str n " PR(s) selected for discussion.")
+                                                 "No PRs selected. Select PRs with Space first.")
+                                               "\nI can help steer these PRs through review, "
+                                               "remediation, and merge once orchestrator is connected."))
+                                        "Chat context not recognized."))
+                        :actions []}]
+                      (catch Exception e
+                        [:msg/chat-response
+                         {:content (str "Error: " (.getMessage e))
+                          :actions []}])))
+
+                  :chat-execute-action
+                  ;; Placeholder — execute chat-suggested action through command path
+                  [:msg/chat-action-result {:success? false
+                                            :message "Chat action execution not yet wired"}]
 
                   ;; Unknown effect — no-op
                   nil))

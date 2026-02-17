@@ -95,14 +95,19 @@
     (let [prs (:pr-items model)
           idx (:selected-idx model)]
       (if-let [pr (get prs idx)]
-        (let [readiness (project/derive-readiness pr)
-              risk      (project/derive-risk pr)]
-          (-> model
-              (assoc :view :pr-detail)
-              (assoc-in [:detail :selected-pr] pr)
-              (assoc-in [:detail :pr-readiness] readiness)
-              (assoc-in [:detail :pr-risk] risk)
-              (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil)))
+        (let [pr-id [(:pr/repo pr) (:pr/number pr)]
+              needs-policy? (nil? (:pr/policy pr))]
+          (cond-> (-> model
+                      (assoc :view :pr-detail)
+                      (assoc-in [:detail :selected-pr] pr)
+                      (assoc-in [:detail :pr-readiness] (or (:pr/readiness pr) (project/derive-readiness pr)))
+                      (assoc-in [:detail :pr-risk] (or (:pr/risk pr) (project/derive-risk pr)))
+                      (assoc-in [:detail :pr-policy] (:pr/policy pr))
+                      (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
+            needs-policy?
+            (assoc :side-effect {:type :evaluate-policy
+                                 :pr-id pr-id
+                                 :pr pr})))
         model))
 
     :train-view
@@ -251,8 +256,9 @@
         (let [pr (get prs prev-idx)]
           (-> model
               (assoc-in [:detail :selected-pr] pr)
-              (assoc-in [:detail :pr-readiness] (project/derive-readiness pr))
-              (assoc-in [:detail :pr-risk] (project/derive-risk pr))
+              (assoc-in [:detail :pr-readiness] (or (:pr/readiness pr) (project/derive-readiness pr)))
+              (assoc-in [:detail :pr-risk] (or (:pr/risk pr) (project/derive-risk pr)))
+              (assoc-in [:detail :pr-policy] (:pr/policy pr))
               (assoc :selected-idx 0)))
         model))
 
@@ -289,8 +295,9 @@
         (let [pr (get prs next-idx)]
           (-> model
               (assoc-in [:detail :selected-pr] pr)
-              (assoc-in [:detail :pr-readiness] (project/derive-readiness pr))
-              (assoc-in [:detail :pr-risk] (project/derive-risk pr))
+              (assoc-in [:detail :pr-readiness] (or (:pr/readiness pr) (project/derive-readiness pr)))
+              (assoc-in [:detail :pr-risk] (or (:pr/risk pr) (project/derive-risk pr)))
+              (assoc-in [:detail :pr-policy] (:pr/policy pr))
               (assoc :selected-idx 0)))
         model))
 

@@ -29,7 +29,9 @@
    [clojure.java.io :as io]
    [clojure.edn :as edn]
    [ai.miniforge.tui-views.model :as model]
-   [ai.miniforge.pr-sync.interface :as pr-sync]))
+   [ai.miniforge.pr-sync.interface :as pr-sync]
+   [ai.miniforge.pr-train.interface :as pr-train]
+   [ai.miniforge.policy-pack.interface :as policy-pack]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; EDN line reading
@@ -160,6 +162,56 @@
       model)))
 
 ;------------------------------------------------------------------------------ Layer 3
+;; PR enrichment
+
+(defn- packs-dir
+  "Get the policy packs directory path."
+  []
+  (io/file (System/getProperty "user.home") ".miniforge" "packs"))
+
+(defn load-policy-packs
+  "Load policy packs from ~/.miniforge/packs/.
+   Returns vector of PackManifest maps, or empty vec on error."
+  []
+  (try
+    (let [dir (packs-dir)]
+      (if (and (.exists dir) (.isDirectory dir))
+        (let [result (policy-pack/load-all-packs (.getPath dir))]
+          (or (:loaded result) []))
+        []))
+    (catch Exception _ [])))
+
+(defn- enrich-pr-in-context
+  "Enrich a single PR with readiness and risk, using its repo-level
+   train snapshot as context (so dependency and fanout factors are correct)."
+  [train-snapshot pr]
+  (try
+    (let [readiness (pr-train/explain-readiness train-snapshot pr)
+          risk (pr-train/assess-risk train-snapshot pr {} {} {})]
+      (assoc pr
+             :pr/readiness readiness
+             :pr/risk risk))
+    (catch Exception _
+      ;; If enrichment fails, return PR unchanged (fallback to naive derivation)
+      pr)))
+
+(defn enrich-prs
+  "Enrich a collection of PRs with readiness and risk from pr-train component.
+   Groups PRs by repo and builds per-repo train snapshots so that dependency,
+   fanout, and merge-order factors are computed correctly within each repo."
+  [prs]
+  (let [by-repo (group-by :pr/repo prs)
+        enriched (mapcat (fn [[_repo repo-prs]]
+                           (let [snapshot {:train/prs (vec repo-prs)}]
+                             (mapv (partial enrich-pr-in-context snapshot) repo-prs)))
+                         by-repo)
+        ;; Preserve original ordering
+        enriched-map (into {}
+                           (map (fn [pr] [[(:pr/repo pr) (:pr/number pr)] pr]))
+                           enriched)]
+    (mapv (fn [pr] (get enriched-map [(:pr/repo pr) (:pr/number pr)] pr)) prs)))
+
+;------------------------------------------------------------------------------ Layer 4
 ;; PR loading
 
 (defn load-fleet-repos
@@ -180,10 +232,12 @@
 
 (defn load-pr-items
   "Fetch open PRs for all configured fleet repositories.
-   Returns vector of TrainPR maps, or empty vec on error."
+   Enriches each PR with readiness and risk from pr-train component.
+   Returns vector of enriched TrainPR maps, or empty vec on error."
   [& [{:keys [config-path]}]]
   (try
-    (pr-sync/fetch-all-fleet-prs (when config-path {:config-path config-path}))
+    (let [prs (pr-sync/fetch-all-fleet-prs (when config-path {:config-path config-path}))]
+      (enrich-prs prs))
     (catch Exception _ [])))
 
 (defn load-pr-items-into-model

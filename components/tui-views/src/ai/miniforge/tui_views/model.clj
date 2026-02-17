@@ -86,13 +86,22 @@
    :confirm         nil
    :search-matches  []
    :search-match-idx nil
+   ;; Train state
+   :active-train-id nil
+   ;; Filter palette
+   :active-filter   nil
    ;; Tab completion
    :completions    []
    :completion-idx nil
    :completing?    false
    ;; Browse repos cache (populated by :browse-repos side-effect)
    :browse-repos   []
-   :browse-repos-loading? false})
+   :browse-repos-loading? false
+   ;; Chat state
+   :chat {:messages []        ;; [{:role :user/:assistant :content str :timestamp inst}]
+          :input-buf ""       ;; Current input being typed
+          :context {}         ;; PR data, selections, filter context passed to agent
+          :pending? false}})
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Workflow data shape
