@@ -46,7 +46,9 @@
         ai.miniforge/orchestrator {:local/root "../../components/orchestrator"}
         ai.miniforge/reporting {:local/root "../../components/reporting"}
         ;; Self-healing
-        ai.miniforge/self-healing {:local/root "../../components/self-healing"}}
+        ai.miniforge/self-healing {:local/root "../../components/self-healing"}
+        ;; Spec parsing
+        ai.miniforge/spec-parser {:local/root "../../components/spec-parser"}}
 
  :aliases
  {:uberjar

@@ -28,7 +28,12 @@
    [ai.miniforge.tui-views.views.workflow-detail :as wf-detail]
    [ai.miniforge.tui-views.views.evidence :as evidence]
    [ai.miniforge.tui-views.views.artifact-browser :as artifact-browser]
-   [ai.miniforge.tui-views.views.dag-kanban :as dag-kanban]))
+   [ai.miniforge.tui-views.views.dag-kanban :as dag-kanban]
+   [ai.miniforge.tui-views.views.pr-fleet :as pr-fleet]
+   [ai.miniforge.tui-views.views.pr-detail :as pr-detail]
+   [ai.miniforge.tui-views.views.train-view :as train-view]
+   [ai.miniforge.tui-views.views.repo-manager :as repo-manager]
+   [ai.miniforge.tui-views.views.help :as help]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; View dispatch
@@ -42,6 +47,10 @@
     :evidence         (evidence/render model size)
     :artifact-browser (artifact-browser/render model size)
     :dag-kanban       (dag-kanban/render model size)
+    :pr-fleet         (pr-fleet/render model size)
+    :pr-detail        (pr-detail/render model size)
+    :train-view       (train-view/render model size)
+    :repo-manager     (repo-manager/render model size)
     ;; Fallback
     (layout/text size "Unknown view")))
 
@@ -58,6 +67,18 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Root view function
 
+(defn- apply-help-overlay
+  "Composite the help overlay centered on the buffer when visible."
+  [buf [cols rows] model]
+  (if (:help-visible? model)
+    (let [overlay (help/render-overlay [cols rows])
+          ov-cols (count (first overlay))
+          ov-rows (count overlay)
+          x (max 0 (quot (- cols ov-cols) 2))
+          y (max 0 (quot (- rows ov-rows) 2))]
+      (layout/blit buf overlay x y))
+    buf))
+
 (defn root-view
   "Root view function for the Elm runtime.
    model -> [cols rows] -> cell-buffer"
@@ -68,14 +89,16 @@
           cmd-active? (not= :normal (:mode model))
           content-rows (if cmd-active? (dec rows) rows)
           ;; Render main view
-          content (render-active-view model [cols content-rows])]
-      (if cmd-active?
-        ;; Build full-size buffer: content on top, command bar on last row
-        (let [buf (layout/make-buffer [cols rows])
-              buf (layout/blit buf content 0 0)
-              cmd-bar (render-command-bar [cols 1] model)]
-          (layout/blit buf cmd-bar 0 (dec rows)))
-        content))))
+          content (render-active-view model [cols content-rows])
+          ;; Build composite buffer
+          buf (if cmd-active?
+                (let [buf (layout/make-buffer [cols rows])
+                      buf (layout/blit buf content 0 0)
+                      cmd-bar (render-command-bar [cols 1] model)]
+                  (layout/blit buf cmd-bar 0 (dec rows)))
+                content)]
+      ;; Apply help overlay on top if visible
+      (apply-help-overlay buf [cols rows] model))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

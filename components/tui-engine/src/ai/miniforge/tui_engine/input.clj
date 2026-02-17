@@ -17,54 +17,50 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.tui-engine.input
-  "Key event parsing -- normalizes raw Lanterna key events into
-   semantic message keywords for the Elm update loop.
+  "Key event lexer -- normalizes raw Lanterna key events into
+   semantic key tokens for the Elm update loop.
 
-   Raw Lanterna events are maps like {:type :character :char \\j}.
-   This module translates them into normalized TUI messages like :key/j, :key/enter, etc."
+   The lexer table is loaded from config/tui/key-tokens.edn, making
+   the full input pipeline data-driven:
+
+     raw Lanterna event -> key token (this ns, via key-tokens.edn)
+                        -> action token (keybindings.edn)
+                        -> handler fn (action registry)
+
+   Character keys return {:key :key/j :char \\j} (mapped) or
+   {:key nil :char \\x} (unmapped). Special keys return bare
+   keywords like :key/enter."
   (:require
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [ai.miniforge.tui-engine.screen :as screen]))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
-;; Key normalization
+;; Lexer table (EDN-driven)
+
+(def ^:private key-tokens
+  "Lexer config loaded from EDN. Two sections:
+   :char-keys    — string->keyword map (converted to char->keyword at load time)
+   :special-keys — Lanterna event type keyword -> key token keyword"
+  (-> (io/resource "config/tui/key-tokens.edn")
+      slurp
+      edn/read-string))
 
 (def ^:private char-key-map
-  "Map single characters to semantic key names."
-  {\j     :key/j
-   \k     :key/k
-   \h     :key/h
-   \l     :key/l
-   \g     :key/g
-   \G     :key/G
-   \q     :key/q
-   \1     :key/d1
-   \2     :key/d2
-   \3     :key/d3
-   \4     :key/d4
-   \5     :key/d5
-   \6     :key/d6
-   \7     :key/d7
-   \8     :key/d8
-   \9     :key/d9
-   \0     :key/d0
-   \r     :key/r
-   \s     :key/s
-   \b     :key/b
-   \e     :key/e
-   \f     :key/f
-   \o     :key/o
-   \x     :key/x
-   \a     :key/a
-   \v     :key/v
-   \c     :key/c
-   \/     :key/slash
-   \:     :key/colon
-   \space :key/space
-   \tab   :key/tab
-   \?     :key/question
-   \y     :key/y
-   \n     :key/n
-   \N     :key/N})
+  "Map single characters to semantic key tokens.
+   Built from :char-keys in key-tokens.edn.
+   Single-char strings are converted to char keys for O(1) lookup."
+  (into {}
+    (map (fn [[s token]] [(first s) token]))
+    (:char-keys key-tokens)))
+
+(def ^:private special-key-map
+  "Map Lanterna event type keywords to semantic key tokens.
+   Loaded directly from :special-keys in key-tokens.edn."
+  (:special-keys key-tokens))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Key normalization
 
 (defn normalize-key
   "Convert a raw Lanterna key event map to a normalized message.
@@ -76,25 +72,12 @@
    Special keys return bare keywords: :key/enter, :key/escape, etc."
   [raw-event]
   (when raw-event
-    (case (:type raw-event)
-      :character
-      (let [ch (:char raw-event)
-            semantic (get char-key-map ch)]
-        {:key semantic :char ch})
-
-      :enter     :key/enter
-      :escape    :key/escape
-      :backspace :key/backspace
-      :arrow-up  :key/up
-      :arrow-down :key/down
-      :arrow-left :key/left
-      :arrow-right :key/right
-      :tab         :key/tab
-      :reverse-tab :key/shift-tab
-      :eof         :key/eof
-
-      ;; Unknown key type
-      nil)))
+    (let [event-type (:type raw-event)]
+      (if (= :character event-type)
+        (let [ch (:char raw-event)
+              semantic (get char-key-map ch)]
+          {:key semantic :char ch})
+        (get special-key-map event-type)))))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Input polling

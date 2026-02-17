@@ -18,6 +18,8 @@
 
 (ns ai.miniforge.tui-engine.input-test
   (:require
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.tui-engine.input :as input]))
 
@@ -66,5 +68,41 @@
     (let [result (input/normalize-key {:type :character :char \m})]
       (is (= {:key nil :char \m} result))))
 
+  (testing "Unknown event types return nil"
+    (is (nil? (input/normalize-key {:type :unknown-key-type})))
+    (is (nil? (input/normalize-key {:type :f1}))))
+
   (testing "nil input returns nil"
     (is (nil? (input/normalize-key nil)))))
+
+(deftest key-tokens-edn-test
+  (testing "key-tokens.edn is loadable and well-formed"
+    (let [tokens (-> (io/resource "config/tui/key-tokens.edn")
+                     slurp
+                     edn/read-string)]
+      (is (map? (:char-keys tokens))
+          "char-keys section exists and is a map")
+      (is (map? (:special-keys tokens))
+          "special-keys section exists and is a map")
+
+      (testing "all char-keys are single-char strings -> :key/* keywords"
+        (doseq [[s token] (:char-keys tokens)]
+          (is (string? s) (str "char-key key must be a string: " s))
+          (is (= 1 (count s)) (str "char-key must be single char: " s))
+          (is (= "key" (namespace token))
+              (str "char-key value must be :key/* keyword: " token))))
+
+      (testing "all special-keys are keyword -> :key/* keyword"
+        (doseq [[event-type token] (:special-keys tokens)]
+          (is (keyword? event-type)
+              (str "special-key key must be a keyword: " event-type))
+          (is (= "key" (namespace token))
+              (str "special-key value must be :key/* keyword: " token))))
+
+      (testing "char-keys and special-keys cover expected tokens"
+        (let [all-tokens (set (concat (vals (:char-keys tokens))
+                                      (vals (:special-keys tokens))))]
+          (is (contains? all-tokens :key/j))
+          (is (contains? all-tokens :key/enter))
+          (is (contains? all-tokens :key/escape))
+          (is (contains? all-tokens :key/tab)))))))
