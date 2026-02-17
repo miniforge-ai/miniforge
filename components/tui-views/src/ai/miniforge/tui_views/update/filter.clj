@@ -133,30 +133,45 @@
     :recommend  (name (or (:action (project/derive-recommendation pr)) :wait))
     ""))
 
+(defn- positive-field?
+  "True if the key is a positive (non-negated, non-text) field with values."
+  [[field-kw values]]
+  (and (not= field-kw :text)
+       (not (str/starts-with? (name field-kw) "neg-"))
+       (seq values)))
+
+(defn- negated-field?
+  "True if the key is a negation field with values."
+  [[field-kw values]]
+  (and (str/starts-with? (name field-kw) "neg-")
+       (seq values)))
+
+(defn- negated->real-field
+  "Convert :neg-risk → :risk."
+  [field-kw]
+  (keyword (subs (name field-kw) 4)))
+
+(defn- matches-text? [pr text]
+  (or (str/blank? text) (fuzzy-match? (:pr/title pr) text)))
+
+(defn- matches-positive-fields? [pr parsed-filter]
+  (every? (fn [[field-kw values]]
+            (any-match? (pr-field-value pr field-kw) values))
+          (filter positive-field? parsed-filter)))
+
+(defn- matches-negated-fields? [pr parsed-filter]
+  (every? (fn [[field-kw values]]
+            (none-match? (pr-field-value pr (negated->real-field field-kw)) values))
+          (filter negated-field? parsed-filter)))
+
 (defn pr-matches-filter?
   "Test if a PR matches the parsed filter.
    AND composition across fields, OR within same field.
    Negation fields exclude matching items."
   [pr parsed-filter]
-  (let [{:keys [text]} parsed-filter]
-    (and
-     ;; Free text matches title
-     (or (str/blank? text)
-         (fuzzy-match? (:pr/title pr) text))
-     ;; Positive field matches (OR within field, AND across fields)
-     (every? (fn [[field-kw values]]
-               (when (and (not= field-kw :text)
-                          (not (str/starts-with? (name field-kw) "neg-"))
-                          (seq values))
-                 (any-match? (pr-field-value pr field-kw) values)))
-             (dissoc parsed-filter :text))
-     ;; Negation field matches
-     (every? (fn [[field-kw values]]
-               (when (and (str/starts-with? (name field-kw) "neg-")
-                          (seq values))
-                 (let [real-field (keyword (subs (name field-kw) 4))]
-                   (none-match? (pr-field-value pr real-field) values))))
-             parsed-filter))))
+  (and (matches-text? pr (:text parsed-filter))
+       (matches-positive-fields? pr parsed-filter)
+       (matches-negated-fields? pr parsed-filter)))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Index computation

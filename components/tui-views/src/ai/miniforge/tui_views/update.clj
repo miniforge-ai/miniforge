@@ -39,7 +39,8 @@
    [ai.miniforge.tui-views.update.mode :as mode]
    [ai.miniforge.tui-views.update.command :as command]
    [ai.miniforge.tui-views.update.completion :as completion]
-   [ai.miniforge.tui-views.update.selection :as sel]))
+   [ai.miniforge.tui-views.update.selection :as sel]
+   [ai.miniforge.tui-views.update.chat :as chat]))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Keybinding configuration (EDN-driven parser pattern)
@@ -233,7 +234,7 @@
    :action/chat-or-clear
    (fn [model]
      (if (#{:pr-fleet :pr-detail} (:view model))
-       (mode/enter-chat-mode model)
+       (chat/enter model)
        (sel/clear-selection model)))
 
    :action/train-view
@@ -434,9 +435,9 @@
 
 (def ^:private chat-action-handlers
   "Action token → handler for chat-mode actions."
-  {:action/chat-escape    mode/chat-escape
-   :action/chat-send      mode/chat-send
-   :action/chat-backspace mode/chat-backspace})
+  {:action/chat-escape    chat/escape
+   :action/chat-send      chat/send-message
+   :action/chat-backspace chat/backspace})
 
 (defn- handle-chat-input [model key]
   (let [k (extract-key key)]
@@ -446,7 +447,7 @@
         model)
       ;; Character input — append to chat buffer
       (if-let [ch (extract-char key)]
-        (mode/chat-append model ch)
+        (chat/append model ch)
         model))))
 
 (defn- refresh-add-repo-completions-if-active
