@@ -1,7 +1,7 @@
 # N2 — Workflow Execution Model
 
-**Version:** 0.1.0-draft
-**Date:** 2026-01-23
+**Version:** 0.4.0-draft
+**Date:** 2026-02-16
 **Status:** Draft
 **Conformance:** MUST
 
@@ -1298,9 +1298,78 @@ Merge order: archetype defaults → DAG defaults → task overrides.
 
 ---
 
-## 14. Future Extensions
+## 14. Workflow Chaining
 
-### 14.1 Parallel Phase Execution (Post-OSS)
+Workflow chaining enables the output of one workflow to serve as input to another,
+creating composable pipelines. This is the mechanism by which Workflow Packs (N1 §2.24)
+compose multi-step domain workflows.
+
+### 14.1 Typed Outputs
+
+Workflows MUST be able to emit typed outputs conforming to a declared output schema:
+
+```clojure
+{:workflow/outputs
+ {:output/schema {...}                 ; EDN schema defining output shape
+  :output/values {...}                 ; Actual output values
+  :output/artifact-refs [uuid ...]}}   ; References to output artifacts
+```
+
+When a workflow is an entrypoint of a Workflow Pack, the output MUST conform to the
+entrypoint's `:entrypoint/output-schema` (N1 §2.24).
+
+### 14.2 Input Binding
+
+Downstream workflows MUST be able to bind inputs to upstream workflow outputs:
+
+```clojure
+{:chain/bindings
+ [{:binding/target-input string        ; Input parameter name in downstream workflow
+   :binding/source-workflow-id uuid    ; Upstream workflow that produced the value
+   :binding/source-output-path string  ; Path within upstream output values
+   :binding/required? boolean}]}       ; FAIL chain if binding unresolvable
+```
+
+Implementations MUST:
+
+1. Resolve bindings before starting the downstream workflow
+2. Fail the chain edge if a required binding cannot be resolved
+3. Record all resolved bindings in the chain edge evidence
+
+### 14.3 Cross-Boundary Provenance
+
+Chained execution MUST preserve provenance across workflow boundaries:
+
+1. Each workflow in a chain MUST link to its upstream workflow(s) via chain edge references
+2. Evidence bundles for downstream workflows MUST reference upstream evidence bundles
+3. Artifact provenance chains MUST be traceable across workflow boundaries
+4. The complete chain MUST be reconstructable from evidence alone
+
+### 14.4 Chain Execution
+
+```clojure
+{:chain/id uuid                        ; REQUIRED: unique chain identifier
+ :chain/edges
+ [{:edge/id uuid                       ; REQUIRED: unique edge identifier
+   :edge/from-workflow-id uuid         ; Upstream workflow
+   :edge/to-workflow-id uuid           ; Downstream workflow
+   :edge/bindings [...]                ; Input bindings (§14.2)
+   :edge/status keyword                ; :pending, :executing, :completed, :failed
+   :edge/started-at inst
+   :edge/completed-at inst}]}
+```
+
+Implementations MUST:
+
+1. Emit chain edge events (see N3) for edge lifecycle transitions
+2. Support pausing/retrying/rolling back at edge granularity via OCI (N8) when available
+3. Record chain structure and edge results in evidence bundles (N6)
+
+---
+
+## 15. Future Extensions
+
+### 15.1 Parallel Phase Execution (Post-OSS)
 
 Future versions will support:
 
@@ -1308,7 +1377,7 @@ Future versions will support:
 - Conditional phase branching (if-then-else)
 - Phase retry with backoff
 
-### 14.2 Custom Phase Plugins (Enterprise)
+### 15.2 Custom Phase Plugins (Enterprise)
 
 Enterprise features will add:
 
@@ -1316,7 +1385,7 @@ Enterprise features will add:
 - Phase plugin marketplace
 - Phase composition (nested phases)
 
-### 14.3 Cross-Workflow Dependencies (Enterprise)
+### 15.3 Cross-Workflow Dependencies (Enterprise)
 
 PR train orchestration will enable:
 
@@ -1326,7 +1395,7 @@ PR train orchestration will enable:
 
 ---
 
-## 15. References
+## 16. References
 
 - RFC 2119: Key words for use in RFCs to Indicate Requirement Levels
 - N1 (Architecture): Defines core concepts (workflow, phase, agent, gate)
@@ -1339,6 +1408,8 @@ PR train orchestration will enable:
 
 **Version History:**
 
+- 0.4.0-draft (2026-02-16): Added workflow chaining (§14) — typed outputs, input binding,
+  cross-boundary provenance, chain execution
 - 0.3.0-draft (2026-02-04): Added node capability contracts (§13.6) and frontier semantics (§13.4.1)
 - 0.2.0-draft (2026-02-03): Added DAG-based multi-task execution model (Section 13)
 - 0.1.0-draft (2026-01-23): Initial workflow execution model specification

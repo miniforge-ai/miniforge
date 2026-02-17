@@ -1,7 +1,7 @@
 # N3 — Event Stream & Observability Contract
 
-**Version:** 0.4.0-draft
-**Date:** 2026-02-07
+**Version:** 0.5.0-draft
+**Date:** 2026-02-16
 **Status:** Draft
 **Conformance:** MUST
 
@@ -728,7 +728,199 @@ ETL workflows MUST emit this event if any critical failure prevents completion.
 Implementations SHOULD include enough detail in `:etl/error-details` to enable
 debugging without log diving.
 
-### 3.12 Task Lifecycle Events (DAG Orchestration)
+### 3.12 Pack Lifecycle and Pack Run Events
+
+For Workflow Pack management and execution (see N1 §2.24–§2.26), implementations MUST emit
+pack lifecycle events and Pack Run events.
+
+#### pack/installed
+
+```clojure
+{:event/type :pack/installed
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :pack/id string
+ :pack/version string
+ :pack/type keyword                    ; :workflow-pack | :policy-pack | etc.
+ :pack/publisher string
+ :pack/content-hash string
+ :pack/signature-verified? boolean
+ :pack/capabilities-required [{:capability/id string :capability/scope keyword}]
+ :pack/capabilities-granted [{:capability/id string :capability/scope keyword}]
+
+ :message "Pack installed: {pack.id}@{pack.version}"}
+```
+
+#### pack/updated
+
+```clojure
+{:event/type :pack/updated
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :pack/id string
+ :pack/from-version string
+ :pack/to-version string
+ :pack/content-hash string
+ :pack/capabilities-changed? boolean   ; true if capabilities differ from prior version
+ :pack/re-approval-required? boolean   ; true if capability upgrade requires re-approval
+
+ :message "Pack updated: {pack.id} {from-version} → {to-version}"}
+```
+
+#### pack/removed
+
+```clojure
+{:event/type :pack/removed
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :pack/id string
+ :pack/version string
+ :pack/content-hash string
+
+ :message "Pack removed: {pack.id}@{pack.version}"}
+```
+
+#### pack.run/started
+
+```clojure
+{:event/type :pack.run/started
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :workflow/id uuid                     ; workflow created for this run
+ :pack-run/id uuid
+ :pack/id string
+ :pack/version string
+ :pack/content-hash string
+ :pack/entrypoint string
+ :pack/signature-verified? boolean
+ :pack/capabilities-granted [{:capability/id string :capability/scope keyword}]
+
+ :message "Pack run started: {pack.id}@{pack.version} / {entrypoint}"}
+```
+
+#### pack.run/completed
+
+```clojure
+{:event/type :pack.run/completed
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :workflow/id uuid
+ :pack-run/id uuid
+ :pack/id string
+ :pack/version string
+ :pack-run/duration-ms long
+ :pack-run/evidence-bundle-id uuid
+
+ :message "Pack run completed: {pack.id}@{pack.version}"}
+```
+
+#### pack.run/failed
+
+```clojure
+{:event/type :pack.run/failed
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :workflow/id uuid
+ :pack-run/id uuid
+ :pack/id string
+ :pack/version string
+ :pack-run/failure-reason string
+ :pack-run/duration-ms long
+
+ :message "Pack run failed: {pack.id}@{pack.version} — {failure-reason}"}
+```
+
+#### capability/denied
+
+```clojure
+{:event/type :capability/denied
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :workflow/id uuid
+ :pack-run/id uuid
+ :pack/id string
+ :capability/attempted string          ; e.g., "github.pr.comment.write"
+ :capability/granted-set [string ...]  ; capabilities that were granted
+
+ :message "Capability denied: {capability.attempted} not in grant set for {pack.id}"}
+```
+
+#### chain.edge/started
+
+```clojure
+{:event/type :chain.edge/started
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :chain/id uuid
+ :edge/id uuid
+ :edge/from-workflow-id uuid
+ :edge/to-workflow-id uuid
+ :edge/bindings-count long
+
+ :message "Chain edge started: {from-workflow} → {to-workflow}"}
+```
+
+#### chain.edge/completed
+
+```clojure
+{:event/type :chain.edge/completed
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :chain/id uuid
+ :edge/id uuid
+ :edge/from-workflow-id uuid
+ :edge/to-workflow-id uuid
+ :edge/duration-ms long
+
+ :message "Chain edge completed: {from-workflow} → {to-workflow}"}
+```
+
+#### chain.edge/failed
+
+```clojure
+{:event/type :chain.edge/failed
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :chain/id uuid
+ :edge/id uuid
+ :edge/from-workflow-id uuid
+ :edge/to-workflow-id uuid
+ :edge/failure-reason string
+
+ :message "Chain edge failed: {from-workflow} → {to-workflow} — {failure-reason}"}
+```
+
+### 3.13 Task Lifecycle Events (DAG Orchestration)
 
 For DAG-based multi-task execution (see N2 Section 13), implementations MUST emit
 task lifecycle events that track frontier computation, agent dispatch, and capability
@@ -832,7 +1024,7 @@ Emitted when a task is skipped due to a dependency failure.
  :message "Task skipped: dependency task-abc failed"}
 ```
 
-### 3.13 OPSV Events (N7)
+### 3.14 OPSV Events (N7)
 
 For Operational Policy Synthesis workflows (see N7), implementations MUST emit these
 event types:
@@ -938,7 +1130,7 @@ event types:
 
 All OPSV events MUST link to the corresponding evidence bundle id per N6.
 
-### 3.14 Observability Control Interface Events (N8)
+### 3.15 Observability Control Interface Events (N8)
 
 For the Observability Control Interface (see N8), implementations MUST emit these
 event types:
@@ -1010,7 +1202,7 @@ event types:
  :message "Advisory annotation: {title}"}
 ```
 
-### 3.15 External PR Integration Events (N9)
+### 3.16 External PR Integration Events (N9)
 
 For external PR integration (see N9), implementations MUST emit these event types.
 These events MAY have nil `:workflow/id` — see §2.3 for scope key rules.
@@ -1388,8 +1580,10 @@ Event stream will extend to:
 
 **Version History:**
 
+- 0.5.0-draft (2026-02-16): Added pack lifecycle, Pack Run, capability denial, and chain
+  edge events (§3.12); renumbered §3.13–§3.16
 - 0.4.0-draft (2026-02-07): Added extension spec events from N7, N8, N9
-  (§3.13–§3.15, §2.3 scope key)
+  (§3.14–§3.16, §2.3 scope key)
 - 0.3.0-draft (2026-02-04): Added task lifecycle events for DAG orchestration (§3.12)
 - 0.2.0-draft (2026-02-03): Add PR lifecycle events for DAG orchestration (Section 3.10)
 - 0.1.0-draft (2026-01-23): Initial event stream specification
