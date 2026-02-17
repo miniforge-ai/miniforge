@@ -256,6 +256,17 @@
        (repo-manager-open-browse model :all)
        model))
 
+   :action/open-in-browser
+   (fn [model]
+     (let [url (case (:view model)
+                 :pr-fleet  (get-in (:pr-items model) [(:selected-idx model) :pr/url])
+                 :pr-detail (get-in model [:detail :selected-pr :pr/url])
+                 nil)]
+       (if url
+         (assoc model :side-effect {:type :open-url :url url}
+                      :flash-message (str "Opening " url "..."))
+         (assoc model :flash-message "No URL available for this item"))))
+
    :action/remove-repos
    (fn [model]
      (if (in-repo-manager? model)

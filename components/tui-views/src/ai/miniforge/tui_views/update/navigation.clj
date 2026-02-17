@@ -22,7 +22,8 @@
    Pure functions for list navigation and view switching.
    Layers 0-1."
   (:require
-   [ai.miniforge.tui-views.model :as model]))
+   [ai.miniforge.tui-views.model :as model]
+   [ai.miniforge.tui-views.view.project :as project]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Navigation helpers
@@ -94,10 +95,14 @@
     (let [prs (:pr-items model)
           idx (:selected-idx model)]
       (if-let [pr (get prs idx)]
-        (-> model
-            (assoc :view :pr-detail)
-            (assoc-in [:detail :selected-pr] pr)
-            (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
+        (let [readiness (project/derive-readiness pr)
+              risk      (project/derive-risk pr)]
+          (-> model
+              (assoc :view :pr-detail)
+              (assoc-in [:detail :selected-pr] pr)
+              (assoc-in [:detail :pr-readiness] readiness)
+              (assoc-in [:detail :pr-risk] risk)
+              (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil)))
         model))
 
     :train-view
@@ -243,9 +248,12 @@
                             (map-indexed vector prs))
           prev-idx (when current-idx (dec current-idx))]
       (if (and prev-idx (>= prev-idx 0))
-        (-> model
-            (assoc-in [:detail :selected-pr] (get prs prev-idx))
-            (assoc :selected-idx 0))
+        (let [pr (get prs prev-idx)]
+          (-> model
+              (assoc-in [:detail :selected-pr] pr)
+              (assoc-in [:detail :pr-readiness] (project/derive-readiness pr))
+              (assoc-in [:detail :pr-risk] (project/derive-risk pr))
+              (assoc :selected-idx 0)))
         model))
 
     ;; Non-detail views: no-op
@@ -278,9 +286,12 @@
                             (map-indexed vector prs))
           next-idx (when current-idx (inc current-idx))]
       (if (and next-idx (< next-idx (count prs)))
-        (-> model
-            (assoc-in [:detail :selected-pr] (get prs next-idx))
-            (assoc :selected-idx 0))
+        (let [pr (get prs next-idx)]
+          (-> model
+              (assoc-in [:detail :selected-pr] pr)
+              (assoc-in [:detail :pr-readiness] (project/derive-readiness pr))
+              (assoc-in [:detail :pr-risk] (project/derive-risk pr))
+              (assoc :selected-idx 0)))
         model))
 
     ;; Non-detail views: no-op

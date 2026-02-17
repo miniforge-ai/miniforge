@@ -76,6 +76,13 @@
                                  :limit (:limit effect)})]
                     [:msg/repos-browsed (assoc result :source (:source effect))])
 
+                  :open-url
+                  (do (when-let [url (:url effect)]
+                        (try
+                          (clojure.java.browse/browse-url url)
+                          (catch Exception _ nil)))
+                      nil)
+
                   ;; Unknown effect — no-op
                   nil))
               :subscriptions

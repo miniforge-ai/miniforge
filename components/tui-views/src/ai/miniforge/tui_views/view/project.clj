@@ -63,6 +63,83 @@
 (defn- risk-label [level]
   (case level :critical "CRIT" :high "high" :medium "med" :low "low" "?"))
 
+;------------------------------------------------------------------------------ Layer 0b
+;; Readiness + risk derivation (pure, from provider signals)
+
+(defn derive-readiness
+  "Derive N9 readiness state from provider signals.
+   Returns {:readiness/state kw :readiness/score float :readiness/blockers [...]
+            :readiness/factors [{:factor kw :weight float :score float} ...]}"
+  [pr]
+  (let [status (:pr/status pr)
+        ci     (:pr/ci-status pr)
+        ci-ok? (= :passed ci)
+        ci-fail? (= :failed ci)
+        ;; Determine readiness state
+        [state score]
+        (cond
+          (and (#{:merge-ready :approved} status) ci-ok?)  [:merge-ready 1.0]
+          (and (= :approved status) ci-fail?)               [:ci-failing 0.5]
+          (and (= :approved status) (not ci-ok?))           [:needs-review 0.7]
+          (= :changes-requested status)                     [:changes-requested 0.25]
+          (= :reviewing status)                             [:needs-review 0.5]
+          (and (= :open status) ci-fail?)                   [:ci-failing 0.25]
+          (= :open status)                                  [:needs-review 0.4]
+          (= :draft status)                                 [:draft 0.1]
+          :else                                             [:unknown 0.0])
+        ;; Compute blockers
+        blockers (cond-> []
+                   ci-fail?
+                   (conj {:blocker/type :ci
+                          :blocker/message "CI checks failing"
+                          :blocker/source "provider"})
+                   (#{:open :reviewing :needs-review} status)
+                   (conj {:blocker/type :review
+                          :blocker/message "Needs review approval"
+                          :blocker/source "provider"})
+                   (= :changes-requested status)
+                   (conj {:blocker/type :review
+                          :blocker/message "Reviewer requested changes"
+                          :blocker/source "provider"})
+                   (= :draft status)
+                   (conj {:blocker/type :review
+                          :blocker/message "PR is in draft"
+                          :blocker/source "author"}))
+        ;; Compute factors for detail view
+        ci-score    (if ci-ok? 1.0 (if ci-fail? 0.0 0.5))
+        review-score (case status
+                       (:merge-ready :approved) 1.0
+                       :reviewing 0.5
+                       :changes-requested 0.0
+                       :open 0.3
+                       :draft 0.0
+                       0.0)]
+    {:readiness/state    state
+     :readiness/score    score
+     :readiness/blockers blockers
+     :readiness/factors  [{:factor :ci     :weight 0.4 :score ci-score}
+                          {:factor :review :weight 0.3 :score review-score}
+                          {:factor :policy :weight 0.3 :score (if (= :merge-ready state) 1.0 0.5)}]}))
+
+(defn derive-risk
+  "Derive N9 risk assessment from provider signals.
+   Returns {:risk/level kw :risk/factors [{:factor kw :explanation str} ...]}"
+  [pr]
+  (let [status (:pr/status pr)
+        ci     (:pr/ci-status pr)
+        ci-fail? (= :failed ci)
+        changes? (= :changes-requested status)
+        [level factors]
+        (cond
+          ci-fail?  [:medium [{:factor :ci-health
+                               :explanation "CI checks are failing"}]]
+          changes?  [:medium [{:factor :review-concerns
+                               :explanation "Reviewer requested changes"}]]
+          :else     [:low    [{:factor :signal-check
+                               :explanation "All available signals nominal"}]])]
+    {:risk/level   level
+     :risk/factors factors}))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Projection functions: model -> widget data
 
@@ -84,18 +161,34 @@
                             (subs msg 0 (min 16 (count msg)))))})
           filtered)))
 
+(defn- readiness-indicator
+  "Readiness state → status string with indicator character."
+  [state]
+  (case state
+    :merge-ready       "✓ merge-ready"
+    :ci-failing        "● ci-failing"
+    :needs-review      "○ needs-review"
+    :changes-requested "◐ changes-req"
+    :draft             "◑ draft"
+    :merge-conflicts   "✗ conflicts"
+    :policy-failing    "✗ policy-fail"
+    :unknown           "? unknown"
+    "? unknown"))
+
 (defn- project-pr-items
   "Project PR items for the fleet table widget."
   [model]
   (mapv (fn [pr]
-          {:_id [(:pr/repo pr) (:pr/number pr)]
-           :repo (or (:pr/repo pr) "")
-           :number (str "#" (:pr/number pr))
-           :title (or (:pr/title pr) "")
-           :status (some-> (:pr/status pr) name)
-           :ready (readiness-bar (:pr/readiness-score pr) 15)
-           :risk (risk-label (get-in pr [:pr/risk :risk/level]))
-           :policy (if (:pr/policy-passed? pr) "pass" "?")})
+          (let [readiness (derive-readiness pr)
+                risk      (derive-risk pr)]
+            {:_id [(:pr/repo pr) (:pr/number pr)]
+             :repo (or (:pr/repo pr) "")
+             :number (str "#" (:pr/number pr))
+             :title (or (:pr/title pr) "")
+             :status (readiness-indicator (:readiness/state readiness))
+             :ready (readiness-bar (:readiness/score readiness) 15)
+             :risk (risk-label (:risk/level risk))
+             :policy (if (:pr/policy-passed? pr) "pass" "?")}))
         (:pr-items model [])))
 
 (defn- project-readiness-tree

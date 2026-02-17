@@ -60,7 +60,7 @@
      :selection-col? true}
     {:type :node/footer
      :segments
-     {:normal "j/k:nav  Enter:detail  Tab:views  /:search  r:refresh (s:alias)  6:repos  q:quit"
+     {:normal "j/k:nav  Enter:detail  O:open  Space:select  r:sync  /:search  ::cmd  Tab:views  q:quit"
       :selected "{n} selected │ Space:toggle  v:visual  a:all  c:clear  :archive :delete"
       :visual "VISUAL │ j/k:extend  Space:toggle  Esc:exit  a:all"}}]}}
 
@@ -87,7 +87,7 @@
          :child {:type :widget/tree :data-fn :project/gate-list}}]}]}
     {:type :node/footer
      :segments
-     {:normal "Esc:back  6:fleet  8:train  Space:expand  q:quit"}}]}}
+     {:normal "Esc:back  O:open  ←/→:prev/next  Tab:pane  q:quit"}}]}}
 
  :train-view
  {:title-bar {:text-fn :ctx/train-title}
