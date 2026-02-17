@@ -53,6 +53,7 @@
     (:size @state))
 
   (put-string! [_ col row text fg bg bold?]
+    (swap! state update :put-count (fnil inc 0))
     (doseq [i (range (count text))]
       (swap! state assoc-in [:cells [(+ col i) row]]
              {:char (.charAt text i) :fg fg :bg bg :bold? bold?})))
@@ -96,6 +97,16 @@
                  (if-let [cell (get cells [c row])]
                    (:char cell)
                    \space)))))
+
+(defn mock-get-put-count
+  "Get the number of put-string! calls on a mock screen."
+  [mock-screen]
+  (or (:put-count @(:state mock-screen)) 0))
+
+(defn mock-reset-put-count!
+  "Reset the put-string! call counter to zero."
+  [mock-screen]
+  (swap! (:state mock-screen) assoc :put-count 0))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Factory (dynamically loads Lanterna)

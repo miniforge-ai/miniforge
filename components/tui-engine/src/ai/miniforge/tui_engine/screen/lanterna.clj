@@ -24,7 +24,7 @@
   (:require
    [ai.miniforge.tui-engine.screen :as screen])
   (:import
-   [com.googlecode.lanterna TextCharacter TextColor$ANSI]
+   [com.googlecode.lanterna TextCharacter TextColor$ANSI TextColor$Indexed TextColor$RGB]
    [com.googlecode.lanterna.screen TerminalScreen]
    [com.googlecode.lanterna.terminal DefaultTerminalFactory]))
 
@@ -43,8 +43,19 @@
    :white   TextColor$ANSI/WHITE
    :default TextColor$ANSI/DEFAULT})
 
-(defn- resolve-lanterna-color [kw]
-  (get color-map kw TextColor$ANSI/DEFAULT))
+(defn- resolve-lanterna-color
+  "Resolve a color value to a Lanterna TextColor.
+   Accepts:
+   - keyword  (:cyan, :red, etc.)  → TextColor.ANSI
+   - integer  (0–255)              → TextColor.Indexed
+   - vector   [r g b]              → TextColor.RGB"
+  [color]
+  (cond
+    (keyword? color) (get color-map color TextColor$ANSI/DEFAULT)
+    (integer? color) (TextColor$Indexed. (int color))
+    (vector? color)  (let [[r g b] color]
+                       (TextColor$RGB. (int r) (int g) (int b)))
+    :else            TextColor$ANSI/DEFAULT))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Lanterna implementation
@@ -110,6 +121,9 @@
 
           (= kind com.googlecode.lanterna.input.KeyType/Tab)
           {:type :tab}
+
+          (= kind com.googlecode.lanterna.input.KeyType/ReverseTab)
+          {:type :reverse-tab}
 
           (= kind com.googlecode.lanterna.input.KeyType/EOF)
           {:type :eof}

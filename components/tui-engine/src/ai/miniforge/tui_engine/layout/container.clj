@@ -48,7 +48,7 @@
    - :fg, :bg, :bold? - Border style
    - :content-fn - (fn [[inner-cols inner-rows]] -> cell-buffer) for box contents"
   [[cols rows] & [{:keys [border title fg bg bold? content-fn]
-                    :or {border :single fg :default bg :black bold? false}}]]
+                    :or {border :single fg :default bg :default bold? false}}]]
   (when (and (>= cols 2) (>= rows 2))
     (let [chars (get box-chars border (:single box-chars))
           style {:fg fg :bg bg :bold? bold?}
