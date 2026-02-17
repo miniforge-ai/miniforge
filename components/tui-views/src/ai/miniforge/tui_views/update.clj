@@ -23,58 +23,384 @@
    stratified sub-namespaces (navigation, events, mode) and provides input
    handling and root update dispatch.
 
+   Keybindings are loaded from config/tui/keybindings.edn as data.
+   Each key maps to a semantic :action/* token, and action tokens
+   resolve to handler fns via the action registry (parser pattern).
+
    Layers 4-5: Input handling + root update function."
   (:require
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
+   [clojure.set :as set]
+   [clojure.string :as str]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update.navigation :as nav]
    [ai.miniforge.tui-views.update.events :as events]
-   [ai.miniforge.tui-views.update.mode :as mode]))
+   [ai.miniforge.tui-views.update.mode :as mode]
+   [ai.miniforge.tui-views.update.command :as command]
+   [ai.miniforge.tui-views.update.completion :as completion]
+   [ai.miniforge.tui-views.update.selection :as sel]))
 
 ;------------------------------------------------------------------------------ Layer 4
-;; Input message handling
+;; Keybinding configuration (EDN-driven parser pattern)
+;;
+;; Flow: raw char → key token (input.clj) → action token (keybindings.edn)
+;;       → handler fn (action registry below)
 
-(defn- handle-normal-input [model key]
-  (case key
-    :key/j         (nav/navigate-down model)
-    :key/k         (nav/navigate-up model)
-    :key/down      (nav/navigate-down model)
-    :key/up        (nav/navigate-up model)
-    :key/g         (nav/navigate-top model)
-    :key/G         (nav/navigate-bottom model)
-    :key/enter     (nav/enter-detail model)
-    :key/escape    (nav/go-back model)
-    :key/l         (nav/enter-detail model)
-    :key/h         (nav/go-back model)
-    :key/colon     (mode/enter-command-mode model)
-    :key/slash     (mode/enter-search-mode model)
-    :key/d1        (nav/switch-view model :workflow-list model/views)
-    :key/d2        (nav/switch-view model :workflow-detail model/views)
-    :key/d3        (nav/switch-view model :evidence model/views)
-    :key/d4        (nav/switch-view model :artifact-browser model/views)
-    :key/d5        (nav/switch-view model :dag-kanban model/views)
-    :key/q         (assoc model :quit? true)
-    ;; Unknown key -- no-op
+(def ^:private keybindings
+  "Keybinding config loaded from EDN. Maps key tokens to action tokens,
+   grouped by mode (:help, :normal, :command, :search, :number-keys)."
+  (-> (io/resource "config/tui/keybindings.edn")
+      slurp
+      edn/read-string))
+
+(def ^:private normal-keybindings  (:normal keybindings))
+(def ^:private help-keybindings    (:help keybindings))
+(def ^:private command-keybindings (:command keybindings))
+(def ^:private search-keybindings  (:search keybindings))
+(def ^:private number-key->index   (:number-keys keybindings))
+
+;; ── Input event helpers ──
+
+(defn- extract-key
+  "Extract the semantic key from a normalized input event.
+   Maps return :key, bare keywords pass through."
+  [key]
+  (if (map? key) (:key key) key))
+
+(defn- extract-char
+  "Extract the raw character from a normalized input event.
+   Maps return :char, bare keywords return nil."
+  [key]
+  (when (map? key) (:char key)))
+
+;; ── Repo manager helpers ──
+
+(defn- in-repo-manager?
+  [model]
+  (= :repo-manager (:view model)))
+
+(defn- repo-manager-source
+  [model]
+  (if (= :browse (:repo-manager-source model)) :browse :fleet))
+
+(defn- reset-repo-manager-state
+  [model source]
+  (assoc model
+         :repo-manager-source source
+         :selected-idx 0
+         :filtered-indices nil
+         :search-matches []
+         :search-match-idx nil
+         :selected-ids #{}
+         :visual-anchor nil))
+
+(defn- selected-repos
+  [model]
+  (->> (sel/effective-ids model)
+       (filter string?)
+       distinct
+       vec))
+
+(defn- repo-manager-open-browse
+  [model provider]
+  (let [m (reset-repo-manager-state model :browse)]
+    (if (:browse-repos-loading? model)
+      (assoc m :flash-message "Browsing remote repos...")
+      (assoc m
+             :side-effect {:type :browse-repos
+                           :source :repo-manager
+                           :provider provider}
+             :browse-repos-loading? true
+             :flash-message (str "Browsing " (name provider) " repos...")))))
+
+(defn- repo-manager-add-selected
+  [model]
+  (let [repos (selected-repos model)]
+    (if (empty? repos)
+      (assoc model :flash-message "No remote repository selected.")
+      (let [before (set (:fleet-repos model))
+            m (reduce (fn [acc repo]
+                        (command/execute-command acc (str ":add-repo " repo)))
+                      model
+                      repos)
+            after (set (:fleet-repos m))
+            added (count (set/difference after before))]
+        (if (pos? added)
+          (-> (reset-repo-manager-state m :browse)
+              (assoc :side-effect {:type :sync-prs}
+                     :flash-message (str "Added " added " repo(s) to fleet. Syncing PRs...")))
+          (-> (reset-repo-manager-state m :browse)
+              (assoc :flash-message "Selected repos already in fleet.")))))))
+
+(defn- repo-manager-request-remove
+  [model]
+  (let [repos (selected-repos model)]
+    (if (empty? repos)
+      (assoc model :flash-message "No configured repository selected.")
+      (assoc model :confirm
+             {:action :remove-repos
+              :label "Remove Repositories"
+              :ids (set repos)}))))
+
+(defn- clear-detail-context
+  [model]
+  (-> model
+      (assoc-in [:detail :workflow-id] nil)
+      (assoc-in [:detail :selected-pr] nil)
+      (assoc-in [:detail :selected-train] nil)))
+
+(defn- switch-numbered-view
+  "Switch view by number within the current abstraction level (1-0)."
+  [model key]
+  (if-let [idx (number-key->index key)]
+    (let [level-views (nav/current-level-views model)
+          target (nth level-views idx nil)]
+      (if target
+        (let [m (nav/switch-view model target model/views)]
+          (if (= level-views model/top-level-views)
+            (clear-detail-context m)
+            m))
+        model))
     model))
 
+;; ── Navigation with visual selection ──
+
+(defn- nav-down-with-visual  [m] (-> (nav/navigate-down m)   sel/update-visual-selection))
+(defn- nav-up-with-visual    [m] (-> (nav/navigate-up m)     sel/update-visual-selection))
+(defn- nav-top-with-visual   [m] (-> (nav/navigate-top m)    sel/update-visual-selection))
+(defn- nav-bottom-with-visual [m] (-> (nav/navigate-bottom m) sel/update-visual-selection))
+
+;; ── Action registries ──
+;;
+;; Maps :action/* tokens → handler (fn [model] -> model').
+;; The keybinding EDN maps key tokens → action tokens; these registries
+;; resolve action tokens to concrete handler functions.
+
+(def ^:private selectable-views
+  #{:workflow-list :pr-fleet :artifact-browser :train-view :repo-manager})
+
+(def ^:private action-handlers
+  "Action token → handler function registry.
+   Actions that are context-free (same behavior regardless of view)."
+  {:action/navigate-down      nav-down-with-visual
+   :action/navigate-up        nav-up-with-visual
+   :action/navigate-top       nav-top-with-visual
+   :action/navigate-bottom    nav-bottom-with-visual
+   :action/navigate-prev-item nav/navigate-prev-item
+   :action/navigate-next-item nav/navigate-next-item
+   :action/enter-detail       nav/enter-detail
+   :action/go-back            nav/go-back
+   :action/enter-command-mode mode/enter-command-mode
+   :action/enter-search-mode  mode/enter-search-mode
+   :action/next-search-match  nav/next-search-match
+   :action/prev-search-match  nav/prev-search-match
+   :action/enter-visual-mode  sel/enter-visual-mode
+   :action/select-all         sel/select-all
+   :action/clear-selection    sel/clear-selection
+   :action/evidence-view      #(nav/switch-view % :evidence model/views)
+   :action/toggle-help        nav/toggle-help
+   :action/quit               #(assoc % :quit? true)})
+
+(def ^:private context-action-handlers
+  "Action token → handler for actions that depend on view context."
+  {:action/enter-or-confirm
+   (fn [model]
+     (if (and (in-repo-manager? model) (= :browse (repo-manager-source model)))
+       (repo-manager-add-selected model)
+       (nav/enter-detail model)))
+
+   :action/escape-cascade
+   (fn [model]
+     (cond
+       (:visual-anchor model)        (sel/exit-visual-mode model)
+       (seq (:selected-ids model))   (sel/clear-selection model)
+       (:filtered-indices model)     (assoc model :filtered-indices nil :selected-idx 0)
+       (seq (:search-matches model)) (assoc model :search-matches [] :search-match-idx nil)
+       :else                         (nav/go-back model)))
+
+   :action/toggle-or-expand
+   (fn [model]
+     (if (selectable-views (:view model))
+       (sel/toggle-selection model)
+       (nav/toggle-expand model)))
+
+   :action/refresh-or-sync
+   (fn [model]
+     (if (#{:pr-fleet :repo-manager} (:view model))
+       (command/execute-command model ":sync")
+       (nav/refresh model)))
+
+   :action/sync
+   (fn [model]
+     (if (#{:pr-fleet :repo-manager} (:view model))
+       (command/execute-command model ":sync")
+       model))
+
+   :action/browse-or-kanban
+   (fn [model]
+     (if (in-repo-manager? model)
+       (repo-manager-open-browse model :all)
+       (nav/switch-view model :dag-kanban model/views)))
+
+   :action/fleet-view
+   (fn [model]
+     (if (in-repo-manager? model)
+       (-> (reset-repo-manager-state model :fleet)
+           (assoc :flash-message "Showing configured repositories."))
+       model))
+
+   :action/open-browse
+   (fn [model]
+     (if (in-repo-manager? model)
+       (repo-manager-open-browse model :all)
+       model))
+
+   :action/remove-repos
+   (fn [model]
+     (if (in-repo-manager? model)
+       (if (= :fleet (repo-manager-source model))
+         (repo-manager-request-remove model)
+         (assoc model :flash-message "Switch to fleet (f) to remove repositories."))
+       model))
+
+   :action/cycle-tab
+   (fn [model]
+     (cond
+       (nav/in-detail-subview? model)                (nav/cycle-detail-subview model)
+       (some #{(:view model)} model/detail-views)    (nav/cycle-pane model)
+       (some #{(:view model)} model/top-level-views) (nav/cycle-top-level-view model)
+       :else                                         model))
+
+   :action/cycle-tab-reverse
+   (fn [model]
+     (cond
+       (nav/in-detail-subview? model)                (nav/cycle-detail-subview-reverse model)
+       (some #{(:view model)} model/detail-views)    (nav/cycle-pane-reverse model)
+       (some #{(:view model)} model/top-level-views) (nav/cycle-top-level-view-reverse model)
+       :else                                         model))})
+
+(defn- resolve-action
+  "Look up handler fn for an action token."
+  [action]
+  (or (action-handlers action)
+      (context-action-handlers action)))
+
+;; ── Normal mode input ──
+
+(defn- handle-normal-input [model key]
+  (let [k (extract-key key)]
+    (if (:help-visible? model)
+      ;; Help overlay: only help-keybinding actions accepted
+      (if-let [action (help-keybindings k)]
+        (if-let [handler (resolve-action action)]
+          (handler model)
+          model)
+        model)
+      ;; Normal mode: resolve key → action → handler, then number keys
+      (if-let [action (normal-keybindings k)]
+        (if-let [handler (resolve-action action)]
+          (handler model)
+          model)
+        (if (number-key->index k)
+          (switch-numbered-view model k)
+          model)))))
+
+;; ── Command mode input ──
+
+(defn- command-escape
+  "Escape in command mode: dismiss completions if open, else exit."
+  [model]
+  (if (:completing? model)
+    (completion/dismiss model)
+    (mode/exit-mode model)))
+
+(defn- command-enter
+  "Enter in command mode: accept completion, open arg picker, or execute."
+  [model]
+  (if (and (:completing? model) (:completion-idx model))
+    (completion/accept model)
+    (let [buf (:command-buf model)
+          cmd-name (subs buf 1)
+          exact-cmd? (and (not (str/blank? cmd-name))
+                          (not (str/includes? cmd-name " "))
+                          (some #{cmd-name} (command/complete-command-name cmd-name)))
+          arg-completion? (when exact-cmd?
+                            (let [result (command/compute-completions model (str ":" cmd-name " "))]
+                              (or (seq (:completions result))
+                                  (:side-effect result))))]
+      (if arg-completion?
+        (completion/handle-tab model)
+        (-> (command/execute-command model buf)
+            mode/exit-mode)))))
+
+(def ^:private command-action-handlers
+  "Action token → handler for command-mode actions."
+  {:action/command-escape       command-escape
+   :action/command-enter        command-enter
+   :action/completion-tab       completion/handle-tab
+   :action/completion-shift-tab completion/handle-shift-tab
+   :action/command-backspace    #(-> (mode/command-backspace %) completion/dismiss)
+   :action/completion-next      completion/next-completion
+   :action/completion-prev      completion/prev-completion})
+
 (defn- handle-command-input [model key]
-  (case key
-    :key/escape   (mode/exit-mode model)
-    :key/enter    (-> model
-                      (assoc :flash-message (str "Executed: " (:command-buf model)))
-                      mode/exit-mode)
-    :key/backspace (mode/command-backspace model)
-    ;; Character input
-    (if (and (map? key) (= :char (:type key)))
-      (mode/command-append model (:char key))
-      model)))
+  (let [k (extract-key key)]
+    (if-let [action (command-keybindings k)]
+      (let [handler (command-action-handlers action)]
+        (cond
+          ;; Completion arrow keys only active when completing
+          (and (#{:action/completion-next :action/completion-prev} action)
+               (not (:completing? model)))
+          model
+
+          handler
+          (handler model)
+
+          :else model))
+      ;; No keybinding — character input
+      (if-let [ch (extract-char key)]
+        (-> (mode/command-append model ch)
+            completion/dismiss)
+        model))))
+
+(def ^:private search-action-handlers
+  "Action token → handler for search-mode actions."
+  {:action/exit-mode        mode/exit-mode
+   :action/confirm-search   mode/confirm-search
+   :action/search-backspace mode/command-backspace})
 
 (defn- handle-search-input [model key]
-  (case key
-    :key/escape   (mode/exit-mode model)
-    :key/enter    (mode/exit-mode model)
-    :key/backspace (mode/command-backspace model)
-    (if (and (map? key) (= :char (:type key)))
-      (mode/command-append model (:char key))
+  (let [k (extract-key key)]
+    (if-let [action (search-keybindings k)]
+      (if-let [handler (search-action-handlers action)]
+        (handler model)
+        model)
+      ;; Character input — all chars (mapped and unmapped) carry :char
+      (if-let [ch (extract-char key)]
+        (-> model
+            (mode/command-append ch)
+            mode/compute-search-results)
+        model))))
+
+(defn- refresh-add-repo-completions-if-active
+  "If command-mode add-repo picker is currently open, refresh its options."
+  [model]
+  (try
+    (let [active? (and (= :command (:mode model))
+                       (:completing? model)
+                       (str/starts-with? (:command-buf model "") ":add-repo "))]
+      (if-not active?
+        model
+        (let [result (command/compute-completions model (:command-buf model))
+              completions (vec (or (:completions result) []))
+              n (count completions)
+              prior-idx (or (:completion-idx model) 0)]
+          (assoc model
+                 :completions completions
+                 :completion-idx (when (pos? n) (min prior-idx (dec n)))
+                 :completing? (pos? n)))))
+    (catch Exception _
       model)))
 
 ;------------------------------------------------------------------------------ Layer 5
@@ -92,11 +418,22 @@
     (case msg-type
       ;; User input
       :input
-      (case (:mode model)
-        :normal  (handle-normal-input model payload)
-        :command (handle-command-input model payload)
-        :search  (handle-search-input model payload)
-        model)
+      (if (:confirm model)
+        ;; Confirmation prompt active -- only y/n/escape accepted
+        (let [k (extract-key payload)]
+          (case k
+            :key/y     (-> model
+                           (command/execute-confirmed-action)
+                           (assoc :confirm nil))
+            :key/n     (assoc model :confirm nil :flash-message "Cancelled")
+            :key/escape (assoc model :confirm nil :flash-message "Cancelled")
+            model))
+        ;; Normal input routing by mode
+        (case (:mode model)
+          :normal  (handle-normal-input model payload)
+          :command (handle-command-input model payload)
+          :search  (handle-search-input model payload)
+          model))
 
       ;; Event stream messages
       :msg/workflow-added   (events/handle-workflow-added model payload)
@@ -107,6 +444,22 @@
       :msg/workflow-done    (events/handle-workflow-done model payload)
       :msg/workflow-failed  (events/handle-workflow-failed model payload)
       :msg/gate-result      (events/handle-gate-result model payload)
+
+      ;; PR fleet messages
+      :msg/prs-synced       (events/handle-prs-synced model payload)
+      :msg/pr-updated       (events/handle-pr-updated model payload)
+      :msg/pr-removed       (events/handle-pr-removed model payload)
+      :msg/repos-discovered (events/handle-repos-discovered model payload)
+      :msg/repos-browsed    (-> (events/handle-repos-browsed model payload)
+                                refresh-add-repo-completions-if-active)
+
+      ;; Side-effect error
+      :msg/side-effect-error
+      (cond-> (assoc model :flash-message
+                     (str "Effect error (" (name (or (:type payload) :unknown)) "): "
+                          (:error payload)))
+        (= :browse-repos (:type payload))
+        (assoc :browse-repos-loading? false))
 
       ;; Tick (for clock/timing updates, currently unused)
       :tick model
@@ -122,7 +475,7 @@
   (-> m
       (update-model [:msg/workflow-added {:workflow-id (random-uuid) :name "test"}])
       (update-model [:msg/workflow-added {:workflow-id (random-uuid) :name "test-2"}])
-      (update-model [:input :key/j])
+      (update-model [:input {:key :key/j :char \j}])
       :selected-idx)
   ;; => 1
 
