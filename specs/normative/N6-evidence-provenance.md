@@ -1,7 +1,7 @@
 # N6 — Evidence & Provenance Standard
 
-**Version:** 0.3.0-draft
-**Date:** 2026-02-07
+**Version:** 0.4.0-draft
+**Date:** 2026-02-16
 **Status:** Draft
 **Conformance:** MUST
 
@@ -374,6 +374,93 @@ artifacts, not inline their content.
 For external PRs (no workflow), `:provenance/workflow-id` MAY be nil and
 `:provenance/phase` SHOULD be `:external-pr-eval`.
 
+### 2.11 Pack Run Evidence
+
+Pack Runs (N1 §2.26) produce evidence using the existing bundle schema with
+pack-specific fields.
+
+#### 2.11.1 Pack Run Evidence Requirements
+
+Each Pack Run evidence bundle MUST include:
+
+```clojure
+{:evidence/pack-run
+ {:pack-run/id uuid
+  :pack/id string
+  :pack/version string
+  :pack/content-hash string            ; Digest at run time
+  :pack/publisher string
+  :pack/entrypoint string
+
+  :pack/signature-verified? boolean    ; REQUIRED: verification result
+  :pack/signature-error string         ; OPTIONAL: error if verification failed
+
+  :pack/capabilities-required
+  [{:capability/id string
+    :capability/scope keyword}]
+
+  :pack/capabilities-granted
+  [{:capability/id string
+    :capability/scope keyword
+    :capability/granted-by string      ; "user", "policy", "auto"
+    :capability/granted-at inst}]
+
+  :pack/capabilities-denied            ; OPTIONAL: capabilities that were denied
+  [{:capability/id string
+    :capability/scope keyword
+    :capability/denied-reason string}]
+
+  :pack/resolved-dependencies          ; REQUIRED if pack has dependencies
+  [{:pack/id string
+    :pack/version string
+    :pack/content-hash string}]
+
+  :pack-run/inputs {...}               ; Input values (redacted per data-handling)
+  :pack-run/outputs {...}              ; Output values upon completion
+  :pack-run/connector-actions          ; All connector actions taken during run
+  [{:action/capability string
+    :action/timestamp inst
+    :action/result keyword}]}}         ; :success | :failure | :denied
+```
+
+#### 2.11.2 Metrics Snapshot Artifact
+
+When a pack performs reporting or analytics, metric queries MUST produce
+Metrics Snapshot artifacts:
+
+```clojure
+{:artifact/type :metrics-snapshot
+ :artifact/content
+ {:metrics/query string                ; Query expression
+  :metrics/parameters {...}            ; Query parameters
+  :metrics/time-window
+  {:start inst :end inst}
+  :metrics/result-digest string        ; SHA-256 of query results
+  :metrics/source string}              ; Metrics endpoint identifier
+ :artifact/content-hash string}
+```
+
+Metrics Snapshots enable reproducibility by recording the exact query and parameters
+used to produce a result, without requiring storage of raw metric data.
+
+#### 2.11.3 Report Artifact
+
+When a pack renders a report, the output MUST be a Report Artifact:
+
+```clojure
+{:artifact/type :report-artifact
+ :artifact/content
+ {:report/template-ref string          ; Template identifier within pack
+  :report/template-digest string       ; SHA-256 of template at render time
+  :report/input-artifact-refs [uuid ...] ; Input artifacts used
+  :report/output-format keyword        ; :markdown | :html | :pdf | :json
+  :report/rendered-digest string}      ; SHA-256 of rendered output
+ :artifact/content-hash string}
+```
+
+Report Artifacts enable provenance tracing from rendered output back to input data
+and template.
+
 ---
 
 ## 3. Artifact Provenance Schema
@@ -435,7 +522,13 @@ Implementations MUST support:
 - `:pr-policy-result` - Policy evaluation result for an external PR
 - `:pr-readiness-snapshot` - Point-in-time readiness assessment for a PR
 
-Artifacts of type `:feature-pack`, `:policy-pack`, and `:agent-profile-pack` MUST include:
+**Pack Run artifact types:**
+
+- `:pack-run-evidence` - Pack Run execution record (see below)
+- `:metrics-snapshot` - Query + parameters + time window + result digest
+- `:report-artifact` - Rendered report referencing input artifacts and templates by digest
+
+Artifacts of type `:feature-pack`, `:policy-pack`, `:agent-profile-pack`, and `:workflow-pack` MUST include:
 
 - `:artifact/metadata {:trust-level ... :authority ...}`
 - `:artifact/content-hash` computed over canonical EDN
@@ -900,6 +993,9 @@ Fleet-wide evidence will enable:
 
 **Version History:**
 
+- 0.4.0-draft (2026-02-16): Added Pack Run Evidence (§2.11), Metrics Snapshot (§2.11.2),
+  Report Artifact (§2.11.3); added pack-run-evidence, metrics-snapshot, report-artifact
+  to artifact types (§3.1.1)
 - 0.3.0-draft (2026-02-07): Added extension spec evidence from N7, N8, N9
   (§2.8–§2.10, §3.1.1 artifact types)
 - 0.2.0-draft (2026-02-03): Add DAG orchestration evidence (Section 2.7: DAG Run, Task Workflow, Merge Evidence)

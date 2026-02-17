@@ -1,7 +1,7 @@
 # N4 — Policy Packs & Gates Standard
 
-**Version:** 0.3.0-draft
-**Date:** 2026-02-07
+**Version:** 0.4.0-draft
+**Date:** 2026-02-16
 **Status:** Draft
 **Conformance:** MUST
 
@@ -749,6 +749,64 @@ Policy result schema for external PR evaluation:
    :policy-pack/version string}]}
 ```
 
+#### 5.1.8 Pack Trust Gate
+
+**ID:** `pack-trust`
+**Purpose:** Enforce trust requirements when installing and running Workflow Packs (see N1 §2.24)
+
+Rules:
+
+- `require-signature-verification` (severity: high)
+  - WARN if a pack is installed without a valid signature
+  - Implementations SHOULD allow configuring this to FAIL for production environments
+- `enforce-publisher-allowlist` (severity: critical)
+  - FAIL if pack publisher is not in the configured allowlist (when allowlist is enabled)
+  - Implementations MUST support publisher allowlists in pack trust configuration
+- `enforce-minimum-trust-level` (severity: high)
+  - FAIL if pack trust level is below the configured minimum for the environment
+  - Default minimum: `:untrusted` (no restriction); configurable per environment
+
+This pack is RECOMMENDED for all Workflow Pack installations.
+
+#### 5.1.9 Capability Grant Gate
+
+**ID:** `capability-grant`
+**Purpose:** Enforce capability declarations and grants for Workflow Pack runs (see N1 §2.25)
+
+Rules:
+
+- `require-capability-declaration` (severity: critical)
+  - FAIL if a Workflow Pack does not declare its required capabilities in the manifest
+- `enforce-deny-default-writes` (severity: critical)
+  - FAIL if a write capability (`*.write`) is invoked without explicit user grant
+  - Write capabilities MUST default to denied; read capabilities MAY default to granted
+- `enforce-capability-scope` (severity: critical)
+  - FAIL if a pack invokes a connector action not covered by its declared and granted capabilities
+  - Implementations MUST intercept connector actions and validate against the grant set
+- `require-re-approval-on-upgrade` (severity: high)
+  - FAIL if a pack update increases required capabilities without re-approval
+  - Capability changes MUST be presented to the user before the update takes effect
+
+This pack is REQUIRED for all Workflow Pack runs.
+
+#### 5.1.10 High-Risk Pack Action Gate
+
+**ID:** `pack-high-risk-action`
+**Purpose:** Govern high-risk actions triggered by pack runs (see N1 §2.26)
+
+Rules:
+
+- `require-justification-for-writes` (severity: medium)
+  - WARN if a pack run performs write actions without a justification record
+- `enforce-production-restrictions` (severity: critical)
+  - FAIL if a pack run targets production resources without explicit approval
+  - Production targets MUST be defined in pack trust configuration
+- `audit-all-connector-actions` (severity: high)
+  - FAIL if connector actions during a pack run are not logged in the evidence bundle
+  - All connector actions (read and write) MUST be recorded with timestamps and principals
+
+This pack is RECOMMENDED for production environments.
+
 ### 5.2 Pack Discovery & Installation
 
 Implementations SHOULD support:
@@ -1120,6 +1178,8 @@ Research directions:
 
 **Version History:**
 
+- 0.4.0-draft (2026-02-16): Added Pack Trust Gate (§5.1.8), Capability Grant Gate
+  (§5.1.9), High-Risk Pack Action Gate (§5.1.10)
 - 0.3.0-draft (2026-02-07): Added extension spec gates from N7, N8, N9
   (§5.1.5–§5.1.7)
 - 0.2.0-draft (2026-02-04): Added task-scope policy pack for capability enforcement (§5.1.4)

@@ -1,7 +1,7 @@
 # miniforge Specification Index
 
-**Version:** 0.3.0-draft
-**Date:** 2026-02-07
+**Version:** 0.4.0-draft
+**Date:** 2026-02-16
 **Status:** Living specification during OSS development
 
 ---
@@ -42,7 +42,8 @@ They use RFC 2119 terminology (MUST, SHALL, SHOULD, MAY).
 
 Defines:
 
-- Core nouns: workflow, phase, agent, subagent, tool, gate, policy pack, evidence bundle, artifact, provenance
+- Core nouns: workflow, phase, agent, subagent, tool, gate, policy pack, evidence bundle,
+  artifact, provenance, workflow pack, capability, pack run
 - Three-layer architecture: Control Plane, Agent Layer, Learning Layer
 - Polylith component boundaries (OSS component catalog)
 - Operational model: local-first execution, reproducibility, failure semantics
@@ -62,6 +63,7 @@ Defines:
 - Outer loop: phase transition state machine with prerequisites and failure handling
 - Gate contract: check/repair function signatures, violation schema, enforcement rules
 - Context handoff: protocol for passing context between phases
+- Workflow chaining: typed outputs, input binding, cross-boundary provenance
 
 ### N3 — Event Stream & Observability Contract ✅
 
@@ -71,7 +73,8 @@ Defines:
 
 Defines:
 
-- Event envelope fields; required event types (workflow, agent, status, subagent, tool, LLM, messages, milestone, gate)
+- Event envelope fields; required event types (workflow, agent, status, subagent, tool,
+  LLM, messages, milestone, gate, pack lifecycle, pack run, chain edge)
 - Ordering guarantees (per-workflow sequence, causal ordering, replay determinism)
 - Streaming API (SSE/WebSocket) with subscription protocol
 - Throttling and performance requirements
@@ -90,6 +93,7 @@ Defines:
 - Semantic intent validation: IMPORT/CREATE/UPDATE/DESTROY/REFACTOR/MIGRATE rules
 - Violation schema: severity levels, remediation templates, auto-fix capabilities
 - Terraform/Kubernetes-specific validation rules
+- Pack trust, capability grant, and high-risk action gates for Workflow Packs
 
 ### N5 — Interface Standard: CLI/TUI/API ✅
 
@@ -99,8 +103,8 @@ Defines:
 
 Defines:
 
-- CLI command taxonomy: six namespaces (init, workflow, fleet, policy, evidence, artifact)
-- TUI primitives: workflow list, detail view, evidence viewer, artifact browser
+- CLI command taxonomy: seven namespaces (init, workflow, fleet, policy, evidence, artifact, pack)
+- TUI primitives: workflow list, detail view, evidence viewer, artifact browser, pack browser, run launcher
 - API surface: minimal REST endpoints for workflow control, event streaming, evidence/artifact access
 - Operations console purpose: monitoring autonomous factory (NOT PR management)
 - Manual override mechanisms: plan approval, gate handling, budget escalation
@@ -117,6 +121,7 @@ Defines:
 - Artifact provenance: source inputs, tool executions, content hashes, timestamps
 - Semantic intent validation rules with Terraform/Kubernetes specifics
 - Queryable provenance API: trace artifact chains, find intent mismatches
+- Pack Run evidence: pack identity, capabilities, connector actions, metrics snapshots, report artifacts
 - Compliance metadata: sensitive data handling, audit requirements (SOCII/FedRAMP)
 
 ### N7 — Operational Policy Synthesis With Verification ✅
@@ -328,6 +333,9 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.4.0-draft** (2026-02-16) - OSS pack runtime amendments: Workflow Pack, Capability, Pack Run
+  concepts in N1; workflow chaining in N2; pack lifecycle/run events in N3; pack trust/capability
+  gates in N4; pack CLI + browser/launcher TUI in N5; Pack Run evidence in N6
 - **0.3.0-draft** (2026-02-07) - Added N9 (External PR Integration), Fleet Mode disambiguation
 - **0.2.0-draft** (2026-02-01) - Added N7 (OPSV) and N8 (OCI), updated governance for extension specs
 - **0.1.0-draft** (2026-01-23) - Initial spec index, normative spec structure established
