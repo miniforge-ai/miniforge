@@ -1,0 +1,128 @@
+;; TUI Theme Definitions — Extensible like policy packs
+;;
+;; Each theme is a map of semantic color keys -> color values.
+;; Color values can be:
+;;   - Keywords:  :cyan, :red, etc.      (ANSI-16)
+;;   - Integers:  0-255                   (ANSI-256 indexed)
+;;   - Vectors:   [r g b]                (24-bit true-color)
+;;
+;; To add a custom theme, drop an EDN file in ~/.miniforge/themes/
+;; with a single map of the same shape. The TUI will merge it into
+;; the theme registry at startup.
+;;
+;; Miniforge brand palette reference:
+;;   :steel     [89 89 89]       — dark gray
+;;   :gold      [242 185 12]     — gold / amber
+;;   :flame     [242 84 27]      — orange-red
+;;   :hot       [242 34 15]      — red
+;;   :ash       [217 217 217]    — light gray
+;;   :charcoal  [35 30 28]       — near-black
+;;   :ember     [180 60 20]      — dark orange
+;;   :parchment [240 235 225]    — warm white
+;;   :warm-gray [120 115 110]    — mid gray
+;;   :dark-gold [190 145 10]     — muted gold
+
+{:dark
+ {;; Base colors
+  :bg              [35 30 28]
+  :fg              [217 217 217]
+  :fg-dim          [120 115 110]
+  :fg-muted        [89 89 89]
+
+  ;; Status indicators
+  :status/running  [242 185 12]
+  :status/success  :green
+  :status/failed   [242 34 15]
+  :status/blocked  [242 84 27]
+  :status/pending  [217 217 217]
+  :status/skipped  [89 89 89]
+
+  ;; UI chrome
+  :border          [89 89 89]
+  :border-focus    [242 185 12]
+  :title           [242 185 12]
+  :title-focus     [242 84 27]
+  :header          [242 84 27]
+  :row-fg          [217 217 217]
+  :row-bg          [35 30 28]
+  :selected-bg     [242 84 27]
+  :selected-fg     :white
+
+  ;; Progress
+  :progress-fill   [242 185 12]
+  :progress-empty  [89 89 89]
+
+  ;; Kanban columns
+  :kanban/blocked  [242 34 15]
+  :kanban/pending  [242 185 12]
+  :kanban/running  [242 84 27]
+  :kanban/done     :green
+
+  ;; Sparkline
+  :sparkline       [242 185 12]
+
+  ;; Command / search bar
+  :command-bg      [35 30 28]
+  :command-fg      [242 185 12]
+  :search-match    [242 84 27]}
+
+ :light
+ {:bg              [240 235 225]
+  :fg              [35 30 28]
+  :fg-dim          [89 89 89]
+  :fg-muted        [120 115 110]
+
+  :status/running  :blue
+  :status/success  :green
+  :status/failed   [242 34 15]
+  :status/blocked  [242 84 27]
+  :status/pending  [35 30 28]
+  :status/skipped  [89 89 89]
+
+  :border          [120 115 110]
+  :border-focus    [242 84 27]
+  :title           [180 60 20]
+  :title-focus     [242 84 27]
+  :header          [180 60 20]
+  :row-fg          [35 30 28]
+  :row-bg          [240 235 225]
+  :selected-bg     [242 84 27]
+  :selected-fg     :white
+
+  :progress-fill   [180 60 20]
+  :progress-empty  [120 115 110]
+
+  :kanban/blocked  [242 34 15]
+  :kanban/pending  [242 185 12]
+  :kanban/running  :blue
+  :kanban/done     :green
+
+  :sparkline       [180 60 20]
+
+  :command-bg      [240 235 225]
+  :command-fg      [35 30 28]
+  :search-match    [242 84 27]}
+
+ :high-contrast
+ {:bg :black :fg :white :fg-dim :cyan :fg-muted :green
+  :status/running :cyan :status/success :green :status/failed :red
+  :status/blocked :yellow :status/pending :white :status/skipped :white
+  :border :green :border-focus :cyan :title :green :title-focus :cyan
+  :header :cyan :row-fg :white :row-bg :black
+  :selected-bg :blue :selected-fg :white
+  :progress-fill :cyan :progress-empty :white
+  :kanban/blocked :red :kanban/pending :yellow :kanban/running :cyan :kanban/done :green
+  :sparkline :cyan
+  :command-bg :black :command-fg :white :search-match :yellow}
+
+ :high-contrast-light
+ {:bg :white :fg :black :fg-dim :blue :fg-muted :magenta
+  :status/running :blue :status/success :green :status/failed :red
+  :status/blocked :yellow :status/pending :black :status/skipped :black
+  :border :blue :border-focus :magenta :title :blue :title-focus :magenta
+  :header :blue :row-fg :black :row-bg :white
+  :selected-bg :blue :selected-fg :white
+  :progress-fill :blue :progress-empty :black
+  :kanban/blocked :red :kanban/pending :yellow :kanban/running :blue :kanban/done :green
+  :sparkline :blue
+  :command-bg :white :command-fg :black :search-match :red}}

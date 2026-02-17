@@ -26,7 +26,8 @@
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update :as update]
    [ai.miniforge.tui-views.view :as view]
-   [ai.miniforge.tui-views.subscription :as subscription]))
+   [ai.miniforge.tui-views.subscription :as subscription]
+   [ai.miniforge.tui-views.persistence :as persistence]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; TUI lifecycle
@@ -47,12 +48,36 @@
    4. Render the workflow list view
 
    The TUI blocks the calling thread until the user quits (q key)."
-  [event-stream & [{:keys [throttle-ms screen] :or {throttle-ms 1000}}]]
+  [event-stream & [{:keys [throttle-ms screen load-limit]
+                    :or {throttle-ms 1000 load-limit 100}}]]
   (let [app (tui/create-app
-             {:init   model/init-model
+             {:init   (fn []
+                        (persistence/load-all-into-model
+                         (model/init-model)
+                         {:limit load-limit}))
               :update update/update-model
               :view   view/root-view
               :screen screen
+              :effect-handler
+              (fn [effect]
+                (case (:type effect)
+                  :sync-prs
+                  (let [prs (persistence/load-pr-items)]
+                    [:msg/prs-synced {:pr-items prs}])
+
+                  :discover-repos
+                  (let [result (persistence/discover-repos (:owner effect))]
+                    [:msg/repos-discovered result])
+
+                  :browse-repos
+                  (let [result (persistence/browse-repos
+                                {:owner (:owner effect)
+                                 :provider (:provider effect)
+                                 :limit (:limit effect)})]
+                    [:msg/repos-browsed (assoc result :source (:source effect))])
+
+                  ;; Unknown effect — no-op
+                  nil))
               :subscriptions
               (when event-stream
                 (fn [dispatch-fn]

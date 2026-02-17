@@ -122,19 +122,19 @@
 
 (def dark-theme
   "Miniforge brand dark: charcoal background, gold/flame accents."
-  style/dark-theme)
+  (style/get-theme :dark))
 
 (def light-theme
   "Miniforge brand light: parchment background, ember accents."
-  style/light-theme)
+  (style/get-theme :light))
 
 (def high-contrast-theme
   "High-contrast dark: pure black bg, white fg, bright ANSI accents."
-  style/high-contrast-theme)
+  (style/get-theme :high-contrast))
 
 (def high-contrast-light-theme
   "High-contrast light: pure white bg, black fg, bold ANSI accents."
-  style/high-contrast-light-theme)
+  (style/get-theme :high-contrast-light))
 
 (def themes
   "Registry of available themes: {:dark, :light, :high-contrast, :high-contrast-light, :default}."

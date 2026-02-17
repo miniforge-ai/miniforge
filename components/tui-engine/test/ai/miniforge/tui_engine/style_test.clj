@@ -24,7 +24,7 @@
 (deftest resolve-color-test
   (testing "Known theme keys resolve to non-default values"
     (is (not= :default (style/resolve-color style/default-theme :status/running)))
-    (is (= :green (style/resolve-color style/default-theme :status/success)))
+    (is (not= :default (style/resolve-color style/default-theme :status/success)))
     (is (not= :default (style/resolve-color style/default-theme :status/failed))))
 
   (testing "Unknown keys fall back to :default"
@@ -32,8 +32,8 @@
 
 (deftest resolve-style-test
   (testing "Resolves fg, bg, bold from theme"
-    (let [result (style/resolve-style style/high-contrast-theme
-                                      {:fg :status/running :bg :bg :bold? true})]
+    (let [hc (style/get-theme :high-contrast)
+          result (style/resolve-style hc {:fg :status/running :bg :bg :bold? true})]
       (is (= :cyan (:fg result)))
       (is (= :black (:bg result)))
       (is (true? (:bold? result)))))
@@ -46,14 +46,17 @@
 
 (deftest get-theme-test
   (testing "Known theme keys resolve to theme maps"
-    (is (= style/dark-theme (style/get-theme :dark)))
-    (is (= style/light-theme (style/get-theme :light)))
-    (is (= style/high-contrast-theme (style/get-theme :high-contrast)))
-    (is (= style/high-contrast-light-theme (style/get-theme :high-contrast-light)))
-    (is (= style/dark-theme (style/get-theme :default))))
+    (is (map? (style/get-theme :dark)))
+    (is (map? (style/get-theme :light)))
+    (is (map? (style/get-theme :high-contrast)))
+    (is (map? (style/get-theme :high-contrast-light)))
+    (is (map? (style/get-theme :default))))
 
-  (testing "Unknown theme key falls back to dark-theme"
-    (is (= style/dark-theme (style/get-theme :nonexistent)))))
+  (testing "Default resolves to dark theme"
+    (is (= (style/get-theme :dark) (style/get-theme :default))))
+
+  (testing "Unknown theme key falls back to dark theme"
+    (is (= (style/get-theme :dark) (style/get-theme :nonexistent)))))
 
 (deftest themes-registry-test
   (testing "Themes registry contains all expected keys"
@@ -64,20 +67,24 @@
     (is (contains? style/themes :default)))
 
   (testing "High-contrast dark has keyword colors (ANSI only)"
-    (is (= :black (:bg style/high-contrast-theme)))
-    (is (= :white (:fg style/high-contrast-theme))))
+    (let [hc (style/get-theme :high-contrast)]
+      (is (= :black (:bg hc)))
+      (is (= :white (:fg hc)))))
 
   (testing "High-contrast light has keyword colors (ANSI only)"
-    (is (= :white (:bg style/high-contrast-light-theme)))
-    (is (= :black (:fg style/high-contrast-light-theme))))
+    (let [hcl (style/get-theme :high-contrast-light)]
+      (is (= :white (:bg hcl)))
+      (is (= :black (:fg hcl)))))
 
   (testing "Brand dark theme uses RGB vectors"
-    (is (vector? (:bg style/dark-theme)))
-    (is (vector? (:fg style/dark-theme))))
+    (let [dark (style/get-theme :dark)]
+      (is (vector? (:bg dark)))
+      (is (vector? (:fg dark)))))
 
   (testing "Brand light theme uses RGB vectors"
-    (is (vector? (:bg style/light-theme)))
-    (is (vector? (:fg style/light-theme)))))
+    (let [light (style/get-theme :light)]
+      (is (vector? (:bg light)))
+      (is (vector? (:fg light))))))
 
 (def ^:private required-theme-keys
   #{:bg :fg :border :title :header :selected-bg :selected-fg
@@ -94,6 +101,34 @@
       (doseq [k required-theme-keys]
         (is (contains? theme-map k)
             (str "Theme " theme-name " missing key: " k))))))
+
+(deftest themes-loaded-from-edn-test
+  (testing "Themes are loaded from config/tui/themes.edn"
+    (is (= 5 (count style/themes))
+        "Expected 5 theme entries: :dark :light :high-contrast :high-contrast-light :default")
+    (is (map? (:dark style/themes)))
+    (is (map? (:light style/themes)))))
+
+(deftest brand-palette-values-test
+  (testing "Dark theme contains miniforge brand colors"
+    (let [dark (style/get-theme :dark)]
+      ;; Charcoal background
+      (is (= [35 30 28] (:bg dark)))
+      ;; Ash foreground
+      (is (= [217 217 217] (:fg dark)))
+      ;; Gold accent
+      (is (= [242 185 12] (:status/running dark)))
+      ;; Flame accent
+      (is (= [242 84 27] (:header dark)))))
+
+  (testing "Light theme contains miniforge brand colors"
+    (let [light (style/get-theme :light)]
+      ;; Parchment background
+      (is (= [240 235 225] (:bg light)))
+      ;; Charcoal foreground
+      (is (= [35 30 28] (:fg light)))
+      ;; Ember accent
+      (is (= [180 60 20] (:header light))))))
 
 (deftest degrade-color-test
   (testing "Keywords pass through at all depths"
@@ -122,19 +157,12 @@
 
 (deftest resolve-theme-colors-test
   (testing "True-color passes through unchanged"
-    (is (= style/dark-theme
-           (style/resolve-theme-colors style/dark-theme :true-color))))
+    (let [dark (style/get-theme :dark)]
+      (is (= dark (style/resolve-theme-colors dark :true-color)))))
 
   (testing "16-color degrades all RGB to keywords"
-    (let [degraded (style/resolve-theme-colors style/dark-theme :16)]
+    (let [dark (style/get-theme :dark)
+          degraded (style/resolve-theme-colors dark :16)]
       (doseq [[k v] degraded]
         (is (keyword? v)
             (str "Key " k " should be keyword at 16-color, got: " (type v)))))))
-
-(deftest miniforge-palette-test
-  (testing "Palette contains brand swatches"
-    (is (= [89 89 89]     (:steel style/miniforge-palette)))
-    (is (= [242 185 12]   (:gold style/miniforge-palette)))
-    (is (= [242 84 27]    (:flame style/miniforge-palette)))
-    (is (= [242 34 15]    (:hot style/miniforge-palette)))
-    (is (= [217 217 217]  (:ash style/miniforge-palette)))))

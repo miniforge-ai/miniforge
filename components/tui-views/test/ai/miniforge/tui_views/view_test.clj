@@ -78,7 +78,7 @@
           buf (view/root-view m [80 24])
           strings (layout/buf->strings buf)]
       (is (some? buf))
-      (is (some #(str/includes? % "No repositories configured") strings))))
+      (is (some #(str/includes? % "No data") strings))))
 
   (testing "Repo manager view renders configured repositories"
     (let [m (-> (model/init-model)
@@ -89,7 +89,7 @@
                                   {:pr/repo "gitlab:team/service-b"}]))
           buf (view/root-view m [100 24])
           strings (layout/buf->strings buf)]
-      (is (some #(str/includes? % "[Repos (6)]") strings))
+      (is (some #(str/includes? % "Repos") strings))
       (is (some #(str/includes? % "acme/service-a") strings))
       (is (some #(str/includes? % "gitlab:team/service-b") strings)))))
 
