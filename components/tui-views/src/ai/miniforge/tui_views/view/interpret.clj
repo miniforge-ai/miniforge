@@ -189,19 +189,18 @@
     (merge {:fg (get theme :fg :default)} style)))
 
 (defn interpret-node
-  "Interpret a single view-spec node, dispatching by :type."
+  "Interpret a single view-spec node, dispatching by :type.
+   Type values are namespaced: :node/* for layout, :widget/* for widgets."
   [model theme size node]
   (case (:type node)
-    :split-v (interpret-split-v model theme size node)
-    :split-h (interpret-split-h model theme size node)
-    :box     (interpret-box model theme size node)
-    :text    (interpret-text model theme size node)
-    :footer  (render-footer model theme size (:segments node))
-    :widget  (case (:widget node)
-               :table  (render-table-widget model theme size node)
-               :tree   (render-tree-widget model theme size node)
-               :kanban (render-kanban-widget model theme size node)
-               (layout/text size "Unknown widget"))
+    :node/split-v  (interpret-split-v model theme size node)
+    :node/split-h  (interpret-split-h model theme size node)
+    :node/box      (interpret-box model theme size node)
+    :node/text     (interpret-text model theme size node)
+    :node/footer   (render-footer model theme size (:segments node))
+    :widget/table  (render-table-widget model theme size node)
+    :widget/tree   (render-tree-widget model theme size node)
+    :widget/kanban (render-kanban-widget model theme size node)
     ;; Fallback
     (layout/text size "Unknown node type")))
 

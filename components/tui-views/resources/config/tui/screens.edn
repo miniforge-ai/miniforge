@@ -5,25 +5,27 @@
 ;; to produce cell buffers. Adding a new screen = adding EDN here.
 ;;
 ;; Layout nodes:
-;;   :split-v {:ratio R :children [top bottom]}
-;;   :split-h {:ratio R :children [left right]}
-;;   :box     {:title T :border :single :child node}
-;;   :text    {:content "..." :style {:fg K :bold? B}}
-;;   :widget  {:type :table/:tree/:kanban/:progress-bar :opts {...}}
+;;   :node/split-v   {:ratio R :children [top bottom]}
+;;   :node/split-h   {:ratio R :children [left right]}
+;;   :node/box       {:title T :border :single :child node}
+;;   :node/text      {:content "..." :style {:fg K :bold? B}}
+;;   :node/footer    {:segments {:normal "..." :selected "..."}}
+;;
+;; Widget nodes:
+;;   :widget/table   {:data-fn :project/X :columns [...] :selectable? ...}
+;;   :widget/tree    {:data-fn :project/X}
+;;   :widget/kanban  {:data-fn :project/X}
 ;;
 ;; Data projections — :data-fn keyword resolves to a registered projection fn:
 ;;   :project/workflows, :project/pr-items, :project/evidence-tree, etc.
-;;
-;; Footer templates — :footer key with :segments for contextual hints
 
 {:workflow-list
  {:tab-bar {:context-fn :ctx/workflow-count}
   :body
-  {:type :split-v
+  {:type :node/split-v
    :ratio :footer
    :children
-   [{:type :widget
-     :widget :table
+   [{:type :widget/table
      :data-fn :project/workflows
      :columns [{:key :status-char :header "  " :width 2}
                {:key :name :header "Workflow" :width :flex}
@@ -32,7 +34,7 @@
                {:key :agent-msg :header "Agent" :width 16}]
      :selectable? true
      :selection-col? true}
-    {:type :footer
+    {:type :node/footer
      :segments
      {:normal "j/k:nav  Enter:detail  Space:select  v:visual  1-0:views  /:search  ::cmd  q:quit"
       :selected "{n} selected │ Space:toggle  v:visual  a:all  c:clear  :archive :delete :cancel"
@@ -42,11 +44,10 @@
  :pr-fleet
  {:tab-bar {:context-fn :ctx/pr-fleet-summary}
   :body
-  {:type :split-v
+  {:type :node/split-v
    :ratio :footer
    :children
-   [{:type :widget
-     :widget :table
+   [{:type :widget/table
      :data-fn :project/pr-items
      :columns [{:key :repo   :header "Repo"      :width 18}
                {:key :number :header "PR"        :width 6}
@@ -57,7 +58,7 @@
                {:key :policy :header "Policy"    :width 6}]
      :selectable? true
      :selection-col? true}
-    {:type :footer
+    {:type :node/footer
      :segments
      {:normal "j/k:nav  Enter:detail  Tab:views  /:search  r:refresh (s:alias)  6:repos  q:quit"
       :selected "{n} selected │ Space:toggle  v:visual  a:all  c:clear  :archive :delete"
@@ -66,69 +67,69 @@
  :pr-detail
  {:title-bar {:text-fn :ctx/pr-detail-title}
   :body
-  {:type :split-v
+  {:type :node/split-v
    :ratio :footer
    :children
-   [{:type :split-h
+   [{:type :node/split-h
      :ratio 0.4
      :children
-     [{:type :box
+     [{:type :node/box
        :title "Readiness"
-       :child {:type :widget :widget :tree :data-fn :project/readiness-tree}}
-      {:type :split-v
+       :child {:type :widget/tree :data-fn :project/readiness-tree}}
+      {:type :node/split-v
        :ratio 0.5
        :children
-       [{:type :box
+       [{:type :node/box
          :title "Risk Assessment"
-         :child {:type :widget :widget :tree :data-fn :project/risk-tree}}
-        {:type :box
+         :child {:type :widget/tree :data-fn :project/risk-tree}}
+        {:type :node/box
          :title "Gates & Policy"
-         :child {:type :widget :widget :tree :data-fn :project/gate-list}}]}]}
-    {:type :footer
+         :child {:type :widget/tree :data-fn :project/gate-list}}]}]}
+    {:type :node/footer
      :segments
      {:normal "Esc:back  6:fleet  8:train  Space:expand  q:quit"}}]}}
 
  :train-view
  {:title-bar {:text-fn :ctx/train-title}
   :body
-  {:type :split-v
+  {:type :node/split-v
    :ratio :footer
    :children
-   [{:type :box
+   [{:type :node/box
      :title "Merge Train"
-     :child {:type :widget :widget :table :data-fn :project/train-prs
+     :child {:type :widget/table :data-fn :project/train-prs
              :columns [{:key :order :header "#" :width 3}
                        {:key :repo  :header "Repo" :width 15}
                        {:key :pr    :header "PR" :width 6}
                        {:key :title :header "Title" :width :flex}
                        {:key :status :header "Status" :width 12}
                        {:key :ci    :header "CI" :width 8}]}}
-    {:type :footer
+    {:type :node/footer
      :segments
      {:normal "Esc:back  6:fleet  Space:select  q:quit"}}]}}
 
  :evidence
  {:tab-bar {:context-fn :ctx/evidence-title}
   :body
-  {:type :split-v
+  {:type :node/split-v
    :ratio :footer
    :children
-   [{:type :box
+   [{:type :node/box
      :title "Evidence"
-     :child {:type :widget :widget :tree :data-fn :project/evidence-tree}}
-    {:type :footer
+     :child {:type :widget/tree :data-fn :project/evidence-tree}}
+    {:type :node/footer
      :segments
      {:normal "j/k:navigate  Space:expand  /:search  n/N:next/prev  Esc:back  q:quit"}}]}}
 
  :artifact-browser
  {:tab-bar {:context-fn :ctx/artifact-title}
   :body
-  {:type :split-v
+  {:type :node/split-v
    :ratio :footer
    :children
-   [{:type :box
+   [{:type :node/box
      :title-fn :ctx/artifact-box-title
-     :child {:type :widget :widget :table :data-fn :project/artifacts
+     :child {:type :widget/table :data-fn :project/artifacts
              :columns [{:key :type :header "Type" :width 10}
                        {:key :name :header "Name" :width :flex}
                        {:key :phase :header "Phase" :width 10}
@@ -137,7 +138,7 @@
                        {:key :time :header "Time" :width 10}]
              :selectable? true
              :selection-col? true}}
-    {:type :footer
+    {:type :node/footer
      :segments
      {:normal "j/k:navigate  Space:select  /:search  Tab:cycle  Esc:back  q:quit"
       :selected "{n} selected │ Space:toggle  v:visual  a:all  c:clear"
@@ -146,43 +147,42 @@
  :dag-kanban
  {:tab-bar {}
   :body
-  {:type :split-v
+  {:type :node/split-v
    :ratio :footer
    :children
-   [{:type :box
+   [{:type :node/box
      :title "Task Board"
-     :child {:type :widget :widget :kanban :data-fn :project/kanban-columns}}
-    {:type :footer
+     :child {:type :widget/kanban :data-fn :project/kanban-columns}}
+    {:type :node/footer
      :segments
      {:normal "Tab:views  1-0:jump  q:quit"}}]}}
 
  :workflow-detail
  {:title-bar {:text-fn :ctx/workflow-detail-title}
   :body
-  {:type :split-v
+  {:type :node/split-v
    :ratio :footer
    :children
-   [{:type :split-h
+   [{:type :node/split-h
      :ratio 0.35
      :children
-     [{:type :box
+     [{:type :node/box
        :title "Phases"
-       :child {:type :widget :widget :tree :data-fn :project/phase-tree}}
-      {:type :box
+       :child {:type :widget/tree :data-fn :project/phase-tree}}
+      {:type :node/box
        :title "Agent Output"
-       :child {:type :widget :widget :tree :data-fn :project/agent-output}}]}
-    {:type :footer
+       :child {:type :widget/tree :data-fn :project/agent-output}}]}
+    {:type :node/footer
      :segments
      {:normal "Tab:pane  3:evidence  4:artifacts  5:dag  Esc:back  q:quit"}}]}}
 
  :repo-manager
  {:tab-bar {:context-fn :ctx/repo-manager-title}
   :body
-  {:type :split-v
+  {:type :node/split-v
    :ratio :footer
    :children
-   [{:type :widget
-     :widget :table
+   [{:type :widget/table
      :data-fn :project/repo-list
      :columns [{:key :name :header "Repository" :width :flex}
                {:key :source :header "Source" :width 10}
@@ -190,7 +190,7 @@
                {:key :status :header "Status" :width 10}]
      :selectable? true
      :selection-col? true}
-    {:type :footer
+    {:type :node/footer
      :segments
      {:normal "j/k:nav  Space:select  a:add  Enter:browse  Tab:toggle  /:search  Esc:back  q:quit"
       :selected "{n} selected │ Space:toggle  v:visual  a:all  c:clear  :remove-repo"
