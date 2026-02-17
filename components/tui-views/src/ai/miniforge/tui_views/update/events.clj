@@ -199,43 +199,52 @@
            :side-effect {:type :sync-prs})
     (assoc model :flash-message (str "Discover failed: " (or error "unknown error")))))
 
+(defn- repos-browsed-ok
+  "Success path: populate browse-repos cache, reset repo-manager if source
+   is :repo-manager, and flash a summary."
+  [model {:keys [repos owner provider warnings source]}]
+  (let [repo-list (vec (or repos []))
+        base (assoc model
+                    :browse-repos repo-list
+                    :browse-repos-loading? false)
+        candidate-count (count (model/browse-candidate-repos base))
+        provider-name (name (or provider :github))
+        warnings* (vec (or warnings []))
+        base (if (= source :repo-manager)
+               (assoc base
+                      :repo-manager-source :browse
+                      :selected-idx 0
+                      :filtered-indices nil
+                      :search-matches []
+                      :search-match-idx nil
+                      :selected-ids #{}
+                      :visual-anchor nil)
+               base)]
+    (assoc base :flash-message
+           (str "Loaded " (count repo-list) " remote repo(s)"
+                " via " provider-name
+                (when owner (str " from " owner))
+                " — " candidate-count " new candidate(s)"
+                (when (seq warnings*)
+                  (str " | warnings: " (count warnings*)))))))
+
+(defn- repos-browsed-err
+  "Failure path: clear loading flag and flash error details."
+  [model {:keys [error error-source provider]}]
+  (assoc model
+         :browse-repos-loading? false
+         :flash-message (str "Repo browse failed"
+                             (when error-source (str " (" (name error-source) ")"))
+                             (when provider (str " [" (name provider) "]"))
+                             ": "
+                             (or (some-> error str not-empty)
+                                 "no error details were provided"))))
+
 (defn handle-repos-browsed
   "Handle result of a :browse-repos side effect.
    Populates :browse-repos cache used by :add-repo completion."
-  [model {:keys [success? repos owner provider warnings error error-source source]}]
-  (if success?
-    (let [repo-list (vec (or repos []))
-          base (assoc model
-                      :browse-repos repo-list
-                      :browse-repos-loading? false)
-          candidate-count (count (model/browse-candidate-repos base))
-          provider-name (name (or provider :github))
-          warnings* (vec (or warnings []))
-          base (if (= source :repo-manager)
-                 (assoc base
-                        :repo-manager-source :browse
-                        :selected-idx 0
-                        :filtered-indices nil
-                        :search-matches []
-                        :search-match-idx nil
-                        :selected-ids #{}
-                        :visual-anchor nil)
-                 base)]
-      (-> base
-          (assoc :flash-message
-                 (str "Loaded " (count repo-list) " remote repo(s)"
-                      " via " provider-name
-                      (when owner (str " from " owner))
-                      " — " candidate-count " new candidate(s)"
-                      (when (seq warnings*)
-                        (str " | warnings: " (count warnings*)))))
-          with-timestamp))
-    (-> model
-        (assoc :browse-repos-loading? false
-               :flash-message (str "Repo browse failed"
-                                   (when error-source (str " (" (name error-source) ")"))
-                                   (when provider (str " [" (name provider) "]"))
-                                   ": "
-                                   (or (some-> error str not-empty)
-                                       "no error details were provided")))
-        with-timestamp)))
+  [model {:keys [success?] :as payload}]
+  (-> (if success?
+        (repos-browsed-ok model payload)
+        (repos-browsed-err model payload))
+      with-timestamp))

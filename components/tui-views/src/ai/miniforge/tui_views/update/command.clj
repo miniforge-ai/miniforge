@@ -157,79 +157,84 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Confirmed action execution
 
+(defn- set-status-where
+  "Map over workflows, setting :status to `new-status` where the workflow id
+   is in `ids` and `pred?` (if supplied) is truthy. Default pred: always true."
+  ([wfs ids new-status]
+   (set-status-where wfs ids new-status (constantly true)))
+  ([wfs ids new-status pred?]
+   (mapv (fn [wf]
+           (if (and (contains? ids (:id wf)) (pred? wf))
+             (assoc wf :status new-status)
+             wf))
+         wfs)))
+
+(defn- confirm-set-status
+  "Confirmed action helper: update matching workflows to `new-status`,
+   flash `label`, and clear selection. Optionally accepts a `pred?`
+   filter (default: all matched ids)."
+  ([model ids label new-status]
+   (confirm-set-status model ids label new-status (constantly true)))
+  ([model ids label new-status pred?]
+   (-> model
+       (update :workflows set-status-where ids new-status pred?)
+       (assoc :flash-message (str label " " (count ids) " item(s)"))
+       sel/clear-selection)))
+
+(defn- confirm-delete
+  [model ids]
+  (-> model
+      (update :workflows (fn [wfs] (vec (remove #(contains? ids (:id %)) wfs))))
+      (assoc :flash-message (str "Deleted " (count ids) " item(s)")
+             :selected-idx 0)
+      sel/clear-selection))
+
+(defn- confirm-remove-repos
+  [model ids]
+  (let [targets (->> ids (filter string?) distinct vec)
+        result (reduce
+                (fn [{:keys [repos removed errors]} repo]
+                  (let [r (pr-sync/remove-repo! repo)]
+                    (if (:success? r)
+                      {:repos (:repos r)
+                       :removed (+ removed (if (:removed? r) 1 0))
+                       :errors errors}
+                      {:repos repos
+                       :removed removed
+                       :errors (conj errors (str repo ": " (or (:error r) "unknown error")))})))
+                {:repos (:fleet-repos model) :removed 0 :errors []}
+                targets)
+        next-model (-> (with-fleet-repos model (:repos result))
+                       sel/clear-selection)
+        removed (:removed result)
+        failures (count (:errors result))]
+    (assoc next-model
+           :flash-message
+           (cond
+             (zero? (count targets))
+             "No repositories selected for removal."
+
+             (and (pos? removed) (zero? failures))
+             (str "Removed " removed " repo(s) from fleet")
+
+             (and (zero? removed) (pos? failures))
+             (str "Failed to remove selected repos: "
+                  (str/join "; " (:errors result)))
+
+             :else
+             (str "Removed " removed " repo(s), " failures " failed")))))
+
 (defn execute-confirmed-action
   "Execute the action stored in :confirm after user presses 'y'.
    Pure: (model) -> model'."
   [model]
   (let [{:keys [action ids]} (:confirm model)]
     (case action
-      :delete
-      (-> model
-          (update :workflows
-                  (fn [wfs] (vec (remove #(contains? ids (:id %)) wfs))))
-          (assoc :flash-message (str "Deleted " (count ids) " item(s)")
-                 :selected-idx 0)
-          sel/clear-selection)
-
-      :archive
-      (-> model
-          (update :workflows
-                  (fn [wfs]
-                    (mapv (fn [wf]
-                            (if (contains? ids (:id wf))
-                              (assoc wf :status :archived)
-                              wf))
-                          wfs)))
-          (assoc :flash-message (str "Archived " (count ids) " item(s)"))
-          sel/clear-selection)
-
-      :cancel
-      (-> model
-          (update :workflows
-                  (fn [wfs]
-                    (mapv (fn [wf]
-                            (if (and (contains? ids (:id wf))
-                                     (= :running (:status wf)))
-                              (assoc wf :status :cancelled)
-                              wf))
-                          wfs)))
-          (assoc :flash-message (str "Cancelled " (count ids) " workflow(s)"))
-          sel/clear-selection)
-
-      :remove-repos
-      (let [targets (->> ids (filter string?) distinct vec)
-            result (reduce
-                    (fn [{:keys [repos removed errors]} repo]
-                      (let [r (pr-sync/remove-repo! repo)]
-                        (if (:success? r)
-                          {:repos (:repos r)
-                           :removed (+ removed (if (:removed? r) 1 0))
-                           :errors errors}
-                          {:repos repos
-                           :removed removed
-                           :errors (conj errors (str repo ": " (or (:error r) "unknown error")))})))
-                    {:repos (:fleet-repos model) :removed 0 :errors []}
-                    targets)
-            next-model (-> (with-fleet-repos model (:repos result))
-                           sel/clear-selection)
-            removed (:removed result)
-            failures (count (:errors result))]
-        (assoc next-model
-               :flash-message
-               (cond
-                 (zero? (count targets))
-                 "No repositories selected for removal."
-
-                 (and (pos? removed) (zero? failures))
-                 (str "Removed " removed " repo(s) from fleet")
-
-                 (and (zero? removed) (pos? failures))
-                 (str "Failed to remove selected repos: "
-                      (str/join "; " (:errors result)))
-
-                 :else
-                 (str "Removed " removed " repo(s), " failures " failed"))))
-
+      :delete       (confirm-delete model ids)
+      :archive      (confirm-set-status model ids "Archived" :archived)
+      :cancel       (confirm-set-status model ids "Cancelled" :cancelled
+                                        #(= :running (:status %)))
+      :remove-repos (confirm-remove-repos model ids)
       ;; Unknown action -- no-op
       model)))
 
