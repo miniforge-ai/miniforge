@@ -25,7 +25,7 @@
    [ai.miniforge.tui-engine.screen :as screen])
   (:import
    [com.googlecode.lanterna TextCharacter TextColor$ANSI TextColor$Indexed TextColor$RGB]
-   [com.googlecode.lanterna.screen TerminalScreen]
+   [com.googlecode.lanterna.screen TerminalScreen Screen$RefreshType]
    [com.googlecode.lanterna.terminal DefaultTerminalFactory]))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
@@ -89,7 +89,7 @@
     (.clear screen))
 
   (refresh! [_]
-    (.refresh screen))
+    (.refresh screen Screen$RefreshType/DELTA))
 
   (poll-input [_]
     (when-let [key (.pollInput screen)]
