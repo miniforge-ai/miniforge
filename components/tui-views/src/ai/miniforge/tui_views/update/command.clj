@@ -24,6 +24,7 @@
    Layer 3."
   (:require
    [clojure.string :as str]
+   [ai.miniforge.tui-engine.interface :as engine]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update.selection :as sel]
    [ai.miniforge.pr-sync.interface :as pr-sync]))
@@ -61,6 +62,21 @@
 
 (defn- cmd-help [model _args]
   (assoc model :help-visible? true))
+
+(defn- cmd-theme [model args]
+  (let [available (keys engine/themes)
+        names-str (str/join ", " (map name available))]
+    (if (str/blank? args)
+      (assoc model :flash-message
+             (str "Current theme: " (name (:theme model))
+                  " | Available: " names-str))
+      (let [theme-kw (keyword args)]
+        (if (contains? engine/themes theme-kw)
+          (assoc model :theme theme-kw
+                 :flash-message (str "Theme: " args))
+          (assoc model :flash-message
+                 (str "Unknown theme: " args
+                      " | Available: " names-str)))))))
 
 ;------------------------------------------------------------------------------ Layer 1b
 ;; Fleet management commands
@@ -278,6 +294,12 @@
                   :completions (fn [_] (mapv name model/views))}
    "refresh"     {:handler cmd-refresh     :help "Refresh data"}
    "help"        {:handler cmd-help        :help "Show help overlay"}
+   "theme"       {:handler cmd-theme       :help "Switch theme (e.g. :theme dark)"
+                  :completions (fn [_] (->> (keys engine/themes)
+                                            (remove #{:default})
+                                            (map name)
+                                            sort
+                                            vec))}
    "archive"     {:handler cmd-archive     :help "Archive selected workflows"}
    "delete"      {:handler cmd-delete      :help "Delete selected workflows"}
    "cancel"      {:handler cmd-cancel      :help "Cancel running workflows"}
