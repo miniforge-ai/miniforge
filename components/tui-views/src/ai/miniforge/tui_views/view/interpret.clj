@@ -88,13 +88,16 @@
 ;; Widget rendering
 
 (defn- resolve-columns
-  "Resolve :flex width columns to fill remaining space."
+  "Resolve :flex width columns to fill remaining space.
+   Accounts for 1-char inter-column gaps matching the table renderer."
   [columns cols sel-w]
-  (let [fixed (reduce + sel-w (map (fn [c] (if (= :flex (:width c)) 0 (:width c)))
+  (let [total-cols (+ (count columns) (if (pos? sel-w) 1 0))
+        gap-total  (max 0 (dec total-cols))
+        fixed (reduce + sel-w (map (fn [c] (if (= :flex (:width c)) 0 (:width c)))
                                     columns))
         flex-count (count (filter #(= :flex (:width %)) columns))
         flex-w (if (pos? flex-count)
-                 (max 10 (quot (- cols fixed) flex-count))
+                 (max 10 (quot (- cols fixed gap-total) flex-count))
                  0)]
     (mapv (fn [c] (if (= :flex (:width c)) (assoc c :width flex-w) c)) columns)))
 

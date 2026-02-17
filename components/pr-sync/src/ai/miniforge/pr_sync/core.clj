@@ -225,6 +225,7 @@
             :provider :github
             :prs (->> rows
                       (map #(status/provider-pr->train-pr % repo))
+                      (remove #(= :closed (:pr/status %)))
                       (sort-by :pr/number)
                       vec)}))
         (catch Exception e
@@ -246,6 +247,7 @@
             :provider :gitlab
             :prs (->> rows
                       (map #(status/gitlab-mr->train-pr % repo))
+                      (remove #(= :closed (:pr/status %)))
                       (sort-by :pr/number)
                       vec)}))
         (catch Exception e

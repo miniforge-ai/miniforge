@@ -42,20 +42,28 @@
       (subs s 0 width)
       (str s (apply str (repeat (- width (count s)) \space))))))
 
+(def ^:private col-gap
+  "Space between adjacent columns."
+  1)
+
 (defn- compute-col-widths
-  "Compute column widths from specs. Fixed :width honored, remainder distributed."
+  "Compute column widths from specs. Fixed :width honored, remainder distributed.
+   Subtracts inter-column gaps from available space before distributing to flex."
   [col-specs total-width]
-  (let [fixed-used (reduce + 0 (keep :width col-specs))
+  (let [gap-total (* col-gap (max 0 (dec (count col-specs))))
+        usable    (- total-width gap-total)
+        fixed-used (reduce + 0 (keep :width col-specs))
         flex-count (count (remove :width col-specs))
         flex-each (if (pos? flex-count)
-                    (max 1 (quot (- total-width fixed-used) flex-count))
+                    (max 1 (quot (- usable fixed-used) flex-count))
                     0)]
     (mapv (fn [spec] (or (:width spec) flex-each)) col-specs)))
 
 (defn- compute-col-offset
-  "Compute x-offset for column at index."
+  "Compute x-offset for column at index, including inter-column gaps."
   [col-widths idx]
-  (reduce + 0 (take idx col-widths)))
+  (+ (reduce + 0 (take idx col-widths))
+     (* col-gap idx)))
 
 (defn- render-header-row
   "Render table header row."
