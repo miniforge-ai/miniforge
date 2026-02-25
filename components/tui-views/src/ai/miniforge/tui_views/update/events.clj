@@ -204,9 +204,7 @@
         model (if (and active-pr
                        (= (:pr/repo active-pr) repo)
                        (= (:pr/number active-pr) number))
-                (-> model
-                    (assoc-in [:detail :selected-pr :pr/policy] result)
-                    (assoc-in [:detail :pr-policy] result))
+                (assoc-in model [:detail :selected-pr :pr/policy] result)
                 model)]
     (-> model
         (assoc :flash-message

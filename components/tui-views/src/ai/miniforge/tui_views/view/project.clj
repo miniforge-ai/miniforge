@@ -201,7 +201,7 @@
 ;------------------------------------------------------------------------------ Layer 0d
 ;; Recommendation signal extraction
 
-(defn- pr-signals
+(defn- extract-pr-signals
   "Extract enriched signals from a PR for recommendation.
    Returns a flat map of booleans/keywords for predicate use."
   [pr]
@@ -232,7 +232,7 @@
    5. All clear → merge"
   [pr]
   (let [{:keys [ready? state risk-level policy-pass? policy-unknown?
-                has-violations? auto-fixable? large?]} (pr-signals pr)]
+                has-violations? auto-fixable? large?]} (extract-pr-signals pr)]
     (cond
       (and has-violations? auto-fixable?)              (recommend-action :remediate "Auto-fixable policy violations")
       (and has-violations? (not auto-fixable?))        (recommend-action :review "Policy violations need review")
@@ -307,14 +307,13 @@
     (mapv project-pr-row filtered)))
 
 (defn- resolve-detail-enrichment
-  "Resolve enrichment data for the detail view's selected PR.
-   Falls back to legacy [:detail :pr-*] keys."
+  "Resolve enrichment data for the detail view's selected PR."
   [model]
   (let [pr-data (get-in model [:detail :selected-pr])]
     {:pr        pr-data
-     :readiness (or (:pr/readiness pr-data) (get-in model [:detail :pr-readiness]))
-     :risk      (or (:pr/risk pr-data) (get-in model [:detail :pr-risk]))
-     :policy    (or (:pr/policy pr-data) (get-in model [:detail :pr-policy]))
+     :readiness (:pr/readiness pr-data)
+     :risk      (:pr/risk pr-data)
+     :policy    (:pr/policy pr-data)
      :gates     (get pr-data :pr/gate-results [])}))
 
 (defn- project-readiness-tree

@@ -231,8 +231,8 @@
 
 ;; --- Enter-detail populates readiness/risk ---
 
-(deftest enter-detail-populates-readiness-test
-  (testing "Entering PR detail populates readiness and risk"
+(deftest enter-detail-selects-pr-test
+  (testing "Entering PR detail stores selected PR for enrichment"
     (let [m (-> (model/init-model)
                 (assoc :view :pr-fleet
                        :pr-items sample-prs
@@ -240,5 +240,4 @@
           m' (nav/enter-detail m)]
       (is (= :pr-detail (:view m')))
       (is (= 101 (get-in m' [:detail :selected-pr :pr/number])))
-      (is (= :merge-ready (get-in m' [:detail :pr-readiness :readiness/state])))
-      (is (= :low (get-in m' [:detail :pr-risk :risk/level]))))))
+      (is (= "api" (get-in m' [:detail :selected-pr :pr/repo]))))))

@@ -123,8 +123,8 @@
   "Extract the string value for a field from a PR for matching."
   [pr field-kw]
   (case field-kw
-    :repo       (or (:pr/repo pr) "")
-    :author     (or (:pr/author pr) "")
+    :repo       (get pr :pr/repo "")
+    :author     (get pr :pr/author "")
     :readiness  (name (resolve-or :unknown
                         #(get-in pr [:pr/readiness :readiness/state])
                         #(get-in (project/derive-readiness pr) [:readiness/state])))
