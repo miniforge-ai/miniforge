@@ -37,40 +37,37 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Side-effect handlers — each returns [msg-type payload] or nil
 
-(defn- handle-sync-prs [effect]
-  (let [state (:state effect)
-        opts  (when state {:state state})]
-    (msg/prs-synced (persistence/load-pr-items opts))))
+(defn- handle-sync-prs [{:keys [state]}]
+  (msg/prs-synced (persistence/load-pr-items (when state {:state state}))))
 
-(defn- handle-discover-repos [effect]
-  (msg/repos-discovered (persistence/discover-repos (:owner effect))))
+(defn- handle-discover-repos [{:keys [owner]}]
+  (msg/repos-discovered (persistence/discover-repos owner)))
 
-(defn- handle-browse-repos [effect]
-  (let [result (persistence/browse-repos
-                {:owner (:owner effect) :provider (:provider effect) :limit (:limit effect)})]
-    (msg/repos-browsed (assoc result :source (:source effect)))))
+(defn- handle-browse-repos [{:keys [owner provider limit source]}]
+  (let [result (persistence/browse-repos {:owner owner :provider provider :limit limit})]
+    (msg/repos-browsed (assoc result :source source))))
 
-(defn- handle-open-url [effect]
-  (when-let [url (:url effect)]
+(defn- handle-open-url [{:keys [url]}]
+  (when url
     (try (browse/browse-url url) (catch Exception _ nil)))
   nil)
 
-(defn- handle-evaluate-policy [effect]
+(defn- handle-evaluate-policy [{:keys [pr pr-id]}]
   (try
     (let [result (policy-pack/evaluate-external-pr
-                  (persistence/load-policy-packs) (:pr effect))]
-      (msg/policy-evaluated (:pr-id effect) result))
+                  (persistence/load-policy-packs) pr)]
+      (msg/policy-evaluated pr-id result))
     (catch Exception e
-      (msg/policy-evaluated (:pr-id effect)
+      (msg/policy-evaluated pr-id
                             {:evaluation/passed? nil
                              :evaluation/error (.getMessage e)}))))
 
-(defn- handle-create-train [train-mgr effect]
+(defn- handle-create-train [train-mgr {:keys [name description]}]
   (try
     (let [train-id (pr-train/create-train
-                    train-mgr (:name effect)
-                    (java.util.UUID/randomUUID) (or (:description effect) ""))]
-      (msg/train-created train-id (:name effect)))
+                    train-mgr name
+                    (java.util.UUID/randomUUID) (or description ""))]
+      (msg/train-created train-id name))
     (catch Exception e
       (msg/side-effect-error
        (response/error (.getMessage e) {:data {:type :create-train}})))))
@@ -89,9 +86,9 @@
       (msg/side-effect-error
        (response/error (.getMessage e) {:data {:type :add-to-train}})))))
 
-(defn- handle-merge-next [train-mgr effect]
+(defn- handle-merge-next [train-mgr {:keys [train-id]}]
   (try
-    (let [result (pr-train/merge-next train-mgr (:train-id effect))]
+    (let [result (pr-train/merge-next train-mgr train-id)]
       (if result
         (msg/merge-started (:pr-number result) (:train result))
         (msg/side-effect-error
@@ -100,7 +97,7 @@
       (msg/side-effect-error
        (response/error (.getMessage e) {:data {:type :merge-next}})))))
 
-(defn- handle-review-prs [effect]
+(defn- handle-review-prs [{:keys [prs]}]
   (try
     (let [packs (persistence/load-policy-packs)]
       (msg/review-completed
@@ -111,26 +108,23 @@
                           (catch Exception e
                             {:evaluation/passed? nil
                              :evaluation/error (.getMessage e)}))})
-             (:prs effect))))
+             prs)))
     (catch Exception e
       (msg/side-effect-error
        (response/error (.getMessage e) {:data {:type :review-prs}})))))
 
-(defn- handle-remediate-prs [effect]
-  (let [fixable (count (filter #(seq (get-in % [:pr/policy :evaluation/violations]))
-                               (:prs effect)))]
+(defn- handle-remediate-prs [{:keys [prs]}]
+  (let [fixable (count (filter #(seq (get-in % [:pr/policy :evaluation/violations])) prs))]
     (msg/remediation-completed 0 fixable "Remediation via pr-lifecycle not yet wired")))
 
-(defn- handle-decompose-pr [effect]
-  (let [pr (:pr effect)]
-    (msg/decomposition-started [(:pr/repo pr) (:pr/number pr)]
-                               {:sub-prs []
-                                :message "Decomposition analysis not yet wired"})))
+(defn- handle-decompose-pr [{:keys [pr]}]
+  (msg/decomposition-started [(:pr/repo pr) (:pr/number pr)]
+                             {:sub-prs []
+                              :message "Decomposition analysis not yet wired"}))
 
-(defn- handle-chat-send [effect]
+(defn- handle-chat-send [{:keys [message context]}]
   (try
-    (let [{:keys [message context]} effect
-          ctx-type (:type context)]
+    (let [ctx-type (:type context)]
       (msg/chat-response
        (str "Chat integration pending orchestrator wiring.\n\n"
             "Context: " (name (or ctx-type :unknown)) "\n"
