@@ -22,7 +22,9 @@
    Pure functions for list navigation and view switching.
    Layers 0-1."
   (:require
+   [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.model :as model]
+   [ai.miniforge.tui-views.transition :as transition]
    [ai.miniforge.tui-views.view.project :as project]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -108,9 +110,7 @@
                       (assoc-in [:detail :pr-policy] (:pr/policy pr))
                       (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
             needs-policy?
-            (assoc :side-effect {:type :evaluate-policy
-                                 :pr-id pr-id
-                                 :pr pr})))
+            (assoc :side-effect (effect/evaluate-policy pr-id pr))))
         model))
 
     :train-view
@@ -385,11 +385,7 @@
         next-view (if (>= idx 0)
                     (get views (mod (inc idx) (count views)))
                     (first views))]
-    (-> model
-        (assoc :view next-view :selected-idx 0 :scroll-offset 0
-               :selected-ids #{} :visual-anchor nil
-               :filtered-indices nil :search-matches [] :search-match-idx nil)
-        (assoc-in [:detail :workflow-id] nil))))
+    (transition/switch-view model next-view)))
 
 (defn cycle-top-level-view-reverse
   "Cycle Shift+Tab through top-level aggregate views in reverse.
@@ -403,11 +399,7 @@
         prev-view (if (>= idx 0)
                     (get views (mod (+ idx (dec n)) n))
                     (last views))]
-    (-> model
-        (assoc :view prev-view :selected-idx 0 :scroll-offset 0
-               :selected-ids #{} :visual-anchor nil
-               :filtered-indices nil :search-matches [] :search-match-idx nil)
-        (assoc-in [:detail :workflow-id] nil))))
+    (transition/switch-view model prev-view)))
 
 (defn cycle-pane-reverse
   "Cycle Shift+Tab focus between panes in reverse."

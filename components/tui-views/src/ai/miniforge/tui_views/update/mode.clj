@@ -24,16 +24,17 @@
   (:require
    [clojure.string :as str]
    [ai.miniforge.tui-views.model :as model]
+   [ai.miniforge.tui-views.transition :as transition]
    [ai.miniforge.tui-views.update.filter :as filter]))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Mode switching
 
 (defn enter-command-mode [model]
-  (assoc model :mode :command :command-buf ":"))
+  (transition/enter-command model))
 
 (defn enter-search-mode [model]
-  (assoc model :mode :search :command-buf "/" :search-results []))
+  (transition/enter-search model))
 
 (defn exit-mode
   "Exit command/search mode back to normal.
@@ -175,7 +176,7 @@
   "Enter filter mode. Sets mode to :filter with '>' prefix in command bar."
   [model]
   (if (= :pr-fleet (:view model))
-    (assoc model :mode :filter :command-buf ">")
+    (transition/enter-filter model)
     model))
 
 (defn- filter-query

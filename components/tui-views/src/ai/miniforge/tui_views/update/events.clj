@@ -22,6 +22,7 @@
    Pure functions that handle workflow events from the event stream.
    Layer 2."
   (:require
+   [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.model :as model]))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -296,7 +297,7 @@
            :flash-message (str "Discovered " discovered " repo(s)"
                                (when owner (str " from " owner))
                                " — " added " new. Syncing PRs...")
-           :side-effect {:type :sync-prs})
+           :side-effect (effect/sync-prs))
     (assoc model :flash-message (str "Discover failed: " (or error "unknown error")))))
 
 (defn- repos-browsed-ok

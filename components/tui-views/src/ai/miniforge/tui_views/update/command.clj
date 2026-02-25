@@ -24,6 +24,7 @@
    Layer 3."
   (:require
    [clojure.string :as str]
+   [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update.selection :as sel]
    [ai.miniforge.pr-sync.interface :as pr-sync]))
@@ -100,7 +101,7 @@
 
 (defn- cmd-sync [model _args]
   (assoc model
-         :side-effect {:type :sync-prs}
+         :side-effect (effect/sync-prs)
          :flash-message "Syncing PRs..."))
 
 (def ^:private show-states
@@ -110,7 +111,7 @@
   (let [state-str (some-> args str/trim str/lower-case)
         state (if (show-states state-str) (keyword state-str) :open)]
     (assoc model
-           :side-effect {:type :sync-prs :state state}
+           :side-effect (effect/sync-prs state)
            :flash-message (str "Loading " (name state) " PRs..."))))
 
 (defn- cmd-repos [model _args]
@@ -124,7 +125,7 @@
 (defn- cmd-discover [model args]
   (let [owner (when-not (str/blank? args) (str/trim args))]
     (assoc model
-           :side-effect {:type :discover-repos :owner owner}
+           :side-effect (effect/discover-repos owner)
            :flash-message (str "Discovering repos"
                                (when owner (str " from " owner)) "..."))))
 
@@ -135,7 +136,7 @@
   (if (str/blank? args)
     (assoc model :flash-message "Usage: :create-train NAME")
     (assoc model
-           :side-effect {:type :create-train :name (str/trim args)}
+           :side-effect (effect/create-train (str/trim args))
            :flash-message (str "Creating train: " (str/trim args) "..."))))
 
 (defn- cmd-add-to-train [model _args]
@@ -153,9 +154,7 @@
                      (filter #(contains? ids [(:pr/repo %) (:pr/number %)]))
                      vec)]
         (assoc model
-               :side-effect {:type :add-to-train
-                             :train-id train-id
-                             :prs prs}
+               :side-effect (effect/add-to-train train-id prs)
                :flash-message (str "Adding " (count prs) " PR(s) to train..."))))))
 
 (defn- cmd-merge-next [model _args]
@@ -163,7 +162,7 @@
     (if (nil? train-id)
       (assoc model :flash-message "No active train.")
       (assoc model
-             :side-effect {:type :merge-next :train-id train-id}
+             :side-effect (effect/merge-next train-id)
              :flash-message "Merging next ready PR..."))))
 
 (defn- cmd-train [model _args]
@@ -297,14 +296,14 @@
                                    (filter #(contains? ids [(:pr/repo %) (:pr/number %)]))
                                    vec)]
                       (-> model
-                          (assoc :side-effect {:type :review-prs :prs prs}
+                          (assoc :side-effect (effect/review-prs prs)
                                  :flash-message (str "Reviewing " (count prs) " PR(s)..."))
                           sel/clear-selection))
       :remediate    (let [prs (->> (:pr-items model [])
                                    (filter #(contains? ids [(:pr/repo %) (:pr/number %)]))
                                    vec)]
                       (-> model
-                          (assoc :side-effect {:type :remediate-prs :prs prs}
+                          (assoc :side-effect (effect/remediate-prs prs)
                                  :flash-message (str "Remediating " (count prs) " PR(s)..."))
                           sel/clear-selection))
       :decompose    (let [prs (->> (:pr-items model [])
@@ -313,7 +312,7 @@
                           pr (first prs)]
                       (if pr
                         (-> model
-                            (assoc :side-effect {:type :decompose-pr :pr pr}
+                            (assoc :side-effect (effect/decompose-pr pr)
                                    :flash-message (str "Decomposing PR #" (:pr/number pr) "..."))
                             sel/clear-selection)
                         (assoc model :flash-message "No matching PR found")))
@@ -348,7 +347,7 @@
   (when (and (= cmd-name "add-repo")
              (empty? (:browse-repos model))
              (not (:browse-repos-loading? model)))
-    {:type :browse-repos :provider :all}))
+    (effect/browse-repos {:provider :all})))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Command table and dispatch

@@ -25,6 +25,7 @@
    [clojure.java.browse :as browse]
    [ai.miniforge.tui-engine.interface :as tui]
    [ai.miniforge.tui-views.model :as model]
+   [ai.miniforge.tui-views.msg :as msg]
    [ai.miniforge.tui-views.update :as update]
    [ai.miniforge.tui-views.view :as view]
    [ai.miniforge.tui-views.subscription :as subscription]
@@ -39,15 +40,15 @@
 (defn- handle-sync-prs [effect]
   (let [state (:state effect)
         opts  (when state {:state state})]
-    [:msg/prs-synced {:pr-items (persistence/load-pr-items opts)}]))
+    (msg/prs-synced (persistence/load-pr-items opts))))
 
 (defn- handle-discover-repos [effect]
-  [:msg/repos-discovered (persistence/discover-repos (:owner effect))])
+  (msg/repos-discovered (persistence/discover-repos (:owner effect))))
 
 (defn- handle-browse-repos [effect]
   (let [result (persistence/browse-repos
                 {:owner (:owner effect) :provider (:provider effect) :limit (:limit effect)})]
-    [:msg/repos-browsed (assoc result :source (:source effect))]))
+    (msg/repos-browsed (assoc result :source (:source effect)))))
 
 (defn- handle-open-url [effect]
   (when-let [url (:url effect)]
@@ -58,21 +59,21 @@
   (try
     (let [result (policy-pack/evaluate-external-pr
                   (persistence/load-policy-packs) (:pr effect))]
-      [:msg/policy-evaluated {:pr-id (:pr-id effect) :result result}])
+      (msg/policy-evaluated (:pr-id effect) result))
     (catch Exception e
-      [:msg/policy-evaluated {:pr-id (:pr-id effect)
-                              :result {:evaluation/passed? nil
-                                       :evaluation/error (.getMessage e)}}])))
+      (msg/policy-evaluated (:pr-id effect)
+                            {:evaluation/passed? nil
+                             :evaluation/error (.getMessage e)}))))
 
 (defn- handle-create-train [train-mgr effect]
   (try
     (let [train-id (pr-train/create-train
                     train-mgr (:name effect)
                     (java.util.UUID/randomUUID) (or (:description effect) ""))]
-      [:msg/train-created {:train-id train-id :train-name (:name effect)}])
+      (msg/train-created train-id (:name effect)))
     (catch Exception e
-      [:msg/side-effect-error
-       (response/error (.getMessage e) {:data {:type :create-train}})])))
+      (msg/side-effect-error
+       (response/error (.getMessage e) {:data {:type :create-train}})))))
 
 (defn- handle-add-to-train [train-mgr effect]
   (try
@@ -82,75 +83,74 @@
                          (:pr/repo pr) (:pr/number pr)
                          (or (:pr/url pr) "") (or (:pr/branch pr) "")
                          (or (:pr/title pr) "")))
-      [:msg/prs-added-to-train {:train (pr-train/get-train train-mgr train-id)
-                                :added (count prs)}])
+      (msg/prs-added-to-train (pr-train/get-train train-mgr train-id)
+                               (count prs)))
     (catch Exception e
-      [:msg/side-effect-error
-       (response/error (.getMessage e) {:data {:type :add-to-train}})])))
+      (msg/side-effect-error
+       (response/error (.getMessage e) {:data {:type :add-to-train}})))))
 
 (defn- handle-merge-next [train-mgr effect]
   (try
     (let [result (pr-train/merge-next train-mgr (:train-id effect))]
       (if result
-        [:msg/merge-started {:pr-number (:pr-number result) :train (:train result)}]
-        [:msg/side-effect-error
-         (response/error "No PRs ready to merge" {:data {:type :merge-next}})]))
+        (msg/merge-started (:pr-number result) (:train result))
+        (msg/side-effect-error
+         (response/error "No PRs ready to merge" {:data {:type :merge-next}}))))
     (catch Exception e
-      [:msg/side-effect-error
-       (response/error (.getMessage e) {:data {:type :merge-next}})])))
+      (msg/side-effect-error
+       (response/error (.getMessage e) {:data {:type :merge-next}})))))
 
 (defn- handle-review-prs [effect]
   (try
     (let [packs (persistence/load-policy-packs)]
-      [:msg/review-completed
-       {:results (mapv (fn [pr]
-                         {:pr-id  [(:pr/repo pr) (:pr/number pr)]
-                          :result (try
-                                    (policy-pack/evaluate-external-pr packs pr)
-                                    (catch Exception e
-                                      {:evaluation/passed? nil
-                                       :evaluation/error (.getMessage e)}))})
-                       (:prs effect))}])
+      (msg/review-completed
+       (mapv (fn [pr]
+               {:pr-id  [(:pr/repo pr) (:pr/number pr)]
+                :result (try
+                          (policy-pack/evaluate-external-pr packs pr)
+                          (catch Exception e
+                            {:evaluation/passed? nil
+                             :evaluation/error (.getMessage e)}))})
+             (:prs effect))))
     (catch Exception e
-      [:msg/side-effect-error
-       (response/error (.getMessage e) {:data {:type :review-prs}})])))
+      (msg/side-effect-error
+       (response/error (.getMessage e) {:data {:type :review-prs}})))))
 
 (defn- handle-remediate-prs [effect]
   (let [fixable (count (filter #(seq (get-in % [:pr/policy :evaluation/violations]))
                                (:prs effect)))]
-    [:msg/remediation-completed {:fixed 0 :failed fixable
-                                 :message "Remediation via pr-lifecycle not yet wired"}]))
+    (msg/remediation-completed 0 fixable "Remediation via pr-lifecycle not yet wired")))
 
 (defn- handle-decompose-pr [effect]
   (let [pr (:pr effect)]
-    [:msg/decomposition-started {:pr-id   [(:pr/repo pr) (:pr/number pr)]
-                                 :plan    {:sub-prs []
-                                           :message "Decomposition analysis not yet wired"}}]))
+    (msg/decomposition-started [(:pr/repo pr) (:pr/number pr)]
+                               {:sub-prs []
+                                :message "Decomposition analysis not yet wired"})))
 
 (defn- handle-chat-send [effect]
   (try
     (let [{:keys [message context]} effect
           ctx-type (:type context)]
-      [:msg/chat-response
-       {:content (str "Chat integration pending orchestrator wiring.\n\n"
-                      "Context: " (name (or ctx-type :unknown)) "\n"
-                      "Your message: " message "\n\n"
-                      (case ctx-type
-                        :pr-detail (let [pr (:pr context)]
-                                     (str "PR: " (:pr/repo pr) "#" (:pr/number pr)
-                                          " — " (:pr/title pr) "\n"
-                                          "I can help analyze this PR's risk, readiness, "
-                                          "and policy compliance once orchestrator is connected."))
-                        :pr-fleet  (let [n (count (:selected-prs context))]
-                                     (str (if (pos? n)
-                                            (str n " PR(s) selected for discussion.")
-                                            "No PRs selected. Select PRs with Space first.")
-                                          "\nI can help steer these PRs through review, "
-                                          "remediation, and merge once orchestrator is connected."))
-                        "Chat context not recognized."))
-        :actions []}])
+      (msg/chat-response
+       (str "Chat integration pending orchestrator wiring.\n\n"
+            "Context: " (name (or ctx-type :unknown)) "\n"
+            "Your message: " message "\n\n"
+            (case ctx-type
+              :pr-detail (let [pr (:pr context)]
+                           (str "PR: " (:pr/repo pr) "#" (:pr/number pr)
+                                " — " (:pr/title pr) "\n"
+                                "I can help analyze this PR's risk, readiness, "
+                                "and policy compliance once orchestrator is connected."))
+              :pr-fleet  (let [n (count (:selected-prs context))]
+                           (str (if (pos? n)
+                                  (str n " PR(s) selected for discussion.")
+                                  "No PRs selected. Select PRs with Space first.")
+                                "\nI can help steer these PRs through review, "
+                                "remediation, and merge once orchestrator is connected."))
+              "Chat context not recognized."))
+       []))
     (catch Exception e
-      [:msg/chat-response {:content (str "Error: " (.getMessage e)) :actions []}])))
+      (msg/chat-response (str "Error: " (.getMessage e)) []))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Effect dispatcher
@@ -171,8 +171,8 @@
     :remediate-prs     (handle-remediate-prs effect)
     :decompose-pr      (handle-decompose-pr effect)
     :chat-send         (handle-chat-send effect)
-    :chat-execute-action [:msg/chat-action-result
-                          (response/failure "Chat action execution not yet wired" {})]
+    :chat-execute-action (msg/chat-action-result
+                          (response/failure "Chat action execution not yet wired" {}))
     nil))
 
 ;------------------------------------------------------------------------------ Layer 2

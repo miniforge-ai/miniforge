@@ -25,7 +25,9 @@
 
    Layer 2."
   (:require
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [ai.miniforge.tui-views.effect :as effect]
+   [ai.miniforge.tui-views.transition :as transition]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Context builders
@@ -78,7 +80,7 @@
         (assoc-in [:chat :context] (build-context model))
         (assoc-in [:chat :input-buf] "")
         (assoc-in [:chat :pending?] false))
-    (assoc model :flash-message "Chat available in PR Fleet or PR Detail views")))
+    (transition/flash model "Chat available in PR Fleet or PR Detail views")))
 
 (defn escape
   "Exit chat mode back to normal."
@@ -124,7 +126,4 @@
             (assoc-in [:chat :messages] messages)
             (assoc-in [:chat :input-buf] "")
             (assoc-in [:chat :pending?] true)
-            (assoc :side-effect {:type    :chat-send
-                                 :context context
-                                 :message msg
-                                 :history messages}))))))
+            (assoc :side-effect (effect/chat-send context msg messages)))))))

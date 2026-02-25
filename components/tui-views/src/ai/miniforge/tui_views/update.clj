@@ -33,6 +33,7 @@
    [clojure.java.io :as io]
    [clojure.set :as set]
    [clojure.string :as str]
+   [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update.navigation :as nav]
    [ai.miniforge.tui-views.update.events :as events]
@@ -111,9 +112,8 @@
     (if (:browse-repos-loading? model)
       (assoc m :flash-message "Browsing remote repos...")
       (assoc m
-             :side-effect {:type :browse-repos
-                           :source :repo-manager
-                           :provider provider}
+             :side-effect (effect/browse-repos {:source :repo-manager
+                                                :provider provider})
              :browse-repos-loading? true
              :flash-message (str "Browsing " (name provider) " repos...")))))
 
@@ -131,7 +131,7 @@
             added (count (set/difference after before))]
         (if (pos? added)
           (-> (reset-repo-manager-state m :browse)
-              (assoc :side-effect {:type :sync-prs}
+              (assoc :side-effect (effect/sync-prs)
                      :flash-message (str "Added " added " repo(s) to fleet. Syncing PRs...")))
           (-> (reset-repo-manager-state m :browse)
               (assoc :flash-message "Selected repos already in fleet.")))))))
@@ -285,7 +285,7 @@
                  :pr-detail (get-in model [:detail :selected-pr :pr/url])
                  nil)]
        (if url
-         (assoc model :side-effect {:type :open-url :url url}
+         (assoc model :side-effect (effect/open-url url)
                       :flash-message (str "Opening " url "..."))
          (assoc model :flash-message "No URL available for this item"))))
 
