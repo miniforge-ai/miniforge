@@ -107,6 +107,14 @@
   (let [n (if (integer? limit) limit default)]
     (if (pos? n) n default)))
 
+(defn- normalized-repos
+  "Extract, normalize, and validate repo slugs from a fleet config map."
+  [cfg]
+  (->> (get-in cfg [:fleet :repos] [])
+       (map normalize-repo-slug)
+       (filter valid-repo-slug?)
+       vec))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Fleet config I/O
 
@@ -134,11 +142,7 @@
   "Get configured fleet repositories as normalized slugs."
   ([] (get-configured-repos default-fleet-config-path))
   ([path]
-   (->> (get-in (load-fleet-config path) [:fleet :repos] [])
-        (map normalize-repo-slug)
-        (filter valid-repo-slug?)
-        distinct
-        vec)))
+   (-> (load-fleet-config path) normalized-repos distinct vec)))
 
 (defn add-repo!
   "Add a repository slug to fleet configuration.
@@ -158,10 +162,7 @@
 
        :else
        (let [cfg (load-fleet-config path)
-             repos (->> (get-in cfg [:fleet :repos] [])
-                        (map normalize-repo-slug)
-                        (filter valid-repo-slug?)
-                        vec)
+             repos (normalized-repos cfg)
              exists? (some #{repo} repos)
              next-repos (if exists? repos (conj repos repo))
              next-cfg (assoc-in cfg [:fleet :repos] (vec (distinct next-repos)))]
@@ -179,10 +180,7 @@
      (if (str/blank? repo)
        (result-failure "Repository is required." {:repo repo})
        (let [cfg (load-fleet-config path)
-             repos (->> (get-in cfg [:fleet :repos] [])
-                        (map normalize-repo-slug)
-                        (filter valid-repo-slug?)
-                        vec)
+             repos (normalized-repos cfg)
              existed? (some #{repo} repos)
              next-repos (vec (remove #{repo} repos))
              next-cfg (assoc-in cfg [:fleet :repos] next-repos)]
@@ -325,10 +323,7 @@
                          (take limit*)
                          vec)
               cfg (load-fleet-config path)
-              existing (->> (get-in cfg [:fleet :repos] [])
-                            (map normalize-repo-slug)
-                            (filter valid-repo-slug?)
-                            vec)
+              existing (normalized-repos cfg)
               merged (vec (distinct (concat existing repos)))
               added (vec (remove (set existing) merged))
               next-cfg (assoc-in cfg [:fleet :repos] merged)]
