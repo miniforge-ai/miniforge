@@ -139,6 +139,15 @@
        (filter #(contains? ids [(:pr/repo %) (:pr/number %)]))
        vec))
 
+(defn- batch-pr-action
+  "Select PRs by ids, apply effect-fn to them, flash a message, clear selection."
+  [model ids verb effect-fn]
+  (let [prs (selected-prs model ids)]
+    (-> model
+        (assoc :side-effect (effect-fn prs)
+               :flash-message (str verb " " (count prs) " PR(s)..."))
+        sel/clear-selection)))
+
 ;; Train commands
 
 (defn- cmd-create-train [model args]
@@ -299,23 +308,15 @@
                                         #(= :running (:status %)))
       :remove-repos (confirm-remove-repos model ids)
       ;; Batch PR actions
-      :review       (let [prs (selected-prs model ids)]
-                      (-> model
-                          (assoc :side-effect (effect/review-prs prs)
-                                 :flash-message (str "Reviewing " (count prs) " PR(s)..."))
-                          sel/clear-selection))
-      :remediate    (let [prs (selected-prs model ids)]
-                      (-> model
-                          (assoc :side-effect (effect/remediate-prs prs)
-                                 :flash-message (str "Remediating " (count prs) " PR(s)..."))
-                          sel/clear-selection))
-      :decompose    (let [pr (first (selected-prs model ids))]
-                      (if pr
-                        (-> model
-                            (assoc :side-effect (effect/decompose-pr pr)
-                                   :flash-message (str "Decomposing PR #" (:pr/number pr) "..."))
-                            sel/clear-selection)
-                        (assoc model :flash-message "No matching PR found")))
+      :review    (batch-pr-action model ids "Reviewing" effect/review-prs)
+      :remediate (batch-pr-action model ids "Remediating" effect/remediate-prs)
+      :decompose (let [pr (first (selected-prs model ids))]
+                   (if pr
+                     (-> model
+                         (assoc :side-effect (effect/decompose-pr pr)
+                                :flash-message (str "Decomposing PR #" (:pr/number pr) "..."))
+                         sel/clear-selection)
+                     (assoc model :flash-message "No matching PR found")))
       ;; Unknown action -- no-op
       model)))
 
