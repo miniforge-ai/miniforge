@@ -62,26 +62,26 @@
                             {:evaluation/passed? nil
                              :evaluation/error (.getMessage e)}))))
 
-(defn- handle-create-train [train-mgr {:keys [name description]}]
+(defn- handle-create-train [train-mgr {:keys [name description]
+                                       :or {description ""}}]
   (try
     (let [train-id (pr-train/create-train
                     train-mgr name
-                    (java.util.UUID/randomUUID) (or description ""))]
+                    (java.util.UUID/randomUUID) description)]
       (msg/train-created train-id name))
     (catch Exception e
       (msg/side-effect-error
        (response/error (.getMessage e) {:data {:type :create-train}})))))
 
-(defn- handle-add-to-train [train-mgr effect]
+(defn- handle-add-to-train [train-mgr {:keys [train-id prs]}]
   (try
-    (let [{:keys [train-id prs]} effect]
-      (doseq [pr prs]
-        (pr-train/add-pr train-mgr train-id
-                         (:pr/repo pr) (:pr/number pr)
-                         (or (:pr/url pr) "") (or (:pr/branch pr) "")
-                         (or (:pr/title pr) "")))
-      (msg/prs-added-to-train (pr-train/get-train train-mgr train-id)
-                               (count prs)))
+    (doseq [pr prs]
+      (pr-train/add-pr train-mgr train-id
+                       (:pr/repo pr) (:pr/number pr)
+                       (get pr :pr/url "") (get pr :pr/branch "")
+                       (get pr :pr/title "")))
+    (msg/prs-added-to-train (pr-train/get-train train-mgr train-id)
+                             (count prs))
     (catch Exception e
       (msg/side-effect-error
        (response/error (.getMessage e) {:data {:type :add-to-train}})))))
@@ -124,10 +124,10 @@
 
 (defn- handle-chat-send [{:keys [message context]}]
   (try
-    (let [ctx-type (:type context)]
+    (let [ctx-type (get context :type :unknown)]
       (msg/chat-response
        (str "Chat integration pending orchestrator wiring.\n\n"
-            "Context: " (name (or ctx-type :unknown)) "\n"
+            "Context: " (name ctx-type) "\n"
             "Your message: " message "\n\n"
             (case ctx-type
               :pr-detail (let [pr (:pr context)]
