@@ -114,23 +114,29 @@
   [haystack values]
   (not (any-match? haystack values)))
 
+(defn- resolve-or
+  "Try each path-fn in order, returning the first non-nil result or default."
+  [default & path-fns]
+  (or (some #(%) path-fns) default))
+
 (defn- pr-field-value
   "Extract the string value for a field from a PR for matching."
   [pr field-kw]
   (case field-kw
     :repo       (or (:pr/repo pr) "")
     :author     (or (:pr/author pr) "")
-    :readiness  (name (or (get-in pr [:pr/readiness :readiness/state])
-                          (get-in (project/derive-readiness pr) [:readiness/state])
-                          :unknown))
-    :risk       (name (or (get-in pr [:pr/risk :risk/level])
-                          (get-in (project/derive-risk pr) [:risk/level])
-                          :unknown))
+    :readiness  (name (resolve-or :unknown
+                        #(get-in pr [:pr/readiness :readiness/state])
+                        #(get-in (project/derive-readiness pr) [:readiness/state])))
+    :risk       (name (resolve-or :unknown
+                        #(get-in pr [:pr/risk :risk/level])
+                        #(get-in (project/derive-risk pr) [:risk/level])))
     :policy     (case (get-in pr [:pr/policy :evaluation/passed?])
                   true "pass"
                   false "fail"
                   "unknown")
-    :recommend  (name (or (:action (project/derive-recommendation pr)) :wait))
+    :recommend  (name (resolve-or :wait
+                        #(:action (project/derive-recommendation pr))))
     ""))
 
 (defn- positive-field?
