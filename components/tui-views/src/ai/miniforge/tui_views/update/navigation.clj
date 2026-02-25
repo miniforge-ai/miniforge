@@ -22,8 +22,9 @@
    Pure functions for list navigation and view switching.
    Layers 0-1."
   (:require
+   [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.model :as model]
-   [ai.miniforge.tui-views.view.project :as project]))
+   [ai.miniforge.tui-views.transition :as transition]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Navigation helpers
@@ -93,16 +94,19 @@
 
     :pr-fleet
     (let [prs (:pr-items model)
+          visible (if-let [fi (:filtered-indices model)]
+                    (vec (keep-indexed (fn [i pr] (when (contains? fi i) pr)) prs))
+                    prs)
           idx (:selected-idx model)]
-      (if-let [pr (get prs idx)]
-        (let [readiness (project/derive-readiness pr)
-              risk      (project/derive-risk pr)]
-          (-> model
-              (assoc :view :pr-detail)
-              (assoc-in [:detail :selected-pr] pr)
-              (assoc-in [:detail :pr-readiness] readiness)
-              (assoc-in [:detail :pr-risk] risk)
-              (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil)))
+      (if-let [pr (get visible idx)]
+        (let [pr-id [(:pr/repo pr) (:pr/number pr)]
+              needs-policy? (nil? (:pr/policy pr))]
+          (cond-> (-> model
+                      (assoc :view :pr-detail)
+                      (assoc-in [:detail :selected-pr] pr)
+                      (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
+            needs-policy?
+            (assoc :side-effect (effect/evaluate-policy pr-id pr))))
         model))
 
     :train-view
@@ -251,8 +255,6 @@
         (let [pr (get prs prev-idx)]
           (-> model
               (assoc-in [:detail :selected-pr] pr)
-              (assoc-in [:detail :pr-readiness] (project/derive-readiness pr))
-              (assoc-in [:detail :pr-risk] (project/derive-risk pr))
               (assoc :selected-idx 0)))
         model))
 
@@ -289,8 +291,6 @@
         (let [pr (get prs next-idx)]
           (-> model
               (assoc-in [:detail :selected-pr] pr)
-              (assoc-in [:detail :pr-readiness] (project/derive-readiness pr))
-              (assoc-in [:detail :pr-risk] (project/derive-risk pr))
               (assoc :selected-idx 0)))
         model))
 
@@ -375,11 +375,7 @@
         next-view (if (>= idx 0)
                     (get views (mod (inc idx) (count views)))
                     (first views))]
-    (-> model
-        (assoc :view next-view :selected-idx 0 :scroll-offset 0
-               :selected-ids #{} :visual-anchor nil
-               :filtered-indices nil :search-matches [] :search-match-idx nil)
-        (assoc-in [:detail :workflow-id] nil))))
+    (transition/switch-view model next-view)))
 
 (defn cycle-top-level-view-reverse
   "Cycle Shift+Tab through top-level aggregate views in reverse.
@@ -393,11 +389,7 @@
         prev-view (if (>= idx 0)
                     (get views (mod (+ idx (dec n)) n))
                     (last views))]
-    (-> model
-        (assoc :view prev-view :selected-idx 0 :scroll-offset 0
-               :selected-ids #{} :visual-anchor nil
-               :filtered-indices nil :search-matches [] :search-match-idx nil)
-        (assoc-in [:detail :workflow-id] nil))))
+    (transition/switch-view model prev-view)))
 
 (defn cycle-pane-reverse
   "Cycle Shift+Tab focus between panes in reverse."

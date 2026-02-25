@@ -24,6 +24,7 @@
    Layer 3."
   (:require
    [clojure.string :as str]
+   [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update.selection :as sel]
    [ai.miniforge.pr-sync.interface :as pr-sync]))
@@ -100,8 +101,18 @@
 
 (defn- cmd-sync [model _args]
   (assoc model
-         :side-effect {:type :sync-prs}
+         :side-effect (effect/sync-prs)
          :flash-message "Syncing PRs..."))
+
+(def ^:private show-states
+  #{"open" "merged" "closed" "all"})
+
+(defn- cmd-show [model args]
+  (let [state-str (some-> args str/trim str/lower-case)
+        state (if (show-states state-str) (keyword state-str) :open)]
+    (assoc model
+           :side-effect (effect/sync-prs state)
+           :flash-message (str "Loading " (name state) " PRs..."))))
 
 (defn- cmd-repos [model _args]
   (let [repos (or (:fleet-repos model) (pr-sync/get-configured-repos))]
@@ -114,9 +125,70 @@
 (defn- cmd-discover [model args]
   (let [owner (when-not (str/blank? args) (str/trim args))]
     (assoc model
-           :side-effect {:type :discover-repos :owner owner}
+           :side-effect (effect/discover-repos owner)
            :flash-message (str "Discovering repos"
                                (when owner (str " from " owner)) "..."))))
+
+;------------------------------------------------------------------------------ Layer 1c
+;; PR selection helper
+
+(defn- selected-prs
+  "Return pr-items whose [repo number] pair is in `ids`."
+  [model ids]
+  (->> (:pr-items model [])
+       (filter #(contains? ids [(:pr/repo %) (:pr/number %)]))
+       vec))
+
+(defn- batch-pr-action
+  "Select PRs by ids, apply effect-fn to them, flash a message, clear selection."
+  [model ids verb effect-fn]
+  (let [prs (selected-prs model ids)]
+    (-> model
+        (assoc :side-effect (effect-fn prs)
+               :flash-message (str verb " " (count prs) " PR(s)..."))
+        sel/clear-selection)))
+
+;; Train commands
+
+(defn- cmd-create-train [model args]
+  (if (str/blank? args)
+    (assoc model :flash-message "Usage: :create-train NAME")
+    (assoc model
+           :side-effect (effect/create-train (str/trim args))
+           :flash-message (str "Creating train: " (str/trim args) "..."))))
+
+(defn- cmd-add-to-train [model _args]
+  (let [ids (sel/effective-ids model)
+        train-id (:active-train-id model)]
+    (cond
+      (nil? train-id)
+      (assoc model :flash-message "No active train. Use :create-train NAME first.")
+
+      (empty? ids)
+      (assoc model :flash-message "No PRs selected. Select PRs with Space first.")
+
+      :else
+      (let [prs (selected-prs model ids)]
+        (assoc model
+               :side-effect (effect/add-to-train train-id prs)
+               :flash-message (str "Adding " (count prs) " PR(s) to train..."))))))
+
+(defn- cmd-merge-next [model _args]
+  (let [train-id (:active-train-id model)]
+    (if (nil? train-id)
+      (assoc model :flash-message "No active train.")
+      (assoc model
+             :side-effect (effect/merge-next train-id)
+             :flash-message "Merging next ready PR..."))))
+
+(defn- cmd-train [model _args]
+  (let [train-id (:active-train-id model)]
+    (if (nil? train-id)
+      (assoc model :flash-message "No active train. Use :create-train NAME first.")
+      (assoc model
+             :view :train-view
+             :selected-idx 0 :scroll-offset 0
+             :selected-ids #{} :visual-anchor nil))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Batch action handlers (destructive actions prompt for confirmation)
@@ -235,6 +307,16 @@
       :cancel       (confirm-set-status model ids "Cancelled" :cancelled
                                         #(= :running (:status %)))
       :remove-repos (confirm-remove-repos model ids)
+      ;; Batch PR actions
+      :review    (batch-pr-action model ids "Reviewing" effect/review-prs)
+      :remediate (batch-pr-action model ids "Remediating" effect/remediate-prs)
+      :decompose (let [pr (first (selected-prs model ids))]
+                   (if pr
+                     (-> model
+                         (assoc :side-effect (effect/decompose-pr pr)
+                                :flash-message (str "Decomposing PR #" (:pr/number pr) "..."))
+                         sel/clear-selection)
+                     (assoc model :flash-message "No matching PR found")))
       ;; Unknown action -- no-op
       model)))
 
@@ -266,7 +348,7 @@
   (when (and (= cmd-name "add-repo")
              (empty? (:browse-repos model))
              (not (:browse-repos-loading? model)))
-    {:type :browse-repos :provider :all}))
+    (effect/browse-repos {:provider :all})))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Command table and dispatch
@@ -286,9 +368,27 @@
                   :completions add-repo-completions}
    "remove-repo" {:handler cmd-remove-repo :help "Remove repo from fleet"
                   :completions remove-repo-completions}
-   "sync"        {:handler cmd-sync        :help "Sync PRs from all fleet repos"}
-   "repos"       {:handler cmd-repos       :help "List configured fleet repos"}
-   "discover"    {:handler cmd-discover    :help "Discover repos from org (e.g. :discover my-org)"}})
+   "sync"          {:handler cmd-sync          :help "Sync PRs from all fleet repos"}
+   "show"          {:handler cmd-show          :help "Show PRs by state (open, merged, closed, all)"
+                    :completions (fn [_] ["open" "merged" "closed" "all"])}
+   "repos"         {:handler cmd-repos         :help "List configured fleet repos"}
+   "discover"      {:handler cmd-discover      :help "Discover repos from org (e.g. :discover my-org)"}
+   ;; Train commands
+   "create-train"  {:handler cmd-create-train  :help "Create a merge train (e.g. :create-train My Train)"}
+   "add-to-train"  {:handler cmd-add-to-train  :help "Add selected PRs to active train"}
+   "merge-next"    {:handler cmd-merge-next    :help "Merge next ready PR in active train"}
+   "train"         {:handler cmd-train         :help "Switch to train view"}
+   ;; Batch actions
+   "review"        {:handler (fn [m _] (request-confirmation m :review "Review"))
+                    :help "Evaluate policy for selected PRs"}
+   "remediate"     {:handler (fn [m _] (request-confirmation m :remediate "Remediate"))
+                    :help "Auto-fix policy violations for selected PRs"}
+   "decompose"     {:handler (fn [m _]
+                               (let [ids (sel/effective-ids m)]
+                                 (if (not= 1 (count ids))
+                                   (assoc m :flash-message "Decompose requires exactly 1 PR selected.")
+                                   (request-confirmation m :decompose "Decompose"))))
+                    :help "Decompose a large PR into sub-PRs"}})
 
 (defn execute-command
   "Execute a command string. Returns updated model.

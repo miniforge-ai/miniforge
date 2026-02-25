@@ -175,62 +175,211 @@
     :unknown           "? unknown"
     "? unknown"))
 
+;------------------------------------------------------------------------------ Layer 0c
+;; Recommendation constructors
+
+(defn- recommend
+  "Build a recommendation map. Single constructor for all recommendation types."
+  [action label reason]
+  {:action action :label label :reason reason})
+
+(def ^:private labels
+  "Action → label mapping."
+  {:remediate "\u26a1 remediate"
+   :review    "\u2299 review"
+   :evaluate  "\u25c7 evaluate"
+   :wait      "\u25cc wait"
+   :decompose "\u25c7 decompose"
+   :approve   "\u2298 approve"
+   :merge     "\u2192 merge"})
+
+(defn- recommend-action
+  "Build recommendation for a known action keyword."
+  [action reason]
+  (recommend action (labels action) reason))
+
+;------------------------------------------------------------------------------ Layer 0d
+;; Recommendation signal extraction
+
+(defn- extract-pr-signals
+  "Extract enriched signals from a PR for recommendation.
+   Returns a flat map of booleans/keywords for predicate use."
+  [pr]
+  (let [readiness   (or (:pr/readiness pr) (derive-readiness pr))
+        risk        (or (:pr/risk pr) (derive-risk pr))
+        policy      (:pr/policy pr)
+        violations  (:evaluation/violations policy)
+        changes     (+ (get-in pr [:change-size :additions] 0)
+                       (get-in pr [:change-size :deletions] 0))]
+    {:ready?          (:readiness/ready? readiness)
+     :state           (or (:readiness/state readiness) :unknown)
+     :risk-level      (or (:risk/level risk) :low)
+     :policy-pass?    (:evaluation/passed? policy)
+     :policy-unknown? (nil? policy)
+     :has-violations? (boolean (seq violations))
+     :auto-fixable?   (boolean (some :auto-fixable? violations))
+     :large?          (> changes 500)}))
+
+(defn derive-recommendation
+  "Derive recommended next action from enriched PR data.
+   Returns {:action kw :label str :reason str}.
+
+   Ordering (policy-first to avoid unsafe merge on unknown data):
+   1. Policy violations → remediate or review
+   2. Policy unknown → evaluate first
+   3. Not ready → wait/review
+   4. Elevated risk → human approval
+   5. All clear → merge"
+  [pr]
+  (let [{:keys [ready? state risk-level policy-pass? policy-unknown?
+                has-violations? auto-fixable? large?]} (extract-pr-signals pr)]
+    (cond
+      (and has-violations? auto-fixable?)              (recommend-action :remediate "Auto-fixable policy violations")
+      (and has-violations? (not auto-fixable?))        (recommend-action :review "Policy violations need review")
+      (and (not policy-unknown?) (false? policy-pass?)) (recommend-action :review "Policy evaluation failed")
+      (and policy-unknown? ready?)                     (recommend-action :evaluate "Policy not yet evaluated")
+      (= :draft state)                                 (recommend-action :wait "Draft PR")
+      (= :ci-failing state)                            (recommend-action :wait "CI failing")
+      (= :changes-requested state)                     (recommend-action :review "Changes requested")
+      (and large? (#{:needs-review :open} state))      (recommend-action :decompose "Large PR \u2014 consider splitting")
+      (= :needs-review state)                          (recommend-action :review "Awaiting review")
+      (and ready? (#{:medium :high :critical} risk-level)) (recommend-action :approve (str "Ready but " (name risk-level) " risk"))
+      (and ready? (= :low risk-level) (true? policy-pass?)) (recommend-action :merge "All gates green, low risk")
+      (and ready? policy-unknown?)                     (recommend-action :evaluate "Policy not yet evaluated")
+      :else                                            (recommend-action :wait "Awaiting signals"))))
+
+;------------------------------------------------------------------------------ Layer 0e
+;; Enrichment resolution — single fn for readiness/risk/policy lookup
+
+(defn- resolve-enrichment
+  "Resolve enriched readiness/risk/policy for a PR.
+   Prefers pr-train/policy-pack data, falls back to naive derivation."
+  [pr]
+  {:readiness (or (:pr/readiness pr) (derive-readiness pr))
+   :risk      (or (:pr/risk pr) (derive-risk pr))
+   :policy    (:pr/policy pr)
+   :recommend (derive-recommendation pr)})
+
+(defn- policy-label
+  "Policy pass/fail/unknown → display label."
+  [policy]
+  (case (:evaluation/passed? policy) true "pass" false "FAIL" "?"))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Tree node constructors
+
+(defn- tree-node
+  "Build a tree node for the tree widget."
+  ([label depth] {:label label :depth depth :expandable? false})
+  ([label depth expandable?] {:label label :depth depth :expandable? expandable?}))
+
+(defn- factor-label
+  "Format a readiness/risk factor for display."
+  [{:keys [factor weight score contribution]}]
+  (str (name factor) ": "
+       (int (* 100 (or score 0))) "%"
+       " (w=" (int (* 100 (or weight 0))) "%"
+       (when contribution (str ", c=" (format "%.2f" (double contribution))))
+       ")"))
+
+(defn- project-pr-row
+  "Project a single PR into a table row map."
+  [pr]
+  (let [{:keys [readiness risk policy recommend]} (resolve-enrichment pr)]
+    {:_id [(:pr/repo pr) (:pr/number pr)]
+     :repo (or (:pr/repo pr) "")
+     :number (str "#" (:pr/number pr))
+     :title (or (:pr/title pr) "")
+     :status (readiness-indicator (or (:readiness/state readiness) :unknown))
+     :ready (readiness-bar (or (:readiness/score readiness) 0) 15)
+     :risk (risk-label (or (:risk/level risk) :low))
+     :policy (policy-label policy)
+     :recommend (:label recommend)}))
+
 (defn- project-pr-items
-  "Project PR items for the fleet table widget."
+  "Project PR items for the fleet table widget.
+   Respects :filtered-indices from search/filter modes."
   [model]
-  (mapv (fn [pr]
-          (let [readiness (derive-readiness pr)
-                risk      (derive-risk pr)]
-            {:_id [(:pr/repo pr) (:pr/number pr)]
-             :repo (or (:pr/repo pr) "")
-             :number (str "#" (:pr/number pr))
-             :title (or (:pr/title pr) "")
-             :status (readiness-indicator (:readiness/state readiness))
-             :ready (readiness-bar (:readiness/score readiness) 15)
-             :risk (risk-label (:risk/level risk))
-             :policy (if (:pr/policy-passed? pr) "pass" "?")}))
-        (:pr-items model [])))
+  (let [prs (:pr-items model [])
+        filtered (if-let [fi (:filtered-indices model)]
+                   (vec (keep-indexed (fn [i pr] (when (contains? fi i) pr)) prs))
+                   prs)]
+    (mapv project-pr-row filtered)))
+
+(defn- resolve-detail-enrichment
+  "Resolve enrichment data for the detail view's selected PR."
+  [model]
+  (let [pr-data (get-in model [:detail :selected-pr])]
+    {:pr        pr-data
+     :readiness (:pr/readiness pr-data)
+     :risk      (:pr/risk pr-data)
+     :policy    (:pr/policy pr-data)
+     :gates     (get pr-data :pr/gate-results [])}))
 
 (defn- project-readiness-tree
   "Build readiness tree nodes for the tree widget."
   [model]
-  (let [readiness (get-in model [:detail :pr-readiness])
-        score (or (:readiness/score readiness) 0)
-        factors (:readiness/factors readiness [])]
-    (into [{:label (str "Readiness: " (int (* 100 score)) "%")
-            :depth 0 :expandable? true}]
-          (mapv (fn [{:keys [factor weight score]}]
-                  {:label (str (name factor) ": "
-                               (int (* 100 (or score 0))) "%"
-                               " (w=" (int (* 100 (or weight 0))) "%)")
-                   :depth 1 :expandable? false})
-                factors))))
+  (let [{:keys [pr readiness]} (resolve-detail-enrichment model)
+        score     (or (:readiness/score readiness) 0)
+        ready?    (:readiness/ready? readiness)
+        recommend (when pr (derive-recommendation pr))]
+    (into (cond-> [(tree-node (str "Readiness: " (int (* 100 score)) "%"
+                                   (when ready? " \u2714 ready"))
+                              0 true)]
+            recommend
+            (conj (tree-node (str "Recommend: " (:label recommend) " \u2014 " (:reason recommend)) 0)))
+          (mapv #(tree-node (factor-label %) 1)
+                (:readiness/factors readiness [])))))
+
+(defn- risk-factor-label
+  "Format a risk factor for display."
+  [{:keys [factor explanation weight score]}]
+  (str (name factor) ": " (or explanation "")
+       (when weight
+         (str " (w=" (int (* 100 weight)) "%, s=" (int (* 100 (or score 0))) "%)"))))
 
 (defn- project-risk-tree
   "Build risk tree nodes for the tree widget."
   [model]
-  (let [risk (get-in model [:detail :pr-risk])
-        level (or (:risk/level risk) :unknown)
-        factors (:risk/factors risk [])]
-    (into [{:label (str "Risk: " (name level))
-            :depth 0 :expandable? true}]
-          (mapv (fn [{:keys [factor explanation]}]
-                  {:label (str (name factor) ": " explanation)
-                   :depth 1 :expandable? false})
-                factors))))
+  (let [{:keys [risk]} (resolve-detail-enrichment model)
+        level   (or (:risk/level risk) :unknown)
+        score   (:risk/score risk)]
+    (into [(tree-node (str "Risk: " (name level)
+                           (when score (str " (" (format "%.2f" (double score)) ")")))
+                      0 true)]
+          (mapv #(tree-node (risk-factor-label %) 1)
+                (:risk/factors risk [])))))
+
+(defn- severity-prefix [severity]
+  (case severity
+    :critical "\u2718 CRIT " :major "\u2718 MAJR "
+    :minor    "\u26a0 MINR " :info  "\u2139 INFO " "\u26a0 "))
+
+(defn- policy-tree [policy]
+  (let [summary    (:evaluation/summary policy)
+        violations (:evaluation/violations policy [])]
+    (into [(tree-node (str "Policy: "
+                           (if (:evaluation/passed? policy) "\u2714 passed" "\u2718 FAILED")
+                           " (" (:total summary 0) " violations)")
+                      0 true)]
+          (concat
+           (when-let [packs (seq (:evaluation/packs-applied policy))]
+             [(tree-node (str "Packs: " (str/join ", " packs)) 1)])
+           (mapv #(tree-node (str (severity-prefix (:severity %))
+                                  (or (:message %) (name (:rule-id % "")))) 1)
+                 violations)))))
+
+(defn- gates-tree [gates]
+  (mapv #(tree-node (str (if (:gate/passed? %) "pass " "FAIL ") (name (:gate/id %))) 0) gates))
 
 (defn- project-gate-list
-  "Build gate result list for the tree widget."
+  "Build gate/policy result list for the tree widget."
   [model]
-  (let [pr-data (get-in model [:detail :selected-pr])
-        gates (get pr-data :pr/gate-results [])]
-    (if (empty? gates)
-      [{:label "No gate results" :depth 0 :expandable? false}]
-      (mapv (fn [g]
-              {:label (str (if (:gate/passed? g) "pass " "FAIL ")
-                           (name (:gate/id g)))
-               :depth 0 :expandable? false})
-            gates))))
+  (let [{:keys [policy gates]} (resolve-detail-enrichment model)]
+    (cond
+      policy     (policy-tree policy)
+      (seq gates) (gates-tree gates)
+      :else       [(tree-node "No policy/gate results" 0)])))
 
 (defn- project-train-prs
   "Project train PRs for the table widget."

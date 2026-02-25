@@ -22,6 +22,7 @@
    Pure functions that handle workflow events from the event stream.
    Layer 2."
   (:require
+   [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.model :as model]))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -186,6 +187,104 @@
       (update :pr-items (partial remove-matching-pr repo number))
       with-timestamp))
 
+(defn handle-policy-evaluated
+  "Handle result of an :evaluate-policy side effect.
+   Merges policy evaluation result into the matching PR in :pr-items
+   and updates the active detail if this PR is currently shown."
+  [model {:keys [pr-id result]}]
+  (let [[repo number] pr-id
+        update-policy (fn [pr]
+                        (if (and (= (:pr/repo pr) repo)
+                                 (= (:pr/number pr) number))
+                          (assoc pr :pr/policy result)
+                          pr))
+        model (update model :pr-items (fn [prs] (mapv update-policy (or prs []))))
+        ;; Also update active detail if this PR is currently shown
+        active-pr (get-in model [:detail :selected-pr])
+        model (if (and active-pr
+                       (= (:pr/repo active-pr) repo)
+                       (= (:pr/number active-pr) number))
+                (assoc-in model [:detail :selected-pr :pr/policy] result)
+                model)]
+    (-> model
+        (assoc :flash-message
+               (if (:evaluation/passed? result)
+                 "Policy: passed"
+                 (str "Policy: "
+                      (if (nil? (:evaluation/passed? result))
+                        (str "error — " (:evaluation/error result "unknown"))
+                        (str "FAILED ("
+                             (count (:evaluation/violations result))
+                             " violation(s))")))))
+        with-timestamp)))
+
+;------------------------------------------------------------------------------ Layer 3b
+;; Train event handlers
+
+(defn handle-train-created
+  "Handle result of a :create-train side effect."
+  [model {:keys [train-id train-name]}]
+  (-> model
+      (assoc :active-train-id train-id)
+      (assoc :flash-message (str "Train created: " (or train-name "Merge Train")))
+      with-timestamp))
+
+(defn handle-prs-added-to-train
+  "Handle result of :add-to-train side effect.
+   Updates detail train data and flashes count."
+  [model {:keys [train added]}]
+  (-> model
+      (assoc-in [:detail :selected-train] train)
+      (assoc :flash-message (str "Added " (or added 0) " PR(s) to train"))
+      with-timestamp))
+
+(defn handle-merge-started
+  "Handle result of :merge-next side effect."
+  [model {:keys [pr-number]}]
+  (-> model
+      (assoc :flash-message (str "Merging PR #" pr-number "..."))
+      with-timestamp))
+
+;------------------------------------------------------------------------------ Layer 3c
+;; Batch action event handlers
+
+(defn handle-review-completed
+  "Handle result of :review-prs side effect.
+   Updates PRs with policy results and flashes summary."
+  [model {:keys [results]}]
+  (let [updated-prs (reduce
+                     (fn [prs {:keys [pr-id result]}]
+                       (let [[repo number] pr-id]
+                         (mapv (fn [pr]
+                                 (if (and (= (:pr/repo pr) repo)
+                                          (= (:pr/number pr) number))
+                                   (assoc pr :pr/policy result)
+                                   pr))
+                               prs)))
+                     (:pr-items model [])
+                     (or results []))
+        passed (count (filter #(get-in % [:result :evaluation/passed?]) results))
+        failed (- (count results) passed)]
+    (-> model
+        (assoc :pr-items updated-prs)
+        (assoc :flash-message (str "Review complete: " passed " passed, " failed " with violations"))
+        with-timestamp)))
+
+(defn handle-remediation-completed
+  "Handle result of :remediate-prs side effect."
+  [model {:keys [fixed failed]}]
+  (-> model
+      (assoc :flash-message (str "Remediation: " (or fixed 0) " fixed, " (or failed 0) " failed"))
+      with-timestamp))
+
+(defn handle-decomposition-started
+  "Handle result of :decompose-pr side effect."
+  [model {:keys [pr-id plan]}]
+  (-> model
+      (assoc :flash-message (str "Decomposition plan for #" (second pr-id) ": "
+                                 (count (:sub-prs plan [])) " sub-PRs proposed"))
+      with-timestamp))
+
 (defn handle-repos-discovered
   "Handle result of a :discover-repos side effect.
    Shows discovery results and triggers a PR sync."
@@ -196,7 +295,7 @@
            :flash-message (str "Discovered " discovered " repo(s)"
                                (when owner (str " from " owner))
                                " — " added " new. Syncing PRs...")
-           :side-effect {:type :sync-prs})
+           :side-effect (effect/sync-prs))
     (assoc model :flash-message (str "Discover failed: " (or error "unknown error")))))
 
 (defn- repos-browsed-ok
@@ -247,4 +346,29 @@
   (-> (if success?
         (repos-browsed-ok model payload)
         (repos-browsed-err model payload))
+      with-timestamp))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Chat event handlers
+
+(defn handle-chat-response
+  "Handle result of a :chat-send side effect.
+   Appends assistant message to chat history, clears pending state."
+  [model {:keys [content actions workflow-id]}]
+  (let [assistant-msg {:role :assistant
+                       :content (or content "No response")
+                       :timestamp (java.util.Date.)
+                       :actions (or actions [])
+                       :workflow-id workflow-id}]
+    (-> model
+        (update-in [:chat :messages] conj assistant-msg)
+        (assoc-in [:chat :pending?] false)
+        with-timestamp)))
+
+(defn handle-chat-action-result
+  "Handle result of a :chat-execute-action side effect.
+   Shows result of executing a chat-suggested action."
+  [model {:keys [success? message]}]
+  (-> model
+      (assoc :flash-message (or message (if success? "Action completed" "Action failed")))
       with-timestamp))

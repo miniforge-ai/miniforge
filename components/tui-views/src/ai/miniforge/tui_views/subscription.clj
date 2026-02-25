@@ -23,7 +23,8 @@
    TUI messages for the Elm update loop. Handles throttling so rapid
    agent/chunk events are coalesced into 1 aggregate message per second."
   (:require
-   [ai.miniforge.event-stream.interface :as es]))
+   [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.tui-views.msg :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event -> TUI message translation
@@ -34,48 +35,37 @@
   [event]
   (case (:event/type event)
     :workflow/started
-    [:msg/workflow-added {:workflow-id (:workflow/id event)
-                          :name (get-in event [:workflow/spec :name])
-                          :spec (:workflow/spec event)}]
+    (msg/workflow-added (:workflow/id event)
+                        (get-in event [:workflow/spec :name])
+                        (:workflow/spec event))
 
     :workflow/phase-started
-    [:msg/phase-changed {:workflow-id (:workflow/id event)
-                          :phase (:workflow/phase event)}]
+    (msg/phase-changed (:workflow/id event) (:workflow/phase event))
 
     :workflow/phase-completed
-    [:msg/phase-done {:workflow-id (:workflow/id event)
-                       :phase (:workflow/phase event)
-                       :outcome (get-in event [:result :outcome])}]
+    (msg/phase-done (:workflow/id event)
+                    (:workflow/phase event)
+                    (get-in event [:result :outcome]))
 
     :agent/status
-    [:msg/agent-status {:workflow-id (:workflow/id event)
-                         :agent (:agent/id event)
-                         :status (:status-type event)
-                         :message (:message event)}]
+    (msg/agent-status (:workflow/id event) (:agent/id event)
+                      (:status-type event) (:message event))
 
     :agent/chunk
-    [:msg/agent-output {:workflow-id (:workflow/id event)
-                         :agent (:agent/id event)
-                         :delta (:delta event)
-                         :done? (:done? event)}]
+    (msg/agent-output (:workflow/id event) (:agent/id event)
+                      (:delta event) (:done? event))
 
     :workflow/completed
-    [:msg/workflow-done {:workflow-id (:workflow/id event)
-                          :status (:workflow/status event)}]
+    (msg/workflow-done (:workflow/id event) (:workflow/status event))
 
     :workflow/failed
-    [:msg/workflow-failed {:workflow-id (:workflow/id event)
-                            :error (:error event)}]
+    (msg/workflow-failed (:workflow/id event) (:error event))
 
     :gate/passed
-    [:msg/gate-result {:workflow-id (:workflow/id event)
-                        :gate (:gate event)
-                        :passed? true}]
+    (msg/gate-result (:workflow/id event) (:gate event) true)
 
     :gate/failed
-    [:msg/gate-result {:workflow-id (:workflow/id event)
-                        :gate (:gate event)
-                        :passed? false}]
+    (msg/gate-result (:workflow/id event) (:gate event) false)
 
     ;; Unknown event types are ignored
     nil))
@@ -94,11 +84,7 @@
                      (reset! buffer {})
                      (doseq [[wf-id {:keys [delta agent]}] buf]
                        (when (seq delta)
-                         (dispatch-fn [:msg/agent-output
-                                       {:workflow-id wf-id
-                                        :agent agent
-                                        :delta delta
-                                        :done? false}])))))
+                         (dispatch-fn (msg/agent-output wf-id agent delta false))))))
         thread (Thread. (fn []
                           (try
                             (while @running?
