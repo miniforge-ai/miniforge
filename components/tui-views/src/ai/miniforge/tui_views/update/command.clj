@@ -130,6 +130,15 @@
                                (when owner (str " from " owner)) "..."))))
 
 ;------------------------------------------------------------------------------ Layer 1c
+;; PR selection helper
+
+(defn- selected-prs
+  "Return pr-items whose [repo number] pair is in `ids`."
+  [model ids]
+  (->> (:pr-items model [])
+       (filter #(contains? ids [(:pr/repo %) (:pr/number %)]))
+       vec))
+
 ;; Train commands
 
 (defn- cmd-create-train [model args]
@@ -150,9 +159,7 @@
       (assoc model :flash-message "No PRs selected. Select PRs with Space first.")
 
       :else
-      (let [prs (->> (:pr-items model [])
-                     (filter #(contains? ids [(:pr/repo %) (:pr/number %)]))
-                     vec)]
+      (let [prs (selected-prs model ids)]
         (assoc model
                :side-effect (effect/add-to-train train-id prs)
                :flash-message (str "Adding " (count prs) " PR(s) to train..."))))))
@@ -292,24 +299,17 @@
                                         #(= :running (:status %)))
       :remove-repos (confirm-remove-repos model ids)
       ;; Batch PR actions
-      :review       (let [prs (->> (:pr-items model [])
-                                   (filter #(contains? ids [(:pr/repo %) (:pr/number %)]))
-                                   vec)]
+      :review       (let [prs (selected-prs model ids)]
                       (-> model
                           (assoc :side-effect (effect/review-prs prs)
                                  :flash-message (str "Reviewing " (count prs) " PR(s)..."))
                           sel/clear-selection))
-      :remediate    (let [prs (->> (:pr-items model [])
-                                   (filter #(contains? ids [(:pr/repo %) (:pr/number %)]))
-                                   vec)]
+      :remediate    (let [prs (selected-prs model ids)]
                       (-> model
                           (assoc :side-effect (effect/remediate-prs prs)
                                  :flash-message (str "Remediating " (count prs) " PR(s)..."))
                           sel/clear-selection))
-      :decompose    (let [prs (->> (:pr-items model [])
-                                   (filter #(contains? ids [(:pr/repo %) (:pr/number %)]))
-                                   vec)
-                          pr (first prs)]
+      :decompose    (let [pr (first (selected-prs model ids))]
                       (if pr
                         (-> model
                             (assoc :side-effect (effect/decompose-pr pr)
