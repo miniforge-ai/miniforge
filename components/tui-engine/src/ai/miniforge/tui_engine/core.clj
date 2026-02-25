@@ -67,7 +67,8 @@
          :running?       false
          :input-thread   nil
          :unsub-fn       nil
-         :prev-buffer    nil}))
+         :prev-buffer    nil
+         :effect-threads (atom #{})}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Rendering
@@ -105,19 +106,26 @@
 (defn- execute-side-effect!
   "Execute a side-effect on a background daemon thread.
    Calls effect-handler-fn with the effect map, then dispatches the result
-   message back into the Elm loop via dispatch-fn."
-  [effect effect-handler-fn dispatch-fn]
+   message back into the Elm loop via dispatch-fn.
+   Tracks the thread in effect-threads so stop! can interrupt in-flight effects."
+  [effect effect-handler-fn dispatch-fn effect-threads]
   (let [thread (Thread.
                 (fn []
                   (try
                     (when-let [result-msg (effect-handler-fn effect)]
                       (dispatch-fn result-msg))
+                    (catch InterruptedException _)
                     (catch Exception e
-                      (dispatch-fn [:msg/side-effect-error
-                                    {:type (:type effect)
-                                     :error (.getMessage e)}])))))]
+                      (when-not (Thread/interrupted)
+                        (dispatch-fn [:msg/side-effect-error
+                                      {:type (:type effect)
+                                       :error (.getMessage e)}]))))
+                  (when effect-threads
+                    (swap! effect-threads disj (Thread/currentThread)))))]
     (.setDaemon thread true)
     (.setName thread (str "tui-effect-" (name (or (:type effect) "unknown"))))
+    (when effect-threads
+      (swap! effect-threads conj thread))
     (.start thread)))
 
 ;------------------------------------------------------------------------------ Layer 3
@@ -143,7 +151,9 @@
     ;; Execute side-effect outside swap! to avoid re-entrancy issues
     (when-let [fx @pending-effect]
       (when-let [handler (:effect-handler @app)]
-        (execute-side-effect! fx handler (fn [result-msg] (dispatch! app result-msg)))))))
+        (execute-side-effect! fx handler
+                              (fn [result-msg] (dispatch! app result-msg))
+                              (:effect-threads @app))))))
 
 (defn get-model
   "Get current model snapshot."
@@ -208,7 +218,8 @@
   "Stop the TUI application.
    1. Unregister subscriptions
    2. Stop input thread
-   3. Exit alternate screen
+   3. Interrupt in-flight side-effect threads
+   4. Exit alternate screen
 
    Safe to call multiple times."
   [app]
@@ -220,6 +231,11 @@
     ;; Stop input thread
     (when-let [thread (:input-thread @app)]
       (.interrupt thread))
+    ;; Interrupt all in-flight side-effect threads
+    (when-let [threads-atom (:effect-threads @app)]
+      (doseq [^Thread t @threads-atom]
+        (try (.interrupt t) (catch Exception _)))
+      (reset! threads-atom #{}))
     ;; Restore terminal
     (try
       (screen/stop-screen! (:screen @app))
