@@ -214,3 +214,50 @@
           result (runner/run-pipeline workflow {} {})]
       (is (= :failed (:execution/status result)))
       (is (= :failed (:_state (:execution/fsm-state result)))))))
+
+;; ============================================================================
+;; Output extraction tests
+;; ============================================================================
+
+(deftest extract-output-shape-test
+  (testing "extract-output populates :execution/output with expected shape"
+    (let [;; Build a minimal context that looks like a completed pipeline
+          fake-ctx {:execution/artifacts [{:type :file :path "out.txt"}]
+                    :execution/phase-results {:plan {:phase/status :succeeded}
+                                              :done {:phase/status :succeeded}}
+                    :execution/current-phase :done
+                    :execution/status :completed}
+          ;; Call extract-output via its var (private fn)
+          result (#'ai.miniforge.workflow.runner/extract-output fake-ctx)
+          output (:execution/output result)]
+      (is (some? output) ":execution/output should be present")
+      (is (= [{:type :file :path "out.txt"}] (:artifacts output)))
+      (is (= {:plan {:phase/status :succeeded}
+              :done {:phase/status :succeeded}}
+             (:phase-results output)))
+      (is (= {:phase/status :succeeded} (:last-phase-result output)))
+      (is (= :completed (:status output))))))
+
+(deftest run-pipeline-returns-execution-output-test
+  (testing "run-pipeline returns context with :execution/output populated"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase :done}]}
+          result (runner/run-pipeline workflow {:task "Test"} {})]
+      (is (= :completed (:execution/status result)))
+      (is (some? (:execution/output result))
+          ":execution/output should be present after run-pipeline")
+      (let [output (:execution/output result)]
+        (is (= :completed (:status output)))
+        (is (vector? (:artifacts output)))
+        (is (map? (:phase-results output)))
+        (is (contains? (:phase-results output) :done))
+        (is (some? (:last-phase-result output)))))))
+
+(deftest context-initializes-output-nil-test
+  (testing "create-context initializes :execution/output as nil"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"}
+          ctx (ctx/create-context workflow {:task "Test"} {})]
+      (is (contains? ctx :execution/output))
+      (is (nil? (:execution/output ctx))))))

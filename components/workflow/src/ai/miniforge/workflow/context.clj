@@ -55,6 +55,7 @@
       :execution/errors []  ; DEPRECATED: Use :execution/response-chain instead
       :execution/response-chain (response/create (:workflow/id workflow))
       :execution/phase-results {}
+      :execution/output nil
       :execution/current-phase nil
       :execution/phase-index 0
       :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
