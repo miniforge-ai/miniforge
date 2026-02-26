@@ -5,6 +5,65 @@
    [ai.miniforge.event-stream.control :as control]
    [ai.miniforge.response.interface :as response]))
 
+;------------------------------------------------------------------------------ Layer 0
+;; Control state primitive tests
+
+(deftest create-control-state-test
+  (testing "returns atom with expected shape"
+    (let [cs (control/create-control-state)]
+      (is (instance? clojure.lang.Atom cs))
+      (is (= {:paused false :stopped false :adjustments {}} @cs)))))
+
+(deftest pause!-test
+  (testing "sets :paused to true"
+    (let [cs (control/create-control-state)]
+      (control/pause! cs)
+      (is (true? (:paused @cs))))))
+
+(deftest resume!-test
+  (testing "sets :paused to false"
+    (let [cs (control/create-control-state)]
+      (control/pause! cs)
+      (control/resume! cs)
+      (is (false? (:paused @cs))))))
+
+(deftest cancel!-test
+  (testing "sets :stopped to true"
+    (let [cs (control/create-control-state)]
+      (control/cancel! cs)
+      (is (true? (:stopped @cs))))))
+
+(deftest paused?-test
+  (testing "returns correct value"
+    (let [cs (control/create-control-state)]
+      (is (false? (control/paused? cs)))
+      (control/pause! cs)
+      (is (true? (control/paused? cs)))
+      (control/resume! cs)
+      (is (false? (control/paused? cs))))))
+
+(deftest cancelled?-test
+  (testing "returns correct value"
+    (let [cs (control/create-control-state)]
+      (is (false? (control/cancelled? cs)))
+      (control/cancel! cs)
+      (is (true? (control/cancelled? cs))))))
+
+(deftest control-state-interface-delegation-test
+  (testing "interface delegates to control functions"
+    (let [cs (es/create-control-state)]
+      (is (false? (es/paused? cs)))
+      (es/pause! cs)
+      (is (true? (es/paused? cs)))
+      (es/resume! cs)
+      (is (false? (es/paused? cs)))
+      (is (false? (es/cancelled? cs)))
+      (es/cancel! cs)
+      (is (true? (es/cancelled? cs))))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; RBAC and control action tests
+
 (deftest create-control-action-test
   (testing "creates action with required fields"
     (let [action (es/create-control-action
