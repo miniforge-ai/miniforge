@@ -1,9 +1,8 @@
-{:weights {:deps-merged       0.30
+{:weights {:deps-merged       0.25
            :ci-passed         0.25
            :approved          0.20
            :gates-passed      0.15
-           :age-penalty       0.05
-           :staleness-penalty 0.05}
+           :behind-main       0.15}
 
  :merge-threshold #profile {:default 0.85
                              :strict  0.95
@@ -19,12 +18,4 @@
                    :merged            1.0
                    :merging           1.0
                    :reviewing         0.5
-                   :changes-requested 0.25}
-
- :age {:max-days #profile {:default 14
-                            :strict  7
-                            :permissive 30}}
-
- :staleness {:max-hours #profile {:default 72
-                                   :strict  24
-                                   :permissive 168}}}
+                   :changes-requested 0.25}}

@@ -63,22 +63,11 @@
       (let [passed (count (filter :gate/passed? gates))]
         (double (/ passed (count gates)))))))
 
-(defn- score-decay
-  "Linear decay from 1.0 to 0.0 as value approaches max-value."
-  [value max-value]
-  (max 0.0 (- 1.0 (/ (double (min value max-value)) max-value))))
-
-(defn score-age-factor
-  "Score based on PR age. Older PRs score lower (freshness bonus)."
-  [_train pr cfg]
-  (let [age-days (get-in pr [:pr/derived-state :age-days] 0)]
-    (score-decay age-days (get-in cfg [:age :max-days]))))
-
-(defn score-staleness-factor
-  "Score based on time since last activity."
-  [_train pr cfg]
-  (let [staleness-hours (get-in pr [:pr/derived-state :staleness-hours] 0)]
-    (score-decay staleness-hours (get-in cfg [:staleness :max-hours]))))
+(defn score-behind-main-factor
+  "Score based on whether the PR branch is behind main.
+   1.0 = not behind main (CLEAN), 0.0 = behind main (BEHIND/DIRTY)."
+  [_train pr _cfg]
+  (if (:pr/behind-main? pr) 0.0 1.0))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Aggregation and explainability
@@ -89,8 +78,7 @@
    :ci-passed         score-ci-factor
    :approved          score-approved-factor
    :gates-passed      score-gates-factor
-   :age-penalty       score-age-factor
-   :staleness-penalty score-staleness-factor})
+   :behind-main       score-behind-main-factor})
 
 (defn- score-factor
   "Score a single factor, returning its contribution map."
@@ -154,7 +142,7 @@
     {:pr/number 2 :pr/status :approved
      :pr/depends-on [1] :pr/ci-status :passed
      :pr/gate-results [{:gate/passed? true}]
-     :pr/derived-state {:age-days 2 :staleness-hours 6}})
+     :pr/behind-main? false})
 
   (compute-readiness-score example-train example-pr)
   (explain-readiness example-train example-pr)

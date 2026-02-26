@@ -49,9 +49,10 @@
    :children
    [{:type :widget/table
      :data-fn :project/pr-items
-     :columns [{:key :repo      :header "Repo"      :width 18}
+     :columns [{:key :repo      :header "Repo"      :width 30}
                {:key :number   :header "PR"        :width 6}
                {:key :title    :header "Title"     :width :flex}
+               {:key :state    :header "State"     :width 7}
                {:key :status   :header "Status"    :width 12}
                {:key :ready    :header "Readiness" :width 15}
                {:key :risk     :header "Risk"      :width 6}

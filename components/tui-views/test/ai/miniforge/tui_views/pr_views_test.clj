@@ -199,7 +199,8 @@
   (testing "Draft = draft with draft blocker"
     (let [r (project/derive-readiness {:pr/status :draft :pr/ci-status :pending})]
       (is (= :draft (:readiness/state r)))
-      (is (= 0.1 (:readiness/score r)))
+      ;; Score: deps=0.25*1 + ci=0.25*0.5 + approved=0.20*0 + gates=0.15*1 + behind=0.15*1 = 0.675
+      (is (< (Math/abs (- 0.675 (:readiness/score r))) 0.001))
       (is (some #(str/includes? (:blocker/message %) "draft") (:readiness/blockers r))))))
 
 (deftest derive-readiness-changes-requested-test
@@ -209,10 +210,10 @@
       (is (some #(str/includes? (:blocker/message %) "changes") (:readiness/blockers r))))))
 
 (deftest derive-readiness-has-factors-test
-  (testing "Readiness always includes CI, review, and policy factors"
+  (testing "Readiness includes all five factors aligned with pr-train"
     (let [r (project/derive-readiness {:pr/status :open :pr/ci-status :pending})]
-      (is (= 3 (count (:readiness/factors r))))
-      (is (= #{:ci :review :policy}
+      (is (= 5 (count (:readiness/factors r))))
+      (is (= #{:deps-merged :ci-passed :approved :gates-passed :behind-main}
              (set (map :factor (:readiness/factors r))))))))
 
 ;; --- Risk derivation tests ---

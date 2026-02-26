@@ -95,6 +95,17 @@
   [rollup]
   (status/check-rollup->ci-status rollup))
 
+(defn check-rollup->ci-checks
+  "Extract individual check results from GitHub statusCheckRollup.
+   Returns vector of {:name str :conclusion kw :status kw}."
+  [rollup]
+  (status/check-rollup->ci-checks rollup))
+
+(defn merge-state-status->behind?
+  "Map GitHub mergeStateStatus to boolean indicating if PR is behind main."
+  [merge-state-status]
+  (status/merge-state-status->behind? merge-state-status))
+
 (defn provider-pr->train-pr
   "Convert a GitHub provider PR map to a normalized TrainPR map."
   ([pr] (status/provider-pr->train-pr pr))

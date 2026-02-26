@@ -199,8 +199,6 @@
    :action/enter-filter-mode  mode/enter-filter-mode
    :action/next-search-match  nav/next-search-match
    :action/prev-search-match  nav/prev-search-match
-   :action/enter-visual-mode  sel/enter-visual-mode
-   :action/select-all         sel/select-all
    :action/clear-selection    sel/clear-selection
    :action/evidence-view      #(nav/switch-view % :evidence model/views)
    :action/toggle-help        nav/toggle-help
@@ -311,7 +309,19 @@
        (nav/in-detail-subview? model)                (nav/cycle-detail-subview-reverse model)
        (some #{(:view model)} model/detail-views)    (nav/cycle-pane-reverse model)
        (some #{(:view model)} model/top-level-views) (nav/cycle-top-level-view-reverse model)
-       :else                                         model))})
+       :else                                         model))
+
+   :action/select-all
+   (fn [model]
+     (if (and (selectable-views (:view model)) (sel/has-selection? model))
+       (sel/select-all model)
+       model))
+
+   :action/enter-visual-mode
+   (fn [model]
+     (if (and (selectable-views (:view model)) (sel/has-selection? model))
+       (sel/enter-visual-mode model)
+       model))})
 
 (defn- resolve-action
   "Look up handler fn for an action token."

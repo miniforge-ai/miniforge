@@ -152,14 +152,14 @@
     (let [m (-> (util/fresh-model)
                 (assoc :view :pr-fleet)
                 (update/update-model [:input {:key :key/r :char \r}]))]
-      (is (= {:type :sync-prs} (:side-effect m)))
+      (is (= :sync-prs (:type (:side-effect m))))
       (is (str/includes? (:flash-message m) "Syncing"))))
 
   (testing "s key in pr-fleet also triggers PR sync side-effect"
     (let [m (-> (util/fresh-model)
                 (assoc :view :pr-fleet)
                 (update/update-model [:input {:key :key/s :char \s}]))]
-      (is (= {:type :sync-prs} (:side-effect m)))
+      (is (= :sync-prs (:type (:side-effect m))))
       (is (str/includes? (:flash-message m) "Syncing"))))
 
   (testing "b key switches to dag-kanban view"
@@ -172,9 +172,10 @@
       (is (util/view-is? m :evidence))
       (is (util/selected-idx-is? m 0))))
 
-  (testing "a key selects all items in workflow list"
+  (testing "a key selects all items after Space (gated behind first selection)"
     (let [m (util/apply-updates (two-workflows)
-              [[:input {:key :key/a :char \a}]])]
+              [[:input {:key :key/space :char \space}]  ;; select first
+               [:input {:key :key/a :char \a}]])]
       (is (util/selection-count-is? m 2))))
 
   (testing "? key toggles help overlay on"
@@ -631,7 +632,8 @@
 (deftest batch-delete-test
   (testing ":delete with selection triggers confirmation"
     (let [m (-> (two-workflows)
-                (util/apply-updates [[:input {:key :key/a :char \a}]])   ;; select all
+                (util/apply-updates [[:input {:key :key/space :char \space}]   ;; select first
+                                     [:input {:key :key/a :char \a}]])         ;; select all
                 (execute-command "delete"))]
       (is (util/confirm-active? m))
       (is (= :delete (get-in m [:confirm :action])))
@@ -639,7 +641,8 @@
 
   (testing "y confirms delete — removes workflows"
     (let [m (-> (two-workflows)
-                (util/apply-updates [[:input {:key :key/a :char \a}]])
+                (util/apply-updates [[:input {:key :key/space :char \space}]
+                                     [:input {:key :key/a :char \a}]])
                 (execute-command "delete")
                 (update/update-model [:input {:key :key/y :char \y}]))]
       (is (not (util/confirm-active? m)))
@@ -791,5 +794,5 @@
 (deftest sync-command-sets-side-effect-test
   (testing ":sync command sets :side-effect on model"
     (let [m (execute-command (util/fresh-model) "sync")]
-      (is (= {:type :sync-prs} (:side-effect m)))
+      (is (= :sync-prs (:type (:side-effect m))))
       (is (str/includes? (:flash-message m) "Syncing")))))

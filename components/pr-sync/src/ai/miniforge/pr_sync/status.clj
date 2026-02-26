@@ -58,6 +58,20 @@
       (= "REVIEW_REQUIRED" decision) :reviewing
       :else :open)))
 
+(defn check-rollup->ci-checks
+  "Extract individual check results from GitHub statusCheckRollup.
+   Returns vector of {:name str :conclusion kw :status kw}."
+  [rollup]
+  (let [entries (cond
+                  (nil? rollup) []
+                  (sequential? rollup) rollup
+                  :else [rollup])]
+    (mapv (fn [entry]
+            {:name       (or (:name entry) (:context entry) "unknown")
+             :conclusion (some-> (:conclusion entry) str str/lower-case keyword)
+             :status     (some-> (:status entry) str str/lower-case keyword)})
+          entries)))
+
 (defn check-rollup->ci-status
   "Map GitHub statusCheckRollup to normalized CI status keyword."
   [rollup]
@@ -75,18 +89,31 @@
       (seq entries) :pending
       :else :pending)))
 
+(defn merge-state-status->behind?
+  "Map GitHub mergeStateStatus to a boolean indicating if the PR is behind main.
+   Values: BEHIND, CLEAN, DIRTY, BLOCKED, HAS_HOOKS, UNKNOWN, UNSTABLE."
+  [merge-state-status]
+  (let [s (some-> merge-state-status str str/upper-case)]
+    (contains? #{"BEHIND" "DIRTY"} s)))
+
 (defn provider-pr->train-pr
   "Convert a GitHub provider PR map to a normalized TrainPR map.
-   Adds :pr/repo when repo is provided."
+   Adds :pr/repo when repo is provided.
+   Includes :pr/ci-checks for individual check results and
+   :pr/merge-state / :pr/behind-main? for branch-behind-main detection."
   ([pr] (provider-pr->train-pr pr nil))
   ([pr repo]
-   (cond-> {:pr/number    (:number pr)
-            :pr/title     (:title pr)
-            :pr/url       (:url pr)
-            :pr/branch    (:headRefName pr)
-            :pr/status    (pr-status-from-provider pr)
-            :pr/ci-status (check-rollup->ci-status (:statusCheckRollup pr))}
-     repo (assoc :pr/repo repo))))
+   (let [merge-state (:mergeStateStatus pr)]
+     (cond-> {:pr/number        (:number pr)
+              :pr/title         (:title pr)
+              :pr/url           (:url pr)
+              :pr/branch        (:headRefName pr)
+              :pr/status        (pr-status-from-provider pr)
+              :pr/ci-status     (check-rollup->ci-status (:statusCheckRollup pr))
+              :pr/ci-checks     (check-rollup->ci-checks (:statusCheckRollup pr))
+              :pr/merge-state   (some-> merge-state str str/upper-case)
+              :pr/behind-main?  (merge-state-status->behind? merge-state)}
+       repo (assoc :pr/repo repo)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; GitLab MR status mapping + unified conversion

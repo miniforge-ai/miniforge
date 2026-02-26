@@ -86,6 +86,8 @@
    :confirm         nil
    :search-matches  []
    :search-match-idx nil
+   ;; PR filter state (:open, :closed, :merged, :all)
+   :pr-filter-state :open
    ;; Train state
    :active-train-id nil
    ;; Filter palette
