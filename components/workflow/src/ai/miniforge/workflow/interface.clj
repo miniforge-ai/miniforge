@@ -442,6 +442,38 @@
   ((requiring-resolve 'ai.miniforge.workflow.comparison/compare-workflows)
    execution-states))
 
+;------------------------------------------------------------------------------ Layer 6b
+;; Event-driven triggers
+
+(defn create-merge-trigger
+  "Create a merge trigger that subscribes to an event stream.
+
+   Arguments:
+   - event-stream: Event stream to subscribe to
+   - trigger-config: {:triggers [{:on :pr/merged :repo ... :run {...}}]}
+   - opts: Options map, passed to workflow execution
+
+   Returns {:subscriber-id keyword, :stop-fn (fn [])}
+
+   Example:
+     (def trigger (create-merge-trigger stream
+                    {:triggers [{:on :pr/merged
+                                 :repo \"my-org/my-repo\"
+                                 :run {:workflow-id :deploy-v1
+                                       :version \"1.0.0\"
+                                       :input-from-event {:branch :pr/branch}}}]}
+                    {}))
+     ;; Later:
+     (stop-trigger! trigger)"
+  [event-stream trigger-config opts]
+  ((requiring-resolve 'ai.miniforge.workflow.trigger/create-merge-trigger)
+   event-stream trigger-config opts))
+
+(defn stop-trigger!
+  "Stop a merge trigger. Unsubscribes and cancels pending work."
+  [trigger]
+  ((requiring-resolve 'ai.miniforge.workflow.trigger/stop-trigger!) trigger))
+
 ;------------------------------------------------------------------------------ Layer 7
 ;; Workflow registry
 
