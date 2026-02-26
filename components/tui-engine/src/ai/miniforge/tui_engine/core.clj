@@ -21,10 +21,15 @@
 
    Implements the core application loop:
    1. Messages arrive via dispatch! (from input polling or external subscriptions)
-   2. The update function produces a new model (pure)
-   3. The view function produces a render tree (pure)
-   4. The render tree is flattened to a cell buffer and diffed against previous
-   5. Changed cells are written to the screen
+   2. The update function produces a new model (pure, in dosync)
+   3. An add-watch on the model ref triggers rendering
+   4. The render function diffs the cell buffer and writes only changed cells
+
+   Concurrency model:
+   - model and prev-buffer are refs, coordinated via dosync
+   - add-watch on model-ref triggers rendering after every state transition
+   - Rendering is serialized via a lock to prevent concurrent screen writes
+   - Side-effects are extracted during dosync and executed asynchronously
 
    Throttling: user input renders immediately. External messages are batched
    and rendered at a configurable frame rate (default 1 fps)."
@@ -34,6 +39,46 @@
    [ai.miniforge.tui-engine.layout :as layout]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Rendering primitives
+
+(defn- paint-screen!
+  "Impure: diff new-buffer against prev-buffer and write changed cells to screen.
+   Must be called under the render lock to prevent concurrent screen writes.
+   Returns new-buffer (to be stored as prev-buffer)."
+  [screen prev-buffer new-buffer]
+  (let [buf-rows (count new-buffer)
+        buf-cols (if (pos? buf-rows) (count (first new-buffer)) 0)
+        [scr-cols scr-rows] (screen/get-size screen)
+        resized? (or (nil? prev-buffer)
+                     (not= buf-rows (count prev-buffer))
+                     (and (pos? buf-rows) (seq prev-buffer)
+                          (not= buf-cols (count (first prev-buffer)))))]
+    ;; Only clear on first render or resize — never on normal frames
+    (when resized? (screen/clear! screen))
+    ;; Cell-level diff: only write cells that actually changed
+    (doseq [row (range (min scr-rows buf-rows))
+            col (range (min scr-cols (count (nth new-buffer row))))]
+      (let [new-cell (get-in new-buffer [row col])
+            old-cell (when-not resized? (get-in prev-buffer [row col]))]
+        (when (or resized? (not= new-cell old-cell))
+          (let [{:keys [char fg bg bold?]} new-cell]
+            (when char
+              (screen/put-string! screen col row (str char) fg bg (boolean bold?)))))))
+    (screen/refresh! screen)
+    new-buffer))
+
+(defn- do-render!
+  "Compute a new buffer from the model and paint it to screen.
+   Updates buffer-ref transactionally. Serialized by the render lock."
+  [{:keys [view-fn screen buffer-ref render-lock]} model]
+  (let [[cols rows] (screen/get-size screen)
+        new-buffer (view-fn model [cols rows])
+        prev-buffer @buffer-ref
+        painted (locking render-lock
+                  (paint-screen! screen prev-buffer new-buffer))]
+    (dosync (ref-set buffer-ref painted))))
+
+;------------------------------------------------------------------------------ Layer 1
 ;; App state structure
 
 (defn create-app
@@ -54,53 +99,55 @@
    a message vector (e.g. [:msg/prs-synced {:pr-items [...]}]) which is dispatched
    back into the update loop.
 
+   Installs an add-watch on the model ref that triggers rendering on every
+   state change. The watcher is the sole render trigger — dispatch! only
+   does the pure model update.
+
    Returns an atom holding the app state."
   [{:keys [init update view subscriptions effect-handler screen fps]
     :or {fps 1}}]
-  (atom {:model          (init)
-         :update-fn      update
-         :view-fn        view
-         :subscriptions  subscriptions
-         :effect-handler effect-handler
-         :screen         (or screen (screen/create-screen))
-         :fps            fps
-         :running?       false
-         :input-thread   nil
-         :unsub-fn       nil
-         :prev-buffer    nil
-         :effect-threads (atom #{})}))
+  (let [model-ref   (ref (init))
+        buffer-ref  (ref nil)
+        render-lock (Object.)
+        scr         (or screen (screen/create-screen))
+        app-state   {:model-ref      model-ref
+                     :buffer-ref     buffer-ref
+                     :update-fn      update
+                     :view-fn        view
+                     :subscriptions  subscriptions
+                     :effect-handler effect-handler
+                     :screen         scr
+                     :fps            fps
+                     :running?       false
+                     :input-thread   nil
+                     :unsub-fn       nil
+                     :render-lock    render-lock
+                     :effect-threads (atom #{})}]
+    ;; Install render watcher — fires after every model ref change
+    (add-watch model-ref ::render
+               (fn [_key _ref _old-model new-model]
+                 (try
+                   (do-render! app-state new-model)
+                   (catch Exception _))))
+    (atom app-state)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Rendering
+;------------------------------------------------------------------------------ Layer 2
+;; Public render entry point (for initial render and tests)
 
 (defn render!
   "Render the current model to screen. Only writes changed cells.
    Uses cell-level diffing against prev-buffer to avoid full-screen
-   rewrites that cause visible flashing."
-  [app-state]
-  (let [{:keys [model view-fn screen prev-buffer]} app-state
-        [cols rows] (screen/get-size screen)
-        new-buffer (view-fn model [cols rows])
-        resized? (or (nil? prev-buffer)
-                     (not= (count new-buffer) (count prev-buffer))
-                     (and (seq new-buffer) (seq prev-buffer)
-                          (not= (count (first new-buffer))
-                                (count (first prev-buffer)))))]
-    ;; Only clear on first render or resize — never on normal frames
-    (when resized? (screen/clear! screen))
-    ;; Cell-level diff: only write cells that actually changed
-    (doseq [row (range (min rows (count new-buffer)))
-            col (range (min cols (count (nth new-buffer row))))]
-      (let [new-cell (get-in new-buffer [row col])
-            old-cell (when-not resized? (get-in prev-buffer [row col]))]
-        (when (or resized? (not= new-cell old-cell))
-          (let [{:keys [char fg bg bold?]} new-cell]
-            (when char
-              (screen/put-string! screen col row (str char) fg bg (boolean bold?)))))))
-    (screen/refresh! screen)
-    (assoc app-state :prev-buffer new-buffer)))
+   rewrites that cause visible flashing.
 
-;------------------------------------------------------------------------------ Layer 2
+   For backward compatibility with (swap! app render!) in tests.
+   The model-ref watcher handles all dispatch-driven renders; this
+   is only needed for the initial render in start!."
+  [app-state]
+  (let [{:keys [model-ref]} app-state]
+    (do-render! app-state @model-ref)
+    app-state))
+
+;------------------------------------------------------------------------------ Layer 3
 ;; Side-effect execution
 
 (defn- execute-side-effect!
@@ -128,12 +175,15 @@
       (swap! effect-threads conj thread))
     (.start thread)))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 4
 ;; Message dispatch
 
 (defn dispatch!
   "Dispatch a message into the Elm update loop.
-   Calls update, then re-renders.
+
+   Uses dosync to atomically update the model ref. The add-watch
+   installed in create-app triggers rendering after each state transition.
+   dispatch! only does the pure model update — no screen I/O.
 
    Side-effect protocol:
    If the new model contains a :side-effect key, it is stripped from the model
@@ -141,14 +191,16 @@
    runs on a background thread and its result message is dispatched back into
    the update loop."
   [app msg]
-  (let [pending-effect (atom nil)]
-    (swap! app (fn [state]
-                 (let [new-model ((:update-fn state) (:model state) msg)
-                       fx (:side-effect new-model)
-                       clean-model (dissoc new-model :side-effect)]
-                   (when fx (reset! pending-effect fx))
-                   (render! (assoc state :model clean-model)))))
-    ;; Execute side-effect outside swap! to avoid re-entrancy issues
+  (let [{:keys [model-ref update-fn]} @app
+        pending-effect (atom nil)]
+    ;; Atomic model update — watcher fires after commit to handle rendering
+    (dosync
+     (let [new-model (update-fn @model-ref msg)
+           fx (:side-effect new-model)
+           clean-model (dissoc new-model :side-effect)]
+       (when fx (reset! pending-effect fx))
+       (ref-set model-ref clean-model)))
+    ;; Side-effects executed outside the transaction
     (when-let [fx @pending-effect]
       (when-let [handler (:effect-handler @app)]
         (execute-side-effect! fx handler
@@ -158,9 +210,9 @@
 (defn get-model
   "Get current model snapshot."
   [app]
-  (:model @app))
+  @(:model-ref @app))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 5
 ;; Input polling thread
 
 (defn- start-input-thread!
@@ -182,15 +234,18 @@
     (.start thread)
     thread))
 
-;------------------------------------------------------------------------------ Layer 5
+;------------------------------------------------------------------------------ Layer 6
 ;; Application lifecycle
 
 (defn start!
   "Start the TUI application.
    1. Enter alternate screen
-   2. Start input polling thread
-   3. Register subscriptions
-   4. Render initial view
+   2. Initial render
+   3. Start input polling thread
+   4. Register subscriptions
+
+   The model-ref watcher (installed in create-app) handles all subsequent
+   renders triggered by dispatch!.
 
    Returns the app atom."
   [app]
@@ -216,15 +271,18 @@
 
 (defn stop!
   "Stop the TUI application.
-   1. Unregister subscriptions
-   2. Stop input thread
-   3. Interrupt in-flight side-effect threads
-   4. Exit alternate screen
+   1. Remove render watcher
+   2. Unregister subscriptions
+   3. Stop input thread
+   4. Interrupt in-flight side-effect threads
+   5. Exit alternate screen
 
    Safe to call multiple times."
   [app]
   (when (:running? @app)
     (swap! app assoc :running? false)
+    ;; Remove render watcher to stop rendering
+    (remove-watch (:model-ref @app) ::render)
     ;; Unsubscribe
     (when-let [unsub (:unsub-fn @app)]
       (try (unsub) (catch Exception _)))

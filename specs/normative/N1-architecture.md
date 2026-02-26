@@ -1,7 +1,7 @@
 # N1 — Core Architecture & Concepts
 
-**Version:** 0.2.0-draft
-**Date:** 2026-02-07
+**Version:** 0.3.0-draft
+**Date:** 2026-02-16
 **Status:** Draft
 **Conformance:** MUST
 
@@ -409,10 +409,19 @@ during pack loading and workflow execution.
 
 miniforge treats structured "packs" as first-class knowledge units and artifacts. Packs are EDN-serialized and schema-validated.
 
+**Core pack types (OSS):**
+
 - **Feature Pack** (`:feature-pack`) — normalized feature intent, acceptance criteria, constraints, and references
 - **Policy Pack** (`:policy-pack`) — deterministic validation rules and scanners (see N4)
 - **Agent Profile Pack** (`:agent-profile-pack`) — agent routing, allowed capabilities, and scopes
 - **Pack Index** (`:pack-index`) — manifest of generated packs, hashes, trust labels, and provenance
+- **Workflow Pack** (`:workflow-pack`) — versioned bundle containing workflows, schemas, templates,
+  and metadata for distributable domain workflows (see §2.24)
+
+Policy Packs (N4) are a specialization of the general pack model: they follow the same
+versioning, signing, and trust semantics but their content is deterministic validation
+rules rather than workflow definitions. Workflow Packs generalize the pack model to
+arbitrary domain workflows (e.g., reporting, product-brief pipelines).
 
 Packs MUST be machine-readable and MUST NOT embed freeform prose as executable instruction.
 
@@ -423,9 +432,12 @@ All packs MUST include versioning information following this schema:
 ```clojure
 {:pack/id string                      ; REQUIRED: unique identifier (e.g., "com.example/feature-auth")
  :pack/version string                 ; REQUIRED: semantic version (e.g., "1.2.3")
- :pack/type keyword                   ; REQUIRED: :feature-pack | :policy-pack | :agent-profile-pack
+ :pack/type keyword                   ; REQUIRED: :feature-pack | :policy-pack | :agent-profile-pack | :workflow-pack
  :pack/created-at inst                ; REQUIRED: creation timestamp
  :pack/content-hash string            ; REQUIRED: sha256 over canonical EDN representation
+
+ :pack/publisher string               ; REQUIRED for :workflow-pack: publisher identity
+ :pack/miniforge-min-version string   ; REQUIRED for :workflow-pack: minimum runtime version
 
  :pack/dependencies                   ; OPTIONAL: dependencies on other packs
  [{:pack/id string
@@ -435,6 +447,20 @@ All packs MUST include versioning information following this schema:
  :pack/trust-level keyword            ; REQUIRED: :trusted | :untrusted | :tainted
  :pack/authority keyword              ; REQUIRED: :authority/instruction | :authority/data
  :pack/signature string               ; OPTIONAL: cryptographic signature over content-hash
+
+ :pack/capabilities-required          ; REQUIRED for :workflow-pack: connector-scoped permissions
+ [{:capability/id string              ; e.g., "github.pr.read", "jira.issue.write"
+   :capability/scope keyword}]        ; :read | :write
+
+ :pack/data-handling                  ; OPTIONAL: redaction and egress constraints
+ {:redaction-policy keyword           ; :none | :pii-redact | :full-redact
+  :egress-allowed? boolean}           ; default false
+
+ :pack/entrypoints                    ; REQUIRED for :workflow-pack: named workflow entrypoints
+ [{:entrypoint/name string
+   :entrypoint/workflow-ref string    ; path within pack
+   :entrypoint/input-schema {...}
+   :entrypoint/output-schema {...}}]
 
  :pack/content {...}}                 ; Pack-specific content
 ```
@@ -747,6 +773,119 @@ an evidence artifact (N6) with traceable factors. Risk scoring MUST be explainab
 factor evidence refs and MUST NOT be a black-box number without factors.
 
 See N9 §5 for risk artifact schema.
+
+### 2.24 Workflow Pack
+
+A **Workflow Pack** is a versioned, distributable bundle containing one or more workflow
+entrypoints with their schemas, templates, and metadata. Workflow Packs are the primary
+mechanism for delivering domain workflows (e.g., reporting, product-brief pipelines)
+without bloating Miniforge core.
+
+Workflow Packs are specializations of Packs (§2.10.3) with `:pack/type :workflow-pack`.
+
+```clojure
+{:workflow-pack/id string              ; REQUIRED: stable identifier (e.g., "com.miniforge/pr-review")
+ :workflow-pack/version string         ; REQUIRED: semantic version
+ :workflow-pack/publisher string       ; REQUIRED: publisher identity
+
+ :workflow-pack/entrypoints            ; REQUIRED: at least one
+ [{:entrypoint/name string
+   :entrypoint/workflow-ref string     ; path within pack bundle
+   :entrypoint/input-schema {...}      ; EDN schema for inputs
+   :entrypoint/output-schema {...}}]   ; EDN schema for outputs
+
+ :workflow-pack/capabilities-required  ; REQUIRED: connector-scoped permissions
+ [{:capability/id string               ; e.g., "github.pr.read"
+   :capability/scope keyword}]         ; :read | :write
+
+ :workflow-pack/templates [...]        ; OPTIONAL: rendering templates
+ :workflow-pack/policy-fragments [...] ; OPTIONAL: advisory by default
+ :workflow-pack/data-handling {...}}    ; OPTIONAL: redaction/egress constraints
+```
+
+#### 2.24.1 Workflow Pack Requirements
+
+Implementations MUST:
+
+1. Verify pack signature before installation (if signature is present)
+2. Record pack digest (`pack/content-hash`) in all Pack Run evidence
+3. Present required capabilities to the user before install and before run
+4. Deny connector actions not covered by granted capabilities
+5. Enforce deny-by-default for write capabilities (`:capability/scope :write`)
+6. Require re-approval when a pack update increases required capabilities
+7. Resolve pack dependencies deterministically and record resolved versions/digests
+8. Support loading packs from local bundles and configured registry roots
+
+#### 2.24.2 No Ambient Authority
+
+Packs MUST NOT inherit implicit privileges from the runtime environment. All connector
+actions MUST be mediated by the capability enforcement layer. A pack that declares
+`github.pr.read` MUST NOT be able to invoke `github.pr.comment.write` unless that
+capability is also declared and granted.
+
+### 2.25 Capability (Pack Permissions)
+
+A **Capability** is a connector-scoped permission unit that a Workflow Pack declares
+and the runtime enforces. Capabilities follow the pattern `<connector>.<resource>.<action>`.
+
+Examples:
+
+- `github.pr.read` — read PR metadata and diffs
+- `github.pr.comment.write` — post comments on PRs
+- `jira.issue.read` — read Jira issues
+- `jira.issue.write` — create/update Jira issues
+- `git.repo.checkout` — checkout repository content
+- `metrics.query.read` — query metrics endpoints
+
+#### 2.25.1 Capability Enforcement Requirements
+
+Implementations MUST:
+
+1. Maintain an explicit grant set per Pack Run (capabilities granted at install/run time)
+2. Intercept all connector actions and validate against the grant set
+3. Block and log denied actions with the attempted capability
+4. Default write capabilities (any `*.write`) to denied unless explicitly granted
+5. Record granted capabilities in Pack Run evidence (N6)
+6. Record capability denials as events (N3)
+
+### 2.26 Pack Run
+
+A **Pack Run** is an execution instance of a Workflow Pack entrypoint. Each Pack Run
+is an observable, auditable unit of work that produces evidence and artifacts.
+
+```clojure
+{:pack-run/id uuid                     ; REQUIRED: unique run identifier
+ :pack-run/pack-id string              ; REQUIRED: workflow pack identifier
+ :pack-run/pack-version string         ; REQUIRED: pack version executed
+ :pack-run/pack-digest string          ; REQUIRED: content hash at run time
+ :pack-run/entrypoint string           ; REQUIRED: entrypoint name
+ :pack-run/status keyword              ; REQUIRED: :pending, :executing, :completed, :failed, :cancelled
+
+ :pack-run/signature-verified? boolean ; REQUIRED: whether signature was verified
+ :pack-run/capabilities-granted        ; REQUIRED: capabilities granted for this run
+ [{:capability/id string
+   :capability/scope keyword}]
+
+ :pack-run/inputs {...}                ; REQUIRED: input values (redacted per data-handling)
+ :pack-run/outputs {...}               ; OPTIONAL: output values upon completion
+
+ :pack-run/workflow-id uuid            ; REQUIRED: workflow created for this run
+ :pack-run/evidence-bundle-id uuid     ; OPTIONAL: created upon completion
+
+ :pack-run/started-at inst             ; OPTIONAL
+ :pack-run/completed-at inst}          ; OPTIONAL
+```
+
+#### 2.26.1 Pack Run Requirements
+
+Implementations MUST:
+
+1. Create a workflow (§2.1) for each Pack Run
+2. Emit Pack Run events (see N3) for lifecycle transitions
+3. Generate an evidence bundle (N6) that includes pack identity, digest, signature
+   verification result, and granted capabilities
+4. Enforce capabilities throughout the run (§2.25.1)
+5. Support re-running with a pinned pack version/digest
 
 ---
 
@@ -1373,6 +1512,7 @@ Research directions:
 - **Advisory Annotation** - Non-blocking message attached to a workflow or event by a Listener (N8)
 - **Agent** - Autonomous software entity that executes workflow phases
 - **Artifact** - Work product created during workflow execution
+- **Capability** - Connector-scoped permission unit required by a Workflow Pack; deny-by-default for writes
 - **Capability Level** - Listener permission tier: OBSERVE, ADVISE, or CONTROL (N8)
 - **Control Action** - Command that modifies workflow execution state, subject to RBAC and gates (N8)
 - **Evidence Bundle** - Immutable audit trail from intent to outcome
@@ -1384,7 +1524,8 @@ Research directions:
 - **Operational Policy** - Versioned runtime configuration artifacts controlling service behavior under load (N7)
 - **Outer Loop** - Phase transition state machine
 - **Phase** - Logical SDLC stage (Plan, Implement, Verify, etc.)
-- **Policy Pack** - Collection of validation rules
+- **Pack Run** - Execution instance of a Workflow Pack entrypoint, producing evidence and audit linkage
+- **Policy Pack** - Collection of validation rules; specialization of pack model (§2.10.3) (N4)
 - **PR Train** - Ordered set of PR Work Items with dependency relationships for sequential merge (N9)
 - **PR Work Item** - Canonical internal model of a PR in the Fleet control plane (N9)
 - **Provider** - External code hosting platform (GitHub, GitLab) as source of PR events (N9)
@@ -1394,11 +1535,14 @@ Research directions:
 - **Tool** - External capability invoked by agent
 - **Verification** - Executing an Experiment Pack against a candidate Operational Policy to produce pass/fail evidence (N7)
 - **Workflow** - Top-level unit of autonomous execution
+- **Workflow Pack** - Versioned bundle containing workflows, schemas, templates, and metadata
 
 ---
 
 **Version History:**
 
+- 0.3.0-draft (2026-02-16): Added Workflow Pack, Capability, Pack Run concepts
+  (§2.10.3 extended, §2.24–§2.26, §12 glossary)
 - 0.2.0-draft (2026-02-07): Added extension spec concepts from N7, N8, N9
   (§2.11–§2.23, §12 glossary)
 - 0.1.0-draft (2026-01-23): Initial core architecture specification

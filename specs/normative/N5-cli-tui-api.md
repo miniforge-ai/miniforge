@@ -1,7 +1,7 @@
 # N5 — Interface Standard: CLI/TUI/API
 
-**Version:** 0.3.0-draft
-**Date:** 2026-02-07
+**Version:** 0.4.0-draft
+**Date:** 2026-02-16
 **Status:** Draft
 **Conformance:** MUST
 
@@ -549,19 +549,46 @@ Flags:
 
 #### 2.3.8 Pack Namespace
 
-**Purpose:** Inspect, verify, and promote packs.
+**Purpose:** Manage, inspect, install, and run packs (including Workflow Packs per N1 §2.24).
 
 ```bash
-# List packs in registry roots
+# Search for packs across configured registry roots
+miniforge pack search QUERY [flags]
+
+Flags:
+  --type TYPE          Filter by pack type (feature|policy|agent-profile|workflow|index)
+  --publisher PUB      Filter by publisher
+  --capability CAP     Filter by required capability
+  --json               Output as JSON
+
+# List installed packs
 miniforge pack list [flags]
 
 Flags:
   --root DIR           Add an additional registry root
-  --type TYPE          Filter by pack type (feature|policy|agent-profile|index)
+  --type TYPE          Filter by pack type (feature|policy|agent-profile|workflow|index)
   --json               Output as JSON
 
-# Show pack details (including provenance + hash)
+# Show pack details (including provenance, hash, capabilities, entrypoints)
 miniforge pack show PACK_ID [flags]
+
+# Install a pack from a registry root or local bundle
+miniforge pack install PACK_ID[@VERSION] [flags]
+
+Flags:
+  --root DIR           Registry root to install from (or local path)
+  --grant CAP          Pre-grant capability (repeatable; prompted interactively if omitted)
+  --dry-run            Show what would be installed without installing
+
+# Update an installed pack
+miniforge pack update PACK_ID [flags]
+
+Flags:
+  --to VERSION         Target version (default: latest)
+  --accept-capabilities  Accept capability changes without interactive prompt
+
+# Remove an installed pack
+miniforge pack remove PACK_ID [flags]
 
 # Promote pack trust level (local OSS workflow)
 miniforge pack promote PACK_ID [flags]
@@ -579,6 +606,26 @@ Policy Enforcement:
 
 # Verify pack signature/hash
 miniforge pack verify PACK_ID [flags]
+
+# Run a Workflow Pack entrypoint
+miniforge pack run PACK_ID[@VERSION] [flags]
+
+Flags:
+  --entry ENTRYPOINT   Entrypoint name (required if pack has multiple entrypoints)
+  --input KEY=VALUE    Input parameter (repeatable)
+  --inputs-file FILE   JSON/EDN file with input parameters
+  --grant CAP          Grant capability for this run (repeatable)
+  --pin-digest         Pin to exact content digest (no auto-update)
+  --dry-run            Show what would be executed without running
+
+# Configure pack trust policies
+miniforge pack trust [flags]
+
+Flags:
+  --allow-publisher PUB    Add publisher to allowlist
+  --deny-publisher PUB     Add publisher to denylist
+  --min-trust-level LEVEL  Set minimum trust level for installs
+  --show                   Show current trust configuration
 ```
 
 **Requirements:**
@@ -586,6 +633,11 @@ miniforge pack verify PACK_ID [flags]
 - MUST treat pack promotion as a policy-gated operation
 - MUST record pack hashes and promotion evidence in N6 evidence bundles
 - MUST NOT allow untrusted packs to gain instruction authority without promotion/signature
+- MUST present required capabilities before install and before run (interactive prompt)
+- MUST deny write capabilities by default unless explicitly granted
+- MUST require re-approval when pack update increases capabilities
+- MUST emit pack lifecycle events (N3 §3.12) for install/update/remove
+- MUST emit Pack Run events (N3 §3.12) for run start/complete/fail
 
 ## 3. TUI Primitives
 
@@ -909,6 +961,65 @@ j/k:nav  Enter:detail  O:open  Space:select  p:filter  c:chat  t:train  /:search
 - MUST support `:merge-next` — trigger merge of next ready PR in train
 - MUST show per-PR readiness score and recommended action within train context
 - Train merge orchestration MUST respect automation tier constraints (N9 §10)
+
+#### 3.2.11 Pack Browser View
+
+```text
+╭─────────────────────────────────────────────────────────────────────────────╮
+│ miniforge pack browser  [Installed: 12 | Available: 47]         ⟳ 30s ago  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ PACK                   PUBLISHER       TYPE       VER    STATUS    TRUST    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ ✓ pr-review            miniforge       workflow   1.2.0  installed trusted  │
+│ ✓ tf-aws-foundations   miniforge       policy     2.0.1  installed trusted  │
+│ ● risk-report          miniforge       workflow   0.9.0  update    trusted  │
+│ ○ sprint-metrics       acme-co         workflow   1.0.0  available verified │
+│ ○ k8s-drift-check      community       workflow   0.5.2  available unsigned │
+╰─────────────────────────────────────────────────────────────────────────────╯
+
+[j/k] Navigate  [Enter] Details  [i] Install  [u] Update  [x] Remove  [/] Search
+```
+
+**Requirements:**
+
+- MUST list installed and available packs with publisher, type, version, status, trust
+- MUST show signature/trust status prominently
+- MUST support search and filtering by publisher, type, capability
+- MUST allow installing, updating, and removing packs with capability grant review
+- MUST present required capabilities for review before confirming install
+
+#### 3.2.12 Run Launcher View
+
+```text
+╭─────────────────────────────────────────────────────────────────────────────╮
+│ Run Pack: pr-review@1.2.0 (miniforge)                   ✓ signature valid  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Entrypoint: [review-pr ▼]                                                  │
+│                                                                             │
+│ Inputs:                                                                     │
+│   repo:     [acme/api         ]                                            │
+│   pr_number:[42               ]                                            │
+│   depth:    [standard ▼       ]                                            │
+│                                                                             │
+│ Capabilities Requested:                     Granted:                        │
+│   github.pr.read                            ✓ auto                         │
+│   github.pr.comment.write                   ○ requires approval            │
+│   git.repo.checkout                         ✓ auto                         │
+│                                                                             │
+│ Trust: trusted | Digest: sha256:a1b2c3...                                  │
+╰─────────────────────────────────────────────────────────────────────────────╯
+
+[Tab] Next field  [Enter] Submit/Grant  [Esc] Cancel  [p] Pin digest
+```
+
+**Requirements:**
+
+- MUST allow entrypoint selection when pack has multiple entrypoints
+- MUST generate input forms from pack entrypoint schemas
+- MUST show required capabilities with grant status (auto-granted reads vs pending writes)
+- MUST show pack trust and signature status
+- MUST support pinning to exact pack digest for reproducible runs
+- MUST allow re-running with same inputs and pinned version
 
 ### 3.3 TUI Keyboard Navigation
 
@@ -1425,6 +1536,8 @@ Research directions:
 
 **Version History:**
 
+- 0.4.0-draft (2026-02-16): Extended pack namespace with search/install/update/remove/run/trust
+  commands (§2.3.8); added Pack Browser (§3.2.11) and Run Launcher (§3.2.12) TUI views
 - 0.3.0-draft (2026-02-07): Added extension spec interfaces from N7, N8, N9
   (§2.3.3, §3.2.6–§3.2.10, §4.2.4)
 - 0.2.0-draft (2026-02-04): Added DAG Kanban view and task lifecycle CLI command (§3.2.5)

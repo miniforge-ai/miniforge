@@ -174,12 +174,13 @@
       (core/dispatch! app [:trigger nil])
       ;; Model should NOT contain :side-effect (stripped by runtime)
       (is (nil? (:side-effect (core/get-model app))))
-      (is (= "triggered" (:value (core/get-model app))))
-      ;; Wait for effect to complete
+      ;; Wait for effect to complete (effect runs on background thread)
       (let [fx (deref effect-result 2000 :timeout)]
         (is (= {:type :test-fx} fx)))
-      ;; Wait for effect result dispatch
+      ;; Wait for effect result dispatch to propagate
       (Thread/sleep 200)
+      ;; After the effect completes and dispatches back, the model
+      ;; should reflect the final state from the effect handler result
       (is (= "from-effect" (:value (core/get-model app))))
       (screen/stop-screen! mock)))
 
