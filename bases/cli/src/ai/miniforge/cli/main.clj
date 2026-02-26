@@ -201,6 +201,7 @@ Usage: miniforge <command> [options]
 Commands:
   run <spec-file>     Execute a workflow from a spec file
     --interactive     Interactive mode (chat-based)
+    --tui             Monitor workflow in terminal UI
     --worktree <path> Custom worktree path
 
   status [id]         Show workflow status
@@ -281,6 +282,7 @@ Examples:
     :fn run-cmd
     :args->opts [:spec]
     :spec {:interactive {:coerce :boolean :alias :i}
+           :tui         {:coerce :boolean}
            :worktree    {:alias :w}}}
 
    ;; Status command

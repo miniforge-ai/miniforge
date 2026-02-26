@@ -277,7 +277,7 @@
           enriched-spec (context/decorate-spec-with-runtime-context spec opts)
           workflow-input (context/spec->workflow-input enriched-spec)
           artifact-store (create-artifact-store quiet)
-          event-stream (es/create-event-stream)
+          event-stream (or (:event-stream opts) (es/create-event-stream))
           workflow-id (or (get-in enriched-spec [:spec/metadata :session-id]) (random-uuid))
           ;; Control state for dashboard commands (pause/resume/stop)
           control-state (atom {:paused false :stopped false :adjustments {}})
