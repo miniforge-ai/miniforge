@@ -96,6 +96,59 @@
     (spit cmd-file (pr-str {:command command :timestamp (java.util.Date.)}))))
 
 ;------------------------------------------------------------------------------ Layer 3
+;; File tracking and polling
+
+(defn- track-file!
+  "Track a new event file: register it in tracked map and hydrate
+   all existing lines through dispatch-fn."
+  [tracked dispatch-fn ^java.io.File f]
+  (let [path (.getAbsolutePath f)
+        pos  (atom 0)]
+    (swap! tracked assoc path {:file f :position pos})
+    (let [lines (read-new-lines f pos)]
+      (parse-and-dispatch! lines dispatch-fn))))
+
+(defn- poll-tracked-files!
+  "Read new lines from all tracked files and dispatch them."
+  [tracked dispatch-fn]
+  (doseq [[_path {:keys [file position]}] @tracked]
+    (let [lines (read-new-lines file position)]
+      (when (seq lines)
+        (parse-and-dispatch! lines dispatch-fn)))))
+
+(defn- scan-for-new-files!
+  "Check for new .edn files in dir and start tracking them."
+  [dir tracked dispatch-fn]
+  (let [current-files (scan-event-files dir)
+        tracked-paths (set (keys @tracked))]
+    (doseq [^java.io.File f current-files]
+      (when-not (tracked-paths (.getAbsolutePath f))
+        (track-file! tracked dispatch-fn f)))))
+
+(defn- poll-loop
+  "Polling loop body for the file-subscription daemon thread.
+   Polls tracked files every poll-ms, scans for new files every scan-ms."
+  [running? tracked dispatch-fn dir poll-ms scan-ms]
+  (try
+    (let [scan-counter (atom 0)]
+      (while @running?
+        (Thread/sleep poll-ms)
+        (when @running?
+          (poll-tracked-files! tracked dispatch-fn)
+          (swap! scan-counter + poll-ms)
+          (when (>= @scan-counter scan-ms)
+            (reset! scan-counter 0)
+            (scan-for-new-files! dir tracked dispatch-fn)))))
+    (catch InterruptedException _)
+    (catch Exception _)))
+
+(defn- stop-subscription!
+  "Stop the file-subscription polling thread."
+  [running? ^Thread thread]
+  (reset! running? false)
+  (.interrupt thread))
+
+;------------------------------------------------------------------------------ Layer 4
 ;; Main subscription entry point
 
 (defn subscribe-to-files!
@@ -114,57 +167,15 @@
   (let [poll-ms   (get opts :poll-ms 500)
         scan-ms   (get opts :scan-ms 2000)
         dir       (events-dir)
-        ;; Map of file-path -> position-atom for tracked files
         tracked   (atom {})
         running?  (atom true)
-
-        ;; Track a file: read all existing lines (hydrate), store position
-        track-file!
-        (fn [^java.io.File f]
-          (let [path (.getAbsolutePath f)
-                pos  (atom 0)]
-            (swap! tracked assoc path {:file f :position pos})
-            ;; Hydrate: read all existing lines
-            (let [lines (read-new-lines f pos)]
-              (parse-and-dispatch! lines dispatch-fn))))
-
-        ;; Initial scan — hydrate all existing files
-        _  (doseq [f (scan-event-files dir)]
-             (track-file! f))
-
-        ;; Background polling thread
-        thread
-        (Thread.
-         (fn []
-           (try
-             (let [scan-counter (atom 0)]
-               (while @running?
-                 (Thread/sleep poll-ms)
-                 (when @running?
-                   ;; Poll tracked files for new lines
-                   (doseq [[_path {:keys [file position]}] @tracked]
-                     (let [lines (read-new-lines file position)]
-                       (when (seq lines)
-                         (parse-and-dispatch! lines dispatch-fn))))
-
-                   ;; Periodically scan for new files
-                   (swap! scan-counter + poll-ms)
-                   (when (>= @scan-counter scan-ms)
-                     (reset! scan-counter 0)
-                     (let [current-files (scan-event-files dir)
-                           tracked-paths (set (keys @tracked))]
-                       (doseq [^java.io.File f current-files]
-                         (when-not (tracked-paths (.getAbsolutePath f))
-                           (track-file! f))))))))
-             (catch InterruptedException _)
-             (catch Exception _))))]
-    (.setDaemon thread true)
-    (.setName thread "tui-file-subscription")
-    (.start thread)
-    ;; Return cleanup function
-    (fn []
-      (reset! running? false)
-      (.interrupt thread))))
+        _         (doseq [f (scan-event-files dir)]
+                    (track-file! tracked dispatch-fn f))
+        thread    (doto (Thread. #(poll-loop running? tracked dispatch-fn dir poll-ms scan-ms))
+                    (.setDaemon true)
+                    (.setName "tui-file-subscription")
+                    (.start))]
+    (partial stop-subscription! running? thread)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
