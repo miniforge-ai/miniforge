@@ -231,6 +231,13 @@
   [workflow]
   ((requiring-resolve 'ai.miniforge.workflow.runner/validate-pipeline) workflow))
 
+(defn run-chain
+  "Execute a chain of workflows sequentially.
+   See workflow.chain for details."
+  [chain-def chain-input opts]
+  ((requiring-resolve 'ai.miniforge.workflow.chain/run-chain)
+   chain-def chain-input opts))
+
 ;------------------------------------------------------------------------------ Layer 6
 ;; Configurable workflow API (Legacy)
 
