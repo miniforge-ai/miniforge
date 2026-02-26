@@ -86,13 +86,14 @@
     buffer))
 
 (defn- render-data-cell
-  "Render single data cell."
+  "Render single data cell. Supports per-cell color via :<key>-fg in row data."
   [buffer row-data col-idx col-spec width col-widths render-row fg bg]
   (let [val (str (get row-data (:key col-spec) ""))
+        cell-fg (or (get row-data (keyword (str (name (:key col-spec)) "-fg"))) fg)
         txt (pad-right (truncate-str val width) width)
         x-offset (compute-col-offset col-widths col-idx)]
     (buf/buf-put-string buffer x-offset render-row txt
-                        {:fg fg :bg bg :bold? false})))
+                        {:fg cell-fg :bg bg :bold? false})))
 
 (defn- render-data-row
   "Render single data row across all columns."

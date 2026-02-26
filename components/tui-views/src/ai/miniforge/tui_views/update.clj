@@ -174,14 +174,123 @@
 (defn- nav-top-with-visual   [m] (-> (nav/navigate-top m)    sel/update-visual-selection))
 (defn- nav-bottom-with-visual [m] (-> (nav/navigate-bottom m) sel/update-visual-selection))
 
+(def ^:private selectable-views
+  #{:workflow-list :pr-fleet :artifact-browser :train-view :repo-manager})
+
+;; ── Extracted action handlers ──
+
+(defn- nav-to-evidence [model]
+  (nav/switch-view model :evidence model/views))
+
+(defn- handle-quit [model]
+  (assoc model :quit? true))
+
+(defn- handle-enter-or-confirm [model]
+  (if (and (in-repo-manager? model) (= :browse (repo-manager-source model)))
+    (repo-manager-add-selected model)
+    (nav/enter-detail model)))
+
+(defn- handle-escape-cascade [model]
+  (cond
+    (:visual-anchor model)        (sel/exit-visual-mode model)
+    (seq (:selected-ids model))   (sel/clear-selection model)
+    (:active-filter model)        (assoc model :filtered-indices nil :selected-idx 0
+                                               :active-filter nil)
+    (:filtered-indices model)     (assoc model :filtered-indices nil :selected-idx 0)
+    (seq (:search-matches model)) (assoc model :search-matches [] :search-match-idx nil)
+    :else                         (nav/go-back model)))
+
+(defn- handle-toggle-or-expand [model]
+  (if (selectable-views (:view model))
+    (sel/toggle-selection model)
+    (nav/toggle-expand model)))
+
+(defn- handle-chat-or-clear [model]
+  (if (#{:pr-fleet :pr-detail} (:view model))
+    (chat/enter model)
+    (sel/clear-selection model)))
+
+(defn- handle-train-view [model]
+  (if (:active-train-id model)
+    (command/execute-command model ":train")
+    (assoc model :flash-message "No active train. Use :create-train NAME")))
+
+(defn- handle-refresh-or-sync [model]
+  (if (#{:pr-fleet :repo-manager} (:view model))
+    (command/execute-command model ":sync")
+    (nav/refresh model)))
+
+(defn- handle-sync [model]
+  (if (#{:pr-fleet :repo-manager} (:view model))
+    (command/execute-command model ":sync")
+    model))
+
+(defn- handle-browse-or-kanban [model]
+  (if (in-repo-manager? model)
+    (repo-manager-open-browse model :all)
+    (nav/switch-view model :dag-kanban model/views)))
+
+(defn- handle-fleet-view [model]
+  (if (in-repo-manager? model)
+    (-> (reset-repo-manager-state model :fleet)
+        (assoc :flash-message "Showing configured repositories."))
+    model))
+
+(defn- handle-open-browse [model]
+  (if (in-repo-manager? model)
+    (repo-manager-open-browse model :all)
+    model))
+
+(defn- handle-open-in-browser [model]
+  (let [url (case (:view model)
+              :pr-fleet  (let [prs (:pr-items model [])
+                               visible (if-let [fi (:filtered-indices model)]
+                                         (into [] (keep-indexed #(when (contains? fi %1) %2)) prs)
+                                         prs)]
+                           (:pr/url (get visible (:selected-idx model))))
+              :pr-detail (get-in model [:detail :selected-pr :pr/url])
+              nil)]
+    (if url
+      (assoc model :side-effect (effect/open-url url)
+                   :flash-message (str "Opening " url "..."))
+      (assoc model :flash-message "No URL available for this item"))))
+
+(defn- handle-remove-repos [model]
+  (if (in-repo-manager? model)
+    (if (= :fleet (repo-manager-source model))
+      (repo-manager-request-remove model)
+      (assoc model :flash-message "Switch to fleet (f) to remove repositories."))
+    model))
+
+(defn- handle-cycle-tab [model]
+  (cond
+    (nav/in-detail-subview? model)                (nav/cycle-detail-subview model)
+    (some #{(:view model)} model/detail-views)    (nav/cycle-pane model)
+    (some #{(:view model)} model/top-level-views) (nav/cycle-top-level-view model)
+    :else                                         model))
+
+(defn- handle-cycle-tab-reverse [model]
+  (cond
+    (nav/in-detail-subview? model)                (nav/cycle-detail-subview-reverse model)
+    (some #{(:view model)} model/detail-views)    (nav/cycle-pane-reverse model)
+    (some #{(:view model)} model/top-level-views) (nav/cycle-top-level-view-reverse model)
+    :else                                         model))
+
+(defn- handle-select-all [model]
+  (if (and (selectable-views (:view model)) (sel/has-selection? model))
+    (sel/select-all model)
+    model))
+
+(defn- handle-enter-visual-mode [model]
+  (if (and (selectable-views (:view model)) (sel/has-selection? model))
+    (sel/enter-visual-mode model)
+    model))
+
 ;; ── Action registries ──
 ;;
 ;; Maps :action/* tokens → handler (fn [model] -> model').
 ;; The keybinding EDN maps key tokens → action tokens; these registries
 ;; resolve action tokens to concrete handler functions.
-
-(def ^:private selectable-views
-  #{:workflow-list :pr-fleet :artifact-browser :train-view :repo-manager})
 
 (def ^:private action-handlers
   "Action token → handler function registry.
@@ -199,119 +308,29 @@
    :action/enter-filter-mode  mode/enter-filter-mode
    :action/next-search-match  nav/next-search-match
    :action/prev-search-match  nav/prev-search-match
-   :action/enter-visual-mode  sel/enter-visual-mode
-   :action/select-all         sel/select-all
    :action/clear-selection    sel/clear-selection
-   :action/evidence-view      #(nav/switch-view % :evidence model/views)
+   :action/evidence-view      nav-to-evidence
    :action/toggle-help        nav/toggle-help
-   :action/quit               #(assoc % :quit? true)})
+   :action/quit               handle-quit})
 
 (def ^:private context-action-handlers
   "Action token → handler for actions that depend on view context."
-  {:action/enter-or-confirm
-   (fn [model]
-     (if (and (in-repo-manager? model) (= :browse (repo-manager-source model)))
-       (repo-manager-add-selected model)
-       (nav/enter-detail model)))
-
-   :action/escape-cascade
-   (fn [model]
-     (cond
-       (:visual-anchor model)        (sel/exit-visual-mode model)
-       (seq (:selected-ids model))   (sel/clear-selection model)
-       (:active-filter model)        (assoc model :filtered-indices nil :selected-idx 0
-                                                  :active-filter nil)
-       (:filtered-indices model)     (assoc model :filtered-indices nil :selected-idx 0)
-       (seq (:search-matches model)) (assoc model :search-matches [] :search-match-idx nil)
-       :else                         (nav/go-back model)))
-
-   :action/toggle-or-expand
-   (fn [model]
-     (if (selectable-views (:view model))
-       (sel/toggle-selection model)
-       (nav/toggle-expand model)))
-
-   :action/chat-or-clear
-   (fn [model]
-     (if (#{:pr-fleet :pr-detail} (:view model))
-       (chat/enter model)
-       (sel/clear-selection model)))
-
-   :action/train-view
-   (fn [model]
-     (if (:active-train-id model)
-       (command/execute-command model ":train")
-       (assoc model :flash-message "No active train. Use :create-train NAME")))
-
-   :action/refresh-or-sync
-   (fn [model]
-     (if (#{:pr-fleet :repo-manager} (:view model))
-       (command/execute-command model ":sync")
-       (nav/refresh model)))
-
-   :action/sync
-   (fn [model]
-     (if (#{:pr-fleet :repo-manager} (:view model))
-       (command/execute-command model ":sync")
-       model))
-
-   :action/browse-or-kanban
-   (fn [model]
-     (if (in-repo-manager? model)
-       (repo-manager-open-browse model :all)
-       (nav/switch-view model :dag-kanban model/views)))
-
-   :action/fleet-view
-   (fn [model]
-     (if (in-repo-manager? model)
-       (-> (reset-repo-manager-state model :fleet)
-           (assoc :flash-message "Showing configured repositories."))
-       model))
-
-   :action/open-browse
-   (fn [model]
-     (if (in-repo-manager? model)
-       (repo-manager-open-browse model :all)
-       model))
-
-   :action/open-in-browser
-   (fn [model]
-     (let [url (case (:view model)
-                 :pr-fleet  (let [prs (:pr-items model [])
-                                  visible (if-let [fi (:filtered-indices model)]
-                                            (vec (keep-indexed (fn [i pr] (when (contains? fi i) pr)) prs))
-                                            prs)]
-                              (:pr/url (get visible (:selected-idx model))))
-                 :pr-detail (get-in model [:detail :selected-pr :pr/url])
-                 nil)]
-       (if url
-         (assoc model :side-effect (effect/open-url url)
-                      :flash-message (str "Opening " url "..."))
-         (assoc model :flash-message "No URL available for this item"))))
-
-   :action/remove-repos
-   (fn [model]
-     (if (in-repo-manager? model)
-       (if (= :fleet (repo-manager-source model))
-         (repo-manager-request-remove model)
-         (assoc model :flash-message "Switch to fleet (f) to remove repositories."))
-       model))
-
-   :action/cycle-tab
-   (fn [model]
-     (cond
-       (nav/in-detail-subview? model)                (nav/cycle-detail-subview model)
-       (some #{(:view model)} model/detail-views)    (nav/cycle-pane model)
-       (some #{(:view model)} model/top-level-views) (nav/cycle-top-level-view model)
-       :else                                         model))
-
-   :action/cycle-tab-reverse
-   (fn [model]
-     (cond
-       (nav/in-detail-subview? model)                (nav/cycle-detail-subview-reverse model)
-       (some #{(:view model)} model/detail-views)    (nav/cycle-pane-reverse model)
-       (some #{(:view model)} model/top-level-views) (nav/cycle-top-level-view-reverse model)
-       :else                                         model))})
+  {:action/enter-or-confirm   handle-enter-or-confirm
+   :action/escape-cascade     handle-escape-cascade
+   :action/toggle-or-expand   handle-toggle-or-expand
+   :action/chat-or-clear      handle-chat-or-clear
+   :action/train-view         handle-train-view
+   :action/refresh-or-sync    handle-refresh-or-sync
+   :action/sync               handle-sync
+   :action/browse-or-kanban   handle-browse-or-kanban
+   :action/fleet-view         handle-fleet-view
+   :action/open-browse        handle-open-browse
+   :action/open-in-browser    handle-open-in-browser
+   :action/remove-repos       handle-remove-repos
+   :action/cycle-tab          handle-cycle-tab
+   :action/cycle-tab-reverse  handle-cycle-tab-reverse
+   :action/select-all         handle-select-all
+   :action/enter-visual-mode  handle-enter-visual-mode})
 
 (defn- resolve-action
   "Look up handler fn for an action token."

@@ -216,7 +216,7 @@
         {:keys [success? out err]} (run-gh "pr" "list"
                                            "--repo" repo*
                                            "--state" gh-state
-                                           "--json" "number,title,url,state,headRefName,isDraft,reviewDecision,statusCheckRollup")]
+                                           "--json" "number,title,url,state,headRefName,isDraft,reviewDecision,statusCheckRollup,mergeStateStatus")]
     (if-not success?
       (result-failure (gh-error-message out err) {:repo repo :provider :github})
       (try

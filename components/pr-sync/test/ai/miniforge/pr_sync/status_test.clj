@@ -70,8 +70,35 @@
   (testing "Empty entries"
     (is (= :pending (status/check-rollup->ci-status [])))))
 
+(deftest check-rollup->ci-checks-test
+  (testing "Extracts individual check details"
+    (let [checks (status/check-rollup->ci-checks
+                  [{:name "lint" :conclusion "SUCCESS" :status "COMPLETED"}
+                   {:name "test" :conclusion "FAILURE" :status "COMPLETED"}])]
+      (is (= 2 (count checks)))
+      (is (= "lint" (:name (first checks))))
+      (is (= :success (:conclusion (first checks))))
+      (is (= :failure (:conclusion (second checks))))))
+
+  (testing "Nil rollup returns empty"
+    (is (= [] (status/check-rollup->ci-checks nil))))
+
+  (testing "Uses :context as fallback name"
+    (let [checks (status/check-rollup->ci-checks [{:context "ci/build" :conclusion "SUCCESS"}])]
+      (is (= "ci/build" (:name (first checks)))))))
+
+(deftest merge-state-status->behind?-test
+  (testing "BEHIND is behind"
+    (is (true? (status/merge-state-status->behind? "BEHIND"))))
+  (testing "DIRTY is behind"
+    (is (true? (status/merge-state-status->behind? "DIRTY"))))
+  (testing "CLEAN is not behind"
+    (is (false? (status/merge-state-status->behind? "CLEAN"))))
+  (testing "nil is not behind"
+    (is (false? (status/merge-state-status->behind? nil)))))
+
 (deftest provider-pr->train-pr-test
-  (testing "Converts provider PR to train PR shape"
+  (testing "Converts provider PR to train PR shape with ci-checks and merge-state"
     (let [pr {:number 42
               :title "Fix auth"
               :url "https://github.com/owner/repo/pull/42"
@@ -79,7 +106,8 @@
               :state "OPEN"
               :isDraft false
               :reviewDecision "APPROVED"
-              :statusCheckRollup [{:conclusion "SUCCESS"}]}
+              :statusCheckRollup [{:name "lint" :conclusion "SUCCESS"}]
+              :mergeStateStatus "CLEAN"}
           result (status/provider-pr->train-pr pr "owner/repo")]
       (is (= 42 (:pr/number result)))
       (is (= "Fix auth" (:pr/title result)))
@@ -87,7 +115,18 @@
       (is (= "fix-auth" (:pr/branch result)))
       (is (= :approved (:pr/status result)))
       (is (= :passed (:pr/ci-status result)))
-      (is (= "owner/repo" (:pr/repo result)))))
+      (is (= "owner/repo" (:pr/repo result)))
+      ;; New fields
+      (is (= 1 (count (:pr/ci-checks result))))
+      (is (= "lint" (:name (first (:pr/ci-checks result)))))
+      (is (= "CLEAN" (:pr/merge-state result)))
+      (is (false? (:pr/behind-main? result)))))
+
+  (testing "Behind main PR"
+    (let [result (status/provider-pr->train-pr
+                  {:number 1 :title "X" :state "OPEN" :mergeStateStatus "BEHIND"})]
+      (is (true? (:pr/behind-main? result)))
+      (is (= "BEHIND" (:pr/merge-state result)))))
 
   (testing "Without repo arg, :pr/repo is absent"
     (let [result (status/provider-pr->train-pr {:number 1 :title "X" :state "OPEN"})]

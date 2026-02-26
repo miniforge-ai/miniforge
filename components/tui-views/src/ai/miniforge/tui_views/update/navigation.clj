@@ -78,48 +78,49 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; View navigation
 
+(defn- visible-prs
+  "Return the visible PR list, respecting any active filter."
+  [model]
+  (let [prs (:pr-items model)]
+    (if-let [fi (:filtered-indices model)]
+      (into [] (keep-indexed #(when (contains? fi %1) %2)) prs)
+      prs)))
+
+(defn- enter-workflow-detail [model]
+  (let [raw-idx (raw-workflow-index model (:selected-idx model))]
+    (if-let [wf (when raw-idx (get (:workflows model) raw-idx))]
+      (-> model
+          (assoc :view :workflow-detail)
+          (assoc-in [:detail :workflow-id] (:id wf))
+          (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil
+                 :scroll-offset nil :search-matches [] :search-match-idx nil))
+      model)))
+
+(defn- enter-pr-detail [model]
+  (if-let [pr (get (visible-prs model) (:selected-idx model))]
+    (let [pr-id [(:pr/repo pr) (:pr/number pr)]]
+      (cond-> (-> model
+                  (assoc :view :pr-detail)
+                  (assoc-in [:detail :selected-pr] pr)
+                  (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
+        (nil? (:pr/policy pr))
+        (assoc :side-effect (effect/evaluate-policy pr-id pr))))
+    model))
+
+(defn- enter-train-detail [model]
+  (let [prs (get-in model [:detail :selected-train :train/prs])]
+    (if-let [pr (get (vec prs) (:selected-idx model))]
+      (-> model
+          (assoc :view :pr-detail)
+          (assoc-in [:detail :selected-pr] pr)
+          (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
+      model)))
+
 (defn enter-detail [model]
   (case (:view model)
-    :workflow-list
-    (let [workflows (:workflows model)
-          idx (:selected-idx model)
-          raw-idx (raw-workflow-index model idx)]
-      (if-let [wf (when raw-idx (get workflows raw-idx))]
-        (-> model
-            (assoc :view :workflow-detail)
-            (assoc-in [:detail :workflow-id] (:id wf))
-            (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil
-                   :scroll-offset nil :search-matches [] :search-match-idx nil))
-        model))
-
-    :pr-fleet
-    (let [prs (:pr-items model)
-          visible (if-let [fi (:filtered-indices model)]
-                    (vec (keep-indexed (fn [i pr] (when (contains? fi i) pr)) prs))
-                    prs)
-          idx (:selected-idx model)]
-      (if-let [pr (get visible idx)]
-        (let [pr-id [(:pr/repo pr) (:pr/number pr)]
-              needs-policy? (nil? (:pr/policy pr))]
-          (cond-> (-> model
-                      (assoc :view :pr-detail)
-                      (assoc-in [:detail :selected-pr] pr)
-                      (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
-            needs-policy?
-            (assoc :side-effect (effect/evaluate-policy pr-id pr))))
-        model))
-
-    :train-view
-    (let [prs (get-in model [:detail :selected-train :train/prs])
-          idx (:selected-idx model)]
-      (if-let [pr (get (vec prs) idx)]
-        (-> model
-            (assoc :view :pr-detail)
-            (assoc-in [:detail :selected-pr] pr)
-            (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
-        model))
-
-    ;; Default: no-op
+    :workflow-list (enter-workflow-detail model)
+    :pr-fleet      (enter-pr-detail model)
+    :train-view    (enter-train-detail model)
     model))
 
 (defn go-back [model]

@@ -23,6 +23,7 @@
    Wires together the tui-engine (rendering) with domain data (event stream)."
   (:require
    [clojure.java.browse :as browse]
+   [clojure.string :as str]
    [ai.miniforge.tui-engine.interface :as tui]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.msg :as msg]
@@ -32,7 +33,8 @@
    [ai.miniforge.tui-views.persistence :as persistence]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.policy-pack.interface :as policy-pack]
-   [ai.miniforge.pr-train.interface :as pr-train]))
+   [ai.miniforge.pr-train.interface :as pr-train]
+   [ai.miniforge.llm.interface :as llm]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Side-effect handlers — each returns [msg-type payload] or nil
@@ -122,29 +124,96 @@
                              {:sub-prs []
                               :message "Decomposition analysis not yet wired"}))
 
-(defn- handle-chat-send [{:keys [message context]}]
+;; Lazy LLM client — initialized on first chat message
+(def ^:private llm-client (delay (llm/create-client)))
+
+(defn- format-check-context [checks]
+  (str/join ", " (map #(str (:name %) "=" (-> % (get :conclusion :unknown) name)) checks)))
+
+(defn- build-pr-context-str
+  "Build a text summary of PR data for the LLM system prompt."
+  [{:keys [pr/behind-main? pr/branch pr/ci-status pr/number
+           pr/policy pr/readiness pr/repo pr/risk pr/status pr/title]
+    :or   {ci-status :unknown status :unknown}
+    :as   pr}]
+  (when pr
+    (let [checks                                     (get pr :pr/ci-checks [])
+          {:keys [readiness/score readiness/ready?]}  readiness
+          {:keys [evaluation/passed?
+                  evaluation/packs-applied]}          policy
+          risk-level                                  (get risk :risk/level :unknown)
+          risk-score                                  (:risk/score risk)
+          ci-str                                      (if (seq checks)
+                                                        (str "CI checks: " (format-check-context checks))
+                                                        (str "CI status: " (name ci-status)))]
+      (str "PR: " repo "#" number " — " title "\n"
+           "Branch: " branch "\n"
+           "Status: " (name status) "\n"
+           ci-str "\n"
+           "Behind main: " (if behind-main? "yes" "no") "\n"
+           (when readiness
+             (str "Readiness score: " score
+                  (when ready? " (ready)")
+                  "\n"))
+           (when risk
+             (str "Risk level: " (name risk-level)
+                  (when risk-score
+                    (str " (score: " (format "%.2f" (double risk-score)) ")"))
+                  "\n"))
+           (when policy
+             (str "Policy: " (if passed? "passed" "FAILED")
+                  (when-let [packs packs-applied]
+                    (str " (packs: " (str/join ", " packs) ")"))
+                  "\n"))))))
+
+(defn- build-chat-system-prompt
+  "Build a context-aware system prompt for the chat LLM."
+  [context]
+  (let [ctx-type (get context :type :unknown)]
+    (str "You are a PR fleet analyst for Miniforge, an agentic SDLC platform.\n"
+         "Help the user understand and manage their pull requests.\n"
+         "Be concise and actionable. Reference specific data when possible.\n\n"
+         (case ctx-type
+           :pr-detail
+           (str "The user is viewing a specific PR:\n"
+                (build-pr-context-str (:pr context)))
+
+           :pr-fleet
+           (let [prs (:selected-prs context)
+                 n (count prs)]
+             (str "The user is in the PR fleet view.\n"
+                  "Total PRs: " (:total-prs context 0) "\n"
+                  "Active filter: " (name (or (:active-filter context) :open)) "\n"
+                  (if (pos? n)
+                    (str n " PR(s) selected:\n"
+                         (str/join "\n"
+                           (map #(str "- " (:pr/repo %) "#" (:pr/number %)
+                                      " " (:pr/title %))
+                                prs)))
+                    "No PRs currently selected.")))
+
+           "Unknown context."))))
+
+(defn- handle-chat-send [{:keys [message context history]}]
   (try
-    (let [ctx-type (get context :type :unknown)]
-      (msg/chat-response
-       (str "Chat integration pending orchestrator wiring.\n\n"
-            "Context: " (name ctx-type) "\n"
-            "Your message: " message "\n\n"
-            (case ctx-type
-              :pr-detail (let [pr (:pr context)]
-                           (str "PR: " (:pr/repo pr) "#" (:pr/number pr)
-                                " — " (:pr/title pr) "\n"
-                                "I can help analyze this PR's risk, readiness, "
-                                "and policy compliance once orchestrator is connected."))
-              :pr-fleet  (let [n (count (:selected-prs context))]
-                           (str (if (pos? n)
-                                  (str n " PR(s) selected for discussion.")
-                                  "No PRs selected. Select PRs with Space first.")
-                                "\nI can help steer these PRs through review, "
-                                "remediation, and merge once orchestrator is connected."))
-              "Chat context not recognized."))
-       []))
+    (let [system-prompt (build-chat-system-prompt context)
+          messages (mapv (fn [m]
+                           {:role (name (:role m))
+                            :content (:content m)})
+                         (or history []))
+          request (cond-> {:system system-prompt}
+                    (seq messages) (assoc :messages
+                                         (conj messages
+                                               {:role "user" :content message}))
+                    (empty? messages) (assoc :prompt message))
+          result (llm/complete @llm-client request)]
+      (if (llm/success? result)
+        (msg/chat-response (llm/get-content result) [])
+        (msg/chat-response
+         (str "LLM error: " (get-in (llm/get-error result) [:message] "Unknown error"))
+         [])))
     (catch Exception e
-      (msg/chat-response (str "Error: " (.getMessage e)) []))))
+      (msg/chat-response (str "Chat error: " (.getMessage e)) []))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Effect dispatcher

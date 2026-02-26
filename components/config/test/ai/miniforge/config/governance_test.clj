@@ -12,9 +12,7 @@
       (is (contains? cfg :weights))
       (is (contains? cfg :merge-threshold))
       (is (contains? cfg :ci-scores))
-      (is (contains? cfg :approval-scores))
-      (is (contains? cfg :age))
-      (is (contains? cfg :staleness))))
+      (is (contains? cfg :approval-scores))))
 
   (testing "readiness weights sum to 1.0"
     (let [cfg (gov/load-governance-config :readiness {:skip-digest? true})
@@ -176,19 +174,17 @@
 ;------------------------------------------------------------------------------ Regression: Values Match Original Hardcoded Defaults
 
 (deftest regression-readiness-defaults-test
-  (testing "loaded readiness config matches original hardcoded values"
+  (testing "loaded readiness config matches current expected values"
     (let [cfg (gov/load-governance-config :readiness {:profile :default :skip-digest? true})]
-      (is (= {:deps-merged 0.30 :ci-passed 0.25 :approved 0.20
-              :gates-passed 0.15 :age-penalty 0.05 :staleness-penalty 0.05}
+      (is (= {:deps-merged 0.25 :ci-passed 0.25 :approved 0.20
+              :gates-passed 0.15 :behind-main 0.15}
              (:weights cfg)))
       (is (= 0.85 (:merge-threshold cfg)))
       (is (= {:passed 1.0 :running 0.5 :pending 0.5 :skipped 0.75 :failed 0.0}
              (:ci-scores cfg)))
       (is (= {:approved 1.0 :merged 1.0 :merging 1.0
               :reviewing 0.5 :changes-requested 0.25}
-             (:approval-scores cfg)))
-      (is (= {:max-days 14} (:age cfg)))
-      (is (= {:max-hours 72} (:staleness cfg))))))
+             (:approval-scores cfg))))))
 
 (deftest regression-risk-defaults-test
   (testing "loaded risk config matches original hardcoded values (pre-compilation)"

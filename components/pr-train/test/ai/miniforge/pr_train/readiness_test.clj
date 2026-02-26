@@ -65,19 +65,15 @@
                  {:pr/gate-results [{:gate/passed? true} {:gate/passed? false}]}
                  readiness/default-config)))))
 
-(deftest score-age-factor-test
-  (testing "brand new PR scores 1.0"
-    (is (= 1.0 (readiness/score-age-factor nil {:pr/derived-state {:age-days 0}} readiness/default-config))))
+(deftest score-behind-main-factor-test
+  (testing "not behind main scores 1.0"
+    (is (= 1.0 (readiness/score-behind-main-factor nil {:pr/behind-main? false} readiness/default-config))))
 
-  (testing "max age PR scores 0.0"
-    (is (= 0.0 (readiness/score-age-factor nil {:pr/derived-state {:age-days 14}} readiness/default-config)))))
+  (testing "behind main scores 0.0"
+    (is (= 0.0 (readiness/score-behind-main-factor nil {:pr/behind-main? true} readiness/default-config))))
 
-(deftest score-staleness-factor-test
-  (testing "just updated PR scores 1.0"
-    (is (= 1.0 (readiness/score-staleness-factor nil {:pr/derived-state {:staleness-hours 0}} readiness/default-config))))
-
-  (testing "max stale PR scores 0.0"
-    (is (= 0.0 (readiness/score-staleness-factor nil {:pr/derived-state {:staleness-hours 72}} readiness/default-config)))))
+  (testing "nil behind-main scores 1.0 (default not behind)"
+    (is (= 1.0 (readiness/score-behind-main-factor nil {} readiness/default-config)))))
 
 ;; ============================================================================
 ;; Weighted aggregation tests
@@ -91,7 +87,7 @@
               :pr/ci-status :passed
               :pr/status :approved
               :pr/gate-results [{:gate/passed? true}]
-              :pr/derived-state {:age-days 0 :staleness-hours 0}}
+              :pr/behind-main? false}
           score (readiness/compute-readiness-score train pr)]
       (is (>= score 0.95))
       (is (<= score 1.0))))
@@ -103,7 +99,7 @@
               :pr/ci-status :failed
               :pr/status :draft
               :pr/gate-results [{:gate/passed? false}]
-              :pr/derived-state {:age-days 14 :staleness-hours 72}}
+              :pr/behind-main? true}
           score (readiness/compute-readiness-score train pr)]
       (is (<= score 0.1)))))
 
@@ -115,12 +111,12 @@
   (testing "explain returns all factors"
     (let [train {:train/prs []}
           pr {:pr/depends-on [] :pr/ci-status :passed :pr/status :approved
-              :pr/gate-results [] :pr/derived-state {:age-days 0 :staleness-hours 0}}
+              :pr/gate-results [] :pr/behind-main? false}
           result (readiness/explain-readiness train pr)]
       (is (contains? result :readiness/score))
       (is (contains? result :readiness/threshold))
       (is (contains? result :readiness/ready?))
-      (is (= 6 (count (:readiness/factors result))))
+      (is (= 5 (count (:readiness/factors result))))
 
       (testing "factors have required keys"
         (doseq [f (:readiness/factors result)]
@@ -132,7 +128,7 @@
   (testing "score matches explicit computation"
     (let [train {:train/prs []}
           pr {:pr/depends-on [] :pr/ci-status :passed :pr/status :approved
-              :pr/gate-results [] :pr/derived-state {:age-days 0 :staleness-hours 0}}
+              :pr/gate-results [] :pr/behind-main? false}
           explained (readiness/explain-readiness train pr)
           computed (readiness/compute-readiness-score train pr)]
       (is (< (Math/abs (- (:readiness/score explained) computed)) 0.001)))))
@@ -146,9 +142,9 @@
     (let [train {:train/prs []}
           good-pr {:pr/depends-on [] :pr/ci-status :passed :pr/status :approved
                    :pr/gate-results [{:gate/passed? true}]
-                   :pr/derived-state {:age-days 0 :staleness-hours 0}}
+                   :pr/behind-main? false}
           bad-pr {:pr/depends-on [] :pr/ci-status :failed :pr/status :draft
                   :pr/gate-results [{:gate/passed? false}]
-                  :pr/derived-state {:age-days 14 :staleness-hours 72}}]
+                  :pr/behind-main? true}]
       (is (true? (:readiness/ready? (readiness/explain-readiness train good-pr))))
       (is (false? (:readiness/ready? (readiness/explain-readiness train bad-pr)))))))

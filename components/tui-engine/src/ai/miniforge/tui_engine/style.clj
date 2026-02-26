@@ -222,3 +222,25 @@
   {:fg     (resolve-color theme fg)
    :bg     (resolve-color theme bg)
    :bold?  bold?})
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Semantic status colors — theme-independent
+;;
+;; These colors encode universal meaning (pass/fail/warning) and remain
+;; constant across all UI themes. Users learn to associate green with pass,
+;; red with fail, etc., and those associations must not shift when themes change.
+
+(def semantic-status-colors
+  "Fixed status colors that remain constant across all themes.
+   Use these for any pass/fail/warning/info status indicators."
+  {:status-color/pass    :green
+   :status-color/fail    :red
+   :status-color/warning :yellow
+   :status-color/info    :cyan
+   :status-color/neutral :default})
+
+(defn resolve-status-color
+  "Resolve a semantic status color keyword to its fixed ANSI color.
+   Unlike theme colors, these never change."
+  [status-key]
+  (get semantic-status-colors status-key :default))

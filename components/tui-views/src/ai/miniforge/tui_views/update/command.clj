@@ -116,9 +116,10 @@
         (assoc model :flash-message (str "Error: " (:error result)))))))
 
 (defn- cmd-sync [model _args]
-  (assoc model
-         :side-effect (effect/sync-prs)
-         :flash-message "Syncing PRs..."))
+  (let [state (or (:pr-filter-state model) :open)]
+    (assoc model
+           :side-effect (effect/sync-prs state)
+           :flash-message (str "Syncing " (name state) " PRs..."))))
 
 (def ^:private show-states
   #{"open" "merged" "closed" "all"})
@@ -127,6 +128,7 @@
   (let [state-str (some-> args str/trim str/lower-case)
         state (if (show-states state-str) (keyword state-str) :open)]
     (assoc model
+           :pr-filter-state state
            :side-effect (effect/sync-prs state)
            :flash-message (str "Loading " (name state) " PRs..."))))
 

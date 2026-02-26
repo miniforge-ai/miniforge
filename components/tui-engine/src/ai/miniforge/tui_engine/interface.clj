@@ -150,6 +150,17 @@
    Converts {:fg :bg :bold?} to Lanterna-compatible representation."
   style/resolve-style)
 
+(def semantic-status-colors
+  "Fixed status colors that remain constant across all themes.
+   Keys: :status-color/pass, :status-color/fail, :status-color/warning,
+         :status-color/info, :status-color/neutral."
+  style/semantic-status-colors)
+
+(def resolve-status-color
+  "Resolve a semantic status color keyword to its fixed ANSI color.
+   Unlike theme colors, these never change."
+  style/resolve-status-color)
+
 ;; Input
 
 (def normalize-key

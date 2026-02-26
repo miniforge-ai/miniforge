@@ -66,41 +66,56 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest visual-mode-test
-  (testing "v enters visual mode"
+  (testing "v requires prior selection — no-op without Space first"
     (let [m (util/apply-updates (three-workflows)
               [[:input {:key :key/v :char \v}]])]
-      (is (util/visual-mode? m))
-      (is (util/selection-count-is? m 1))))  ;; anchor item selected
+      (is (not (util/visual-mode? m)))
+      (is (util/selection-count-is? m 0))))
 
-  (testing "v + j extends selection range"
+  (testing "Space + v enters visual mode"
     (let [m (util/apply-updates (three-workflows)
-              [[:input {:key :key/v :char \v}]
-               [:input {:key :key/j :char \j}]
-               [:input {:key :key/j :char \j}]])]
+              [[:input {:key :key/space :char \space}]  ;; select wf-1, cursor → 1
+               [:input {:key :key/v :char \v}]])]
       (is (util/visual-mode? m))
-      (is (util/selection-count-is? m 3))))
+      (is (util/selection-count-is? m 1))))
+
+  (testing "Space + v + j extends selection range from visual anchor"
+    (let [m (util/apply-updates (three-workflows)
+              [[:input {:key :key/space :char \space}]  ;; select wf-1, cursor → 1
+               [:input {:key :key/v :char \v}]          ;; anchor at cursor 1 (wf-2)
+               [:input {:key :key/j :char \j}]])]       ;; extend to cursor 2 (wf-2 + wf-3)
+      (is (util/visual-mode? m))
+      (is (util/selection-count-is? m 2))))
 
   (testing "Escape exits visual mode but keeps selection"
     (let [m (util/apply-updates (three-workflows)
-              [[:input {:key :key/v :char \v}]
+              [[:input {:key :key/space :char \space}]  ;; select wf-1
+               [:input {:key :key/v :char \v}]
                [:input {:key :key/j :char \j}]
                [:input :key/escape]])]
       (is (not (util/visual-mode? m)))
-      (is (util/selection-count-is? m 2)))))  ;; selection kept
+      (is (util/selection-count-is? m 2)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Select all / clear
 ;; ---------------------------------------------------------------------------
 
 (deftest select-all-test
-  (testing "a selects all items"
+  (testing "a requires prior selection — no-op without Space first"
     (let [m (util/apply-updates (three-workflows)
               [[:input {:key :key/a :char \a}]])]
+      (is (util/selection-count-is? m 0))))
+
+  (testing "Space + a selects all items"
+    (let [m (util/apply-updates (three-workflows)
+              [[:input {:key :key/space :char \space}]  ;; select wf-1
+               [:input {:key :key/a :char \a}]])]
       (is (util/selection-count-is? m 3))))
 
   (testing "c clears all selections"
     (let [m (util/apply-updates (three-workflows)
-              [[:input {:key :key/a :char \a}]
+              [[:input {:key :key/space :char \space}]
+               [:input {:key :key/a :char \a}]
                [:input {:key :key/c :char \c}]])]
       (is (util/selection-count-is? m 0)))))
 
@@ -111,13 +126,15 @@
 (deftest view-switch-clears-selection-test
   (testing "Switching view clears selection"
     (let [m (util/apply-updates (three-workflows)
-              [[:input {:key :key/a :char \a}]           ;; select all
+              [[:input {:key :key/space :char \space}]   ;; select wf-1
+               [:input {:key :key/a :char \a}]           ;; select all
                [:input {:key :key/d3 :char \3}]])]       ;; switch to evidence
       (is (util/selection-count-is? m 0))))
 
   (testing "Escape clears selection before going back"
     (let [m (util/apply-updates (three-workflows)
-              [[:input {:key :key/a :char \a}]           ;; select all
+              [[:input {:key :key/space :char \space}]   ;; select wf-1
+               [:input {:key :key/a :char \a}]           ;; select all
                [:input :key/escape]])]                   ;; first Escape clears selection
       (is (util/selection-count-is? m 0))
       (is (util/view-is? m :workflow-list))))             ;; still in workflow-list
@@ -222,13 +239,14 @@
       (is (contains? (:selected-ids m) wf-id-3))
       (is (not (contains? (:selected-ids m) wf-id-2)))))
 
-  (testing "Full flow: search → confirm → select-all → Esc clears filter, selection persists"
+  (testing "Full flow: search → confirm → Space → select-all → Esc clears filter, selection persists"
     (let [m (util/apply-updates (three-workflows)
               [[:input {:key :key/slash :char \/}]     ;; enter search
                [:input {:key nil :char \1}]             ;; type "1" → matches wf-1
                [:input :key/enter]                      ;; confirm → filter active, normal mode
+               [:input {:key :key/space :char \space}]  ;; select wf-1 (enter selection mode)
                [:input {:key :key/a :char \a}]])]       ;; select-all on filtered results
-      ;; Filter is active, only 1 item selected
+      ;; Filter is active, only 1 item selected (only 1 in filter)
       (is (some? (:filtered-indices m)))
       (is (= 1 (count (:selected-ids m))))
       (is (contains? (:selected-ids m) wf-id-1))
