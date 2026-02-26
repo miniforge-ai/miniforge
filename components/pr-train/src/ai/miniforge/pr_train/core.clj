@@ -111,7 +111,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; In-memory implementation
 
-(defrecord InMemoryPRTrainManager [trains evidence-bundles]
+(defrecord InMemoryPRTrainManager [trains evidence-bundles event-stream]
   PRTrainManager
 
   ;; Lifecycle
@@ -223,6 +223,15 @@
                         state/recompute-train-state
                         state/auto-transition-train)]
           (swap! trains assoc train-id final)
+          (when event-stream
+            (try
+              (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
+                (publish! event-stream
+                          {:event/type :pr/merged
+                           :pr/number pr-number
+                           :train/id train-id
+                           :timestamp (java.util.Date.)}))
+              (catch Exception _ nil)))
           final))))
 
   (fail-merge [_this train-id pr-number _reason]
@@ -338,10 +347,12 @@
 
 (defn create-manager
   "Create a new in-memory PR train manager.
-
+   Options:
+   - :event-stream - Optional event stream for publishing merge events
    Returns an InMemoryPRTrainManager instance."
-  []
-  (->InMemoryPRTrainManager (atom {}) (atom {})))
+  ([] (create-manager nil))
+  ([opts]
+   (->InMemoryPRTrainManager (atom {}) (atom {}) (:event-stream opts))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Utility functions for working with trains
