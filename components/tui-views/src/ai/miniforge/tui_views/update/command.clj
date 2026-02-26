@@ -228,6 +228,31 @@
 (defn- cmd-cancel [model _args]
   (request-confirmation model :cancel "Cancel"))
 
+;------------------------------------------------------------------------------ Layer 2b
+;; Workflow control commands (filesystem-backed pause/resume/cancel)
+
+(defn- selected-workflow-id
+  "Return the single workflow ID from the current selection, or nil if
+   nothing is selected or the view doesn't contain workflows."
+  [model]
+  (let [ids (sel/effective-ids model)]
+    (when (= 1 (count ids))
+      (first ids))))
+
+(defn- cmd-pause [model _args]
+  (if-let [wf-id (selected-workflow-id model)]
+    (assoc model
+           :side-effect (effect/control-action :pause wf-id)
+           :flash-message "Pausing workflow...")
+    (assoc model :flash-message "Select a single workflow to pause")))
+
+(defn- cmd-resume [model _args]
+  (if-let [wf-id (selected-workflow-id model)]
+    (assoc model
+           :side-effect (effect/control-action :resume wf-id)
+           :flash-message "Resuming workflow...")
+    (assoc model :flash-message "Select a single workflow to resume")))
+
 (defn- cmd-rerun [model _args]
   (let [ids (sel/effective-ids model)]
     (if (seq ids)
@@ -387,6 +412,8 @@
    "archive"     {:handler cmd-archive     :help "Archive selected workflows"}
    "delete"      {:handler cmd-delete      :help "Delete selected workflows"}
    "cancel"      {:handler cmd-cancel      :help "Cancel running workflows"}
+   "pause"       {:handler cmd-pause       :help "Pause a running workflow"}
+   "resume"      {:handler cmd-resume      :help "Resume a paused workflow"}
    "rerun"       {:handler cmd-rerun       :help "Rerun failed workflows"}
    "add-repo"    {:handler cmd-add-repo    :help "Add repo to fleet (e.g. :add-repo owner/name or gitlab:group/name)"
                   :completions add-repo-completions}

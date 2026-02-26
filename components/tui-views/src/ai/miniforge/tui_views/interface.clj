@@ -23,6 +23,7 @@
    Wires together the tui-engine (rendering) with domain data (event stream)."
   (:require
    [clojure.java.browse :as browse]
+   [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.tui-engine.interface :as tui]
    [ai.miniforge.tui-views.model :as model]
@@ -123,6 +124,14 @@
   (msg/decomposition-started [(:pr/repo pr) (:pr/number pr)]
                              {:sub-prs []
                               :message "Decomposition analysis not yet wired"}))
+
+(defn- handle-control-action [{:keys [action workflow-id]}]
+  (let [commands-dir (io/file (System/getProperty "user.home")
+                              ".miniforge" "commands" (str workflow-id))
+        cmd-file (io/file commands-dir (str (System/currentTimeMillis) ".edn"))]
+    (.mkdirs commands-dir)
+    (spit cmd-file (pr-str {:command action :timestamp (java.util.Date.)}))
+    nil))
 
 ;; Lazy LLM client — initialized on first chat message
 (def ^:private llm-client (delay (llm/create-client)))
@@ -233,6 +242,7 @@
     :review-prs        (handle-review-prs effect)
     :remediate-prs     (handle-remediate-prs effect)
     :decompose-pr      (handle-decompose-pr effect)
+    :control-action    (handle-control-action effect)
     :chat-send         (handle-chat-send effect)
     :chat-execute-action (msg/chat-action-result
                           (response/failure "Chat action execution not yet wired" {}))
