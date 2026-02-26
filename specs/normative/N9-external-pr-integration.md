@@ -667,17 +667,56 @@ mf fleet train TRAIN_ID [flags]       # Show train detail and membership
 
 ### 12.2 TUI Extensions
 
-The TUI (N5 §3) SHOULD provide:
+The TUI (N5 §3) MUST provide:
 
-- **PR Fleet View:** List of PR Work Items across repos with readiness/risk
-  columns, sortable and filterable
-- **PR Detail View:** Readiness blockers, risk factors, policy results with
-  drill-down to evidence artifacts
-- **Train View:** Ordered train members with merge readiness status
+- **PR Fleet View:** List of PR Work Items across repos with readiness/risk/policy/recommend
+  columns, sortable and filterable. RECOMMEND column derives the optimal next action
+  (merge, approve, review, remediate, decompose, wait) from enriched readiness, risk,
+  and policy signals. Filter palette supports field-qualified queries with AND composition.
+- **PR Detail View:** Readiness factor breakdown (6 weighted factors from `pr-train/explain-readiness`),
+  risk factor breakdown (7 factors from `pr-train/assess-risk`), policy evaluation results
+  (per-rule from `policy-pack/evaluate-external-pr`) with drill-down to evidence artifacts.
+  Recommended action with explanation. Chat mode for conversational PR analysis.
+- **Train View:** Ordered train members with merge readiness status, dependency edges,
+  and per-PR recommended actions. Commands: `:create-train`, `:add-to-train`, `:merge-next`.
 
 These views derive from the event stream (N3) and PR Work Item state — they
 are projections, not separate data models (same principle as N5 §3.2.5 DAG
 Kanban View).
+
+**TUI-triggered Policy Evaluation:**
+
+When a user enters PR Detail View, the TUI SHOULD fire an `:evaluate-policy`
+side-effect that runs `policy-pack/evaluate-external-pr` against applicable packs.
+Results populate the policy panel and influence the RECOMMEND column.
+
+**Automation Tier Display:**
+
+The TUI SHOULD show the effective automation tier (N9 §10) for each repository
+in the fleet view. Available actions in PR Detail MUST be governed by the repo's
+automation tier:
+
+- Tier 0 (Observe): read-only display
+- Tier 1 (Advise): `:review` command available
+- Tier 2 (Converse): `:remediate` command available
+- Tier 3 (Govern): `:merge-next`, auto-merge available
+
+**Batch Actions:**
+
+The TUI MUST support batch operations on selected PRs:
+
+- `:review` — evaluate selected PRs against policy packs (Tier 1+)
+- `:remediate` — execute `rule/repair-fn` for auto-fixable violations (Tier 2+)
+- `:decompose` — analyze PR diff and propose sub-PR decomposition plan
+- `:create-train` / `:add-to-train` — PR train management
+
+**Chat Integration:**
+
+The TUI MUST support conversational interaction via `c` key:
+
+- Fleet context: hand off selected PRs to miniforge workflows via orchestrator (N7)
+- Detail context: deep-dive analysis of specific PR risk, approach, blockers
+- Chat backend dispatches through orchestrator for full agent capability
 
 ### 12.3 Fleet API Extensions
 

@@ -121,7 +121,8 @@
                      :running?       false
                      :input-thread   nil
                      :unsub-fn       nil
-                     :render-lock    render-lock}]
+                     :render-lock    render-lock
+                     :effect-threads (atom #{})}]
     ;; Install render watcher — fires after every model ref change
     (add-watch model-ref ::render
                (fn [_key _ref _old-model new-model]
@@ -152,19 +153,26 @@
 (defn- execute-side-effect!
   "Execute a side-effect on a background daemon thread.
    Calls effect-handler-fn with the effect map, then dispatches the result
-   message back into the Elm loop via dispatch-fn."
-  [effect effect-handler-fn dispatch-fn]
+   message back into the Elm loop via dispatch-fn.
+   Tracks the thread in effect-threads so stop! can interrupt in-flight effects."
+  [effect effect-handler-fn dispatch-fn effect-threads]
   (let [thread (Thread.
                 (fn []
                   (try
                     (when-let [result-msg (effect-handler-fn effect)]
                       (dispatch-fn result-msg))
+                    (catch InterruptedException _)
                     (catch Exception e
-                      (dispatch-fn [:msg/side-effect-error
-                                    {:type (:type effect)
-                                     :error (.getMessage e)}])))))]
+                      (when-not (Thread/interrupted)
+                        (dispatch-fn [:msg/side-effect-error
+                                      {:type (:type effect)
+                                       :error (.getMessage e)}]))))
+                  (when effect-threads
+                    (swap! effect-threads disj (Thread/currentThread)))))]
     (.setDaemon thread true)
     (.setName thread (str "tui-effect-" (name (or (:type effect) "unknown"))))
+    (when effect-threads
+      (swap! effect-threads conj thread))
     (.start thread)))
 
 ;------------------------------------------------------------------------------ Layer 4
@@ -195,7 +203,9 @@
     ;; Side-effects executed outside the transaction
     (when-let [fx @pending-effect]
       (when-let [handler (:effect-handler @app)]
-        (execute-side-effect! fx handler (fn [result-msg] (dispatch! app result-msg)))))))
+        (execute-side-effect! fx handler
+                              (fn [result-msg] (dispatch! app result-msg))
+                              (:effect-threads @app))))))
 
 (defn get-model
   "Get current model snapshot."
@@ -264,7 +274,8 @@
    1. Remove render watcher
    2. Unregister subscriptions
    3. Stop input thread
-   4. Exit alternate screen
+   4. Interrupt in-flight side-effect threads
+   5. Exit alternate screen
 
    Safe to call multiple times."
   [app]
@@ -278,6 +289,11 @@
     ;; Stop input thread
     (when-let [thread (:input-thread @app)]
       (.interrupt thread))
+    ;; Interrupt all in-flight side-effect threads
+    (when-let [threads-atom (:effect-threads @app)]
+      (doseq [^Thread t @threads-atom]
+        (try (.interrupt t) (catch Exception _)))
+      (reset! threads-atom #{}))
     ;; Restore terminal
     (try
       (screen/stop-screen! (:screen @app))

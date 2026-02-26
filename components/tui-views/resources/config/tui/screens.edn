@@ -49,20 +49,22 @@
    :children
    [{:type :widget/table
      :data-fn :project/pr-items
-     :columns [{:key :repo   :header "Repo"      :width 18}
-               {:key :number :header "PR"        :width 6}
-               {:key :title  :header "Title"     :width :flex}
-               {:key :status :header "Status"    :width 12}
-               {:key :ready  :header "Readiness" :width 15}
-               {:key :risk   :header "Risk"      :width 6}
-               {:key :policy :header "Policy"    :width 6}]
+     :columns [{:key :repo      :header "Repo"      :width 18}
+               {:key :number   :header "PR"        :width 6}
+               {:key :title    :header "Title"     :width :flex}
+               {:key :status   :header "Status"    :width 12}
+               {:key :ready    :header "Readiness" :width 15}
+               {:key :risk     :header "Risk"      :width 6}
+               {:key :policy   :header "Policy"    :width 6}
+               {:key :recommend :header "Recommend" :width 14}]
      :selectable? true
      :selection-col? true}
     {:type :node/footer
      :segments
-     {:normal "j/k:nav  Enter:detail  Tab:views  /:search  r:refresh (s:alias)  6:repos  q:quit"
-      :selected "{n} selected │ Space:toggle  v:visual  a:all  c:clear  :archive :delete"
-      :visual "VISUAL │ j/k:extend  Space:toggle  Esc:exit  a:all"}}]}}
+     {:normal "j/k:nav  Enter:detail  O:open  Space:select  p:filter  c:chat  r:sync  /:search  ::cmd  Tab:views  q:quit"
+      :selected "{n} selected │ Space:toggle  v:visual  a:all  c:chat  C:clear  :review :remediate :decompose"
+      :visual "VISUAL │ j/k:extend  Space:toggle  Esc:exit  a:all"
+      :filtered "FILTER [{n}] │ Space:select  a:all  v:visual  Esc:clear filter"}}]}}
 
  :pr-detail
  {:title-bar {:text-fn :ctx/pr-detail-title}
@@ -87,7 +89,7 @@
          :child {:type :widget/tree :data-fn :project/gate-list}}]}]}
     {:type :node/footer
      :segments
-     {:normal "Esc:back  6:fleet  8:train  Space:expand  q:quit"}}]}}
+     {:normal "Esc:back  O:open  c:chat  ←/→:prev/next  Tab:pane  q:quit"}}]}}
 
  :train-view
  {:title-bar {:text-fn :ctx/train-title}

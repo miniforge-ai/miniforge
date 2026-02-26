@@ -19,20 +19,22 @@
 (ns ai.miniforge.tui-views.update.mode
   "Mode switching and command buffer manipulation.
 
-   Pure functions for switching between normal/command/search modes.
+   Pure functions for switching between normal/command/search/filter modes.
    Layer 3."
   (:require
    [clojure.string :as str]
-   [ai.miniforge.tui-views.model :as model]))
+   [ai.miniforge.tui-views.model :as model]
+   [ai.miniforge.tui-views.transition :as transition]
+   [ai.miniforge.tui-views.update.filter :as filter]))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Mode switching
 
 (defn enter-command-mode [model]
-  (assoc model :mode :command :command-buf ":"))
+  (transition/enter-command model))
 
 (defn enter-search-mode [model]
-  (assoc model :mode :search :command-buf "/" :search-results []))
+  (transition/enter-search model))
 
 (defn exit-mode
   "Exit command/search mode back to normal.
@@ -166,3 +168,65 @@
 
       ;; Default — no search behavior
       model)))
+
+;------------------------------------------------------------------------------ Layer 5
+;; Filter mode (VS Code cmd+p style palette for PR fleet)
+
+(defn enter-filter-mode
+  "Enter filter mode. Sets mode to :filter with '>' prefix in command bar."
+  [model]
+  (if (= :pr-fleet (:view model))
+    (transition/enter-filter model)
+    model))
+
+(defn- filter-query
+  "Extract the filter query from the command buffer (strip '>' prefix)."
+  [model]
+  (let [buf (or (:command-buf model) ">")]
+    (if (str/starts-with? buf ">")
+      (subs buf 1)
+      buf)))
+
+(defn update-filter-results
+  "Recompute filtered indices from the current filter query."
+  [model]
+  (let [query (filter-query model)
+        indices (filter/compute-filter-indices (:pr-items model []) query)]
+    (assoc model
+           :filtered-indices indices
+           :selected-idx 0)))
+
+(defn filter-confirm
+  "Confirm filter: exit to normal mode, keep filter active.
+   Sets :active-filter for display in the header."
+  [model]
+  (let [query (filter-query model)]
+    (-> model
+        (assoc :mode :normal :command-buf "")
+        (assoc :active-filter (when-not (str/blank? query) query)))))
+
+(defn filter-escape
+  "Escape filter: exit to normal mode, clear filter entirely."
+  [model]
+  (-> model
+      (assoc :mode :normal :command-buf ""
+             :filtered-indices nil :selected-idx 0
+             :active-filter nil)))
+
+(defn filter-append
+  "Append character to filter buffer and recompute results."
+  [model ch]
+  (-> model
+      (update :command-buf str ch)
+      update-filter-results))
+
+(defn filter-backspace
+  "Backspace in filter buffer. Exit mode if at '>' prefix."
+  [model]
+  (let [buf (:command-buf model)]
+    (if (> (count buf) 1)
+      (-> model
+          (assoc :command-buf (subs buf 0 (dec (count buf))))
+          update-filter-results)
+      (filter-escape model))))
+

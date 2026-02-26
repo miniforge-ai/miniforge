@@ -872,24 +872,62 @@ The TUI MUST provide:
 #### 3.2.8 PR Fleet View (N9)
 
 ```text
-╭─────────────────────────────────────────────────────────────────────────────╮
-│ miniforge fleet PRs  [Repos: 12 | PRs: 34 | Merge-Ready: 8]   ⟳ 15s ago   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ REPO              PR#   TITLE              READINESS       RISK   POLICY   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ acme/api          #42   Add auth endpoint  ✓ merge-ready   low    pass     │
-│ acme/api          #45   Fix rate limiter   ● ci-failing    med    pass     │
-│ acme/infra        #18   Scale RDS          ✓ merge-ready   high   pass     │
-│ acme/frontend     #99   Dark mode          ● needs-review  low    unknown  │
-╰─────────────────────────────────────────────────────────────────────────────╯
-[j/k] Navigate  [Enter] PR Detail  [f] Filter  [t] Trains  [Esc] Back
+╭──────────────────────────────────────────────────────────────────────────────────────╮
+│ miniforge fleet PRs  [Repos: 12 | PRs: 34 | Merge-Ready: 8]   ⟳ 15s ago            │
+├──────────────────────────────────────────────────────────────────────────────────────┤
+│ REPO            PR#   TITLE             READINESS       RISK   POLICY  RECOMMEND     │
+├──────────────────────────────────────────────────────────────────────────────────────┤
+│ acme/api        #42   Add auth endpoint ✓ merge-ready   low    pass    → merge       │
+│ acme/api        #45   Fix rate limiter  ● ci-failing    med    pass    ◌ wait        │
+│ acme/infra      #18   Scale RDS         ✓ merge-ready   high   pass    ⊘ approve     │
+│ acme/frontend   #99   Dark mode         ○ needs-review  low    unknown ⊙ review      │
+│ acme/api        #51   Migrate DB        ○ needs-review  low    FAIL    ⚡ remediate   │
+│ acme/platform   #77   Monolith refactor ○ needs-review  med    pass    ◇ decompose   │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+j/k:nav  Enter:detail  O:open  Space:select  p:filter  c:chat  t:train  /:search  ::cmd
 ```
 
 **Requirements:**
 
-- MUST show PR Work Items across repos with readiness/risk/policy columns
-- MUST support sorting and filtering by readiness, risk, repo, author
+- MUST show PR Work Items across repos with readiness/risk/policy/recommend columns
 - MUST derive from event stream (N3) and PR Work Item state — projections, not separate data
+- MUST compute readiness using `pr-train/explain-readiness` weighted factors (deps, CI, approval, gates, age, staleness)
+- MUST compute risk using `pr-train/assess-risk` explainable factors
+  (change size, dep fanout, coverage, author, staleness, complexity, critical files)
+- MUST evaluate policy using `policy-pack/evaluate-external-pr` against applicable policy packs
+- MUST derive RECOMMEND column from enriched readiness, risk, policy, and PR size:
+  - `→ merge` — all gates green, low risk, policy passes
+  - `⊘ approve` — merge-ready but elevated risk requires human approval
+  - `⊙ review` — awaiting review or non-auto-fixable policy violations
+  - `⚡ remediate` — auto-fixable policy violations detected
+  - `◇ decompose` — large PR (>500 lines) not yet reviewed
+  - `◌ wait` — CI failing, draft, or awaiting signals
+
+**Filter Palette:**
+
+- `p` key MUST enter filter mode with field-qualified query syntax
+- Supported field qualifiers: `repo:X`, `author:X`, `readiness:STATE`, `risk:LEVEL`, `policy:pass|fail`, `recommend:ACTION`
+- Free text tokens MUST fuzzy-match against PR title
+- Multiple qualifiers MUST compose with AND semantics
+- Filter MUST update results incrementally on each keystroke
+- `Enter` confirms filter, `Esc` clears
+
+**Batch Actions:**
+
+- Selection via `Space` key (toggle) and visual mode (`v`)
+- When items are selected, footer MUST show `{n} selected` with available batch commands
+- Supported batch commands:
+  - `:review` — evaluate selected PRs against policy packs
+  - `:remediate` — auto-fix policy violations for selected PRs (rules with repair functions)
+  - `:decompose` — break a single selected PR into a DAG of smaller PRs
+  - `:create-train NAME` — create a new merge train from selected PRs
+  - `:add-to-train` — add selected PRs to active train
+
+**Chat Integration:**
+
+- `c` key MUST open conversational handoff to miniforge workflows
+- In fleet context: passes selected PRs + active filter as chat context
+- Dispatches through orchestrator (N7) for full agent capability
 
 #### 3.2.9 PR Detail View (N9)
 
@@ -898,6 +936,18 @@ The TUI MUST provide:
 - MUST show readiness blockers, risk factors, policy results
 - MUST allow drill-down to evidence artifacts (N6)
 - MUST show automation tier and recent provider actions
+- MUST display readiness factor breakdown from `pr-train/explain-readiness`:
+  - deps-merged, ci-passed, approved, gates-passed, age-penalty, staleness-penalty
+  - Each factor shows weight, score, and contribution
+- MUST display risk factor breakdown from `pr-train/assess-risk`:
+  - change-size, dependency-fanout, test-coverage-delta, author-experience, review-staleness, complexity-delta, critical-files
+  - Each factor shows weight, score, value, and explanation
+- MUST display policy evaluation results from `policy-pack/evaluate-external-pr`:
+  - Per-rule outcome (pass/fail/warn) with severity and message
+  - Summary counts (critical/major/minor/info)
+- MUST show recommended action with explanation (why this action is suggested)
+- `c` key MUST open chat pane for conversing about this specific PR (risk, approach, etc.)
+- `O` key MUST open PR URL in default browser
 
 #### 3.2.10 Train View (N9)
 
@@ -906,6 +956,11 @@ The TUI MUST provide:
 - MUST show ordered train members with merge readiness status
 - MUST indicate which member is next for merge
 - MUST show dependency edges between train members
+- MUST support `:create-train NAME` — create a new merge train
+- MUST support `:add-to-train` — add selected PRs from fleet to active train
+- MUST support `:merge-next` — trigger merge of next ready PR in train
+- MUST show per-PR readiness score and recommended action within train context
+- Train merge orchestration MUST respect automation tier constraints (N9 §10)
 
 #### 3.2.11 Pack Browser View
 

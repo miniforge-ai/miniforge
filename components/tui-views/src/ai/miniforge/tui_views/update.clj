@@ -33,13 +33,15 @@
    [clojure.java.io :as io]
    [clojure.set :as set]
    [clojure.string :as str]
+   [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update.navigation :as nav]
    [ai.miniforge.tui-views.update.events :as events]
    [ai.miniforge.tui-views.update.mode :as mode]
    [ai.miniforge.tui-views.update.command :as command]
    [ai.miniforge.tui-views.update.completion :as completion]
-   [ai.miniforge.tui-views.update.selection :as sel]))
+   [ai.miniforge.tui-views.update.selection :as sel]
+   [ai.miniforge.tui-views.update.chat :as chat]))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Keybinding configuration (EDN-driven parser pattern)
@@ -58,6 +60,8 @@
 (def ^:private help-keybindings    (:help keybindings))
 (def ^:private command-keybindings (:command keybindings))
 (def ^:private search-keybindings  (:search keybindings))
+(def ^:private filter-keybindings  (:filter keybindings))
+(def ^:private chat-keybindings    (:chat keybindings))
 (def ^:private number-key->index   (:number-keys keybindings))
 
 ;; ── Input event helpers ──
@@ -108,9 +112,8 @@
     (if (:browse-repos-loading? model)
       (assoc m :flash-message "Browsing remote repos...")
       (assoc m
-             :side-effect {:type :browse-repos
-                           :source :repo-manager
-                           :provider provider}
+             :side-effect (effect/browse-repos {:source :repo-manager
+                                                :provider provider})
              :browse-repos-loading? true
              :flash-message (str "Browsing " (name provider) " repos...")))))
 
@@ -128,7 +131,7 @@
             added (count (set/difference after before))]
         (if (pos? added)
           (-> (reset-repo-manager-state m :browse)
-              (assoc :side-effect {:type :sync-prs}
+              (assoc :side-effect (effect/sync-prs)
                      :flash-message (str "Added " added " repo(s) to fleet. Syncing PRs...")))
           (-> (reset-repo-manager-state m :browse)
               (assoc :flash-message "Selected repos already in fleet.")))))))
@@ -193,6 +196,7 @@
    :action/go-back            nav/go-back
    :action/enter-command-mode mode/enter-command-mode
    :action/enter-search-mode  mode/enter-search-mode
+   :action/enter-filter-mode  mode/enter-filter-mode
    :action/next-search-match  nav/next-search-match
    :action/prev-search-match  nav/prev-search-match
    :action/enter-visual-mode  sel/enter-visual-mode
@@ -215,6 +219,8 @@
      (cond
        (:visual-anchor model)        (sel/exit-visual-mode model)
        (seq (:selected-ids model))   (sel/clear-selection model)
+       (:active-filter model)        (assoc model :filtered-indices nil :selected-idx 0
+                                                  :active-filter nil)
        (:filtered-indices model)     (assoc model :filtered-indices nil :selected-idx 0)
        (seq (:search-matches model)) (assoc model :search-matches [] :search-match-idx nil)
        :else                         (nav/go-back model)))
@@ -224,6 +230,18 @@
      (if (selectable-views (:view model))
        (sel/toggle-selection model)
        (nav/toggle-expand model)))
+
+   :action/chat-or-clear
+   (fn [model]
+     (if (#{:pr-fleet :pr-detail} (:view model))
+       (chat/enter model)
+       (sel/clear-selection model)))
+
+   :action/train-view
+   (fn [model]
+     (if (:active-train-id model)
+       (command/execute-command model ":train")
+       (assoc model :flash-message "No active train. Use :create-train NAME")))
 
    :action/refresh-or-sync
    (fn [model]
@@ -255,6 +273,21 @@
      (if (in-repo-manager? model)
        (repo-manager-open-browse model :all)
        model))
+
+   :action/open-in-browser
+   (fn [model]
+     (let [url (case (:view model)
+                 :pr-fleet  (let [prs (:pr-items model [])
+                                  visible (if-let [fi (:filtered-indices model)]
+                                            (vec (keep-indexed (fn [i pr] (when (contains? fi i) pr)) prs))
+                                            prs)]
+                              (:pr/url (get visible (:selected-idx model))))
+                 :pr-detail (get-in model [:detail :selected-pr :pr/url])
+                 nil)]
+       (if url
+         (assoc model :side-effect (effect/open-url url)
+                      :flash-message (str "Opening " url "..."))
+         (assoc model :flash-message "No URL available for this item"))))
 
    :action/remove-repos
    (fn [model]
@@ -383,6 +416,44 @@
             mode/compute-search-results)
         model))))
 
+;; ── Filter mode input ──
+
+(def ^:private filter-action-handlers
+  "Action token → handler for filter-mode actions."
+  {:action/filter-escape    mode/filter-escape
+   :action/filter-confirm   mode/filter-confirm
+   :action/filter-backspace mode/filter-backspace})
+
+(defn- handle-filter-input [model key]
+  (let [k (extract-key key)]
+    (if-let [action (filter-keybindings k)]
+      (if-let [handler (filter-action-handlers action)]
+        (handler model)
+        model)
+      ;; Character input — append and live-filter
+      (if-let [ch (extract-char key)]
+        (mode/filter-append model ch)
+        model))))
+
+;; ── Chat mode input ──
+
+(def ^:private chat-action-handlers
+  "Action token → handler for chat-mode actions."
+  {:action/chat-escape    chat/escape
+   :action/chat-send      chat/send-message
+   :action/chat-backspace chat/backspace})
+
+(defn- handle-chat-input [model key]
+  (let [k (extract-key key)]
+    (if-let [action (chat-keybindings k)]
+      (if-let [handler (chat-action-handlers action)]
+        (handler model)
+        model)
+      ;; Character input — append to chat buffer
+      (if-let [ch (extract-char key)]
+        (chat/append model ch)
+        model))))
+
 (defn- refresh-add-repo-completions-if-active
   "If command-mode add-repo picker is currently open, refresh its options."
   [model]
@@ -433,6 +504,8 @@
           :normal  (handle-normal-input model payload)
           :command (handle-command-input model payload)
           :search  (handle-search-input model payload)
+          :filter  (handle-filter-input model payload)
+          :chat    (handle-chat-input model payload)
           model))
 
       ;; Event stream messages
@@ -446,12 +519,27 @@
       :msg/gate-result      (events/handle-gate-result model payload)
 
       ;; PR fleet messages
+      :msg/policy-evaluated (events/handle-policy-evaluated model payload)
       :msg/prs-synced       (events/handle-prs-synced model payload)
       :msg/pr-updated       (events/handle-pr-updated model payload)
       :msg/pr-removed       (events/handle-pr-removed model payload)
       :msg/repos-discovered (events/handle-repos-discovered model payload)
       :msg/repos-browsed    (-> (events/handle-repos-browsed model payload)
                                 refresh-add-repo-completions-if-active)
+
+      ;; Train messages
+      :msg/train-created         (events/handle-train-created model payload)
+      :msg/prs-added-to-train    (events/handle-prs-added-to-train model payload)
+      :msg/merge-started         (events/handle-merge-started model payload)
+
+      ;; Batch action messages
+      :msg/review-completed      (events/handle-review-completed model payload)
+      :msg/remediation-completed (events/handle-remediation-completed model payload)
+      :msg/decomposition-started (events/handle-decomposition-started model payload)
+
+      ;; Chat messages
+      :msg/chat-response         (events/handle-chat-response model payload)
+      :msg/chat-action-result    (events/handle-chat-action-result model payload)
 
       ;; Side-effect error
       :msg/side-effect-error

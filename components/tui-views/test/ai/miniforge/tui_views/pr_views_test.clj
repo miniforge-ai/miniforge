@@ -27,20 +27,22 @@
    [ai.miniforge.tui-engine.interface :as engine]
    [ai.miniforge.tui-engine.interface.layout :as layout]
    [ai.miniforge.tui-views.view.interpret :as interpret]
+   [ai.miniforge.tui-views.view.project :as project]
+   [ai.miniforge.tui-views.update.navigation :as nav]
    [ai.miniforge.tui-views.model :as model]))
 
 ;; --- Mock data ---
 
 (def sample-prs
   [{:pr/repo "my-app" :pr/number 42 :pr/title "Fix auth bug"
-    :pr/status :open :pr/readiness-score 0.75
-    :pr/risk {:risk/level :low} :pr/policy-passed? true}
+    :pr/status :open :pr/ci-status :pending :pr/url "https://github.com/my-app/pull/42"
+    :pr/policy-passed? true}
    {:pr/repo "api" :pr/number 101 :pr/title "Add caching layer"
-    :pr/status :merge-ready :pr/readiness-score 1.0
-    :pr/risk {:risk/level :medium} :pr/policy-passed? true}
+    :pr/status :merge-ready :pr/ci-status :passed :pr/url "https://github.com/api/pull/101"
+    :pr/policy-passed? true}
    {:pr/repo "infra" :pr/number 7 :pr/title "Update DNS records"
-    :pr/status :draft :pr/readiness-score 0.2
-    :pr/risk {:risk/level :high} :pr/policy-passed? false}])
+    :pr/status :draft :pr/ci-status :pending :pr/url "https://github.com/infra/pull/7"
+    :pr/policy-passed? false}])
 
 (def sample-readiness
   {:readiness/score 0.8
@@ -171,3 +173,71 @@
           buf (render-view m [100 30])]
       (is (= 30 (count buf)))
       (is (= 100 (count (first buf)))))))
+
+;; --- Readiness derivation tests ---
+
+(deftest derive-readiness-merge-ready-test
+  (testing "Merge-ready + passed CI = merge-ready 1.0"
+    (let [r (project/derive-readiness {:pr/status :merge-ready :pr/ci-status :passed})]
+      (is (= :merge-ready (:readiness/state r)))
+      (is (= 1.0 (:readiness/score r)))
+      (is (empty? (:readiness/blockers r))))))
+
+(deftest derive-readiness-ci-failing-test
+  (testing "Open + failed CI = ci-failing with blocker"
+    (let [r (project/derive-readiness {:pr/status :open :pr/ci-status :failed})]
+      (is (= :ci-failing (:readiness/state r)))
+      (is (some #(= :ci (:blocker/type %)) (:readiness/blockers r))))))
+
+(deftest derive-readiness-needs-review-test
+  (testing "Open + pending CI = needs-review with blocker"
+    (let [r (project/derive-readiness {:pr/status :open :pr/ci-status :pending})]
+      (is (= :needs-review (:readiness/state r)))
+      (is (some #(= :review (:blocker/type %)) (:readiness/blockers r))))))
+
+(deftest derive-readiness-draft-test
+  (testing "Draft = draft with draft blocker"
+    (let [r (project/derive-readiness {:pr/status :draft :pr/ci-status :pending})]
+      (is (= :draft (:readiness/state r)))
+      (is (= 0.1 (:readiness/score r)))
+      (is (some #(str/includes? (:blocker/message %) "draft") (:readiness/blockers r))))))
+
+(deftest derive-readiness-changes-requested-test
+  (testing "Changes-requested = changes-requested with review blocker"
+    (let [r (project/derive-readiness {:pr/status :changes-requested :pr/ci-status :passed})]
+      (is (= :changes-requested (:readiness/state r)))
+      (is (some #(str/includes? (:blocker/message %) "changes") (:readiness/blockers r))))))
+
+(deftest derive-readiness-has-factors-test
+  (testing "Readiness always includes CI, review, and policy factors"
+    (let [r (project/derive-readiness {:pr/status :open :pr/ci-status :pending})]
+      (is (= 3 (count (:readiness/factors r))))
+      (is (= #{:ci :review :policy}
+             (set (map :factor (:readiness/factors r))))))))
+
+;; --- Risk derivation tests ---
+
+(deftest derive-risk-low-test
+  (testing "Merge-ready = low risk"
+    (let [r (project/derive-risk {:pr/status :merge-ready :pr/ci-status :passed})]
+      (is (= :low (:risk/level r)))
+      (is (seq (:risk/factors r))))))
+
+(deftest derive-risk-ci-failing-test
+  (testing "CI failing = medium risk"
+    (let [r (project/derive-risk {:pr/status :open :pr/ci-status :failed})]
+      (is (= :medium (:risk/level r)))
+      (is (some #(str/includes? (:explanation %) "CI") (:risk/factors r))))))
+
+;; --- Enter-detail populates readiness/risk ---
+
+(deftest enter-detail-selects-pr-test
+  (testing "Entering PR detail stores selected PR for enrichment"
+    (let [m (-> (model/init-model)
+                (assoc :view :pr-fleet
+                       :pr-items sample-prs
+                       :selected-idx 1))
+          m' (nav/enter-detail m)]
+      (is (= :pr-detail (:view m')))
+      (is (= 101 (get-in m' [:detail :selected-pr :pr/number])))
+      (is (= "api" (get-in m' [:detail :selected-pr :pr/repo]))))))
