@@ -19,6 +19,7 @@
 (ns ai.miniforge.tui-views.command-test
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update.command :as command]))
 
@@ -77,6 +78,66 @@
 (deftest command-mode-integration-test
   (testing "Full command mode flow: colon, type, enter"
     (let [m (model/init-model)
-          m (assoc m :mode :command :command-buf ":q")]
-      (let [result (command/execute-command m (:command-buf m))]
-        (is (:quit? result))))))
+          m (assoc m :mode :command :command-buf ":q")
+          result (command/execute-command m (:command-buf m))]
+      (is (:quit? result)))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Control action effect tests
+
+(deftest control-action-effect-test
+  (testing "control-action creates correct map shape"
+    (let [eff (effect/control-action :pause (java.util.UUID/randomUUID))]
+      (is (= :control-action (:type eff)))
+      (is (= :pause (:action eff)))
+      (is (some? (:workflow-id eff)))))
+
+  (testing "control-action for resume"
+    (let [wf-id (java.util.UUID/randomUUID)
+          eff (effect/control-action :resume wf-id)]
+      (is (= :control-action (:type eff)))
+      (is (= :resume (:action eff)))
+      (is (= wf-id (:workflow-id eff)))))
+
+  (testing "control-action for cancel"
+    (let [eff (effect/control-action :cancel (java.util.UUID/randomUUID))]
+      (is (= :cancel (:action eff))))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Pause/resume command handler tests
+
+(deftest pause-command-test
+  (testing ":pause with single workflow selected produces control-action"
+    (let [wf-id (java.util.UUID/randomUUID)
+          m (-> (model/init-model)
+                (assoc :workflows [{:id wf-id :name "test" :status :running}])
+                (assoc :selected-ids #{wf-id}))
+          result (command/execute-command m ":pause")]
+      (is (= :control-action (get-in result [:side-effect :type])))
+      (is (= :pause (get-in result [:side-effect :action])))
+      (is (= wf-id (get-in result [:side-effect :workflow-id])))
+      (is (= "Pausing workflow..." (:flash-message result)))))
+
+  (testing ":pause with no selection shows error"
+    (let [m (model/init-model)
+          result (command/execute-command m ":pause")]
+      (is (some? (:flash-message result)))
+      (is (nil? (:side-effect result))))))
+
+(deftest resume-command-test
+  (testing ":resume with single workflow selected produces control-action"
+    (let [wf-id (java.util.UUID/randomUUID)
+          m (-> (model/init-model)
+                (assoc :workflows [{:id wf-id :name "test" :status :paused}])
+                (assoc :selected-ids #{wf-id}))
+          result (command/execute-command m ":resume")]
+      (is (= :control-action (get-in result [:side-effect :type])))
+      (is (= :resume (get-in result [:side-effect :action])))
+      (is (= wf-id (get-in result [:side-effect :workflow-id])))
+      (is (= "Resuming workflow..." (:flash-message result)))))
+
+  (testing ":resume with no selection shows error"
+    (let [m (model/init-model)
+          result (command/execute-command m ":resume")]
+      (is (some? (:flash-message result)))
+      (is (nil? (:side-effect result))))))

@@ -84,6 +84,14 @@
   [pr]
   {:type :decompose-pr :pr pr})
 
+(defn control-action
+  "Create a control action effect to pause/resume/cancel a workflow.
+   The effect handler writes a command file to ~/.miniforge/commands/<workflow-id>/."
+  [action-type workflow-id]
+  {:type :control-action
+   :action action-type
+   :workflow-id workflow-id})
+
 (defn chat-send
   "Send a chat message to the orchestrator."
   [context message history]
