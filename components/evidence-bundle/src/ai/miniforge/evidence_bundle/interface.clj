@@ -4,6 +4,7 @@
   (:require
    [ai.miniforge.evidence-bundle.collector :as collector]
    [ai.miniforge.evidence-bundle.extraction :as extraction]
+   [ai.miniforge.evidence-bundle.hash :as hash]
    [ai.miniforge.evidence-bundle.schema :as schema]
    [ai.miniforge.evidence-bundle.interface.protocols.evidence-bundle :as p]
    [ai.miniforge.evidence-bundle.protocols.records.evidence-bundle :as records]))
@@ -252,6 +253,19 @@
   (collector/auto-collect-evidence workflow-id workflow-state artifact-store))
 
 ;------------------------------------------------------------------------------ Layer 6
+;; Content Hashing
+
+(defn content-hash
+  "Compute SHA-256 digest of artifact content.
+   Returns hex-encoded hash string.
+
+   Example:
+     (content-hash {:type :terraform-plan :body \"resource ...\"})
+     ;; => \"a3f2b7c9...\" (64-char hex string)"
+  [content]
+  (hash/content-hash content))
+
+;------------------------------------------------------------------------------ Layer 7
 ;; Schema Exports
 
 (def intent-types
@@ -268,7 +282,7 @@
   []
   (schema/create-evidence-bundle-template))
 
-;------------------------------------------------------------------------------ Layer 7
+;------------------------------------------------------------------------------ Layer 8
 ;; Artifact Extraction
 
 (defn extract-file
