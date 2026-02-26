@@ -2,6 +2,7 @@
   "Utilities for collecting evidence during workflow execution.
    Provides helpers for gathering phase results, artifacts, and metadata."
   (:require
+   [ai.miniforge.evidence-bundle.hash :as hash]
    [ai.miniforge.evidence-bundle.schema :as schema]
    [ai.miniforge.response.interface :as response]))
 
@@ -186,21 +187,22 @@
                                                'ai.miniforge.evidence-bundle.protocols.impl.semantic-validator/validate-intent-impl)]
                                 (validator intent impl-artifacts)))]
 
-    (merge
-     (schema/create-evidence-bundle-template)
-     {:evidence-bundle/id (random-uuid)
-      :evidence-bundle/workflow-id workflow-id
-      :evidence-bundle/created-at (java.time.Instant/now)
-      :evidence/intent intent
-      :evidence/policy-checks policy-checks
-      :evidence/outcome outcome}
-     phase-evidence
-     (when (seq tool-invocations)
-       {:evidence/tool-invocations tool-invocations})
-     (when (seq pack-promotions)
-       {:evidence/pack-promotions pack-promotions})
-     (when semantic-validation
-       {:evidence/semantic-validation semantic-validation}))))
+    (let [bundle (merge
+                  (schema/create-evidence-bundle-template)
+                  {:evidence-bundle/id (random-uuid)
+                   :evidence-bundle/workflow-id workflow-id
+                   :evidence-bundle/created-at (java.time.Instant/now)
+                   :evidence/intent intent
+                   :evidence/policy-checks policy-checks
+                   :evidence/outcome outcome}
+                  phase-evidence
+                  (when (seq tool-invocations)
+                    {:evidence/tool-invocations tool-invocations})
+                  (when (seq pack-promotions)
+                    {:evidence/pack-promotions pack-promotions})
+                  (when semantic-validation
+                    {:evidence/semantic-validation semantic-validation}))]
+      (assoc bundle :evidence/content-hash (hash/content-hash bundle)))))
 
 ;------------------------------------------------------------------------------ Layer 6
 ;; Workflow Integration Helpers
