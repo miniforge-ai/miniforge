@@ -29,7 +29,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event -> TUI message translation
 
-(defn- translate-event
+(defn translate-event
   "Translate a single event-stream event to a TUI message vector.
    Returns nil for events that should be ignored."
   [event]

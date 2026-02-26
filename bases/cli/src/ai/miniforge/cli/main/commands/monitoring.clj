@@ -2,6 +2,7 @@
   "Web dashboard and TUI monitoring commands."
   (:require
    [babashka.process :as process]
+   [clojure.string :as str]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.config :as config]))
 
@@ -92,8 +93,9 @@
 (def ^:dynamic *tui-available?* false)
 
 (defn tui-cmd
-  "Start terminal UI for workflow monitoring."
-  [_opts]
+  "Start terminal UI for workflow monitoring.
+   Launches standalone TUI that tail-follows ~/.miniforge/events/ files."
+  [opts]
   (if-not *tui-available?*
     (do
       (display/print-error "TUI not available in this runtime.")
@@ -107,20 +109,17 @@
       (println "  miniforge web")
       (System/exit 1))
     (do
-      (display/print-info "Starting TUI dashboard...")
+      (display/print-info "Starting TUI monitor...")
+      (display/print-info "Watching ~/.miniforge/events/ for workflow activity")
       (display/print-info "Press 'q' to quit, '?' for help")
       (println)
       (try
-        (require 'ai.miniforge.event-stream.interface)
-        (require 'ai.miniforge.tui-views.interface)
-        (let [create-stream (resolve 'ai.miniforge.event-stream.interface/create-event-stream)
-              start-tui!    (resolve 'ai.miniforge.tui-views.interface/start-tui!)
-              event-stream  (create-stream)]
-          ;; Start TUI (blocks until quit)
-          (start-tui! event-stream))
+        (let [start-standalone! (requiring-resolve 'ai.miniforge.tui-views.interface/start-standalone-tui!)]
+          ;; Start standalone TUI (blocks until quit)
+          (start-standalone! opts))
         (catch Exception e
           (display/print-error (str "Failed to start TUI: " (.getMessage e)))
-          (when (clojure.string/includes? (str e) "terminal")
+          (when (str/includes? (str e) "terminal")
             (println)
             (println "Note: The TUI requires a proper terminal environment.")
             (println "Try running from Terminal.app or iTerm2, not from an IDE.")))))))

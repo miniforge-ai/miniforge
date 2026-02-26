@@ -30,6 +30,7 @@
    [ai.miniforge.tui-views.update :as update]
    [ai.miniforge.tui-views.view :as view]
    [ai.miniforge.tui-views.subscription :as subscription]
+   [ai.miniforge.tui-views.file-subscription :as file-subscription]
    [ai.miniforge.tui-views.persistence :as persistence]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.policy-pack.interface :as policy-pack]
@@ -289,6 +290,35 @@
    Safe to call multiple times."
   [app]
   (tui/stop! app))
+
+(defn start-standalone-tui!
+  "Start the TUI in standalone monitoring mode.
+   Discovers and tail-follows workflow event files from ~/.miniforge/events/.
+   Does not require an in-memory event stream."
+  [& [opts]]
+  (let [train-mgr (pr-train/create-manager)
+        app (tui/create-app
+             {:init   (fn []
+                        (persistence/load-all-into-model
+                         (model/init-model)
+                         {:limit (:load-limit opts 100)}))
+              :update update/update-model
+              :view   view/root-view
+              :screen (:screen opts)
+              :effect-handler (partial dispatch-effect train-mgr)
+              :subscriptions
+              (fn [dispatch-fn]
+                (file-subscription/subscribe-to-files!
+                 dispatch-fn
+                 {:poll-ms (:poll-ms opts 500)
+                  :scan-ms (:scan-ms opts 2000)}))})]
+    (tui/start! app)
+    (try
+      (while (not (:quit? (tui/get-model app)))
+        (Thread/sleep 100))
+      (finally
+        (tui/stop! app)))
+    app))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
