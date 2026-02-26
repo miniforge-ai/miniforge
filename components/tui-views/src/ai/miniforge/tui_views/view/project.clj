@@ -464,6 +464,7 @@
      :policy    (:pr/policy pr-data)
      :gates     (get pr-data :pr/gate-results [])}))
 
+
 (defn- ci-check-node
   "Build a tree node for a single CI check result."
   [{:keys [name conclusion]}]
@@ -541,6 +542,7 @@
   (str (name factor) ": " (or explanation "")
        (when weight
          (str " (w=" (int (* 100 weight)) "%, s=" (int (* 100 (or score 0))) "%)"))))
+
 
 (defn- risk-factor-detail-nodes
   "Build expandable detail nodes for a risk factor."
