@@ -53,6 +53,34 @@
    [ai.miniforge.event-stream.approval :as approval]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Control state primitives
+
+(def create-control-state
+  "Create a canonical control-state atom for workflow execution.
+   Used by both CLI dashboard poller and TUI to drive pause/resume/cancel."
+  control/create-control-state)
+
+(def pause!
+  "Pause workflow execution."
+  control/pause!)
+
+(def resume!
+  "Resume paused workflow execution."
+  control/resume!)
+
+(def cancel!
+  "Cancel workflow execution."
+  control/cancel!)
+
+(def paused?
+  "Check if workflow is paused."
+  control/paused?)
+
+(def cancelled?
+  "Check if workflow is cancelled."
+  control/cancelled?)
+
+;------------------------------------------------------------------------------ Layer 0b
 ;; Event stream lifecycle
 
 (defn create-event-stream

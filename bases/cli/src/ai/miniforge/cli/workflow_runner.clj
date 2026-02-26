@@ -280,7 +280,7 @@
           event-stream (es/create-event-stream)
           workflow-id (or (get-in enriched-spec [:spec/metadata :session-id]) (random-uuid))
           ;; Control state for dashboard commands (pause/resume/stop)
-          control-state (atom {:paused false :stopped false :adjustments {}})
+          control-state (es/create-control-state)
           command-poller-cleanup (dashboard/start-command-poller! workflow-id control-state)
           ;; Create workflow-specific LLM client for execution
           llm-client (context/create-llm-client workflow spec quiet)

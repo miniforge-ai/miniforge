@@ -12,6 +12,40 @@
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Control state management
+
+(defn create-control-state
+  "Create a canonical control-state atom for workflow execution.
+   Used by both CLI dashboard poller and TUI to drive pause/resume/cancel."
+  []
+  (atom {:paused false :stopped false :adjustments {}}))
+
+(defn pause!
+  "Pause workflow execution."
+  [control-state]
+  (swap! control-state assoc :paused true))
+
+(defn resume!
+  "Resume paused workflow execution."
+  [control-state]
+  (swap! control-state assoc :paused false))
+
+(defn cancel!
+  "Cancel workflow execution."
+  [control-state]
+  (swap! control-state assoc :stopped true))
+
+(defn paused?
+  "Check if workflow is paused."
+  [control-state]
+  (:paused @control-state))
+
+(defn cancelled?
+  "Check if workflow is cancelled."
+  [control-state]
+  (:stopped @control-state))
+
+;------------------------------------------------------------------------------ Layer 1a
 ;; RBAC role definitions
 
 (def default-roles
@@ -29,7 +63,7 @@
   "Valid target types for control actions."
   #{:workflow :agent :fleet})
 
-;------------------------------------------------------------------------------ Layer 1
+;------------------------------------------------------------------------------ Layer 1b
 ;; Control action creation
 
 (defn create-control-action
@@ -53,7 +87,7 @@
     (:justification opts) (assoc :action/justification (:justification opts))
     (:parameters opts) (assoc :action/parameters (:parameters opts))))
 
-;------------------------------------------------------------------------------ Layer 1
+;------------------------------------------------------------------------------ Layer 1c
 ;; RBAC authorization
 
 (def ^:private target-type->category
@@ -107,7 +141,7 @@
                                          :action-type action-type
                                          :target-type target-type})})))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 2a
 ;; Control action execution
 
 (defn execute-control-action!
@@ -140,7 +174,7 @@
                       stream workflow-id action-id result))
       result)))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 2b
 ;; Approval-aware control action execution
 
 (def ^:private actions-requiring-approval

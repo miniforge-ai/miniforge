@@ -71,11 +71,11 @@
                                     data (edn/read-string content)
                                     command (keyword (:command data))]
                                 (case command
-                                  :pause (do (swap! control-state assoc :paused true)
+                                  :pause (do ((requiring-resolve 'ai.miniforge.event-stream.interface/pause!) control-state)
                                              (println "\u23f8  Workflow paused by dashboard"))
-                                  :resume (do (swap! control-state assoc :paused false)
+                                  :resume (do ((requiring-resolve 'ai.miniforge.event-stream.interface/resume!) control-state)
                                               (println "\u25b6  Workflow resumed by dashboard"))
-                                  :stop (do (swap! control-state assoc :stopped true)
+                                  :stop (do ((requiring-resolve 'ai.miniforge.event-stream.interface/cancel!) control-state)
                                             (println "\u23f9  Workflow stopped by dashboard"))
                                   nil)
                                 (.delete file))
