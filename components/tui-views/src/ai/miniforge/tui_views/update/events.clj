@@ -252,17 +252,15 @@
   "Handle result of :review-prs side effect.
    Updates PRs with policy results and flashes summary."
   [model {:keys [results]}]
-  (let [updated-prs (reduce
-                     (fn [prs {:keys [pr-id result]}]
-                       (let [[repo number] pr-id]
-                         (mapv (fn [pr]
-                                 (if (and (= (:pr/repo pr) repo)
-                                          (= (:pr/number pr) number))
-                                   (assoc pr :pr/policy result)
-                                   pr))
-                               prs)))
-                     (:pr-items model [])
-                     (or results []))
+  (let [results-by-id (into {}
+                            (map (fn [{:keys [pr-id result]}] [pr-id result]))
+                            (or results []))
+        updated-prs (mapv (fn [pr]
+                            (let [pr-id [(:pr/repo pr) (:pr/number pr)]]
+                              (if-let [result (get results-by-id pr-id)]
+                                (assoc pr :pr/policy result)
+                                pr)))
+                          (:pr-items model []))
         passed (count (filter #(get-in % [:result :evaluation/passed?]) results))
         failed (- (count results) passed)]
     (-> model
