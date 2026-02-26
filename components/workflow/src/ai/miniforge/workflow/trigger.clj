@@ -20,7 +20,8 @@
   "Event-driven workflow triggers.
 
    Subscribes to event streams and fires workflows or chains
-   when matching events occur. Currently supports :pr/merged triggers.")
+   when matching events occur. Currently supports :pr/merged triggers."
+  (:require [clojure.edn]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Trigger matching
@@ -28,12 +29,13 @@
 (defn- matches-trigger?
   "Check if an event matches a trigger rule."
   [trigger event]
-  (and (= (:on trigger) (:event/type event))
-       (or (nil? (:repo trigger))
-           (= (:repo trigger) (:pr/repo event)))
-       (or (nil? (:branch-pattern trigger))
-           (re-matches (re-pattern (:branch-pattern trigger))
-                       (or (:pr/branch event) "")))))
+  (boolean
+    (and (= (:on trigger) (:event/type event))
+         (or (nil? (:repo trigger))
+             (= (:repo trigger) (:pr/repo event)))
+         (or (nil? (:branch-pattern trigger))
+             (re-matches (re-pattern (:branch-pattern trigger))
+                         (or (:pr/branch event) ""))))))
 
 (defn- extract-input
   "Extract input from event using trigger's :input-from-event mapping."
@@ -55,6 +57,34 @@
   (clojure.edn/read-string (slurp path)))
 
 ;------------------------------------------------------------------------------ Layer 2
+;; Trigger execution
+
+(defn- fire-workflow
+  "Load and run a workflow from a trigger's run-spec. Returns the future."
+  [run-spec input opts load-wf run-pipeline]
+  (let [{:keys [workflow-id version] :or {version :latest}} run-spec
+        wf-result (load-wf workflow-id version opts)
+        workflow  (:workflow wf-result)]
+    (run-pipeline workflow input opts)))
+
+(defn- handle-trigger-event
+  "Process a single event against all trigger rules, firing matching workflows."
+  [triggers opts futures-atom load-wf run-pipeline event]
+  (doseq [trigger triggers]
+    (when (matches-trigger? trigger event)
+      (let [input    (or (extract-input trigger event) {})
+            run-spec (:run trigger)
+            f        (future (fire-workflow run-spec input opts load-wf run-pipeline))]
+        (swap! futures-atom conj f)))))
+
+(defn- cancel-futures!
+  "Cancel all pending futures and clear the atom."
+  [futures-atom]
+  (doseq [f @futures-atom]
+    (future-cancel f))
+  (reset! futures-atom []))
+
+;------------------------------------------------------------------------------ Layer 3
 ;; Trigger lifecycle
 
 (defn create-merge-trigger
@@ -74,26 +104,11 @@
         run-pipeline (requiring-resolve 'ai.miniforge.workflow.interface/run-pipeline)
         load-wf      (requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)
         sub-id       :merge-trigger]
-    (subscribe!
-      event-stream sub-id
-      (fn [event]
-        (doseq [trigger triggers]
-          (when (matches-trigger? trigger event)
-            (let [input    (or (extract-input trigger event) {})
-                  run-spec (:run trigger)
-                  f (future
-                      (let [{:keys [workflow-id version]
-                             :or   {version :latest}} run-spec
-                            wf-result (load-wf workflow-id version opts)
-                            workflow  (:workflow wf-result)]
-                        (run-pipeline workflow input opts)))]
-              (swap! futures-atom conj f))))))
+    (subscribe! event-stream sub-id
+                (partial handle-trigger-event triggers opts futures-atom load-wf run-pipeline))
     {:subscriber-id sub-id
-     :stop-fn       (fn []
-                      (unsubscribe! event-stream sub-id)
-                      (doseq [f @futures-atom]
-                        (future-cancel f))
-                      (reset! futures-atom []))}))
+     :stop-fn       #(do (unsubscribe! event-stream sub-id)
+                         (cancel-futures! futures-atom))}))
 
 (defn stop-trigger!
   "Stop a merge trigger. Unsubscribes and cancels pending work."
