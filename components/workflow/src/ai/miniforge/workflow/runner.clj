@@ -248,6 +248,22 @@
           (assoc phase-ctx :self-healing/backend-switch switch-result)
           phase-ctx)))))
 
+;------------------------------------------------------------------------------ Layer 1.5: Output extraction
+
+(defn- extract-output
+  "Synthesize :execution/output from completed pipeline context.
+   Provides a stable interface for chaining: downstream consumers
+   read :execution/output instead of reaching into phase-results."
+  [ctx]
+  (let [phase-results (:execution/phase-results ctx)
+        current-phase (:execution/current-phase ctx)
+        last-result (get phase-results current-phase)]
+    (assoc ctx :execution/output
+           {:artifacts (:execution/artifacts ctx)
+            :phase-results phase-results
+            :last-phase-result last-result
+            :status (:execution/status ctx)})))
+
 ;------------------------------------------------------------------------------ Layer 2: Main entry point
 
 (defn run-pipeline
@@ -312,10 +328,11 @@
                  (recur (execute-single-iteration pipeline context callbacks iteration control-state)
                         (inc iteration)))))]
 
-       ;; Publish workflow completed event (unless caller already does)
-       (when-not skip-lifecycle?
-         (publish-workflow-completed! event-stream final-ctx))
-       final-ctx))))
+       ;; Extract output and publish workflow completed event
+       (let [output-ctx (extract-output final-ctx)]
+         (when-not skip-lifecycle?
+           (publish-workflow-completed! event-stream output-ctx))
+         output-ctx)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
