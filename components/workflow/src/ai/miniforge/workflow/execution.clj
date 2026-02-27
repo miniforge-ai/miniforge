@@ -188,8 +188,13 @@
   [pipeline current-index phase-config phase-result]
   (let [status (or (:status phase-result) (:phase/status phase-result))
         on-fail (:on-fail phase-config)
-        on-success (:on-success phase-config)]
+        on-success (:on-success phase-config)
+        redirect-to (:redirect-to phase-result)]
     (cond
+      ;; Phase requested retry — re-run current phase
+      (= :retrying status)
+      current-index
+
       ;; Phase completed successfully
       (= :completed status)
       (if on-success
@@ -204,6 +209,14 @@
           (if (< next-idx (count pipeline))
             next-idx
             :done)))
+
+      ;; Phase failed with redirect — jump to target phase
+      (and (= :failed status) redirect-to)
+      (let [target-index (->> pipeline
+                              (map-indexed vector)
+                              (filter #(= redirect-to (get-in (second %) [:config :phase])))
+                              (first))]
+        (if target-index (first target-index) :error))
 
       ;; Phase failed
       (= :failed status)
