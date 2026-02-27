@@ -90,12 +90,23 @@
 
 ;; Event handlers
 
+(defn- link-chain-instance
+  "When a chain step is active, record the workflow instance UUID so
+   the view layer can show the chain indicator on the correct row."
+  [model workflow-id]
+  (if (and (:active-chain model)
+           (get-in model [:active-chain :current-step])
+           (nil? (get-in model [:active-chain :current-step :instance-id])))
+    (assoc-in model [:active-chain :current-step :instance-id] workflow-id)
+    model))
+
 (defn handle-workflow-added [model {:keys [workflow-id name spec]}]
   (let [wf (model/make-workflow {:id workflow-id
                                   :name (or name (:name spec))
                                   :status :running})]
     (-> model
         (update :workflows conj wf)
+        (link-chain-instance workflow-id)
         with-timestamp)))
 
 (defn handle-phase-changed [model {:keys [workflow-id phase]}]

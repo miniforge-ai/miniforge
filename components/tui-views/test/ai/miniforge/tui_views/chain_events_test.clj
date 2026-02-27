@@ -151,3 +151,47 @@
     (let [model (model/init-model)]
       (is (contains? model :active-chain))
       (is (nil? (:active-chain model))))))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Chain instance linking and view indicator tests
+
+(deftest workflow-added-links-chain-instance-test
+  (testing "workflow-added during active chain step links instance-id"
+    (let [wf-id (random-uuid)
+          model (-> (model/init-model)
+                    (assoc :active-chain {:chain-id :my-chain
+                                         :step-count 2
+                                         :current-step {:step-id :plan
+                                                        :step-index 0
+                                                        :workflow-id :planning-v1}
+                                         :status :running}))
+          result (events/handle-workflow-added model
+                   {:workflow-id wf-id :name "plan-wf" :spec nil})]
+      (is (= wf-id (get-in result [:active-chain :current-step :instance-id])))
+      (is (= 1 (count (:workflows result)))))))
+
+(deftest workflow-added-no-chain-leaves-model-unchanged-test
+  (testing "workflow-added without active chain does not add chain info"
+    (let [wf-id (random-uuid)
+          model (model/init-model)
+          result (events/handle-workflow-added model
+                   {:workflow-id wf-id :name "solo-wf" :spec nil})]
+      (is (nil? (:active-chain result)))
+      (is (= 1 (count (:workflows result)))))))
+
+(deftest workflow-added-does-not-overwrite-instance-id-test
+  (testing "second workflow-added does not overwrite existing instance-id"
+    (let [wf-id-1 (random-uuid)
+          wf-id-2 (random-uuid)
+          model (-> (model/init-model)
+                    (assoc :active-chain {:chain-id :my-chain
+                                         :step-count 2
+                                         :current-step {:step-id :plan
+                                                        :step-index 0
+                                                        :workflow-id :planning-v1
+                                                        :instance-id wf-id-1}
+                                         :status :running}))
+          result (events/handle-workflow-added model
+                   {:workflow-id wf-id-2 :name "other-wf" :spec nil})]
+      (is (= wf-id-1 (get-in result [:active-chain :current-step :instance-id]))
+          "instance-id should not be overwritten"))))
