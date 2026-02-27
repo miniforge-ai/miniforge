@@ -141,7 +141,7 @@
                        chain-id step-id idx workflow-id)
               input-bindings (:step/input-bindings step)
               resolved-input (resolve-bindings input-bindings prev-output chain-input)
-              workflow-result (load-workflow workflow-id :latest {})
+              workflow-result (load-workflow workflow-id :latest {:skip-validation? true})
               workflow (:workflow workflow-result)
               result (runner/run-pipeline workflow resolved-input opts)
               output (:execution/output result)

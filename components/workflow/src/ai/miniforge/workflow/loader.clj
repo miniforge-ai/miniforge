@@ -22,8 +22,11 @@
   (:require
    [clojure.java.io :as io]
    [clojure.edn :as edn]
+   [clojure.string :as str]
    [ai.miniforge.workflow.validator :as validator]
-   [ai.miniforge.heuristic.interface :as heuristic]))
+   [ai.miniforge.heuristic.interface :as heuristic])
+  (:import
+   [java.util.jar JarFile]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Cache
@@ -41,22 +44,57 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Resource loading
 
+(defn- jar-entry-names
+  "List entry names under dir-prefix inside a JAR file."
+  [^java.net.URL jar-url dir-prefix]
+  (let [jar-path (-> (.getPath jar-url)
+                     (str/replace #"^file:" "")
+                     (str/replace #"!.*$" ""))]
+    (with-open [jf (JarFile. jar-path)]
+      (->> (enumeration-seq (.entries jf))
+           (map #(.getName %))
+           (filter #(str/starts-with? % dir-prefix))
+           (remove #(= % dir-prefix))
+           vec))))
+
+(defn- list-resource-names
+  "List resource names under a classpath directory.
+   Works for both filesystem directories and JAR entries."
+  [dir-name]
+  (when-let [dir-url (io/resource dir-name)]
+    (let [protocol (.getProtocol dir-url)
+          prefix (if (str/ends-with? dir-name "/") dir-name (str dir-name "/"))]
+      (case protocol
+        "file" (let [dir-file (io/file (.getPath dir-url))]
+                 (when (.isDirectory dir-file)
+                   (->> (.listFiles dir-file)
+                        (filter #(.isFile ^java.io.File %))
+                        (map #(.getName ^java.io.File %))
+                        vec)))
+        "jar"  (->> (jar-entry-names dir-url prefix)
+                    (map #(str/replace-first % prefix ""))
+                    (remove #(str/includes? % "/"))
+                    vec)
+        nil))))
+
+(defn- latest?
+  "True when version represents 'latest' (keyword or string)."
+  [version]
+  (or (= version :latest) (= version "latest")))
+
 (defn- find-latest-versioned-resource
   "Scan classpath for the highest versioned workflow file matching workflow-id.
    Looks for workflows/<workflow-id>-v*.edn files and returns the path with
-   the highest version number."
+   the highest version number. Works inside uberjars."
   [workflow-id]
-  (when-let [workflows-dir (io/resource "workflows")]
-    (let [prefix (str (name workflow-id) "-v")
-          dir-file (io/file (.getPath workflows-dir))]
-      (when (.isDirectory dir-file)
-        (->> (.listFiles dir-file)
-             (filter #(.isFile %))
-             (filter #(let [n (.getName %)]
-                        (and (.startsWith n prefix) (.endsWith n ".edn"))))
-             (sort-by #(.getName %) (comp - compare))
-             first
-             (#(when % (str "workflows/" (.getName %)))))))))
+  (let [prefix (str (name workflow-id) "-v")
+        candidates (->> (list-resource-names "workflows")
+                        (filter #(str/ends-with? % ".edn"))
+                        (filter #(str/starts-with? % prefix))
+                        sort
+                        reverse)]
+    (when-let [filename (first candidates)]
+      (str "workflows/" filename))))
 
 (defn load-from-resource
   "Load workflow config from classpath resources.
@@ -75,7 +113,7 @@
         ;; Fallback to non-versioned: workflows/standard-sdlc.edn
         base-path (str "workflows/" (name workflow-id) ".edn")
         ;; Try versioned first, then base, then scan for latest version
-        resource-path (or (when (and version (not= version "latest"))
+        resource-path (or (when (and version (not (latest? version)))
                            (when (io/resource versioned-path)
                              versioned-path))
                          (when (io/resource base-path)
@@ -197,6 +235,7 @@
 
 (defn list-available-workflows
   "List available workflows from resources.
+   Works for both filesystem and JAR resources.
 
    Returns vector of workflow metadata maps:
    [{:workflow/id keyword
@@ -204,26 +243,25 @@
      :workflow/type keyword
      :workflow/description string}]"
   []
-  (let [workflows-dir (io/resource "workflows")]
-    (if workflows-dir
-      (let [workflows-path (.getPath workflows-dir)
-            workflow-files (file-seq (io/file workflows-path))]
-        (->> workflow-files
-             (filter #(.isFile %))
-             (filter #(.endsWith (.getName %) ".edn"))
-             (map (fn [file]
-                    (try
-                      (with-open [rdr (io/reader file)]
+  (let [filenames (list-resource-names "workflows")]
+    (if (seq filenames)
+      (->> filenames
+           (filter #(str/ends-with? % ".edn"))
+           (map #(str "workflows/" %))
+           (map (fn [resource-path]
+                  (try
+                    (when-let [url (io/resource resource-path)]
+                      (with-open [rdr (io/reader url)]
                         (let [config (edn/read (java.io.PushbackReader. rdr))]
                           (select-keys config [:workflow/id
                                                :workflow/version
                                                :workflow/type
                                                :workflow/description
-                                               :workflow/metadata])))
-                      (catch Exception _e
-                        nil))))
-             (filter some?)
-             vec))
+                                               :workflow/metadata]))))
+                    (catch Exception _e
+                      nil))))
+           (filter some?)
+           vec)
       [])))
 
 ;------------------------------------------------------------------------------ Rich Comment
