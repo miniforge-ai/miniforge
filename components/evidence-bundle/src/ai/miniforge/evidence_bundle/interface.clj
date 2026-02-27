@@ -2,6 +2,7 @@
   "Public API for the evidence-bundle component.
    Handles evidence collection, storage, and provenance tracing per N6 spec."
   (:require
+   [ai.miniforge.evidence-bundle.chain-evidence :as chain-evidence]
    [ai.miniforge.evidence-bundle.collector :as collector]
    [ai.miniforge.evidence-bundle.extraction :as extraction]
    [ai.miniforge.evidence-bundle.hash :as hash]
@@ -264,6 +265,24 @@
      ;; => \"a3f2b7c9...\" (64-char hex string)"
   [content]
   (hash/content-hash content))
+
+;------------------------------------------------------------------------------ Layer 7b
+;; Chain Evidence
+
+(defn create-chain-evidence
+  "Create a chain-level evidence record from chain results."
+  [chain-def chain-result & [opts]]
+  (chain-evidence/create-chain-evidence chain-def chain-result opts))
+
+(defn summarize-step
+  "Create a summary of a single chain step."
+  [step-result step-index]
+  (chain-evidence/summarize-step step-result step-index))
+
+(defn aggregate-metrics
+  "Aggregate metrics across chain step results."
+  [step-results]
+  (chain-evidence/aggregate-metrics step-results))
 
 ;------------------------------------------------------------------------------ Layer 7
 ;; Schema Exports
