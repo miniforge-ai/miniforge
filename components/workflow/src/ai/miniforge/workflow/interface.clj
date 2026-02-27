@@ -238,6 +238,18 @@
   ((requiring-resolve 'ai.miniforge.workflow.chain/run-chain)
    chain-def chain-input opts))
 
+(defn load-chain
+  "Load a chain definition by ID and version from classpath resources.
+   Returns {:chain chain-def :source :resource :path resource-path}."
+  [chain-id version]
+  ((requiring-resolve 'ai.miniforge.workflow.chain-loader/load-chain)
+   chain-id version))
+
+(defn list-chains
+  "List all available chain definitions from classpath."
+  []
+  ((requiring-resolve 'ai.miniforge.workflow.chain-loader/list-chains)))
+
 ;------------------------------------------------------------------------------ Layer 6
 ;; Configurable workflow API (Legacy)
 

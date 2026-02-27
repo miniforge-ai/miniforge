@@ -168,6 +168,24 @@
 
 (defn workflow-list-cmd [_m] (workflow-runner/list-workflows!))
 
+;; Chain commands
+(defn chain-run-cmd
+  [m]
+  (let [{:keys [chain-id version spec input-json quiet]} (get-opts m)]
+    (if-not chain-id
+      (display/print-error "Usage: miniforge chain run <chain-id> [options]")
+      (try
+        (workflow-runner/run-chain!
+         (keyword (str/replace chain-id #"^:" ""))
+         {:version (or version "latest")
+          :spec spec
+          :input-json input-json
+          :quiet (boolean quiet)})
+        (catch Exception e
+          (display/print-error (str "Chain execution failed: " (ex-message e))))))))
+
+(defn chain-list-cmd [_m] (workflow-runner/list-chains!))
+
 ;; Observability commands
 (defn logs-tail-cmd [m] (observability/handle-logs (assoc (get-opts m) :subcommand "tail")))
 (defn logs-list-cmd [_m] (observability/handle-logs {:subcommand "list"}))
@@ -217,6 +235,14 @@ Commands:
       -o, --output    Output format: pretty, json, edn (default: pretty)
       -q, --quiet     Suppress progress output
     list              List available workflows
+
+  chain <subcommand>  Chain execution (multi-workflow)
+    run <id>          Execute a chain by ID
+      -v, --version   Chain version (default: latest)
+      -s, --spec      Input spec file (EDN)
+      --input-json    Inline JSON input
+      -q, --quiet     Suppress progress output
+    list              List available chains
 
   fleet <subcommand>  Multi-repo management
     start             Start fleet daemon
@@ -310,6 +336,18 @@ Examples:
 
    {:cmds ["workflow" "list"]
     :fn workflow-list-cmd}
+
+   ;; Chain commands
+   {:cmds ["chain" "run"]
+    :fn chain-run-cmd
+    :args->opts [:chain-id]
+    :spec {:version {:coerce :string :alias :v :default "latest"}
+           :spec {:alias :s}
+           :input-json {}
+           :quiet {:coerce :boolean :alias :q}}}
+
+   {:cmds ["chain" "list"]
+    :fn chain-list-cmd}
 
    ;; Config subcommands
    {:cmds ["config"] :fn help-cmd}
