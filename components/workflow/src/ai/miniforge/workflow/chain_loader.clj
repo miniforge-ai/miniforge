@@ -18,41 +18,61 @@
 
 (ns ai.miniforge.workflow.chain-loader
   "Chain definition loading from classpath resources.
-   Loads chain EDN files from resources/chains/ directory."
+   Loads chain EDN files from resources/chains/ directory.
+   Works both on filesystem (dev) and inside uberjars."
   (:require
    [clojure.java.io :as io]
-   [clojure.edn :as edn]))
+   [clojure.edn :as edn]
+   [clojure.string :as str])
+  (:import
+   [java.util.jar JarFile]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; File helpers
+;; Resource enumeration
 
-(defn- edn-file?
-  "True when file is an existing .edn file."
-  [^java.io.File f]
-  (and (.isFile f) (.endsWith (.getName f) ".edn")))
+(defn- jar-entry-names
+  "List entry names under dir-prefix inside a JAR file."
+  [^java.net.URL jar-url dir-prefix]
+  (let [jar-path (-> (.getPath jar-url)
+                     (str/replace #"^file:" "")
+                     (str/replace #"!.*$" ""))]
+    (with-open [jf (JarFile. jar-path)]
+      (->> (enumeration-seq (.entries jf))
+           (map #(.getName %))
+           (filter #(str/starts-with? % dir-prefix))
+           (remove #(= % dir-prefix))
+           vec))))
 
-(defn- matches-prefix?
-  "True when filename starts with prefix."
-  [prefix ^java.io.File f]
-  (.startsWith (.getName f) prefix))
-
-(defn- resource-dir-files
-  "List files in a classpath resource directory, or nil."
+(defn- list-resource-names
+  "List resource names under a classpath directory.
+   Works for both filesystem directories and JAR entries."
   [dir-name]
   (when-let [dir-url (io/resource dir-name)]
-    (let [dir-file (io/file (.getPath dir-url))]
-      (when (.isDirectory dir-file)
-        (vec (.listFiles dir-file))))))
+    (let [protocol (.getProtocol dir-url)
+          prefix (if (str/ends-with? dir-name "/") dir-name (str dir-name "/"))]
+      (case protocol
+        "file" (let [dir-file (io/file (.getPath dir-url))]
+                 (when (.isDirectory dir-file)
+                   (->> (.listFiles dir-file)
+                        (filter #(.isFile ^java.io.File %))
+                        (map #(.getName ^java.io.File %))
+                        vec)))
+        "jar"  (->> (jar-entry-names dir-url prefix)
+                    (map #(str/replace-first % prefix ""))
+                    (remove #(str/includes? % "/"))
+                    vec)
+        nil))))
 
-(defn- parse-chain-file
-  "Parse a chain EDN file into a summary map, or nil on failure."
-  [^java.io.File f]
+(defn- parse-chain-resource
+  "Parse a chain resource path into a summary map, or nil on failure."
+  [resource-path]
   (try
-    (let [content (edn/read-string (slurp f))]
-      {:id (:chain/id content)
-       :version (:chain/version content)
-       :description (:chain/description content)
-       :steps (count (:chain/steps content))})
+    (when-let [url (io/resource resource-path)]
+      (let [content (edn/read-string (slurp url))]
+        {:id (:chain/id content)
+         :version (:chain/version content)
+         :description (:chain/description content)
+         :steps (count (:chain/steps content))}))
     (catch Exception _ nil)))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -63,10 +83,9 @@
    Returns a resource path string like \"chains/spec-to-pr-v1.0.0.edn\"."
   [chain-id]
   (let [prefix (str (name chain-id) "-v")
-        candidates (->> (resource-dir-files "chains")
-                        (filter edn-file?)
-                        (filter (partial matches-prefix? prefix))
-                        (map #(.getName %))
+        candidates (->> (list-resource-names "chains")
+                        (filter #(str/ends-with? % ".edn"))
+                        (filter #(str/starts-with? % prefix))
                         sort
                         reverse)]
     (when-let [filename (first candidates)]
@@ -107,7 +126,8 @@
 (defn list-chains
   "List all available chain definitions from classpath."
   []
-  (some->> (resource-dir-files "chains")
-           (filter edn-file?)
-           (keep parse-chain-file)
+  (some->> (list-resource-names "chains")
+           (filter #(str/ends-with? % ".edn"))
+           (map #(str "chains/" %))
+           (keep parse-chain-resource)
            vec))
