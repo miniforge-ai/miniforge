@@ -83,7 +83,17 @@
     {}
     input-bindings))
 
-;------------------------------------------------------------------------------ Layer 1: Chain execution
+;------------------------------------------------------------------------------ Layer 1: Event emission
+
+(defn- emit!
+  "Emit a chain event if event-stream is present in opts."
+  [opts constructor-sym & args]
+  (when-let [stream (:event-stream opts)]
+    (let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)
+          constructor (requiring-resolve constructor-sym)]
+      (publish! stream (apply constructor stream args)))))
+
+;------------------------------------------------------------------------------ Layer 2: Chain execution
 
 (defn run-chain
   "Execute a chain of workflows sequentially.
@@ -93,56 +103,76 @@
    - chain-input: Initial input map for the chain
    - opts: Execution options passed to each run-pipeline call
      Must include everything run-pipeline needs (e.g. :llm-backend)
+     Optional :event-stream for chain lifecycle events.
 
    Returns:
    {:chain/id keyword
     :chain/status :completed | :failed
     :chain/step-results [step-result...]
+    :chain/step-count int
     :chain/duration-ms long}"
   [chain-def chain-input opts]
   (let [start-time (System/currentTimeMillis)
+        chain-id (:chain/id chain-def)
         steps (:chain/steps chain-def)
         load-workflow (requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)]
+    (emit! opts 'ai.miniforge.event-stream.interface/chain-started
+           chain-id (count steps))
     (loop [remaining steps
            prev-output nil
            step-results []
            idx 0]
       (if (empty? remaining)
         ;; All steps completed successfully
-        {:chain/id (:chain/id chain-def)
-         :chain/status :completed
-         :chain/step-results step-results
-         :chain/step-count (count steps)
-         :chain/duration-ms (- (System/currentTimeMillis) start-time)}
+        (let [duration-ms (- (System/currentTimeMillis) start-time)]
+          (emit! opts 'ai.miniforge.event-stream.interface/chain-completed
+                 chain-id duration-ms (count steps))
+          {:chain/id chain-id
+           :chain/status :completed
+           :chain/step-results step-results
+           :chain/step-count (count steps)
+           :chain/duration-ms duration-ms})
 
         ;; Execute next step
         (let [step (first remaining)
+              step-id (:step/id step)
+              workflow-id (:step/workflow-id step)
+              _ (emit! opts 'ai.miniforge.event-stream.interface/chain-step-started
+                       chain-id step-id idx workflow-id)
               input-bindings (:step/input-bindings step)
               resolved-input (resolve-bindings input-bindings prev-output chain-input)
-              workflow-result (load-workflow (:step/workflow-id step) :latest {})
+              workflow-result (load-workflow workflow-id :latest {})
               workflow (:workflow workflow-result)
               result (runner/run-pipeline workflow resolved-input opts)
               output (:execution/output result)
-              step-result {:step/id (:step/id step)
-                           :step/workflow-id (:step/workflow-id step)
+              step-result {:step/id step-id
+                           :step/workflow-id workflow-id
                            :step/status (:execution/status result)
                            :step/output output
-                           :step/chain-id (:chain/id chain-def)
+                           :step/chain-id chain-id
                            :step/chain-index idx}
               updated-results (conj step-results step-result)]
           (if (= :failed (:execution/status result))
-            ;; Step failed — stop the chain immediately
-            {:chain/id (:chain/id chain-def)
-             :chain/status :failed
-             :chain/step-results updated-results
-             :chain/step-count (count steps)
-             :chain/duration-ms (- (System/currentTimeMillis) start-time)}
+            ;; Step failed — emit failure events and stop
+            (let [error (or (:execution/error result) "Step execution failed")]
+              (emit! opts 'ai.miniforge.event-stream.interface/chain-step-failed
+                     chain-id step-id idx error)
+              (emit! opts 'ai.miniforge.event-stream.interface/chain-failed
+                     chain-id step-id error)
+              {:chain/id chain-id
+               :chain/status :failed
+               :chain/step-results updated-results
+               :chain/step-count (count steps)
+               :chain/duration-ms (- (System/currentTimeMillis) start-time)})
 
-            ;; Step succeeded — continue with next step
-            (recur (rest remaining)
-                   output
-                   updated-results
-                   (inc idx))))))))
+            ;; Step succeeded — emit completion and continue
+            (do
+              (emit! opts 'ai.miniforge.event-stream.interface/chain-step-completed
+                     chain-id step-id idx)
+              (recur (rest remaining)
+                     output
+                     updated-results
+                     (inc idx)))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

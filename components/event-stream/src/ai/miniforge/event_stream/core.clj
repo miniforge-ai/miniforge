@@ -387,6 +387,54 @@
       (cond-> content (assoc :annotation/content content))))
 
 ;------------------------------------------------------------------------------ Layer 4
+;; Chain lifecycle events
+;; Chains are not workflow-scoped, so workflow-id is nil.
+;; Message is derived from the event-type keyword.
+
+(defn- chain-envelope
+  "Create an envelope for chain events. Chains are not workflow-scoped,
+   so workflow-id is nil. Message is derived from the event-type keyword."
+  [stream event-type]
+  (create-envelope stream event-type nil (name event-type)))
+
+(defn chain-started [stream chain-id step-count]
+  (-> (chain-envelope stream :chain/started)
+      (assoc :chain/id chain-id
+             :chain/step-count step-count)))
+
+(defn chain-step-started [stream chain-id step-id step-index workflow-id]
+  (-> (chain-envelope stream :chain/step-started)
+      (assoc :chain/id chain-id
+             :step/id step-id
+             :step/index step-index
+             :step/workflow-id workflow-id)))
+
+(defn chain-step-completed [stream chain-id step-id step-index]
+  (-> (chain-envelope stream :chain/step-completed)
+      (assoc :chain/id chain-id
+             :step/id step-id
+             :step/index step-index)))
+
+(defn chain-step-failed [stream chain-id step-id step-index error]
+  (-> (chain-envelope stream :chain/step-failed)
+      (assoc :chain/id chain-id
+             :step/id step-id
+             :step/index step-index
+             :chain/error error)))
+
+(defn chain-completed [stream chain-id duration-ms step-count]
+  (-> (chain-envelope stream :chain/completed)
+      (assoc :chain/id chain-id
+             :chain/duration-ms duration-ms
+             :chain/step-count step-count)))
+
+(defn chain-failed [stream chain-id step-id error]
+  (-> (chain-envelope stream :chain/failed)
+      (assoc :chain/id chain-id
+             :chain/failed-step step-id
+             :chain/error error)))
+
+;------------------------------------------------------------------------------ Layer 4
 ;; Control action events (N8)
 
 (defn control-action-requested [stream workflow-id action-id action-type & [requester]]
