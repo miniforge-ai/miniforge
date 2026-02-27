@@ -317,3 +317,105 @@
       (when-not quiet
         (println (display/colorize :red (str "\n❌ Workflow execution failed: " (ex-message e)))))
       (throw e))))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Chain-driven execution
+
+(defn- resolve-chain-input
+  "Resolve chain input from a spec file path or inline JSON."
+  [opts]
+  (let [spec-path (:spec opts)
+        inline-json (:input-json opts)]
+    (cond
+      inline-json (json/parse-string inline-json true)
+      spec-path (let [parsed (edn/read-string (slurp spec-path))
+                      enriched (context/decorate-spec-with-runtime-context parsed {})]
+                  (context/spec->workflow-input enriched))
+      :else {})))
+
+(defn- print-chain-header
+  "Print chain execution banner."
+  [chain-id chain-def quiet]
+  (when-not quiet
+    (println)
+    (println (display/colorize :cyan (str "⛓  Chain: " (name chain-id))))
+    (println (display/colorize :cyan (str "   " (:chain/description chain-def))))
+    (println (display/colorize :cyan (str "   Steps: " (count (:chain/steps chain-def)))))
+    (println (display/colorize :cyan (apply str (repeat 60 "─"))))))
+
+(defn- print-chain-result
+  "Print chain execution result summary."
+  [result quiet]
+  (when-not quiet
+    (let [status (:chain/status result)
+          steps (:chain/step-results result)
+          duration (:chain/duration-ms result)]
+      (println)
+      (println (display/colorize :cyan (apply str (repeat 60 "─"))))
+      (if (= :completed status)
+        (println (display/colorize :green (str "✓ Chain completed — "
+                                                (count steps) " steps in "
+                                                duration "ms")))
+        (let [failed-step (some #(when (= :failed (:step/status %)) (:step/id %)) steps)]
+          (println (display/colorize :red (str "✗ Chain failed at step: "
+                                                (when failed-step (name failed-step))))))))))
+
+(defn run-chain!
+  "Execute a chain of workflows.
+
+   Arguments:
+   - chain-id: Chain identifier keyword (e.g. :spec-to-pr)
+   - opts: {:version \"latest\" :spec \"spec.edn\" :input-json \"{...}\" :quiet false}"
+  [chain-id opts]
+  (let [quiet (or (:quiet opts) false)
+        version (or (:version opts) "latest")]
+    (try
+      (let [load-chain-fn (requiring-resolve 'ai.miniforge.workflow.interface/load-chain)
+            run-chain-fn (requiring-resolve 'ai.miniforge.workflow.interface/run-chain)
+            chain-result (load-chain-fn chain-id version)
+            chain-def (:chain chain-result)
+            chain-input (resolve-chain-input opts)
+            event-stream (es/create-event-stream)
+            llm-client (context/create-llm-client nil nil quiet)
+            callbacks (create-phase-callbacks quiet)
+            context (context/create-workflow-context {:callbacks callbacks
+                                                      :event-stream event-stream
+                                                      :llm-client llm-client
+                                                      :quiet quiet
+                                                      :workflow-id (random-uuid)
+                                                      :workflow-type chain-id
+                                                      :workflow-version version
+                                                      :spec-title (str "Chain: " (name chain-id))
+                                                      :control-state (es/create-control-state)})]
+        (print-chain-header chain-id chain-def quiet)
+        (dashboard/print-dashboard-status! quiet)
+        (let [result (run-chain-fn chain-def chain-input context)]
+          (print-chain-result result quiet)
+          result))
+      (catch Exception e
+        (when-not quiet
+          (println (display/colorize :red (str "\n❌ Chain execution failed: " (ex-message e)))))
+        (throw e)))))
+
+(defn list-chains!
+  "List all available chain definitions."
+  []
+  (try
+    (let [list-chains-fn (requiring-resolve 'ai.miniforge.workflow.interface/list-chains)
+          chains (list-chains-fn)]
+      (if (empty? chains)
+        (println "No chains found.")
+        (do
+          (println (display/colorize :cyan "\nAvailable Chains:"))
+          (println (display/colorize :cyan (apply str (repeat 60 "─"))))
+          (doseq [{:keys [id version description steps]} chains]
+            (println (str (display/colorize :bold (str "  " (name id)))
+                          " (v" version ")"
+                          "  " steps " step(s)"))
+            (when description
+              (println (str "    " description)))
+            (println))
+          (println (display/colorize :cyan (apply str (repeat 60 "─")))))))
+    (catch Exception e
+      (println (display/colorize :red (str "Failed to list chains: " (ex-message e))))
+      (throw e))))
