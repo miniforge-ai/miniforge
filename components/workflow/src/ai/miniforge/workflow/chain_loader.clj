@@ -24,23 +24,51 @@
    [clojure.edn :as edn]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; File helpers
+
+(defn- edn-file?
+  "True when file is an existing .edn file."
+  [^java.io.File f]
+  (and (.isFile f) (.endsWith (.getName f) ".edn")))
+
+(defn- matches-prefix?
+  "True when filename starts with prefix."
+  [prefix ^java.io.File f]
+  (.startsWith (.getName f) prefix))
+
+(defn- resource-dir-files
+  "List files in a classpath resource directory, or nil."
+  [dir-name]
+  (when-let [dir-url (io/resource dir-name)]
+    (let [dir-file (io/file (.getPath dir-url))]
+      (when (.isDirectory dir-file)
+        (vec (.listFiles dir-file))))))
+
+(defn- parse-chain-file
+  "Parse a chain EDN file into a summary map, or nil on failure."
+  [^java.io.File f]
+  (try
+    (let [content (edn/read-string (slurp f))]
+      {:id (:chain/id content)
+       :version (:chain/version content)
+       :description (:chain/description content)
+       :steps (count (:chain/steps content))})
+    (catch Exception _ nil)))
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Resource loading
 
 (defn- find-latest-chain-resource
-  "Scan classpath for the highest versioned chain file matching chain-id.
-   Looks for chains/<chain-id>-v*.edn files."
+  "Find the highest-versioned chain EDN resource path for chain-id."
   [chain-id]
-  (when-let [chains-dir (io/resource "chains")]
-    (let [prefix (str (name chain-id) "-v")
-          dir-file (io/file (.getPath chains-dir))]
-      (when (.isDirectory dir-file)
-        (->> (.listFiles dir-file)
-             (filter #(.isFile %))
-             (filter #(let [n (.getName %)]
-                        (and (.startsWith n prefix) (.endsWith n ".edn"))))
+  (let [prefix (str (name chain-id) "-v")]
+    (some->> (resource-dir-files "chains")
+             (filter edn-file?)
+             (filter (partial matches-prefix? prefix))
              (sort-by #(.getName %) (comp - compare))
              first
-             (#(when % (str "chains/" (.getName %)))))))))
+             (.getName)
+             (str "chains/"))))
 
 (defn- load-chain-resource
   "Load a chain EDN file from classpath."
@@ -48,7 +76,7 @@
   (when-let [resource (io/resource resource-path)]
     (edn/read-string (slurp resource))))
 
-;------------------------------------------------------------------------------ Layer 1
+;------------------------------------------------------------------------------ Layer 2
 ;; Public API
 
 (defn load-chain
@@ -77,17 +105,7 @@
 (defn list-chains
   "List all available chain definitions from classpath."
   []
-  (when-let [chains-dir (io/resource "chains")]
-    (let [dir-file (io/file (.getPath chains-dir))]
-      (when (.isDirectory dir-file)
-        (->> (.listFiles dir-file)
-             (filter #(and (.isFile %) (.endsWith (.getName %) ".edn")))
-             (keep (fn [f]
-                     (try
-                       (let [content (edn/read-string (slurp f))]
-                         {:id (:chain/id content)
-                          :version (:chain/version content)
-                          :description (:chain/description content)
-                          :steps (count (:chain/steps content))})
-                       (catch Exception _ nil))))
-             vec)))))
+  (some->> (resource-dir-files "chains")
+           (filter edn-file?)
+           (keep parse-chain-file)
+           vec))
