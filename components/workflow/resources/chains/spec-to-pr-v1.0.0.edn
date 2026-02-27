@@ -2,7 +2,7 @@
 ;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;
 ;; Reference chain: Takes a spec file and produces a pull request.
-;; Uses the lean-sdlc workflow for each step with different input bindings.
+;; Uses the standard-sdlc pipeline workflow for each step.
 ;;
 ;; This is the dogfooding chain — Miniforge building itself.
 
@@ -14,7 +14,7 @@
 
  :chain/steps
  [{:step/id :execute
-   :step/workflow-id :lean-sdlc-v1
+   :step/workflow-id :standard-sdlc
    :step/input-bindings {:title       :chain/input.title
                          :description :chain/input.description
                          :intent      :chain/input.intent

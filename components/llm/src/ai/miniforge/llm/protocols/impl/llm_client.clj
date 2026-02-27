@@ -373,13 +373,21 @@
     {:lines @out-lines
      :timeout @timeout-reason}))
 
+(defn- clean-env
+  "Build environment map without CLAUDECODE to allow nested Claude CLI sessions.
+   Returns nil if CLAUDECODE is not set (use default env)."
+  []
+  (when (System/getenv "CLAUDECODE")
+    (into {} (remove (fn [[k _]] (= k "CLAUDECODE"))) (System/getenv))))
+
 (defn stream-exec-fn
   ([cmd on-line]
    (stream-exec-fn cmd on-line {}))
   ([cmd on-line {:keys [progress-monitor]}]
    (let [monitor (or progress-monitor (default-progress-monitor))
          empty-stdin (ByteArrayInputStream. (byte-array 0))
-         process (apply p/process {:err :string :in empty-stdin} cmd)
+         process (apply p/process (cond-> {:err :string :in empty-stdin}
+                                          (clean-env) (assoc :env (clean-env))) cmd)
          out-reader (java.io.BufferedReader.
                      (java.io.InputStreamReader. (:out process)))
          {:keys [lines timeout]} (process-stream-lines out-reader monitor on-line)
@@ -544,7 +552,10 @@
 
 (defn default-exec-fn [cmd]
   (let [timeout-ms 600000
-        result (apply p/shell {:out :string :err :string :continue true :timeout timeout-ms} cmd)]
+        empty-stdin (ByteArrayInputStream. (byte-array 0))
+        result (apply p/shell (cond-> {:out :string :err :string :continue true
+                                       :in empty-stdin :timeout timeout-ms}
+                                (clean-env) (assoc :env (clean-env))) cmd)]
     {:out (:out result)
      :err (:err result)
      :exit (:exit result)}))
