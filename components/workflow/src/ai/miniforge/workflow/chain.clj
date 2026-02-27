@@ -52,10 +52,11 @@
     ;; String literal — pass through
     (string? binding) binding
 
-    ;; Keyword starting with :chain/input. — read from chain input
+    ;; Namespaced keyword :chain/input.KEY — read from chain input
     (and (keyword? binding)
-         (.startsWith (name binding) "chain/input."))
-    (let [input-key (keyword (subs (name binding) (count "chain/input.")))]
+         (= "chain" (namespace binding))
+         (.startsWith (name binding) "input."))
+    (let [input-key (keyword (subs (name binding) (count "input.")))]
       (get chain-input input-key))
 
     ;; Vector path — navigate into prev-output
