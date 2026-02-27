@@ -67,6 +67,30 @@
     :gate/failed
     (msg/gate-result (:workflow/id event) (:gate event) false)
 
+    ;; Chain lifecycle events
+    :chain/started
+    (msg/chain-started (:chain/id event) (:chain/step-count event))
+
+    :chain/step-started
+    (msg/chain-step-started (:chain/id event) (:step/id event)
+                            (:step/index event) (:step/workflow-id event))
+
+    :chain/step-completed
+    (msg/chain-step-completed (:chain/id event) (:step/id event)
+                              (:step/index event))
+
+    :chain/step-failed
+    (msg/chain-step-failed (:chain/id event) (:step/id event)
+                           (:step/index event) (:chain/error event))
+
+    :chain/completed
+    (msg/chain-completed (:chain/id event) (:chain/duration-ms event)
+                         (:chain/step-count event))
+
+    :chain/failed
+    (msg/chain-failed (:chain/id event) (:chain/failed-step event)
+                      (:chain/error event))
+
     ;; Unknown event types are ignored
     nil))
 

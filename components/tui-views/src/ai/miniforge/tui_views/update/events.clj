@@ -140,6 +140,73 @@
         (apply-gate-result idx workflow-id gate passed? payload)
         with-timestamp)))
 
+;------------------------------------------------------------------------------ Layer 2b
+;; Chain event handlers
+
+(defn handle-chain-started
+  "Set active chain in model when a chain begins execution."
+  [model {:keys [chain-id step-count]}]
+  (-> model
+      (assoc :active-chain {:chain-id chain-id
+                            :step-count step-count
+                            :current-step nil
+                            :status :running})
+      (assoc :flash-message (str "Chain " (name chain-id)
+                                 " started (" step-count " steps)"))
+      with-timestamp))
+
+(defn handle-chain-step-started
+  "Update active chain with current step info."
+  [model {:keys [chain-id step-id step-index workflow-id]}]
+  (-> model
+      (assoc-in [:active-chain :current-step]
+                {:step-id step-id
+                 :step-index step-index
+                 :workflow-id workflow-id})
+      (assoc :flash-message (str "Chain " (name chain-id)
+                                 " step " (inc step-index) "/"
+                                 (get-in model [:active-chain :step-count])
+                                 ": " (name step-id)))
+      with-timestamp))
+
+(defn handle-chain-step-completed
+  "Mark current chain step as completed."
+  [model {:keys [chain-id step-index]}]
+  (-> model
+      (assoc :flash-message (str "Chain " (name chain-id)
+                                 " step " (inc step-index) " completed"))
+      with-timestamp))
+
+(defn handle-chain-step-failed
+  "Mark current chain step as failed, update chain status."
+  [model {:keys [chain-id step-index error]}]
+  (-> model
+      (assoc-in [:active-chain :status] :failed)
+      (assoc :flash-message (str "Chain " (name chain-id)
+                                 " step " (inc step-index)
+                                 " FAILED: " error))
+      with-timestamp))
+
+(defn handle-chain-completed
+  "Mark chain as completed and clear active chain."
+  [model {:keys [chain-id duration-ms step-count]}]
+  (-> model
+      (assoc :active-chain nil)
+      (assoc :flash-message (str "Chain " (name chain-id)
+                                 " completed — " step-count " steps in "
+                                 duration-ms "ms"))
+      with-timestamp))
+
+(defn handle-chain-failed
+  "Mark chain as failed and record error."
+  [model {:keys [chain-id failed-step error]}]
+  (-> model
+      (assoc-in [:active-chain :status] :failed)
+      (assoc :flash-message (str "Chain " (name chain-id)
+                                 " FAILED at " (when failed-step (name failed-step))
+                                 ": " error))
+      with-timestamp))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; PR event handlers
 
