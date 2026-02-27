@@ -104,12 +104,14 @@
         load-workflow (requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)]
     (loop [remaining steps
            prev-output nil
-           step-results []]
+           step-results []
+           idx 0]
       (if (empty? remaining)
         ;; All steps completed successfully
         {:chain/id (:chain/id chain-def)
          :chain/status :completed
          :chain/step-results step-results
+         :chain/step-count (count steps)
          :chain/duration-ms (- (System/currentTimeMillis) start-time)}
 
         ;; Execute next step
@@ -123,19 +125,23 @@
               step-result {:step/id (:step/id step)
                            :step/workflow-id (:step/workflow-id step)
                            :step/status (:execution/status result)
-                           :step/output output}
+                           :step/output output
+                           :step/chain-id (:chain/id chain-def)
+                           :step/chain-index idx}
               updated-results (conj step-results step-result)]
           (if (= :failed (:execution/status result))
             ;; Step failed — stop the chain immediately
             {:chain/id (:chain/id chain-def)
              :chain/status :failed
              :chain/step-results updated-results
+             :chain/step-count (count steps)
              :chain/duration-ms (- (System/currentTimeMillis) start-time)}
 
             ;; Step succeeded — continue with next step
             (recur (rest remaining)
                    output
-                   updated-results)))))))
+                   updated-results
+                   (inc idx))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
