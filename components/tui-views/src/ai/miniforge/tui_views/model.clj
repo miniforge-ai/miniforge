@@ -50,6 +50,7 @@
     :selected-ids    set          ; Set of selected item IDs (UUIDs or composite keys)
     :visual-anchor   int-or-nil   ; Index where visual mode started (nil = not active)
     :confirm         map-or-nil   ; Confirmation prompt {:action :label :ids} or nil
+    :active-chain    map-or-nil   ; Active chain {:chain-id :step-count :current-step :status} or nil
     :search-matches  vec          ; Vector of {:line-idx N} match descriptors (find-in-page)
     :search-match-idx int-or-nil} ; Current match index into search-matches (nil = none)"
   []
@@ -86,6 +87,8 @@
    :confirm         nil
    :search-matches  []
    :search-match-idx nil
+   ;; Active chain tracking
+   :active-chain nil
    ;; PR filter state (:open, :closed, :merged, :all)
    :pr-filter-state :open
    ;; Train state

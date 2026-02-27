@@ -95,3 +95,29 @@
 
 (defn gate-result [wf-id gate passed?]
   [:msg/gate-result {:workflow-id wf-id :gate gate :passed? passed?}])
+
+;------------------------------------------------------------------------------ Layer 0c
+;; Chain event messages (from subscription.clj)
+
+(defn chain-started [chain-id step-count]
+  [:msg/chain-started {:chain-id chain-id :step-count step-count}])
+
+(defn chain-step-started [chain-id step-id step-index workflow-id]
+  [:msg/chain-step-started {:chain-id chain-id :step-id step-id
+                            :step-index step-index :workflow-id workflow-id}])
+
+(defn chain-step-completed [chain-id step-id step-index]
+  [:msg/chain-step-completed {:chain-id chain-id :step-id step-id
+                              :step-index step-index}])
+
+(defn chain-step-failed [chain-id step-id step-index error]
+  [:msg/chain-step-failed {:chain-id chain-id :step-id step-id
+                           :step-index step-index :error error}])
+
+(defn chain-completed [chain-id duration-ms step-count]
+  [:msg/chain-completed {:chain-id chain-id :duration-ms duration-ms
+                         :step-count step-count}])
+
+(defn chain-failed [chain-id failed-step error]
+  [:msg/chain-failed {:chain-id chain-id :failed-step failed-step
+                      :error error}])

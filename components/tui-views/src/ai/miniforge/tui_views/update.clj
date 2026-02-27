@@ -537,6 +537,14 @@
       :msg/workflow-failed  (events/handle-workflow-failed model payload)
       :msg/gate-result      (events/handle-gate-result model payload)
 
+      ;; Chain lifecycle messages
+      :msg/chain-started         (events/handle-chain-started model payload)
+      :msg/chain-step-started    (events/handle-chain-step-started model payload)
+      :msg/chain-step-completed  (events/handle-chain-step-completed model payload)
+      :msg/chain-step-failed     (events/handle-chain-step-failed model payload)
+      :msg/chain-completed       (events/handle-chain-completed model payload)
+      :msg/chain-failed          (events/handle-chain-failed model payload)
+
       ;; PR fleet messages
       :msg/policy-evaluated (events/handle-policy-evaluated model payload)
       :msg/prs-synced       (events/handle-prs-synced model payload)
