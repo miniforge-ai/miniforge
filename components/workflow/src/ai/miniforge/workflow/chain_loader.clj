@@ -59,16 +59,18 @@
 ;; Resource loading
 
 (defn- find-latest-chain-resource
-  "Find the highest-versioned chain EDN resource path for chain-id."
+  "Find the highest-versioned chain EDN resource path for chain-id.
+   Returns a resource path string like \"chains/spec-to-pr-v1.0.0.edn\"."
   [chain-id]
-  (let [prefix (str (name chain-id) "-v")]
-    (some->> (resource-dir-files "chains")
-             (filter edn-file?)
-             (filter (partial matches-prefix? prefix))
-             (sort-by #(.getName %) (comp - compare))
-             first
-             (.getName)
-             (str "chains/"))))
+  (let [prefix (str (name chain-id) "-v")
+        candidates (->> (resource-dir-files "chains")
+                        (filter edn-file?)
+                        (filter (partial matches-prefix? prefix))
+                        (map #(.getName %))
+                        sort
+                        reverse)]
+    (when-let [filename (first candidates)]
+      (str "chains/" filename))))
 
 (defn- load-chain-resource
   "Load a chain EDN file from classpath."
