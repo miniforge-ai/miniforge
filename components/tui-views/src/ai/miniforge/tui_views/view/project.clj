@@ -42,7 +42,7 @@
 
 (defn- status-char [status]
   (case status
-    :running "●" :success "✓" :failed "✗" :blocked "◐" "○"))
+    :running "●" :success "✓" :failed "✗" :blocked "◐" :archived "⊘" "○"))
 
 (defn- format-progress-bar [pct width]
   (let [pct (or pct 0)
@@ -183,7 +183,7 @@
 (defn- project-workflows
   "Project workflow list for the table widget."
   [model]
-  (let [wfs (:workflows model)
+  (let [wfs (vec (remove #(= :archived (:status %)) (:workflows model)))
         filtered (if-let [fi (:filtered-indices model)]
                    (vec (keep-indexed (fn [i wf] (when (contains? fi i) wf)) wfs))
                    wfs)]
@@ -721,7 +721,7 @@
 (defn- project-kanban-columns
   "Project workflows into kanban columns."
   [model]
-  (let [all-wfs (or (:workflows model) [])
+  (let [all-wfs (vec (remove #(= :archived (:status %)) (or (:workflows model) [])))
         blocked   (filterv #(= :blocked (:status %)) all-wfs)
         ready     (filterv #(#{:ready :pending} (:status %)) all-wfs)
         active    (filterv #(#{:running :implementing :pr-opening :responding} (:status %)) all-wfs)

@@ -33,10 +33,11 @@
 
 (defn- status-char [status]
   (case status
-    :running "●"
-    :success "✓"
-    :failed  "✗"
-    :blocked "◐"
+    :running  "●"
+    :success  "✓"
+    :failed   "✗"
+    :blocked  "◐"
+    :archived "⊘"
     "○"))
 
 (defn- chain-prefix
@@ -90,7 +91,7 @@
    model: full app model
    [cols rows]: available screen area"
   [model [cols rows]]
-  (let [workflows (:workflows model)
+  (let [workflows (vec (remove #(= :archived (:status %)) (:workflows model)))
         selected (:selected-idx model)
         active-chain (:active-chain model)
         flash (:flash-message model)]
