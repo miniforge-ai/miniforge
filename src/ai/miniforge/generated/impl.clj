@@ -1,7 +1,7 @@
 (ns ai.miniforge.generated.impl
   "Generated implementation.")
 
-;; Task: Complete the event telemetry pipeline so the dashboard shows
+;; Task: The algorithms component has 2 source files (graph.clj, inte
 
 (defn execute [input]
   {:status :not-implemented :input input})
