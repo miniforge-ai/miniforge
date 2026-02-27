@@ -1,11 +1,11 @@
 (ns ai.miniforge.tui-views.chain-events-test
   "Tests for chain event translation and TUI model handlers."
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.tui-views.subscription :as sub]
    [ai.miniforge.tui-views.model :as model]
-   [ai.miniforge.tui-views.update.events :as events]
-   [ai.miniforge.tui-views.msg :as msg]))
+   [ai.miniforge.tui-views.update.events :as events]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; translate-event tests
@@ -117,7 +117,7 @@
           result (events/handle-chain-step-failed model
                    {:chain-id :my-chain :step-index 0 :error "boom"})]
       (is (= :failed (get-in result [:active-chain :status])))
-      (is (clojure.string/includes? (:flash-message result) "FAILED")))))
+      (is (str/includes? (:flash-message result) "FAILED")))))
 
 (deftest handle-chain-completed-test
   (testing "chain-completed clears active-chain"
@@ -128,7 +128,7 @@
           result (events/handle-chain-completed model
                    {:chain-id :my-chain :duration-ms 5000 :step-count 2})]
       (is (nil? (:active-chain result)))
-      (is (clojure.string/includes? (:flash-message result) "completed")))))
+      (is (str/includes? (:flash-message result) "completed")))))
 
 (deftest handle-chain-failed-test
   (testing "chain-failed marks chain as failed with error"
@@ -140,8 +140,8 @@
                    {:chain-id :my-chain :failed-step :implement
                     :error "LLM timeout"})]
       (is (= :failed (get-in result [:active-chain :status])))
-      (is (clojure.string/includes? (:flash-message result) "FAILED"))
-      (is (clojure.string/includes? (:flash-message result) "LLM timeout")))))
+      (is (str/includes? (:flash-message result) "FAILED"))
+      (is (str/includes? (:flash-message result) "LLM timeout")))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Model initialization test
