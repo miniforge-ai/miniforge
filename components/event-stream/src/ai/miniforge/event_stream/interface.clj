@@ -467,6 +467,39 @@
   [stream workflow-id action-id & [result]]
   (core/control-action-executed stream workflow-id action-id result))
 
+;------------------------------------------------------------------------------ Layer 2j
+;; Chain lifecycle event constructors
+
+(defn chain-started
+  "Create a chain/started event."
+  [stream chain-id step-count]
+  (core/chain-started stream chain-id step-count))
+
+(defn chain-step-started
+  "Create a chain/step-started event."
+  [stream chain-id step-id step-index workflow-id]
+  (core/chain-step-started stream chain-id step-id step-index workflow-id))
+
+(defn chain-step-completed
+  "Create a chain/step-completed event."
+  [stream chain-id step-id step-index]
+  (core/chain-step-completed stream chain-id step-id step-index))
+
+(defn chain-step-failed
+  "Create a chain/step-failed event."
+  [stream chain-id step-id step-index error]
+  (core/chain-step-failed stream chain-id step-id step-index error))
+
+(defn chain-completed
+  "Create a chain/completed event."
+  [stream chain-id duration-ms step-count]
+  (core/chain-completed stream chain-id duration-ms step-count))
+
+(defn chain-failed
+  "Create a chain/failed event."
+  [stream chain-id step-id error]
+  (core/chain-failed stream chain-id step-id error))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Listener management API (N8)
 
