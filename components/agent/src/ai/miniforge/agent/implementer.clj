@@ -157,7 +157,7 @@
     (when (seq blocks)
       (->> blocks
            (map-indexed (fn [idx [_full lang content]]
-                          {:path (str "src/ai/miniforge/generated/file" idx
+                          {:path (str "generated/file" idx
                                       (case lang
                                         "clojure" ".clj"
                                         "clj" ".clj"
@@ -173,9 +173,9 @@
   "Create a fallback code artifact when LLM response cannot be parsed."
   [task-text]
   {:code/id (random-uuid)
-   :code/files [{:path "src/ai/miniforge/generated/impl.clj"
-                 :content (str "(ns ai.miniforge.generated.impl\n"
-                               "  \"Generated implementation.\")\n\n"
+   :code/files [{:path "generated/impl.clj"
+                 :content (str "(ns generated.impl\n"
+                               "  \"Generated implementation — fallback stub.\")\n\n"
                                ";; Task: " (subs task-text 0 (min 60 (count task-text))) "\n\n"
                                "(defn execute [input]\n"
                                "  {:status :not-implemented :input input})\n")
