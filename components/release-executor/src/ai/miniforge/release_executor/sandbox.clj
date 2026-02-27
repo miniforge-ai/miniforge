@@ -157,13 +157,13 @@
 
 (defn- metrics->result
   "Convert operation metrics to a final result, staging files if no errors."
-  [executor env-id {:keys [created modified deleted errors]}]
+  [executor env-id written-paths {:keys [created modified deleted errors]}]
   (let [file-metrics {:files-written created
                       :files-modified modified
                       :files-deleted deleted}]
     (if (seq errors)
       {:success? false :errors errors :metrics file-metrics}
-      (let [stage-r (stage-files! executor env-id :all)]
+      (let [stage-r (stage-files! executor env-id written-paths)]
         (if (:success? stage-r)
           {:success? true
            :metrics (assoc file-metrics :total-operations (+ created modified deleted))}
@@ -182,4 +182,4 @@
                      (track-operation m file-op r)))
                  {:created 0 :modified 0 :deleted 0 :errors []}
                  all-files)]
-    (metrics->result executor env-id metrics)))
+    (metrics->result executor env-id (map :path all-files) metrics)))

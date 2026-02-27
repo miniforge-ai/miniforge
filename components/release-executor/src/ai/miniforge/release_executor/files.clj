@@ -117,7 +117,8 @@
         {:success? false
          :errors errors
          :metrics {:files-written created :files-modified modified :files-deleted deleted}}
-        (let [stage-result (git/stage-files! worktree-path :all)]
+        (let [written-paths (map :path all-files)
+              stage-result (git/stage-files! worktree-path written-paths)]
           (if (:success? stage-result)
             {:success? true
              :metrics {:files-written created :files-modified modified :files-deleted deleted
