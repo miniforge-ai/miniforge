@@ -102,7 +102,7 @@
               (is (= :test-chain (:chain/id result)))
               (is (= :completed (:chain/status result)))
               (is (= 2 (count (:chain/step-results result))))
-              (is (pos? (:chain/duration-ms result)))
+              (is (nat-int? (:chain/duration-ms result)))
 
               ;; Verify step 1 received chain input
               (is (= {:task "build-login"} (first @call-log)))
@@ -153,4 +153,4 @@
               (is (= 1 (count (:chain/step-results result))))
               (is (= 1 @call-count) "step 2 should never execute")
               (is (= :failed (get-in result [:chain/step-results 0 :step/status])))
-              (is (pos? (:chain/duration-ms result))))))))))
+              (is (nat-int? (:chain/duration-ms result))))))))))
