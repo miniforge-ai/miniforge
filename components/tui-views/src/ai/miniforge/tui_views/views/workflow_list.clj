@@ -39,22 +39,34 @@
     :blocked "◐"
     "○"))
 
+(defn- chain-prefix
+  "Build a chain progress prefix like '[plan-impl 2/4] ' when this workflow
+   is the active chain step. Returns empty string otherwise."
+  [wf active-chain]
+  (when-let [{:keys [chain-id current-step step-count]} active-chain]
+    (when (and current-step
+               (= (:id wf) (:instance-id current-step)))
+      (str "[" (name chain-id) " "
+           (inc (:step-index current-step)) "/" step-count "] "))))
+
 (defn- format-workflow-row
-  "Transform workflow data into table row format."
-  [wf]
-  {:status-char (status-char (:status wf))
-   :name (:name wf)
-   :phase (some-> (:phase wf) name)
-   :progress-str (str (:progress wf 0) "%")
-   :agent-msg (when-let [agent (first (vals (:agents wf)))]
-                (when-let [msg (:message agent)]
-                  (subs msg 0 (min 16 (count msg)))))})
+  "Transform workflow data into table row format.
+   active-chain is the :active-chain map from the model (or nil)."
+  [wf active-chain]
+  (let [prefix (or (chain-prefix wf active-chain) "")]
+    {:status-char (status-char (:status wf))
+     :name (str prefix (:name wf))
+     :phase (some-> (:phase wf) name)
+     :progress-str (str (:progress wf 0) "%")
+     :agent-msg (when-let [agent (first (vals (:agents wf)))]
+                  (when-let [msg (:message agent)]
+                    (subs msg 0 (min 16 (count msg)))))}))
 
 (defn- render-title-bar [[cols rows]]
   (layout/text [cols rows] " MINIFORGE │ Workflows"
                {:fg :cyan :bold? true}))
 
-(defn- render-table [workflows selected [cols rows]]
+(defn- render-table [workflows selected active-chain [cols rows]]
   (if (empty? workflows)
     (layout/text [cols rows] "  No active workflows. Waiting for events..."
                  {:fg :default})
@@ -64,7 +76,7 @@
                  {:key :phase :header "Phase" :width 12}
                  {:key :progress-str :header "Progress" :width 20}
                  {:key :agent-msg :header "Agent" :width 16}]
-       :data (mapv format-workflow-row workflows)
+       :data (mapv #(format-workflow-row % active-chain) workflows)
        :selected-row selected})))
 
 (defn- render-footer [flash-message [cols rows]]
@@ -80,12 +92,13 @@
   [model [cols rows]]
   (let [workflows (:workflows model)
         selected (:selected-idx model)
+        active-chain (:active-chain model)
         flash (:flash-message model)]
     (layout/split-v [cols rows] (/ 2.0 rows)
       (fn [size] (render-title-bar size))
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)
-          (fn [size] (render-table workflows selected size))
+          (fn [size] (render-table workflows selected active-chain size))
           (fn [size] (render-footer flash size)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
