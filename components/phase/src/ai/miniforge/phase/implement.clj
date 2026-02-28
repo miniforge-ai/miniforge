@@ -91,6 +91,9 @@
         ;; Phase results contain the full phase map, so extract :result :output
         plan-result (get-in ctx [:execution/phase-results :plan :result :output])
 
+        ;; Check for verify failure (repair loop re-entry)
+        verify-failure (get-in ctx [:execution/phase-results :verify])
+
         ;; Load existing file contents for agent visibility
         worktree-path (or (:worktree-path ctx) (System/getProperty "user.dir"))
         files-in-scope (or (get-in input [:context :files-in-scope])
@@ -101,15 +104,20 @@
         behavior-addendum (agent-beh/load-and-filter-behaviors
                             :implement {:task {:task/intent (:intent input)}})
 
-        task {:task/id (random-uuid)
-              :task/type :implement
-              :task/description (:description input)
-              :task/title (:title input)
-              :task/intent (:intent input)
-              :task/constraints (:constraints input)
-              :task/plan plan-result
-              :task/existing-files existing-files
-              :task/behavior-addendum behavior-addendum}
+        task (cond-> {:task/id (random-uuid)
+                      :task/type :implement
+                      :task/description (:description input)
+                      :task/title (:title input)
+                      :task/intent (:intent input)
+                      :task/constraints (:constraints input)
+                      :task/plan plan-result
+                      :task/existing-files existing-files
+                      :task/behavior-addendum behavior-addendum}
+                     ;; When re-entering from verify failure, attach test failure context
+                     verify-failure
+                     (assoc :task/verify-failures
+                            {:test-results (get-in verify-failure [:result :output :metadata :test-results])
+                             :test-output (get-in verify-failure [:result :output :metadata :test-results :output])}))
 
         ;; Create streaming callback for agent output
         on-chunk (when-let [es (:event-stream ctx)]
