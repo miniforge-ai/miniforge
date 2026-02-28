@@ -56,7 +56,7 @@
 (def default-config
   {:agent :reviewer
    :gates [:review-approved :quality-check]
-   :budget {:tokens 10000
+   :budget {:tokens 20000
             :iterations 2
             :time-seconds 180}
    ;; Code review needs balanced capabilities - hint at Sonnet
@@ -79,13 +79,11 @@
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
 
-        ;; Create reviewer agent (does not use LLM - runs gates)
-        reviewer-agent (agent/create-reviewer {:gates (map (fn [gate-name]
-                                                                 ;; This is simplified - in real implementation
-                                                                 ;; would resolve gate-name to actual gate impl
-                                                                 {:gate/id gate-name
-                                                                  :gate/type gate-name})
-                                                               gates)})
+        ;; Create reviewer agent with LLM backend from context
+        llm-backend (:llm-backend ctx)
+        reviewer-agent (agent/create-reviewer
+                        (cond-> {}
+                          llm-backend (assoc :llm-backend llm-backend)))
 
         ;; Build task from workflow input and previous phase results
         input (get-in ctx [:execution/input])
@@ -97,7 +95,8 @@
               :task/title (:title input)
               :task/intent (:intent input)
               :task/constraints (:constraints input)
-              :task/artifact implement-result ; Code to review
+              :task/artifact (or (:artifact implement-result)
+                                 implement-result) ; Extract code artifact
               :task/tests verify-result} ; Test results if available
 
         ;; Create streaming callback for agent output
