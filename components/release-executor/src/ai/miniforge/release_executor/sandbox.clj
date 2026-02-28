@@ -94,6 +94,7 @@
 
 (defn commit-changes!
   "Commit staged changes inside the sandbox container.
+
    Returns {:success? bool :commit-sha string :error string}"
   [executor env-id commit-message]
   (let [escaped-msg (str/replace commit-message "'" "'\\''")

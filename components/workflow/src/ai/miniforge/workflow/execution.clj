@@ -95,11 +95,11 @@
                      (get-in phase-result [:result :output]))]
     (if (and (seq gate-keywords) artifact)
       (let [gate-result (gate/check-gates gate-keywords artifact ctx)]
-        (if (:passed? gate-result)
+        (if (:all-passed? gate-result)
           phase-result
           (assoc phase-result
                  :phase/status :failed
-                 :phase/gate-errors (:errors gate-result))))
+                 :phase/gate-errors (:failed-gates gate-result))))
       phase-result)))
 
 (defn- phase-succeeded?
@@ -191,7 +191,7 @@
         on-success (:on-success phase-config)
         redirect-to (:redirect-to phase-result)]
     (cond
-      ;; Phase requested retry — re-run current phase
+      ;; Phase retrying (transient error, stay at current index)
       (= :retrying status)
       current-index
 
@@ -234,38 +234,61 @@
       ;; Default: move to next
       :else (inc current-index))))
 
+(def ^:private max-redirects
+  "Maximum number of phase redirects before failing to prevent infinite loops."
+  3)
+
 (defn- apply-phase-transition
   "Apply phase transition based on next-index.
 
    Returns context with updated status/phase-index or terminal state."
   [ctx next-index pipeline transition-to-completed-fn transition-to-failed-fn]
-  (cond
-    (= :done next-index)
-    (transition-to-completed-fn ctx)
+  (let [current-index (:execution/phase-index ctx)
+        is-redirect? (and (number? next-index) (not= next-index (inc current-index)))
+        redirect-count (get ctx :execution/redirect-count 0)]
+    (cond
+      ;; Redirect cycle limit exceeded
+      (and is-redirect? (>= redirect-count max-redirects))
+      (let [anom (response/make-anomaly
+                   :anomalies.workflow/max-redirects-exceeded
+                   (str "Redirect cycle limit exceeded (" max-redirects " redirects)"))]
+        (-> ctx
+            (update :execution/errors conj
+                    {:type :max-redirects-exceeded
+                     :message (str "Exceeded " max-redirects " redirects")
+                     :anomaly anom})
+            (update :execution/response-chain
+                    response/add-failure :pipeline anom
+                    {:redirect-count redirect-count})
+            (transition-to-failed-fn)))
 
-    (= :error next-index)
-    (transition-to-failed-fn ctx)
+      (= :done next-index)
+      (transition-to-completed-fn ctx)
 
-    (number? next-index)
-    (if (< next-index (count pipeline))
-      (assoc ctx :execution/phase-index next-index)
-      (transition-to-completed-fn ctx))
+      (= :error next-index)
+      (transition-to-failed-fn ctx)
 
-    :else
-    (let [anom (response/make-anomaly
-                :anomalies.workflow/invalid-transition
-                (str "Invalid next index: " next-index))]
-      (-> ctx
-          (update :execution/errors conj
-                  {:type :invalid-transition
-                   :message (str "Invalid next index: " next-index)
-                   :anomaly anom})
-          (update :execution/response-chain
-                  response/add-failure :pipeline
-                  anom
-                  {:error (str "Invalid next index: " next-index)
-                   :next-index next-index})
-          (transition-to-failed-fn)))))
+      (number? next-index)
+      (if (< next-index (count pipeline))
+        (cond-> (assoc ctx :execution/phase-index next-index)
+          is-redirect? (update :execution/redirect-count (fnil inc 0)))
+        (transition-to-completed-fn ctx))
+
+      :else
+      (let [anom (response/make-anomaly
+                   :anomalies.workflow/invalid-transition
+                   (str "Invalid next index: " next-index))]
+        (-> ctx
+            (update :execution/errors conj
+                    {:type :invalid-transition
+                     :message (str "Invalid next index: " next-index)
+                     :anomaly anom})
+            (update :execution/response-chain
+                    response/add-failure :pipeline
+                    anom
+                    {:error (str "Invalid next index: " next-index)
+                     :next-index next-index})
+            (transition-to-failed-fn))))))
 
 ;------------------------------------------------------------------------------ Layer 2: Phase step execution
 

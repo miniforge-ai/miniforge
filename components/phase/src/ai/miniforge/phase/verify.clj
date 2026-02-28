@@ -25,7 +25,10 @@
   (:require [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.task.interface :as task]
-            [ai.miniforge.response.interface :as response]))
+            [ai.miniforge.response.interface :as response]
+            [babashka.process :as process]
+            [babashka.fs :as fs]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event stream helpers (optional dependency)
@@ -65,6 +68,63 @@
 
 ;; Register defaults on load
 (registry/register-phase-defaults! :verify default-config)
+
+;------------------------------------------------------------------------------ Layer 0.5
+;; Test execution helpers
+
+(defn- write-test-files!
+  "Write test files from tester agent output to disk.
+   Returns vector of written file paths."
+  [worktree-path test-files]
+  (mapv (fn [{:keys [path content]}]
+          (let [full-path (fs/path worktree-path path)]
+            (fs/create-dirs (fs/parent full-path))
+            (spit (str full-path) content)
+            path))
+        test-files))
+
+(defn- parse-test-output
+  "Parse clojure.test summary output.
+   Looks for: 'Ran N tests containing M assertions. F failures, E errors.'
+   Returns map with test result counts."
+  [output]
+  (let [ran-match (re-find #"Ran (\d+) tests? containing (\d+) assertions?" output)
+        fail-match (re-find #"(\d+) failures?,\s*(\d+) errors?" output)]
+    (if (and ran-match fail-match)
+      (let [test-count (parse-long (nth ran-match 1))
+            assertion-count (parse-long (nth ran-match 2))
+            fail-count (parse-long (nth fail-match 1))
+            error-count (parse-long (nth fail-match 2))]
+        {:all-passed? (and (zero? fail-count) (zero? error-count))
+         :test-count test-count
+         :assertion-count assertion-count
+         :fail-count fail-count
+         :error-count error-count
+         :output output})
+      ;; Could not parse — treat as failure to be safe
+      {:all-passed? false
+       :test-count 0
+       :assertion-count 0
+       :fail-count 0
+       :error-count 0
+       :parse-error? true
+       :output output})))
+
+(defn- run-tests!
+  "Run tests in the worktree via bb test.
+   Returns parsed test results map."
+  [worktree-path]
+  (try
+    (let [result (process/shell
+                   {:dir (str worktree-path)
+                    :out :string :err :string :continue true}
+                   "bb" "test")]
+      (parse-test-output (str (:out result "") "\n" (:err result ""))))
+    (catch Exception e
+      {:all-passed? false
+       :test-count 0 :assertion-count 0
+       :fail-count 0 :error-count 1
+       :output (.getMessage e)})))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
@@ -116,7 +176,20 @@
         result (try
                  (agent/invoke tester-agent task agent-ctx)
                  (catch Exception e
-                   (response/failure e)))]
+                   (response/failure e)))
+
+        ;; Execute tests if agent produced test files
+        worktree-path (or (:worktree-path ctx) (System/getProperty "user.dir"))
+        test-artifact (get-in result [:output])
+        test-files (when test-artifact (:test/files test-artifact))
+        test-results (when (seq test-files)
+                       (write-test-files! worktree-path test-files)
+                       (run-tests! worktree-path))
+
+        ;; Enrich artifact with test results
+        result (if test-results
+                 (assoc-in result [:output :metadata :test-results] test-results)
+                 result)]
 
     (-> ctx
         (assoc-in [:phase :name] :verify)
@@ -136,12 +209,18 @@
         end-time (System/currentTimeMillis)
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
+        agent-status (:status result)
+        gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
+        phase-status (cond
+                       gate-failed?                :failed
+                       (= :error agent-status)     :failed
+                       :else                       :completed)
         metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
         iterations (get-in ctx [:phase :iterations] 1)
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
-                        (assoc-in [:phase :status] :completed)
+                        (assoc-in [:phase :status] phase-status)
                         (assoc-in [:phase :metrics] metrics)
                         (assoc-in [:metrics :verification :duration-ms] duration-ms)
                         (assoc-in [:metrics :verification :repair-cycles] (dec iterations))
