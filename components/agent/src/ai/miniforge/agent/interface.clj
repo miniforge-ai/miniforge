@@ -494,7 +494,9 @@
 
 (def create-reviewer
   "Create a Reviewer agent with optional configuration overrides.
-   The Reviewer runs static analysis gates without using an LLM."
+   The Reviewer performs LLM-backed semantic code review plus deterministic
+   gate validation. Falls back to gate-only review when no LLM backend
+   is available."
   reviewer/create-reviewer)
 
 (def create-releaser
@@ -520,6 +522,7 @@
 
 ;; Reviewer schemas
 (def ReviewArtifact reviewer/ReviewArtifact)
+(def ReviewIssue reviewer/ReviewIssue)
 (def GateFeedback reviewer/GateFeedback)
 
 ;; Releaser schemas
@@ -603,6 +606,18 @@
 (def get-recommendations
   "Extract recommendations from review artifact."
   reviewer/get-recommendations)
+
+(def changes-requested?
+  "Check if a review artifact has changes requested."
+  reviewer/changes-requested?)
+
+(def get-review-issues
+  "Extract LLM review issues from review artifact."
+  reviewer/get-issues)
+
+(def get-review-strengths
+  "Extract strengths noted by the LLM from review artifact."
+  reviewer/get-strengths)
 
 (def validate-review-artifact
   "Validate a review artifact against the schema."
