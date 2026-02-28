@@ -2,6 +2,7 @@
   "Planner agent implementation.
    Analyzes specifications and creates detailed implementation plans."
   (:require
+   [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
@@ -272,37 +273,46 @@
                                "\n\nOutput your plan as a Clojure map following the format in your system prompt. "
                                "Use (random-uuid) for all IDs - just write #uuid \"<any-uuid>\" placeholders that I'll fill in.")]
           (if llm-client
-            ;; Use the real LLM with streaming if callback provided
-            (let [response (if on-chunk
-                             (llm/chat-stream llm-client user-prompt on-chunk
-                                              {:system @planner-system-prompt})
-                             (llm/chat llm-client user-prompt
-                                       {:system @planner-system-prompt}))
+            ;; Use the real LLM with artifact session for MCP tool support
+            (let [{:keys [llm-result artifact]}
+                  (artifact-session/with-artifact-session [session]
+                    (let [mcp-opts {:mcp-config (:mcp-config-path session)}]
+                      (if on-chunk
+                        (llm/chat-stream llm-client user-prompt on-chunk
+                                         (merge {:system @planner-system-prompt} mcp-opts))
+                        (llm/chat llm-client user-prompt
+                                  (merge {:system @planner-system-prompt} mcp-opts)))))
+                  response llm-result
                   tokens (or (:tokens response) 0)]
               (log/info logger :planner :planner/llm-called
                         {:data {:success (llm/success? response)
                                 :tokens tokens
-                                :streaming? (boolean on-chunk)}})
+                                :streaming? (boolean on-chunk)
+                                :mcp-artifact? (boolean artifact)}})
               (if (llm/success? response)
                 (let [content (llm/get-content response)
-                      plan (or (parse-plan-response content)
-                               (make-fallback-plan spec-text))
-                      ;; Ensure all tasks have proper UUIDs
-                      plan-with-ids (-> plan
-                                        (update :plan/id #(or % (random-uuid)))
-                                        (update :plan/tasks
-                                                (fn [tasks]
-                                                  (mapv (fn [t]
-                                                          (update t :task/id #(or % (random-uuid))))
-                                                        tasks)))
-                                        (assoc :plan/created-at (java.util.Date.)))]
-                  {:status :success
-                   :output plan-with-ids
-                   :artifact plan-with-ids
-                   :tokens tokens
-                   :metrics {:tasks-created (count (:plan/tasks plan-with-ids))
-                             :complexity (:plan/estimated-complexity plan-with-ids)
-                             :tokens tokens}})
+                      plan (or artifact
+                               (parse-plan-response content)
+                               (make-fallback-plan spec-text))]
+                  (when artifact
+                    (log/info logger :planner :planner/mcp-artifact-received
+                              {:data {:task-count (count (:plan/tasks artifact))}}))
+                  ;; Ensure all tasks have proper UUIDs
+                  (let [plan-with-ids (-> plan
+                                          (update :plan/id #(or % (random-uuid)))
+                                          (update :plan/tasks
+                                                  (fn [tasks]
+                                                    (mapv (fn [t]
+                                                            (update t :task/id #(or % (random-uuid))))
+                                                          tasks)))
+                                          (assoc :plan/created-at (java.util.Date.)))]
+                    {:status :success
+                     :output plan-with-ids
+                     :artifact plan-with-ids
+                     :tokens tokens
+                     :metrics {:tasks-created (count (:plan/tasks plan-with-ids))
+                               :complexity (:plan/estimated-complexity plan-with-ids)
+                               :tokens tokens}}))
                 ;; LLM call failed
                 {:status :error
                  :error (llm/get-error response)

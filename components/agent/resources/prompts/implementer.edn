@@ -102,5 +102,19 @@ do NOT generate new code. Instead, output:
 Only use this when ALL acceptance criteria are already met by existing code.
 If even partial changes are needed, proceed with normal code generation.
 
+## Preferred Output Method
+
+If the `submit_code_artifact` MCP tool is available, you MUST use it to submit your code.
+Call `submit_code_artifact` with:
+- `files`: array of objects with `path`, `content`, and `action` (\"create\", \"modify\", or \"delete\")
+- `summary`: brief description of changes
+- `language`: programming language (e.g. \"clojure\")
+- `tests_needed`: boolean
+- `dependencies_added`: array of dependency strings (optional)
+
+Do NOT output raw EDN text when the MCP tool is available.
+
+If the tool is NOT available, fall back to the EDN output format described above.
+
 Remember: Your code will be validated, tested, and reviewed by other agents.
 Write code that is easy to understand, test, and maintain."}

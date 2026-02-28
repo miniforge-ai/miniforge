@@ -68,11 +68,12 @@
             :requires-cli? true
             :api-key-var "ANTHROPIC_API_KEY"
             :stream-parser parse-claude-stream-line
-            :args-fn (fn [{:keys [prompt system max-tokens streaming?]}]
+            :args-fn (fn [{:keys [prompt system max-tokens streaming? mcp-config]}]
                        (cond-> ["-p"]
                          streaming? (conj "--output-format" "stream-json")
                          streaming? (conj "--include-partial-messages")
                          streaming? (conj "--verbose")
+                         mcp-config (into ["--mcp-config" mcp-config])
                          system (into ["--system-prompt" system])
                          max-tokens (into ["--max-budget-usd" "0.10"])
                          true (conj prompt)))}
