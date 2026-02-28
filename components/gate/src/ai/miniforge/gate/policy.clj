@@ -60,21 +60,24 @@
   [artifact _ctx]
   (let [plan (or (:plan artifact)
                  (get-in artifact [:artifact/content :plan])
-                 artifact)]
+                 artifact)
+        steps (or (:steps plan)
+                  (:plan/tasks plan)
+                  (:tasks plan))]
     (cond
       (nil? plan)
       {:passed? false
        :errors [{:type :no-plan
                  :message "No plan found in artifact"}]}
 
-      (empty? (:steps plan))
+      (empty? steps)
       {:passed? false
        :errors [{:type :empty-plan
                  :message "Plan has no steps"}]}
 
       :else
       {:passed? true
-       :step-count (count (:steps plan))})))
+       :step-count (count steps)})))
 
 (defn- check-review-approved
   "Check if review is approved."
