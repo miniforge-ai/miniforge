@@ -127,16 +127,12 @@
 (defn- step-commit [state]
   (if (failed? state)
     state
-    (let [{:keys [worktree-path release-meta sandbox? executor environment-id logger]} state
+    (let [{:keys [worktree-path release-meta sandbox? executor environment-id]} state
           result (if sandbox?
                    (sandbox/commit-changes! executor environment-id (:release/commit-message release-meta))
                    (git/commit-changes! worktree-path (:release/commit-message release-meta)))]
       (if (:success? result)
-        (do
-          (when (and logger (:hooks-bypassed? result))
-            (log/warn logger :release-executor :hooks-bypassed
-                      {:message "Pre-commit hooks failed, committed with --no-verify"}))
-          (assoc state :commit-sha (:commit-sha result)))
+        (assoc state :commit-sha (:commit-sha result))
         (fail state :commit-failed (:error result))))))
 
 (defn- step-push [state]

@@ -110,29 +110,19 @@
 (defn commit-changes!
   "Commit staged changes with the given message.
 
-   Tries a normal commit first. If it fails (e.g. pre-commit hooks),
-   retries with --no-verify and an annotated commit message.
-
-   Returns {:success? bool :commit-sha string :hooks-bypassed? bool :error string}"
+   Returns {:success? bool :commit-sha string :error string}"
   [worktree-path commit-message]
   (try
-    (let [dir-opts {:dir (str worktree-path) :out :string :err :string :continue true}
-          result (process/shell dir-opts "git" "commit" "-m" commit-message)]
+    (let [result (process/shell
+                  {:dir (str worktree-path) :out :string :err :string :continue true}
+                  "git" "commit" "-m" commit-message)]
       (if (zero? (:exit result))
-        ;; Normal commit succeeded
-        (let [sha-result (process/shell dir-opts "git" "rev-parse" "HEAD")]
+        (let [sha-result (process/shell
+                          {:dir (str worktree-path) :out :string :err :string :continue true}
+                          "git" "rev-parse" "HEAD")]
           (result/shell-success {:commit-sha (str/trim (:out sha-result ""))
-                                 :output (:out result)
-                                 :hooks-bypassed? false}))
-        ;; Commit failed — retry with --no-verify
-        (let [annotated-msg (str "[BYPASS-HOOKS: automated-release] " commit-message)
-              retry (process/shell dir-opts "git" "commit" "--no-verify" "-m" annotated-msg)]
-          (if (zero? (:exit retry))
-            (let [sha-result (process/shell dir-opts "git" "rev-parse" "HEAD")]
-              (result/shell-success {:commit-sha (str/trim (:out sha-result ""))
-                                     :output (:out retry)
-                                     :hooks-bypassed? true}))
-            (result/shell-failure (:err retry) {:commit-sha nil})))))
+                                 :output (:out result)}))
+        (result/shell-failure (:err result) {:commit-sha nil})))
     (catch Exception e
       (result/shell-failure (.getMessage e) {:commit-sha nil}))))
 

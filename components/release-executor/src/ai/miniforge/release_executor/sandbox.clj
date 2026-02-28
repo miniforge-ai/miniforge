@@ -95,27 +95,15 @@
 (defn commit-changes!
   "Commit staged changes inside the sandbox container.
 
-   Tries a normal commit first. If it fails (e.g. pre-commit hooks),
-   retries with --no-verify and an annotated commit message.
-
-   Returns {:success? bool :commit-sha string :hooks-bypassed? bool :error string}"
+   Returns {:success? bool :commit-sha string :error string}"
   [executor env-id commit-message]
   (let [escaped-msg (str/replace commit-message "'" "'\\''")
         commit-r (exec! executor env-id (str "git commit -m '" escaped-msg "'"))]
     (if (:success? commit-r)
       (let [sha-r (exec! executor env-id "git rev-parse HEAD")]
         (result/shell-success {:commit-sha (:output sha-r "")
-                               :output (:output commit-r)
-                               :hooks-bypassed? false}))
-      ;; Commit failed — retry with --no-verify
-      (let [annotated-msg (str "[BYPASS-HOOKS: automated-release] " escaped-msg)
-            retry-r (exec! executor env-id (str "git commit --no-verify -m '" annotated-msg "'"))]
-        (if (:success? retry-r)
-          (let [sha-r (exec! executor env-id "git rev-parse HEAD")]
-            (result/shell-success {:commit-sha (:output sha-r "")
-                                   :output (:output retry-r)
-                                   :hooks-bypassed? true}))
-          (result/shell-failure (:error retry-r) {:commit-sha nil}))))))
+                               :output (:output commit-r)}))
+      (result/shell-failure (:error commit-r) {:commit-sha nil}))))
 
 (defn push-branch!
   "Push branch to origin inside the sandbox container."
