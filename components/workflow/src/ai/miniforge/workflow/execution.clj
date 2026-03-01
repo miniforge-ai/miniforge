@@ -139,16 +139,17 @@
 (defn- track-phase-files
   "Track files written by phase for meta-agent monitoring."
   [ctx phase-result]
-  (update ctx :execution/files-written into
-          (or (:files-written phase-result)
-              (:artifacts phase-result)
-              [])))
+  (let [output (get-in phase-result [:result :output])
+        file-paths (when (map? output)
+                     (mapv :path (:code/files output)))]
+    (update ctx :execution/files-written into (or file-paths []))))
 
 (defn- record-phase-artifacts
   "Record phase artifacts in execution context."
   [ctx phase-result]
-  (update ctx :execution/artifacts into
-          (or (:artifacts phase-result) [])))
+  (let [output (get-in phase-result [:result :output])
+        artifacts (when (map? output) [output])]
+    (update ctx :execution/artifacts into (or artifacts []))))
 
 ;------------------------------------------------------------------------------ Layer 1: Composition
 
