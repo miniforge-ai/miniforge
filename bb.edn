@@ -106,65 +106,9 @@
 
   test
   {:doc  "Run changed brick tests in parallel (since main)"
-   :task (do
-           (println "🧪 Detecting changed bricks since main...")
-           ;; Query poly for changed components + bases since main
-           (let [{:keys [out exit]} (p/sh {:out :string}
-                                          "poly" "ws" "get:changes:changed-components" "since:main")
-                 changed-bases (:out (p/sh {:out :string}
-                                           "poly" "ws" "get:changes:changed-bases" "since:main"))
-                 ;; Parse poly EDN output (e.g. ["agent" "llm"])
-                 parse-names (fn [s]
-                               (let [trimmed (str/trim s)]
-                                 (if (or (str/blank? trimmed) (= trimmed "nil") (= trimmed "[]"))
-                                   []
-                                   (->> (re-seq (re-pattern "\"([^\"]+)\"") trimmed)
-                                        (mapv second)))))
-                 components (parse-names out)
-                 bases (parse-names changed-bases)
-                 ;; Resolve test namespaces from filesystem
-                 find-test-nses (fn [brick-type brick-name]
-                                  (let [dir (str brick-type "/" brick-name "/test")]
-                                    (when (fs/exists? dir)
-                                      (->> (fs/glob dir "**/*_test.clj")
-                                           (mapv (fn [path]
-                                                   (-> (str path)
-                                                       ;; Strip dir prefix and .clj suffix
-                                                       (subs (inc (count dir)))
-                                                       (str/replace (re-pattern "\\.clj$") "")
-                                                       (str/replace "/" ".")
-                                                       (str/replace "_" "-"))))))))
-                 test-nses (vec (concat
-                                 (mapcat (fn [c] (find-test-nses "components" c)) components)
-                                 (mapcat (fn [b] (find-test-nses "bases" b)) bases)))]
-             (if (empty? test-nses)
-               (println "✓ No changed bricks — nothing to test")
-               (do
-                 (println (str "  Changed: " (str/join ", " (concat components bases))))
-                 (println (str "  Test namespaces (" (count test-nses) "):"))
-                 (doseq [ns test-nses] (println (str "    " ns)))
-                 ;; Run test namespaces in parallel in a single JVM
-                 (let [quote-ns (fn [n] (str "'" n))
-                       require-expr (str/join " " (map quote-ns test-nses))
-                       ;; Use pmap to run each namespace's tests in parallel
-                       expr (str "(require 'clojure.test " require-expr ") "
-                                 "(let [nses [" (str/join " " (map quote-ns test-nses)) "]"
-                                 "      results (doall (pmap (fn [ns] "
-                                 "                             (clojure.test/run-tests ns)) "
-                                 "                           nses))"
-                                 "      summary (reduce (fn [acc r] "
-                                 "                        (merge-with + acc (select-keys r [:test :pass :fail :error]))) "
-                                 "                      {:test 0 :pass 0 :fail 0 :error 0} results)]"
-                                 "  (println) "
-                                 "  (println (str \"Total: \" (:test summary) \" tests, \""
-                                 "               (:pass summary) \" passes, \""
-                                 "               (:fail summary) \" failures, \""
-                                 "               (:error summary) \" errors\"))"
-                                 "  (System/exit (if (zero? (+ (:fail summary) (:error summary))) 0 1)))")
-                       exit (run-stream! "clojure" "-M:dev:test" "-e" expr)]
-                   (when-not (zero? exit)
-                     (println "❌ Tests failed with exit code:" exit)
-                     (System/exit exit)))))))}
+   :task (let [exit (run-stream! "bb" "scripts/test-changed-bricks.bb")]
+           (when-not (zero? exit)
+             (System/exit exit)))}
 
   test:poly
   {:doc  "Run unit (brick) tests via Polylith (full, serial)"
