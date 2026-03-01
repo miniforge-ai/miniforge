@@ -105,7 +105,13 @@
   ;; ──────────────────────────────────────────────────────────────────────────
 
   test
-  {:doc  "Run unit (brick) tests via Polylith"
+  {:doc  "Run changed brick tests in parallel (since main)"
+   :task (let [exit (run-stream! "bb" "scripts/test-changed-bricks.bb")]
+           (when-not (zero? exit)
+             (System/exit exit)))}
+
+  test:poly
+  {:doc  "Run unit (brick) tests via Polylith (full, serial)"
    :task (do
            (println "🧪 Running tests via poly test...")
            (println "Command: clojure -M:poly test")
@@ -147,7 +153,8 @@
                             "ai.miniforge.release-executor.artifact-validation-integration-test"
                             "ai.miniforge.web-dashboard.fleet-onboarding-integration-test"
                             "ai.miniforge.self-healing.integration-test"
-                            "ai.miniforge.governance.e2e-test"]
+                            "ai.miniforge.governance.e2e-test"
+                            "ai.miniforge.mcp.artifact-server-integration-test"]
                  require-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
                  run-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
                  expr (str "(require 'clojure.test" require-expr ") "
@@ -162,10 +169,20 @@
                (println "❌ Integration tests failed with exit code:" exit)
                (System/exit exit))))}
 
+  test:mcp
+  {:doc  "Run MCP artifact server tests"
+   :task (do
+           (println "🧪 Running MCP artifact server tests...")
+           (let [exit (run-stream! "bb" "scripts/test-mcp-artifact-server.bb")]
+             (when-not (zero? exit)
+               (println "❌ MCP tests failed with exit code:" exit)
+               (System/exit exit))))}
+
   test:all
-  {:doc  "Run full suite (unit bricks + project integration tests)"
+  {:doc  "Run full suite (unit bricks + project integration tests + MCP)"
    :task (do
            (run 'test)
+           (run 'test:mcp)
            (run 'test:integration))}
 
   test:conformance
