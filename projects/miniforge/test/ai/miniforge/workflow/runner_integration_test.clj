@@ -15,19 +15,31 @@
    [ai.miniforge.gate.test]
    [ai.miniforge.gate.policy]))
 
+(defn- with-mocked-test-runner
+  "Run body-fn with run-tests! and write-test-files! mocked to prevent recursive bb test."
+  [body-fn]
+  (let [write-var (resolve 'ai.miniforge.phase.verify/write-test-files!)
+        run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
+    (with-redefs-fn
+      {write-var (fn [_ files] (mapv :path files))
+       run-var (fn [_] {:all-passed? true :test-count 1 :fail-count 0 :error-count 0})}
+      body-fn)))
+
 (deftest run-pipeline-max-phases-test
   (testing "run-pipeline respects max phases option"
-    (let [workflow {:workflow/id :test
-                    :workflow/version "1.0.0"
-                    :workflow/pipeline
-                    [{:phase :plan}
-                     {:phase :implement}
-                     {:phase :verify}
-                     {:phase :review}
-                     {:phase :release}
-                     {:phase :done}]}
-          result (runner/run-pipeline workflow {:task "Test"} {:max-phases 50})]
-      (is (= :completed (:execution/status result))))))
+    (with-mocked-test-runner
+      (fn []
+        (let [workflow {:workflow/id :test
+                        :workflow/version "1.0.0"
+                        :workflow/pipeline
+                        [{:phase :plan}
+                         {:phase :implement}
+                         {:phase :verify}
+                         {:phase :review}
+                         {:phase :release}
+                         {:phase :done}]}
+              result (runner/run-pipeline workflow {:task "Test"} {:max-phases 50})]
+          (is (= :completed (:execution/status result))))))))
 
 (deftest response-chain-records-phases-test
   (testing "response chain records phase results"
