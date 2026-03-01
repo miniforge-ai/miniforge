@@ -2,6 +2,7 @@
   "Tester agent implementation.
    Generates tests for code artifacts and validates coverage."
   (:require
+   [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
@@ -294,20 +295,29 @@
                                "\n\nOutput your tests as a Clojure map following the format in your system prompt. "
                                "Include complete test code, not placeholders.")]
           (if llm-client
-            ;; Use the real LLM with streaming if callback provided
-            (let [response (if on-chunk
-                             (llm/chat-stream llm-client user-prompt on-chunk
-                                              {:system @tester-system-prompt})
-                             (llm/chat llm-client user-prompt
-                                       {:system @tester-system-prompt}))
+            ;; Use the real LLM with artifact session for MCP tool support
+            (let [{:keys [llm-result artifact]}
+                  (artifact-session/with-artifact-session [session]
+                    (let [mcp-opts {:mcp-config (:mcp-config-path session)}]
+                      (if on-chunk
+                        (llm/chat-stream llm-client user-prompt on-chunk
+                                         (merge {:system @tester-system-prompt} mcp-opts))
+                        (llm/chat llm-client user-prompt
+                                  (merge {:system @tester-system-prompt} mcp-opts)))))
+                  response llm-result
                   tokens (or (:tokens response) 0)]
               (log/info logger :tester :tester/llm-called
                         {:data {:success (llm/success? response)
                                 :tokens tokens
-                                :streaming? (boolean on-chunk)}})
+                                :streaming? (boolean on-chunk)
+                                :mcp-artifact? (boolean artifact)}})
               (if (llm/success? response)
+                ;; Check for MCP artifact first, then fall back to text parsing
                 (let [content (llm/get-content response)
-                      parsed (parse-test-response content)
+                      parsed (or artifact (parse-test-response content))
+                      _ (when artifact
+                          (log/info logger :tester :tester/mcp-artifact-received
+                                    {:data {:file-count (count (:test/files artifact))}}))
                       ;; Try multiple parsing strategies
                       tests (or parsed
                                 (when-let [files (extract-test-code-blocks content)]
