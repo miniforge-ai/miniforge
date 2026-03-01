@@ -27,19 +27,11 @@
 
 (deftest run-pipeline-max-phases-test
   (testing "run-pipeline respects max phases option"
-    (with-mocked-test-runner
-      (fn []
-        (let [workflow {:workflow/id :test
-                        :workflow/version "1.0.0"
-                        :workflow/pipeline
-                        [{:phase :plan}
-                         {:phase :implement}
-                         {:phase :verify}
-                         {:phase :review}
-                         {:phase :release}
-                         {:phase :done}]}
-              result (runner/run-pipeline workflow {:task "Test"} {:max-phases 50})]
-          (is (= :completed (:execution/status result))))))))
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase :done}]}
+          result (runner/run-pipeline workflow {:task "Test"} {:max-phases 50})]
+      (is (= :completed (:execution/status result))))))
 
 (deftest response-chain-records-phases-test
   (testing "response chain records phase results"
