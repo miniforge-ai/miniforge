@@ -112,5 +112,19 @@ You must output a structured test artifact as a Clojure map:
     - No shared mutable state between tests
     - Use fixtures for setup/teardown
 
+## Preferred Output Method
+
+If the `submit_test_artifact` MCP tool is available, you MUST use it to submit your tests.
+Call `submit_test_artifact` with:
+- `files`: array of objects with `path` and `content`
+- `summary`: description of test coverage
+- `type`: \"unit\", \"integration\", \"property\", \"e2e\", or \"acceptance\" (optional)
+- `framework`: testing framework used, e.g. \"clojure.test\" (optional)
+- `coverage`: object with `lines`, `branches`, `functions` percentages (optional)
+
+Do NOT output raw EDN text when the MCP tool is available.
+
+If the tool is NOT available, fall back to the EDN output format described above.
+
 Remember: Good tests are documentation. They show how the code is intended to be used
 and what behavior is expected. Make tests readable and maintainable."}

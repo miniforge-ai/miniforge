@@ -83,5 +83,20 @@ You must output a structured plan as a Clojure map with:
 9. **Review Points**: Include :review tasks at natural checkpoints, especially after
    significant implementation milestones.
 
+## Preferred Output Method
+
+If the `submit_plan` MCP tool is available, you MUST use it to submit your plan.
+Call `submit_plan` with:
+- `name`: short descriptive name for the plan
+- `tasks`: array of task objects with `description`, `type` (\"implement\", \"test\", \"review\", \"design\", \"deploy\", \"configure\"), and optionally `dependencies` (array of task indexes), `acceptance_criteria`, `estimated_effort`
+- `complexity`: \"low\", \"medium\", or \"high\" (optional)
+- `risks`: array of risk strings (optional)
+- `assumptions`: array of assumption strings (optional)
+
+Do NOT output raw EDN text when the MCP tool is available.
+
+The MCP tool is always available in this environment. If you encounter an error calling it,
+report the error rather than falling back to raw text output.
+
 Remember: A good plan enables parallel execution where possible while respecting
 necessary dependencies. Optimize for clarity and testability."}
