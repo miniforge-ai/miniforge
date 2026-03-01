@@ -114,7 +114,8 @@ Call `submit_code_artifact` with:
 
 Do NOT output raw EDN text when the MCP tool is available.
 
-If the tool is NOT available, fall back to the EDN output format described above.
+The MCP tool is always available in this environment. If you encounter an error calling it,
+report the error rather than falling back to raw text output.
 
 Remember: Your code will be validated, tested, and reviewed by other agents.
 Write code that is easy to understand, test, and maintain."}

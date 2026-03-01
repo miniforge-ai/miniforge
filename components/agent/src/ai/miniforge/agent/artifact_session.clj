@@ -13,13 +13,31 @@
    [cheshire.core :as json]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [clojure.string :as str])
+   [clojure.string :as str]
+   [malli.core :as m])
   (:import
    [java.nio.file Files]
    [java.nio.file.attribute FileAttribute]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Session lifecycle
+;; Schema & session lifecycle
+
+(def Session
+  "Schema for an artifact session map."
+  [:map
+   [:dir [:string {:min 1}]]
+   [:mcp-config-path [:string {:min 1}]]
+   [:artifact-path [:string {:min 1}]]])
+
+(defn validate-session
+  "Validate a session map against the Session schema.
+
+   Returns {:valid? true} or {:valid? false :errors ...}."
+  [session]
+  (if (m/validate Session session)
+    {:valid? true}
+    {:valid? false
+     :errors (m/explain Session session)}))
 
 (defn- resolve-server-script
   "Find the MCP artifact server script path.
