@@ -21,6 +21,16 @@
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.release-executor.interface :as release-executor]))
 
+(defn- with-mocked-test-runner
+  "Run body-fn with run-tests! and write-test-files! mocked to prevent subprocess spawning."
+  [body-fn]
+  (let [write-var (resolve 'ai.miniforge.phase.verify/write-test-files!)
+        run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
+    (with-redefs-fn
+      {write-var (fn [_ files] (mapv :path files))
+       run-var (fn [_] {:all-passed? true :test-count 1 :fail-count 0 :error-count 0})}
+      body-fn)))
+
 ;------------------------------------------------------------------------------ Mock Data
 
 (def mock-plan-result
@@ -183,11 +193,13 @@
 
         ;; Execute verify phase - should read code from execution context
         (with-redefs [agent/invoke (mock-agent-invoke :tester nil)]
-          (let [ctx3 (execute-phase-enter :verify ctx2)]
-            (is (= :success (get-in ctx3 [:phase :result :status]))
-                "Verify phase should succeed")
-            (is (some? (get-in ctx3 [:phase :result :output]))
-                "Verify phase should produce test result")))))))
+          (with-mocked-test-runner
+            (fn []
+              (let [ctx3 (execute-phase-enter :verify ctx2)]
+                (is (= :success (get-in ctx3 [:phase :result :status]))
+                    "Verify phase should succeed")
+                (is (some? (get-in ctx3 [:phase :result :output]))
+                    "Verify phase should produce test result")))))))))
 
 (deftest implement-to-release-handoff-test
   (testing "Implement phase artifact is correctly handed to release phase"
@@ -257,7 +269,10 @@
                                   :artifact/content {:files-written 2}}]
                      :metrics {:tokens 100 :duration-ms 500}})]
 
-      (let [;; 1. Plan phase
+      ;; Mock verify phase file I/O to prevent recursive bb test
+      (with-mocked-test-runner
+        (fn []
+          (let [;; 1. Plan phase
             ctx1 (execute-phase-enter :plan (create-base-context))
             _    (is (= :success (get-in ctx1 [:phase :result :status])))
             ctx2 (execute-phase-leave :plan ctx1)
@@ -288,7 +303,7 @@
             "All phases should complete in order")
 
         (is (pos? (get-in ctx8 [:execution/metrics :tokens]))
-            "Should accumulate token metrics from all phases")))))
+            "Should accumulate token metrics from all phases")))))))
 
 (deftest handoff-with-missing-artifact-test
   (testing "Verify phase fails fast when no implement artifact is available"

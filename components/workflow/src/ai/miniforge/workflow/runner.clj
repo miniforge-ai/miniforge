@@ -328,8 +328,18 @@
                  (recur (execute-single-iteration pipeline context callbacks iteration control-state)
                         (inc iteration)))))]
 
-       ;; Extract output and publish workflow completed event
-       (let [output-ctx (extract-output final-ctx)]
+       ;; Validate completed workflows produced results
+       (let [final-ctx (if (and (= :completed (:execution/status final-ctx))
+                                (empty? (:execution/artifacts final-ctx))
+                                (empty? (:execution/phase-results final-ctx)))
+                         (-> final-ctx
+                             (update :execution/errors conj
+                                     {:type :empty-completion
+                                      :message "Workflow completed but produced no artifacts or phase results"})
+                             (assoc :execution/status :completed-with-warnings))
+                         final-ctx)
+             ;; Extract output and publish workflow completed event
+             output-ctx (extract-output final-ctx)]
          (when-not skip-lifecycle?
            (publish-workflow-completed! event-stream output-ctx))
          output-ctx)))))

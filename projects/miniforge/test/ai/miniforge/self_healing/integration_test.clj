@@ -217,4 +217,4 @@
                                         (make-task)
                                         {})]
           (is (false? (:success result)))
-          (is (= "real error" (:error result))))))))
+          (is (= "real error" (or (:message (:error result)) (:error result)))))))))

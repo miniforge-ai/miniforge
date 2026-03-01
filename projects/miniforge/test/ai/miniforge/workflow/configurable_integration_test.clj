@@ -25,6 +25,16 @@
    [ai.miniforge.workflow.state :as state]
    [ai.miniforge.agent.interface :as agent]))
 
+(defn- with-mocked-test-runner
+  "Run body-fn with run-tests! and write-test-files! mocked to prevent recursive bb test."
+  [body-fn]
+  (let [write-var (resolve 'ai.miniforge.phase.verify/write-test-files!)
+        run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
+    (with-redefs-fn
+      {write-var (fn [_ files] (mapv :path files))
+       run-var (fn [_] {:all-passed? true :test-count 1 :fail-count 0 :error-count 0})}
+      body-fn)))
+
 ;------------------------------------------------------------------------------ Test fixtures
 
 (def simple-workflow
@@ -108,36 +118,38 @@
 
 (deftest test-multi-phase-workflow-execution
   (testing "Execute multi-phase workflow with mock LLM"
-    (let [mock-llm (agent/create-mock-llm
-                    [{:content "(plan {:tasks [...]})"
-                      :usage {:input-tokens 50 :output-tokens 25}}
-                     {:content "(defn hello [] \"world\")"
-                      :usage {:input-tokens 60 :output-tokens 30}}
-                     {:content "(deftest test-hello ...)"
-                      :usage {:input-tokens 40 :output-tokens 20}}])
-          input {:task "Create and test a greeting function"}
-          context {:llm-backend mock-llm}
-          result (configurable/run-configurable-workflow multi-phase-workflow input context)]
+    (with-mocked-test-runner
+      (fn []
+        (let [mock-llm (agent/create-mock-llm
+                        [{:content "(plan {:tasks [...]})"
+                          :usage {:input-tokens 50 :output-tokens 25}}
+                         {:content "(defn hello [] \"world\")"
+                          :usage {:input-tokens 60 :output-tokens 30}}
+                         {:content "(deftest test-hello ...)"
+                          :usage {:input-tokens 40 :output-tokens 20}}])
+              input {:task "Create and test a greeting function"}
+              context {:llm-backend mock-llm}
+              result (configurable/run-configurable-workflow multi-phase-workflow input context)]
 
-      (is (= :completed (:execution/status result))
-          "Workflow should complete successfully")
+          (is (= :completed (:execution/status result))
+              "Workflow should complete successfully")
 
-      ;; Check that all phases executed
-      (let [phase-results (:execution/phase-results result)]
-        (is (contains? phase-results :plan)
-            "Should have plan phase result")
-        (is (contains? phase-results :implement)
-            "Should have implement phase result")
-        (is (contains? phase-results :verify)
-            "Should have verify phase result"))
+          ;; Check that all phases executed
+          (let [phase-results (:execution/phase-results result)]
+            (is (contains? phase-results :plan)
+                "Should have plan phase result")
+            (is (contains? phase-results :implement)
+                "Should have implement phase result")
+            (is (contains? phase-results :verify)
+                "Should have verify phase result"))
 
-      ;; Should have artifacts from all phases
-      (is (>= (count (:execution/artifacts result)) 3)
-          "Should have at least 3 artifacts (one per phase)")
+          ;; Should have artifacts from all phases
+          (is (>= (count (:execution/artifacts result)) 3)
+              "Should have at least 3 artifacts (one per phase)")
 
-      ;; Check metrics accumulated
-      (is (>= (get-in result [:execution/metrics :tokens] 0) 0)
-          "Should have accumulated token metrics (135 for mock LLM)"))))
+          ;; Check metrics accumulated
+          (is (>= (get-in result [:execution/metrics :tokens] 0) 0)
+              "Should have accumulated token metrics (135 for mock LLM)"))))))
 
 (deftest test-workflow-with-none-agent
   (testing "Execute workflow with :none agent"
