@@ -80,6 +80,8 @@
                        "components/pr-sync/src"
                        "components/spec-parser/src"
                        "components/spec-parser/resources"
+                       "components/mcp-artifact-server/src"
+                       "components/mcp-artifact-server/resources"
                        "bases/cli/src"
                        "bases/cli/resources"
                        "bases/lsp-mcp-bridge/src"]
@@ -123,6 +125,7 @@
                      ai.miniforge/self-healing {:local/root "components/self-healing"}
                      ai.miniforge/pr-sync {:local/root "components/pr-sync"}
                      ai.miniforge/spec-parser {:local/root "components/spec-parser"}
+                     ai.miniforge/mcp-artifact-server {:local/root "components/mcp-artifact-server"}
                      ai.miniforge/cli {:local/root "bases/cli"}}}
 
   :test {:extra-paths ["development/test"
@@ -164,6 +167,7 @@
                        "components/self-healing/test"
                        "components/pr-sync/test"
                        "components/spec-parser/test"
+                       "components/mcp-artifact-server/test"
                        "bases/cli/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/config {:local/root "components/config"}
@@ -202,7 +206,8 @@
                       ai.miniforge/web-dashboard {:local/root "components/web-dashboard"}
                       ai.miniforge/self-healing {:local/root "components/self-healing"}
                       ai.miniforge/pr-sync {:local/root "components/pr-sync"}
-                      ai.miniforge/spec-parser {:local/root "components/spec-parser"}}}
+                      ai.miniforge/spec-parser {:local/root "components/spec-parser"}
+                      ai.miniforge/mcp-artifact-server {:local/root "components/mcp-artifact-server"}}}
 
   :conformance {:extra-paths ["development/test"
                               "tests/conformance"

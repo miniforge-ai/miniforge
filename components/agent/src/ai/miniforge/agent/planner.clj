@@ -136,21 +136,8 @@
       ;; Return nil if parsing fails
       nil)))
 
-(defn- make-fallback-plan
-  "Create a fallback plan when LLM response cannot be parsed."
-  [spec-text]
-  (let [plan-id (random-uuid)
-        task-id (random-uuid)]
-    {:plan/id plan-id
-     :plan/name (str "plan-" (subs (str plan-id) 0 8))
-     :plan/tasks [{:task/id task-id
-                   :task/description (str "Implement: " (subs spec-text 0 (min 100 (count spec-text))))
-                   :task/type :implement
-                   :task/estimated-effort :medium}]
-     :plan/estimated-complexity :medium
-     :plan/risks ["LLM response could not be parsed"]
-     :plan/assumptions ["Spec is complete"]
-     :plan/created-at (java.util.Date.)}))
+;; make-fallback-plan removed — silent fallback masks real failures.
+;; Plan generation now throws with evidence on failure (see invoke-fn below).
 
 ;; NOTE: This function is currently unused but kept as reference for future implementation
 ;; where plan generation may be delegated to a separate function rather than done inline.
@@ -336,7 +323,12 @@
                 (let [content (llm/get-content llm-response)
                       plan (or artifact
                                (parse-plan-response content)
-                               (make-fallback-plan spec-text))
+                               (throw (ex-info "Plan generation failed: neither MCP artifact nor EDN parse succeeded"
+                                               {:phase :plan
+                                                :mcp-artifact nil
+                                                :parse-result nil
+                                                :llm-content-length (count content)
+                                                :llm-content-preview (subs content 0 (min 500 (count content)))})))
                       plan-final (finalize-plan plan)]
                   (when artifact
                     (log/info logger :planner :planner/mcp-artifact-received
@@ -355,19 +347,13 @@
                                        :metrics {:tasks-created (count (:plan/tasks plan-final))
                                                  :complexity (:plan/estimated-complexity plan-final)
                                                  :tokens tokens}})))
-                ;; LLM call failed
-                (let [fallback (make-fallback-plan spec-text)
-                      error-msg (or (:message (llm/get-error llm-response))
+                ;; LLM call failed — no silent fallback
+                (let [error-msg (or (:message (llm/get-error llm-response))
                                     "LLM call failed")]
-                  (response/error error-msg {:output fallback}))))
-            ;; No LLM client - use fallback (for testing)
-            (do
-              (log/warn logger :planner :planner/no-llm-backend
-                        {:message "No LLM backend provided, using fallback plan"})
-              (let [plan (make-fallback-plan spec-text)]
-                (response/success plan
-                                  {:metrics {:tasks-created (count (:plan/tasks plan))
-                                             :complexity (:plan/estimated-complexity plan)}}))))))
+                  (response/error error-msg))))
+               ;; No LLM client — hard failure
+            (throw (ex-info "No LLM backend provided for planner agent"
+                            {:phase :plan})))))
 
       :validate-fn validate-plan
 

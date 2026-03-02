@@ -40,18 +40,56 @@
      :errors (m/explain Session session)}))
 
 (defn- resolve-server-script
-  "Find the MCP artifact server script path.
-   Looks relative to the project root (cwd) first, then checks
-   for an absolute path via MINIFORGE_HOME env var."
+  "Find the MCP artifact server entry point.
+
+   Resolution order:
+   1. Component main class via bb -cp (preferred)
+   2. Legacy script at scripts/mcp-artifact-server.bb
+   3. MINIFORGE_HOME env var fallback
+
+   Throws if no candidate is found."
   []
-  (let [candidates [(io/file "scripts/mcp-artifact-server.bb")
-                    (when-let [home (System/getenv "MINIFORGE_HOME")]
-                      (io/file home "scripts/mcp-artifact-server.bb"))]]
-    (or (some #(when (and % (.exists ^java.io.File %))
-                 (.getAbsolutePath ^java.io.File %))
-              candidates)
-        ;; Fallback: assume it's on PATH or relative
-        "scripts/mcp-artifact-server.bb")))
+  (let [;; Prefer the component source directory
+        component-src (io/file "components/mcp-artifact-server/src")
+        ;; Legacy script
+        legacy-script (io/file "scripts/mcp-artifact-server.bb")
+        ;; MINIFORGE_HOME fallback
+        home-script (when-let [home (System/getenv "MINIFORGE_HOME")]
+                      (io/file home "components/mcp-artifact-server/src"))
+        home-legacy (when-let [home (System/getenv "MINIFORGE_HOME")]
+                      (io/file home "scripts/mcp-artifact-server.bb"))]
+    (cond
+      ;; Component exists — use bb -m with classpath
+      (and component-src (.exists component-src))
+      (.getAbsolutePath ^java.io.File component-src)
+
+      ;; Legacy script
+      (.exists legacy-script)
+      (.getAbsolutePath ^java.io.File legacy-script)
+
+      ;; MINIFORGE_HOME component
+      (and home-script (.exists ^java.io.File home-script))
+      (.getAbsolutePath ^java.io.File home-script)
+
+      ;; MINIFORGE_HOME legacy
+      (and home-legacy (.exists ^java.io.File home-legacy))
+      (.getAbsolutePath ^java.io.File home-legacy)
+
+      :else
+      (throw (ex-info "Cannot resolve MCP artifact server: no component or script found"
+                       {:checked ["components/mcp-artifact-server/src"
+                                  "scripts/mcp-artifact-server.bb"
+                                  "MINIFORGE_HOME"]})))))
+
+(defn- server-command
+  "Build the command vector for starting the MCP server process."
+  [server-path artifact-dir]
+  (if (str/ends-with? server-path "/src")
+    ;; Component mode: use bb -cp with main class
+    ["bb" "-cp" server-path "-m" "ai.miniforge.mcp-artifact-server.main"
+     "--artifact-dir" artifact-dir]
+    ;; Legacy script mode
+    ["bb" server-path "--artifact-dir" artifact-dir]))
 
 (defn create-session!
   "Create a new artifact session with a temporary directory.
@@ -79,11 +117,12 @@
 
    Returns: session (for threading)"
   [session]
-  (let [script-path (resolve-server-script)
+  (let [server-path (resolve-server-script)
+        cmd-vec (server-command server-path (:dir session))
         config {"mcpServers"
                 {"artifact"
-                 {"command" "bb"
-                  "args" [script-path "--artifact-dir" (:dir session)]}}}]
+                 {"command" (first cmd-vec)
+                  "args" (vec (rest cmd-vec))}}}]
     (spit (:mcp-config-path session) (json/generate-string config))
     session))
 
@@ -149,15 +188,23 @@
    - session - Session map from create-session!
 
    Returns:
-   - Parsed artifact map with proper UUID types, or nil if not found"
+   - Parsed artifact map with proper UUID types, or nil if not found.
+     Logs warnings on missing file or parse failure instead of silently returning nil."
   [session]
   (let [f (io/file (:artifact-path session))]
-    (when (.exists f)
+    (if-not (.exists f)
+      (do
+        (binding [*out* *err*]
+          (println "WARN: artifact file not found at" (:artifact-path session)))
+        nil)
       (try
         (-> (slurp f)
             edn/read-string
             parse-uuid-strings)
-        (catch Exception _
+        (catch Exception e
+          (binding [*out* *err*]
+            (println "WARN: failed to parse artifact at" (:artifact-path session)
+                     "—" (ex-message e)))
           nil)))))
 
 ;------------------------------------------------------------------------------ Layer 3

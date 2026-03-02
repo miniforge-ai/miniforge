@@ -72,55 +72,75 @@
   "Execute planning phase.
 
    Reads specification from context, invokes planner agent,
-   runs through inner loop with gates."
+   runs through inner loop with gates.
+
+   When the spec provides :plan/tasks directly, builds the plan from those
+   tasks and skips the LLM call entirely."
   [ctx]
   ;; Emit phase started event
   (emit-phase-started! ctx :plan)
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
+        input (get-in ctx [:execution/input])]
 
-        ;; Create planner agent (specialized implementation uses llm/chat directly)
-        planner-agent (agent/create-planner {})
+    ;; Fast path: spec provides explicit tasks — skip LLM
+    (if-let [spec-tasks (:plan/tasks input)]
+      (let [plan {:plan/id (random-uuid)
+                  :plan/name (or (:title input) (:spec/title input) "spec-provided-plan")
+                  :plan/tasks (mapv #(update % :task/id (fn [id] (or id (random-uuid)))) spec-tasks)
+                  :plan/created-at (java.util.Date.)}
+            result (response/success plan {:tokens 0
+                                           :metrics {:tasks-created (count spec-tasks)
+                                                     :tokens 0
+                                                     :source :spec-provided}})]
+        (-> ctx
+            (assoc-in [:phase :name] :plan)
+            (assoc-in [:phase :agent] :planner)
+            (assoc-in [:phase :gates] gates)
+            (assoc-in [:phase :budget] budget)
+            (assoc-in [:phase :started-at] start-time)
+            (assoc-in [:phase :status] :running)
+            (assoc-in [:phase :result] result)))
 
-        ;; Build task from workflow input
-        input (get-in ctx [:execution/input])
+      ;; Normal path: invoke planner agent
+      (let [planner-agent (agent/create-planner {})
 
-        ;; Read exploration results if available (from explore phase)
-        explore-result (get-in ctx [:execution/phase-results :explore :result :output])
-        existing-files (:exploration/files explore-result)
+            ;; Read exploration results if available (from explore phase)
+            explore-result (get-in ctx [:execution/phase-results :explore :result :output])
+            existing-files (:exploration/files explore-result)
 
-        task (cond-> {:task/id (random-uuid)
-                      :task/type :plan
-                      :task/description (:description input)
-                      :task/title (:title input)
-                      :task/intent (:intent input)
-                      :task/constraints (:constraints input)}
-               (seq existing-files)
-               (assoc :task/existing-files existing-files))
+            task (cond-> {:task/id (random-uuid)
+                          :task/type :plan
+                          :task/description (:description input)
+                          :task/title (:title input)
+                          :task/intent (:intent input)
+                          :task/constraints (:constraints input)}
+                   (seq existing-files)
+                   (assoc :task/existing-files existing-files))
 
-        ;; Create streaming callback for agent output
-        on-chunk (when-let [es (:event-stream ctx)]
-                   (when-let [create-cb (requiring-resolve
-                                         'ai.miniforge.event-stream.interface/create-streaming-callback)]
-                     (create-cb es (:execution/id ctx) :plan
-                                {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)})))
-        agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
+            ;; Create streaming callback for agent output
+            on-chunk (when-let [es (:event-stream ctx)]
+                       (when-let [create-cb (requiring-resolve
+                                              'ai.miniforge.event-stream.interface/create-streaming-callback)]
+                         (create-cb es (:execution/id ctx) :plan
+                                    {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)})))
+            agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
 
-        ;; Invoke agent (this will call LLM and do actual work)
-        result (try
-                 (agent/invoke planner-agent task agent-ctx)
-                 (catch Exception e
-                   (response/failure e)))]
+            ;; Invoke agent (this will call LLM and do actual work)
+            result (try
+                     (agent/invoke planner-agent task agent-ctx)
+                     (catch Exception e
+                       (response/failure e)))]
 
-    (-> ctx
-        (assoc-in [:phase :name] :plan)
-        (assoc-in [:phase :agent] :planner)
-        (assoc-in [:phase :gates] gates)
-        (assoc-in [:phase :budget] budget)
-        (assoc-in [:phase :started-at] start-time)
-        (assoc-in [:phase :status] :running)
-        (assoc-in [:phase :result] result))))
+        (-> ctx
+            (assoc-in [:phase :name] :plan)
+            (assoc-in [:phase :agent] :planner)
+            (assoc-in [:phase :gates] gates)
+            (assoc-in [:phase :budget] budget)
+            (assoc-in [:phase :started-at] start-time)
+            (assoc-in [:phase :status] :running)
+            (assoc-in [:phase :result] result))))))
 
 (defn- leave-plan
   "Post-processing for planning phase.

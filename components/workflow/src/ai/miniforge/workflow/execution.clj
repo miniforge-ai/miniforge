@@ -22,7 +22,8 @@
    Handles execution of individual phase steps through the enter -> gates -> leave lifecycle.
    Processes results, tracks metrics/files/artifacts, and determines phase transitions."
   (:require [ai.miniforge.gate.interface :as gate]
-            [ai.miniforge.response.interface :as response]))
+            [ai.miniforge.response.interface :as response]
+            [ai.miniforge.workflow.dag-orchestrator :as dag-orch]))
 
 ;------------------------------------------------------------------------------ Layer 0: Atomic operations
 
@@ -313,6 +314,50 @@
                      :next-index next-index})
             (transition-to-failed-fn))))))
 
+;------------------------------------------------------------------------------ Layer 1.5: DAG integration helpers
+
+(defn- extract-plan-from-phase-result
+  "Extract a plan map from an interceptor-style phase result, if present."
+  [phase-result]
+  (let [output (get-in phase-result [:result :output])]
+    (when (and (map? output) (:plan/id output))
+      output)))
+
+(defn- index-after-phase
+  "Find the index of the phase immediately after the named phase in the pipeline."
+  [pipeline phase-kw]
+  (some (fn [[i ic]]
+          (when (= phase-kw (get-in ic [:config :phase]))
+            (inc i)))
+        (map-indexed vector pipeline)))
+
+(defn- try-dag-execution
+  "After plan phase, execute all plans via the DAG executor.
+
+   The DAG executor is the universal executor — it handles both parallel
+   and sequential plans. Returns updated context with DAG results and
+   skipped-to index, or nil if this isn't the plan phase or no plan was produced."
+  [ctx-processed phase-name phase-result pipeline
+   transition-to-completed-fn transition-to-failed-fn]
+  (when (= :plan phase-name)
+    (when-let [plan (extract-plan-from-phase-result phase-result)]
+      (when-not (:disable-dag-execution ctx-processed)
+        (let [dag-result (dag-orch/execute-plan-as-dag plan ctx-processed)]
+          (if (:success? dag-result)
+            ;; DAG succeeded — skip implement phase, jump to next
+            (let [ctx-with-dag (-> ctx-processed
+                                   (update :execution/artifacts into (:artifacts dag-result))
+                                   (assoc :execution/dag-result dag-result))
+                  post-impl-idx (index-after-phase pipeline :implement)]
+              (if (and post-impl-idx (< post-impl-idx (count pipeline)))
+                (assoc ctx-with-dag :execution/phase-index post-impl-idx)
+                (transition-to-completed-fn ctx-with-dag)))
+            ;; DAG failed — transition to failed
+            (transition-to-failed-fn
+             (update ctx-processed :execution/errors conj
+                     {:type :dag-execution-failed
+                      :dag-result dag-result}))))))))
+
 ;------------------------------------------------------------------------------ Layer 2: Phase step execution
 
 (defn execute-phase-step
@@ -347,10 +392,13 @@
       (when on-phase-complete
         (on-phase-complete ctx-processed interceptor phase-result))
 
-      ;; Determine and apply next transition
-      (let [next-index (determine-next-index pipeline phase-index
-                                             (:config interceptor)
-                                             phase-result)]
-        (apply-phase-transition ctx-processed next-index pipeline
-                                transition-to-completed-fn
-                                transition-to-failed-fn)))))
+      ;; After plan phase, attempt DAG parallelization before normal transition
+      (or (try-dag-execution ctx-processed phase-name phase-result pipeline
+                             transition-to-completed-fn transition-to-failed-fn)
+          ;; Normal transition (non-plan phases, or plan not parallelizable)
+          (let [next-index (determine-next-index pipeline phase-index
+                                                 (:config interceptor)
+                                                 phase-result)]
+            (apply-phase-transition ctx-processed next-index pipeline
+                                    transition-to-completed-fn
+                                    transition-to-failed-fn))))))
