@@ -331,32 +331,47 @@
             (inc i)))
         (map-indexed vector pipeline)))
 
+(defn- dag-applicable?
+  "Check whether DAG execution should be attempted for this phase result.
+   Returns the plan map if applicable, nil otherwise."
+  [phase-name phase-result ctx]
+  (when (and (= :plan phase-name)
+             (not (:disable-dag-execution ctx)))
+    (extract-plan-from-phase-result phase-result)))
+
+(defn- apply-dag-success
+  "Apply a successful DAG result to the execution context.
+   Merges artifacts and advances past the implement phase."
+  [ctx dag-result pipeline transition-to-completed-fn]
+  (let [ctx-with-dag (-> ctx
+                         (update :execution/artifacts into (:artifacts dag-result))
+                         (assoc :execution/dag-result dag-result))
+        post-impl-idx (index-after-phase pipeline :implement)]
+    (if (and post-impl-idx (< post-impl-idx (count pipeline)))
+      (assoc ctx-with-dag :execution/phase-index post-impl-idx)
+      (transition-to-completed-fn ctx-with-dag))))
+
+(defn- apply-dag-failure
+  "Apply a failed DAG result to the execution context."
+  [ctx dag-result transition-to-failed-fn]
+  (transition-to-failed-fn
+   (update ctx :execution/errors conj
+           {:type :dag-execution-failed
+            :dag-result dag-result})))
+
 (defn- try-dag-execution
   "After plan phase, execute all plans via the DAG executor.
 
    The DAG executor is the universal executor — it handles both parallel
    and sequential plans. Returns updated context with DAG results and
-   skipped-to index, or nil if this isn't the plan phase or no plan was produced."
-  [ctx-processed phase-name phase-result pipeline
+   skipped-to index, or nil if DAG execution is not applicable."
+  [ctx phase-name phase-result pipeline
    transition-to-completed-fn transition-to-failed-fn]
-  (when (= :plan phase-name)
-    (when-let [plan (extract-plan-from-phase-result phase-result)]
-      (when-not (:disable-dag-execution ctx-processed)
-        (let [dag-result (dag-orch/execute-plan-as-dag plan ctx-processed)]
-          (if (:success? dag-result)
-            ;; DAG succeeded — skip implement phase, jump to next
-            (let [ctx-with-dag (-> ctx-processed
-                                   (update :execution/artifacts into (:artifacts dag-result))
-                                   (assoc :execution/dag-result dag-result))
-                  post-impl-idx (index-after-phase pipeline :implement)]
-              (if (and post-impl-idx (< post-impl-idx (count pipeline)))
-                (assoc ctx-with-dag :execution/phase-index post-impl-idx)
-                (transition-to-completed-fn ctx-with-dag)))
-            ;; DAG failed — transition to failed
-            (transition-to-failed-fn
-             (update ctx-processed :execution/errors conj
-                     {:type :dag-execution-failed
-                      :dag-result dag-result}))))))))
+  (when-let [plan (dag-applicable? phase-name phase-result ctx)]
+    (let [dag-result (dag-orch/execute-plan-as-dag plan ctx)]
+      (if (:success? dag-result)
+        (apply-dag-success ctx dag-result pipeline transition-to-completed-fn)
+        (apply-dag-failure ctx dag-result transition-to-failed-fn)))))
 
 ;------------------------------------------------------------------------------ Layer 2: Phase step execution
 

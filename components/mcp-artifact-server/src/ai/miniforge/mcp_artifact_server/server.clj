@@ -15,6 +15,15 @@
     (spit path (pr-str artifact))
     path))
 
+;------------------------------------------------------------------------------ Layer 0
+;; Logging (stderr only — stdout is the JSON-RPC transport)
+
+(defn- log-stderr
+  "Print message to stderr (stdout is reserved for JSON-RPC)."
+  [& args]
+  (binding [*out* *err*]
+    (apply println args)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; MCP dispatch
 
@@ -43,6 +52,49 @@
     "notifications/cancelled"     nil
     (throw (ex-info (str "Method not found: " method) {:code -32601}))))
 
+;------------------------------------------------------------------------------ Layer 1
+;; Message processing — one extracted function per message shape
+
+(defn- handle-request
+  "Handle a JSON-RPC request (has id, expects response)."
+  [id method params artifact-dir]
+  (try
+    (when-let [result (dispatch method params artifact-dir)]
+      (protocol/write-response id result))
+    (catch Exception e
+      (let [code (or (:code (ex-data e)) -32603)]
+        (log-stderr "Error handling" method ":" (ex-message e))
+        (protocol/write-error id code (ex-message e))))))
+
+(defn- handle-notification
+  "Handle a JSON-RPC notification (no id, no response)."
+  [method params artifact-dir]
+  (try
+    (dispatch method params artifact-dir)
+    (catch Exception e
+      (log-stderr "Notification error:" (ex-message e)))))
+
+(defn- process-message
+  "Parse and dispatch a single JSON-RPC message."
+  [line artifact-dir]
+  (if-let [msg (protocol/parse-message line)]
+    (let [id     (get msg "id")
+          method (get msg "method")
+          params (get msg "params" {})]
+      (if id
+        (handle-request id method params artifact-dir)
+        (handle-notification method params artifact-dir)))
+    (log-stderr "Parse error: invalid JSON")))
+
+(defn- process-line
+  "Process a single line from stdin. Skips blank lines."
+  [line artifact-dir]
+  (when-not (str/blank? line)
+    (try
+      (process-message line artifact-dir)
+      (catch Exception e
+        (log-stderr "Parse error:" (ex-message e))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Main loop
 
@@ -52,37 +104,9 @@
    Arguments:
    - artifact-dir — directory path for artifact persistence"
   [artifact-dir]
-  (binding [*out* *err*]
-    (println "miniforge-artifact MCP server started, artifact-dir:" artifact-dir))
+  (log-stderr "miniforge-artifact MCP server started, artifact-dir:" artifact-dir)
   (let [reader (java.io.BufferedReader. (java.io.InputStreamReader. System/in "UTF-8"))]
     (loop []
       (when-let [line (.readLine reader)]
-        (when-not (str/blank? line)
-          (try
-            (let [msg (protocol/parse-message line)]
-              (if msg
-                (let [id (get msg "id")
-                      method (get msg "method")
-                      params (get msg "params" {})]
-                  (if id
-                    ;; Request — needs response
-                    (try
-                      (when-let [result (dispatch method params artifact-dir)]
-                        (protocol/write-response id result))
-                      (catch Exception e
-                        (let [code (or (:code (ex-data e)) -32603)]
-                          (binding [*out* *err*]
-                            (println "Error handling" method ":" (ex-message e)))
-                          (protocol/write-error id code (ex-message e)))))
-                    ;; Notification — no response
-                    (try
-                      (dispatch method params artifact-dir)
-                      (catch Exception e
-                        (binding [*out* *err*]
-                          (println "Notification error:" (ex-message e)))))))
-                (binding [*out* *err*]
-                  (println "Parse error: invalid JSON"))))
-            (catch Exception e
-              (binding [*out* *err*]
-                (println "Parse error:" (ex-message e))))))
+        (process-line line artifact-dir)
         (recur)))))

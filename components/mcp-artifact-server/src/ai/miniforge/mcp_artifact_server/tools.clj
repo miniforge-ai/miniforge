@@ -1,10 +1,9 @@
 (ns ai.miniforge.mcp-artifact-server.tools
   "Tool definitions and handlers for MCP artifact submission.
 
-   Data-driven: each tool is a map in `tool-registry` with:
-   - :tool-def — MCP tool definition (name, description, inputSchema)
-   - :required-params — validation rules
-   - :build-artifact — fn that transforms params into {:artifact ... :message ...}"
+   Data-driven: the tool registry is pure EDN data. Builder functions are
+   registered separately in `artifact-builders` keyed by tool name, so the
+   registry itself contains no embedded code."
   (:require [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -39,10 +38,155 @@
       (when-not (and v (check v))
         (throw (ex-info msg {:code -32602}))))))
 
+;------------------------------------------------------------------------------ Layer 0
+;; Param extractors
+
+(defn- non-blank
+  "Return string if non-blank, else nil."
+  [s]
+  (when-not (str/blank? s) s))
+
 ;------------------------------------------------------------------------------ Layer 1
-;; Tool registry
+;; Artifact builders — named functions, one per tool
+
+(defn build-code-artifact
+  "Build a code artifact from MCP tool params."
+  [params]
+  (let [files (get params "files")
+        summary (get params "summary")
+        language (get params "language")
+        tests-needed (get params "tests_needed" true)
+        deps-added (get params "dependencies_added" [])]
+    {:artifact {:code/id (str (random-uuid))
+                :code/files (mapv (fn [f]
+                                    {:path (get f "path")
+                                     :content (get f "content")
+                                     :action (keyword (get f "action"))})
+                                  files)
+                :code/summary summary
+                :code/language language
+                :code/tests-needed? (boolean tests-needed)
+                :code/dependencies-added (vec deps-added)
+                :code/created-at (str (java.time.Instant/now))}
+     :message (str "Code artifact submitted successfully. "
+                   (count files) " file(s) written to artifact store.")}))
+
+(defn- build-plan-task
+  "Build a single plan task from JSON params, resolving dependency UUIDs."
+  [task-uuids idx t]
+  (let [deps (get t "dependencies" [])
+        dep-uuids (mapv #(get task-uuids %) deps)]
+    (cond-> {:task/id (str (nth task-uuids idx))
+             :task/description (get t "description")
+             :task/type (keyword (get t "type"))}
+      (seq dep-uuids)
+      (assoc :task/dependencies (mapv str dep-uuids))
+      (get t "acceptance_criteria")
+      (assoc :task/acceptance-criteria (vec (get t "acceptance_criteria")))
+      (get t "estimated_effort")
+      (assoc :task/estimated-effort (keyword (get t "estimated_effort"))))))
+
+(defn build-plan-artifact
+  "Build a plan artifact from MCP tool params."
+  [params]
+  (let [plan-name (get params "name")
+        tasks (get params "tasks")
+        complexity (get params "complexity" "medium")
+        risks (get params "risks" [])
+        assumptions (get params "assumptions" [])
+        task-uuids (vec (repeatedly (count tasks) random-uuid))
+        plan-tasks (vec (map-indexed (partial build-plan-task task-uuids) tasks))]
+    {:artifact {:plan/id (str (random-uuid))
+                :plan/name plan-name
+                :plan/tasks plan-tasks
+                :plan/estimated-complexity (keyword complexity)
+                :plan/risks (vec risks)
+                :plan/assumptions (vec assumptions)
+                :plan/created-at (str (java.time.Instant/now))}
+     :message (str "Plan submitted successfully. "
+                   (count tasks) " task(s) in plan '" plan-name "'.")}))
+
+(defn- parse-test-files
+  "Parse test file params into file maps."
+  [files]
+  (mapv (fn [f] {:path (get f "path") :content (get f "content")}) files))
+
+(defn- aggregate-test-content
+  "Aggregate all test file content into a single string."
+  [files]
+  (str/join "\n" (map #(get % "content" "") files)))
+
+(defn- parse-coverage
+  "Parse coverage params into a map."
+  [coverage]
+  (when coverage
+    (cond-> {}
+      (get coverage "lines")     (assoc :lines (get coverage "lines"))
+      (get coverage "branches")  (assoc :branches (get coverage "branches"))
+      (get coverage "functions") (assoc :functions (get coverage "functions")))))
+
+(defn build-test-artifact
+  "Build a test artifact from MCP tool params."
+  [params]
+  (let [files (get params "files")
+        summary (get params "summary")
+        test-type (get params "type" "unit")
+        framework (non-blank (get params "framework"))
+        coverage (parse-coverage (get params "coverage"))
+        file-maps (parse-test-files files)
+        all-content (aggregate-test-content files)
+        assertions (count-assertions all-content)
+        cases (count-test-cases all-content)]
+    {:artifact (cond-> {:test/id (str (random-uuid))
+                        :test/files file-maps
+                        :test/type (keyword test-type)
+                        :test/summary summary
+                        :test/assertions-count (max 1 assertions)
+                        :test/cases-count (max 1 cases)
+                        :test/created-at (str (java.time.Instant/now))}
+                 framework (assoc :test/framework framework)
+                 coverage  (assoc :test/coverage coverage))
+     :message (str "Test artifact submitted successfully. "
+                   (count files) " test file(s), "
+                   cases " test case(s).")}))
+
+(defn build-release-artifact
+  "Build a release artifact from MCP tool params."
+  [params]
+  (let [branch-name (get params "branch_name")
+        commit-message (get params "commit_message")
+        pr-title (get params "pr_title")
+        pr-description (get params "pr_description")
+        files-summary (non-blank (get params "files_summary"))]
+    {:artifact (cond-> {:release/id (str (random-uuid))
+                        :release/branch-name branch-name
+                        :release/commit-message commit-message
+                        :release/pr-title pr-title
+                        :release/pr-description pr-description
+                        :release/created-at (str (java.time.Instant/now))}
+                 files-summary
+                 (assoc :release/files-summary files-summary))
+     :message (str "Release artifact submitted successfully. "
+                   "Branch: " branch-name ", PR: " pr-title)}))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Artifact builder dispatch (keyword → fn)
+
+(def artifact-builders
+  "Keyword dispatch map from tool name to builder function.
+   Keeping this separate from the registry enables the registry to be pure data."
+  {"submit_code_artifact"    build-code-artifact
+   "submit_plan"             build-plan-artifact
+   "submit_test_artifact"    build-test-artifact
+   "submit_release_artifact" build-release-artifact})
+
+;------------------------------------------------------------------------------ Layer 1
+;; Tool registry — pure data, no embedded functions
 
 (def tool-registry
+  "Data-driven tool registry. Each entry is a map with:
+   - :tool-def — MCP tool definition (name, description, inputSchema)
+   - :required-params — validation rules {param-name {:check fn :msg string}}"
   {"submit_code_artifact"
    {:tool-def
     {:name "submit_code_artifact"
@@ -76,29 +220,8 @@
         :items {:type "string"}}}}}
 
     :required-params
-    {"files"   {:check #(seq %)              :msg "files is required and must not be empty"}
-     "summary" {:check #(not (str/blank? %)) :msg "summary is required"}}
-
-    :build-artifact
-    (fn [params]
-      (let [files (get params "files")
-            summary (get params "summary")
-            language (get params "language")
-            tests-needed (get params "tests_needed" true)
-            deps-added (get params "dependencies_added" [])]
-        {:artifact {:code/id (str (random-uuid))
-                    :code/files (mapv (fn [f]
-                                        {:path (get f "path")
-                                         :content (get f "content")
-                                         :action (keyword (get f "action"))})
-                                      files)
-                    :code/summary summary
-                    :code/language language
-                    :code/tests-needed? (boolean tests-needed)
-                    :code/dependencies-added (vec deps-added)
-                    :code/created-at (str (java.time.Instant/now))}
-         :message (str "Code artifact submitted successfully. "
-                       (count files) " file(s) written to artifact store.")}))}
+    {"files"   {:check seq              :msg "files is required and must not be empty"}
+     "summary" {:check (complement str/blank?) :msg "summary is required"}}}
 
    "submit_plan"
    {:tool-def
@@ -149,40 +272,8 @@
         :items {:type "string"}}}}}
 
     :required-params
-    {"name"  {:check #(not (str/blank? %)) :msg "name is required"}
-     "tasks" {:check #(seq %)              :msg "tasks is required and must not be empty"}}
-
-    :build-artifact
-    (fn [params]
-      (let [plan-name (get params "name")
-            tasks (get params "tasks")
-            complexity (get params "complexity" "medium")
-            risks (get params "risks" [])
-            assumptions (get params "assumptions" [])
-            task-uuids (vec (repeatedly (count tasks) random-uuid))
-            plan-tasks (vec (map-indexed
-                             (fn [idx t]
-                               (let [deps (get t "dependencies" [])
-                                     dep-uuids (mapv #(get task-uuids %) deps)]
-                                 (cond-> {:task/id (str (nth task-uuids idx))
-                                          :task/description (get t "description")
-                                          :task/type (keyword (get t "type"))}
-                                   (seq dep-uuids)
-                                   (assoc :task/dependencies (mapv str dep-uuids))
-                                   (get t "acceptance_criteria")
-                                   (assoc :task/acceptance-criteria (vec (get t "acceptance_criteria")))
-                                   (get t "estimated_effort")
-                                   (assoc :task/estimated-effort (keyword (get t "estimated_effort"))))))
-                             tasks))]
-        {:artifact {:plan/id (str (random-uuid))
-                    :plan/name plan-name
-                    :plan/tasks plan-tasks
-                    :plan/estimated-complexity (keyword complexity)
-                    :plan/risks (vec risks)
-                    :plan/assumptions (vec assumptions)
-                    :plan/created-at (str (java.time.Instant/now))}
-         :message (str "Plan submitted successfully. "
-                       (count tasks) " task(s) in plan '" plan-name "'.")}))}
+    {"name"  {:check (complement str/blank?) :msg "name is required"}
+     "tasks" {:check seq                     :msg "tasks is required and must not be empty"}}}
 
    "submit_test_artifact"
    {:tool-def
@@ -219,41 +310,8 @@
          "functions" {:type "number" :description "Function coverage percentage"}}}}}}
 
     :required-params
-    {"files"   {:check #(seq %)              :msg "files is required and must not be empty"}
-     "summary" {:check #(not (str/blank? %)) :msg "summary is required"}}
-
-    :build-artifact
-    (fn [params]
-      (let [files (get params "files")
-            summary (get params "summary")
-            test-type (get params "type" "unit")
-            framework (get params "framework")
-            coverage (get params "coverage")
-            file-maps (mapv (fn [f]
-                              {:path (get f "path")
-                               :content (get f "content")})
-                            files)
-            all-content (str/join "\n" (map #(get % "content" "") files))
-            assertions (count-assertions all-content)
-            cases (count-test-cases all-content)]
-        {:artifact (cond-> {:test/id (str (random-uuid))
-                            :test/files file-maps
-                            :test/type (keyword test-type)
-                            :test/summary summary
-                            :test/assertions-count (max 1 assertions)
-                            :test/cases-count (max 1 cases)
-                            :test/created-at (str (java.time.Instant/now))}
-                     framework
-                     (assoc :test/framework framework)
-                     coverage
-                     (assoc :test/coverage
-                            (cond-> {}
-                              (get coverage "lines")     (assoc :lines (get coverage "lines"))
-                              (get coverage "branches")  (assoc :branches (get coverage "branches"))
-                              (get coverage "functions") (assoc :functions (get coverage "functions")))))
-         :message (str "Test artifact submitted successfully. "
-                       (count files) " test file(s), "
-                       cases " test case(s).")}))}
+    {"files"   {:check seq              :msg "files is required and must not be empty"}
+     "summary" {:check (complement str/blank?) :msg "summary is required"}}}
 
    "submit_release_artifact"
    {:tool-def
@@ -280,28 +338,10 @@
         :description "Brief summary of files changed (e.g. '2 files created, 1 modified')"}}}}
 
     :required-params
-    {"branch_name"    {:check #(not (str/blank? %)) :msg "branch_name is required"}
-     "commit_message" {:check #(not (str/blank? %)) :msg "commit_message is required"}
-     "pr_title"       {:check #(not (str/blank? %)) :msg "pr_title is required"}
-     "pr_description" {:check #(not (str/blank? %)) :msg "pr_description is required"}}
-
-    :build-artifact
-    (fn [params]
-      (let [branch-name (get params "branch_name")
-            commit-message (get params "commit_message")
-            pr-title (get params "pr_title")
-            pr-description (get params "pr_description")
-            files-summary (get params "files_summary")]
-        {:artifact (cond-> {:release/id (str (random-uuid))
-                            :release/branch-name branch-name
-                            :release/commit-message commit-message
-                            :release/pr-title pr-title
-                            :release/pr-description pr-description
-                            :release/created-at (str (java.time.Instant/now))}
-                     files-summary
-                     (assoc :release/files-summary files-summary))
-         :message (str "Release artifact submitted successfully. "
-                       "Branch: " branch-name ", PR: " pr-title)}))}})
+    {"branch_name"    {:check (complement str/blank?) :msg "branch_name is required"}
+     "commit_message" {:check (complement str/blank?) :msg "commit_message is required"}
+     "pr_title"       {:check (complement str/blank?) :msg "pr_title is required"}
+     "pr_description" {:check (complement str/blank?) :msg "pr_description is required"}}}})
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Tool definitions list (derived from registry)
@@ -324,12 +364,13 @@
    Returns {:content [{:type \"text\" :text message}]}
    Throws on unknown tool or validation failure."
   [tool-name arguments write-artifact-fn]
-  (if-let [{:keys [required-params build-artifact]} (get tool-registry tool-name)]
-    (do
-      (validate-required-params required-params arguments)
-      (let [{:keys [artifact message]} (build-artifact arguments)
-            path (write-artifact-fn artifact)]
-        (binding [*out* *err*]
-          (println "Artifact written:" path))
-        {:content [{:type "text" :text message}]}))
-    (throw (ex-info (str "Unknown tool: " tool-name) {:code -32601}))))
+  (let [{:keys [required-params]} (get tool-registry tool-name)
+        build-artifact (get artifact-builders tool-name)]
+    (when-not build-artifact
+      (throw (ex-info (str "Unknown tool: " tool-name) {:code -32601})))
+    (validate-required-params required-params arguments)
+    (let [{:keys [artifact message]} (build-artifact arguments)
+          path (write-artifact-fn artifact)]
+      (binding [*out* *err*]
+        (println "Artifact written:" path))
+      {:content [{:type "text" :text message}]})))
