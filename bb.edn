@@ -427,6 +427,8 @@
                  "components/gate/src"
                  "components/workflow/src"
                  "components/workflow/resources"
+                 "components/spec-parser/src"
+                 "components/self-healing/src"
                  "components/event-stream/src"
                  "components/event-stream/resources"
                  "components/dag-executor/src"

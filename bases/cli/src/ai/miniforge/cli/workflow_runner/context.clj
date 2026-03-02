@@ -51,13 +51,25 @@
          :git-commit (clojure.string/trim (:out commit-result))}))
     (catch Exception _ nil)))
 
-(defn- get-files-in-scope [intent]
+(defn- get-files-in-scope
+  "Resolve scope paths to actual file paths.
+
+   Handles both individual files and directories. Directories are expanded
+   to their contained source files (*.clj, *.cljc, *.cljs, *.edn)."
+  [intent]
   (->> (get intent :scope [])
        (mapcat (fn [path]
                  (try
-                   (if (and (fs/exists? path) (not (fs/directory? path)))
-                     [path]
-                     [path])
+                   (cond
+                     (not (fs/exists? path))
+                     [path] ;; Keep non-existent paths for error reporting
+
+                     (fs/directory? path)
+                     (->> (fs/glob path "**.{clj,cljc,cljs,edn}")
+                          (map str)
+                          vec)
+
+                     :else [path])
                    (catch Exception _ [path]))))
        vec))
 

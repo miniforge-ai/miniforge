@@ -163,7 +163,8 @@
                        "components/web-dashboard/test"
                        "components/self-healing/test"
                        "components/pr-sync/test"
-                       "components/spec-parser/test"]
+                       "components/spec-parser/test"
+                       "bases/cli/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}

@@ -1,21 +1,22 @@
-;; Standard SDLC Workflow v2.0.0 (Interceptor-based)
+;; Nimble SDLC Workflow v1.0.0 (Interceptor-based)
 ;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;
-;; Full SDLC workflow using the new interceptor-based pipeline.
-;; Replaces canonical-sdlc-v1.0.0.edn (145+ lines) with ~30 lines.
+;; Nimble-inspired workflow: waterfall upfront (explore + plan), agile execution.
+;; Explore phase loads existing files before planning to prevent redundant work.
 ;;
-;; Phase behavior is defined by registry defaults. Override only what differs.
+;; Pipeline: explore → plan → implement → verify → review → release → done
 
-{:workflow/id :standard-sdlc
- :workflow/version "2.0.0"
- :workflow/name "Standard SDLC Workflow"
- :workflow/description "Full SDLC: plan -> implement -> verify -> review -> release"
+{:workflow/id :nimble-sdlc
+ :workflow/version "1.0.0"
+ :workflow/name "Nimble SDLC Workflow"
+ :workflow/description "Waterfall upfront (explore + plan), agile execution. Explore phase
+                        loads existing files before planning to prevent redundant work."
 
  :workflow/pipeline
  [;; Exploration phase - deterministic file loading, no LLM
   {:phase :explore}
 
-  ;; Planning phase - uses :planner agent, receives explore results
+  ;; Planning phase - receives explore results for informed planning
   {:phase :plan}
 
   ;; Implementation phase - override to add policy gate

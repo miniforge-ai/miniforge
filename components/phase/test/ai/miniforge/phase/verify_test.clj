@@ -7,7 +7,6 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.phase.verify :as verify]
    [ai.miniforge.phase.registry :as registry]
-   [ai.miniforge.agent.tester :as tester]
    [ai.miniforge.agent.interface :as agent]))
 
 ;------------------------------------------------------------------------------ Test fixtures
@@ -30,9 +29,9 @@
    :test/cases-count 5})
 
 (defn- mock-tester-agent
-  "Create a mock tester agent that returns success."
+  "Create a mock tester agent map (does NOT call create-tester to avoid recursion)."
   []
-  (tester/create-tester {}))
+  {:type :mock-tester})
 
 (defn- create-base-context
   "Create base context for testing."
@@ -74,7 +73,7 @@
 
 (deftest enter-verify-basic-test
   (testing "enter-verify sets up phase context correctly"
-    (with-redefs [tester/create-tester (fn [_] (mock-tester-agent))
+    (with-redefs [agent/create-tester (fn [_] (mock-tester-agent))
                   agent/invoke (fn [_ _ _]
                                 {:success true
                                  :output mock-test-artifact
@@ -107,9 +106,10 @@
                 (is (map? (:metadata output))
                     "Output is enriched with test-runner metadata")))))))))
 
+
 (deftest enter-verify-with-code-from-implement-test
   (testing "enter-verify retrieves code from implement phase result"
-    (with-redefs [tester/create-tester (fn [_] (mock-tester-agent))
+    (with-redefs [agent/create-tester (fn [_] (mock-tester-agent))
                   agent/invoke (fn [_agent task _ctx]
                                 (is (= mock-code-artifact (:code task)))
                                 {:success true
@@ -128,7 +128,7 @@
 
 (deftest enter-verify-with-direct-code-artifact-test
   (testing "enter-verify accepts direct code-artifact in input (test-only workflow)"
-    (with-redefs [tester/create-tester (fn [_] (mock-tester-agent))
+    (with-redefs [agent/create-tester (fn [_] (mock-tester-agent))
                   agent/invoke (fn [_agent task _ctx]
                                 (is (= mock-code-artifact (:code task)))
                                 {:success true
@@ -145,7 +145,7 @@
 
 (deftest enter-verify-with-exception-test
   (testing "enter-verify handles agent exceptions gracefully"
-    (with-redefs [tester/create-tester (fn [_] (mock-tester-agent))
+    (with-redefs [agent/create-tester (fn [_] (mock-tester-agent))
                   agent/invoke (fn [_ _ _]
                                 (throw (ex-info "Test generation failed"
                                                {:reason :llm-timeout})))]

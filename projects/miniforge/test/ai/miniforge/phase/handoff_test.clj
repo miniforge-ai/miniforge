@@ -19,7 +19,8 @@
    [ai.miniforge.phase.registry :as registry]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.response.interface :as response]
-   [ai.miniforge.release-executor.interface :as release-executor]))
+   [ai.miniforge.release-executor.interface :as release-executor]
+   [babashka.process :as process]))
 
 (defn- with-mocked-test-runner
   "Run body-fn with run-tests! and write-test-files! mocked to prevent subprocess spawning."
@@ -201,6 +202,7 @@
                 (is (some? (get-in ctx3 [:phase :result :output]))
                     "Verify phase should produce test result")))))))))
 
+
 (deftest implement-to-release-handoff-test
   (testing "Implement phase artifact is correctly handed to release phase"
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
@@ -258,6 +260,11 @@
 
                                    :else
                                    (response/success {:result :ok} {:tokens 0 :duration-ms 0})))
+                  ;; Mock process/shell to prevent recursive test suite execution
+                  process/shell (fn [& _args]
+                                  {:exit 0
+                                   :out "Ran 1 tests containing 1 assertions.\n0 failures, 0 errors.\n"
+                                   :err ""})
                   ;; Mock release-executor
                   release-executor/execute-release-phase
                   (fn [workflow-state _exec-context _opts]

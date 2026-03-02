@@ -113,6 +113,15 @@
       (is (= [:done] @started))
       (is (= [:done] @completed)))))
 
+(deftest run-pipeline-max-phases-test
+  (testing "run-pipeline completes a simple workflow within max-phases limit"
+    ;; Use :done phase only since other phases require LLM infrastructure
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase :done}]}
+          result (runner/run-pipeline workflow {:task "Test"} {:max-phases 50})]
+      (is (= :completed (:execution/status result))))))
+
 ;; ============================================================================
 ;; Phase result recording tests
 ;; ============================================================================

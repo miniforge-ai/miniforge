@@ -1,9 +1,12 @@
 #!/usr/bin/env bb
-;; Parallel Test Runner for Changed Bricks
+;; Brick-Parallel Test Runner for Changed Bricks
 ;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;
 ;; Queries Polylith for bricks changed since main, resolves their test
-;; namespaces, and runs them in parallel via pmap in a single JVM.
+;; namespaces, and runs them with brick-level parallelism.
+;;
+;; Namespaces within a brick run sequentially (they share with-redefs targets),
+;; while different bricks run in parallel (they don't share mutable state).
 ;;
 ;; Usage:
 ;;   bb scripts/test-changed-bricks.bb
@@ -40,22 +43,37 @@
                        (str/replace "/" ".")
                        (str/replace "_" "-"))))))))
 
-;; --------------------------------------------------------------------------- Parallel test execution
+;; --------------------------------------------------------------------------- Brick-parallel test execution
 
 (defn build-test-expr
-  "Build a Clojure expression string that requires and runs test namespaces
-   in parallel via pmap."
-  [test-nses]
+  "Build a Clojure expression that runs bricks in parallel, but namespaces
+   within each brick sequentially.
+
+   with-redefs (used heavily in phase/agent tests) mutates global var roots,
+   so namespaces sharing the same with-redefs targets must not run concurrently.
+   Brick boundaries are the natural isolation unit — different bricks don't
+   share mocked vars."
+  [brick-groups]
   (let [quote-ns (fn [n] (str "'" n))
-        require-expr (str/join " " (map quote-ns test-nses))
-        nses-expr (str/join " " (map quote-ns test-nses))]
+        all-nses (mapcat val brick-groups)
+        require-expr (str/join " " (map quote-ns all-nses))
+        ;; Build a vector of vectors: [[ns1 ns2] [ns3] ...]
+        groups-expr (str "["
+                         (str/join " "
+                           (map (fn [[_brick nses]]
+                                  (str "[" (str/join " " (map quote-ns nses)) "]"))
+                                brick-groups))
+                         "]")]
     (str "(require 'clojure.test " require-expr ") "
-         "(let [nses [" nses-expr "]"
-         "      results (doall (pmap (fn [ns] "
-         "                             (clojure.test/run-tests ns)) "
-         "                           nses))"
-         "      summary (reduce (fn [acc r] "
-         "                        (merge-with + acc (select-keys r [:test :pass :fail :error]))) "
+         "(let [groups " groups-expr
+         "      run-group (fn [nses] "
+         "                  (reduce (fn [acc ns] "
+         "                            (merge-with + acc "
+         "                              (select-keys (clojure.test/run-tests ns) "
+         "                                           [:test :pass :fail :error]))) "
+         "                          {:test 0 :pass 0 :fail 0 :error 0} nses))"
+         "      results (doall (pmap run-group groups))"
+         "      summary (reduce (fn [acc r] (merge-with + acc r)) "
          "                      {:test 0 :pass 0 :fail 0 :error 0} results)]"
          "  (println) "
          "  (println (str \"Total: \" (:test summary) \" tests, \""
@@ -70,16 +88,28 @@
   (println "🧪 Detecting changed bricks since main...")
   (let [components (poly-changed-names "changed-components")
         bases (poly-changed-names "changed-bases")
-        test-nses (vec (concat
-                         (mapcat #(find-test-nses "components" %) components)
-                         (mapcat #(find-test-nses "bases" %) bases)))]
-    (if (empty? test-nses)
+        ;; Group namespaces by brick so we can parallelize across bricks
+        ;; but run sequentially within each brick
+        brick-groups (into {}
+                       (concat
+                         (for [c components
+                               :let [nses (find-test-nses "components" c)]
+                               :when (seq nses)]
+                           [c nses])
+                         (for [b bases
+                               :let [nses (find-test-nses "bases" b)]
+                               :when (seq nses)]
+                           [b nses])))
+        total-nses (reduce + 0 (map count (vals brick-groups)))]
+    (if (empty? brick-groups)
       (println "✓ No changed bricks — nothing to test")
       (do
-        (println (str "  Changed: " (str/join ", " (concat components bases))))
-        (println (str "  Test namespaces (" (count test-nses) "):"))
-        (doseq [ns test-nses] (println (str "    " ns)))
-        (let [expr (build-test-expr test-nses)
+        (println (str "  Changed bricks: " (str/join ", " (keys brick-groups))))
+        (println (str "  Test namespaces (" total-nses " across " (count brick-groups) " bricks):"))
+        (doseq [[brick nses] brick-groups]
+          (println (str "    " brick " (" (count nses) " namespaces)"))
+          (doseq [ns nses] (println (str "      " ns))))
+        (let [expr (build-test-expr brick-groups)
               {:keys [exit]} (deref (p/process {:out :inherit :err :inherit}
                                                "clojure" "-M:dev:test" "-e" expr))]
           (when-not (zero? exit)

@@ -85,12 +85,19 @@
 
         ;; Build task from workflow input
         input (get-in ctx [:execution/input])
-        task {:task/id (random-uuid)
-              :task/type :plan
-              :task/description (:description input)
-              :task/title (:title input)
-              :task/intent (:intent input)
-              :task/constraints (:constraints input)}
+
+        ;; Read exploration results if available (from explore phase)
+        explore-result (get-in ctx [:execution/phase-results :explore :result :output])
+        existing-files (:exploration/files explore-result)
+
+        task (cond-> {:task/id (random-uuid)
+                      :task/type :plan
+                      :task/description (:description input)
+                      :task/title (:title input)
+                      :task/intent (:intent input)
+                      :task/constraints (:constraints input)}
+               (seq existing-files)
+               (assoc :task/existing-files existing-files))
 
         ;; Create streaming callback for agent output
         on-chunk (when-let [es (:event-stream ctx)]
@@ -136,7 +143,10 @@
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
     ;; Emit phase completed event
     (emit-phase-completed! updated-ctx :plan result)
-    updated-ctx))
+    ;; Handle :already-satisfied — signal pipeline to skip to :done
+    (if (= :already-satisfied (:status result))
+      (assoc-in updated-ctx [:phase :status] :already-satisfied)
+      updated-ctx)))
 
 (defn- error-plan
   "Handle planning phase errors.

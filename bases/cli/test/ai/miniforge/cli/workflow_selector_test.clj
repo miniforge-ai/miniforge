@@ -9,7 +9,7 @@
 (def multi-phase-refactor-spec
   "Emojui-style spec with 6 PRs and stratified design"
   {:spec/title "Memento Views Refactor"
-   :spec/description "Refactor 5 memory view pages to follow stratified design"
+   :spec/description "Multi-phase refactor of 5 memory view pages to follow stratified design"
    :spec/raw-data
    {:type :refactoring
     :implementation-plan
@@ -71,7 +71,7 @@
     (let [features (ws/analyze-spec multi-phase-refactor-spec)]
       (is (= :refactoring (:type features)))
       (is (= 6 (:pr-count features)))
-      (is (true? (:has-dependencies? features)))
+      (is (:has-dependencies? features))
       (is (contains? (:keywords features) :refactoring))
       (is (contains? (:keywords features) :stratified-design))
       (is (contains? (:keywords features) :multi-phase))

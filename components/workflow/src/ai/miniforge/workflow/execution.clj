@@ -84,29 +84,43 @@
   [ctx]
   (get-in ctx [:phase]))
 
+(def ^:private already-done-statuses
+  "Statuses indicating work is already complete — skip gates and jump to :done."
+  #{:already-satisfied :already-implemented})
+
+(defn- already-done?
+  "Check if phase result indicates work was already done."
+  [phase-result]
+  (or (contains? already-done-statuses (:status phase-result))
+      (contains? already-done-statuses (get-in phase-result [:result :status]))))
+
 (defn- apply-gate-validation
   "Apply gate validation to phase result.
 
-   Returns updated phase-result with :phase/status and :phase/gate-errors if gates fail."
+   Returns updated phase-result with :phase/status and :phase/gate-errors if gates fail.
+   Skips gate checks when phase indicates work is already done."
   [interceptor phase-result ctx]
-  (let [gate-keywords (get-in interceptor [:config :gates] [])
-        artifact (or (:artifact phase-result)
-                     (get-in phase-result [:result :artifact])
-                     (get-in phase-result [:result :output]))]
-    (if (and (seq gate-keywords) artifact)
-      (let [gate-result (gate/check-gates gate-keywords artifact ctx)]
-        (if (:all-passed? gate-result)
-          phase-result
-          (assoc phase-result
-                 :phase/status :failed
-                 :phase/gate-errors (:failed-gates gate-result))))
-      phase-result)))
+  (if (already-done? phase-result)
+    phase-result
+    (let [gate-keywords (get-in interceptor [:config :gates] [])
+          artifact (or (:artifact phase-result)
+                       (get-in phase-result [:result :artifact])
+                       (get-in phase-result [:result :output]))]
+      (if (and (seq gate-keywords) artifact)
+        (let [gate-result (gate/check-gates gate-keywords artifact ctx)]
+          (if (:all-passed? gate-result)
+            phase-result
+            (assoc phase-result
+                   :phase/status :failed
+                   :phase/gate-errors (:failed-gates gate-result))))
+        phase-result))))
 
 (defn- phase-succeeded?
   "Check if phase completed successfully."
   [phase-result]
   (or (= :completed (:status phase-result))
-      (= :completed (:phase/status phase-result))))
+      (= :completed (:phase/status phase-result))
+      (already-done? phase-result)))
 
 (defn- update-response-chain
   "Update response chain with phase result."
@@ -195,6 +209,14 @@
       ;; Phase retrying (transient error, stay at current index)
       (= :retrying status)
       current-index
+
+      ;; Phase already done — skip to done
+      (contains? already-done-statuses status)
+      (let [done-index (->> pipeline
+                            (map-indexed vector)
+                            (filter #(= :done (get-in (second %) [:config :phase])))
+                            (first))]
+        (if done-index (first done-index) :done))
 
       ;; Phase completed successfully
       (= :completed status)
