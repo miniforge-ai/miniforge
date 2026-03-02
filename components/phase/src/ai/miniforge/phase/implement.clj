@@ -152,7 +152,10 @@
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
         agent-status (:status result)
-        phase-status (if (= :error agent-status) :failed :completed)
+        phase-status (cond
+                       (= :error agent-status) :failed
+                       (= :already-implemented agent-status) :already-implemented
+                       :else :completed)
         metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
         iterations (get-in ctx [:phase :iterations] 1)
         updated-ctx (-> ctx
