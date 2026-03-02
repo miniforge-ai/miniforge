@@ -2,6 +2,7 @@
   "Planner agent implementation.
    Analyzes specifications and creates detailed implementation plans."
   (:require
+   [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
@@ -255,6 +256,19 @@
      :repairs-made (when (not= plan @repaired)
                      {:original-errors errors})}))
 
+(defn- ensure-task-ids
+  "Ensure all tasks in a plan have proper UUIDs."
+  [tasks]
+  (mapv (fn [t] (update t :task/id #(or % (random-uuid)))) tasks))
+
+(defn- finalize-plan
+  "Ensure a plan has proper ID, task IDs, and timestamp."
+  [plan]
+  (-> plan
+      (update :plan/id #(or % (random-uuid)))
+      (update :plan/tasks ensure-task-ids)
+      (assoc :plan/created-at (java.util.Date.))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public API
 
@@ -302,62 +316,58 @@
                                "\n\nOutput your plan as a Clojure map following the format in your system prompt. "
                                "Use (random-uuid) for all IDs - just write #uuid \"<any-uuid>\" placeholders that I'll fill in.")]
           (if llm-client
-            ;; Use the real LLM with streaming if callback provided
-            (let [response (if on-chunk
-                             (llm/chat-stream llm-client user-prompt on-chunk
-                                              {:system @planner-system-prompt})
-                             (llm/chat llm-client user-prompt
-                                       {:system @planner-system-prompt}))
-                  tokens (or (:tokens response) 0)]
+            ;; Use the real LLM with artifact session for MCP tool support
+            (let [{:keys [llm-result artifact]}
+                  (artifact-session/with-artifact-session [session]
+                    (let [mcp-opts {:mcp-config (:mcp-config-path session)}]
+                      (if on-chunk
+                        (llm/chat-stream llm-client user-prompt on-chunk
+                                         (merge {:system @planner-system-prompt} mcp-opts))
+                        (llm/chat llm-client user-prompt
+                                  (merge {:system @planner-system-prompt} mcp-opts)))))
+                  llm-response llm-result
+                  tokens (or (:tokens llm-response) 0)]
               (log/info logger :planner :planner/llm-called
-                        {:data {:success (llm/success? response)
+                        {:data {:success (llm/success? llm-response)
                                 :tokens tokens
-                                :streaming? (boolean on-chunk)}})
-              (if (llm/success? response)
-                (let [content (llm/get-content response)
-                      plan (or (parse-plan-response content)
-                               (make-fallback-plan spec-text))]
+                                :streaming? (boolean on-chunk)
+                                :mcp-artifact? (boolean artifact)}})
+              (if (llm/success? llm-response)
+                (let [content (llm/get-content llm-response)
+                      plan (or artifact
+                               (parse-plan-response content)
+                               (make-fallback-plan spec-text))
+                      plan-final (finalize-plan plan)]
+                  (when artifact
+                    (log/info logger :planner :planner/mcp-artifact-received
+                              {:data {:task-count (count (:plan/tasks artifact))}}))
                   ;; Check for already-satisfied response
-                  (if (= :already-satisfied (:plan/status plan))
+                  (if (= :already-satisfied (:plan/status plan-final))
                     (let [output {:plan/id (random-uuid)
                                   :plan/name "already-satisfied"
                                   :plan/tasks []
-                                  :plan/summary (:plan/summary plan)
-                                  :plan/evidence (or (:plan/evidence plan) [])}]
+                                  :plan/summary (:plan/summary plan-final)
+                                  :plan/evidence (or (:plan/evidence plan-final) [])}]
                       (assoc (response/success output {:tokens tokens})
                              :status :already-satisfied))
-                    ;; Normal plan — ensure all tasks have proper UUIDs
-                    (let [plan-with-ids (-> plan
-                                            (update :plan/id #(or % (random-uuid)))
-                                            (update :plan/tasks
-                                                    (fn [tasks]
-                                                      (mapv (fn [t]
-                                                              (update t :task/id #(or % (random-uuid))))
-                                                            tasks)))
-                                            (assoc :plan/created-at (java.util.Date.)))]
-                      {:status :success
-                       :output plan-with-ids
-                       :artifact plan-with-ids
-                       :tokens tokens
-                       :metrics {:tasks-created (count (:plan/tasks plan-with-ids))
-                                 :complexity (:plan/estimated-complexity plan-with-ids)
-                                 :tokens tokens}})))
+                    (response/success plan-final
+                                      {:tokens tokens
+                                       :metrics {:tasks-created (count (:plan/tasks plan-final))
+                                                 :complexity (:plan/estimated-complexity plan-final)
+                                                 :tokens tokens}})))
                 ;; LLM call failed
-                {:status :error
-                 :error (llm/get-error response)
-                 :output (make-fallback-plan spec-text)
-                 :artifact (make-fallback-plan spec-text)
-                 :metrics {:tokens 0}}))
+                (let [fallback (make-fallback-plan spec-text)
+                      error-msg (or (:message (llm/get-error llm-response))
+                                    "LLM call failed")]
+                  (response/error error-msg {:output fallback}))))
             ;; No LLM client - use fallback (for testing)
             (do
               (log/warn logger :planner :planner/no-llm-backend
                         {:message "No LLM backend provided, using fallback plan"})
               (let [plan (make-fallback-plan spec-text)]
-                {:status :success
-                 :output plan
-                 :artifact plan
-                 :metrics {:tasks-created (count (:plan/tasks plan))
-                           :complexity (:plan/estimated-complexity plan)}})))))
+                (response/success plan
+                                  {:metrics {:tasks-created (count (:plan/tasks plan))
+                                             :complexity (:plan/estimated-complexity plan)}}))))))
 
       :validate-fn validate-plan
 

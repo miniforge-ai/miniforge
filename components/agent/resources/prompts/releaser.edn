@@ -83,5 +83,19 @@ How this was tested.\"
    - Brief count of files affected
    - Example: \"2 files created, 1 modified, 1 deleted\"
 
+## Preferred Output Method
+
+If the `submit_release_artifact` MCP tool is available, you MUST use it to submit your release metadata.
+Call `submit_release_artifact` with:
+- `branch_name`: git branch name (e.g. \"feature/add-auth\")
+- `commit_message`: git commit message in conventional commits format
+- `pr_title`: pull request title (max 70 characters)
+- `pr_description`: pull request description in markdown
+- `files_summary`: brief summary of files changed (optional)
+
+Do NOT output raw EDN text when the MCP tool is available.
+
+If the tool is NOT available, fall back to the EDN output format described above.
+
 Remember: Your release metadata will be used for git commits and GitHub PRs.
 Write messages that help reviewers understand the changes at a glance."}

@@ -3,6 +3,7 @@
    Generates branch names, commit messages, PR titles and descriptions
    for the release phase."
   (:require
+   [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
@@ -225,20 +226,28 @@
               on-chunk (:on-chunk context)
               user-prompt (input->text input context)]
           (if llm-client
-            ;; Use the real LLM with streaming if callback provided
-            (let [llm-response (if on-chunk
-                                 (llm/chat-stream llm-client user-prompt on-chunk
-                                                  {:system @releaser-system-prompt})
-                                 (llm/chat llm-client user-prompt
-                                           {:system @releaser-system-prompt}))
+            ;; Use the real LLM with artifact session for MCP tool support
+            (let [{:keys [llm-result artifact]}
+                  (artifact-session/with-artifact-session [session]
+                    (let [mcp-opts {:mcp-config (:mcp-config-path session)}]
+                      (if on-chunk
+                        (llm/chat-stream llm-client user-prompt on-chunk
+                                         (merge {:system @releaser-system-prompt} mcp-opts))
+                        (llm/chat llm-client user-prompt
+                                  (merge {:system @releaser-system-prompt} mcp-opts)))))
+                  llm-response llm-result
                   tokens (or (:tokens llm-response) 0)]
               (log/info logger :releaser :releaser/llm-called
                         {:data {:success (llm/success? llm-response)
                                 :tokens tokens
-                                :streaming? (boolean on-chunk)}})
+                                :streaming? (boolean on-chunk)
+                                :mcp-artifact? (boolean artifact)}})
               (if (llm/success? llm-response)
                 (let [content (llm/get-content llm-response)
-                      parsed (parse-release-response content)
+                      parsed (or artifact (parse-release-response content))
+                      _ (when artifact
+                          (log/info logger :releaser :releaser/mcp-artifact-received
+                                    {:data {:branch (:release/branch-name artifact)}}))
                       release (or parsed (make-fallback-artifact input))
                       ;; Ensure proper ID and timestamp
                       release-with-meta (-> release

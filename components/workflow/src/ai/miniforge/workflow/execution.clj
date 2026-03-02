@@ -153,16 +153,17 @@
 (defn- track-phase-files
   "Track files written by phase for meta-agent monitoring."
   [ctx phase-result]
-  (update ctx :execution/files-written into
-          (or (:files-written phase-result)
-              (:artifacts phase-result)
-              [])))
+  (let [output (get-in phase-result [:result :output])
+        file-paths (when (map? output)
+                     (mapv :path (:code/files output)))]
+    (update ctx :execution/files-written into (or file-paths []))))
 
 (defn- record-phase-artifacts
   "Record phase artifacts in execution context."
   [ctx phase-result]
-  (update ctx :execution/artifacts into
-          (or (:artifacts phase-result) [])))
+  (let [output (get-in phase-result [:result :output])
+        artifacts (when (map? output) [output])]
+    (update ctx :execution/artifacts into (or artifacts []))))
 
 ;------------------------------------------------------------------------------ Layer 1: Composition
 
@@ -202,7 +203,8 @@
   [pipeline current-index phase-config phase-result]
   (let [status (or (:status phase-result) (:phase/status phase-result))
         on-fail (:on-fail phase-config)
-        on-success (:on-success phase-config)]
+        on-success (:on-success phase-config)
+        redirect-to (:redirect-to phase-result)]
     (cond
       ;; Phase retrying (transient error, stay at current index)
       (= :retrying status)
@@ -230,6 +232,14 @@
           (if (< next-idx (count pipeline))
             next-idx
             :done)))
+
+      ;; Phase failed with redirect — jump to target phase
+      (and (= :failed status) redirect-to)
+      (let [target-index (->> pipeline
+                              (map-indexed vector)
+                              (filter #(= redirect-to (get-in (second %) [:config :phase])))
+                              (first))]
+        (if target-index (first target-index) :error))
 
       ;; Phase failed
       (= :failed status)

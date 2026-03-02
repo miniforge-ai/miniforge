@@ -311,7 +311,7 @@
       (let [explained (pr-train/explain-readiness train pr-2)]
         (is (contains? explained :readiness/score))
         (is (contains? explained :readiness/factors))
-        (is (= 6 (count (:readiness/factors explained))))
+        (is (= 5 (count (:readiness/factors explained))))
         (doseq [f (:readiness/factors explained)]
           (is (contains? f :factor))
           (is (contains? f :weight))

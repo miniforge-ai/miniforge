@@ -2,23 +2,14 @@
 
  :deps {io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}}
 
+ :paths ["tasks"]
+
  :tasks
  {:requires ([babashka.fs :as fs]
              [babashka.process :as p]
              [clojure.string :as str])
 
   :init (do
-          (def staged-files
-            (delay
-              (-> (p/sh "git" "diff" "--cached" "--name-only" "--diff-filter=ACM")
-                  :out
-                  str/split-lines
-                  (->> (remove str/blank?)))))
-
-          (defn staged-by-ext [ext]
-            (->> (deref staged-files)
-                 (filter (fn [f] (str/ends-with? f ext)))))
-
           (defn run! [& args]
             (let [{:keys [exit]} (apply p/sh args)]
               (when-not (zero? exit)
@@ -48,51 +39,19 @@
   ;; ──────────────────────────────────────────────────────────────────────────
 
   lint:clj
-  {:doc  "Lint Clojure files with clj-kondo"
-   :task (let [clj-files (->> (concat (staged-by-ext ".clj")
-                                      (staged-by-ext ".cljs")
-                                      (staged-by-ext ".cljc")
-                                      (staged-by-ext ".edn"))
-                              ;; Exclude .clj-kondo imports (library configs)
-                              (remove (fn [f] (str/starts-with? f ".clj-kondo/"))))]
-           (if (seq clj-files)
-             (let [_ (println "🔍 Linting" (count clj-files) "Clojure file(s)...")
-                   _ (println "Files:" (str/join ", " clj-files))
-                   {:keys [exit out err]} (apply p/sh {:out :string :err :string}
-                                                "clj-kondo" "--lint" clj-files)]
-               (when-not (str/blank? out) (println out))
-               (when-not (str/blank? err) (binding [*out* *err*] (println err)))
-               ;; Exit 0 = success, 2 = warnings only, 3 = errors
-               ;; Allow warnings but fail on errors
-               (when (= exit 3)
-                 (println "❌ Linting failed with errors (exit code 3)")
-                 (System/exit 3)))
-             (println "✓ No Clojure files to lint")))}
+  {:doc  "Lint staged Clojure files with clj-kondo"
+   :requires ([lint])
+   :task (lint/clj-staged)}
 
   lint:clj:all
   {:doc  "Lint all Clojure files in the project"
-   :task (do
-           (println "🔍 Linting all Clojure files...")
-           (println "Directories: bases components development/src")
-           (let [{:keys [exit out err]} (p/sh {:out :string :err :string}
-                                              "clj-kondo" "--lint" "bases" "components" "development/src")]
-             (when-not (str/blank? out) (println out))
-             (when-not (str/blank? err) (binding [*out* *err*] (println err)))
-             (when-not (zero? exit)
-               (println "❌ Linting failed with exit code:" exit)
-               (System/exit exit))))}
+   :requires ([lint])
+   :task (lint/clj-all)}
 
   fmt:md
   {:doc  "Format staged Markdown files (lint --fix)"
-   :task (let [md-files (staged-by-ext ".md")]
-           (if (seq md-files)
-             (do
-               (println "📝 Formatting" (count md-files) "Markdown file(s)...")
-               (apply run! "markdownlint" "--fix" md-files)
-               ;; Re-add the fixed files to staging
-               (doseq [f md-files]
-                 (p/sh "git" "add" f)))
-             (println "✓ No Markdown files to format")))}
+   :requires ([fmt])
+   :task (fmt/md-staged)}
 
   fmt:md:all
   {:doc  "Format all Markdown files in the project"
@@ -105,7 +64,13 @@
   ;; ──────────────────────────────────────────────────────────────────────────
 
   test
-  {:doc  "Run unit (brick) tests via Polylith"
+  {:doc  "Run changed brick tests in parallel (since main)"
+   :task (let [exit (run-stream! "bb" "scripts/test-changed-bricks.bb")]
+           (when-not (zero? exit)
+             (System/exit exit)))}
+
+  test:poly
+  {:doc  "Run unit (brick) tests via Polylith (full, serial)"
    :task (do
            (println "🧪 Running tests via poly test...")
            (println "Command: clojure -M:poly test")
@@ -116,72 +81,34 @@
 
   test:integration
   {:doc  "Run project-level integration tests"
+   :requires ([test-runner])
+   :task (test-runner/integration)}
+
+  test:mcp
+  {:doc  "Run MCP artifact server tests"
    :task (do
-           (println "🧪 Running project integration tests...")
-           (let [deps (slurp "projects/miniforge/deps.edn")
-                 test-nses ["ai.miniforge.workflow.release-integration-test"
-                            "ai.miniforge.workflow.loader-integration-test"
-                            "ai.miniforge.workflow.configurable-integration-test"
-                            "ai.miniforge.artifact.interface-integration-test"
-                            "ai.miniforge.loop.interface-integration-test"
-                            "ai.miniforge.observer.interface-integration-test"
-                            "ai.miniforge.task.interface-integration-test"
-                            "ai.miniforge.release-executor.artifact-validation-integration-test"
-                            "ai.miniforge.web-dashboard.fleet-onboarding-integration-test"
-                            "ai.miniforge.self-healing.integration-test"
-                            "ai.miniforge.governance.e2e-test"]
-                 require-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
-                 run-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
-                 expr (str "(require 'clojure.test" require-expr ") "
-                           "(clojure.test/run-tests" run-expr ")")
-                 {:keys [exit out err]}
-                 (p/sh {:out :string :err :string :dir "projects/miniforge"}
-                       "clojure" "-Sdeps" deps "-M" "-e" expr)]
-             (when-not (str/blank? out) (println out))
-             (when-not (str/blank? err) (binding [*out* *err*] (println err)))
+           (println "🧪 Running MCP artifact server tests...")
+           (let [exit (run-stream! "bb" "scripts/test-mcp-artifact-server.bb")]
              (when-not (zero? exit)
-               (println "❌ Integration tests failed with exit code:" exit)
+               (println "❌ MCP tests failed with exit code:" exit)
                (System/exit exit))))}
 
   test:all
-  {:doc  "Run full suite (unit bricks + project integration tests)"
+  {:doc  "Run full suite (unit bricks + project integration tests + MCP)"
    :task (do
            (run 'test)
+           (run 'test:mcp)
            (run 'test:integration))}
 
   test:conformance
   {:doc  "Run N1 conformance test suite"
-   :task (do
-           (println "🧪 Running N1 conformance tests...")
-           (let [test-nses ["conformance.n1_architecture_test"
-                            "conformance.event_stream_test"
-                            "conformance.agent_context_handoff_test"
-                            "conformance.protocol_conformance_test"
-                            "conformance.gate_enforcement_test"]
-                 require-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
-                 run-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
-                 expr (str "(require 'clojure.test" require-expr ") "
-                           "(clojure.test/run-tests" run-expr ")")
-                 exit (run-stream! "clojure" "-M:conformance" "-e" expr)]
-             (when-not (zero? exit)
-               (println "❌ Conformance tests failed with exit code:" exit)
-               (System/exit exit))))}
+   :requires ([test-runner])
+   :task (test-runner/conformance)}
 
   test:graalvm
   {:doc  "Test GraalVM/Babashka compatibility"
-   :task (do
-           (println "🧪 Testing GraalVM/Babashka compatibility...")
-           (let [;; Use :dev alias to get full component classpath
-                 cp (-> (p/sh {:out :string} "clojure" "-A:dev" "-Spath")
-                       :out
-                       str/trim)
-                 ;; Add tests directory to classpath
-                 full-cp (str cp ":tests")
-                 expr "(require 'graalvm-compatibility-test) (graalvm-compatibility-test/-main)"
-                 exit (run-stream! "bb" "-cp" full-cp "-e" expr)]
-             (when-not (zero? exit)
-               (println "❌ GraalVM compatibility tests failed with exit code:" exit)
-               (System/exit exit))))}
+   :requires ([test-runner])
+   :task (test-runner/graalvm)}
 
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Pre-commit
@@ -213,16 +140,8 @@
 
   build:cli
   {:doc  "Build miniforge CLI as distributable uberjar"
-   :task (do
-           (println "🔨 Building miniforge CLI uberjar...")
-           (println "Command: clojure -T:build bb-uberjar :project miniforge")
-           (let [{:keys [exit out err]} (p/sh {:out :string :err :string}
-                                              "clojure" "-T:build" "bb-uberjar" ":project" "miniforge")]
-             (when-not (str/blank? out) (println out))
-             (when-not (str/blank? err) (binding [*out* *err*] (println err)))
-             (when-not (zero? exit)
-               (println "❌ Build failed with exit code:" exit)
-               (System/exit exit))))}
+   :requires ([build])
+   :task (build/cli)}
 
   build:jar
   {:doc  "Build JVM uberjar for a project"
@@ -241,126 +160,18 @@
 
   build:tui
   {:doc  "Build miniforge-tui as JVM uberjar + jlink runtime"
-   :task (let [jar-file   "dist/miniforge-tui.jar"
-               jlink-dir  "dist/miniforge-tui-runtime"
-               dist-dir   "dist/miniforge-tui"
-               java-home  (or (System/getenv "JAVA_HOME")
-                              "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home")]
-           (println "🔨 Building miniforge-tui JVM uberjar...")
-           ;; Step 1: Build JVM uberjar
-           (let [{:keys [exit out err]}
-                 (p/sh {:out :string :err :string}
-                       "clojure" "-T:build" "uberjar"
-                       ":project" "miniforge-tui"
-                       ":uber-file" (str "\"" jar-file "\""))]
-             (when-not (str/blank? out) (println out))
-             (when-not (str/blank? err) (binding [*out* *err*] (println err)))
-             (when-not (zero? exit)
-               (println "❌ Uberjar build failed")
-               (System/exit exit)))
-
-           (if-not (fs/exists? jar-file)
-             (do (println "❌" jar-file "not found")
-                 (System/exit 1))
-             (println "✅ Uberjar:" jar-file "(" (fs/size jar-file) "bytes)"))
-
-           ;; Step 2: Create jlink minimal JVM runtime
-           (println "🔗 Creating jlink runtime...")
-           (when (fs/exists? jlink-dir)
-             (fs/delete-tree jlink-dir))
-           (let [jlink-bin (str java-home "/bin/jlink")
-                 {:keys [exit err]}
-                 (p/sh {:out :string :err :string}
-                       jlink-bin
-                       "--add-modules" "java.base,java.desktop,java.logging,java.management,java.sql,java.naming,java.xml"
-                       "--strip-debug"
-                       "--no-man-pages"
-                       "--no-header-files"
-                       "--compress" "zip-6"
-                       "--output" jlink-dir)]
-             (when-not (zero? exit)
-               (println "❌ jlink failed:" err)
-               (System/exit exit)))
-           (println "✅ jlink runtime:" jlink-dir)
-
-           ;; Step 3: Create distribution directory
-           (println "📦 Packaging distribution...")
-           (when (fs/exists? dist-dir)
-             (fs/delete-tree dist-dir))
-           (fs/create-dirs (str dist-dir "/bin"))
-           (fs/create-dirs (str dist-dir "/lib"))
-
-           ;; Copy jar
-           (fs/copy jar-file (str dist-dir "/lib/miniforge-tui.jar"))
-
-           ;; Copy jlink runtime
-           (fs/copy-tree jlink-dir (str dist-dir "/jvm"))
-
-           ;; Create launcher script
-           (spit (str dist-dir "/bin/miniforge-tui")
-                 (str "#!/usr/bin/env bash\n"
-                      "# miniforge-tui launcher (jlink-bundled JVM)\n"
-                      "SCRIPT_DIR=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\n"
-                      "BASE_DIR=\"$(cd \"$SCRIPT_DIR/..\" && pwd)\"\n"
-                      "exec \"$BASE_DIR/jvm/bin/java\" \\\n"
-                      "  -cp \"$BASE_DIR/lib/miniforge-tui.jar\" \\\n"
-                      "  clojure.main -m ai.miniforge.cli.main \\\n"
-                      "  tui \"$@\"\n"))
-           (p/shell "chmod" "+x" (str dist-dir "/bin/miniforge-tui"))
-
-           ;; Clean intermediate jlink dir
-           (fs/delete-tree jlink-dir)
-
-           (println "✅ Distribution ready:" dist-dir)
-           (println "   Run with:" (str dist-dir "/bin/miniforge-tui")))}
+   :requires ([build])
+   :task (build/tui)}
 
   install:tui
   {:doc  "Build and install miniforge-tui to ~/.local/bin"
-   :task (let [dist-dir    "dist/miniforge-tui"
-               bin-dir     (str (System/getProperty "user.home") "/.local/bin")
-               install-dir (str (System/getProperty "user.home") "/.local/lib/miniforge-tui")
-               script-target (str bin-dir "/miniforge-tui")]
-           ;; Build first
-           (run 'build:tui)
-
-           (if-not (fs/exists? dist-dir)
-             (do (println "❌ dist/miniforge-tui not found")
-                 (System/exit 1))
-             (do
-               (println "📦 Installing miniforge-tui to" install-dir)
-               (fs/create-dirs bin-dir)
-
-               ;; Remove old installation
-               (when (fs/exists? install-dir)
-                 (fs/delete-tree install-dir))
-
-               ;; Copy distribution
-               (fs/copy-tree dist-dir install-dir)
-
-               ;; Create symlink in bin
-               (when (fs/exists? script-target)
-                 (fs/delete script-target))
-               (spit script-target
-                     (str "#!/usr/bin/env bash\n"
-                          "exec \"" install-dir "/bin/miniforge-tui\" \"$@\"\n"))
-               (p/shell "chmod" "+x" script-target)
-
-               (println "✅ Installed successfully")
-               (println "   Ensure ~/.local/bin is in your PATH")
-               (println "   Run 'miniforge-tui' to launch"))))}
+   :requires ([install])
+   :task (install/tui)}
 
   compile
   {:doc  "Compile all code (syntax check)"
-   :task (do
-           (println "⚙️  Compiling all code for syntax check...")
-           (println "Command: clojure -T:build compile-all")
-           (let [{:keys [exit out err]} (p/sh {:out :string :err :string}
-                                              "clojure" "-T:build" "compile-all")]
-             (when-not (str/blank? out) (println out))
-             (when-not (str/blank? err) (binding [*out* *err*] (println err)))
-             (when-not (zero? exit)
-               (println "❌ Compilation failed with exit code:" exit)
-               (System/exit exit))))}
+   :requires ([build])
+   :task (build/compile-all)}
 
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Local Installation (for testing)
@@ -368,32 +179,8 @@
 
   install:local
   {:doc  "Build and install CLI to ~/.local/bin/mf (cleans old build first)"
-   :task (let [jar-source "dist/miniforge.jar"
-               bin-dir (str (System/getProperty "user.home") "/.local/bin")
-               jar-target (str bin-dir "/miniforge.jar")
-               script-target (str bin-dir "/mf")]
-           ;; Clean old build
-           (when (fs/exists? jar-source)
-             (println "🗑️  Removing old build:" jar-source)
-             (fs/delete jar-source))
-           ;; Build fresh
-           (run 'build:cli)
-           ;; Install
-           (if (fs/exists? jar-source)
-             (do
-               (println "📦 Installing miniforge CLI to" bin-dir)
-               (fs/create-dirs bin-dir)
-               ;; Copy the jar
-               (fs/copy jar-source jar-target {:replace-existing true})
-               ;; Create wrapper script
-               (spit script-target
-                     (str "#!/usr/bin/env bash\n"
-                          "exec bb --jar \"" jar-target "\" -m ai.miniforge.cli.main \"$@\"\n"))
-               (p/shell "chmod" "+x" script-target)
-               (println "✅ Installed successfully")
-               (println "   Ensure ~/.local/bin is in your PATH")
-               (println "   Run 'mf version' to verify"))
-             (println "❌ dist/miniforge.jar not found. Run 'bb build:cli' first")))}
+   :requires ([install])
+   :task (install/local-cli)}
 
   uninstall:local
   {:doc  "Remove local installation from ~/.local/bin/mf"
@@ -554,23 +341,8 @@
 
   dogfood:check
   {:doc "Check dogfooding prerequisites"
-   :task (do
-           (println "🔍 Checking dogfooding prerequisites...")
-           (let [github-token (System/getenv "GITHUB_TOKEN")
-                 anthropic-key (System/getenv "ANTHROPIC_API_KEY")
-                 git-clean (zero? (:exit (p/sh {:continue true} "git" "diff" "--quiet")))
-                 checks {:github-token (some? github-token)
-                         :anthropic-key (some? anthropic-key)
-                         :git-clean git-clean}]
-             (doseq [[check passed?] checks]
-               (println (format "  %s %s"
-                               (if passed? "✅" "❌")
-                               (name check))))
-             (if (every? val checks)
-               (do (println "\n✅ Ready for dogfooding!")
-                   (System/exit 0))
-               (do (println "\n⚠️  Fix issues above before dogfooding")
-                   (System/exit 1)))))}
+   :requires ([dogfood])
+   :task (dogfood/check)}
 
   dogfood:dry-run
   {:doc "Dry run - show what would be executed"

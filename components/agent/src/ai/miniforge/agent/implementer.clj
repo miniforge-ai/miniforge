@@ -2,6 +2,7 @@
   "Implementer agent implementation.
    Generates code from plans and task descriptions."
   (:require
+   [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
@@ -282,20 +283,29 @@
                                "```clojure\n{:status :already-implemented\n"
                                " :summary \"Brief explanation of why no changes are needed\"}\n```")]
           (if llm-client
-            ;; Use the real LLM with streaming if callback provided
-            (let [response (if on-chunk
-                             (llm/chat-stream llm-client user-prompt on-chunk
-                                              {:system effective-system-prompt})
-                             (llm/chat llm-client user-prompt
-                                       {:system effective-system-prompt}))
+            ;; Use the real LLM with artifact session for MCP tool support
+            (let [{:keys [llm-result artifact]}
+                  (artifact-session/with-artifact-session [session]
+                    (let [mcp-opts {:mcp-config (:mcp-config-path session)}]
+                      (if on-chunk
+                        (llm/chat-stream llm-client user-prompt on-chunk
+                                         (merge {:system effective-system-prompt} mcp-opts))
+                        (llm/chat llm-client user-prompt
+                                  (merge {:system effective-system-prompt} mcp-opts)))))
+                  response llm-result
                   tokens (or (:tokens response) 0)]
               (log/info logger :implementer :implementer/llm-called
                         {:data {:success (llm/success? response)
                                 :tokens tokens
-                                :streaming? (boolean on-chunk)}})
+                                :streaming? (boolean on-chunk)
+                                :mcp-artifact? (boolean artifact)}})
               (if (llm/success? response)
+                ;; Check for MCP artifact first, then fall back to text parsing
                 (let [content (llm/get-content response)
-                      parsed (parse-code-response content)]
+                      parsed (or artifact (parse-code-response content))]
+                  (when artifact
+                    (log/info logger :implementer :implementer/mcp-artifact-received
+                              {:data {:file-count (count (:code/files artifact))}}))
                   ;; Check for already-implemented response
                   (if (= :already-implemented (:status parsed))
                     {:status :already-implemented

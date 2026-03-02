@@ -61,7 +61,8 @@
         (let [file-path (event-file-path workflow-id)]
           (with-open [writer (io/writer file-path :append true)]
             (.write writer (pr-str event))
-            (.write writer "\n")))
+            (.write writer "\n")
+            (.flush writer)))
         (catch Exception _e
           ;; Silently fail - don't break event stream
           nil)))))
@@ -91,7 +92,8 @@
                        :json (let [gen-str (requiring-resolve 'cheshire.core/generate-string)]
                                (str (gen-str event {:pretty (not compact?)})))
                        (pr-str event))]
-          (println output))
+          (println output)
+          (flush))
         (catch Exception _e
           nil)))))
 

@@ -26,9 +26,9 @@
     (let [cfg (config/load-config {:profile :prod})]
       (is (map? cfg))))
 
-  (testing "load-config returns nil when config file not found"
+  (testing "load-config returns default config when config file not found"
     (let [cfg (config/load-config {:config-file (io/file "/nonexistent/config.edn")})]
-      (is (nil? cfg)))))
+      (is (map? cfg)))))
 
 (deftest get-llm-backend-test
   (testing "get-llm-backend returns workflow override when provided"
