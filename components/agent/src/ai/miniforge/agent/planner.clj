@@ -8,7 +8,8 @@
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
    [malli.core :as m]
-   [clojure.edn :as edn]))
+   [clojure.edn :as edn]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Planner-specific schemas
@@ -88,6 +89,23 @@
     (seq dependencies) (assoc :task/dependencies dependencies)
     (seq acceptance-criteria) (assoc :task/acceptance-criteria acceptance-criteria)
     estimated-effort (assoc :task/estimated-effort estimated-effort)))
+
+(defn- format-existing-files
+  "Format existing file contents for inclusion in the user prompt.
+
+   Arguments:
+   - files - Vector of {:path :content :truncated? :lines} maps
+
+   Returns:
+   - Formatted markdown string, or nil if no files"
+  [files]
+  (when (seq files)
+    (->> files
+         (map (fn [{:keys [path content truncated?]}]
+                (str "\n### " path
+                     (when truncated? " (truncated)")
+                     "\n```\n" content "\n```")))
+         (str/join "\n"))))
 
 (defn- spec->text
   "Convert a spec to text for the LLM."
@@ -267,8 +285,19 @@
         (let [llm-client (or (:llm-backend opts) (:llm-backend context))
               on-chunk (:on-chunk context)
               spec-text (spec->text input)
+              existing-files (:task/existing-files input)
               user-prompt (str "Create an implementation plan for the following specification:\n\n"
                                spec-text
+                               (when (seq existing-files)
+                                 (str "\n\n## Existing Files in Scope\n\n"
+                                      "Review these files before planning. If the spec is already "
+                                      "fully satisfied by existing code, respond with an evidence bundle:\n"
+                                      "```clojure\n{:plan/status :already-satisfied\n"
+                                      " :plan/summary \"Brief explanation\"\n"
+                                      " :plan/evidence [{:requirement \"what spec requires\"\n"
+                                      "                  :satisfied-by \"path/to/file.clj\"\n"
+                                      "                  :proof \"specific function/test that satisfies it\"}]}\n```\n"
+                                      (format-existing-files existing-files)))
                                "\n\nOutput your plan as a Clojure map following the format in your system prompt. "
                                "Use (random-uuid) for all IDs - just write #uuid \"<any-uuid>\" placeholders that I'll fill in.")]
           (if llm-client
@@ -286,23 +315,32 @@
               (if (llm/success? response)
                 (let [content (llm/get-content response)
                       plan (or (parse-plan-response content)
-                               (make-fallback-plan spec-text))
-                      ;; Ensure all tasks have proper UUIDs
-                      plan-with-ids (-> plan
-                                        (update :plan/id #(or % (random-uuid)))
-                                        (update :plan/tasks
-                                                (fn [tasks]
-                                                  (mapv (fn [t]
-                                                          (update t :task/id #(or % (random-uuid))))
-                                                        tasks)))
-                                        (assoc :plan/created-at (java.util.Date.)))]
-                  {:status :success
-                   :output plan-with-ids
-                   :artifact plan-with-ids
-                   :tokens tokens
-                   :metrics {:tasks-created (count (:plan/tasks plan-with-ids))
-                             :complexity (:plan/estimated-complexity plan-with-ids)
-                             :tokens tokens}})
+                               (make-fallback-plan spec-text))]
+                  ;; Check for already-satisfied response
+                  (if (= :already-satisfied (:plan/status plan))
+                    {:status :already-satisfied
+                     :output {:plan/id (random-uuid)
+                              :plan/name "already-satisfied"
+                              :plan/tasks []
+                              :plan/summary (:plan/summary plan)
+                              :plan/evidence (or (:plan/evidence plan) [])}
+                     :metrics {:tokens tokens}}
+                    ;; Normal plan — ensure all tasks have proper UUIDs
+                    (let [plan-with-ids (-> plan
+                                            (update :plan/id #(or % (random-uuid)))
+                                            (update :plan/tasks
+                                                    (fn [tasks]
+                                                      (mapv (fn [t]
+                                                              (update t :task/id #(or % (random-uuid))))
+                                                            tasks)))
+                                            (assoc :plan/created-at (java.util.Date.)))]
+                      {:status :success
+                       :output plan-with-ids
+                       :artifact plan-with-ids
+                       :tokens tokens
+                       :metrics {:tasks-created (count (:plan/tasks plan-with-ids))
+                                 :complexity (:plan/estimated-complexity plan-with-ids)
+                                 :tokens tokens}})))
                 ;; LLM call failed
                 {:status :error
                  :error (llm/get-error response)

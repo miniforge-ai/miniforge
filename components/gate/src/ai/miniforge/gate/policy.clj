@@ -65,6 +65,11 @@
                   (:plan/tasks plan)
                   (:tasks plan))]
     (cond
+      ;; Already-satisfied plans pass without tasks
+      (= :already-satisfied (:plan/status plan))
+      {:passed? true
+       :step-count 0}
+
       (nil? plan)
       {:passed? false
        :errors [{:type :no-plan

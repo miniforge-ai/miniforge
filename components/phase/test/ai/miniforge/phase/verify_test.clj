@@ -8,7 +8,8 @@
    [ai.miniforge.phase.verify :as verify]
    [ai.miniforge.phase.registry :as registry]
    [ai.miniforge.agent.tester :as tester]
-   [ai.miniforge.agent.interface :as agent]))
+   [ai.miniforge.agent.interface :as agent]
+   [babashka.process :as process]))
 
 ;------------------------------------------------------------------------------ Test fixtures
 
@@ -68,7 +69,11 @@
                   agent/invoke (fn [_ _ _]
                                 {:success true
                                  :output mock-test-artifact
-                                 :metrics {:tokens 100 :duration-ms 500}})]
+                                 :metrics {:tokens 100 :duration-ms 500}})
+                  process/shell (fn [& _args]
+                                  {:exit 0
+                                   :out "Ran 1 tests containing 1 assertions.\n0 failures, 0 errors.\n"
+                                   :err ""})]
       (let [ctx (-> (create-base-context)
                     (assoc-in [:execution/phase-results :implement]
                               {:result {:status :success
@@ -88,7 +93,10 @@
           (is (= 3 (get-in result [:phase :budget :iterations]))))
 
         (testing "result is stored"
-          (is (= mock-test-artifact (get-in result [:phase :result :output]))))))))
+          (let [output (get-in result [:phase :result :output])]
+            (is (= (:test/id mock-test-artifact) (:test/id output)))
+            (is (= (:test/type mock-test-artifact) (:test/type output)))
+            (is (= (:test/coverage mock-test-artifact) (:test/coverage output)))))))))
 
 (deftest enter-verify-with-code-from-implement-test
   (testing "enter-verify retrieves code from implement phase result"
@@ -100,15 +108,20 @@
                                 (is (= mock-code-artifact (:code task)))
                                 {:success true
                                  :output mock-test-artifact
-                                 :metrics {:tokens 200 :duration-ms 600}})]
+                                 :metrics {:tokens 200 :duration-ms 600}})
+                  process/shell (fn [& _args]
+                                  {:exit 0
+                                   :out "Ran 1 tests containing 1 assertions.\n0 failures, 0 errors.\n"
+                                   :err ""})]
       (let [ctx (-> (create-base-context)
                     ;; Mock the phase result structure as stored by workflow runner
                     (assoc-in [:execution/phase-results :implement]
                               {:result {:status :success
                                         :output mock-code-artifact}})
                     (assoc :phase-config {:phase :verify}))
-            result (#'verify/enter-verify ctx)]
-        (is (= mock-test-artifact (get-in result [:phase :result :output])))))))
+            result (#'verify/enter-verify ctx)
+            output (get-in result [:phase :result :output])]
+        (is (= (:test/id mock-test-artifact) (:test/id output)))))))
 
 (deftest enter-verify-with-direct-code-artifact-test
   (testing "enter-verify accepts direct code-artifact in input (test-only workflow)"
@@ -117,12 +130,17 @@
                                 (is (= mock-code-artifact (:code task)))
                                 {:success true
                                  :output mock-test-artifact
-                                 :metrics {:tokens 150 :duration-ms 450}})]
+                                 :metrics {:tokens 150 :duration-ms 450}})
+                  process/shell (fn [& _args]
+                                  {:exit 0
+                                   :out "Ran 1 tests containing 1 assertions.\n0 failures, 0 errors.\n"
+                                   :err ""})]
       (let [ctx (-> (create-base-context)
                     (assoc-in [:execution/input :task/code-artifact] mock-code-artifact)
                     (assoc :phase-config {:phase :verify}))
-            result (#'verify/enter-verify ctx)]
-        (is (= mock-test-artifact (get-in result [:phase :result :output])))))))
+            result (#'verify/enter-verify ctx)
+            output (get-in result [:phase :result :output])]
+        (is (= (:test/id mock-test-artifact) (:test/id output)))))))
 
 (deftest enter-verify-with-exception-test
   (testing "enter-verify handles agent exceptions gracefully"

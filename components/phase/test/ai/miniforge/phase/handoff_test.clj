@@ -19,7 +19,8 @@
    [ai.miniforge.phase.registry :as registry]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.response.interface :as response]
-   [ai.miniforge.release-executor.interface :as release-executor]))
+   [ai.miniforge.release-executor.interface :as release-executor]
+   [babashka.process :as process]))
 
 ;------------------------------------------------------------------------------ Mock Data
 
@@ -182,7 +183,12 @@
                      "Stored code artifact should match mock data")]
 
         ;; Execute verify phase - should read code from execution context
-        (with-redefs [agent/invoke (mock-agent-invoke :tester nil)]
+        ;; Mock process/shell to prevent recursive test suite execution
+        (with-redefs [agent/invoke (mock-agent-invoke :tester nil)
+                      process/shell (fn [& _args]
+                                      {:exit 0
+                                       :out "Ran 1 tests containing 1 assertions.\n0 failures, 0 errors.\n"
+                                       :err ""})]
           (let [ctx3 (execute-phase-enter :verify ctx2)]
             (is (= :success (get-in ctx3 [:phase :result :status]))
                 "Verify phase should succeed")
@@ -246,6 +252,11 @@
 
                                    :else
                                    (response/success {:result :ok} {:tokens 0 :duration-ms 0})))
+                  ;; Mock process/shell to prevent recursive test suite execution
+                  process/shell (fn [& _args]
+                                  {:exit 0
+                                   :out "Ran 1 tests containing 1 assertions.\n0 failures, 0 errors.\n"
+                                   :err ""})
                   ;; Mock release-executor
                   release-executor/execute-release-phase
                   (fn [workflow-state _exec-context _opts]

@@ -25,15 +25,12 @@
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Constants
+;; Defaults
 
-(def ^:private max-files
-  "Maximum number of files to load into context."
-  10)
-
-(def ^:private max-lines-per-file
-  "Maximum number of lines to read per file."
-  500)
+(def defaults
+  "Default limits for file loading. Override via opts map."
+  {:max-files 25
+   :max-lines-per-file 500})
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; File reading
@@ -71,16 +68,20 @@
    Arguments:
    - worktree-path - Root directory of the worktree
    - files-in-scope - Seq of relative file paths
+   - opts - Optional map with :max-files and :max-lines-per-file overrides
 
    Returns:
    - Vector of file maps {:path :content :truncated? :lines},
      capped at max-files. Nil entries are removed."
-  [worktree-path files-in-scope]
-  (when (seq files-in-scope)
-    (->> files-in-scope
-         (take max-files)
-         (map #(read-file-limited worktree-path % max-lines-per-file))
-         (filterv some?))))
+  ([worktree-path files-in-scope]
+   (load-files-in-scope worktree-path files-in-scope {}))
+  ([worktree-path files-in-scope opts]
+   (let [{:keys [max-files max-lines-per-file]} (merge defaults opts)]
+     (when (seq files-in-scope)
+       (->> files-in-scope
+            (take max-files)
+            (map #(read-file-limited worktree-path % max-lines-per-file))
+            (filterv some?))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

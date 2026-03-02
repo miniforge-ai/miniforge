@@ -33,6 +33,7 @@
       :error   (fn [ctx ex] -> ctx) ; Error handling/repair}"
   (:require
    ;; Require implementation namespaces for side effects (method registration)
+   [ai.miniforge.phase.explore]
    [ai.miniforge.phase.plan]
    [ai.miniforge.phase.implement]
    [ai.miniforge.phase.verify]

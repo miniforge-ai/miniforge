@@ -46,6 +46,25 @@ You must output a structured plan as a Clojure map with:
  :plan/assumptions [\"Assumption made\"...]}
 ```
 
+## Already-Satisfied Detection
+
+Before creating a plan, review any existing files provided. If the specification
+is ALREADY FULLY SATISFIED by existing code (all requirements met, tests exist,
+code is complete), respond with an evidence bundle proving why:
+
+```clojure
+{:plan/status :already-satisfied
+ :plan/summary \"Brief explanation of why no work is needed\"
+ :plan/evidence [{:requirement \"Description of what the spec requires\"
+                  :satisfied-by \"path/to/file.clj\"
+                  :proof \"Specific function/test/code that satisfies this requirement\"}
+                 ...]}
+```
+
+The evidence vector MUST map each spec requirement to a specific file and proof point.
+Only use this when ALL requirements in the spec are clearly met. If even partial
+work is needed, proceed with normal plan generation.
+
 ## Guidelines
 
 1. **Task Granularity**: Break down work into small, testable units. Each task should be
