@@ -86,7 +86,10 @@
 (defn- parse-test-output
   "Parse clojure.test summary output.
    Looks for: 'Ran N tests containing M assertions. F failures, E errors.'
-   Returns map with test result counts."
+   Returns map with test result counts.
+
+   NOTE: Currently Clojure-specific. When supporting other languages (Rust, JS, etc.),
+   this should dispatch on a :test/framework or :language key from the workflow config."
   [output]
   (let [ran-match (re-find #"Ran (\d+) tests? containing (\d+) assertions?" output)
         fail-match (re-find #"(\d+) failures?,\s*(\d+) errors?" output)]

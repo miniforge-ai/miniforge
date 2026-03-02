@@ -7,6 +7,7 @@
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
+   [ai.miniforge.response.interface :as response]
    [malli.core :as m]
    [clojure.edn :as edn]
    [clojure.string :as str]))
@@ -318,13 +319,13 @@
                                (make-fallback-plan spec-text))]
                   ;; Check for already-satisfied response
                   (if (= :already-satisfied (:plan/status plan))
-                    {:status :already-satisfied
-                     :output {:plan/id (random-uuid)
-                              :plan/name "already-satisfied"
-                              :plan/tasks []
-                              :plan/summary (:plan/summary plan)
-                              :plan/evidence (or (:plan/evidence plan) [])}
-                     :metrics {:tokens tokens}}
+                    (let [output {:plan/id (random-uuid)
+                                  :plan/name "already-satisfied"
+                                  :plan/tasks []
+                                  :plan/summary (:plan/summary plan)
+                                  :plan/evidence (or (:plan/evidence plan) [])}]
+                      (assoc (response/success output {:tokens tokens})
+                             :status :already-satisfied))
                     ;; Normal plan — ensure all tasks have proper UUIDs
                     (let [plan-with-ids (-> plan
                                             (update :plan/id #(or % (random-uuid)))
