@@ -66,61 +66,95 @@
 (registry/register-phase-defaults! :plan default-config)
 
 ;------------------------------------------------------------------------------ Layer 1
+;; Phase context builder
+
+(defn- build-phase-context
+  "Build the common phase context fields for plan phase."
+  [ctx gates budget start-time result]
+  (-> ctx
+      (assoc-in [:phase :name] :plan)
+      (assoc-in [:phase :agent] :planner)
+      (assoc-in [:phase :gates] gates)
+      (assoc-in [:phase :budget] budget)
+      (assoc-in [:phase :started-at] start-time)
+      (assoc-in [:phase :status] :running)
+      (assoc-in [:phase :result] result)))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Plan from spec tasks (fast path — no LLM)
+
+(defn- plan-from-spec-tasks
+  "Build a plan directly from spec-provided tasks. No LLM call, 0 tokens."
+  [input spec-tasks]
+  (let [plan {:plan/id (random-uuid)
+              :plan/name (or (:title input) (:spec/title input) "spec-provided-plan")
+              :plan/tasks (mapv #(update % :task/id (fn [id] (or id (random-uuid)))) spec-tasks)
+              :plan/created-at (java.util.Date.)}]
+    (response/success plan {:tokens 0
+                            :metrics {:tasks-created (count spec-tasks)
+                                      :tokens 0
+                                      :source :spec-provided}})))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Plan from LLM agent (normal path)
+
+(defn- build-planner-task
+  "Build the task map to pass to the planner agent."
+  [input explore-result]
+  (let [existing-files (:exploration/files explore-result)]
+    (cond-> {:task/id (random-uuid)
+             :task/type :plan
+             :task/description (:description input)
+             :task/title (:title input)
+             :task/intent (:intent input)
+             :task/constraints (:constraints input)}
+      (seq existing-files)
+      (assoc :task/existing-files existing-files))))
+
+(defn- create-streaming-callback
+  "Create a streaming callback for agent output, if event-stream is available."
+  [ctx]
+  (when-let [es (:event-stream ctx)]
+    (when-let [create-cb (requiring-resolve
+                           'ai.miniforge.event-stream.interface/create-streaming-callback)]
+      (create-cb es (:execution/id ctx) :plan
+                 {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)}))))
+
+(defn- plan-from-agent
+  "Invoke the planner agent to generate a plan via LLM."
+  [ctx input]
+  (let [explore-result (get-in ctx [:execution/phase-results :explore :result :output])
+        task (build-planner-task input explore-result)
+        on-chunk (create-streaming-callback ctx)
+        agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
+        planner-agent (agent/create-planner {})]
+    (try
+      (agent/invoke planner-agent task agent-ctx)
+      (catch Exception e
+        (response/failure e)))))
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
 (defn- enter-plan
   "Execute planning phase.
 
    Reads specification from context, invokes planner agent,
-   runs through inner loop with gates."
+   runs through inner loop with gates.
+
+   When the spec provides :plan/tasks directly, builds the plan from those
+   tasks and skips the LLM call entirely."
   [ctx]
-  ;; Emit phase started event
   (emit-phase-started! ctx :plan)
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
-
-        ;; Create planner agent (specialized implementation uses llm/chat directly)
-        planner-agent (agent/create-planner {})
-
-        ;; Build task from workflow input
         input (get-in ctx [:execution/input])
-
-        ;; Read exploration results if available (from explore phase)
-        explore-result (get-in ctx [:execution/phase-results :explore :result :output])
-        existing-files (:exploration/files explore-result)
-
-        task (cond-> {:task/id (random-uuid)
-                      :task/type :plan
-                      :task/description (:description input)
-                      :task/title (:title input)
-                      :task/intent (:intent input)
-                      :task/constraints (:constraints input)}
-               (seq existing-files)
-               (assoc :task/existing-files existing-files))
-
-        ;; Create streaming callback for agent output
-        on-chunk (when-let [es (:event-stream ctx)]
-                   (when-let [create-cb (requiring-resolve
-                                         'ai.miniforge.event-stream.interface/create-streaming-callback)]
-                     (create-cb es (:execution/id ctx) :plan
-                                {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)})))
-        agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
-
-        ;; Invoke agent (this will call LLM and do actual work)
-        result (try
-                 (agent/invoke planner-agent task agent-ctx)
-                 (catch Exception e
-                   (response/failure e)))]
-
-    (-> ctx
-        (assoc-in [:phase :name] :plan)
-        (assoc-in [:phase :agent] :planner)
-        (assoc-in [:phase :gates] gates)
-        (assoc-in [:phase :budget] budget)
-        (assoc-in [:phase :started-at] start-time)
-        (assoc-in [:phase :status] :running)
-        (assoc-in [:phase :result] result))))
+        spec-tasks (:plan/tasks input)
+        result (if spec-tasks
+                 (plan-from-spec-tasks input spec-tasks)
+                 (plan-from-agent ctx input))]
+    (build-phase-context ctx gates budget start-time result)))
 
 (defn- leave-plan
   "Post-processing for planning phase.

@@ -15,7 +15,7 @@
   This is a critical bug that prevents any workflow from producing actual results."
 
  :spec/intent
- {:type :bug-fix
+ {:type :bugfix
   :scope ["components/workflow/src/ai/miniforge/workflow/runner.clj"
           "components/phase/src/ai/miniforge/phase/implement.clj"
           "components/phase/src/ai/miniforge/phase/verify.clj"
