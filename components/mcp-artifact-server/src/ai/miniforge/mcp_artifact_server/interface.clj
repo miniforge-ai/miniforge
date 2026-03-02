@@ -4,7 +4,8 @@
    Provides:
    - start-server: Run the MCP server (blocking stdin/stdout loop)
    - handle-tool-call: Direct tool invocation for in-process testing
-   - tool-definitions: List of registered MCP tool definitions"
+   - tool-definitions: List of registered MCP tool definitions
+   - register-tool! / register-builder!: Extensibility points"
   (:require [ai.miniforge.mcp-artifact-server.server :as server]
             [ai.miniforge.mcp-artifact-server.tools :as tools]))
 
@@ -36,10 +37,20 @@
                               (spit path (pr-str artifact))
                               path))))
 
-(def tool-definitions
+(defn tool-definitions
   "List of MCP tool definitions registered by this component."
-  tools/tool-definitions)
+  []
+  (tools/tool-definitions))
 
-(def tool-registry
+(defn tool-registry
   "Full tool registry map (tool-name → tool config)."
-  tools/tool-registry)
+  []
+  (tools/tool-registry))
+
+(def register-tool!
+  "Register a new tool at runtime. See tools/register-tool! for details."
+  tools/register-tool!)
+
+(def register-builder!
+  "Register an artifact builder function. See tools/register-builder! for details."
+  tools/register-builder!)

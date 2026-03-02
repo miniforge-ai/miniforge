@@ -136,10 +136,10 @@
 
 (deftest tool-definitions-test
   (testing "registry has 4 tools"
-    (is (= 4 (count mcp/tool-definitions))))
+    (is (= 4 (count (mcp/tool-definitions)))))
 
   (testing "each tool has required fields"
-    (doseq [tool mcp/tool-definitions]
+    (doseq [tool (mcp/tool-definitions)]
       (is (string? (:name tool)))
       (is (string? (:description tool)))
       (is (map? (:inputSchema tool))))))

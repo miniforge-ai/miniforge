@@ -34,7 +34,7 @@
                 :version "3.0.0"}})
 
 (defn handle-tools-list [_params]
-  {:tools tools/tool-definitions})
+  {:tools (tools/tool-definitions)})
 
 (defn handle-tools-call [params artifact-dir]
   (let [tool-name (get params "name")

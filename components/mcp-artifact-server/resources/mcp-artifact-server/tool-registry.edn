@@ -1,0 +1,172 @@
+;; MCP Artifact Server — Tool Registry Configuration
+;;
+;; Pure EDN configuration for MCP tools. Each tool entry is keyed by tool name
+;; and contains:
+;;   :tool-def        — MCP tool definition (name, description, inputSchema)
+;;   :required-params — validation rules using keyword validators:
+;;                      :non-empty  — value must be truthy and (seq value) truthy
+;;                      :non-blank  — string must not be blank
+;;   :builder         — keyword referencing the artifact builder function
+;;
+;; To add a new tool, add an entry here and register a builder function
+;; via (tools/register-builder! "tool_name" builder-fn) in code.
+
+{"submit_code_artifact"
+ {:builder :submit-code-artifact
+  :tool-def
+  {:name "submit_code_artifact"
+   :description "Submit a code implementation artifact. Use this tool to deliver your code output instead of printing raw EDN text. Each file must include a path, content, and action (:create, :modify, or :delete)."
+   :inputSchema
+   {:type "object"
+    :required ["files" "summary"]
+    :properties
+    {"files"
+     {:type "array"
+      :description "Array of files to create/modify/delete"
+      :items {:type "object"
+              :required ["path" "content" "action"]
+              :properties
+              {"path"    {:type "string" :description "File path relative to project root"}
+               "content" {:type "string" :description "Full file content"}
+               "action"  {:type "string" :enum ["create" "modify" "delete"]
+                          :description "File action: create, modify, or delete"}}}}
+     "summary"
+     {:type "string"
+      :description "Brief description of the changes made"}
+     "language"
+     {:type "string"
+      :description "Primary programming language (e.g. clojure, python, javascript)"}
+     "tests_needed"
+     {:type "boolean"
+      :description "Whether tests should be written for this code"}
+     "dependencies_added"
+     {:type "array"
+      :description "List of dependencies added"
+      :items {:type "string"}}}}}
+
+  :required-params
+  {"files"   {:check :non-empty :msg "files is required and must not be empty"}
+   "summary" {:check :non-blank :msg "summary is required"}}}
+
+ "submit_plan"
+ {:builder :submit-plan
+  :tool-def
+  {:name "submit_plan"
+   :description "Submit an implementation plan artifact. Use this tool to deliver your plan instead of printing raw EDN text. Each task must include a description and type."
+   :inputSchema
+   {:type "object"
+    :required ["name" "tasks"]
+    :properties
+    {"name"
+     {:type "string"
+      :description "Short descriptive name for the plan"}
+     "tasks"
+     {:type "array"
+      :description "Array of plan tasks"
+      :items {:type "object"
+              :required ["description" "type"]
+              :properties
+              {"description"
+               {:type "string" :description "What to do in this task"}
+               "type"
+               {:type "string"
+                :enum ["implement" "test" "review" "design" "deploy" "configure"]
+                :description "Task type"}
+               "dependencies"
+               {:type "array"
+                :description "IDs of tasks this depends on (indexes into tasks array)"
+                :items {:type "integer"}}
+               "acceptance_criteria"
+               {:type "array"
+                :description "Verifiable criteria for task completion"
+                :items {:type "string"}}
+               "estimated_effort"
+               {:type "string"
+                :enum ["small" "medium" "large" "xlarge"]
+                :description "Estimated effort level"}}}}
+     "complexity"
+     {:type "string"
+      :enum ["low" "medium" "high"]
+      :description "Overall estimated complexity"}
+     "risks"
+     {:type "array"
+      :description "Potential risks or blockers"
+      :items {:type "string"}}
+     "assumptions"
+     {:type "array"
+      :description "Assumptions made during planning"
+      :items {:type "string"}}}}}
+
+  :required-params
+  {"name"  {:check :non-blank :msg "name is required"}
+   "tasks" {:check :non-empty :msg "tasks is required and must not be empty"}}}
+
+ "submit_test_artifact"
+ {:builder :submit-test-artifact
+  :tool-def
+  {:name "submit_test_artifact"
+   :description "Submit a test artifact. Use this tool to deliver your test output instead of printing raw EDN text. Each file must include a path and content."
+   :inputSchema
+   {:type "object"
+    :required ["files" "summary"]
+    :properties
+    {"files"
+     {:type "array"
+      :description "Array of test files"
+      :items {:type "object"
+              :required ["path" "content"]
+              :properties
+              {"path"    {:type "string" :description "Test file path relative to project root"}
+               "content" {:type "string" :description "Full test file content"}}}}
+     "summary"
+     {:type "string"
+      :description "Description of test coverage"}
+     "type"
+     {:type "string"
+      :enum ["unit" "integration" "property" "e2e" "acceptance"]
+      :description "Type of tests"}
+     "framework"
+     {:type "string"
+      :description "Testing framework used (e.g. clojure.test, pytest, jest)"}
+     "coverage"
+     {:type "object"
+      :description "Coverage information"
+      :properties
+      {"lines"     {:type "number" :description "Line coverage percentage"}
+       "branches"  {:type "number" :description "Branch coverage percentage"}
+       "functions" {:type "number" :description "Function coverage percentage"}}}}}}
+
+  :required-params
+  {"files"   {:check :non-empty :msg "files is required and must not be empty"}
+   "summary" {:check :non-blank :msg "summary is required"}}}
+
+ "submit_release_artifact"
+ {:builder :submit-release-artifact
+  :tool-def
+  {:name "submit_release_artifact"
+   :description "Submit a release artifact. Use this tool to deliver your release metadata instead of printing raw EDN text."
+   :inputSchema
+   {:type "object"
+    :required ["branch_name" "commit_message" "pr_title" "pr_description"]
+    :properties
+    {"branch_name"
+     {:type "string"
+      :description "Git branch name (e.g. feature/add-auth)"}
+     "commit_message"
+     {:type "string"
+      :description "Git commit message (conventional commits format)"}
+     "pr_title"
+     {:type "string"
+      :description "Pull request title (max 70 characters)"}
+     "pr_description"
+     {:type "string"
+      :description "Pull request description in markdown"}
+     "files_summary"
+     {:type "string"
+      :description "Brief summary of files changed (e.g. '2 files created, 1 modified')"}}}}
+
+  :required-params
+  {"branch_name"    {:check :non-blank :msg "branch_name is required"}
+   "commit_message" {:check :non-blank :msg "commit_message is required"}
+   "pr_title"       {:check :non-blank :msg "pr_title is required"}
+   "pr_description" {:check :non-blank :msg "pr_description is required"}}}}

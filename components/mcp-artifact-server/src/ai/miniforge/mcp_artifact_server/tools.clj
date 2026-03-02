@@ -1,10 +1,13 @@
 (ns ai.miniforge.mcp-artifact-server.tools
   "Tool definitions and handlers for MCP artifact submission.
 
-   Data-driven: the tool registry is pure EDN data. Builder functions are
-   registered separately in `artifact-builders` keyed by tool name, so the
-   registry itself contains no embedded code."
-  (:require [clojure.string :as str]))
+   Configuration-driven: tool definitions are loaded from
+   `mcp-artifact-server/tool-registry.edn` on the classpath. Builder functions
+   are registered separately via `register-builder!`, enabling extensibility
+   without modifying the config file."
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Counting helpers
@@ -28,14 +31,33 @@
      (count (re-seq #"test\(" content))))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Keyword validators — referenced by keyword in EDN config
+
+(def validators
+  "Keyword → predicate map for validation rules in the registry config.
+   These are the only functions that bridge EDN config to runtime behavior."
+  {:non-empty (fn [v] (and v (seq v)))
+   :non-blank (fn [v] (and (string? v) (not (str/blank? v))))})
+
+(defn- resolve-validator
+  "Resolve a keyword validator to its predicate function."
+  [check-kw]
+  (or (get validators check-kw)
+      (throw (ex-info (str "Unknown validator: " check-kw)
+                      {:validator check-kw
+                       :available (keys validators)}))))
+
+;------------------------------------------------------------------------------ Layer 0
 ;; Validation
 
 (defn validate-required-params
-  "Validate required params against rules. Throws ex-info with code -32602 on failure."
+  "Validate required params against rules. Throws ex-info with code -32602 on failure.
+   Accepts keyword validators (from EDN config) or function validators."
   [required-params params]
   (doseq [[param-name {:keys [check msg]}] required-params]
-    (let [v (get params param-name)]
-      (when-not (and v (check v))
+    (let [check-fn (if (keyword? check) (resolve-validator check) check)
+          v (get params param-name)]
+      (when-not (check-fn v)
         (throw (ex-info msg {:code -32602}))))))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -170,185 +192,67 @@
                    "Branch: " branch-name ", PR: " pr-title)}))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Artifact builder dispatch (keyword → fn)
+;; Extensible builder registry (atom — builders register at startup)
 
-(def artifact-builders
-  "Keyword dispatch map from tool name to builder function.
-   Keeping this separate from the registry enables the registry to be pure data."
-  {"submit_code_artifact"    build-code-artifact
-   "submit_plan"             build-plan-artifact
-   "submit_test_artifact"    build-test-artifact
-   "submit_release_artifact" build-release-artifact})
+(defonce ^:private builder-registry*
+  (atom {:submit-code-artifact    build-code-artifact
+         :submit-plan             build-plan-artifact
+         :submit-test-artifact    build-test-artifact
+         :submit-release-artifact build-release-artifact}))
+
+(defn register-builder!
+  "Register an artifact builder function for a tool.
+   builder-key is a keyword matching the :builder field in tool-registry.edn."
+  [builder-key builder-fn]
+  (swap! builder-registry* assoc builder-key builder-fn))
+
+(defn- resolve-builder
+  "Resolve a builder keyword to its function."
+  [builder-key]
+  (or (get @builder-registry* builder-key)
+      (throw (ex-info (str "No builder registered for: " builder-key)
+                      {:builder builder-key
+                       :registered (keys @builder-registry*)}))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Tool registry — pure data, no embedded functions
+;; Configuration loading
 
-(def tool-registry
-  "Data-driven tool registry. Each entry is a map with:
-   - :tool-def — MCP tool definition (name, description, inputSchema)
-   - :required-params — validation rules {param-name {:check fn :msg string}}"
-  {"submit_code_artifact"
-   {:tool-def
-    {:name "submit_code_artifact"
-     :description "Submit a code implementation artifact. Use this tool to deliver your code output instead of printing raw EDN text. Each file must include a path, content, and action (:create, :modify, or :delete)."
-     :inputSchema
-     {:type "object"
-      :required ["files" "summary"]
-      :properties
-      {"files"
-       {:type "array"
-        :description "Array of files to create/modify/delete"
-        :items {:type "object"
-                :required ["path" "content" "action"]
-                :properties
-                {"path"    {:type "string" :description "File path relative to project root"}
-                 "content" {:type "string" :description "Full file content"}
-                 "action"  {:type "string" :enum ["create" "modify" "delete"]
-                            :description "File action: create, modify, or delete"}}}}
-       "summary"
-       {:type "string"
-        :description "Brief description of the changes made"}
-       "language"
-       {:type "string"
-        :description "Primary programming language (e.g. clojure, python, javascript)"}
-       "tests_needed"
-       {:type "boolean"
-        :description "Whether tests should be written for this code"}
-       "dependencies_added"
-       {:type "array"
-        :description "List of dependencies added (e.g. [\"lib/name {:mvn/version \\\"1.0.0\\\"}\"])"
-        :items {:type "string"}}}}}
+(defn- load-registry-config
+  "Load tool registry from classpath EDN configuration."
+  []
+  (if-let [resource (io/resource "mcp-artifact-server/tool-registry.edn")]
+    (edn/read-string (slurp resource))
+    (throw (ex-info "Tool registry config not found on classpath"
+                    {:resource "mcp-artifact-server/tool-registry.edn"}))))
 
-    :required-params
-    {"files"   {:check seq              :msg "files is required and must not be empty"}
-     "summary" {:check (complement str/blank?) :msg "summary is required"}}}
+(defonce ^:private registry-config* (atom nil))
 
-   "submit_plan"
-   {:tool-def
-    {:name "submit_plan"
-     :description "Submit an implementation plan artifact. Use this tool to deliver your plan instead of printing raw EDN text. Each task must include a description and type."
-     :inputSchema
-     {:type "object"
-      :required ["name" "tasks"]
-      :properties
-      {"name"
-       {:type "string"
-        :description "Short descriptive name for the plan"}
-       "tasks"
-       {:type "array"
-        :description "Array of plan tasks"
-        :items {:type "object"
-                :required ["description" "type"]
-                :properties
-                {"description"
-                 {:type "string" :description "What to do in this task"}
-                 "type"
-                 {:type "string"
-                  :enum ["implement" "test" "review" "design" "deploy" "configure"]
-                  :description "Task type"}
-                 "dependencies"
-                 {:type "array"
-                  :description "IDs of tasks this depends on (indexes into tasks array)"
-                  :items {:type "integer"}}
-                 "acceptance_criteria"
-                 {:type "array"
-                  :description "Verifiable criteria for task completion"
-                  :items {:type "string"}}
-                 "estimated_effort"
-                 {:type "string"
-                  :enum ["small" "medium" "large" "xlarge"]
-                  :description "Estimated effort level"}}}}
-       "complexity"
-       {:type "string"
-        :enum ["low" "medium" "high"]
-        :description "Overall estimated complexity"}
-       "risks"
-       {:type "array"
-        :description "Potential risks or blockers"
-        :items {:type "string"}}
-       "assumptions"
-       {:type "array"
-        :description "Assumptions made during planning"
-        :items {:type "string"}}}}}
+(defn- ensure-registry-loaded
+  "Ensure the registry config is loaded (once)."
+  []
+  (when-not @registry-config*
+    (reset! registry-config* (load-registry-config)))
+  @registry-config*)
 
-    :required-params
-    {"name"  {:check (complement str/blank?) :msg "name is required"}
-     "tasks" {:check seq                     :msg "tasks is required and must not be empty"}}}
+(defn tool-registry
+  "Return the current tool registry (loads from config on first call)."
+  []
+  (ensure-registry-loaded))
 
-   "submit_test_artifact"
-   {:tool-def
-    {:name "submit_test_artifact"
-     :description "Submit a test artifact. Use this tool to deliver your test output instead of printing raw EDN text. Each file must include a path and content."
-     :inputSchema
-     {:type "object"
-      :required ["files" "summary"]
-      :properties
-      {"files"
-       {:type "array"
-        :description "Array of test files"
-        :items {:type "object"
-                :required ["path" "content"]
-                :properties
-                {"path"    {:type "string" :description "Test file path relative to project root"}
-                 "content" {:type "string" :description "Full test file content"}}}}
-       "summary"
-       {:type "string"
-        :description "Description of test coverage"}
-       "type"
-       {:type "string"
-        :enum ["unit" "integration" "property" "e2e" "acceptance"]
-        :description "Type of tests"}
-       "framework"
-       {:type "string"
-        :description "Testing framework used (e.g. clojure.test, pytest, jest)"}
-       "coverage"
-       {:type "object"
-        :description "Coverage information"
-        :properties
-        {"lines"     {:type "number" :description "Line coverage percentage"}
-         "branches"  {:type "number" :description "Branch coverage percentage"}
-         "functions" {:type "number" :description "Function coverage percentage"}}}}}}
-
-    :required-params
-    {"files"   {:check seq              :msg "files is required and must not be empty"}
-     "summary" {:check (complement str/blank?) :msg "summary is required"}}}
-
-   "submit_release_artifact"
-   {:tool-def
-    {:name "submit_release_artifact"
-     :description "Submit a release artifact. Use this tool to deliver your release metadata instead of printing raw EDN text."
-     :inputSchema
-     {:type "object"
-      :required ["branch_name" "commit_message" "pr_title" "pr_description"]
-      :properties
-      {"branch_name"
-       {:type "string"
-        :description "Git branch name (e.g. feature/add-auth)"}
-       "commit_message"
-       {:type "string"
-        :description "Git commit message (conventional commits format)"}
-       "pr_title"
-       {:type "string"
-        :description "Pull request title (max 70 characters)"}
-       "pr_description"
-       {:type "string"
-        :description "Pull request description in markdown"}
-       "files_summary"
-       {:type "string"
-        :description "Brief summary of files changed (e.g. '2 files created, 1 modified')"}}}}
-
-    :required-params
-    {"branch_name"    {:check (complement str/blank?) :msg "branch_name is required"}
-     "commit_message" {:check (complement str/blank?) :msg "commit_message is required"}
-     "pr_title"       {:check (complement str/blank?) :msg "pr_title is required"}
-     "pr_description" {:check (complement str/blank?) :msg "pr_description is required"}}}})
+(defn register-tool!
+  "Register a new tool at runtime. Merges into the loaded registry.
+   tool-name is a string, tool-config is a map with :tool-def, :required-params, :builder."
+  [tool-name tool-config]
+  (ensure-registry-loaded)
+  (swap! registry-config* assoc tool-name tool-config))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Tool definitions list (derived from registry)
 
-(def tool-definitions
+(defn tool-definitions
   "MCP tool definitions derived from the registry."
-  (mapv :tool-def (vals tool-registry)))
+  []
+  (mapv :tool-def (vals (tool-registry))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Generic tool handler
@@ -364,12 +268,13 @@
    Returns {:content [{:type \"text\" :text message}]}
    Throws on unknown tool or validation failure."
   [tool-name arguments write-artifact-fn]
-  (let [{:keys [required-params]} (get tool-registry tool-name)
-        build-artifact (get artifact-builders tool-name)]
-    (when-not build-artifact
+  (let [registry (tool-registry)
+        {:keys [required-params builder]} (get registry tool-name)]
+    (when-not builder
       (throw (ex-info (str "Unknown tool: " tool-name) {:code -32601})))
     (validate-required-params required-params arguments)
-    (let [{:keys [artifact message]} (build-artifact arguments)
+    (let [build-fn (resolve-builder builder)
+          {:keys [artifact message]} (build-fn arguments)
           path (write-artifact-fn artifact)]
       (binding [*out* *err*]
         (println "Artifact written:" path))
