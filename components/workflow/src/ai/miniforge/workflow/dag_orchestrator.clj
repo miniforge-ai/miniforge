@@ -17,13 +17,15 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.workflow.dag-orchestrator
-  "Orchestrates parallel task execution via DAG scheduling."
+  "Orchestrates parallel task execution via DAG scheduling.
+
+   Each DAG task receives a full sub-workflow pipeline (explore → plan → implement
+   → verify → ...) rather than just an implementer agent. The sub-workflow is
+   derived from the parent workflow config, with the plan phase skipped (the plan
+   already exists) and DAG execution disabled (to prevent infinite recursion)."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
-   [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.agent.interface :as agent]
-   [ai.miniforge.loop.interface :as loop]
-   [ai.miniforge.task.interface :as task]))
+   [ai.miniforge.logging.interface :as log]))
 
 ;--- Layer 0: Result Constructors
 
@@ -112,45 +114,86 @@
                                       :parent-workflow-id (:workflow-id context)}
                                      (select-keys context [:llm-backend :artifact-store]))}))))
 
+;--- Layer 1: Sub-Workflow Construction
+
+(defn- task-sub-workflow
+  "Build a sub-workflow config for a single DAG task.
+
+   Derives pipeline from the parent workflow, removing explore/plan phases
+   (the plan already exists — we're executing it) and keeping implement
+   through done. Disables DAG execution to prevent infinite recursion."
+  [task-def context]
+  (let [parent-workflow (:execution/workflow context)
+        parent-pipeline (or (:workflow/pipeline parent-workflow) [])
+        ;; Keep phases after plan (implement, verify, review, release, done)
+        ;; Drop explore and plan — the task description IS the plan
+        sub-phases (->> parent-pipeline
+                        (remove #(#{:explore :plan} (:phase %)))
+                        vec)
+        ;; If no implement phase found, use a minimal pipeline
+        sub-pipeline (if (seq sub-phases)
+                       sub-phases
+                       [{:phase :implement} {:phase :done}])]
+    {:workflow/id (keyword (str "dag-task-" (:task/id task-def)))
+     :workflow/version "2.0.0"
+     :workflow/name (str "DAG sub-task: " (subs (str (:task/description task-def "task"))
+                                                0 (min 60 (count (str (:task/description task-def "task"))))))
+     :workflow/pipeline sub-pipeline}))
+
+(defn- task-sub-input
+  "Build input map for a DAG task's sub-workflow.
+
+   The task description becomes the spec description, and the task itself
+   is passed as the plan (single-task plan) so the implement phase can
+   pick it up directly."
+  [task-def]
+  {:title (:task/description task-def "Implement task")
+   :description (:task/description task-def "Implement task")
+   :task/type (:task/type task-def :implement)
+   :task/acceptance-criteria (:task/acceptance-criteria task-def [])
+   ;; Provide the task as a single-task plan so the implement phase
+   ;; receives it without needing another plan phase
+   :plan/tasks [{:task/id (random-uuid)
+                 :task/description (:task/description task-def "Implement task")
+                 :task/type (:task/type task-def :implement)}]})
+
+(defn- task-sub-opts
+  "Build execution opts for a DAG task's sub-workflow.
+
+   Carries forward LLM backend and event stream from parent context,
+   disables DAG execution to prevent recursion, and skips lifecycle
+   events (parent workflow owns those)."
+  [context]
+  (cond-> {:disable-dag-execution true
+           :skip-lifecycle-events true
+           :quiet true}
+    (:llm-backend context) (assoc :llm-backend (:llm-backend context))
+    (:event-stream context) (assoc :event-stream (:event-stream context))
+    (get-in context [:execution/opts :event-stream])
+    (assoc :event-stream (get-in context [:execution/opts :event-stream]))))
+
 ;--- Layer 1: Mini-Workflow Execution
 
-(defn- create-inner-task [task-def]
-  (task/create-task
-   {:task/id (random-uuid)
-    :task/type :implement
-    :task/title (:task/description task-def "Implement task")
-    :task/description (:task/description task-def "Implement task")
-    :task/status :pending
-    :task/metadata {:dag-task-id (:task/id task-def)
-                    :parent-plan-id (get-in task-def [:task/context :parent-plan-id])}}))
+(defn- run-mini-workflow
+  "Execute a full sub-workflow pipeline for a single DAG task.
 
-(defn- create-generate-fn [impl-agent context]
-  (fn [t _ctx]
-    (let [result (agent/invoke impl-agent t context)]
-      {:artifact (:artifact result)
-       :tokens (or (get-in result [:metrics :tokens]) 0)})))
-
-(defn- create-repair-fn [impl-agent context]
-  (fn [old-artifact errors _ctx]
-    (let [result (agent/repair impl-agent old-artifact errors context)]
-      {:success? (:success result)
-       :artifact (:repaired result old-artifact)
-       :tokens-used (or (get-in result [:metrics :tokens]) 0)})))
-
-(defn- run-mini-workflow [task-def context]
-  (let [impl-agent (agent/create-implementer {:llm-backend (:llm-backend context)})
-        inner-task (create-inner-task task-def)
-        generate-fn (create-generate-fn impl-agent context)
-        loop-context (assoc context
-                            :max-iterations 3
-                            :repair-fn (create-repair-fn impl-agent context))
-        loop-result (loop/run-simple inner-task generate-fn loop-context)]
-    (if (:success loop-result)
-      (workflow-success (:artifact loop-result) (:metrics loop-result))
-      (workflow-failure (or (:error loop-result)
-                            (get-in loop-result [:termination :message])
-                            "Inner loop failed")
-                        (:metrics loop-result)))))
+   Each task gets its own workflow (implement → verify → review → done)
+   derived from the parent workflow config. The plan phase is skipped
+   because the task description IS the plan."
+  [task-def context]
+  (let [sub-workflow (task-sub-workflow task-def context)
+        sub-input (task-sub-input task-def)
+        sub-opts (task-sub-opts context)
+        run-pipeline (requiring-resolve 'ai.miniforge.workflow.runner/run-pipeline)
+        result (run-pipeline sub-workflow sub-input sub-opts)
+        status (:execution/status result)
+        artifacts (:execution/artifacts result)
+        metrics (:execution/metrics result)]
+    (if (= :completed status)
+      (workflow-success (first artifacts) metrics)
+      (workflow-failure (or (first (:execution/errors result))
+                            "Sub-workflow failed")
+                        metrics))))
 
 (defn- workflow-result->dag-result [task-id description wf-result]
   (if (:success? wf-result)

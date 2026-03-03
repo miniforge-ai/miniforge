@@ -68,8 +68,7 @@
      :loop/type :inner
      :loop/state :pending
      :loop/iteration 0
-     :loop/task {:task/id (:task/id task)
-                 :task/type (:task/type task)}
+     :loop/task task
      :loop/config (cond-> {:max-iterations max-iterations}
                     budget (assoc :budget budget))
      :loop/gate-results []

@@ -46,6 +46,7 @@
         coordinator (agent/create-meta-coordinator meta-agents)]
     (merge
      {:execution/id (random-uuid)
+      :execution/workflow workflow
       :execution/workflow-id (:workflow/id workflow)
       :execution/workflow-version (:workflow/version workflow)
       :execution/status (fsm/current-state fsm-state)
