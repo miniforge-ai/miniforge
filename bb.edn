@@ -452,7 +452,9 @@
                  "components/policy-pack/src"
                  "components/policy-pack/resources"
                  "components/web-dashboard/src"
-                 "components/web-dashboard/resources"]
+                 "components/web-dashboard/resources"
+                 "components/mcp-artifact-server/src"
+                 "components/mcp-artifact-server/resources"]
    :extra-deps {metosin/malli {:mvn/version "0.16.1"}
                 clj-statecharts/clj-statecharts {:mvn/version "0.1.5"}
                 aero/aero        {:mvn/version "1.1.6"}

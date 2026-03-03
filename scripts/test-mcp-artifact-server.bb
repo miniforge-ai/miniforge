@@ -57,16 +57,9 @@
 ;; --------------------------------------------------------------------------- Server process management
 
 (defn start-server [artifact-dir]
-  (let [;; Prefer component over legacy script
-        component-src (str (fs/absolutize "components/mcp-artifact-server/src"))
-        legacy-script (str (fs/absolutize "scripts/mcp-artifact-server.bb"))
-        proc (if (fs/exists? component-src)
-               (p/process {:in :pipe :out :pipe :err :pipe}
-                          "bb" "-cp" component-src
-                          "-m" "ai.miniforge.mcp-artifact-server.main"
-                          "--artifact-dir" artifact-dir)
-               (p/process {:in :pipe :out :pipe :err :pipe}
-                          "bb" legacy-script "--artifact-dir" artifact-dir))]
+  (let [proc (p/process {:in :pipe :out :pipe :err :pipe}
+                        "bb" "miniforge" "mcp-serve"
+                        "--artifact-dir" artifact-dir)]
     ;; Give server a moment to start
     (Thread/sleep 200)
     proc))

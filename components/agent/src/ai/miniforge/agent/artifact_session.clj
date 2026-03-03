@@ -39,57 +39,41 @@
     {:valid? false
      :errors (m/explain Session session)}))
 
-(defn- resolve-server-script
-  "Find the MCP artifact server entry point.
+(defn- command-on-path?
+  "Check if a command exists on PATH."
+  [cmd]
+  (try
+    (let [proc (.exec (Runtime/getRuntime) (into-array String ["which" cmd]))]
+      (zero? (.waitFor proc)))
+    (catch Exception _ false)))
+
+(defn- resolve-miniforge-command
+  "Resolve the miniforge command to use for spawning subprocesses.
 
    Resolution order:
-   1. Component main class via bb -cp (preferred)
-   2. Legacy script at scripts/mcp-artifact-server.bb
-   3. MINIFORGE_HOME env var fallback
-
-   Throws if no candidate is found."
+   1. MINIFORGE_CMD env var (explicit override, e.g. \"/usr/local/bin/mf\")
+   2. \"miniforge\" on PATH (installed binary)
+   3. [\"bb\" \"miniforge\"] (dev mode — bb.edn task, requires CWD at project root)"
   []
-  (let [;; Prefer the component source directory
-        component-src (io/file "components/mcp-artifact-server/src")
-        ;; Legacy script
-        legacy-script (io/file "scripts/mcp-artifact-server.bb")
-        ;; MINIFORGE_HOME fallback
-        home-script (when-let [home (System/getenv "MINIFORGE_HOME")]
-                      (io/file home "components/mcp-artifact-server/src"))
-        home-legacy (when-let [home (System/getenv "MINIFORGE_HOME")]
-                      (io/file home "scripts/mcp-artifact-server.bb"))]
-    (cond
-      ;; Component exists — use bb -m with classpath
-      (and component-src (.exists component-src))
-      (.getAbsolutePath ^java.io.File component-src)
+  (cond
+    ;; 1. Explicit override
+    (System/getenv "MINIFORGE_CMD")
+    [(System/getenv "MINIFORGE_CMD")]
 
-      ;; Legacy script
-      (.exists legacy-script)
-      (.getAbsolutePath ^java.io.File legacy-script)
+    ;; 2. Installed binary on PATH
+    (command-on-path? "miniforge")
+    ["miniforge"]
 
-      ;; MINIFORGE_HOME component
-      (and home-script (.exists ^java.io.File home-script))
-      (.getAbsolutePath ^java.io.File home-script)
-
-      ;; MINIFORGE_HOME legacy
-      (and home-legacy (.exists ^java.io.File home-legacy))
-      (.getAbsolutePath ^java.io.File home-legacy)
-
-      :else
-      (throw (ex-info "Cannot resolve MCP artifact server: no component or script found"
-                       {:checked ["components/mcp-artifact-server/src"
-                                  "scripts/mcp-artifact-server.bb"
-                                  "MINIFORGE_HOME"]})))))
+    ;; 3. Dev mode fallback (bb.edn task)
+    :else
+    ["bb" "miniforge"]))
 
 (defn- server-command
-  "Build the command vector for starting the MCP server process."
-  [server-path artifact-dir]
-  (if (str/ends-with? server-path "/src")
-    ;; Component mode: use bb -cp with main class
-    ["bb" "-cp" server-path "-m" "ai.miniforge.mcp-artifact-server.main"
-     "--artifact-dir" artifact-dir]
-    ;; Legacy script mode
-    ["bb" server-path "--artifact-dir" artifact-dir]))
+  "Build the MCP config command map for starting the artifact server."
+  [artifact-dir]
+  (let [[cmd & args] (resolve-miniforge-command)]
+    {:command cmd
+     :args (vec (concat args ["mcp-serve" "--artifact-dir" artifact-dir]))}))
 
 (defn create-session!
   "Create a new artifact session with a temporary directory.
@@ -117,12 +101,11 @@
 
    Returns: session (for threading)"
   [session]
-  (let [server-path (resolve-server-script)
-        cmd-vec (server-command server-path (:dir session))
+  (let [{:keys [command args]} (server-command (:dir session))
         config {"mcpServers"
                 {"artifact"
-                 {"command" (first cmd-vec)
-                  "args" (vec (rest cmd-vec))}}}]
+                 {"command" command
+                  "args" args}}}]
     (spit (:mcp-config-path session) (json/generate-string config))
     session))
 

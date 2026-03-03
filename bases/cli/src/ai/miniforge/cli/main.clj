@@ -209,6 +209,16 @@
 (defn pr-respond-cmd [m] (cmd-pr/pr-respond-cmd (get-opts m)))
 (defn pr-merge-cmd [m] (cmd-pr/pr-merge-cmd (get-opts m)))
 
+(defn mcp-serve-cmd
+  "Run the MCP artifact server (stdin/stdout JSON-RPC)."
+  [m]
+  (let [{:keys [artifact-dir]} (get-opts m)]
+    (when-not artifact-dir
+      (display/print-error "--artifact-dir is required")
+      (System/exit 1))
+    (let [run-server (requiring-resolve 'ai.miniforge.mcp-artifact-server.interface/start-server)]
+      (run-server artifact-dir))))
+
 (defn help-cmd
   [_m]
   (println "
@@ -301,6 +311,11 @@ Examples:
    {:cmds ["doctor"]  :fn doctor-cmd}
    {:cmds ["help"]    :fn help-cmd}
    {:cmds []          :fn help-cmd}  ; default
+
+   ;; MCP artifact server
+   {:cmds ["mcp-serve"]
+    :fn mcp-serve-cmd
+    :spec {:artifact-dir {:alias :d}}}
 
    ;; Run command
    {:cmds ["run"]
