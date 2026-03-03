@@ -219,6 +219,14 @@
     (let [run-server (requiring-resolve 'ai.miniforge.mcp-artifact-server.interface/start-server)]
       (run-server artifact-dir))))
 
+(defn hook-eval-cmd
+  "Evaluate a tool-use request from a Claude PreToolUse hook.
+
+   Reads JSON from stdin, evaluates against policy, writes decision to stdout."
+  [_m]
+  (let [hook-eval! (requiring-resolve 'ai.miniforge.agent.tool-supervisor/hook-eval-stdin!)]
+    (System/exit (hook-eval!))))
+
 (defn help-cmd
   [_m]
   (println "
@@ -316,6 +324,10 @@ Examples:
    {:cmds ["mcp-serve"]
     :fn mcp-serve-cmd
     :spec {:artifact-dir {:alias :d}}}
+
+   ;; Tool-use supervision hook (Claude PreToolUse)
+   {:cmds ["hook-eval"]
+    :fn hook-eval-cmd}
 
    ;; Run command
    {:cmds ["run"]
