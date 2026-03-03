@@ -248,6 +248,107 @@
    [:llm/cost-usd {:optional true} number?]
    [:message string?]])
 
+;------------------------------------------------------------------------------ Layer 5
+;; Privacy levels and OCI event schemas (N8)
+
+(def PrivacyLevel
+  "Privacy classification for events.
+   - :public    — safe for external dashboards and audit logs
+   - :internal  — visible to team members and internal tools
+   - :confidential — restricted to control-plane operators only"
+  [:enum :public :internal :confidential])
+
+(def event-privacy-defaults
+  "Default privacy level for each event type category.
+   Events not listed default to :internal."
+  {:workflow/started    :public
+   :workflow/completed  :public
+   :workflow/failed     :public
+   :workflow/phase-started   :public
+   :workflow/phase-completed :public
+   :workflow/milestone-reached :public
+   :agent/started    :internal
+   :agent/completed  :internal
+   :agent/failed     :internal
+   :agent/status     :internal
+   :agent/chunk      :internal
+   :gate/started     :public
+   :gate/passed      :public
+   :gate/failed      :public
+   :tool/invoked     :internal
+   :tool/completed   :internal
+   :llm/request      :internal
+   :llm/response     :internal
+   :supervision/tool-use-evaluated :internal
+   :control-action/requested :confidential
+   :control-action/executed  :confidential
+   :annotation/created       :internal
+   :listener/attached        :internal
+   :listener/detached        :internal
+   :task/state-changed       :internal
+   :task/frontier-entered    :internal
+   :task/skip-propagated     :internal
+   :chain/started            :public
+   :chain/completed          :public
+   :chain/failed             :public
+   :chain/step-started       :internal
+   :chain/step-completed     :internal
+   :chain/step-failed        :internal})
+
+(defn event-privacy
+  "Get the privacy level for an event type. Defaults to :internal."
+  [event-type]
+  (get event-privacy-defaults event-type :internal))
+
+;; Supervision event schema
+
+(def ToolUseEvaluated
+  "Schema for supervision/tool-use-evaluated event."
+  [:map
+   [:event/type [:= :supervision/tool-use-evaluated]]
+   [:event/id uuid?]
+   [:event/timestamp inst?]
+   [:event/version string?]
+   [:event/sequence-number int?]
+   [:workflow/id uuid?]
+   [:tool/name string?]
+   [:supervision/decision string?]
+   [:supervision/reasoning {:optional true} string?]
+   [:supervision/meta-eval? {:optional true} boolean?]
+   [:supervision/confidence {:optional true} number?]
+   [:workflow/phase {:optional true} keyword?]
+   [:message string?]])
+
+;; OCI container event schemas
+
+(def ContainerStarted
+  "Schema for oci/container-started event."
+  [:map
+   [:event/type [:= :oci/container-started]]
+   [:event/id uuid?]
+   [:event/timestamp inst?]
+   [:event/version string?]
+   [:event/sequence-number int?]
+   [:workflow/id uuid?]
+   [:oci/container-id string?]
+   [:oci/image-digest {:optional true} string?]
+   [:oci/trust-level {:optional true} [:enum :untrusted :trusted :privileged]]
+   [:message string?]])
+
+(def ContainerCompleted
+  "Schema for oci/container-completed event."
+  [:map
+   [:event/type [:= :oci/container-completed]]
+   [:event/id uuid?]
+   [:event/timestamp inst?]
+   [:event/version string?]
+   [:event/sequence-number int?]
+   [:workflow/id uuid?]
+   [:oci/container-id string?]
+   [:oci/exit-code int?]
+   [:oci/duration-ms {:optional true} int?]
+   [:message string?]])
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Example event
@@ -258,5 +359,9 @@
    :event/sequence-number 0
    :workflow/id (random-uuid)
    :message "Workflow started"}
+
+  ;; Privacy lookup
+  (event-privacy :workflow/started) ;; => :public
+  (event-privacy :control-action/requested) ;; => :confidential
 
   :leave-this-here)

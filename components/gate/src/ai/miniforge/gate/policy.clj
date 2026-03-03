@@ -161,6 +161,134 @@
    :check check-release-ready
    :repair nil})
 
+;------------------------------------------------------------------------------ Layer 2
+;; Severity cascade
+
+(defn evaluate-severity-cascade
+  "Classify violations by severity into cascade buckets.
+
+   Arguments:
+     violations - Vector of violation maps with :violation/severity keys
+
+   Returns:
+     {:blocking          [...] ; :critical -> hard-halt
+      :approval-required [...] ; :high -> require approval
+      :warnings          [...] ; :medium -> warn, passes
+      :audits            [...]} ; :low/:info -> audit, passes silently"
+  [violations]
+  (reduce
+   (fn [acc violation]
+     (let [severity (:violation/severity violation)]
+       (cond
+         (= :critical severity) (update acc :blocking conj violation)
+         (= :high severity)     (update acc :approval-required conj violation)
+         (= :medium severity)   (update acc :warnings conj violation)
+         :else                  (update acc :audits conj violation))))
+   {:blocking [] :approval-required [] :warnings [] :audits []}
+   violations))
+
+(defn request-approval-for-violations!
+  "Create approval requests for :high-severity (approval-required) violations.
+
+   Arguments:
+     event-stream-atom - Atom used as the approval manager store
+     violations        - Vector of approval-required violation maps
+
+   Returns:
+     {:approval-ids [...] :pending-count int}"
+  [event-stream-atom violations]
+  (let [create-fn (requiring-resolve
+                    'ai.miniforge.event-stream.approval/create-approval-request)
+        store-fn  (requiring-resolve
+                    'ai.miniforge.event-stream.approval/store-approval!)
+        approvals (mapv (fn [violation]
+                          (create-fn
+                            (random-uuid)
+                            ["policy-reviewer"]
+                            1
+                            {:metadata {:violation/rule-id    (:violation/rule-id violation)
+                                        :violation/message    (:violation/message violation)
+                                        :violation/severity   (:violation/severity violation)
+                                        :violation/remediation (:violation/remediation violation)}}))
+                        violations)]
+    (run! #(store-fn event-stream-atom %) approvals)
+    {:approval-ids  (mapv :approval/id approvals)
+     :pending-count (count approvals)}))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Policy Pack Gate (delegates to policy-pack component with severity cascade)
+
+(defn- check-policy-pack
+  "Check artifact against loaded policy packs with severity cascade.
+
+   Severity cascade:
+   - :critical -> hard-halt (blocks gate, errors)
+   - :high     -> require-approval (blocks unless approved)
+   - :medium   -> warn (passes with warnings)
+   - :low/:info -> audit (passes silently, recorded in evidence)
+
+   Arguments:
+     artifact - Artifact with :content
+     ctx      - Execution context with :policy-packs, :task-type, :phase
+
+   Returns:
+     {:passed? bool :errors [] :warnings [] :approval-required []}"
+  [artifact ctx]
+  (try
+    (let [check-fn (requiring-resolve 'ai.miniforge.policy-pack.core/check-artifact)
+          packs (or (:policy-packs ctx) [])
+          task-type (or (:task-type ctx) :implement)
+          phase (or (:phase ctx) :implement)]
+      (if (empty? packs)
+        {:passed? true :warnings [{:type :no-policy-packs
+                                    :message "No policy packs loaded"}]}
+        (let [result   (check-fn packs artifact {:task-type task-type :phase phase})
+              cascade  (evaluate-severity-cascade (:violations result []))
+              blocking          (:blocking cascade)
+              approval-required (:approval-required cascade)
+              warnings          (:warnings cascade)]
+          {:passed? (and (empty? blocking) (empty? approval-required))
+           :errors (mapv (fn [v]
+                           {:type :policy-violation
+                            :severity (:violation/severity v)
+                            :rule-id (:violation/rule-id v)
+                            :message (:violation/message v)
+                            :remediation (:violation/remediation v)})
+                         blocking)
+           :approval-required (mapv (fn [v]
+                                      {:type :approval-required
+                                       :severity (:violation/severity v)
+                                       :rule-id (:violation/rule-id v)
+                                       :message (:violation/message v)})
+                                    approval-required)
+           :warnings (mapv (fn [v]
+                             {:type :policy-warning
+                              :severity (:violation/severity v)
+                              :message (:violation/message v)})
+                           (concat warnings (:audits cascade)))})))
+    (catch Exception e
+      {:passed? true
+       :warnings [{:type :policy-check-error
+                    :message (str "Policy check failed: " (ex-message e))}]})))
+
+(defn- repair-policy-pack
+  "Attempt to repair policy violations.
+   Currently returns failure — repair requires LLM agent."
+  [artifact errors _ctx]
+  {:success? false
+   :artifact artifact
+   :errors errors
+   :message "Policy violation repair requires LLM agent"})
+
+(registry/register-gate! :policy-pack)
+
+(defmethod registry/get-gate :policy-pack
+  [_]
+  {:name :policy-pack
+   :description "Validates code against loaded policy packs with severity cascade"
+   :check check-policy-pack
+   :repair repair-policy-pack})
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (check-no-secrets {:content "(def password \"secret123\")"} {})

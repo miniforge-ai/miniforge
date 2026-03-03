@@ -168,6 +168,12 @@
    ;; Pack Promotions (optional, for ETL workflows)
    (optional-key :evidence/pack-promotions) vector?
 
+   ;; Supervision Decisions (N6 tool-use evidence)
+   (optional-key :evidence/supervision-decisions) vector?
+
+   ;; Control Action Evidence
+   (optional-key :evidence/control-actions) vector?
+
    ;; Outcome
    :evidence/outcome map?
 
@@ -234,6 +240,29 @@
    (optional-key :pack-signature) string?})
 
 ;------------------------------------------------------------------------------ Layer 9
+;; Supervision Decision Schema (N6 tool-use evidence)
+
+(def supervision-decision-schema
+  "Schema for individual supervision decision evidence."
+  {:supervision/tool-name string?
+   :supervision/decision string?
+   :supervision/timestamp inst?
+   (optional-key :supervision/reasoning) string?
+   (optional-key :supervision/meta-eval?) boolean?
+   (optional-key :supervision/confidence) float?
+   (optional-key :supervision/phase) keyword?})
+
+(def control-action-evidence-schema
+  "Schema for control action evidence."
+  {:control-action/id uuid?
+   :control-action/type keyword?
+   :control-action/requester map?
+   :control-action/timestamp inst?
+   :control-action/result keyword?
+   (optional-key :control-action/justification) string?
+   (optional-key :control-action/target) map?})
+
+;------------------------------------------------------------------------------ Layer 10
 ;; Helper Functions
 
 (defn validate-schema

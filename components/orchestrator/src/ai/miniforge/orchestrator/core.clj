@@ -127,24 +127,33 @@
          :zettels zettels
          :count (count zettels)})))
 
-  (capture-execution-learning [_this execution-result]
+  (capture-execution-learning [this execution-result]
     (when (and (:learning-capture? config)
                (:repaired? execution-result))
       (let [{:keys [agent-role task repair-history]} execution-result]
         (when (seq repair-history)
-          (knowledge/capture-inner-loop-learning
-           knowledge-store
-           {:agent agent-role
-            :task-id (:task/id task)
-            :title (str "Repair pattern: " (-> repair-history last :error-type name))
-            :content (str "## Repair Context\n\n"
-                          "Task: " (:task/title task) "\n"
-                          "Agent: " (name agent-role) "\n"
-                          "Repair iterations: " (count repair-history) "\n\n"
-                          "## Pattern\n\n"
-                          (-> repair-history last :fix-description))
-            :tags [:repair :inner-loop (keyword (name agent-role))]
-            :confidence 0.7})))))
+          (let [learning (knowledge/capture-inner-loop-learning
+                          knowledge-store
+                          {:agent agent-role
+                           :task-id (:task/id task)
+                           :title (str "Repair pattern: " (-> repair-history last :error-type name))
+                           :content (str "## Repair Context\n\n"
+                                         "Task: " (:task/title task) "\n"
+                                         "Agent: " (name agent-role) "\n"
+                                         "Repair iterations: " (count repair-history) "\n\n"
+                                         "## Pattern\n\n"
+                                         (-> repair-history last :fix-description))
+                           :tags [:repair :inner-loop (keyword (name agent-role))]
+                           :confidence 0.7})]
+            ;; Check if learning should be promoted to a rule
+            (when learning
+              (let [learning-id (or (:zettel/id learning) (:id learning))
+                    promotion-check (proto/should-promote-learning? this learning)]
+                (when (and (:promote? promotion-check) learning-id)
+                  (try
+                    (knowledge/promote-learning knowledge-store learning-id {})
+                    (catch Exception _e nil)))))
+            learning)))))
 
   (should-promote-learning? [_this learning]
     (let [confidence (get-in learning [:zettel/source :source/confidence] 0)

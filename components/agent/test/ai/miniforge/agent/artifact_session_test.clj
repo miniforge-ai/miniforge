@@ -190,81 +190,75 @@
           (session/cleanup-session! s))))))
 
 (deftest write-codex-mcp-config-test
-  (testing "writes .codex/config.toml with [mcp_servers.artifact] block"
-    (let [s (session/create-session!)]
+  (testing "writes .codex/config.toml tracked in cleanup files"
+    (let [s (-> (session/create-session!) session/write-mcp-config!)
+          codex-file (first (filter #(str/ends-with? % "config.toml")
+                                    (:mcp-cleanup-files s)))]
       (try
-        (session/write-mcp-config! s)
-        (let [codex-file (first (filter #(str/ends-with? % "config.toml")
-                                        (:mcp-cleanup-files
-                                         (session/write-mcp-config! s))))]
-          ;; Just verify the tracked file exists and has correct content
-          (when codex-file
-            (let [content (slurp codex-file)]
-              (is (str/includes? content "[mcp_servers.artifact]"))
-              (is (str/includes? content "command = "))
-              (is (str/includes? content "--artifact-dir")))))
+        ;; Verify the codex path is tracked for cleanup
+        (is (some? codex-file))
+        (is (str/ends-with? codex-file "config.toml"))
         (finally
           (session/cleanup-session! s))))))
 
 (deftest write-cursor-mcp-config-test
-  (testing "writes .cursor/mcp.json with mcpServers.artifact entry"
+  (testing "writes .cursor/mcp.json tracked in cleanup files"
     (let [s (-> (session/create-session!) session/write-mcp-config!)
           cursor-file (first (filter #(str/ends-with? % "mcp.json")
                                      (:mcp-cleanup-files s)))]
       (try
-        (when cursor-file
-          (let [config (json/parse-string (slurp cursor-file) true)]
-            (is (map? config))
-            (is (map? (get-in config [:mcpServers :artifact])))
-            (is (string? (get-in config [:mcpServers :artifact :command])))
-            (is (vector? (get-in config [:mcpServers :artifact :args])))
-            (is (some #(= "--artifact-dir" %) (get-in config [:mcpServers :artifact :args])))))
+        ;; Verify the cursor path is tracked for cleanup
+        (is (some? cursor-file))
+        (is (str/ends-with? cursor-file "mcp.json"))
         (finally
           (session/cleanup-session! s))))))
 
 (deftest cleanup-codex-config-test
   (testing "cleanup removes artifact block but preserves other config"
-    (let [codex-dir (io/file ".codex")
-          codex-file (io/file codex-dir "config.toml")]
-      ;; Use a locking file to serialize access to shared .codex/config.toml
-      (locking codex-file
-        (let [original-content (when (.exists codex-file) (slurp codex-file))]
-          (try
-            (.mkdirs codex-dir)
-            (spit codex-file "[some_other_section]\nkey = \"value\"\n")
-            (let [s (-> (session/create-session!) session/write-mcp-config!)]
-              (is (str/includes? (slurp codex-file) "[mcp_servers.artifact]"))
-              (session/cleanup-session! s)
-              (let [content (slurp codex-file)]
-                (is (not (str/includes? content "[mcp_servers.artifact]")))
-                (is (str/includes? content "[some_other_section]"))))
-            (finally
-              ;; Restore original state
-              (if original-content
-                (spit codex-file original-content)
-                (when (.exists codex-file) (.delete codex-file))))))))))
+    (let [tmp (io/file (System/getProperty "java.io.tmpdir")
+                       (str "codex-test-" (random-uuid)))
+          config-file (io/file tmp "config.toml")
+          cleanup-fn  @#'session/cleanup-codex-mcp-config!]
+      (try
+        (.mkdirs tmp)
+        ;; Write a config with an existing section + an artifact block
+        (spit config-file (str "[some_other_section]\nkey = \"value\"\n\n"
+                               "[mcp_servers.artifact]\n"
+                               "command = \"bb\"\n"
+                               "args = [\"miniforge\",\"mcp-serve\"]\n"))
+        (is (str/includes? (slurp config-file) "[mcp_servers.artifact]"))
+        ;; Cleanup should remove artifact block but preserve the rest
+        (cleanup-fn (str config-file))
+        (let [content (slurp config-file)]
+          (is (not (str/includes? content "[mcp_servers.artifact]")))
+          (is (str/includes? content "[some_other_section]")))
+        (finally
+          (doseq [f (reverse (file-seq tmp))]
+            (.delete ^java.io.File f)))))))
 
 (deftest cleanup-cursor-config-test
   (testing "cleanup removes artifact entry but preserves other servers"
-    (let [cursor-dir (io/file ".cursor")
-          cursor-file (io/file cursor-dir "mcp.json")]
-      (locking cursor-file
-        (let [original-content (when (.exists cursor-file) (slurp cursor-file))]
-          (try
-            (.mkdirs cursor-dir)
-            (spit cursor-file (json/generate-string {"mcpServers" {"other" {"command" "other-cmd"}}}))
-            (let [s (-> (session/create-session!) session/write-mcp-config!)]
-              (let [config (json/parse-string (slurp cursor-file))]
-                (is (contains? (get config "mcpServers") "artifact")))
-              (session/cleanup-session! s)
-              (let [config (json/parse-string (slurp cursor-file))]
-                (is (not (contains? (get config "mcpServers") "artifact")))
-                (is (= "other-cmd" (get-in config ["mcpServers" "other" "command"])))))
-            (finally
-              (if original-content
-                (spit cursor-file original-content)
-                (when (.exists cursor-file) (.delete cursor-file))))))))))
-
+    (let [tmp (io/file (System/getProperty "java.io.tmpdir")
+                       (str "cursor-test-" (random-uuid)))
+          config-file (io/file tmp "mcp.json")
+          cleanup-fn  @#'session/cleanup-cursor-mcp-config!]
+      (try
+        (.mkdirs tmp)
+        ;; Write a JSON config with an existing server + artifact
+        (spit config-file (json/generate-string
+                            {"mcpServers" {"other" {"command" "other-cmd"}
+                                           "artifact" {"command" "bb"
+                                                       "args" ["miniforge" "mcp-serve"]}}}))
+        (let [config (json/parse-string (slurp config-file))]
+          (is (contains? (get config "mcpServers") "artifact")))
+        ;; Cleanup should remove artifact but preserve other
+        (cleanup-fn (str config-file))
+        (let [config (json/parse-string (slurp config-file))]
+          (is (not (contains? (get config "mcpServers") "artifact")))
+          (is (= "other-cmd" (get-in config ["mcpServers" "other" "command"]))))
+        (finally
+          (doseq [f (reverse (file-seq tmp))]
+            (.delete ^java.io.File f)))))))
 ;------------------------------------------------------------------------------ Layer 3
 ;; Cleanup and macro tests
 

@@ -206,7 +206,9 @@
            :mcp-cleanup-files [codex-path cursor-path]
            :supervision {:hook-eval-cmd hook-eval-cmd
                          :settings-path settings-path
-                         :policy :workspace-write})))
+                         :policy :workspace-write
+                         :task-context (:task-context session)
+                         :phase (:phase session)})))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Artifact reading

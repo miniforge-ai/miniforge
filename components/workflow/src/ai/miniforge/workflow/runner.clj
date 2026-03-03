@@ -342,6 +342,23 @@
              output-ctx (extract-output final-ctx)]
          (when-not skip-lifecycle?
            (publish-workflow-completed! event-stream output-ctx))
+
+         ;; Post-workflow: feed signals to operator for pattern analysis
+         (try
+           (when-let [operator (:operator opts)]
+             (let [observe-fn (requiring-resolve 'ai.miniforge.operator.interface/observe-signal)
+                   status (:execution/status output-ctx)
+                   signal-type (if (= :completed status)
+                                 :workflow-complete
+                                 :workflow-failed)]
+               (observe-fn operator
+                           {:signal/type signal-type
+                            :workflow-id (:execution/id output-ctx)
+                            :phase-results (:execution/phase-results output-ctx)
+                            :metrics (:execution/metrics output-ctx)
+                            :timestamp (java.time.Instant/now)})))
+           (catch Exception _e nil))
+
          output-ctx)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
