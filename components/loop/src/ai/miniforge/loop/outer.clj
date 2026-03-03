@@ -8,7 +8,8 @@
    Layer 1: Loop state management
    Layer 2: Phase execution (stub)"
   (:require
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Phase definitions
@@ -259,10 +260,7 @@
             (log/error logger :loop :outer/phase-failed
                        {:message "Phase execution error"
                         :data {:phase phase :error (ex-message e)}}))
-          {:success? false
-           :phase phase
-           :errors [{:type :execution-error
-                     :message (ex-message e)}]}))
+          (response/failure (ex-message e) {:data {:phase phase}})))
       ;; No executor: mock success (development/testing)
       {:success? true
        :artifacts (mapv (fn [type] {:type type :id (random-uuid)})

@@ -96,6 +96,18 @@
    :agent    :agents
    :fleet    :fleet})
 
+(defn- authorization-granted
+  "Build a granted authorization result."
+  [reason]
+  {:authorized? true :reason reason})
+
+(defn- authorization-denied
+  "Build a denied authorization result with anomaly."
+  [anomaly-category message context]
+  {:authorized? false
+   :reason message
+   :anomaly (response/make-anomaly anomaly-category message context)})
+
 (defn authorize-action
   "Check RBAC authorization for a control action.
 
@@ -104,7 +116,7 @@
    - action: Control action map from create-control-action
    - requester: Map with :role keyword
 
-   Returns: {:authorized? bool :reason string}"
+   Returns: {:authorized? bool :reason string :anomaly map?}"
   [roles action requester]
   (let [role (:role requester)
         role-perms (get roles role)
@@ -114,32 +126,25 @@
         permitted-actions (get role-perms category #{})]
     (cond
       (nil? role-perms)
-      {:authorized? false
-       :reason (str "Unknown role: " role)
-       :anomaly (response/make-anomaly :anomalies/not-found
-                                        (str "Unknown role: " role)
-                                        {:role role})}
+      (authorization-denied :anomalies/not-found
+                            (str "Unknown role: " role)
+                            {:role role})
 
       (nil? category)
-      {:authorized? false
-       :reason (str "Unknown target type: " target-type)
-       :anomaly (response/make-anomaly :anomalies/incorrect
-                                        (str "Unknown target type: " target-type)
-                                        {:target-type target-type})}
+      (authorization-denied :anomalies/incorrect
+                            (str "Unknown target type: " target-type)
+                            {:target-type target-type})
 
       (contains? permitted-actions action-type)
-      {:authorized? true :reason "Action permitted by role"}
+      (authorization-granted "Action permitted by role")
 
       :else
-      {:authorized? false
-       :reason (str "Role " (name role) " cannot perform " (name action-type)
-                    " on " (name target-type))
-       :anomaly (response/make-anomaly :anomalies/forbidden
-                                        (str "Role " (name role) " cannot perform "
-                                             (name action-type) " on " (name target-type))
-                                        {:role role
-                                         :action-type action-type
-                                         :target-type target-type})})))
+      (authorization-denied :anomalies/forbidden
+                            (str "Role " (name role) " cannot perform "
+                                 (name action-type) " on " (name target-type))
+                            {:role role
+                             :action-type action-type
+                             :target-type target-type}))))
 
 ;------------------------------------------------------------------------------ Layer 2a
 ;; Control action execution

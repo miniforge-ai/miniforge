@@ -258,8 +258,8 @@
    - :confidential — restricted to control-plane operators only"
   [:enum :public :internal :confidential])
 
-(def event-privacy-defaults
-  "Default privacy level for each event type category.
+(def ^:private default-event-privacy
+  "Built-in privacy level for each event type category.
    Events not listed default to :internal."
   {:workflow/started    :public
    :workflow/completed  :public
@@ -295,10 +295,29 @@
    :chain/step-completed     :internal
    :chain/step-failed        :internal})
 
+(defn create-privacy-config
+  "Create a privacy configuration by merging overrides into defaults.
+
+   Arguments:
+   - overrides: Map of event-type -> privacy-level to override defaults
+
+   Returns: Map of event-type -> privacy-level"
+  [overrides]
+  (merge default-event-privacy overrides))
+
 (defn event-privacy
-  "Get the privacy level for an event type. Defaults to :internal."
-  [event-type]
-  (get event-privacy-defaults event-type :internal))
+  "Get the privacy level for an event type.
+
+   Arguments:
+   - event-type: Event type keyword
+   - config: Optional privacy config from create-privacy-config.
+             Uses built-in defaults when not provided.
+
+   Defaults to :internal for unlisted event types."
+  ([event-type]
+   (get default-event-privacy event-type :internal))
+  ([event-type config]
+   (get config event-type :internal)))
 
 ;; Supervision event schema
 

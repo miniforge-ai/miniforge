@@ -218,6 +218,15 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Policy Pack Gate (delegates to policy-pack component with severity cascade)
 
+(defn- violation->gate-result
+  "Convert a violation map to a gate result entry."
+  [result-type violation]
+  (cond-> {:type result-type
+           :severity (:violation/severity violation)
+           :message (:violation/message violation)}
+    (:violation/rule-id violation) (assoc :rule-id (:violation/rule-id violation))
+    (:violation/remediation violation) (assoc :remediation (:violation/remediation violation))))
+
 (defn- check-policy-pack
   "Check artifact against loaded policy packs with severity cascade.
 
@@ -248,23 +257,9 @@
               approval-required (:approval-required cascade)
               warnings          (:warnings cascade)]
           {:passed? (and (empty? blocking) (empty? approval-required))
-           :errors (mapv (fn [v]
-                           {:type :policy-violation
-                            :severity (:violation/severity v)
-                            :rule-id (:violation/rule-id v)
-                            :message (:violation/message v)
-                            :remediation (:violation/remediation v)})
-                         blocking)
-           :approval-required (mapv (fn [v]
-                                      {:type :approval-required
-                                       :severity (:violation/severity v)
-                                       :rule-id (:violation/rule-id v)
-                                       :message (:violation/message v)})
-                                    approval-required)
-           :warnings (mapv (fn [v]
-                             {:type :policy-warning
-                              :severity (:violation/severity v)
-                              :message (:violation/message v)})
+           :errors (mapv #(violation->gate-result :policy-violation %) blocking)
+           :approval-required (mapv #(violation->gate-result :approval-required %) approval-required)
+           :warnings (mapv #(violation->gate-result :policy-warning %)
                            (concat warnings (:audits cascade)))})))
     (catch Exception e
       {:passed? true

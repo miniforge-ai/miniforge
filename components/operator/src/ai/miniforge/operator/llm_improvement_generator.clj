@@ -17,7 +17,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Prompt construction
 
-(def ^:private system-prompt
+(def ^:private default-system-prompt
   "You are a process improvement advisor for a software engineering meta-agent.
 Your job: generate concrete improvement proposals from detected workflow patterns.
 
@@ -39,7 +39,7 @@ Respond with ONLY a JSON array of improvement objects, no other text:
 
 Return an empty array [] if no improvements can be confidently proposed.")
 
-(def ^:private improvement-types
+(def ^:private default-improvement-types
   "All improvement types the generator can produce."
   #{:prompt-change
     :gate-adjustment
@@ -89,15 +89,15 @@ Return an empty array [] if no improvements can be confidently proposed.")
 
 (defn- parse-improvement-type
   "Parse an improvement type string to keyword, returning nil for unknown types."
-  [type-str]
+  [type-str allowed-types]
   (let [kw (keyword (str/lower-case (str/trim (str type-str))))]
-    (when (contains? improvement-types kw)
+    (when (contains? allowed-types kw)
       kw)))
 
 (defn- parse-improvement
   "Parse a single improvement map from LLM JSON output into a canonical improvement map."
-  [raw]
-  (let [imp-type (parse-improvement-type (:type raw))]
+  [raw allowed-types]
+  (let [imp-type (parse-improvement-type (:type raw) allowed-types)]
     (when imp-type
       {:improvement/id           (random-uuid)
        :improvement/type         imp-type
@@ -118,7 +118,7 @@ Return an empty array [] if no improvements can be confidently proposed.")
   "Parse LLM JSON response into a sequence of improvement maps.
 
    Returns empty sequence on parse failure (fail-open)."
-  [response-text]
+  [response-text allowed-types]
   (try
     (let [cleaned (-> response-text
                       str/trim
@@ -126,7 +126,7 @@ Return an empty array [] if no improvements can be confidently proposed.")
                       (str/replace #"\s*```$" ""))
           parsed  (json/parse-string cleaned true)]
       (->> (if (sequential? parsed) parsed [])
-           (map parse-improvement)
+           (map #(parse-improvement % allowed-types))
            (remove nil?)))
     (catch Exception _e
       [])))
@@ -143,13 +143,15 @@ Return an empty array [] if no improvements can be confidently proposed.")
       (try
         (let [complete-fn (requiring-resolve
                            'ai.miniforge.llm.interface.protocols.llm-client/complete*)
+              sys-prompt  (get config :system-prompt default-system-prompt)
+              types       (get config :improvement-types default-improvement-types)
               prompt      (build-generate-prompt patterns context)
               request     {:prompt     prompt
-                           :system     system-prompt
+                           :system     sys-prompt
                            :max-tokens (get config :max-tokens 600)}
               response    (complete-fn llm-client request)]
           (if (:success response)
-            (parse-generate-response (:content response))
+            (parse-generate-response (:content response) types)
             ;; LLM call failed -> fail-open with empty proposals
             []))
         (catch Exception _e
@@ -178,7 +180,9 @@ Return an empty array [] if no improvements can be confidently proposed.")
      opts - Map with:
        :llm-client - LLM client implementing LLMClient protocol (required)
        :config     - Optional config map:
-                       :max-tokens - Max tokens for LLM response (default 600)"
+                       :max-tokens       - Max tokens for LLM response (default 600)
+                       :system-prompt    - Override the system prompt
+                       :improvement-types - Set of allowed improvement type keywords"
   [{:keys [llm-client config]}]
   (->LLMImprovementGenerator llm-client (or config {})))
 
@@ -206,14 +210,16 @@ Return an empty array [] if no improvements can be confidently proposed.")
       \"change\": {\"action\": \"add-pre-check\", \"gate-type\": \"dependency-check\"},
       \"rationale\": \"Validate dependencies before compile to prevent repeated failures\",
       \"confidence\": 0.85,
-      \"source-pattern-type\": \"repeated-failure\"}]")
+      \"source-pattern-type\": \"repeated-failure\"}]"
+   default-improvement-types)
 
   ;; Test fail-open
-  (parse-generate-response "not valid json")
+  (parse-generate-response "not valid json" default-improvement-types)
   ;; => []
 
   ;; Test unknown improvement type is filtered
-  (parse-improvement {:type "unknown-type" :target "foo" :rationale "bar"})
+  (parse-improvement {:type "unknown-type" :target "foo" :rationale "bar"}
+                     default-improvement-types)
   ;; => nil
 
   :end)
