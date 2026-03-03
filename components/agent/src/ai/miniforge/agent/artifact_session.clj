@@ -93,21 +93,97 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; MCP config generation
 
+(def ^:private mcp-server-name
+  "Name used in MCP config for the artifact server.
+   Must match the key in mcpServers — Claude CLI derives tool names as
+   mcp__<server-name>__<tool-name>."
+  "artifact")
+
+(def ^:private mcp-tool-names
+  "MCP tool names exposed by the artifact server."
+  ["submit_code_artifact"
+   "submit_plan"
+   "submit_test_artifact"
+   "submit_release_artifact"])
+
+(defn- write-codex-mcp-config!
+  "Write or update .codex/config.toml with [mcp_servers.artifact] block.
+
+   If the file exists and already has an [mcp_servers.artifact] block,
+   replaces it. Otherwise appends the block. Creates .codex/ dir if needed.
+
+   Returns the path to the config file."
+  [server-cmd]
+  (let [{:keys [command args]} server-cmd
+        dir (io/file ".codex")
+        config-file (io/file dir "config.toml")
+        block-header "[mcp_servers.artifact]"
+        block (str block-header "\n"
+                   "command = " (json/generate-string command) "\n"
+                   "args = " (json/generate-string args) "\n")]
+    (.mkdirs dir)
+    (if (.exists config-file)
+      (let [content (slurp config-file)]
+        (if (str/includes? content block-header)
+          ;; Replace existing block (up to next section or EOF)
+          (let [replaced (str/replace content
+                                      #"(?s)\[mcp_servers\.artifact\]\n(?:(?!\n\[).)*"
+                                      block)]
+            (spit config-file replaced))
+          ;; Append
+          (spit config-file (str content "\n" block) :append false)))
+      (spit config-file block))
+    (str config-file)))
+
+(defn- write-cursor-mcp-config!
+  "Write or update .cursor/mcp.json with mcpServers.artifact entry.
+
+   If the file exists, merges into existing JSON. Creates .cursor/ dir if needed.
+
+   Returns the path to the config file."
+  [server-cmd]
+  (let [{:keys [command args]} server-cmd
+        dir (io/file ".cursor")
+        config-file (io/file dir "mcp.json")
+        entry {"command" command "args" args}
+        existing (when (.exists config-file)
+                   (try (json/parse-string (slurp config-file))
+                        (catch Exception _ {})))
+        config (assoc-in (or existing {}) ["mcpServers" "artifact"] entry)]
+    (.mkdirs dir)
+    (spit config-file (json/generate-string config {:pretty true}))
+    (str config-file)))
+
 (defn write-mcp-config!
-  "Write the MCP server configuration JSON to the session directory.
+  "Write MCP server configs for all supported CLI backends.
+
+   Writes three config files:
+   - <session-dir>/mcp-config.json — Claude CLI (passed via --mcp-config flag)
+   - .codex/config.toml — Codex CLI (reads from CWD automatically)
+   - .cursor/mcp.json — Cursor agent (reads from CWD automatically)
+
+   Also populates :mcp-allowed-tools on the session with the fully-qualified
+   tool names (mcp__artifact__<tool>) so the LLM layer can pass them to
+   --allowedTools or equivalent.
 
    Arguments:
    - session - Session map from create-session!
 
    Returns: session (for threading)"
   [session]
-  (let [{:keys [command args]} (server-command (:dir session))
+  (let [srv-cmd (server-command (:dir session))
+        {:keys [command args]} srv-cmd
         config {"mcpServers"
-                {"artifact"
+                {mcp-server-name
                  {"command" command
-                  "args" args}}}]
+                  "args" args}}}
+        allowed-tools (mapv #(str "mcp__" mcp-server-name "__" %) mcp-tool-names)
+        codex-path (write-codex-mcp-config! srv-cmd)
+        cursor-path (write-cursor-mcp-config! srv-cmd)]
     (spit (:mcp-config-path session) (json/generate-string config))
-    session))
+    (assoc session
+           :mcp-allowed-tools allowed-tools
+           :mcp-cleanup-files [codex-path cursor-path])))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Artifact reading
@@ -193,12 +269,53 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; High-level session helpers
 
+(defn- cleanup-codex-mcp-config!
+  "Remove [mcp_servers.artifact] block from .codex/config.toml.
+   Deletes the file if it becomes empty."
+  [path]
+  (let [f (io/file path)]
+    (when (.exists f)
+      (let [content (slurp f)
+            cleaned (str/replace content
+                                 #"(?s)\n?\[mcp_servers\.artifact\]\n(?:(?!\n\[).)*"
+                                 "")]
+        (if (str/blank? (str/trim cleaned))
+          (.delete f)
+          (spit f cleaned))))))
+
+(defn- cleanup-cursor-mcp-config!
+  "Remove artifact key from .cursor/mcp.json.
+   Deletes the file if mcpServers becomes empty."
+  [path]
+  (let [f (io/file path)]
+    (when (.exists f)
+      (try
+        (let [config (json/parse-string (slurp f))
+              servers (dissoc (get config "mcpServers" {}) "artifact")
+              config' (if (empty? servers)
+                        (dissoc config "mcpServers")
+                        (assoc config "mcpServers" servers))]
+          (if (empty? config')
+            (.delete f)
+            (spit f (json/generate-string config' {:pretty true}))))
+        (catch Exception _ nil)))))
+
 (defn cleanup-session!
-  "Delete the temporary session directory and its contents.
+  "Delete the temporary session directory and clean up injected MCP configs.
+
+   Removes the [mcp_servers.artifact] block from .codex/config.toml
+   and the artifact entry from .cursor/mcp.json, preserving any other
+   config in those files.
 
    Arguments:
    - session - Session map from create-session!"
   [session]
+  ;; Clean up injected MCP entries from project-scoped config files
+  (doseq [path (:mcp-cleanup-files session)]
+    (cond
+      (str/ends-with? path "config.toml") (cleanup-codex-mcp-config! path)
+      (str/ends-with? path "mcp.json") (cleanup-cursor-mcp-config! path)))
+  ;; Delete temp session directory
   (try
     (let [dir (io/file (:dir session))]
       (doseq [f (reverse (file-seq dir))]
