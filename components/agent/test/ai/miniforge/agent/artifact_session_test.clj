@@ -1,6 +1,7 @@
 (ns ai.miniforge.agent.artifact-session-test
   (:require [clojure.test :as test :refer [deftest testing is]]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [cheshire.core :as json]
             [ai.miniforge.agent.artifact-session :as session]))
 
@@ -62,10 +63,15 @@
         (finally
           (session/cleanup-session! s)))))
 
-  (testing "returns session for threading"
+  (testing "returns session for threading (with mcp-allowed-tools added)"
     (let [s (session/create-session!)]
       (try
-        (is (= s (session/write-mcp-config! s)))
+        (let [result (session/write-mcp-config! s)]
+          (is (= (:dir s) (:dir result)))
+          (is (= (:mcp-config-path s) (:mcp-config-path result)))
+          (is (= (:artifact-path s) (:artifact-path result)))
+          (is (vector? (:mcp-allowed-tools result)))
+          (is (every? #(str/starts-with? % "mcp__artifact__") (:mcp-allowed-tools result))))
         (finally
           (session/cleanup-session! s))))))
 

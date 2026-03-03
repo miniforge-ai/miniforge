@@ -93,8 +93,25 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; MCP config generation
 
+(def ^:private mcp-server-name
+  "Name used in MCP config for the artifact server.
+   Must match the key in mcpServers — Claude CLI derives tool names as
+   mcp__<server-name>__<tool-name>."
+  "artifact")
+
+(def ^:private mcp-tool-names
+  "MCP tool names exposed by the artifact server."
+  ["submit_code_artifact"
+   "submit_plan"
+   "submit_test_artifact"
+   "submit_release_artifact"])
+
 (defn write-mcp-config!
   "Write the MCP server configuration JSON to the session directory.
+
+   Also populates :mcp-allowed-tools on the session with the fully-qualified
+   tool names (mcp__artifact__<tool>) so the LLM layer can pass them to
+   --allowedTools or equivalent.
 
    Arguments:
    - session - Session map from create-session!
@@ -103,11 +120,12 @@
   [session]
   (let [{:keys [command args]} (server-command (:dir session))
         config {"mcpServers"
-                {"artifact"
+                {mcp-server-name
                  {"command" command
-                  "args" args}}}]
+                  "args" args}}}
+        allowed-tools (mapv #(str "mcp__" mcp-server-name "__" %) mcp-tool-names)]
     (spit (:mcp-config-path session) (json/generate-string config))
-    session))
+    (assoc session :mcp-allowed-tools allowed-tools)))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Artifact reading
