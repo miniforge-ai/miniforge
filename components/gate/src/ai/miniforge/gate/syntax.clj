@@ -26,14 +26,22 @@
 ;; Syntax checking
 
 (defn- parse-clojure
-  "Attempt to parse Clojure code.
+  "Parse Clojure code using read-string for AST validation.
+
+   Reads all top-level forms (not just the first one).
 
    Returns:
-     {:valid? bool :error string?}"
+     {:valid? bool :error string? :form-count int?}"
   [code-str]
   (try
-    (let [_ (read-string code-str)]
-      {:valid? true})
+    (let [rdr (java.io.PushbackReader. (java.io.StringReader. code-str))
+          eof (Object.)
+          forms (loop [forms []]
+                  (let [form (read {:eof eof} rdr)]
+                    (if (identical? form eof)
+                      forms
+                      (recur (conj forms form)))))]
+      {:valid? true :form-count (count forms)})
     (catch Exception ex
       {:valid? false
        :error (ex-message ex)})))

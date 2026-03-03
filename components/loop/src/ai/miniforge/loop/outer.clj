@@ -216,7 +216,13 @@
 
 (defn run-phase
   "Run the current phase using the appropriate agent.
-   Stub implementation - returns mock success.
+
+   Delegates to the phase interceptor registry for real execution.
+   Falls back to mock success if no phase executor is available.
+
+   Arguments:
+   - loop-state: Current outer loop state
+   - context: Execution context map with :logger, :phase-executor, :event-stream, etc.
 
    Returns:
    {:success? boolean
@@ -231,11 +237,37 @@
                 {:message "Running phase"
                  :data {:phase phase
                         :agent (:phase/agent definition)}}))
-    ;; Stub: return mock success
-    {:success? true
-     :artifacts (mapv (fn [type] {:type type :id (random-uuid)})
-                      (:phase/artifacts definition))
-     :phase phase}))
+    (if-let [phase-executor (:phase-executor context)]
+      ;; Real execution: delegate to the phase executor
+      (try
+        (let [result (phase-executor phase loop-state context)]
+          (if (:success? result)
+            (do
+              (when logger
+                (log/info logger :loop :outer/phase-completed
+                          {:message "Phase completed successfully"
+                           :data {:phase phase}}))
+              result)
+            (do
+              (when logger
+                (log/warn logger :loop :outer/phase-failed
+                          {:message "Phase failed"
+                           :data {:phase phase :error (:error result)}}))
+              result)))
+        (catch Exception e
+          (when logger
+            (log/error logger :loop :outer/phase-failed
+                       {:message "Phase execution error"
+                        :data {:phase phase :error (ex-message e)}}))
+          {:success? false
+           :phase phase
+           :errors [{:type :execution-error
+                     :message (ex-message e)}]}))
+      ;; No executor: mock success (development/testing)
+      {:success? true
+       :artifacts (mapv (fn [type] {:type type :id (random-uuid)})
+                        (:phase/artifacts definition))
+       :phase phase})))
 
 (defn is-complete?
   "Check if the outer loop has completed all phases."

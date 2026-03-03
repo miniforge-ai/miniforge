@@ -127,6 +127,20 @@
                                 {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)})))
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
 
+        ;; Peer consultation: check if another agent should review the plan
+        ;; before implementation begins
+        peer-advice (when-let [msg-router (:message-router ctx)]
+                      (try
+                        (let [get-msgs (requiring-resolve
+                                        'ai.miniforge.agent.interface.protocols.messaging/get-messages-for-agent)
+                              msgs (get-msgs msg-router :implementer (:execution/id ctx))]
+                          (when (seq msgs)
+                            {:peer-messages (vec msgs)}))
+                        (catch Exception _e nil)))
+
+        task (cond-> task
+               peer-advice (assoc :task/peer-advice peer-advice))
+
         ;; Invoke agent
         result (try
                  (agent/invoke implementer-agent task agent-ctx)

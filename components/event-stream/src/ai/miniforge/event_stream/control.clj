@@ -145,34 +145,54 @@
 ;; Control action execution
 
 (defn execute-control-action!
-  "Execute an authorized control action.
+  "Execute a control action with RBAC authorization.
+
+   Calls authorize-action before executing. Returns authorization failure
+   if the requester lacks permission.
 
    Arguments:
    - stream: Event stream atom
    - action: Control action map
    - execution-fn: (fn [action] -> result-map) that performs the actual action
+   - opts: Optional map with :roles (RBAC roles, defaults to default-roles)
 
    Emits :control-action/requested before execution and
    :control-action/executed after. Returns result map with :status and :result."
-  [stream action execution-fn]
+  [stream action execution-fn & [opts]]
   (let [workflow-id (get-in action [:action/target :target-id])
-        action-id (:action/id action)]
-    ;; Emit requested event
-    (core/publish! stream
-                   (core/control-action-requested
-                    stream workflow-id action-id (:action/type action)
-                    (:action/requester action)))
-    ;; Execute
-    (let [result (try
-                   (let [r (execution-fn action)]
-                     (response/success r))
-                   (catch Exception e
-                     (response/failure (.getMessage e) {:data (ex-data e)})))]
-      ;; Emit executed event
-      (core/publish! stream
-                     (core/control-action-executed
-                      stream workflow-id action-id result))
-      result)))
+        action-id (:action/id action)
+        roles (or (:roles opts) default-roles)
+        requester (:action/requester action)
+        auth-result (authorize-action roles action requester)]
+    (if-not (:authorized? auth-result)
+      ;; RBAC denied
+      (do
+        (core/publish! stream
+                       (core/control-action-requested
+                        stream workflow-id action-id (:action/type action)
+                        requester))
+        (let [denial {:status :denied
+                      :reason (:reason auth-result)
+                      :anomaly (:anomaly auth-result)}]
+          (core/publish! stream
+                         (core/control-action-executed
+                          stream workflow-id action-id denial))
+          denial))
+      ;; RBAC authorized — execute
+      (do
+        (core/publish! stream
+                       (core/control-action-requested
+                        stream workflow-id action-id (:action/type action)
+                        requester))
+        (let [result (try
+                       (let [r (execution-fn action)]
+                         (response/success r))
+                       (catch Exception e
+                         (response/failure (.getMessage e) {:data (ex-data e)})))]
+          (core/publish! stream
+                         (core/control-action-executed
+                          stream workflow-id action-id result))
+          result)))))
 
 ;------------------------------------------------------------------------------ Layer 2b
 ;; Approval-aware control action execution
