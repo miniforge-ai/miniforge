@@ -154,17 +154,34 @@
     (spit config-file (json/generate-string config {:pretty true}))
     (str config-file)))
 
+(defn- write-claude-settings!
+  "Write Claude CLI settings JSON with PreToolUse hook for supervision.
+
+   The hook invokes `bb miniforge hook-eval` which reads the tool request
+   from stdin and returns allow/deny on stdout.
+
+   Returns the path to the settings file."
+  [session-dir]
+  (let [[cmd & args] (resolve-miniforge-command)
+        hook-command (str/join " " (concat [cmd] args ["hook-eval"]))
+        settings {"hooks"
+                  {"PreToolUse"
+                   [{"type" "command"
+                     "command" hook-command}]}}
+        path (str session-dir "/claude-settings.json")]
+    (spit path (json/generate-string settings {:pretty true}))
+    path))
+
 (defn write-mcp-config!
   "Write MCP server configs for all supported CLI backends.
 
-   Writes three config files:
+   Writes config files:
    - <session-dir>/mcp-config.json — Claude CLI (passed via --mcp-config flag)
+   - <session-dir>/claude-settings.json — Claude CLI hooks (passed via --settings)
    - .codex/config.toml — Codex CLI (reads from CWD automatically)
    - .cursor/mcp.json — Cursor agent (reads from CWD automatically)
 
-   Also populates :mcp-allowed-tools on the session with the fully-qualified
-   tool names (mcp__artifact__<tool>) so the LLM layer can pass them to
-   --allowedTools or equivalent.
+   Also populates :mcp-allowed-tools and :supervision on the session.
 
    Arguments:
    - session - Session map from create-session!
@@ -179,11 +196,17 @@
                   "args" args}}}
         allowed-tools (mapv #(str "mcp__" mcp-server-name "__" %) mcp-tool-names)
         codex-path (write-codex-mcp-config! srv-cmd)
-        cursor-path (write-cursor-mcp-config! srv-cmd)]
+        cursor-path (write-cursor-mcp-config! srv-cmd)
+        settings-path (write-claude-settings! (:dir session))
+        [hook-cmd & hook-args] (resolve-miniforge-command)
+        hook-eval-cmd (str/join " " (concat [hook-cmd] hook-args ["hook-eval"]))]
     (spit (:mcp-config-path session) (json/generate-string config))
     (assoc session
            :mcp-allowed-tools allowed-tools
-           :mcp-cleanup-files [codex-path cursor-path])))
+           :mcp-cleanup-files [codex-path cursor-path]
+           :supervision {:hook-eval-cmd hook-eval-cmd
+                         :settings-path settings-path
+                         :policy :workspace-write})))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Artifact reading

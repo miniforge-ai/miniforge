@@ -230,7 +230,8 @@
             (let [{:keys [llm-result artifact]}
                   (artifact-session/with-artifact-session [session]
                     (let [mcp-opts {:mcp-config (:mcp-config-path session)
-                                    :mcp-allowed-tools (:mcp-allowed-tools session)}]
+                                    :mcp-allowed-tools (:mcp-allowed-tools session)
+                                    :supervision (:supervision session)}]
                       (if on-chunk
                         (llm/chat-stream llm-client user-prompt on-chunk
                                          (merge {:system @releaser-system-prompt} mcp-opts))

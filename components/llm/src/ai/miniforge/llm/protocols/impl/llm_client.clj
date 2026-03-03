@@ -68,16 +68,15 @@
             :requires-cli? true
             :api-key-var "ANTHROPIC_API_KEY"
             :stream-parser parse-claude-stream-line
-            :args-fn (fn [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools]}]
+            :args-fn (fn [{:keys [prompt system max-tokens streaming? mcp-config supervision]}]
                        (cond-> ["-p"]
-                         streaming? (conj "--output-format" "stream-json")
-                         streaming? (conj "--include-partial-messages")
-                         streaming? (conj "--verbose")
-                         mcp-config (into ["--mcp-config" mcp-config])
-                         (seq mcp-allowed-tools) (into ["--allowedTools" (str/join "," mcp-allowed-tools)])
-                         system (into ["--system-prompt" system])
-                         max-tokens (into ["--max-budget-usd" "0.10"])
-                         true (conj prompt)))}
+                         streaming?                   (conj "--output-format" "stream-json")
+                         streaming?                   (conj "--verbose")
+                         mcp-config                   (into ["--mcp-config" mcp-config])
+                         (:settings-path supervision) (into ["--settings" (:settings-path supervision)])
+                         system                       (into ["--system-prompt" system])
+                         max-tokens                   (into ["--max-budget-usd" "0.10"])
+                         true                         (conj prompt)))}
 
    :codex {:cmd "codex"
            :streaming? true
@@ -86,13 +85,14 @@
            :requires-cli? true
            :api-key-var nil
            :stream-parser parse-codex-stream-line
-           :args-fn (fn [{:keys [prompt model]}]
+           :args-fn (fn [{:keys [prompt model system]}]
                       (cond-> ["exec"
                                "--json"
                                "--full-auto"
                                "--skip-git-repo-check"]
-                        model (into ["-m" model])
-                        true (conj prompt)))}
+                        model  (into ["-m" model])
+                        system (into ["-c" (str "system_prompt=" (json/generate-string system))])
+                        true   (conj prompt)))}
 
    :openai {:cmd "http"
             :streaming? true
