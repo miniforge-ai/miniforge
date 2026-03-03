@@ -81,13 +81,28 @@
                                   "scripts/mcp-artifact-server.bb"
                                   "MINIFORGE_HOME"]})))))
 
+(defn- resolve-server-classpath
+  "Build the full classpath for the MCP artifact server.
+
+   Includes both the src directory (for code) and the resources directory
+   (for tool-registry.edn). Falls back to src-only if resources doesn't exist."
+  [server-path]
+  (let [;; server-path ends with /src — derive /resources from the parent
+        parent (.getParent (io/file server-path))
+        resources-dir (io/file parent "resources")]
+    (if (.exists resources-dir)
+      (str server-path java.io.File/pathSeparator (.getAbsolutePath resources-dir))
+      server-path)))
+
 (defn- server-command
   "Build the command vector for starting the MCP server process."
   [server-path artifact-dir]
   (if (str/ends-with? server-path "/src")
     ;; Component mode: use bb -cp with main class
-    ["bb" "-cp" server-path "-m" "ai.miniforge.mcp-artifact-server.main"
-     "--artifact-dir" artifact-dir]
+    ;; Include resources dir on classpath for tool-registry.edn
+    (let [classpath (resolve-server-classpath server-path)]
+      ["bb" "-cp" classpath "-m" "ai.miniforge.mcp-artifact-server.main"
+       "--artifact-dir" artifact-dir])
     ;; Legacy script mode
     ["bb" server-path "--artifact-dir" artifact-dir]))
 
