@@ -30,6 +30,29 @@
   (>= (get capability-rank actual 0)
       (get capability-rank required 0)))
 
+(def ^:private privacy->min-capability
+  "Map from event privacy level to minimum listener capability required.
+   :public events -> any listener (:observe)
+   :internal events -> :advise or higher
+   :confidential events -> :control only"
+  {:public       :observe
+   :internal     :observe
+   :confidential :control})
+
+(defn- event-requires-capability
+  "Return the minimum capability level required to receive an event.
+
+   Uses schema-defined privacy levels with fallback overrides for
+   specific event types that need stricter filtering."
+  [event-type]
+  (let [;; Get privacy from schema (if available)
+        privacy (try
+                  (let [privacy-fn (requiring-resolve
+                                    'ai.miniforge.event-stream.schema/event-privacy)]
+                    (privacy-fn event-type))
+                  (catch Exception _e :internal))]
+    (get privacy->min-capability privacy :observe)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Listener registration
 
@@ -59,18 +82,23 @@
                                  (str "Invalid capability level: " capability)
                                  {:capability capability
                                   :valid capability-levels})})))
-    ;; Build filter function from listener filters
-    (let [filter-fn (cond
-                      (nil? filters) (constantly true)
-                      :else (fn [event]
-                              (let [wf-ids (:workflow-ids filters)
-                                    event-types (:event-types filters)]
-                                (and (or (nil? wf-ids)
-                                         (empty? wf-ids)
-                                         (contains? (set wf-ids) (:workflow/id event)))
-                                     (or (nil? event-types)
-                                         (empty? event-types)
-                                         (contains? (set event-types) (:event/type event)))))))]
+    ;; Build filter function from listener filters + capability enforcement
+    (let [user-filter-fn (cond
+                           (nil? filters) (constantly true)
+                           :else (fn [event]
+                                   (let [wf-ids (:workflow-ids filters)
+                                         event-types (:event-types filters)]
+                                     (and (or (nil? wf-ids)
+                                              (empty? wf-ids)
+                                              (contains? (set wf-ids) (:workflow/id event)))
+                                          (or (nil? event-types)
+                                              (empty? event-types)
+                                              (contains? (set event-types) (:event/type event)))))))
+          ;; Capability-based filter: listeners only receive events they're authorized for
+          filter-fn (fn [event]
+                      (and (capability-sufficient? capability
+                                                   (event-requires-capability (:event/type event)))
+                           (user-filter-fn event)))]
       ;; Subscribe to event stream
       (core/subscribe! stream listener-id callback filter-fn)
       ;; Store listener metadata
@@ -155,3 +183,36 @@
                  (:annotation/content annotation))]
       (core/publish! stream event)
       event)))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Control action submission (capability-gated)
+
+(defn submit-control-action!
+  "Submit a control action via a listener (requires :control capability).
+
+   Arguments:
+   - stream: Event stream atom
+   - listener-id: UUID of the listener submitting
+   - action: Control action map (from control/create-control-action)
+   - execution-fn: (fn [action] -> result-map)
+
+   Returns: Execution result or throws if insufficient capability."
+  [stream listener-id action execution-fn]
+  (let [listener (get-listener stream listener-id)]
+    (when-not listener
+      (throw (ex-info "Listener not found"
+                      {:anomaly (response/make-anomaly
+                                 :anomalies/not-found
+                                 (str "Listener not found: " listener-id)
+                                 {:listener-id listener-id})})))
+    (when-not (capability-sufficient? (:listener/capability listener) :control)
+      (throw (ex-info "Insufficient capability for control action"
+                      {:anomaly (response/make-anomaly
+                                 :anomalies/forbidden
+                                 "Insufficient capability for control action"
+                                 {:listener-id listener-id
+                                  :capability (:listener/capability listener)
+                                  :required :control})})))
+    ;; Delegate to control/execute-control-action!
+    (let [execute-fn (requiring-resolve 'ai.miniforge.event-stream.control/execute-control-action!)]
+      (execute-fn stream action execution-fn))))

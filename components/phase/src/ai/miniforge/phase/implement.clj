@@ -70,69 +70,74 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
+(defn- build-implement-task
+  "Build the task map for the implementer agent from execution context."
+  [ctx]
+  (let [input (get-in ctx [:execution/input])
+        plan-result (get-in ctx [:execution/phase-results :plan :result :output])
+        verify-failure (get-in ctx [:execution/phase-results :verify])
+        worktree-path (or (:worktree-path ctx) (System/getProperty "user.dir"))
+        files-in-scope (or (get-in input [:context :files-in-scope])
+                           (get-in input [:intent :scope]))
+        existing-files (file-ctx/load-files-in-scope worktree-path files-in-scope)
+        behavior-addendum (agent-beh/load-and-filter-behaviors
+                            :implement {:task {:task/intent (:intent input)}})]
+    (cond-> {:task/id (random-uuid)
+             :task/type :implement
+             :task/description (:description input)
+             :task/title (:title input)
+             :task/intent (:intent input)
+             :task/constraints (:constraints input)
+             :task/plan plan-result
+             :task/existing-files existing-files
+             :task/behavior-addendum behavior-addendum}
+      verify-failure
+      (assoc :task/verify-failures
+             {:test-results (get-in verify-failure [:result :output :metadata :test-results])
+              :test-output (get-in verify-failure [:result :output :metadata :test-results :output])}))))
+
+(defn- create-streaming-callback
+  "Create a streaming callback for agent output if event-stream is available."
+  [ctx]
+  (when-let [es (:event-stream ctx)]
+    (when-let [create-cb (requiring-resolve
+                           'ai.miniforge.event-stream.interface/create-streaming-callback)]
+      (create-cb es (:execution/id ctx) :implement
+                 {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)}))))
+
+(defn- collect-peer-advice
+  "Collect peer messages for the implementer agent if a message router is available."
+  [ctx]
+  (when-let [msg-router (:message-router ctx)]
+    (try
+      (let [get-msgs (requiring-resolve
+                       'ai.miniforge.agent.interface.protocols.messaging/get-messages-for-agent)
+            msgs (get-msgs msg-router :implementer (:execution/id ctx))]
+        (when (seq msgs)
+          {:peer-messages (vec msgs)}))
+      (catch Exception _e nil))))
+
 (defn- enter-implement
   "Execute implementation phase.
 
    Reads plan from context, invokes implementer agent,
    runs through inner loop with syntax/lint gates."
   [ctx]
-  ;; Emit phase started event
   (emit-phase-started! ctx :implement)
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
-
-        ;; Create implementer agent (specialized implementation uses llm/chat directly)
         implementer-agent (agent/create-implementer {})
-
-        ;; Build task from workflow input and plan result
-        input (get-in ctx [:execution/input])
-        ;; Read from execution phase results where plan phase stored its output
-        ;; Phase results contain the full phase map, so extract :result :output
-        plan-result (get-in ctx [:execution/phase-results :plan :result :output])
-
-        ;; Check for verify failure (repair loop re-entry)
-        verify-failure (get-in ctx [:execution/phase-results :verify])
-
-        ;; Load existing file contents for agent visibility
-        worktree-path (or (:worktree-path ctx) (System/getProperty "user.dir"))
-        files-in-scope (or (get-in input [:context :files-in-scope])
-                           (get-in input [:intent :scope]))
-        existing-files (file-ctx/load-files-in-scope worktree-path files-in-scope)
-
-        ;; Load agent-behavior addendum from policy rules
-        behavior-addendum (agent-beh/load-and-filter-behaviors
-                            :implement {:task {:task/intent (:intent input)}})
-
-        task (cond-> {:task/id (random-uuid)
-                      :task/type :implement
-                      :task/description (:description input)
-                      :task/title (:title input)
-                      :task/intent (:intent input)
-                      :task/constraints (:constraints input)
-                      :task/plan plan-result
-                      :task/existing-files existing-files
-                      :task/behavior-addendum behavior-addendum}
-                     ;; When re-entering from verify failure, attach test failure context
-                     verify-failure
-                     (assoc :task/verify-failures
-                            {:test-results (get-in verify-failure [:result :output :metadata :test-results])
-                             :test-output (get-in verify-failure [:result :output :metadata :test-results :output])}))
-
-        ;; Create streaming callback for agent output
-        on-chunk (when-let [es (:event-stream ctx)]
-                   (when-let [create-cb (requiring-resolve
-                                         'ai.miniforge.event-stream.interface/create-streaming-callback)]
-                     (create-cb es (:execution/id ctx) :implement
-                                {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)})))
+        task (build-implement-task ctx)
+        on-chunk (create-streaming-callback ctx)
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
-
-        ;; Invoke agent
+        peer-advice (collect-peer-advice ctx)
+        task (cond-> task
+               peer-advice (assoc :task/peer-advice peer-advice))
         result (try
                  (agent/invoke implementer-agent task agent-ctx)
                  (catch Exception e
                    (response/failure e)))]
-
     (-> ctx
         (assoc-in [:phase :name] :implement)
         (assoc-in [:phase :agent] :implementer)

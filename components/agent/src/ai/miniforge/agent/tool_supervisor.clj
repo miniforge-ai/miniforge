@@ -7,11 +7,18 @@
 
    Architecture:
    - evaluate-tool-use: core policy function (pure, no side effects)
+   - meta-evaluate:     semantic LLM-powered quality/relevance check
    - hook-eval-stdin!:  CLI entry point — reads Claude PreToolUse JSON from
-                        stdin, evaluates, writes decision to stdout"
+                        stdin, evaluates, writes decision to stdout
+
+   Layered evaluation:
+   1. Regex guardrails (fast, cheap) — defense-in-depth
+   2. Meta-evaluator (LLM call) — quality/relevance judgment
+   Container sandbox handles safety; supervision handles quality."
   (:require
    [cheshire.core :as json]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [ai.miniforge.agent.meta-evaluator :as meta-eval]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Bash command policy
@@ -96,6 +103,88 @@
     ;; Default: allow (permissive — only deny known-dangerous)
     {:decision "allow"}))
 
+;------------------------------------------------------------------------------ Layer 1.5
+;; Semantic meta-evaluation (LLM-powered quality/relevance check)
+
+(defn- trivially-safe-tool?
+  "Tools that are always on-task and never need semantic review."
+  [tool-name]
+  (contains? #{"Read" "Glob" "Grep" "WebSearch" "WebFetch" "LS"
+               "mcp__artifact__submit_code_artifact"
+               "mcp__artifact__submit_plan"
+               "mcp__artifact__submit_test_artifact"
+               "mcp__artifact__submit_release_artifact"}
+             tool-name))
+
+(defn evaluate-with-meta
+  "Two-layer evaluation: regex guardrails first, then semantic LLM check.
+
+   Arguments:
+     tool-name  - Tool name string
+     tool-input - Tool input map (keyword keys)
+     opts       - Map with :llm-client, :task-context, :phase
+
+   Returns {:decision \"allow\"|\"deny\" :reason string? :meta-eval map?}
+
+   Layer 1 (regex) denials are final. Layer 2 (meta-eval) only runs for
+   non-trivial tools that passed Layer 1."
+  [tool-name tool-input opts]
+  (let [regex-result (evaluate-tool-use tool-name tool-input)]
+    (cond
+      ;; Layer 1 denied — don't override
+      (= "deny" (:decision regex-result))
+      regex-result
+
+      ;; Trivially safe tools — skip LLM call
+      (trivially-safe-tool? tool-name)
+      regex-result
+
+      ;; No LLM client — regex only
+      (nil? (:llm-client opts))
+      regex-result
+
+      ;; Layer 2: meta-evaluator LLM call
+      :else
+      (let [eval-result (meta-eval/evaluate
+                         {:tool-name tool-name
+                          :tool-input tool-input
+                          :task-context (:task-context opts)
+                          :phase (:phase opts)}
+                         {:llm-client (:llm-client opts)})
+            decision (:decision eval-result)]
+        (if (= :deny decision)
+          {:decision "deny"
+           :reason (:reasoning eval-result)
+           :meta-eval eval-result}
+          {:decision "allow"
+           :meta-eval eval-result})))))
+
+;------------------------------------------------------------------------------ Layer 1.7
+;; Event emission (soft dependency via requiring-resolve)
+
+(defn emit-tool-use-event!
+  "Emit a tool-use-evaluated event to the event stream (if available).
+
+   Uses requiring-resolve to avoid hard dependency on event-stream component.
+   Silently no-ops if event-stream is not loaded or no stream is bound."
+  [tool-name result & [{:keys [event-stream workflow-id phase]}]]
+  (try
+    (when (and event-stream workflow-id)
+      (let [emit-fn (requiring-resolve 'ai.miniforge.event-stream.core/tool-use-evaluated)
+            publish-fn (requiring-resolve 'ai.miniforge.event-stream.core/publish!)
+            meta-eval (:meta-eval result)
+            event (emit-fn event-stream workflow-id tool-name
+                           (:decision result)
+                           (cond-> {}
+                             (:reasoning meta-eval) (assoc :reasoning (:reasoning meta-eval))
+                             (:meta-eval? meta-eval) (assoc :meta-eval? true)
+                             (:confidence meta-eval) (assoc :confidence (:confidence meta-eval))
+                             phase (assoc :phase phase)))]
+        (publish-fn event-stream event)))
+    (catch Exception _e
+      ;; Silently ignore — event emission is observability, not critical path
+      nil)))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Claude hook protocol (stdin/stdout JSON)
 
@@ -104,6 +193,10 @@
 
    Reads Claude PreToolUse JSON from stdin:
      {\"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"ls\"}}
+
+   Optionally includes meta-eval context:
+     {\"tool_name\": \"Bash\", \"tool_input\": {...},
+      \"meta_eval\": {\"task_context\": \"...\", \"phase\": \"implement\"}}
 
    Writes Claude hook response to stdout:
      {} for allow (empty object = no objection)
@@ -115,9 +208,24 @@
     (let [input (json/parse-string (slurp *in*) true)
           tool-name (:tool_name input)
           tool-input (or (:tool_input input) {})
-          ;; Convert string keys to keyword keys for evaluate-tool-use
           tool-input-kw (into {} (map (fn [[k v]] [(keyword k) v]) tool-input))
-          result (evaluate-tool-use tool-name tool-input-kw)]
+          meta-eval-config (:meta_eval input)
+          result (if meta-eval-config
+                   ;; Meta-eval enabled: two-layer evaluation
+                   (let [llm-client (when-let [backend (keyword (or (:backend meta-eval-config) "claude"))]
+                                      (try
+                                        (let [create-client (requiring-resolve
+                                                             'ai.miniforge.llm.protocols.records.llm-client/create-client)]
+                                          (create-client {:backend backend}))
+                                        (catch Exception _e nil)))]
+                     (evaluate-with-meta tool-name tool-input-kw
+                                         {:llm-client llm-client
+                                          :task-context (:task_context meta-eval-config)
+                                          :phase (some-> (:phase meta-eval-config) keyword)}))
+                   ;; No meta-eval: regex only
+                   (evaluate-tool-use tool-name tool-input-kw))
+          ;; Emit event (no-ops if no event stream bound)
+          _ (emit-tool-use-event! tool-name result)]
       (if (= "deny" (:decision result))
         (println (json/generate-string {:decision "block"
                                         :reason (:reason result)}))

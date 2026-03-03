@@ -125,6 +125,87 @@
   (let [promotions (get workflow-state :workflow/pack-promotions [])]
     (mapv build-pack-promotion-evidence promotions)))
 
+;------------------------------------------------------------------------------ Layer 3.5
+;; Supervision Decision Evidence (N6)
+
+(defn collect-supervision-decisions
+  "Collect supervision decision events from the event stream.
+
+   Filters for :supervision/tool-use-evaluated events and transforms
+   them into evidence records.
+
+   Arguments:
+   - event-stream: Event stream atom
+   - workflow-id: UUID of the workflow
+
+   Returns vector of supervision decision evidence maps."
+  [event-stream workflow-id]
+  (try
+    (when event-stream
+      (let [get-events-fn (requiring-resolve 'ai.miniforge.event-stream.core/get-events)
+            events (get-events-fn event-stream
+                                  {:workflow-id workflow-id
+                                   :event-type :supervision/tool-use-evaluated})]
+        (mapv (fn [event]
+                (cond-> {:supervision/tool-name (or (:tool/name event) "unknown")
+                         :supervision/decision (or (:supervision/decision event) "allow")
+                         :supervision/timestamp (or (:event/timestamp event)
+                                                    (java.util.Date.))}
+                  (:supervision/reasoning event)
+                  (assoc :supervision/reasoning (:supervision/reasoning event))
+
+                  (:supervision/meta-eval? event)
+                  (assoc :supervision/meta-eval? true)
+
+                  (:supervision/confidence event)
+                  (assoc :supervision/confidence (:supervision/confidence event))
+
+                  (:workflow/phase event)
+                  (assoc :supervision/phase (:workflow/phase event))))
+              events)))
+    (catch Exception _e
+      ;; event-stream dependency might not be loaded
+      [])))
+
+(defn collect-control-actions
+  "Collect control action events from the event stream.
+
+   Pairs :control-action/requested with :control-action/executed events.
+
+   Arguments:
+   - event-stream: Event stream atom
+   - workflow-id: UUID of the workflow
+
+   Returns vector of control action evidence maps."
+  [event-stream workflow-id]
+  (try
+    (when event-stream
+      (let [get-events-fn (requiring-resolve 'ai.miniforge.event-stream.core/get-events)
+            requested (get-events-fn event-stream
+                                     {:workflow-id workflow-id
+                                      :event-type :control-action/requested})
+            executed (get-events-fn event-stream
+                                    {:workflow-id workflow-id
+                                     :event-type :control-action/executed})
+            executed-by-id (into {} (map (fn [e] [(:action/id e) e]) executed))]
+        (mapv (fn [req-event]
+                (let [action-id (:action/id req-event)
+                      exec-event (get executed-by-id action-id)]
+                  (cond-> {:control-action/id action-id
+                           :control-action/type (:action/type req-event)
+                           :control-action/requester (or (:action/requester req-event) {})
+                           :control-action/timestamp (or (:event/timestamp req-event)
+                                                         (java.util.Date.))
+                           :control-action/result (if exec-event :executed :pending)}
+                    (:action/justification req-event)
+                    (assoc :control-action/justification (:action/justification req-event))
+
+                    (:action/target req-event)
+                    (assoc :control-action/target (:action/target req-event)))))
+              requested)))
+    (catch Exception _e
+      [])))
+
 ;------------------------------------------------------------------------------ Layer 4
 ;; Outcome Evidence
 
@@ -163,14 +244,17 @@
 (defn assemble-evidence-bundle
   "Assemble complete evidence bundle from workflow state and context.
    Returns evidence bundle ready for storage."
-  [workflow-id workflow-state artifact-store]
+  [workflow-id workflow-state artifact-store & [opts]]
   (let [workflow-spec (:workflow/spec workflow-state)
+        event-stream (:event-stream opts)
         intent (extract-intent workflow-spec)
         phase-evidence (collect-all-phases workflow-state)
         policy-checks (collect-policy-checks workflow-state)
         pack-promotions (collect-pack-promotions workflow-state)
         outcome (build-outcome-evidence workflow-state)
         tool-invocations (collect-tool-invocations workflow-state)
+        supervision-decisions (collect-supervision-decisions event-stream workflow-id)
+        control-actions (collect-control-actions event-stream workflow-id)
 
         ;; Get artifacts for semantic validation
         artifacts (when artifact-store
@@ -185,24 +269,41 @@
         semantic-validation (when (seq impl-artifacts)
                               (let [validator (requiring-resolve
                                                'ai.miniforge.evidence-bundle.protocols.impl.semantic-validator/validate-intent-impl)]
-                                (validator intent impl-artifacts)))]
+                                (validator intent impl-artifacts)))
 
-    (let [bundle (merge
-                  (schema/create-evidence-bundle-template)
-                  {:evidence-bundle/id (random-uuid)
-                   :evidence-bundle/workflow-id workflow-id
-                   :evidence-bundle/created-at (java.time.Instant/now)
-                   :evidence/intent intent
-                   :evidence/policy-checks policy-checks
-                   :evidence/outcome outcome}
-                  phase-evidence
-                  (when (seq tool-invocations)
-                    {:evidence/tool-invocations tool-invocations})
-                  (when (seq pack-promotions)
-                    {:evidence/pack-promotions pack-promotions})
-                  (when semantic-validation
-                    {:evidence/semantic-validation semantic-validation}))]
-      (assoc bundle :evidence/content-hash (hash/content-hash bundle)))))
+        bundle (merge
+                 (schema/create-evidence-bundle-template)
+                 {:evidence-bundle/id (random-uuid)
+                  :evidence-bundle/workflow-id workflow-id
+                  :evidence-bundle/created-at (java.time.Instant/now)
+                  :evidence/intent intent
+                  :evidence/policy-checks policy-checks
+                  :evidence/outcome outcome}
+                 phase-evidence
+                 (when (seq tool-invocations)
+                   {:evidence/tool-invocations tool-invocations})
+                 (when (seq pack-promotions)
+                   {:evidence/pack-promotions pack-promotions})
+                 (when (seq supervision-decisions)
+                   {:evidence/supervision-decisions supervision-decisions})
+                 (when (seq control-actions)
+                   {:evidence/control-actions control-actions})
+                 (when semantic-validation
+                   {:evidence/semantic-validation semantic-validation}))
+
+        ;; Run sensitive data scanner before hashing
+        scan-result (try
+                      (let [scan-fn (requiring-resolve
+                                      'ai.miniforge.evidence-bundle.scanner/scan-artifact)
+                            compliance-fn (requiring-resolve
+                                            'ai.miniforge.evidence-bundle.scanner/compliance-metadata)]
+                        (compliance-fn (scan-fn bundle)))
+                      (catch Exception _e nil))
+
+        ;; Merge compliance metadata
+        bundle (cond-> bundle
+                 scan-result (merge scan-result))]
+    (assoc bundle :evidence/content-hash (hash/content-hash bundle))))
 
 ;------------------------------------------------------------------------------ Layer 6
 ;; Workflow Integration Helpers

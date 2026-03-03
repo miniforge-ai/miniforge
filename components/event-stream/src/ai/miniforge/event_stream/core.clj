@@ -450,6 +450,42 @@
       (assoc :action/id action-id)
       (cond-> result (assoc :action/result result))))
 
+;------------------------------------------------------------------------------ Layer 4
+;; OCI container events (N8)
+
+(defn container-started [stream workflow-id container-id & [opts]]
+  (-> (create-envelope stream :oci/container-started workflow-id
+                       (str "Container " container-id " started"))
+      (assoc :oci/container-id container-id)
+      (cond->
+        (:image-digest opts) (assoc :oci/image-digest (:image-digest opts))
+        (:trust-level opts)  (assoc :oci/trust-level (:trust-level opts)))))
+
+(defn container-completed [stream workflow-id container-id exit-code & [duration-ms]]
+  (-> (create-envelope stream :oci/container-completed workflow-id
+                       (str "Container " container-id " completed (exit " exit-code ")"))
+      (assoc :oci/container-id container-id
+             :oci/exit-code exit-code)
+      (cond-> duration-ms (assoc :oci/duration-ms duration-ms))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Tool supervision events (N6/N8)
+
+(defn tool-use-evaluated
+  "Emit when a tool-use request is evaluated by the supervisor.
+
+   Captures both regex and meta-eval decisions for evidence trail."
+  [stream workflow-id tool-name decision & [opts]]
+  (-> (create-envelope stream :supervision/tool-use-evaluated workflow-id
+                       (str "Tool " tool-name " evaluated: " (name (keyword decision))))
+      (assoc :tool/name tool-name
+             :supervision/decision decision)
+      (cond->
+        (:reasoning opts)  (assoc :supervision/reasoning (:reasoning opts))
+        (:meta-eval? opts) (assoc :supervision/meta-eval? true)
+        (:confidence opts) (assoc :supervision/confidence (:confidence opts))
+        (:phase opts)      (assoc :workflow/phase (:phase opts)))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Create event stream

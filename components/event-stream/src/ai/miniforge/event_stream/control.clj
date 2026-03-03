@@ -96,6 +96,18 @@
    :agent    :agents
    :fleet    :fleet})
 
+(defn- authorization-granted
+  "Build a granted authorization result."
+  [reason]
+  {:authorized? true :reason reason})
+
+(defn- authorization-denied
+  "Build a denied authorization result with anomaly."
+  [anomaly-category message context]
+  {:authorized? false
+   :reason message
+   :anomaly (response/make-anomaly anomaly-category message context)})
+
 (defn authorize-action
   "Check RBAC authorization for a control action.
 
@@ -104,7 +116,7 @@
    - action: Control action map from create-control-action
    - requester: Map with :role keyword
 
-   Returns: {:authorized? bool :reason string}"
+   Returns: {:authorized? bool :reason string :anomaly map?}"
   [roles action requester]
   (let [role (:role requester)
         role-perms (get roles role)
@@ -114,65 +126,78 @@
         permitted-actions (get role-perms category #{})]
     (cond
       (nil? role-perms)
-      {:authorized? false
-       :reason (str "Unknown role: " role)
-       :anomaly (response/make-anomaly :anomalies/not-found
-                                        (str "Unknown role: " role)
-                                        {:role role})}
+      (authorization-denied :anomalies/not-found
+                            (str "Unknown role: " role)
+                            {:role role})
 
       (nil? category)
-      {:authorized? false
-       :reason (str "Unknown target type: " target-type)
-       :anomaly (response/make-anomaly :anomalies/incorrect
-                                        (str "Unknown target type: " target-type)
-                                        {:target-type target-type})}
+      (authorization-denied :anomalies/incorrect
+                            (str "Unknown target type: " target-type)
+                            {:target-type target-type})
 
       (contains? permitted-actions action-type)
-      {:authorized? true :reason "Action permitted by role"}
+      (authorization-granted "Action permitted by role")
 
       :else
-      {:authorized? false
-       :reason (str "Role " (name role) " cannot perform " (name action-type)
-                    " on " (name target-type))
-       :anomaly (response/make-anomaly :anomalies/forbidden
-                                        (str "Role " (name role) " cannot perform "
-                                             (name action-type) " on " (name target-type))
-                                        {:role role
-                                         :action-type action-type
-                                         :target-type target-type})})))
+      (authorization-denied :anomalies/forbidden
+                            (str "Role " (name role) " cannot perform "
+                                 (name action-type) " on " (name target-type))
+                            {:role role
+                             :action-type action-type
+                             :target-type target-type}))))
 
 ;------------------------------------------------------------------------------ Layer 2a
 ;; Control action execution
 
 (defn execute-control-action!
-  "Execute an authorized control action.
+  "Execute a control action with RBAC authorization.
+
+   Calls authorize-action before executing. Returns authorization failure
+   if the requester lacks permission.
 
    Arguments:
    - stream: Event stream atom
    - action: Control action map
    - execution-fn: (fn [action] -> result-map) that performs the actual action
+   - opts: Optional map with :roles (RBAC roles, defaults to default-roles)
 
    Emits :control-action/requested before execution and
    :control-action/executed after. Returns result map with :status and :result."
-  [stream action execution-fn]
+  [stream action execution-fn & [opts]]
   (let [workflow-id (get-in action [:action/target :target-id])
-        action-id (:action/id action)]
-    ;; Emit requested event
-    (core/publish! stream
-                   (core/control-action-requested
-                    stream workflow-id action-id (:action/type action)
-                    (:action/requester action)))
-    ;; Execute
-    (let [result (try
-                   (let [r (execution-fn action)]
-                     (response/success r))
-                   (catch Exception e
-                     (response/failure (.getMessage e) {:data (ex-data e)})))]
-      ;; Emit executed event
-      (core/publish! stream
-                     (core/control-action-executed
-                      stream workflow-id action-id result))
-      result)))
+        action-id (:action/id action)
+        roles (or (:roles opts) default-roles)
+        requester (:action/requester action)
+        auth-result (authorize-action roles action requester)]
+    (if-not (:authorized? auth-result)
+      ;; RBAC denied
+      (do
+        (core/publish! stream
+                       (core/control-action-requested
+                        stream workflow-id action-id (:action/type action)
+                        requester))
+        (let [denial {:status :denied
+                      :reason (:reason auth-result)
+                      :anomaly (:anomaly auth-result)}]
+          (core/publish! stream
+                         (core/control-action-executed
+                          stream workflow-id action-id denial))
+          denial))
+      ;; RBAC authorized — execute
+      (do
+        (core/publish! stream
+                       (core/control-action-requested
+                        stream workflow-id action-id (:action/type action)
+                        requester))
+        (let [result (try
+                       (let [r (execution-fn action)]
+                         (response/success r))
+                       (catch Exception e
+                         (response/failure (.getMessage e) {:data (ex-data e)})))]
+          (core/publish! stream
+                         (core/control-action-executed
+                          stream workflow-id action-id result))
+          result)))))
 
 ;------------------------------------------------------------------------------ Layer 2b
 ;; Approval-aware control action execution

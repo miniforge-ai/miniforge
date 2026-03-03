@@ -158,6 +158,38 @@
       (result/err :copy-failed (.getMessage e)))))
 
 ;; ============================================================================
+;; Public Utility Functions
+;; ============================================================================
+
+(defn create-worktree!
+  "Create a git worktree at <base-path>/task-<task-id> from <branch>.
+
+   Takes a map with keys:
+   - :base-path  - Base directory under which the worktree directory is created
+   - :repo-path  - Path to the git repository (used as -C arg)
+   - :branch     - Branch/ref to check out in the worktree
+   - :task-id    - Identifier for the task; the directory will be task-<task-id>
+
+   Returns {:worktree-path string :branch string :task-id string} on success,
+   or a result/err map on failure."
+  [{:keys [base-path repo-path branch task-id]}]
+  (let [worktree-name (str "task-" task-id)
+        result (create-worktree base-path repo-path worktree-name branch)]
+    (if (result/ok? result)
+      (result/ok {:worktree-path (:worktree-path (:data result))
+                  :branch branch
+                  :task-id (str task-id)})
+      result)))
+
+(defn remove-worktree!
+  "Remove a git worktree created by create-worktree!.
+
+   Takes a map with keys:
+   - :worktree-path - Absolute path to the worktree directory to remove"
+  [{:keys [worktree-path]}]
+  (remove-worktree worktree-path))
+
+;; ============================================================================
 ;; WorktreeExecutor Record
 ;; ============================================================================
 
