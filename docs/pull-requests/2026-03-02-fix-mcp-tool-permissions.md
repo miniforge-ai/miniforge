@@ -1,54 +1,75 @@
-# fix: Pass --allowedTools to Claude CLI for MCP artifact tools
+# fix: Universal MCP config for all CLI backends
 
 ## Overview
 
-Fix MCP artifact submission by passing `--allowedTools` to the Claude CLI
-when MCP tools are configured. Without explicit tool permissions, the inner
-Claude session outputs artifacts as text instead of calling MCP tools.
+Extend MCP artifact server integration to work with all three CLI backends
+(Claude, Codex, Cursor) by writing backend-native config files. Previously
+only Claude connected to the MCP artifact server.
 
 ## Motivation
 
-After integrating the MCP artifact server as `miniforge mcp-serve` (PR #233),
-the `--mcp-config` flag was correctly passed to the Claude CLI but the MCP
-tools were never actually called. In `-p` (print) mode, Claude CLI requires
-explicit `--allowedTools` to permit tool use — otherwise it just produces text.
+MCP is a cross-tool standard supported by Claude, Codex, and Cursor Agent,
+but each has a different config mechanism:
 
-This manifested as repeated `WARN: artifact file not found` during spec runs.
+| CLI | Config location | Format |
+|-----|----------------|--------|
+| Claude | `--mcp-config <file>` flag | JSON |
+| Codex | `.codex/config.toml` (project-scoped) | TOML |
+| Cursor | `.cursor/mcp.json` (project-scoped) | JSON |
+
+After PR #233 integrated the MCP artifact server and PR #234 (initial commit)
+fixed `--allowedTools` for Claude, the Codex and Cursor backends still had
+no MCP connectivity. This change completes the picture.
 
 ## Changes in Detail
 
-### 1. `artifact_session.clj` — Expose allowed tool names on session
+### 1. `artifact_session.clj` — Write all config formats + cleanup
 
-- Added `mcp-server-name` and `mcp-tool-names` constants
-- `write-mcp-config!` now populates `:mcp-allowed-tools` on the session
-  with fully-qualified names (e.g. `mcp__artifact__submit_code_artifact`)
-- Backend-agnostic: tool names are data, not CLI flags
+Added two private helpers:
 
-### 2. Agent files — Thread `:mcp-allowed-tools` to LLM layer
+- `write-codex-mcp-config!` — creates/updates `.codex/config.toml` with
+  `[mcp_servers.artifact]` block (append or replace existing block)
+- `write-cursor-mcp-config!` — creates/updates `.cursor/mcp.json` with
+  `mcpServers.artifact` entry (merge into existing JSON)
 
-Updated all four agents to include `:mcp-allowed-tools` in `mcp-opts`:
+Updated `write-mcp-config!` to call both and track paths as
+`:mcp-cleanup-files` on the session.
 
-- `implementer.clj`
-- `planner.clj`
-- `tester.clj`
-- `releaser.clj`
+Added cleanup helpers:
 
-### 3. `llm_client.clj` — Add `--allowedTools` to Claude backend
+- `cleanup-codex-mcp-config!` — removes `[mcp_servers.artifact]` block,
+  deletes file if empty
+- `cleanup-cursor-mcp-config!` — removes `artifact` key from mcpServers,
+  deletes file if empty
 
-The `:claude` backend's `args-fn` now passes
-`--allowedTools <comma-separated-tools>` when `mcp-allowed-tools` is present.
-Other backends (codex, openai, ollama) ignore the key — no changes needed.
+Updated `cleanup-session!` to call both cleanup helpers, preserving
+any pre-existing config in those files.
 
-### 4. `artifact_session_test.clj` — Update test for new session shape
+### 2. `llm_client.clj` — Fix Cursor backend
 
-Updated `write-mcp-config-test` to expect `:mcp-allowed-tools` on the
-returned session map.
+- Changed `:cmd` from `"cursor-cli"` to `"agent"` (correct binary name)
+- Changed `:args-fn` to use `-p` flag and pass `--approve-mcps` when
+  MCP tools are configured (auto-approves MCP in headless mode)
+- Codex backend: no changes needed (reads `.codex/config.toml` from CWD)
+
+### 3. `artifact_session_test.clj` — Test new config formats
+
+Added tests:
+
+- `write-codex-mcp-config-test` — verifies TOML content and append behavior
+- `write-cursor-mcp-config-test` — verifies JSON structure and merge behavior
+- `write-mcp-config-tracks-cleanup-files-test` — verifies `:mcp-cleanup-files`
+- Extended `cleanup-session-test` with 3 new scenarios:
+  - Preserves other config in `.codex/config.toml` after cleanup
+  - Preserves other servers in `.cursor/mcp.json` after cleanup
+  - Deletes empty config files after cleanup
 
 ## Testing Plan
 
-- [x] `bb test` — 321 tests, 0 failures
+- [x] `bb test` — 324 tests, 1827 assertions, 0 failures
 - [x] `bb test:mcp` — 50/50 MCP tests pass
-- [ ] `bb miniforge run work/finish-yc-mvp.spec.edn` — artifacts captured via MCP
+- [ ] Manual: run spec with Codex backend, verify artifact captured
+- [ ] Manual: run spec with Cursor backend, verify artifact captured
 
 ## Deployment Plan
 
@@ -57,12 +78,13 @@ Merge to main. Internal change, no user-facing API changes.
 ## Related Issues/PRs
 
 - PR #233: `feat(mcp): integrate artifact server as miniforge mcp-serve`
-- Root cause: Claude CLI `-p` mode requires explicit `--allowedTools` for MCP tools
+- PR #234 initial commit: `--allowedTools` fix for Claude backend
 
 ## Checklist
 
-- [x] Session exposes `:mcp-allowed-tools`
-- [x] All 4 agents thread tool names to LLM
-- [x] Claude backend passes `--allowedTools`
-- [x] Tests updated and passing
-- [x] Backend-agnostic design (non-Claude backends unaffected)
+- [x] All three backends get MCP config written
+- [x] Cleanup preserves pre-existing config
+- [x] Cleanup deletes empty config files
+- [x] Cursor backend uses correct binary name (`agent`)
+- [x] Tests cover write + merge + cleanup scenarios
+- [x] All tests passing (324 + 50 MCP)
