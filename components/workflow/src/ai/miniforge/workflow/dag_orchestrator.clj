@@ -106,8 +106,9 @@
 (defn- ensure-uuid [x]
   (cond
     (uuid? x) x
-    (string? x) (parse-uuid x)
-    :else x))
+    (string? x) (or (parse-uuid x)
+                     (throw (ex-info (str "Invalid UUID string: " x) {:value x})))
+    :else (throw (ex-info (str "Cannot convert to UUID: " (pr-str x)) {:value x :type (type x)}))))
 
 (defn plan->dag-tasks [plan context]
   (->> (:plan/tasks plan [])
