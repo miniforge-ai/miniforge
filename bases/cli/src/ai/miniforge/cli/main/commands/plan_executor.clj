@@ -4,7 +4,8 @@
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
-   [ai.miniforge.event-stream.interface :as es])
+   [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.phase.registry :as phase-reg])
   (:import
    [java.util UUID]))
 
@@ -114,8 +115,8 @@
       (let [execute-dag (requiring-resolve 'ai.miniforge.workflow.dag-orchestrator/execute-plan-as-dag)
             result (execute-dag plan ctx)]
         (when-not quiet
-          (let [completed (count (filter #(= :completed (:status %)) (vals result)))
-                failed (count (filter #(= :failed (:status %)) (vals result)))]
+          (let [completed (count (filter #(phase-reg/succeeded? (:status %)) (vals result)))
+                failed (count (filter #(phase-reg/failed? (:status %)) (vals result)))]
             (display/print-info (str "Plan execution complete: "
                                      completed " completed, " failed " failed"))))
         result)

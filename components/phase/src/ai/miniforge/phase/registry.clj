@@ -139,10 +139,27 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Phase status predicates
 
+(def already-done-statuses
+  "Statuses indicating work is already complete — neutral outcome."
+  #{:already-satisfied :already-implemented})
+
 (defn succeeded?
   "Check if a phase status indicates success."
   [phase-status]
   (= :completed phase-status))
+
+(defn already-done?
+  "Check if a phase status indicates work was already complete.
+   This is a neutral outcome — not a failure."
+  [phase-status]
+  (contains? already-done-statuses phase-status))
+
+(defn succeeded-or-done?
+  "Check if a phase status indicates success or already-done (neutral).
+   Use this for event emission and outcome reporting."
+  [phase-status]
+  (or (succeeded? phase-status)
+      (already-done? phase-status)))
 
 (defn failed?
   "Check if a phase status indicates failure."

@@ -22,6 +22,7 @@
    Uses a formal FSM (see fsm.clj) for state transitions.
    Tracks runtime state separately from workflow configuration."
   (:require
+   [ai.miniforge.phase.registry :as phase-reg]
    [ai.miniforge.workflow.fsm :as fsm]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -208,12 +209,12 @@
 (defn completed?
   "Check if execution is completed."
   [state]
-  (= :completed (:execution/status state)))
+  (phase-reg/succeeded? (:execution/status state)))
 
 (defn failed?
   "Check if execution has failed."
   [state]
-  (= :failed (:execution/status state)))
+  (phase-reg/failed? (:execution/status state)))
 
 (defn running?
   "Check if execution is running."

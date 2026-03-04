@@ -86,15 +86,11 @@
   [ctx]
   (get-in ctx [:phase]))
 
-(def ^:private already-done-statuses
-  "Statuses indicating work is already complete — skip gates and jump to :done."
-  #{:already-satisfied :already-implemented})
-
 (defn- already-done?
   "Check if phase result indicates work was already done."
   [phase-result]
-  (or (contains? already-done-statuses (:status phase-result))
-      (contains? already-done-statuses (get-in phase-result [:result :status]))))
+  (or (phase-reg/already-done? (:status phase-result))
+      (phase-reg/already-done? (get-in phase-result [:result :status]))))
 
 (defn- apply-gate-validation
   "Apply gate validation to phase result.
@@ -118,10 +114,10 @@
         phase-result))))
 
 (defn- phase-succeeded?
-  "Check if phase completed successfully."
+  "Check if phase completed successfully or work was already done."
   [phase-result]
   (let [status (or (:status phase-result) (:phase/status phase-result))]
-    (or (phase-reg/succeeded? status)
+    (or (phase-reg/succeeded-or-done? status)
         (already-done? phase-result))))
 
 (defn- update-response-chain
@@ -213,7 +209,7 @@
       current-index
 
       ;; Phase already done — skip to done
-      (contains? already-done-statuses status)
+      (phase-reg/already-done? status)
       (let [done-index (->> pipeline
                             (map-indexed vector)
                             (filter #(= :done (get-in (second %) [:config :phase])))
