@@ -30,6 +30,23 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Context reconstruction
 
+(defn- extract-completed-dag-tasks
+  "Extract task IDs that completed successfully from :dag/task-completed events."
+  [events]
+  (->> events
+       (filter #(= :dag/task-completed (:event/type %)))
+       (map :dag/task-id)
+       set))
+
+(defn- extract-dag-pause-info
+  "Find last :dag/paused event and extract completed task IDs and reason."
+  [events]
+  (when-let [pause-event (->> events
+                               (filter #(= :dag/paused (:event/type %)))
+                               last)]
+    {:completed-task-ids (set (:dag/completed-task-ids pause-event))
+     :pause-reason (:dag/pause-reason pause-event)}))
+
 (defn- extract-completed-phases
   "Extract phase names that completed successfully from events."
   [events]
@@ -68,14 +85,21 @@
         workflow-spec (find-workflow-spec events)
         started-event (first (get by-type :workflow/started))
         completed? (boolean (seq (get by-type :workflow/completed)))
-        failed? (boolean (seq (get by-type :workflow/failed)))]
+        failed? (boolean (seq (get by-type :workflow/failed)))
+        completed-dag-tasks (extract-completed-dag-tasks events)
+        dag-pause-info (extract-dag-pause-info events)]
     {:phase-results phase-results
      :completed-phases completed-phases
      :workflow-spec workflow-spec
      :workflow-id (or (:workflow/id started-event) workflow-id)
      :completed? completed?
      :failed? failed?
-     :event-count (count events)}))
+     :event-count (count events)
+     :completed-dag-tasks (or (not-empty completed-dag-tasks)
+                              (:completed-task-ids dag-pause-info)
+                              #{})
+     :dag-paused? (boolean dag-pause-info)
+     :dag-pause-reason (:pause-reason dag-pause-info)}))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public API
@@ -146,6 +170,7 @@
                                       :event-stream event-stream
                                       :control-state control-state
                                       :skip-lifecycle-events false
+                                      :pre-completed-dag-tasks (:completed-dag-tasks reconstructed)
                                       :on-phase-start (fn [_ctx interceptor]
                                                         (when-not quiet
                                                           (display/print-info

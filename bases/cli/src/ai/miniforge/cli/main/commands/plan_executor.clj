@@ -107,7 +107,8 @@
                                              :skip-lifecycle-events false})
         ;; Enrich context with workflow definition for sub-workflow construction
         ctx (assoc ctx :execution/workflow workflow
-                       :workflow-id workflow-id)]
+                       :workflow-id workflow-id
+                       :pre-completed-ids (get opts :pre-completed-dag-tasks #{}))]
     (when-not quiet
       (display/print-info (str "Executing plan: " plan-id " (" task-count " tasks)"))
       (display/print-info (str "Format: " (name format-type))))
