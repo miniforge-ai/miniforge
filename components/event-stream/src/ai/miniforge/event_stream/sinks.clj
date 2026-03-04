@@ -46,15 +46,42 @@
     (.mkdirs events-dir)
     (.getPath (io/file events-dir workflow-file))))
 
+(defn cleanup-stale-events!
+  "Delete event files older than TTL from the events directory.
+
+   Arguments:
+     opts - Map with optional:
+       :ttl-ms - Max age in milliseconds (default: 7 days)
+
+   Returns: Number of files deleted"
+  [& [opts]]
+  (let [ttl-ms (or (:ttl-ms opts) (* 7 24 60 60 1000))
+        home (System/getProperty "user.home")
+        events-dir (io/file home ".miniforge" "events")
+        cutoff (- (System/currentTimeMillis) ttl-ms)]
+    (if (.isDirectory events-dir)
+      (let [stale-files (->> (.listFiles events-dir)
+                             (filter #(and (.isFile %)
+                                           (str/ends-with? (.getName %) ".edn")
+                                           (< (.lastModified %) cutoff))))]
+        (doseq [f stale-files] (.delete f))
+        (count stale-files))
+      0)))
+
 (defn file-sink
   "Create a file sink that writes events to per-workflow files.
+
+   Performs lazy cleanup of stale event files (older than 7 days) on creation.
 
    Arguments:
      opts - Map with optional:
        :base-dir - Base directory (default: ~/.miniforge/events)
+       :ttl-ms   - Max event file age in ms (default: 7 days)
 
    Returns: Sink function (fn [event] -> nil)"
-  [& [_opts]]
+  [& [opts]]
+  ;; Non-blocking cleanup on sink creation
+  (future (try (cleanup-stale-events! opts) (catch Exception _ nil)))
   (fn [event]
     (when-let [workflow-id (:workflow/id event)]
       (try

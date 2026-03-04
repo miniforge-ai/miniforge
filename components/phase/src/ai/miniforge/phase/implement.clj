@@ -157,12 +157,19 @@
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
         agent-status (:status result)
+        iterations (get-in ctx [:phase :iterations] 1)
+        max-iterations (get-in ctx [:phase :budget :iterations]
+                               (get-in default-config [:budget :iterations]))
         phase-status (cond
+                       ;; Error with retry budget remaining — retry
+                       (and (= :error agent-status)
+                            (< iterations max-iterations))
+                       :retrying
+                       ;; Error with budget exhausted — fail
                        (= :error agent-status) :failed
                        (= :already-implemented agent-status) :already-implemented
                        :else :completed)
         metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
-        iterations (get-in ctx [:phase :iterations] 1)
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
@@ -180,8 +187,15 @@
       (println "WARNING: implement phase result has no :output — artifact may be nil"))
     ;; Emit phase completed event
     (emit-phase-completed! updated-ctx :implement result)
-    ;; Add skip metadata when work was already implemented
+    ;; Handle retrying: increment iteration counter and record last error
     (cond-> updated-ctx
+      (= :retrying phase-status)
+      (-> (update-in [:phase :iterations] (fnil inc 1))
+          (assoc-in [:phase :last-error]
+                    (or (get-in result [:error :message])
+                        (get-in result [:output :error])
+                        "Agent returned error status")))
+
       (= :already-implemented agent-status)
       (assoc-in [:phase :skipped-reason] :already-implemented))))
 
