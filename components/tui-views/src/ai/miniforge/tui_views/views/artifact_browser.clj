@@ -67,7 +67,7 @@
                       :data (mapv (fn [a]
                                     {:type (some-> (:type a) name)
                                      :name (or (:name a) (:path a) "unnamed")
-                                     :size (or (:size a) "-")
+                                     :size (get a :size "-")
                                      :status (some-> (:status a) name)})
                                   artifacts)
                       :selected-row selected}))})))

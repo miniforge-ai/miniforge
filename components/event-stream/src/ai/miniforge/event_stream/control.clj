@@ -166,7 +166,7 @@
   [stream action execution-fn & [opts]]
   (let [workflow-id (get-in action [:action/target :target-id])
         action-id (:action/id action)
-        roles (or (:roles opts) default-roles)
+        roles (get opts :roles default-roles)
         requester (:action/requester action)
         auth-result (authorize-action roles action requester)]
     (if-not (:authorized? auth-result)

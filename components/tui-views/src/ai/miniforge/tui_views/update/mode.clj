@@ -182,7 +182,7 @@
 (defn- filter-query
   "Extract the filter query from the command buffer (strip '>' prefix)."
   [model]
-  (let [buf (or (:command-buf model) ">")]
+  (let [buf (get model :command-buf ">")]
     (if (str/starts-with? buf ">")
       (subs buf 1)
       buf)))

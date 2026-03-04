@@ -315,7 +315,7 @@
                         (llm/chat llm-client user-prompt
                                   (merge {:system @planner-system-prompt} mcp-opts)))))
                   llm-response llm-result
-                  tokens (or (:tokens llm-response) 0)]
+                  tokens (get llm-response :tokens 0)]
               (log/info logger :planner :planner/llm-called
                         {:data {:success (llm/success? llm-response)
                                 :tokens tokens

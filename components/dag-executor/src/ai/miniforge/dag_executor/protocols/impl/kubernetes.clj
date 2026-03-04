@@ -274,7 +274,7 @@
 
   (acquire-environment! [_this task-id env-config]
     (let [job-name (str "miniforge-task-" (subs (str task-id) 0 8))
-          workdir (or (:workdir env-config) "/workspace")
+          workdir (get env-config :workdir "/workspace")
           job-spec (build-job-spec job-name namespace image workdir
                                    (:env env-config)
                                    (:resources env-config)

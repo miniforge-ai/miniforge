@@ -206,8 +206,8 @@
 
   (acquire-environment! [_this task-id env-config]
     (let [worktree-name (str "task-" (subs (str task-id) 0 8))
-          repo-path (or (:repo-path env-config) ".")
-          branch (or (:branch env-config) "main")
+          repo-path (get env-config :repo-path ".")
+          branch (get env-config :branch "main")
           create-result (create-worktree base-path repo-path worktree-name branch)]
       (if (result/ok? create-result)
         (let [worktree-path (:worktree-path (:data create-result))]

@@ -193,7 +193,7 @@
                  n (count prs)]
              (str "The user is in the PR fleet view.\n"
                   "Total PRs: " (:total-prs context 0) "\n"
-                  "Active filter: " (name (or (:active-filter context) :open)) "\n"
+                  "Active filter: " (name (get context :active-filter :open)) "\n"
                   (if (pos? n)
                     (str n " PR(s) selected:\n"
                          (str/join "\n"

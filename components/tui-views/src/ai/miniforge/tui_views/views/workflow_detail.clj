@@ -50,7 +50,7 @@
 (defn- render-title-bar [wf [cols rows]]
   (layout/text [cols rows]
                (str " MINIFORGE │ "
-                    (or (:name wf) "Workflow Detail")
+                    (get wf :name "Workflow Detail")
                     (when-let [phase (:phase wf)]
                       (str " │ " (name phase))))
                {:fg :cyan :bold? true}))

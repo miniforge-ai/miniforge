@@ -143,7 +143,7 @@
   "Create a fallback release artifact when LLM response cannot be parsed."
   [input]
   (let [code-artifact (:code-artifact input)
-        task-description (or (:task-description input) "implement changes")
+        task-description (get input :task-description "implement changes")
         files (:code/files code-artifact)
         slug (slugify task-description)
         file-summary (when files (summarize-files files))]
@@ -238,7 +238,7 @@
                         (llm/chat llm-client user-prompt
                                   (merge {:system @releaser-system-prompt} mcp-opts)))))
                   llm-response llm-result
-                  tokens (or (:tokens llm-response) 0)]
+                  tokens (get llm-response :tokens 0)]
               (log/info logger :releaser :releaser/llm-called
                         {:data {:success (llm/success? llm-response)
                                 :tokens tokens

@@ -170,7 +170,7 @@
                   (when effect-threads
                     (swap! effect-threads disj (Thread/currentThread)))))]
     (.setDaemon thread true)
-    (.setName thread (str "tui-effect-" (name (or (:type effect) "unknown"))))
+    (.setName thread (str "tui-effect-" (name (get effect :type "unknown"))))
     (when effect-threads
       (swap! effect-threads conj thread))
     (.start thread)))

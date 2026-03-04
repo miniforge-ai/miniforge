@@ -129,13 +129,13 @@
 (defn fleet-repos
   "Configured repositories in fleet."
   [model]
-  (vec (or (:fleet-repos model) [])))
+  (vec (get model :fleet-repos [])))
 
 (defn browse-candidate-repos
   "Remote browse candidates that are NOT already configured in fleet."
   [model]
   (let [fleet (set (fleet-repos model))]
-    (->> (or (:browse-repos model) [])
+    (->> (get model :browse-repos [])
          (remove fleet)
          vec)))
 

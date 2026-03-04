@@ -150,7 +150,7 @@
   "Record phase metrics in execution context."
   [ctx phase-result merge-metrics-fn]
   (update ctx :execution/metrics merge-metrics-fn
-          (or (:metrics phase-result) {})))
+          (get phase-result :metrics {})))
 
 (defn- track-phase-files
   "Track files written by phase for meta-agent monitoring."

@@ -62,7 +62,7 @@
    - :max-iterations - Maximum generate/repair cycles (default 5)
    - :budget - Budget constraints map"
   [task context]
-  (let [max-iterations (or (:max-iterations context) 5)
+  (let [max-iterations (get context :max-iterations 5)
         budget (:budget context)]
     {:loop/id (random-uuid)
      :loop/type :inner
