@@ -165,7 +165,7 @@
             "Source file content should match artifact")))))
 
 (deftest test-implement-fails-on-agent-error
-  (testing "leave-implement sets phase status to :failed when agent returns :error"
+  (testing "leave-implement retries when agent returns :error and within budget"
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                   agent/invoke (fn [_ _ _]
                                  ;; Simulate agent returning error status
@@ -173,9 +173,22 @@
       (let [ctx (create-base-context)
             ctx-entered (execute-phase-enter :implement ctx)
             ctx-left (execute-phase-leave :implement ctx-entered)]
-        ;; Agent returned :error status, so leave-implement should set :failed
+        ;; Agent returned :error status within retry budget — should retry
+        (is (= :retrying (get-in ctx-left [:phase :status]))
+            "Phase status should be :retrying when agent returns error within budget")
+        (is (= :retrying (get-in ctx-left [:execution/phase-results :implement :status]))
+            "Stored phase result should also show :retrying"))))
+
+  (testing "leave-implement fails when agent returns :error and budget exhausted"
+    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                  agent/invoke (fn [_ _ _]
+                                 (response/error "LLM timeout" {:tokens 0 :duration-ms 5000}))]
+      (let [ctx (-> (create-base-context)
+                    (assoc-in [:phase :iterations] 5)) ;; At max budget
+            ctx-entered (execute-phase-enter :implement ctx)
+            ctx-left (execute-phase-leave :implement ctx-entered)]
         (is (= :failed (get-in ctx-left [:phase :status]))
-            "Phase status should be :failed when agent returns error")
+            "Phase status should be :failed when budget exhausted")
         (is (= :failed (get-in ctx-left [:execution/phase-results :implement :status]))
             "Stored phase result should also show :failed")))))
 
