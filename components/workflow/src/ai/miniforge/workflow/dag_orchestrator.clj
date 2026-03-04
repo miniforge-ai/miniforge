@@ -307,6 +307,28 @@
         propagated
         (recur (into propagated newly-failed))))))
 
+(defn- handle-rate-limit-in-batch
+  "Handle rate-limited tasks in a batch. Returns either:
+   - {:action :continue :new-backend X} to re-queue tasks
+   - {:action :pause :result <paused-map>} to stop execution"
+  [context rate-limited-ids new-completed failed-ids all-results
+   event-stream workflow-id logger]
+  (let [decision (resilience/handle-rate-limited-batch
+                  context rate-limited-ids new-completed logger)]
+    (if (= :continue (:action decision))
+      decision
+      (let [{:keys [artifacts]} (aggregate-results all-results)]
+        (resilience/emit-dag-paused! event-stream workflow-id new-completed (:reason decision))
+        {:action :pause
+         :result (dag-execution-paused (count new-completed) (count failed-ids)
+                                       artifacts (:reason decision))}))))
+
+(defn- emit-completed-checkpoints!
+  "Emit task-completed events for checkpointing."
+  [completed-task-ids results event-stream workflow-id]
+  (doseq [tid completed-task-ids]
+    (resilience/emit-dag-task-completed! event-stream workflow-id tid (get results tid))))
+
 (defn- execute-dag-loop [tasks-map context logger]
   (let [{:keys [on-task-start on-task-complete]} context
         max-parallel (get context :max-parallel 4)
@@ -347,26 +369,21 @@
                 {:keys [rate-limited-ids]} (resilience/analyze-batch-for-rate-limits results)
                 new-completed (into completed-ids completed)]
 
-            ;; Emit task-completed events for checkpointing
-            (doseq [tid completed]
-              (resilience/emit-dag-task-completed! event-stream workflow-id tid (get results tid)))
+            (emit-completed-checkpoints! completed results event-stream workflow-id)
 
             (if (seq rate-limited-ids)
               ;; Handle rate-limited batch
-              (let [decision (resilience/handle-rate-limited-batch
-                              context rate-limited-ids new-completed logger)]
+              (let [decision (handle-rate-limit-in-batch
+                              context rate-limited-ids new-completed failed-ids
+                              all-results event-stream workflow-id logger)]
                 (if (= :continue (:action decision))
-                  ;; Re-queue rate-limited tasks with new backend, don't mark as failed
                   (recur new-completed
                          failed-ids
                          (merge all-results (select-keys results completed))
                          (into sub-workflow-ids batch-sub-ids)
                          (:new-backend decision)
                          (inc iteration))
-                  ;; Pause — emit event and return paused result
-                  (let [{:keys [artifacts]} (aggregate-results all-results)]
-                    (resilience/emit-dag-paused! event-stream workflow-id new-completed (:reason decision))
-                    (dag-execution-paused (count new-completed) (count failed-ids) artifacts (:reason decision)))))
+                  (:result decision)))
 
               ;; Normal path — no rate limits
               (recur new-completed

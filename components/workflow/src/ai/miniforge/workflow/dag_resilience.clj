@@ -60,6 +60,20 @@
                   (str result))]
       (boolean (some #(re-find % msg) @rate-limit-patterns)))))
 
+(defn- find-healthy-backend
+  "Find a healthy backend from the allowed list, excluding the current one.
+   Records the current backend's failure, then returns the first candidate."
+  [current-backend allowed-backends]
+  (try
+    (let [record-call! (requiring-resolve 'ai.miniforge.self-healing.backend-health/record-backend-call!)]
+      (record-call! current-backend false)
+      (first (filter #(not= % (keyword current-backend))
+                     (map keyword allowed-backends))))
+    (catch Exception _
+      ;; If backend-health isn't available, still pick from allowed list
+      (first (filter #(not= % (keyword current-backend))
+                     (map keyword allowed-backends))))))
+
 ;--- Layer 1: Backend Failover + Event Emission
 
 (defn attempt-backend-switch
@@ -82,25 +96,21 @@
 
     ;; Try to find a healthy backend from the allowed list
     :else
-    (try
-      (let [record-call! (requiring-resolve 'ai.miniforge.self-healing.backend-health/record-backend-call!)
-            trigger-switch! (requiring-resolve 'ai.miniforge.self-healing.backend-health/trigger-backend-switch!)
-            _ (record-call! current-backend false)
-            ;; Pick first allowed backend that isn't the current one
-            candidate (first (filter #(not= % (keyword current-backend))
-                                     (map keyword allowed-backends)))]
-        (if candidate
-          (let [result (trigger-switch! current-backend candidate)]
+    (let [candidate (find-healthy-backend current-backend allowed-backends)]
+      (if candidate
+        (try
+          (let [trigger-switch! (requiring-resolve 'ai.miniforge.self-healing.backend-health/trigger-backend-switch!)
+                result (trigger-switch! current-backend candidate)]
             (log/info logger :dag-resilience :failover/switched
                       {:data {:from current-backend :to candidate}})
             {:switched? true :new-backend candidate :switch-result result})
-          (do (log/info logger :dag-resilience :failover/exhausted
-                        {:data {:allowed allowed-backends}})
-              {:switched? false :exhausted? true :reason :all-allowed-exhausted})))
-      (catch Exception e
-        (log/info logger :dag-resilience :failover/error
-                  {:data {:error (.getMessage e)}})
-        {:switched? false :reason :failover-error :error (.getMessage e)}))))
+          (catch Exception e
+            (log/info logger :dag-resilience :failover/error
+                      {:data {:error (.getMessage e)}})
+            {:switched? false :reason :failover-error :error (.getMessage e)}))
+        (do (log/info logger :dag-resilience :failover/exhausted
+                      {:data {:allowed allowed-backends}})
+            {:switched? false :exhausted? true :reason :all-allowed-exhausted})))))
 
 (defn emit-dag-task-completed!
   "Publish :dag/task-completed event for checkpointing."
