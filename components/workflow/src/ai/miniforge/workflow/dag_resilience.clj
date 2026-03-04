@@ -55,8 +55,8 @@
   "Check if a DAG result indicates a rate limit error."
   [result]
   (when-not (dag/ok? result)
-    (let [msg (or (:message result)
-                  (get-in result [:data :message])
+    (let [msg (or (get-in result [:error :message])
+                  (get-in result [:error :data :message])
                   (str result))]
       (boolean (some #(re-find % msg) @rate-limit-patterns)))))
 
