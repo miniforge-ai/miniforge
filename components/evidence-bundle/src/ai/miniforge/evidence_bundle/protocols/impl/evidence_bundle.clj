@@ -18,11 +18,11 @@
      :phase/agent-instance-id (or (:agent-instance-id phase-result) (random-uuid))
      :phase/started-at (:started-at phase-result)
      :phase/completed-at (:completed-at phase-result)
-     :phase/duration-ms (or (:duration-ms phase-result) 0)
-     :phase/output (or (:output phase-result) {})
-     :phase/artifacts (or (:artifacts phase-result) [])
-     :phase/inner-loop-iterations (or (:inner-loop-iterations phase-result) 0)
-     :phase/event-stream-range (or (:event-stream-range phase-result) {})}))
+     :phase/duration-ms (get phase-result :duration-ms 0)
+     :phase/output (get phase-result :output {})
+     :phase/artifacts (get phase-result :artifacts [])
+     :phase/inner-loop-iterations (get phase-result :inner-loop-iterations 0)
+     :phase/event-stream-range (get phase-result :event-stream-range {})}))
 
 (defn collect-all-phase-evidence
   "Collect evidence from all executed phases.
@@ -60,7 +60,7 @@
         tool-invocations (let [collect-fn (requiring-resolve
                                            'ai.miniforge.evidence-bundle.collector/collect-tool-invocations)]
                            (collect-fn workflow-state))
-        semantic-validation (or (:semantic-validation opts) {})
+        semantic-validation (get opts :semantic-validation {})
         collect-all-fn (requiring-resolve 'ai.miniforge.evidence-bundle.collector/collect-all-phases)
         phase-evidence (collect-all-fn workflow-state)
 

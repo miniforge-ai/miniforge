@@ -344,7 +344,7 @@
   [state workflow-id body]
   (try
     (let [data (json/parse-string body true)
-          command (or (:command data) "unknown")]
+          command (get data :command "unknown")]
       ;; Write command file for CLI filesystem polling
       (write-command-file! workflow-id command)
       ;; Keep in-memory enqueue for state tracking
@@ -441,12 +441,12 @@
   (try
     (let [data (json/parse-string body true)
           es (:event-stream @state)
-          listener-spec {:listener/type (keyword (or (:type data) "watcher"))
-                         :listener/capability (keyword (or (:capability data) "observe"))
-                         :listener/identity {:principal (or (:principal data) "anonymous")}
+          listener-spec {:listener/type (keyword (get data :type "watcher"))
+                         :listener/capability (keyword (get data :capability "observe"))
+                         :listener/identity {:principal (get data :principal "anonymous")}
                          :listener/filters (when-let [f (:filters data)]
-                                             {:workflow-ids (mapv parse-uuid (or (:workflow-ids f) []))
-                                              :event-types (mapv keyword (or (:event-types f) []))})
+                                             {:workflow-ids (mapv parse-uuid (get f :workflow-ids []))
+                                              :event-types (mapv keyword (get f :event-types []))})
                          :listener/callback (fn [_event] nil) ; HTTP listeners poll
                          :listener/options (:options data)}
           register-fn (requiring-resolve 'ai.miniforge.event-stream.interface/register-listener!)
@@ -474,7 +474,7 @@
     (let [data (json/parse-string body true)
           es (:event-stream @state)
           listener-id (parse-uuid listener-id-str)
-          annotation {:annotation/type (keyword (or (:type data) "note"))
+          annotation {:annotation/type (keyword (get data :type "note"))
                       :annotation/content (:content data)
                       :annotation/workflow-id (when-let [wid (:workflow-id data)]
                                                 (parse-uuid wid))}
@@ -561,7 +561,7 @@
     (let [data (json/parse-string body true)
           action-id (parse-uuid (str (:action-id data)))
           signers (vec (:required-signers data))
-          quorum (or (:quorum data) (count signers))
+          quorum (get data :quorum (count signers))
           create-fn (requiring-resolve 'ai.miniforge.event-stream.interface/create-approval-request)
           store-fn (requiring-resolve 'ai.miniforge.event-stream.interface/store-approval!)
           mgr-fn (requiring-resolve 'ai.miniforge.event-stream.interface/create-approval-manager)
@@ -571,7 +571,7 @@
                     (swap! state assoc :approval-manager m)
                     m))
           approval (create-fn action-id signers quorum
-                              {:expires-in-hours (or (:expires-in-hours data) 24)})]
+                              {:expires-in-hours (get data :expires-in-hours 24)})]
       (store-fn mgr approval)
       (responses/json-response
        {:status "created"

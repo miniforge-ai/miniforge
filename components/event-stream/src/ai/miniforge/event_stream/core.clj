@@ -176,7 +176,7 @@
       (cond-> context (assoc :phase/context context))))
 
 (defn phase-completed [stream workflow-id phase & [result]]
-  (let [outcome (or (:outcome result) :success)]
+  (let [outcome (get result :outcome :success)]
     (-> (create-envelope stream :workflow/phase-completed workflow-id
                          (str (name phase) " phase " (name outcome)))
         (assoc :workflow/phase phase
@@ -220,7 +220,7 @@
         event-data (response/anomaly->event-data
                     (or anomaly-map
                         (response/make-anomaly :anomalies/fault
-                                               (or (:message error-map) "unknown error"))))]
+                                               (get error-map :message "unknown error"))))]
     (-> (create-envelope stream :workflow/failed workflow-id
                          (str "Workflow failed: " (:message error-map "unknown error")))
         (assoc :workflow/failure-reason (:message error-map (:message event-data))

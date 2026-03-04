@@ -57,7 +57,7 @@
         flex-each (if (pos? flex-count)
                     (max 1 (quot (- usable fixed-used) flex-count))
                     0)]
-    (mapv (fn [spec] (or (:width spec) flex-each)) col-specs)))
+    (mapv (fn [spec] (get spec :width flex-each)) col-specs)))
 
 (defn- compute-col-offset
   "Compute x-offset for column at index, including inter-column gaps."

@@ -56,14 +56,14 @@
   "Move to the next completion option (wraps around)."
   [model]
   (let [n (count (:completions model))
-        idx (or (:completion-idx model) 0)]
+        idx (get model :completion-idx 0)]
     (assoc model :completion-idx (mod (inc idx) n))))
 
 (defn prev-completion
   "Move to the previous completion option (wraps around)."
   [model]
   (let [n (count (:completions model))
-        idx (or (:completion-idx model) 0)]
+        idx (get model :completion-idx 0)]
     (assoc model :completion-idx (mod (+ idx (dec n)) n))))
 
 ;------------------------------------------------------------------------------ Layer 2

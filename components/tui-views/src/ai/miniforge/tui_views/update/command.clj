@@ -86,7 +86,7 @@
   [model repos]
   (let [repos* (vec (or repos []))
         max-idx (max 0 (dec (count repos*)))
-        idx (or (:selected-idx model) 0)]
+        idx (get model :selected-idx 0)]
     (assoc model
            :fleet-repos repos*
            :selected-idx (min idx max-idx))))
@@ -116,7 +116,7 @@
         (assoc model :flash-message (str "Error: " (:error result)))))))
 
 (defn- cmd-sync [model _args]
-  (let [state (or (:pr-filter-state model) :open)]
+  (let [state (get model :pr-filter-state :open)]
     (assoc model
            :side-effect (effect/sync-prs state)
            :flash-message (str "Syncing " (name state) " PRs..."))))
@@ -316,7 +316,7 @@
                        :errors errors}
                       {:repos repos
                        :removed removed
-                       :errors (conj errors (str repo ": " (or (:error r) "unknown error")))})))
+                       :errors (conj errors (str repo ": " (get r :error "unknown error")))})))
                 {:repos (:fleet-repos model) :removed 0 :errors []}
                 targets)
         next-model (-> (with-fleet-repos model (:repos result))
@@ -375,7 +375,7 @@
 (defn- add-repo-completions
   [model]
   (let [local-repos (safe-configured-repos)
-        remote-repos (or (:browse-repos model) [])]
+        remote-repos (get model :browse-repos [])]
     (->> (concat ["browse"] local-repos remote-repos)
          (remove str/blank?)
          distinct

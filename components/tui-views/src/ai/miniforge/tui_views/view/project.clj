@@ -664,9 +664,9 @@
         prs (:train/prs train [])]
     (mapv (fn [pr]
             {:order (str (:pr/merge-order pr))
-             :repo (or (:pr/repo pr) "")
+             :repo (get pr :pr/repo "")
              :pr (str "#" (:pr/number pr))
-             :title (or (:pr/title pr) "")
+             :title (get pr :pr/title "")
              :status (some-> (:pr/status pr) name)
              :ci (some-> (:pr/ci-status pr) name)})
           prs)))
@@ -713,7 +713,7 @@
              :type (some-> (:type a) name)
              :name (or (:name a) (:path a) "unnamed")
              :phase (some-> (:phase a) name)
-             :size (or (:size a) "-")
+             :size (get a :size "-")
              :status (some-> (:status a) name)
              :time (or (safe-format-time (:created-at a)) "")})
           artifacts)))
@@ -721,7 +721,7 @@
 (defn- project-kanban-columns
   "Project workflows into kanban columns."
   [model]
-  (let [all-wfs (vec (remove #(= :archived (:status %)) (or (:workflows model) [])))
+  (let [all-wfs (vec (remove #(= :archived (:status %)) (get model :workflows [])))
         blocked   (filterv #(= :blocked (:status %)) all-wfs)
         ready     (filterv #(#{:ready :pending} (:status %)) all-wfs)
         active    (filterv #(#{:running :implementing :pr-opening :responding} (:status %)) all-wfs)
@@ -739,7 +739,7 @@
      {:title "MERGING" :color :blue
       :cards (mapv (fn [wf] {:label (:name wf) :status :merging}) merging)}
      {:title "DONE" :color :green
-      :cards (mapv (fn [wf] {:label (:name wf) :status (or (:status wf) :success)}) done)}]))
+      :cards (mapv (fn [wf] {:label (:name wf) :status (get wf :status :success)}) done)}]))
 
 (defn- project-phase-tree
   "Project workflow phases as tree nodes for the detail view."
@@ -767,17 +767,17 @@
   [model]
   (let [detail (:detail model)
         agent (:current-agent detail)
-        output (or (:agent-output detail) "")]
+        output (get detail :agent-output "")]
     [{:label (if agent
-               (str "[" (name (or (:type agent) :agent)) "] " output)
+               (str "[" (name (get agent :type :agent)) "] " output)
                (if (seq output) output "No agent output"))}]))
 
 (defn- project-repo-list
   "Project repo manager data for the table widget."
   [model]
-  (let [source (or (:repo-manager-source model) :fleet)
-        fleet-repos (set (or (:fleet-repos model) []))
-        browse-repos (or (:browse-repos model) [])]
+  (let [source (get model :repo-manager-source :fleet)
+        fleet-repos (set (get model :fleet-repos []))
+        browse-repos (get model :browse-repos [])]
     (if (= source :browse)
       ;; Browse mode: show remote repos with fleet membership
       (mapv (fn [repo]
@@ -832,7 +832,7 @@
 
 (defn- ctx-pr-fleet-summary [model]
   (let [prs (:pr-items model [])
-        filter-state (or (:pr-filter-state model) :open)
+        filter-state (get model :pr-filter-state :open)
         repo-count (count (distinct (map :pr/repo prs)))
         merge-ready (count (filter (fn [pr]
                                      (let [r (or (:pr/readiness pr) (derive-readiness pr))]
@@ -884,7 +884,7 @@
 
 (defn- ctx-repo-manager-title [model]
   (let [idx (.indexOf ^java.util.List model/top-level-views :repo-manager)
-        repos (or (:fleet-repos model) [])]
+        repos (get model :fleet-repos [])]
     (str "Repos (" (count repos) ") [" (inc idx) "]")))
 
 (def ^:private contexts

@@ -74,7 +74,7 @@
                    (str (count filtered?)))
 
       :else
-      (or (:normal segments) ""))))
+      (get segments :normal ""))))
 
 (defn- render-footer
   "Render a footer node. Appends flash message if present."
@@ -107,7 +107,7 @@
   (let [project-fn (project/get-projection data-fn)
         data-raw (project-fn model)
         selected (:selected-idx model)
-        selected-ids (or (:selected-ids model) #{})
+        selected-ids (get model :selected-ids #{})
         show-sel? (and selection-col? (seq selected-ids))
         sel-w (if show-sel? 3 0)
         ;; Add selection column to data if needed

@@ -71,7 +71,7 @@ Respond with ONLY a JSON object, no other text:
                          (min 1.0 (max 0.0 (double c)))
                          0.5))]
       {:decision decision
-       :reasoning (or (:reasoning parsed) "No reasoning provided")
+       :reasoning (get parsed :reasoning "No reasoning provided")
        :confidence confidence
        :meta-eval? true})
     (catch Exception _e

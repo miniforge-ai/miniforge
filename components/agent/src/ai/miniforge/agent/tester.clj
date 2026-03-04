@@ -153,7 +153,7 @@
   [code-artifact spec]
   (let [code-files (or (:code/files code-artifact) [])
         source-file (first (filter #(= :create (:action %)) code-files))
-        source-path (or (:path source-file) "src/unknown.clj")
+        source-path (get source-file :path "src/unknown.clj")
         test-path (-> source-path
                       (str/replace #"^src/" "test/")
                       (str/replace #"\.clj$" "_test.clj"))
@@ -282,7 +282,7 @@
               on-chunk (:on-chunk context)
               ;; Input can be a code artifact or a map with :code and :spec
               code-artifact (or (:code input) input)
-              spec (or (:spec input) {})
+              spec (get input :spec {})
               code-text (code->text code-artifact)
               acceptance-criteria (or (:task/acceptance-criteria spec)
                                       (:acceptance-criteria spec)
@@ -307,7 +307,7 @@
                         (llm/chat llm-client user-prompt
                                   (merge {:system @tester-system-prompt} mcp-opts)))))
                   response llm-result
-                  tokens (or (:tokens response) 0)]
+                  tokens (get response :tokens 0)]
               (log/info logger :tester :tester/llm-called
                         {:data {:success (llm/success? response)
                                 :tokens tokens

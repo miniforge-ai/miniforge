@@ -84,9 +84,9 @@
     (swap! usage update workflow-id
            (fn [current]
              (let [curr (or current {:tokens 0 :cost-usd 0.0 :duration-ms 0})]
-               {:tokens (+ (:tokens curr) (or (:tokens new-usage) 0))
-                :cost-usd (+ (:cost-usd curr) (or (:cost-usd new-usage) 0.0))
-                :duration-ms (+ (:duration-ms curr) (or (:duration-ms new-usage) 0))}))))
+               {:tokens (+ (:tokens curr) (get new-usage :tokens 0))
+                :cost-usd (+ (:cost-usd curr) (get new-usage :cost-usd 0.0))
+                :duration-ms (+ (:duration-ms curr) (get new-usage :duration-ms 0))}))))
 
   (check-budget [_this workflow-id]
     (let [budget (get @budgets workflow-id (:default-budget default-config))
@@ -136,7 +136,7 @@
   (inject-for-agent [_this agent-role task context]
     (when (:knowledge-injection? config)
       (let [task-tags (or (:task/tags task) [])
-            context-tags (or (:tags context) [])
+            context-tags (get context :tags [])
             query-context {:tags (distinct (concat task-tags context-tags))}
             zettels (knowledge/inject-knowledge knowledge-store agent-role query-context)]
         {:formatted (format-knowledge-block zettels agent-role)

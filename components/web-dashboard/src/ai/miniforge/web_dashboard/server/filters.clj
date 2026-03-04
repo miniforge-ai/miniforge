@@ -159,7 +159,7 @@
 (defn- normalize-filter-ast
   "Normalize JSON AST from browser before evaluation."
   [ast]
-  (let [clauses (or (:clauses ast) (get ast "clauses") [])]
+  (let [clauses (get ast :clauses (get ast "clauses" []))]
     {:op (normalize-ast-op (or (:op ast) (get ast "op")))
      :clauses (->> clauses
                    (map normalize-filter-clause)
