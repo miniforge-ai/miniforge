@@ -138,21 +138,52 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Phase status predicates
+;;
+;; Accept either a bare keyword (:completed, :failed, etc.) or a map with
+;; a status key (:status, :execution/status, :step/status, :chain/status).
+
+(def already-done-statuses
+  "Statuses indicating work is already complete — neutral outcome."
+  #{:already-satisfied :already-implemented})
+
+(def ^:private status-keys
+  "Keys to try when extracting status from a map, in priority order."
+  [:status :execution/status :step/status :chain/status])
+
+(defn- extract-status
+  "Extract a status keyword from a map by trying known status keys."
+  [m]
+  (when m (some m status-keys)))
 
 (defn succeeded?
-  "Check if a phase status indicates success."
-  [phase-status]
-  (= :completed phase-status))
+  "Check if a result map indicates success.
+   Looks for :status, :execution/status, :step/status, or :chain/status."
+  [m]
+  (= :completed (extract-status m)))
+
+(defn already-done?
+  "Check if a result map indicates work was already complete.
+   This is a neutral outcome — not a failure."
+  [m]
+  (contains? already-done-statuses (extract-status m)))
+
+(defn succeeded-or-done?
+  "Check if a result map indicates success or already-done (neutral).
+   Use this for event emission and outcome reporting."
+  [m]
+  (let [s (extract-status m)]
+    (or (= :completed s)
+        (contains? already-done-statuses s))))
 
 (defn failed?
-  "Check if a phase status indicates failure."
-  [phase-status]
-  (= :failed phase-status))
+  "Check if a result map indicates failure."
+  [m]
+  (= :failed (extract-status m)))
 
 (defn retrying?
-  "Check if a phase status indicates retry."
-  [phase-status]
-  (= :retrying phase-status))
+  "Check if a result map indicates retry."
+  [m]
+  (= :retrying (extract-status m)))
 
 (defn determine-phase-status
   "Determine phase status from agent result status, iteration count, and budget.

@@ -49,7 +49,7 @@
     (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
       (when-let [phase-completed (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
         (let [workflow-id (:execution/id ctx)
-              outcome (if (registry/succeeded? (get-in ctx [:phase :status])) :success :failure)
+              outcome (if (registry/succeeded-or-done? (:phase ctx)) :success :failure)
               duration-ms (get-in ctx [:phase :duration-ms])]
           (publish! event-stream (phase-completed event-stream workflow-id phase
                                                    {:outcome outcome :duration-ms duration-ms})))))))

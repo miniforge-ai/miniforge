@@ -153,7 +153,7 @@
                            :step/chain-id chain-id
                            :step/chain-index idx}
               updated-results (conj step-results step-result)]
-          (if (phase-reg/failed? (:execution/status result))
+          (if (phase-reg/failed? result)
             ;; Step failed — emit failure events and stop
             (let [error (or (:execution/error result) "Step execution failed")]
               (emit! opts 'ai.miniforge.event-stream.interface/chain-step-failed

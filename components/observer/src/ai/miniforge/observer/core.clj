@@ -5,6 +5,7 @@
    collects metrics, and generates performance reports."
   (:require
    [ai.miniforge.observer.protocol :as proto]
+   [ai.miniforge.phase.registry :as phase-reg]
    [ai.miniforge.workflow.interface :as wf]
    [clojure.string :as str]))
 
@@ -321,7 +322,7 @@
   [observer opts]
   (let [limit (get opts :limit 100)
         metrics (proto/get-all-metrics observer {:limit limit})
-        failed (filter #(= :failed (:status %)) metrics)
+        failed (filter phase-reg/failed? metrics)
 
         ;; Analyze which phases fail most often
         failed-phases (reduce

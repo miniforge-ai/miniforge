@@ -2,7 +2,8 @@
   "Chain-level evidence aggregation.
 
    Aggregates per-step evidence bundles into a chain-level bundle,
-   including chain definition, step results, total timing, and metrics.")
+   including chain definition, step results, total timing, and metrics."
+  (:require [ai.miniforge.phase.registry :as phase-reg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Step Summarization
@@ -43,8 +44,8 @@
    - :steps-with-output"
   [step-results]
   (let [total (count step-results)
-        completed (count (filter #(= :completed (:step/status %)) step-results))
-        failed (count (filter #(= :failed (:step/status %)) step-results))
+        completed (count (filter phase-reg/succeeded? step-results))
+        failed (count (filter phase-reg/failed? step-results))
         with-output (count (filter #(some? (:step/output %)) step-results))]
     {:total-steps total
      :completed-steps completed
@@ -57,7 +58,7 @@
 (defn- derive-chain-status
   "Derive chain evidence status from the chain result."
   [chain-result]
-  (if (= :completed (:chain/status chain-result))
+  (if (phase-reg/succeeded? chain-result)
     :completed
     :failed))
 

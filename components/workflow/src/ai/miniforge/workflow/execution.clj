@@ -86,15 +86,11 @@
   [ctx]
   (get-in ctx [:phase]))
 
-(def ^:private already-done-statuses
-  "Statuses indicating work is already complete — skip gates and jump to :done."
-  #{:already-satisfied :already-implemented})
-
 (defn- already-done?
   "Check if phase result indicates work was already done."
   [phase-result]
-  (or (contains? already-done-statuses (:status phase-result))
-      (contains? already-done-statuses (get-in phase-result [:result :status]))))
+  (or (phase-reg/already-done? phase-result)
+      (phase-reg/already-done? (:result phase-result))))
 
 (defn- apply-gate-validation
   "Apply gate validation to phase result.
@@ -118,11 +114,10 @@
         phase-result))))
 
 (defn- phase-succeeded?
-  "Check if phase completed successfully."
+  "Check if phase completed successfully or work was already done."
   [phase-result]
-  (let [status (or (:status phase-result) (:phase/status phase-result))]
-    (or (phase-reg/succeeded? status)
-        (already-done? phase-result))))
+  (or (phase-reg/succeeded-or-done? phase-result)
+      (already-done? phase-result)))
 
 (defn- update-response-chain
   "Update response chain with phase result."
@@ -203,17 +198,16 @@
 
    Returns next index or :done/:error."
   [pipeline current-index phase-config phase-result]
-  (let [status (or (:status phase-result) (:phase/status phase-result))
-        on-fail (:on-fail phase-config)
+  (let [on-fail (:on-fail phase-config)
         on-success (:on-success phase-config)
         redirect-to (:redirect-to phase-result)]
     (cond
       ;; Phase retrying (transient error, stay at current index)
-      (phase-reg/retrying? status)
+      (phase-reg/retrying? phase-result)
       current-index
 
       ;; Phase already done — skip to done
-      (contains? already-done-statuses status)
+      (phase-reg/already-done? phase-result)
       (let [done-index (->> pipeline
                             (map-indexed vector)
                             (filter #(= :done (get-in (second %) [:config :phase])))
@@ -221,7 +215,7 @@
         (if done-index (first done-index) :done))
 
       ;; Phase completed successfully
-      (phase-reg/succeeded? status)
+      (phase-reg/succeeded? phase-result)
       (if on-success
         ;; Find target phase by name
         (let [target-index (->> pipeline
@@ -236,7 +230,7 @@
             :done)))
 
       ;; Phase failed with redirect — jump to target phase
-      (and (phase-reg/failed? status) redirect-to)
+      (and (phase-reg/failed? phase-result) redirect-to)
       (let [target-index (->> pipeline
                               (map-indexed vector)
                               (filter #(= redirect-to (get-in (second %) [:config :phase])))
@@ -244,7 +238,7 @@
         (if target-index (first target-index) :error))
 
       ;; Phase failed
-      (phase-reg/failed? status)
+      (phase-reg/failed? phase-result)
       (if on-fail
         ;; Find target phase by name
         (let [target-index (->> pipeline

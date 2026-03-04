@@ -191,10 +191,9 @@
         sub-opts (task-sub-opts context)
         run-pipeline (requiring-resolve 'ai.miniforge.workflow.runner/run-pipeline)
         result (run-pipeline sub-workflow sub-input sub-opts)
-        status (:execution/status result)
         artifacts (:execution/artifacts result)
         metrics (:execution/metrics result)]
-    (if (phase-reg/succeeded? status)
+    (if (phase-reg/succeeded? result)
       (workflow-success (first artifacts) metrics)
       (workflow-failure (or (first (:execution/errors result))
                             "Sub-workflow failed")
