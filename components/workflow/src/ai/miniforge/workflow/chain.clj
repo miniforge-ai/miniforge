@@ -37,6 +37,7 @@
    - [:prev/last-phase-result ...] — navigates into previous step's last phase result
    - keyword                 — reads from chain input"
   (:require
+   [ai.miniforge.phase.registry :as phase-reg]
    [ai.miniforge.workflow.runner :as runner]))
 
 ;------------------------------------------------------------------------------ Layer 0: Binding resolution
@@ -152,7 +153,7 @@
                            :step/chain-id chain-id
                            :step/chain-index idx}
               updated-results (conj step-results step-result)]
-          (if (= :failed (:execution/status result))
+          (if (phase-reg/failed? (:execution/status result))
             ;; Step failed — emit failure events and stop
             (let [error (or (:execution/error result) "Step execution failed")]
               (emit! opts 'ai.miniforge.event-stream.interface/chain-step-failed

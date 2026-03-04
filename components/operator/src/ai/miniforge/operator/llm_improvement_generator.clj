@@ -73,9 +73,9 @@
     (when imp-type
       {:improvement/id           (random-uuid)
        :improvement/type         imp-type
-       :improvement/target       (or (:target raw) :unknown)
-       :improvement/change       (or (:change raw) {})
-       :improvement/rationale    (or (:rationale raw) "No rationale provided")
+       :improvement/target       (get raw :target :unknown)
+       :improvement/change       (get raw :change {})
+       :improvement/rationale    (get raw :rationale "No rationale provided")
        :improvement/confidence   (let [c (:confidence raw)]
                                    (if (number? c)
                                      (min 1.0 (max 0.0 (double c)))

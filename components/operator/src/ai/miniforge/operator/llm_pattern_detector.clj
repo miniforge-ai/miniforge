@@ -75,15 +75,15 @@
   (let [pattern-type (parse-pattern-type (:type raw))]
     (when pattern-type
       {:pattern/type        pattern-type
-       :pattern/description (or (:description raw) "No description provided")
-       :pattern/affected    (or (:affected raw) "unknown")
+       :pattern/description (get raw :description "No description provided")
+       :pattern/affected    (get raw :affected "unknown")
        :pattern/occurrences (let [n (:occurrences raw)]
                               (if (number? n) (int n) 1))
        :pattern/confidence  (let [c (:confidence raw)]
                               (if (number? c)
                                 (min 1.0 (max 0.0 (double c)))
                                 0.5))
-       :pattern/rationale   (or (:rationale raw) "No rationale provided")
+       :pattern/rationale   (get raw :rationale "No rationale provided")
        :pattern/source      :llm})))
 
 (defn- parse-detect-response

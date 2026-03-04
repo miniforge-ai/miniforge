@@ -22,6 +22,18 @@
 (def repair p/repair)
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Gate result predicates
+
+(defn passed?
+  "Check if a gate result or aggregate result indicates all gates passed."
+  [result]
+  (boolean (:passed? result)))
+
+(defn failed?
+  "Check if a gate result or aggregate result indicates failure."
+  [result]
+  (not (:passed? result)))
+
 ;; Gate result constructors (pure functions)
 
 (defn pass-result

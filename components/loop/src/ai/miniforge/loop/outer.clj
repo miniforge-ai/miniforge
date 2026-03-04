@@ -120,7 +120,7 @@
    :loop/history [{:phase :spec
                    :timestamp (java.util.Date.)
                    :outcome :entered}]
-   :loop/config (or (:config context) {})
+   :loop/config (get context :config {})
    :loop/created-at (java.util.Date.)
    :loop/updated-at (java.util.Date.)})
 

@@ -25,7 +25,8 @@
    already exists) and DAG execution disabled (to prevent infinite recursion)."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.phase.registry :as phase-reg]))
 
 ;--- Layer 0: Result Constructors
 
@@ -193,7 +194,7 @@
         status (:execution/status result)
         artifacts (:execution/artifacts result)
         metrics (:execution/metrics result)]
-    (if (= :completed status)
+    (if (phase-reg/succeeded? status)
       (workflow-success (first artifacts) metrics)
       (workflow-failure (or (first (:execution/errors result))
                             "Sub-workflow failed")

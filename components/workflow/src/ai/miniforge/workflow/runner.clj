@@ -26,6 +26,7 @@
 
    Provides the main run-pipeline entry point."
   (:require [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.registry :as phase-reg]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.execution :as exec]
@@ -329,7 +330,7 @@
                         (inc iteration)))))]
 
        ;; Validate completed workflows produced results
-       (let [final-ctx (if (and (= :completed (:execution/status final-ctx))
+       (let [final-ctx (if (and (phase-reg/succeeded? (:execution/status final-ctx))
                                 (empty? (:execution/artifacts final-ctx))
                                 (empty? (:execution/phase-results final-ctx)))
                          (-> final-ctx
@@ -348,7 +349,7 @@
            (when-let [operator (:operator opts)]
              (let [observe-fn (requiring-resolve 'ai.miniforge.operator.interface/observe-signal)
                    status (:execution/status output-ctx)
-                   signal-type (if (= :completed status)
+                   signal-type (if (phase-reg/succeeded? status)
                                  :workflow-complete
                                  :workflow-failed)]
                (observe-fn operator
