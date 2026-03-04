@@ -188,12 +188,23 @@
         release-data (when (= :success (:status result)) (:output result))
         release-metrics (or (:release/metrics release-data) {})
         metrics (merge {:tokens 0 :duration-ms duration-ms} release-metrics)
+        agent-status (:status result)
         iterations (get-in ctx [:phase :iterations] 1)
+        max-iterations (get-in ctx [:phase :budget :iterations]
+                               (get-in default-config [:budget :iterations]))
+        phase-status (cond
+                       (= :success agent-status) :completed
+                       (and (= :error agent-status)
+                            (< iterations max-iterations)) :retrying
+                       (= :error agent-status) :failed
+                       ;; Fallback: if no explicit success, treat as failed
+                       (not= :success agent-status) :failed
+                       :else :completed)
         pr-info (get-in ctx [:workflow/pr-info])
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
-                        (assoc-in [:phase :status] :completed)
+                        (assoc-in [:phase :status] phase-status)
                         (assoc-in [:phase :metrics] metrics)
                         (assoc-in [:metrics :release :duration-ms] duration-ms)
                         (assoc-in [:metrics :release :repair-cycles] (dec iterations))
@@ -206,7 +217,13 @@
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
     ;; Emit phase completed event
     (emit-phase-completed! updated-ctx :release result)
-    updated-ctx))
+    ;; Handle retrying: increment iteration counter
+    (cond-> updated-ctx
+      (= :retrying phase-status)
+      (-> (update-in [:phase :iterations] (fnil inc 1))
+          (assoc-in [:phase :last-error]
+                    (or (get-in result [:error :message])
+                        "Release phase failed"))))))
 
 (defn- error-release
   "Handle release phase errors."
