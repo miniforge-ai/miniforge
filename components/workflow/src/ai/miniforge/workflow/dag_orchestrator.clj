@@ -26,7 +26,8 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.phase.registry :as phase-reg]))
+   [ai.miniforge.phase.registry :as phase-reg]
+   [ai.miniforge.workflow.dag-resilience :as resilience]))
 
 ;--- Layer 0: Result Constructors
 
@@ -54,6 +55,15 @@
    :artifacts []
    :metrics {}
    :error error})
+
+(defn- dag-execution-paused [completed failed artifacts reason]
+  {:success? false
+   :paused? true
+   :tasks-completed completed
+   :tasks-failed failed
+   :artifacts (vec artifacts)
+   :pause-reason reason
+   :metrics {}})
 
 ;--- Layer 0: Level Traversal
 
@@ -299,11 +309,15 @@
 
 (defn- execute-dag-loop [tasks-map context logger]
   (let [{:keys [on-task-start on-task-complete]} context
-        max-parallel (get context :max-parallel 4)]
-    (loop [completed-ids #{}
+        max-parallel (get context :max-parallel 4)
+        event-stream (or (:event-stream context)
+                         (get-in context [:execution/opts :event-stream]))
+        workflow-id (:workflow-id context)]
+    (loop [completed-ids (get context :pre-completed-ids #{})
            failed-ids #{}
            all-results {}
            sub-workflow-ids []
+           current-backend (get context :current-backend)
            iteration 0]
       (let [all-failed (propagate-failures tasks-map failed-ids)
             ready-tasks (compute-ready-tasks tasks-map completed-ids all-failed)]
@@ -323,23 +337,57 @@
           :else
           (let [batch (take max-parallel ready-tasks)
                 _ (notify-batch-start batch on-task-start)
-                results (execute-tasks-batch batch execute-single-task context)
+                ctx (cond-> context
+                      current-backend (assoc :current-backend current-backend))
+                results (execute-tasks-batch batch execute-single-task ctx)
                 _ (notify-batch-complete results on-task-complete)
                 {:keys [completed failed]} (partition-results results)
-                batch-sub-ids (map (fn [[tid _]] (keyword (str "dag-task-" tid))) batch)]
-            (recur (into completed-ids completed)
-                   (into failed-ids failed)
-                   (merge all-results results)
-                   (into sub-workflow-ids batch-sub-ids)
-                   (inc iteration))))))))
+                batch-sub-ids (map (fn [[tid _]] (keyword (str "dag-task-" tid))) batch)
+                ;; Analyze for rate limits
+                {:keys [rate-limited-ids]} (resilience/analyze-batch-for-rate-limits results)
+                new-completed (into completed-ids completed)]
+
+            ;; Emit task-completed events for checkpointing
+            (doseq [tid completed]
+              (resilience/emit-dag-task-completed! event-stream workflow-id tid (get results tid)))
+
+            (if (seq rate-limited-ids)
+              ;; Handle rate-limited batch
+              (let [decision (resilience/handle-rate-limited-batch
+                              context rate-limited-ids new-completed logger)]
+                (if (= :continue (:action decision))
+                  ;; Re-queue rate-limited tasks with new backend, don't mark as failed
+                  (recur new-completed
+                         failed-ids
+                         (merge all-results (select-keys results completed))
+                         (into sub-workflow-ids batch-sub-ids)
+                         (:new-backend decision)
+                         (inc iteration))
+                  ;; Pause — emit event and return paused result
+                  (let [{:keys [artifacts]} (aggregate-results all-results)]
+                    (resilience/emit-dag-paused! event-stream workflow-id new-completed (:reason decision))
+                    (dag-execution-paused (count new-completed) (count failed-ids) artifacts (:reason decision)))))
+
+              ;; Normal path — no rate limits
+              (recur new-completed
+                     (into failed-ids failed)
+                     (merge all-results results)
+                     (into sub-workflow-ids batch-sub-ids)
+                     current-backend
+                     (inc iteration)))))))))
 
 (defn execute-plan-as-dag [plan context]
   (let [logger (or (:logger context) (log/create-logger {:min-level :info}))
         task-defs (plan->dag-tasks plan context)
-        tasks-map (->> task-defs (map (fn [t] [(:task/id t) t])) (into {}))]
+        tasks-map (->> task-defs (map (fn [t] [(:task/id t) t])) (into {}))
+        pre-completed (get context :pre-completed-ids #{})
+        ctx (cond-> context
+              (seq pre-completed) (assoc :pre-completed-ids pre-completed))]
     (log/info logger :dag-orchestrator :dag/starting
-              {:data {:plan-id (:plan/id plan) :task-count (count task-defs)}})
-    (execute-dag-loop tasks-map context logger)))
+              {:data {:plan-id (:plan/id plan)
+                      :task-count (count task-defs)
+                      :pre-completed (count pre-completed)}})
+    (execute-dag-loop tasks-map ctx logger)))
 
 ;--- Layer 3: Workflow Integration
 
