@@ -231,8 +231,8 @@
       (is (= 3 (get-in result [:metrics :total-operations])))
       ;; Should have: write, write, delete, stage = 4 commands
       (is (= 4 (count @cmds)))
-      ;; Last command should be git add .
-      (is (= "git add ." (last @cmds))))))
+      ;; Last command should be path-specific git add
+      (is (= "git add 'src/a.clj' 'src/b.clj' 'src/old.clj'" (last @cmds))))))
 
 (deftest write-and-stage-files-failure-test
   (testing "write-and-stage-files! reports errors from failed operations"

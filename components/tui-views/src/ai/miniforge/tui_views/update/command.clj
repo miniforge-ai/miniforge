@@ -95,7 +95,7 @@
   (if (str/blank? args)
     (assoc model :flash-message "Usage: :add-repo owner/name OR :add-repo gitlab:group/name")
     (let [result (pr-sync/add-repo! (str/trim args))]
-      (if (:success? result)
+      (if (pr-sync/succeeded? result)
         (-> (with-fleet-repos model (:repos result))
             (assoc :flash-message
                    (if (:added? result)
@@ -107,7 +107,7 @@
   (if (str/blank? args)
     (assoc model :flash-message "Usage: :remove-repo owner/name")
     (let [result (pr-sync/remove-repo! (str/trim args))]
-      (if (:success? result)
+      (if (pr-sync/succeeded? result)
         (-> (with-fleet-repos model (:repos result))
             (assoc :flash-message
                    (if (:removed? result)
@@ -310,7 +310,7 @@
         result (reduce
                 (fn [{:keys [repos removed errors]} repo]
                   (let [r (pr-sync/remove-repo! repo)]
-                    (if (:success? r)
+                    (if (pr-sync/succeeded? r)
                       {:repos (:repos r)
                        :removed (+ removed (if (:removed? r) 1 0))
                        :errors errors}

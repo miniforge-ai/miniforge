@@ -201,9 +201,9 @@
           (let [rule-files (when (.exists rules-dir)
                              (find-rule-files rules-dir))
                 rule-results (mapv load-rule-file rule-files)
-                successful-rules (keep :rule (filter :success? rule-results))
+                successful-rules (keep :rule (filter schema/succeeded? rule-results))
                 rule-errors (keep (fn [r]
-                                    (when-not (:success? r)
+                                    (when-not (schema/succeeded? r)
                                       {:error (:error r)}))
                                   rule-results)
 
@@ -315,9 +315,9 @@
          results (map (fn [{:keys [path]}]
                         (assoc (load-pack path) :path path))
                       discovered)
-         loaded-packs (vec (keep :pack (filter :success? results)))
+         loaded-packs (vec (keep :pack (filter schema/succeeded? results)))
          failed (vec (map #(select-keys % [:path :errors])
-                         (remove :success? results)))
+                         (remove schema/succeeded? results)))
 
          ;; Run dependency validation if requested
          dep-validation-result (when (and validate-deps? (seq loaded-packs))
@@ -470,7 +470,7 @@
   (let [load-result (load-pack path)
         skip-trust? (:skip-trust-validation? options false)]
 
-    (if-not (:success? load-result)
+    (if-not (schema/succeeded? load-result)
       load-result  ; Return load errors immediately
 
       ;; Apply overrides if provided

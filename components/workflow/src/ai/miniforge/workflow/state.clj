@@ -102,7 +102,7 @@
   [state event]
   (let [current-status (:execution/status state)
         result (fsm/transition current-status event)]
-    (if (:success? result)
+    (if (fsm/succeeded? result)
       (-> state
           (assoc :execution/status (:state result))
           (record-fsm-transition current-status (:state result) event))

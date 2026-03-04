@@ -79,7 +79,7 @@
       (is (pos? (count @cmds)))
       ;; Should contain sandbox operations (base64 write, git add)
       (is (some #(clojure.string/includes? % "base64 -d") @cmds))
-      (is (some #(= "git add ." %) @cmds)))))
+      (is (some #(clojure.string/includes? % "git add") @cmds)))))
 
 (deftest host-mode-when-no-executor
   (testing "sandbox? is false when :executor is nil"

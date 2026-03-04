@@ -214,14 +214,14 @@
         results (for [{:keys [path]} discovered]
                   (let [result (load-tool-file registry path)]
                     (when logger
-                      (if (:success? result)
+                      (if (schema/succeeded? result)
                         (log/debug logger :system :tool-registry/loaded
                                    {:data {:tool-id (:tool-id result) :path path}})
                         (log/warn logger :system :tool-registry/load-failed
                                   {:data {:path path :error (:error result)}})))
                     (assoc result :path path)))
-        loaded (vec (keep :tool-id (filter :success? results)))
-        failed (vec (for [r (remove :success? results)]
+        loaded (vec (keep :tool-id (filter schema/succeeded? results)))
+        failed (vec (for [r (remove schema/succeeded? results)]
                       {:path (:path r) :error (or (:error r) (:errors r))}))]
     {:loaded loaded
      :failed failed}))

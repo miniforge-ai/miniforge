@@ -299,6 +299,11 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Result helpers (used by loader.clj)
 
+(defn succeeded?
+  "Check if a result map indicates success."
+  [result]
+  (boolean (:success? result)))
+
 (defn success
   "Create a success result.
    (success :pack pack {:errors nil}) => {:success? true :pack pack :errors nil}"

@@ -47,6 +47,11 @@
 (def ^:private pending-check-states
   #{"PENDING" "QUEUED" "IN_PROGRESS" "WAITING" "REQUESTED"})
 
+(defn- succeeded?
+  "Check if a result map indicates success."
+  [result]
+  (boolean (:success? result)))
+
 (defn- result-success
   [data]
   (merge {:success? true
@@ -177,7 +182,7 @@
                    (str "orgs/" owner* "/repos?per_page=100")
                    "user/repos?per_page=100")
         result (gh-api-json endpoint)]
-    (if-not (:success? result)
+    (if-not (succeeded? result)
       result
       (let [repos (->> (:data result)
                        (keep :full_name)
@@ -419,7 +424,7 @@
 (defn- sync-repo-prs-into-train!
   [state repo]
   (let [fetch-result (fetch-open-prs repo)]
-    (if-not (:success? fetch-result)
+    (if-not (succeeded? fetch-result)
       (merge fetch-result {:repo repo})
       (if-let [mgr (:pr-train-manager @state)]
         (if-let [train-id (ensure-repo-train! state repo)]
@@ -462,8 +467,8 @@
 
       :else
       (let [results (mapv #(sync-repo-prs-into-train! state %) repos)
-            ok (filter :success? results)
-            failed (remove :success? results)]
+            ok (filter succeeded? results)
+            failed (remove succeeded? results)]
         (if (empty? failed)
           (result-success
            {:repos repos

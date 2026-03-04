@@ -3,6 +3,7 @@
    Handles writing, deleting, and staging code artifact files."
   (:require
    [ai.miniforge.release-executor.git :as git]
+   [ai.miniforge.release-executor.result :as result]
    [ai.miniforge.logging.interface :as log]
    [babashka.fs :as fs]))
 
@@ -99,7 +100,7 @@
 
     (doseq [file-spec all-files]
       (let [result (process-file-action worktree-path file-spec logger)]
-        (if (:success? result)
+        (if (result/succeeded? result)
           (case (:action result)
             :create (swap! results update :created inc)
             :modify (swap! results update :modified inc)
@@ -119,7 +120,7 @@
          :metrics {:files-written created :files-modified modified :files-deleted deleted}}
         (let [written-paths (map :path all-files)
               stage-result (git/stage-files! worktree-path written-paths)]
-          (if (:success? stage-result)
+          (if (result/succeeded? stage-result)
             {:success? true
              :metrics {:files-written created :files-modified modified :files-deleted deleted
                        :total-operations total-operations}}

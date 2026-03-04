@@ -79,6 +79,11 @@
   [s]
   (java.net.URLEncoder/encode (str s) "UTF-8"))
 
+(defn succeeded?
+  "Check if a result map indicates success."
+  [result]
+  (boolean (:success? result)))
+
 (defn- result-success
   [data]
   (merge {:success? true} data))
@@ -235,7 +240,7 @@
 (defn- fetch-open-github-prs
   [repo]
   (let [result (fetch-github-prs repo :open)]
-    (if (:success? result)
+    (if (succeeded? result)
       (update result :prs (fn [prs] (vec (remove #(= :closed (:pr/status %)) prs))))
       result)))
 
@@ -292,7 +297,7 @@
       []
       (->> repos
            (pmap fetch-fn)
-           (filter :success?)
+           (filter succeeded?)
            (mapcat :prs)
            vec))))
 
@@ -312,7 +317,7 @@
                    (str "orgs/" owner* "/repos?per_page=100")
                    "user/repos?per_page=100")
         result (run-gh "api" endpoint)]
-    (if-not (:success? result)
+    (if-not (succeeded? result)
       (result-failure (gh-error-message (:out result) (:err result)))
       (try
         (let [repos (->> (json/parse-string (:out result) true)
@@ -407,7 +412,7 @@
     (loop [after nil
            acc []]
       (let [result (apply run-gh (viewer-repos-gh-args limit acc after))]
-        (if-not (:success? result)
+        (if-not (succeeded? result)
           (result-failure (gh-error-message (:out result) (:err result)))
           (let [parsed-result (try
                                 {:ok (json/parse-string (:out result) true)}
@@ -431,10 +436,10 @@
         org-endpoint (str "orgs/" owner* "/repos?per_page=100&type=all&sort=updated")
         org-result (run-gh "api" org-endpoint)
         user-endpoint (str "users/" owner* "/repos?per_page=100&type=owner&sort=updated")
-        result (if (:success? org-result)
+        result (if (succeeded? org-result)
                  org-result
                  (run-gh "api" user-endpoint))]
-    (if-not (:success? result)
+    (if-not (succeeded? result)
       (result-failure (or (gh-error-message (:out result) (:err result))
                           (gh-error-message (:out org-result) (:err org-result)))
                       {:owner owner* :provider :github})
@@ -449,7 +454,7 @@
 (defn- list-github-viewer-orgs
   []
   (let [result (run-gh "api" "user/orgs?per_page=100")]
-    (if-not (:success? result)
+    (if-not (succeeded? result)
       (result-failure (gh-error-message (:out result) (:err result))
                       {:provider :github :error-source :orgs})
       (try
@@ -466,7 +471,7 @@
 (defn- list-github-user-repos-fallback
   [limit]
   (let [result (run-gh "api" "user/repos?per_page=100&sort=updated")]
-    (if-not (:success? result)
+    (if-not (succeeded? result)
       (result-failure (gh-error-message (:out result) (:err result))
                       {:provider :github :error-source :rest})
       (try
@@ -481,20 +486,20 @@
   [limit]
   (let [viewer (list-viewer-repos limit)
         orgs-result (list-github-viewer-orgs)
-        org-results (if (:success? orgs-result)
+        org-results (if (succeeded? orgs-result)
                       (->> (:orgs orgs-result)
                            (map #(list-github-owner-repos % limit))
                            doall)
                       [])
         repos (->> (concat (or (:repos viewer) [])
-                           (mapcat #(or (:repos %) []) (filter :success? org-results)))
+                           (mapcat #(or (:repos %) []) (filter succeeded? org-results)))
                    distinct
                    (take limit)
                    vec)
         warnings (vec (concat
-                       (when-not (:success? viewer)
+                       (when-not (succeeded? viewer)
                          [(or (:error viewer) "GraphQL browse failed.")])
-                       (when-not (:success? orgs-result)
+                       (when-not (succeeded? orgs-result)
                          [(or (:error orgs-result) "Organization browse failed.")])
                        (for [{:keys [success? owner error]} org-results
                              :when (not success?)]
@@ -507,7 +512,7 @@
       ;; GraphQL failed and org listing failed/empty: try REST fallback
       :else
       (let [fallback (list-github-user-repos-fallback limit)]
-        (if (:success? fallback)
+        (if (succeeded? fallback)
           (cond-> fallback
             (seq warnings) (assoc :warnings warnings))
           (result-failure (or (:error fallback)
@@ -535,7 +540,7 @@
                         "/projects?include_subgroups=true&archived=false&per_page=100&simple=true&order_by=last_activity_at&sort=desc")
                    "projects?membership=true&archived=false&per_page=100&simple=true&order_by=last_activity_at&sort=desc")
         result (run-glab "api" endpoint)]
-    (if-not (:success? result)
+    (if-not (succeeded? result)
       (result-failure (gh-error-message (:out result) (:err result))
                       {:owner owner* :provider :gitlab})
       (try
@@ -579,9 +584,9 @@
                        (take limit*)
                        vec)
             warnings (vec (concat
-                           (when-not (:success? gh-result)
+                           (when-not (succeeded? gh-result)
                              [(str "GitHub: " (or (:error gh-result) "browse failed"))])
-                           (when-not (:success? gl-result)
+                           (when-not (succeeded? gl-result)
                              [(str "GitLab: " (or (:error gl-result) "browse failed"))])
                            (or (:warnings gh-result) [])))]
         (if (seq repos)

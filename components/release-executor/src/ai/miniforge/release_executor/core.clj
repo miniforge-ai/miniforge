@@ -95,7 +95,7 @@
           result (if sandbox?
                    (sandbox/create-branch! executor environment-id branch-name)
                    (git/create-branch! worktree-path branch-name))]
-      (if (:success? result)
+      (if (result/succeeded? result)
         (assoc state
                :branch (:branch result)
                :base-branch (:base-branch result))
@@ -111,7 +111,7 @@
         (let [result (if sandbox?
                        (sandbox/write-and-stage-files! executor environment-id code-artifacts)
                        (files/write-and-stage-files! worktree-path code-artifacts logger))]
-          (if (:success? result)
+          (if (result/succeeded? result)
             (let [total-ops (get-in result [:metrics :total-operations] 0)]
               (if (zero? total-ops)
                 (fail state :no-files-written "Expected files but wrote 0")
@@ -131,7 +131,7 @@
           result (if sandbox?
                    (sandbox/commit-changes! executor environment-id (:release/commit-message release-meta))
                    (git/commit-changes! worktree-path (:release/commit-message release-meta)))]
-      (if (:success? result)
+      (if (result/succeeded? result)
         (assoc state :commit-sha (:commit-sha result))
         (fail state :commit-failed (:error result))))))
 
@@ -144,7 +144,7 @@
           result (if sandbox?
                    (sandbox/push-branch! executor environment-id branch)
                    (git/push-branch! worktree-path branch))]
-      (if (:success? result)
+      (if (result/succeeded? result)
         state
         (fail state :push-failed (:error result))))))
 
@@ -163,7 +163,7 @@
                                    {:title (:release/pr-title release-meta)
                                     :body (:release/pr-description release-meta)
                                     :base-branch base-branch}))]
-      (if (:success? result)
+      (if (result/succeeded? result)
         (assoc state
                :pr-number (:pr-number result)
                :pr-url (:pr-url result))

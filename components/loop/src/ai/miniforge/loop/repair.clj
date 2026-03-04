@@ -74,7 +74,7 @@
           (let [result (repair-fn artifact errors
                                   (assoc context :max-tokens max-tokens))
                 duration (- (System/currentTimeMillis) start)]
-            (if (:success? result)
+            (if (succeeded? result)
               (repair-success :llm-fix (:artifact result)
                               :tokens-used (:tokens-used result)
                               :duration-ms duration
@@ -220,7 +220,7 @@
    Returns a map with :action (:success, :escalate, or :continue) and :result."
   [result attempt results errors]
   (cond
-    (:success? result)
+    (succeeded? result)
     {:action :success
      :result (make-success-result result attempt results)}
 

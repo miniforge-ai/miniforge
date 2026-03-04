@@ -10,6 +10,13 @@
   (:require [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Result predicates
+
+(defn- succeeded?
+  "Check if a repair result indicates success."
+  [result]
+  (boolean (:success? result)))
+
 ;; Repair registry
 
 ;; Registry of repair functions keyed by rule-id pattern.
@@ -122,7 +129,7 @@
        :repair-count (count repaired)}
       (let [violation (first remaining)
             result (attempt-repair violation current-artifact context)]
-        (if (and result (:success? result))
+        (if (and result (succeeded? result))
           (recur (rest remaining)
                  (:artifact result)
                  (conj repaired {:violation violation
