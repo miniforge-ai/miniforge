@@ -47,7 +47,7 @@
     (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
       (when-let [phase-completed (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
         (let [workflow-id (:execution/id ctx)
-              outcome (if (= :completed (get-in ctx [:phase :status])) :success :failure)
+              outcome (if (registry/succeeded? (get-in ctx [:phase :status])) :success :failure)
               duration-ms (get-in ctx [:phase :duration-ms])]
           (publish! event-stream (phase-completed event-stream workflow-id phase
                                                    {:outcome outcome :duration-ms duration-ms})))))))
@@ -82,19 +82,20 @@
         existing-files (file-ctx/load-files-in-scope worktree-path files-in-scope)
         behavior-addendum (agent-beh/load-and-filter-behaviors
                             :implement {:task {:task/intent (:intent input)}})]
-    (cond-> {:task/id (random-uuid)
-             :task/type :implement
-             :task/description (:description input)
-             :task/title (:title input)
-             :task/intent (:intent input)
-             :task/constraints (:constraints input)
-             :task/plan plan-result
-             :task/existing-files existing-files
-             :task/behavior-addendum behavior-addendum}
-      verify-failure
-      (assoc :task/verify-failures
-             {:test-results (get-in verify-failure [:result :output :metadata :test-results])
-              :test-output (get-in verify-failure [:result :output :metadata :test-results :output])}))))
+    (let [base-task {:task/id (random-uuid)
+                     :task/type :implement
+                     :task/description (:description input)
+                     :task/title (:title input)
+                     :task/intent (:intent input)
+                     :task/constraints (:constraints input)
+                     :task/plan plan-result
+                     :task/existing-files existing-files
+                     :task/behavior-addendum behavior-addendum}]
+      (cond-> base-task
+        verify-failure
+        (assoc :task/verify-failures
+               {:test-results (get-in verify-failure [:result :output :metadata :test-results])
+                :test-output (get-in verify-failure [:result :output :metadata :test-results :output])})))))
 
 (defn- create-streaming-callback
   "Create a streaming callback for agent output if event-stream is available."
@@ -157,12 +158,14 @@
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
         agent-status (:status result)
-        phase-status (cond
-                       (= :error agent-status) :failed
-                       (= :already-implemented agent-status) :already-implemented
-                       :else :completed)
-        metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
         iterations (get-in ctx [:phase :iterations] 1)
+        max-iterations (get-in ctx [:phase :budget :iterations]
+                               (get-in default-config [:budget :iterations]))
+        phase-status (cond
+                       (= :already-implemented agent-status) :already-implemented
+                       :else (registry/determine-phase-status
+                               agent-status iterations max-iterations))
+        metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
@@ -180,8 +183,15 @@
       (println "WARNING: implement phase result has no :output — artifact may be nil"))
     ;; Emit phase completed event
     (emit-phase-completed! updated-ctx :implement result)
-    ;; Add skip metadata when work was already implemented
+    ;; Handle retrying: increment iteration counter and record last error
     (cond-> updated-ctx
+      (registry/retrying? phase-status)
+      (-> (update-in [:phase :iterations] (fnil inc 1))
+          (assoc-in [:phase :last-error]
+                    (or (get-in result [:error :message])
+                        (get-in result [:output :error])
+                        "Agent returned error status")))
+
       (= :already-implemented agent-status)
       (assoc-in [:phase :skipped-reason] :already-implemented))))
 

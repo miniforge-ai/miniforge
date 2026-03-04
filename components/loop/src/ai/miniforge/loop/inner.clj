@@ -238,7 +238,7 @@
 
     (let [results (gates/run-gates gates artifact context)
           loop-state (add-gate-results loop-state (:results results))]
-      (if (:passed? results)
+      (if (gates/passed? results)
         ;; All gates passed
         (do
           (when logger
@@ -305,7 +305,7 @@
                                             :repair-calls 1}))]
         (cond
           ;; Repair succeeded
-          (:success? result)
+          (repair/succeeded? result)
           (do
             (when logger
               (log/info logger :loop :inner/repair-attempted

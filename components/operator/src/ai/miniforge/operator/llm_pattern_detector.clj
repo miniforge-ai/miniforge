@@ -12,31 +12,13 @@
   (:require
    [cheshire.core :as json]
    [clojure.string :as str]
+   [ai.miniforge.operator.defaults :as defaults]
    [ai.miniforge.operator.protocol :as proto]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Prompt construction
 
-(def ^:private system-prompt
-  "You are a workflow pattern analyzer for a software engineering meta-agent.
-Your job: detect meaningful patterns in workflow execution signals.
-
-Analyze the signals and identify any of these pattern types:
-- repeated-failure: A task/phase fails repeatedly
-- performance-degradation: Quality or speed declining over time
-- resource-waste: Redundant work, unnecessary retries, budget overuse
-- anti-pattern: Systematically poor choices in workflow structure
-- improvement-opportunity: Clear area where process could be improved
-
-Respond with ONLY a JSON array of pattern objects, no other text:
-[{\"type\": \"repeated-failure\",
-  \"description\": \"Brief description of the pattern\",
-  \"affected\": \"phase or component name\",
-  \"occurrences\": 3,
-  \"confidence\": 0.85,
-  \"rationale\": \"Why this is a problem and what could fix it\"}]
-
-Return an empty array [] if no significant patterns are detected.")
+;; System prompt sourced from defaults — override via config :system-prompt
 
 (defn- summarize-signal
   "Create a compact string summary of a single signal."
@@ -93,15 +75,15 @@ Return an empty array [] if no significant patterns are detected.")
   (let [pattern-type (parse-pattern-type (:type raw))]
     (when pattern-type
       {:pattern/type        pattern-type
-       :pattern/description (or (:description raw) "No description provided")
-       :pattern/affected    (or (:affected raw) "unknown")
+       :pattern/description (get raw :description "No description provided")
+       :pattern/affected    (get raw :affected "unknown")
        :pattern/occurrences (let [n (:occurrences raw)]
                               (if (number? n) (int n) 1))
        :pattern/confidence  (let [c (:confidence raw)]
                               (if (number? c)
                                 (min 1.0 (max 0.0 (double c)))
                                 0.5))
-       :pattern/rationale   (or (:rationale raw) "No rationale provided")
+       :pattern/rationale   (get raw :rationale "No rationale provided")
        :pattern/source      :llm})))
 
 (defn- parse-detect-response
@@ -134,8 +116,9 @@ Return an empty array [] if no significant patterns are detected.")
         (let [complete-fn (requiring-resolve
                            'ai.miniforge.llm.interface.protocols.llm-client/complete*)
               prompt      (build-detect-prompt signals)
+              sys-prompt  (get config :system-prompt defaults/pattern-detector-system-prompt)
               request     {:prompt     prompt
-                           :system     system-prompt
+                           :system     sys-prompt
                            :max-tokens (get config :max-tokens 500)}
               response    (complete-fn llm-client request)]
           (if (:success response)
@@ -163,7 +146,8 @@ Return an empty array [] if no significant patterns are detected.")
      opts - Map with:
        :llm-client - LLM client implementing LLMClient protocol (required)
        :config     - Optional config map:
-                       :max-tokens - Max tokens for LLM response (default 500)"
+                       :max-tokens    - Max tokens for LLM response (default 500)
+                       :system-prompt - Override the system prompt"
   [{:keys [llm-client config]}]
   (->LLMPatternDetector llm-client (or config {})))
 

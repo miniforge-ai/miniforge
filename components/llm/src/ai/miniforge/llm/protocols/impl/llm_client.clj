@@ -17,6 +17,11 @@
 (defn- parse-claude-stream-line
   "Parse a line from Claude CLI streaming output.
 
+   Claude CLI stream-json emits:
+   - {\"type\":\"system\"} — init event (ignored)
+   - {\"type\":\"assistant\",\"message\":{\"content\":[{\"text\":\"...\"}]}} — content
+   - {\"type\":\"result\"} — final result with usage (ignored)
+
    Arguments:
      line - String line from stream
 
@@ -25,9 +30,24 @@
   (try
     (when-not (str/blank? line)
       (let [data (json/parse-string line true)]
-        (when (= "stream_event" (:type data))
+        (case (:type data)
+          "assistant"
+          (let [content-blocks (get-in data [:message :content])
+                text-blocks (keep (fn [block]
+                                    (when (= "text" (:type block))
+                                      (:text block)))
+                                  content-blocks)
+                text (str/join text-blocks)]
+            (when-not (str/blank? text)
+              {:delta text :done? false}))
+
+          ;; Legacy format support
+          "stream_event"
           (when-let [delta-text (get-in data [:event :delta :text])]
-            {:delta delta-text :done? false}))))
+            {:delta delta-text :done? false})
+
+          ;; Ignore system, result, rate_limit_event
+          nil)))
     (catch Exception _e
       nil)))
 
@@ -68,11 +88,12 @@
             :requires-cli? true
             :api-key-var "ANTHROPIC_API_KEY"
             :stream-parser parse-claude-stream-line
-            :args-fn (fn [{:keys [prompt system max-tokens streaming? mcp-config supervision]}]
+            :args-fn (fn [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools supervision]}]
                        (cond-> ["-p"]
                          streaming?                   (conj "--output-format" "stream-json")
                          streaming?                   (conj "--verbose")
                          mcp-config                   (into ["--mcp-config" mcp-config])
+                         (seq mcp-allowed-tools)      (into ["--allowedTools" (str/join "," mcp-allowed-tools)])
                          (:settings-path supervision) (into ["--settings" (:settings-path supervision)])
                          system                       (into ["--system-prompt" system])
                          max-tokens                   (into ["--max-budget-usd" "0.10"])

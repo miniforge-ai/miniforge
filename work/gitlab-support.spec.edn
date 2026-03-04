@@ -1,61 +1,20 @@
-{:dag-id "miniforge-gitlab-support-2026-02-06"
- :spec/description "Add GitLab support to miniforge for MR lifecycle management"
-
- :tasks
- [{:task/id "task-1-git-provider-protocol"
-   :task/deps #{}
-   :description "Create git-provider protocol abstraction for GitHub/GitLab"
-   :files ["components/git-provider/src/ai/miniforge/git_provider/protocol.clj"
-           "components/git-provider/src/ai/miniforge/git_provider/interface.clj"
-           "components/git-provider/deps.edn"]
-   :acceptance-criteria "Protocol defines operations: create-pr, get-ci-status, get-reviews, merge-pr, enable-auto-merge, post-comment, rebase-pr. Clean abstraction that works for both GitHub and GitLab. Returns standardized data structures."
-   :context "Current pr-lifecycle hardcodes GitHub gh CLI commands. Need abstraction layer that allows multiple providers (GitHub, GitLab, Gitea, etc). Protocol should define operations, adapters implement provider-specific logic."
-   :design-rules "Protocol-based design. Provider-agnostic data structures. Each operation returns {:success? bool :data map :error string-or-nil}. Use Clojure protocols not multimethods for extensibility."}
-
-  {:task/id "task-2-github-adapter"
-   :task/deps #{"task-1-git-provider-protocol"}
-   :description "Extract GitHub implementation into adapter using protocol"
-   :files ["components/git-provider/src/ai/miniforge/git_provider/github.clj"
-           "components/git-provider/test/ai/miniforge/git_provider/github_test.clj"]
-   :acceptance-criteria "GitHub adapter implements protocol using gh CLI. All operations from current pr-lifecycle extracted and working. Tests verify each operation. Backward compatible with existing functionality."
-   :context "Current pr-lifecycle/ci_monitor.clj, merge.clj, review_monitor.clj have direct gh CLI calls. Extract these into GitHub adapter that implements git-provider protocol. Preserve all existing behavior."
-   :design-rules "Extract not rewrite - preserve existing gh CLI commands. Add error handling and retries. Return standardized protocol data structures."}
-
-  {:task/id "task-3-gitlab-adapter"
-   :task/deps #{"task-1-git-provider-protocol"}
-   :description "Implement GitLab adapter using glab CLI"
-   :files ["components/git-provider/src/ai/miniforge/git_provider/gitlab.clj"
-           "components/git-provider/test/ai/miniforge/git_provider/gitlab_test.clj"]
-   :acceptance-criteria "GitLab adapter implements protocol using glab CLI (GitLab CLI tool). Operations: create MR (mr create), get CI status (ci view), get reviews (mr view), merge MR (mr merge), enable auto-merge, post comment (mr comment), rebase (mr rebase). Tests verify each operation."
-   :context "GitLab uses glab CLI (https://gitlab.com/gitlab-org/cli). Similar to gh but for GitLab. Commands: glab mr create, glab ci view, glab mr merge, etc. Need to map GitLab concepts (MR, pipelines) to protocol operations."
-   :design-rules "Use glab CLI not GitLab API directly. Handle GitLab-specific features (pipelines vs checks, approval rules). Return same protocol data structures as GitHub adapter for consistency."}
-
-  {:task/id "task-4-update-pr-lifecycle"
-   :task/deps #{"task-2-github-adapter" "task-3-gitlab-adapter"}
-   :description "Update pr-lifecycle to use git-provider abstraction"
-   :files ["components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/ci_monitor.clj"
-           "components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/merge.clj"
-           "components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/review_monitor.clj"
-           "components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/controller.clj"
-           "components/pr-lifecycle/deps.edn"]
-   :acceptance-criteria "pr-lifecycle accepts provider parameter (:github or :gitlab). All gh CLI calls replaced with protocol operations. CI monitor, merge, review monitor work with both providers. Tests pass for both providers. Backward compatible - defaults to GitHub."
-   :context "pr-lifecycle currently has hardcoded gh CLI calls in ci_monitor.clj (sh \"gh\" \"pr\" \"checks\"), merge.clj (sh \"gh\" \"pr\" \"merge\"), review_monitor.clj (sh \"gh\" \"pr\" \"view\"). Replace with protocol calls: (provider/get-ci-status provider repo-path pr-number)."
-   :design-rules "Provider injected via controller config. Protocol dispatch on provider type. No conditional logic - use polymorphism. Preserve all existing functionality for GitHub."}
-
-  {:task/id "task-5-task-executor-gitlab"
-   :task/deps #{"task-4-update-pr-lifecycle"}
-   :description "Update task-executor to accept git-provider config"
-   :files ["components/task-executor/src/ai/miniforge/task_executor/runner.clj"
-           "components/task-executor/src/ai/miniforge/task_executor/orchestrator.clj"]
-   :acceptance-criteria "task-executor config accepts :git-provider :github or :gitlab. Runner creates pr-lifecycle controller with correct provider. Orchestrator passes provider through to all tasks. Works end-to-end with GitLab repos."
-   :context "task-executor creates pr-lifecycle controllers in runner.clj. Need to detect repo type (github.com vs gitlab.com) or accept explicit config. Pass provider to controller. Handle both GITHUB_TOKEN and GITLAB_TOKEN env vars."
-   :design-rules "Auto-detect from repo URL if not specified. Support explicit override. Validate token exists for provider. Clear error messages if wrong token for provider."}
-
-  {:task/id "task-6-integration-tests"
-   :task/deps #{"task-5-task-executor-gitlab"}
-   :description "Add integration tests for GitLab workflow"
-   :files ["tests/integration/gitlab_workflow_test.clj"
-           "tests/fixtures/test-gitlab-repo/"]
-   :acceptance-criteria "Integration test creates test GitLab repo, runs full workflow (task execution → MR creation → CI → merge), verifies all events fire correctly. Test uses real glab CLI with test repo. Cleanup happens in finally block."
-   :context "Need end-to-end verification that GitLab support works. Create minimal test repo, define simple task, execute through task-executor, verify MR created and merged. Use test GitLab group/project to avoid polluting real repos."
-   :design-rules "Use real glab CLI not mocks. Test with minimal task (add one file). Verify all lifecycle events. Clean up test MRs after. Parameterized to run against test GitLab instance."}]}
+{:spec/title "Add GitLab Support for MR Lifecycle Management"
+ :spec/description "Add GitLab support to miniforge for MR lifecycle management. Create a git-provider protocol abstraction, implement GitHub and GitLab adapters, and update pr-lifecycle and task-executor to use the abstraction."
+ :spec/intent {:type :feature
+               :scope ["components/git-provider/"
+                       "components/pr-lifecycle/"
+                       "components/task-executor/"
+                       "tests/integration/"]}
+ :spec/constraints ["Protocol-based design using Clojure protocols not multimethods"
+                    "Provider-agnostic data structures"
+                    "Each operation returns {:success? bool :data map :error string-or-nil}"
+                    "Use glab CLI for GitLab, not GitLab API directly"
+                    "Backward compatible — defaults to GitHub"
+                    "Extract existing gh CLI calls, not rewrite"]
+ :spec/acceptance-criteria ["Protocol defines: create-pr, get-ci-status, get-reviews, merge-pr, enable-auto-merge, post-comment, rebase-pr"
+                            "GitHub adapter implements protocol using gh CLI with all existing behavior preserved"
+                            "GitLab adapter implements protocol using glab CLI"
+                            "pr-lifecycle accepts provider parameter (:github or :gitlab)"
+                            "task-executor config accepts :git-provider and auto-detects from repo URL"
+                            "Integration test verifies full GitLab workflow end-to-end"]
+ :workflow/type :lean-sdlc}

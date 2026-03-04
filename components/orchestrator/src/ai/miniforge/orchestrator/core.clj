@@ -18,6 +18,22 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration
 
+(defn- build-repair-learning
+  "Build a learning capture map from a repair history entry."
+  [agent-role task repair-history]
+  (let [last-repair (last repair-history)]
+    {:agent agent-role
+     :task-id (:task/id task)
+     :title (str "Repair pattern: " (name (:error-type last-repair)))
+     :content (str "## Repair Context\n\n"
+                   "Task: " (:task/title task) "\n"
+                   "Agent: " (name agent-role) "\n"
+                   "Repair iterations: " (count repair-history) "\n\n"
+                   "## Pattern\n\n"
+                   (:fix-description last-repair))
+     :tags [:repair :inner-loop (keyword (name agent-role))]
+     :confidence 0.7}))
+
 (def default-config
   "Default control plane configuration."
   {:default-budget {:max-tokens 100000
@@ -134,17 +150,7 @@
         (when (seq repair-history)
           (let [learning (knowledge/capture-inner-loop-learning
                           knowledge-store
-                          {:agent agent-role
-                           :task-id (:task/id task)
-                           :title (str "Repair pattern: " (-> repair-history last :error-type name))
-                           :content (str "## Repair Context\n\n"
-                                         "Task: " (:task/title task) "\n"
-                                         "Agent: " (name agent-role) "\n"
-                                         "Repair iterations: " (count repair-history) "\n\n"
-                                         "## Pattern\n\n"
-                                         (-> repair-history last :fix-description))
-                           :tags [:repair :inner-loop (keyword (name agent-role))]
-                           :confidence 0.7})]
+                          (build-repair-learning agent-role task repair-history))]
             ;; Check if learning should be promoted to a rule
             (when learning
               (let [learning-id (or (:zettel/id learning) (:id learning))

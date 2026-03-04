@@ -235,9 +235,10 @@ miniforge - AI-powered software development workflows
 Usage: miniforge <command> [options]
 
 Commands:
-  run <spec-file>     Execute a workflow from a spec file
+  run <file>          Execute a workflow (spec, DAG, or plan file)
     --interactive     Interactive mode (chat-based)
     --worktree <path> Custom worktree path
+    --resume <id>     Resume a workflow from its last checkpoint
 
   status [id]         Show workflow status
 
@@ -334,7 +335,8 @@ Examples:
     :fn run-cmd
     :args->opts [:spec]
     :spec {:interactive {:coerce :boolean :alias :i}
-           :worktree    {:alias :w}}}
+           :worktree    {:alias :w}
+           :resume      {:alias :r}}}
 
    ;; Status command
    {:cmds ["status"]

@@ -136,6 +136,42 @@
   [interceptor]
   (m/validate Interceptor interceptor))
 
+;------------------------------------------------------------------------------ Layer 3
+;; Phase status predicates
+
+(defn succeeded?
+  "Check if a phase status indicates success."
+  [phase-status]
+  (= :completed phase-status))
+
+(defn failed?
+  "Check if a phase status indicates failure."
+  [phase-status]
+  (= :failed phase-status))
+
+(defn retrying?
+  "Check if a phase status indicates retry."
+  [phase-status]
+  (= :retrying phase-status))
+
+(defn determine-phase-status
+  "Determine phase status from agent result status, iteration count, and budget.
+
+   Arguments:
+   - agent-status: The :status from the agent result (:success, :error, etc.)
+   - iterations: Current iteration count
+   - max-iterations: Maximum allowed iterations
+
+   Returns: :completed, :retrying, or :failed"
+  [agent-status iterations max-iterations]
+  (cond
+    (= :success agent-status) :completed
+    (and (= :error agent-status)
+         (< iterations max-iterations)) :retrying
+    (= :error agent-status) :failed
+    (not= :success agent-status) :failed
+    :else :completed))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Register a phase

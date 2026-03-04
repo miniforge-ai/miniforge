@@ -18,6 +18,13 @@
 (def repair p/repair)
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Repair result predicates
+
+(defn succeeded?
+  "Check if a repair result indicates success."
+  [result]
+  (boolean (:success? result)))
+
 ;; Repair result constructors (pure functions)
 
 (defn repair-success

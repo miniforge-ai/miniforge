@@ -16,6 +16,11 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Content Hash Verification
 
+(defn valid?
+  "Check if a verification result indicates the hash is valid."
+  [result]
+  (boolean (:valid? result)))
+
 (defn verify-content-hash
   "Verify that content matches its stored hash.
 

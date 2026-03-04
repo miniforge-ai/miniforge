@@ -45,7 +45,7 @@
     (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
       (when-let [phase-completed (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
         (let [workflow-id (:execution/id ctx)
-              outcome (if (= :completed (get-in ctx [:phase :status])) :success :failure)
+              outcome (if (registry/succeeded? (get-in ctx [:phase :status])) :success :failure)
               duration-ms (get-in ctx [:phase :duration-ms])]
           (publish! event-stream (phase-completed event-stream workflow-id phase
                                                    {:outcome outcome :duration-ms duration-ms})))))))
@@ -125,18 +125,26 @@
 (defn- leave-review
   "Post-processing for review phase.
 
-   Records review metrics: issues found, approval status."
+   Records review metrics: issues found, approval status.
+   When review decision is :changes-requested, sets status to :retrying
+   and stores review feedback for the implement phase to consume."
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
+        review-decision (get-in result [:output :review/decision])
         metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
         iterations (get-in ctx [:phase :iterations] 1)
+        max-iterations (get-in ctx [:phase :budget :iterations]
+                               (get-in default-config [:budget :iterations]))
+        phase-status (if (= :changes-requested review-decision)
+                       (if (< iterations max-iterations) :retrying :failed)
+                       :completed)
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
-                        (assoc-in [:phase :status] :completed)
+                        (assoc-in [:phase :status] phase-status)
                         (assoc-in [:phase :metrics] metrics)
                         (assoc-in [:metrics :review :duration-ms] duration-ms)
                         (assoc-in [:metrics :review :repair-cycles] (dec iterations))
@@ -146,7 +154,13 @@
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
     ;; Emit phase completed event
     (emit-phase-completed! updated-ctx :review result)
-    updated-ctx))
+    ;; Handle retrying: store review feedback for implement phase
+    (cond-> updated-ctx
+      (registry/retrying? phase-status)
+      (-> (update-in [:phase :iterations] (fnil inc 1))
+          (assoc-in [:phase :review-feedback]
+                    (get-in result [:output :review/feedback]))
+          (assoc-in [:phase :redirect-to] :implement)))))
 
 (defn- error-review
   "Handle review phase errors.

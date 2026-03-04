@@ -25,7 +25,8 @@
    already exists) and DAG execution disabled (to prevent infinite recursion)."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.phase.registry :as phase-reg]))
 
 ;--- Layer 0: Result Constructors
 
@@ -160,17 +161,21 @@
 (defn- task-sub-opts
   "Build execution opts for a DAG task's sub-workflow.
 
-   Carries forward LLM backend and event stream from parent context,
-   disables DAG execution to prevent recursion, and skips lifecycle
-   events (parent workflow owns those)."
+   Carries forward LLM backend, event stream, and sandbox/isolation config
+   from parent context. Disables DAG execution to prevent recursion and
+   skips lifecycle events (parent workflow owns those)."
   [context]
   (cond-> {:disable-dag-execution true
            :skip-lifecycle-events true
            :quiet true}
-    (:llm-backend context) (assoc :llm-backend (:llm-backend context))
-    (:event-stream context) (assoc :event-stream (:event-stream context))
+    (:llm-backend context)      (assoc :llm-backend (:llm-backend context))
+    (:event-stream context)     (assoc :event-stream (:event-stream context))
     (get-in context [:execution/opts :event-stream])
-    (assoc :event-stream (get-in context [:execution/opts :event-stream]))))
+    (assoc :event-stream (get-in context [:execution/opts :event-stream]))
+    (:executor context)         (assoc :executor (:executor context))
+    (:environment-id context)   (assoc :environment-id (:environment-id context))
+    (:sandbox-workdir context)  (assoc :sandbox-workdir (:sandbox-workdir context))
+    (:worktree-path context)    (assoc :worktree-path (:worktree-path context))))
 
 ;--- Layer 1: Mini-Workflow Execution
 
@@ -189,7 +194,7 @@
         status (:execution/status result)
         artifacts (:execution/artifacts result)
         metrics (:execution/metrics result)]
-    (if (= :completed status)
+    (if (phase-reg/succeeded? status)
       (workflow-success (first artifacts) metrics)
       (workflow-failure (or (first (:execution/errors result))
                             "Sub-workflow failed")
@@ -236,10 +241,11 @@
 
 ;--- Layer 2: Synchronous DAG Execution
 
-(defn- compute-ready-tasks [tasks-map completed-ids]
+(defn- compute-ready-tasks [tasks-map completed-ids failed-ids]
   (->> tasks-map
        (filter (fn [[task-id task]]
                  (and (not (contains? completed-ids task-id))
+                      (not (contains? failed-ids task-id))
                       (every? #(contains? completed-ids %) (:task/deps task #{})))))))
 
 (defn- execute-tasks-batch [tasks execute-fn context]
@@ -267,35 +273,58 @@
         total-tokens (->> (vals all-results) (map #(get-in % [:data :metrics :tokens] 0)) (reduce + 0))]
     {:artifacts artifacts :total-tokens total-tokens}))
 
+(defn- has-failed-dependency?
+  "Check if a task depends on any task in the failed set."
+  [task failed-ids]
+  (some failed-ids (get task :task/deps #{})))
+
+(defn- propagate-failures
+  "Mark tasks whose deps include any failed task as transitively failed."
+  [tasks-map failed-ids]
+  (loop [propagated failed-ids]
+    (let [newly-failed (->> tasks-map
+                            (remove (fn [[tid _]] (contains? propagated tid)))
+                            (filter (fn [[_tid task]] (has-failed-dependency? task propagated)))
+                            (map first)
+                            set)]
+      (if (empty? newly-failed)
+        propagated
+        (recur (into propagated newly-failed))))))
+
 (defn- execute-dag-loop [tasks-map context logger]
   (let [{:keys [on-task-start on-task-complete]} context
         max-parallel (or (:max-parallel context) 4)]
     (loop [completed-ids #{}
            failed-ids #{}
            all-results {}
+           sub-workflow-ids []
            iteration 0]
-      (let [ready-tasks (compute-ready-tasks tasks-map completed-ids)]
+      (let [all-failed (propagate-failures tasks-map failed-ids)
+            ready-tasks (compute-ready-tasks tasks-map completed-ids all-failed)]
         (cond
           (empty? ready-tasks)
           (let [{:keys [artifacts total-tokens]} (aggregate-results all-results)]
             (log/info logger :dag-orchestrator :dag/completed
                       {:data {:completed (count completed-ids)
-                              :failed (count failed-ids)
+                              :failed (count all-failed)
                               :iterations iteration}})
-            (dag-execution-result (count completed-ids) (count failed-ids) artifacts total-tokens))
+            (assoc (dag-execution-result (count completed-ids) (count all-failed) artifacts total-tokens)
+                   :sub-workflow-ids (vec sub-workflow-ids)))
 
           (> iteration 100)
-          (dag-execution-error (count completed-ids) (count failed-ids) "Max iterations exceeded")
+          (dag-execution-error (count completed-ids) (count all-failed) "Max iterations exceeded")
 
           :else
           (let [batch (take max-parallel ready-tasks)
                 _ (notify-batch-start batch on-task-start)
                 results (execute-tasks-batch batch execute-single-task context)
                 _ (notify-batch-complete results on-task-complete)
-                {:keys [completed failed]} (partition-results results)]
+                {:keys [completed failed]} (partition-results results)
+                batch-sub-ids (map (fn [[tid _]] (keyword (str "dag-task-" tid))) batch)]
             (recur (into completed-ids completed)
                    (into failed-ids failed)
                    (merge all-results results)
+                   (into sub-workflow-ids batch-sub-ids)
                    (inc iteration))))))))
 
 (defn execute-plan-as-dag [plan context]

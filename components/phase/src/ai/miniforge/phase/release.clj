@@ -45,7 +45,7 @@
     (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
       (when-let [phase-completed (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
         (let [workflow-id (:execution/id ctx)
-              outcome (if (= :completed (get-in ctx [:phase :status])) :success :failure)
+              outcome (if (registry/succeeded? (get-in ctx [:phase :status])) :success :failure)
               duration-ms (get-in ctx [:phase :duration-ms])]
           (publish! event-stream (phase-completed event-stream workflow-id phase
                                                    {:outcome outcome :duration-ms duration-ms})))))))
@@ -188,12 +188,17 @@
         release-data (when (= :success (:status result)) (:output result))
         release-metrics (or (:release/metrics release-data) {})
         metrics (merge {:tokens 0 :duration-ms duration-ms} release-metrics)
+        agent-status (:status result)
         iterations (get-in ctx [:phase :iterations] 1)
+        max-iterations (get-in ctx [:phase :budget :iterations]
+                               (get-in default-config [:budget :iterations]))
+        phase-status (registry/determine-phase-status
+                       agent-status iterations max-iterations)
         pr-info (get-in ctx [:workflow/pr-info])
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
-                        (assoc-in [:phase :status] :completed)
+                        (assoc-in [:phase :status] phase-status)
                         (assoc-in [:phase :metrics] metrics)
                         (assoc-in [:metrics :release :duration-ms] duration-ms)
                         (assoc-in [:metrics :release :repair-cycles] (dec iterations))
@@ -206,7 +211,13 @@
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
     ;; Emit phase completed event
     (emit-phase-completed! updated-ctx :release result)
-    updated-ctx))
+    ;; Handle retrying: increment iteration counter
+    (cond-> updated-ctx
+      (registry/retrying? phase-status)
+      (-> (update-in [:phase :iterations] (fnil inc 1))
+          (assoc-in [:phase :last-error]
+                    (or (get-in result [:error :message])
+                        "Release phase failed"))))))
 
 (defn- error-release
   "Handle release phase errors."

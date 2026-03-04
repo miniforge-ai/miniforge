@@ -59,6 +59,29 @@
      Set of gate keywords"
   registry/list-gates)
 
+;;------------------------------------------------------------------------------ Layer 0.5
+;; Gate result predicates
+
+(defn passed?
+  "Check if a gate result passed.
+
+   Arguments:
+     result - Gate result map from check-gate
+
+   Returns: boolean"
+  [result]
+  (boolean (:passed? result)))
+
+(defn failed?
+  "Check if a gate result failed.
+
+   Arguments:
+     result - Gate result map from check-gate
+
+   Returns: boolean"
+  [result]
+  (not (:passed? result)))
+
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Gate operations
 
@@ -92,7 +115,7 @@
     (try
       (let [result (check artifact ctx)
             result (assoc result :gate gate-kw)]
-        (if (:passed? result)
+        (if (passed? result)
           (emit-gate-event! ctx gate-kw :passed (- (System/currentTimeMillis) start-ms))
           (emit-gate-event! ctx gate-kw :failed (:errors result)))
         result)
@@ -147,7 +170,7 @@
         all-passed? (every? :passed? results)]
     {:all-passed? all-passed?
      :results results
-     :failed-gates (filterv (complement :passed?) results)}))
+     :failed-gates (filterv failed? results)}))
 
 ;;------------------------------------------------------------------------------ Layer 2
 ;; Response chain support
@@ -182,7 +205,7 @@
               :anomalies.gate/check-failed))
         (fn []
           (let [result (check artifact ctx)]
-            (if (:passed? result)
+            (if (passed? result)
               result
               (throw (ex-info "Gate validation failed"
                               {:anomaly :anomalies.gate/validation-failed
