@@ -192,14 +192,8 @@
         iterations (get-in ctx [:phase :iterations] 1)
         max-iterations (get-in ctx [:phase :budget :iterations]
                                (get-in default-config [:budget :iterations]))
-        phase-status (cond
-                       (= :success agent-status) :completed
-                       (and (= :error agent-status)
-                            (< iterations max-iterations)) :retrying
-                       (= :error agent-status) :failed
-                       ;; Fallback: if no explicit success, treat as failed
-                       (not= :success agent-status) :failed
-                       :else :completed)
+        phase-status (registry/determine-phase-status
+                       agent-status iterations max-iterations)
         pr-info (get-in ctx [:workflow/pr-info])
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
@@ -219,7 +213,7 @@
     (emit-phase-completed! updated-ctx :release result)
     ;; Handle retrying: increment iteration counter
     (cond-> updated-ctx
-      (= :retrying phase-status)
+      (registry/retrying? phase-status)
       (-> (update-in [:phase :iterations] (fnil inc 1))
           (assoc-in [:phase :last-error]
                     (or (get-in result [:error :message])

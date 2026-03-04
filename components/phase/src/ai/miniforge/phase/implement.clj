@@ -82,19 +82,20 @@
         existing-files (file-ctx/load-files-in-scope worktree-path files-in-scope)
         behavior-addendum (agent-beh/load-and-filter-behaviors
                             :implement {:task {:task/intent (:intent input)}})]
-    (cond-> {:task/id (random-uuid)
-             :task/type :implement
-             :task/description (:description input)
-             :task/title (:title input)
-             :task/intent (:intent input)
-             :task/constraints (:constraints input)
-             :task/plan plan-result
-             :task/existing-files existing-files
-             :task/behavior-addendum behavior-addendum}
-      verify-failure
-      (assoc :task/verify-failures
-             {:test-results (get-in verify-failure [:result :output :metadata :test-results])
-              :test-output (get-in verify-failure [:result :output :metadata :test-results :output])}))))
+    (let [base-task {:task/id (random-uuid)
+                     :task/type :implement
+                     :task/description (:description input)
+                     :task/title (:title input)
+                     :task/intent (:intent input)
+                     :task/constraints (:constraints input)
+                     :task/plan plan-result
+                     :task/existing-files existing-files
+                     :task/behavior-addendum behavior-addendum}]
+      (cond-> base-task
+        verify-failure
+        (assoc :task/verify-failures
+               {:test-results (get-in verify-failure [:result :output :metadata :test-results])
+                :test-output (get-in verify-failure [:result :output :metadata :test-results :output])})))))
 
 (defn- create-streaming-callback
   "Create a streaming callback for agent output if event-stream is available."
@@ -161,14 +162,9 @@
         max-iterations (get-in ctx [:phase :budget :iterations]
                                (get-in default-config [:budget :iterations]))
         phase-status (cond
-                       ;; Error with retry budget remaining — retry
-                       (and (= :error agent-status)
-                            (< iterations max-iterations))
-                       :retrying
-                       ;; Error with budget exhausted — fail
-                       (= :error agent-status) :failed
                        (= :already-implemented agent-status) :already-implemented
-                       :else :completed)
+                       :else (registry/determine-phase-status
+                               agent-status iterations max-iterations))
         metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
@@ -189,7 +185,7 @@
     (emit-phase-completed! updated-ctx :implement result)
     ;; Handle retrying: increment iteration counter and record last error
     (cond-> updated-ctx
-      (= :retrying phase-status)
+      (registry/retrying? phase-status)
       (-> (update-in [:phase :iterations] (fnil inc 1))
           (assoc-in [:phase :last-error]
                     (or (get-in result [:error :message])

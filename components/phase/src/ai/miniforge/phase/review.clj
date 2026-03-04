@@ -138,15 +138,9 @@
         iterations (get-in ctx [:phase :iterations] 1)
         max-iterations (get-in ctx [:phase :budget :iterations]
                                (get-in default-config [:budget :iterations]))
-        phase-status (cond
-                       ;; Reviewer requested changes and we have retry budget
-                       (and (= :changes-requested review-decision)
-                            (< iterations max-iterations))
-                       :retrying
-                       ;; Reviewer requested changes but budget exhausted
-                       (= :changes-requested review-decision) :failed
-                       ;; Default: approved / completed
-                       :else :completed)
+        phase-status (if (= :changes-requested review-decision)
+                       (if (< iterations max-iterations) :retrying :failed)
+                       :completed)
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
@@ -162,7 +156,7 @@
     (emit-phase-completed! updated-ctx :review result)
     ;; Handle retrying: store review feedback for implement phase
     (cond-> updated-ctx
-      (= :retrying phase-status)
+      (registry/retrying? phase-status)
       (-> (update-in [:phase :iterations] (fnil inc 1))
           (assoc-in [:phase :review-feedback]
                     (get-in result [:output :review/feedback]))

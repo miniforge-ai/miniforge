@@ -245,9 +245,9 @@
   [artifact ctx]
   (try
     (let [check-fn (requiring-resolve 'ai.miniforge.policy-pack.core/check-artifact)
-          packs (or (:policy-packs ctx) [])
-          task-type (or (:task-type ctx) :implement)
-          phase (or (:phase ctx) :implement)]
+          packs (get ctx :policy-packs [])
+          task-type (get ctx :task-type :implement)
+          phase (get ctx :phase :implement)]
       (if (empty? packs)
         {:passed? true :warnings [{:type :no-policy-packs
                                     :message "No policy packs loaded"}]}

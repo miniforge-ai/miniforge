@@ -111,8 +111,7 @@
   (scanner-type [_] :content-scan)
   (scan [_ artifact context]
     (let [content (or (:content artifact)
-                      (get-in artifact [:artifact/content])
-                      "")
+                      (get-in artifact [:artifact/content] ""))
           content-str (if (string? content) content (pr-str content))
           rule (:rule context)
           violations (for [{:keys [pattern-name regex severity message]} patterns

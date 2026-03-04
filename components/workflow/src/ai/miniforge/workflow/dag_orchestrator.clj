@@ -272,14 +272,18 @@
         total-tokens (->> (vals all-results) (map #(get-in % [:data :metrics :tokens] 0)) (reduce + 0))]
     {:artifacts artifacts :total-tokens total-tokens}))
 
+(defn- has-failed-dependency?
+  "Check if a task depends on any task in the failed set."
+  [task failed-ids]
+  (some failed-ids (get task :task/deps #{})))
+
 (defn- propagate-failures
   "Mark tasks whose deps include any failed task as transitively failed."
   [tasks-map failed-ids]
   (loop [propagated failed-ids]
     (let [newly-failed (->> tasks-map
-                            (filter (fn [[tid task]]
-                                      (and (not (contains? propagated tid))
-                                           (some propagated (:task/deps task #{})))))
+                            (remove (fn [[tid _]] (contains? propagated tid)))
+                            (filter (fn [[_tid task]] (has-failed-dependency? task propagated)))
                             (map first)
                             set)]
       (if (empty? newly-failed)

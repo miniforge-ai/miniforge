@@ -58,7 +58,7 @@
 (defn whitespace-repair
   "Repair function for whitespace violations (trailing whitespace, mixed tabs/spaces)."
   [_violation artifact _context]
-  (let [content (or (:content artifact) "")
+  (let [content (get artifact :content "")
         fixed (-> content
                   (str/replace #"[ \t]+\n" "\n")
                   (str/replace #"\t" "  "))]
@@ -71,7 +71,7 @@
 (defn trailing-newline-repair
   "Ensure file ends with exactly one newline."
   [_violation artifact _context]
-  (let [content (or (:content artifact) "")
+  (let [content (get artifact :content "")
         fixed (str (clojure.string/trimr content) "\n")]
     {:success? true
      :artifact (assoc artifact :content fixed)

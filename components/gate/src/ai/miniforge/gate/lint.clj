@@ -23,6 +23,16 @@
   (:require [ai.miniforge.gate.registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Content extraction helpers
+
+(defn- extract-content-str
+  "Extract content string from an artifact."
+  [artifact]
+  (let [content (or (:content artifact)
+                    (get-in artifact [:artifact/content])
+                    "")]
+    (if (string? content) content (pr-str content))))
+
 ;; Lint checking (simplified - real impl would call clj-kondo)
 
 (defn- check-unused-vars
@@ -70,10 +80,7 @@
      {:passed? bool :errors [] :warnings []}"
   [artifact ctx]
   (or (run-policy-pack-check artifact ctx)
-      (let [content (or (:content artifact)
-                        (get-in artifact [:artifact/content])
-                        "")
-            content-str (if (string? content) content (pr-str content))
+      (let [content-str (extract-content-str artifact)
             errors []
             warnings (check-unused-vars content-str)]
         (if (empty? errors)

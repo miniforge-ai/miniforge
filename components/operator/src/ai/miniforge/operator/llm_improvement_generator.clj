@@ -12,41 +12,13 @@
   (:require
    [cheshire.core :as json]
    [clojure.string :as str]
+   [ai.miniforge.operator.defaults :as defaults]
    [ai.miniforge.operator.protocol :as proto]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Prompt construction
 
-(def ^:private default-system-prompt
-  "You are a process improvement advisor for a software engineering meta-agent.
-Your job: generate concrete improvement proposals from detected workflow patterns.
-
-For each pattern, propose one or more improvements using these types:
-- prompt-change: Modify an LLM prompt to get better results
-- gate-adjustment: Add, remove, or modify a quality gate/check
-- policy-update: Change a workflow policy or rule
-- rule-addition: Add a new knowledge-base rule to prevent recurrence
-- budget-adjustment: Modify token/time/cost budget for a phase
-- workflow-modification: Restructure or reorder workflow phases
-
-Respond with ONLY a JSON array of improvement objects, no other text:
-[{\"type\": \"gate-adjustment\",
-  \"target\": \"implement-phase\",
-  \"change\": {\"action\": \"add-pre-check\", \"description\": \"Validate deps before compile\"},
-  \"rationale\": \"Prevent repeated compile failures by checking dependencies first\",
-  \"confidence\": 0.85,
-  \"source-pattern-type\": \"repeated-failure\"}]
-
-Return an empty array [] if no improvements can be confidently proposed.")
-
-(def ^:private default-improvement-types
-  "All improvement types the generator can produce."
-  #{:prompt-change
-    :gate-adjustment
-    :policy-update
-    :rule-addition
-    :budget-adjustment
-    :workflow-modification})
+;; System prompt and improvement types sourced from defaults — override via config
 
 (defn- summarize-pattern
   "Create a compact string summary of a single detected pattern."
@@ -143,8 +115,8 @@ Return an empty array [] if no improvements can be confidently proposed.")
       (try
         (let [complete-fn (requiring-resolve
                            'ai.miniforge.llm.interface.protocols.llm-client/complete*)
-              sys-prompt  (get config :system-prompt default-system-prompt)
-              types       (get config :improvement-types default-improvement-types)
+              sys-prompt  (get config :system-prompt defaults/improvement-generator-system-prompt)
+              types       (get config :improvement-types defaults/improvement-types)
               prompt      (build-generate-prompt patterns context)
               request     {:prompt     prompt
                            :system     sys-prompt
@@ -211,15 +183,15 @@ Return an empty array [] if no improvements can be confidently proposed.")
       \"rationale\": \"Validate dependencies before compile to prevent repeated failures\",
       \"confidence\": 0.85,
       \"source-pattern-type\": \"repeated-failure\"}]"
-   default-improvement-types)
+   defaults/improvement-types)
 
   ;; Test fail-open
-  (parse-generate-response "not valid json" default-improvement-types)
+  (parse-generate-response "not valid json" defaults/improvement-types)
   ;; => []
 
   ;; Test unknown improvement type is filtered
   (parse-improvement {:type "unknown-type" :target "foo" :rationale "bar"}
-                     default-improvement-types)
+                     defaults/improvement-types)
   ;; => nil
 
   :end)

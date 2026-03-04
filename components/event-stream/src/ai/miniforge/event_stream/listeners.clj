@@ -53,6 +53,18 @@
                   (catch Exception _e :internal))]
     (get privacy->min-capability privacy :observe)))
 
+(defn- matches-workflow?
+  "Check if event matches the workflow ID filter (nil/empty = match all)."
+  [wf-ids event]
+  (or (empty? wf-ids)
+      (contains? (set wf-ids) (:workflow/id event))))
+
+(defn- matches-event-type?
+  "Check if event matches the event type filter (nil/empty = match all)."
+  [event-types event]
+  (or (empty? event-types)
+      (contains? (set event-types) (:event/type event))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Listener registration
 
@@ -85,15 +97,11 @@
     ;; Build filter function from listener filters + capability enforcement
     (let [user-filter-fn (cond
                            (nil? filters) (constantly true)
-                           :else (fn [event]
-                                   (let [wf-ids (:workflow-ids filters)
-                                         event-types (:event-types filters)]
-                                     (and (or (nil? wf-ids)
-                                              (empty? wf-ids)
-                                              (contains? (set wf-ids) (:workflow/id event)))
-                                          (or (nil? event-types)
-                                              (empty? event-types)
-                                              (contains? (set event-types) (:event/type event)))))))
+                           :else (let [wf-ids (:workflow-ids filters)
+                                       event-types (:event-types filters)]
+                                   (fn [event]
+                                     (and (matches-workflow? wf-ids event)
+                                          (matches-event-type? event-types event)))))
           ;; Capability-based filter: listeners only receive events they're authorized for
           filter-fn (fn [event]
                       (and (capability-sufficient? capability
