@@ -29,6 +29,13 @@
    [ai.miniforge.self-healing.workaround-registry :as registry]))
 
 ;;------------------------------------------------------------------------------ Layer 0
+;; Result predicates
+
+(defn- succeeded?
+  "Check if a result map indicates success."
+  [result]
+  (boolean (:success? result)))
+
 ;; Pattern loading with workaround metadata
 
 (defn- load-workaround-patterns
@@ -167,7 +174,7 @@
   [workaround _pattern-id]
   (let [command (:command workaround)
         result (execute-shell-command command)]
-    (if (:success? result)
+    (if (succeeded? result)
       {:success? true
        :message (str "Executed: " command)
        :output (:output result)}
@@ -306,7 +313,7 @@
              :workaround-type (get-in pattern [:workaround :type])
              :workaround-data (:workaround pattern)}))
          (when (:applied? result)
-           (registry/update-workaround-stats! pattern-id (:success? result))))
+           (registry/update-workaround-stats! pattern-id (succeeded? result))))
 
        (merge result
               {:workaround-found? true

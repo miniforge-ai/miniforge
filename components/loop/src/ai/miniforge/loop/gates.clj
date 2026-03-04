@@ -196,7 +196,7 @@
         ;; Execute provided test function
         (try
           (let [result (test-fn artifact context)]
-            (if (:passed? result)
+            (if (passed? result)
               (pass-result id :test
                            :duration-ms (- (System/currentTimeMillis) start))
               (fail-result id :test

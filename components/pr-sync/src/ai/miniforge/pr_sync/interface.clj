@@ -120,6 +120,11 @@
   ([] (core/load-fleet-config))
   ([path] (core/load-fleet-config path)))
 
+(defn succeeded?
+  "Check if a pr-sync result map indicates success."
+  [result]
+  (core/succeeded? result))
+
 (defn save-fleet-config!
   "Write fleet configuration to disk."
   ([config] (core/save-fleet-config! config))

@@ -112,6 +112,11 @@
   [state]
   (contains? terminal-states state))
 
+(defn succeeded?
+  "Check if a transition result indicates success."
+  [result]
+  (boolean (:success? result)))
+
 (defn next-state
   "Get next state for a transition.
 

@@ -238,6 +238,11 @@
 ;------------------------------------------------------------------------------ Layer 4
 ;; Result builders and normalization
 
+(defn succeeded?
+  "Check if a result map indicates success."
+  [result]
+  (boolean (:success? result)))
+
 (defn success
   "Build a success result with a keyed value."
   [key value & {:as extras}]
