@@ -1,0 +1,18 @@
+{:spec/title "GitLab Support — Detailed Implementation Tasks"
+ :spec/description "Detailed implementation plan for GitLab MR lifecycle support. Covers git-provider protocol, GitHub/GitLab adapters, pr-lifecycle integration, task-executor updates, and integration tests."
+ :spec/intent {:type :feature
+               :scope ["components/git-provider/"
+                       "components/pr-lifecycle/"
+                       "components/task-executor/"
+                       "tests/integration/"]}
+ :spec/constraints ["Protocol-based design with Clojure protocols"
+                    "Extract existing gh CLI calls, don't rewrite"
+                    "Use glab CLI for GitLab, not API directly"
+                    "Backward compatible — defaults to GitHub"]
+ :spec/acceptance-criteria ["git-provider protocol abstraction created"
+                            "GitHub adapter extracted from existing pr-lifecycle code"
+                            "GitLab adapter using glab CLI implemented"
+                            "pr-lifecycle updated to use git-provider abstraction"
+                            "task-executor accepts :git-provider config"
+                            "Integration tests verify full GitLab workflow"]
+ :workflow/type :lean-sdlc}
