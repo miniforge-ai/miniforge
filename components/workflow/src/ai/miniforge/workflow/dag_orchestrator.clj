@@ -103,11 +103,17 @@
 
 ;--- Layer 1: Plan to DAG Conversion
 
+(defn- ensure-uuid [x]
+  (cond
+    (uuid? x) x
+    (string? x) (parse-uuid x)
+    :else x))
+
 (defn plan->dag-tasks [plan context]
   (->> (:plan/tasks plan [])
        (mapv (fn [t]
                {:task/id (:task/id t)
-                :task/deps (set (:task/dependencies t []))
+                :task/deps (set (map ensure-uuid (:task/dependencies t [])))
                 :task/description (:task/description t)
                 :task/type (:task/type t :implement)
                 :task/acceptance-criteria (:task/acceptance-criteria t [])
