@@ -209,12 +209,12 @@
 (defn completed?
   "Check if execution is completed."
   [state]
-  (phase-reg/succeeded? (:execution/status state)))
+  (phase-reg/succeeded? state))
 
 (defn failed?
   "Check if execution has failed."
   [state]
-  (phase-reg/failed? (:execution/status state)))
+  (phase-reg/failed? state))
 
 (defn running?
   "Check if execution is running."

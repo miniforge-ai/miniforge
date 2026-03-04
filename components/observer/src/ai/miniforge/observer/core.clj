@@ -322,7 +322,7 @@
   [observer opts]
   (let [limit (get opts :limit 100)
         metrics (proto/get-all-metrics observer {:limit limit})
-        failed (filter #(phase-reg/failed? (:status %)) metrics)
+        failed (filter phase-reg/failed? metrics)
 
         ;; Analyze which phases fail most often
         failed-phases (reduce

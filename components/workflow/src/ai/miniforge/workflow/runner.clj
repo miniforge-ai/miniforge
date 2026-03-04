@@ -330,7 +330,7 @@
                         (inc iteration)))))]
 
        ;; Validate completed workflows produced results
-       (let [final-ctx (if (and (phase-reg/succeeded? (:execution/status final-ctx))
+       (let [final-ctx (if (and (phase-reg/succeeded? final-ctx)
                                 (empty? (:execution/artifacts final-ctx))
                                 (empty? (:execution/phase-results final-ctx)))
                          (-> final-ctx
@@ -348,8 +348,7 @@
          (try
            (when-let [operator (:operator opts)]
              (let [observe-fn (requiring-resolve 'ai.miniforge.operator.interface/observe-signal)
-                   status (:execution/status output-ctx)
-                   signal-type (if (phase-reg/succeeded? status)
+                   signal-type (if (phase-reg/succeeded? output-ctx)
                                  :workflow-complete
                                  :workflow-failed)]
                (observe-fn operator

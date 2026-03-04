@@ -115,8 +115,8 @@
       (let [execute-dag (requiring-resolve 'ai.miniforge.workflow.dag-orchestrator/execute-plan-as-dag)
             result (execute-dag plan ctx)]
         (when-not quiet
-          (let [completed (count (filter #(phase-reg/succeeded? (:status %)) (vals result)))
-                failed (count (filter #(phase-reg/failed? (:status %)) (vals result)))]
+          (let [completed (count (filter phase-reg/succeeded? (vals result)))
+                failed (count (filter phase-reg/failed? (vals result)))]
             (display/print-info (str "Plan execution complete: "
                                      completed " completed, " failed " failed"))))
         result)
