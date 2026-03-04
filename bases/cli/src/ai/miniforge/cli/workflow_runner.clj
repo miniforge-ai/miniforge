@@ -348,8 +348,7 @@
   "Print chain execution result summary."
   [result quiet]
   (when-not quiet
-    (let [status (:chain/status result)
-          steps (:chain/step-results result)
+    (let [steps (:chain/step-results result)
           duration (:chain/duration-ms result)]
       (println)
       (println (display/colorize :cyan (apply str (repeat 60 "─"))))
