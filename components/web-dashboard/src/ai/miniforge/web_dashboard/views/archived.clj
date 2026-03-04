@@ -57,7 +57,7 @@
      [:div.workflow-card-list
       (for [wf archived-workflows]
         (let [wf-id  (str (:id wf))
-              status (or (:status wf) :stale)]
+              status (get wf :status :stale)]
           [:details.workflow-card.archived-card
            {:id (str "arch-" wf-id)}
            [:summary.workflow-card-summary

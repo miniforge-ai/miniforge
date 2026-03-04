@@ -483,9 +483,9 @@
       (if-not active?
         model
         (let [result (command/compute-completions model (:command-buf model))
-              completions (vec (or (:completions result) []))
+              completions (vec (get result :completions []))
               n (count completions)
-              prior-idx (or (:completion-idx model) 0)]
+              prior-idx (get model :completion-idx 0)]
           (assoc model
                  :completions completions
                  :completion-idx (when (pos? n) (min prior-idx (dec n)))
@@ -571,7 +571,7 @@
       ;; Side-effect error
       :msg/side-effect-error
       (cond-> (assoc model :flash-message
-                     (str "Effect error (" (name (or (:type payload) :unknown)) "): "
+                     (str "Effect error (" (name (get payload :type :unknown)) "): "
                           (:error payload)))
         (= :browse-repos (:type payload))
         (assoc :browse-repos-loading? false))

@@ -202,7 +202,7 @@
    Returns:
      {:passed? bool :errors [...] :warnings [...]}"
   [_artifact ctx]
-  (let [config (or (:config ctx) {})
+  (let [config (get ctx :config {})
         commits-to-check (get config :commits-to-check 50)
         branch (get config :branch "HEAD")
         fail-on-warning? (get config :fail-on-warning false)

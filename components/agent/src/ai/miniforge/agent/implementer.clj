@@ -272,7 +272,7 @@
               task-text (task->text input)
               ;; Append behavior addendum to system prompt if present
               effective-system-prompt (str @implementer-system-prompt
-                                          (or (:task/behavior-addendum input) ""))
+                                          (get input :task/behavior-addendum ""))
               ;; Include existing files and already-implemented escape hatch
               user-prompt (str "Implement the following task:\n\n"
                                task-text
@@ -295,7 +295,7 @@
                         (llm/chat llm-client user-prompt
                                   (merge {:system effective-system-prompt} mcp-opts)))))
                   response llm-result
-                  tokens (or (:tokens response) 0)]
+                  tokens (get response :tokens 0)]
               (log/info logger :implementer :implementer/llm-called
                         {:data {:success (llm/success? response)
                                 :tokens tokens

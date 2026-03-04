@@ -177,7 +177,7 @@
     (let [dir (packs-dir)]
       (if (and (.exists dir) (.isDirectory dir))
         (let [result (policy-pack/load-all-packs (.getPath dir))]
-          (or (:loaded result) []))
+          (get result :loaded []))
         []))
     (catch Exception _ [])))
 

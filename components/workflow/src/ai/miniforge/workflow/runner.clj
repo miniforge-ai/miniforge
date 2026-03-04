@@ -283,7 +283,7 @@
    (run-pipeline workflow input {}))
   ([workflow input opts]
    (let [pipeline (build-pipeline workflow)
-         max-phases (or (:max-phases opts) 50)
+         max-phases (get opts :max-phases 50)
          ;; Control state for dashboard commands — caller can provide their own
          control-state (or (:control-state opts)
                            (atom {:paused false :stopped false :adjustments {}}))

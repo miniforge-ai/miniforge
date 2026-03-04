@@ -207,12 +207,12 @@
   (try
     (let [input (json/parse-string (slurp *in*) true)
           tool-name (:tool_name input)
-          tool-input (or (:tool_input input) {})
+          tool-input (get input :tool_input {})
           tool-input-kw (into {} (map (fn [[k v]] [(keyword k) v]) tool-input))
           meta-eval-config (:meta_eval input)
           result (if meta-eval-config
                    ;; Meta-eval enabled: two-layer evaluation
-                   (let [llm-client (when-let [backend (keyword (or (:backend meta-eval-config) "claude"))]
+                   (let [llm-client (when-let [backend (keyword (get meta-eval-config :backend "claude"))]
                                       (try
                                         (let [create-client (requiring-resolve
                                                              'ai.miniforge.llm.protocols.records.llm-client/create-client)]

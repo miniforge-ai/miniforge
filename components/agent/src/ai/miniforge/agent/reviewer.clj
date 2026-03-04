@@ -452,7 +452,7 @@
                        (loop/lint-gate)
                        (loop/policy-gate :security {:policies [:no-secrets]})]
         gates (or (:gates opts) default-gates)
-        config {:strict (or (:strict opts) false)}]
+        config {:strict (get opts :strict false)}]
     (specialized/create-base-agent
      {:role :reviewer
       :system-prompt @reviewer-system-prompt
@@ -482,7 +482,7 @@
                                               {:system @reviewer-system-prompt})
                              (llm/chat llm-client user-prompt
                                        {:system @reviewer-system-prompt}))
-                  tokens (or (:tokens response) 0)]
+                  tokens (get response :tokens 0)]
 
               (log/info logger :reviewer :reviewer/llm-called
                         {:data {:success (llm/success? response)

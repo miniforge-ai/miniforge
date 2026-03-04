@@ -101,7 +101,7 @@
   [phase exec-state context]
   (let [phase-agent (:phase/agent phase)
         inner-loop (:phase/inner-loop phase {})
-        max-iterations (or (:max-iterations inner-loop) 5)]
+        max-iterations (get inner-loop :max-iterations 5)]
 
     (cond
       ;; Skip :none agent
@@ -146,7 +146,7 @@
            :artifacts []
            :errors [{:type :phase-failed
                      :phase (:phase/id phase)
-                     :message (or (:error result) "Phase execution failed")}]
+                     :message (get result :error "Phase execution failed")}]
            :metrics (:metrics result {})})))))
 
 ;------------------------------------------------------------------------------ Layer 3
@@ -281,7 +281,7 @@
       e. Transition to next phase
    3. Mark as completed or failed"
   [workflow input context]
-  (let [max-phases (or (:max-phases context) 50)
+  (let [max-phases (get context :max-phases 50)
         callbacks {:on-phase-start (:on-phase-start context)
                    :on-phase-complete (:on-phase-complete context)}]
 

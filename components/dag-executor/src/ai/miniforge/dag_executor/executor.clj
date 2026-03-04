@@ -169,7 +169,7 @@
    Returns {:executor DockerExecutor :image-result Result} or error Result."
   [config]
   (let [docker-path (:docker-path config)
-        image-type (or (:image-type config) :minimal)
+        image-type (get config :image-type :minimal)
         ensure? (get config :ensure-image? true)
         default-image (get-in task-runner-images [image-type :image])
         image (or (:image config) default-image)]

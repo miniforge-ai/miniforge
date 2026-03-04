@@ -55,7 +55,7 @@
 
    Returns: Number of files deleted"
   [& [opts]]
-  (let [ttl-ms (or (:ttl-ms opts) (* 7 24 60 60 1000))
+  (let [ttl-ms (get opts :ttl-ms (* 7 24 60 60 1000))
         home (System/getProperty "user.home")
         events-dir (io/file home ".miniforge" "events")
         cutoff (- (System/currentTimeMillis) ttl-ms)]

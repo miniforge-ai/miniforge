@@ -293,7 +293,7 @@
 
 (defn- execute-dag-loop [tasks-map context logger]
   (let [{:keys [on-task-start on-task-complete]} context
-        max-parallel (or (:max-parallel context) 4)]
+        max-parallel (get context :max-parallel 4)]
     (loop [completed-ids #{}
            failed-ids #{}
            all-results {}
