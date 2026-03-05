@@ -178,6 +178,8 @@
                                                                      {:phase/id :dag-task
                                                                       :task-id task-id}
                                                                      result)))})
+        dag-context (assoc dag-context :pre-completed-ids
+                          (get-in context [:pre-completed-dag-tasks] #{}))
         dag-result (dag-orch/execute-plan-as-dag plan dag-context)]
 
     ;; Merge DAG results into execution state

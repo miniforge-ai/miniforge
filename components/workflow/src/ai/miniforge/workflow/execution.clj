@@ -363,7 +363,9 @@
   [ctx phase-name phase-result pipeline
    transition-to-completed-fn transition-to-failed-fn]
   (when-let [plan (dag-applicable? phase-name phase-result ctx)]
-    (let [dag-result (dag-orch/execute-plan-as-dag plan ctx)]
+    (let [ctx-with-resume (assoc ctx :pre-completed-ids
+                                 (get-in ctx [:execution/opts :pre-completed-dag-tasks] #{}))
+          dag-result (dag-orch/execute-plan-as-dag plan ctx-with-resume)]
       (if (:success? dag-result)
         (apply-dag-success ctx dag-result pipeline transition-to-completed-fn)
         (apply-dag-failure ctx dag-result transition-to-failed-fn)))))

@@ -21,7 +21,7 @@
   - No build step required (server-side rendering for Homebrew)"
 
  :spec/intent
- {:type :feature-complete-production-ready
+ {:type :feature
   :scope ["Complete all 8 views (5 N5 + 3 N9 PR views)"
           "Polished UI with professional design system"
           "Real-time updates and live metrics"
