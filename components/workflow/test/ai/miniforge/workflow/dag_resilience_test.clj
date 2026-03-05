@@ -51,6 +51,15 @@
   (testing "returns nil/false for successful results"
     (is (not (resilience/rate-limit-error? (ok-result :a))))))
 
+(deftest test-rate-limit-error-handles-map-message
+  (testing "handles non-string :message (error map) without throwing ClassCastException"
+    (let [result (dag/err :task-execution-failed
+                          {:type :phase-error :phase :implement
+                           :message "Sub-workflow failed"
+                           :data {:some "context"}}
+                          {:task-id :test})]
+      (is (not (resilience/rate-limit-error? result))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; analyze-batch-for-rate-limits tests
 
