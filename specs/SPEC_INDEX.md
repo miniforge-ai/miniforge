@@ -1,7 +1,7 @@
 # miniforge Specification Index
 
-**Version:** 0.4.0-draft
-**Date:** 2026-02-16
+**Version:** 0.5.0-draft
+**Date:** 2026-03-04
 **Status:** Living specification during OSS development
 
 ---
@@ -44,6 +44,9 @@ Defines:
 
 - Core nouns: workflow, phase, agent, subagent, tool, gate, policy pack, evidence bundle,
   artifact, provenance, workflow pack, capability, pack run
+- **Repository Intelligence:** Repo Index, Context Pack, Range, Symbol, Edge, Coverage (§2.27–§2.30)
+- **Context Assembly:** tool contract (repo.map/search/symbol/open, nav.def/refs/impls/calls),
+  staleness detection, policy envelopes, budget enforcement (§11)
 - Three-layer architecture: Control Plane, Agent Layer, Learning Layer
 - Polylith component boundaries (OSS component catalog)
 - Operational model: local-first execution, reproducibility, failure semantics
