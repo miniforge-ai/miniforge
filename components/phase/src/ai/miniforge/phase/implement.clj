@@ -166,6 +166,8 @@
                        :else (registry/determine-phase-status
                                agent-status iterations max-iterations))
         metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
+        cost-usd (* (:tokens metrics 0) 0.000015)
+        metrics (assoc metrics :cost-usd cost-usd)
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
@@ -176,6 +178,7 @@
                         (update-in [:execution :phases-completed] (fnil conj []) :implement)
                         ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
+                        (update-in [:execution/metrics :cost-usd] (fnil + 0.0) cost-usd)
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
     ;; Warn if result has no output and isn't already-implemented
     (when (and (not= :already-implemented agent-status)

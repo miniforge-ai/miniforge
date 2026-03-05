@@ -40,12 +40,14 @@
    :error error
    :metrics (or metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0})})
 
-(defn- dag-execution-result [completed failed artifacts total-tokens]
+(defn- dag-execution-result [completed failed artifacts metrics-agg]
   {:success? (zero? failed)
    :tasks-completed completed
    :tasks-failed failed
    :artifacts (vec artifacts)
-   :metrics {:tokens total-tokens}})
+   :metrics {:tokens (:total-tokens metrics-agg 0)
+             :cost-usd (:total-cost metrics-agg 0.0)
+             :duration-ms (:total-duration metrics-agg 0)}})
 
 (defn- dag-execution-error [completed failed error]
   {:success? false
@@ -268,9 +270,12 @@
     {:completed ok-results :failed err-results}))
 
 (defn- aggregate-results [all-results]
-  (let [artifacts (->> (vals all-results) (mapcat #(get-in % [:data :artifacts] [])))
-        total-tokens (->> (vals all-results) (map #(get-in % [:data :metrics :tokens] 0)) (reduce + 0))]
-    {:artifacts artifacts :total-tokens total-tokens}))
+  (let [results (vals all-results)
+        artifacts (->> results (mapcat #(get-in % [:data :artifacts] [])))
+        total-tokens (->> results (map #(get-in % [:data :metrics :tokens] 0)) (reduce + 0))
+        total-cost (->> results (map #(get-in % [:data :metrics :cost-usd] 0.0)) (reduce + 0.0))
+        total-duration (->> results (map #(get-in % [:data :metrics :duration-ms] 0)) (reduce + 0))]
+    {:artifacts artifacts :total-tokens total-tokens :total-cost total-cost :total-duration total-duration}))
 
 (defn- has-failed-dependency?
   "Check if a task depends on any task in the failed set."
@@ -302,12 +307,12 @@
             ready-tasks (compute-ready-tasks tasks-map completed-ids all-failed)]
         (cond
           (empty? ready-tasks)
-          (let [{:keys [artifacts total-tokens]} (aggregate-results all-results)]
+          (let [metrics-agg (aggregate-results all-results)]
             (log/info logger :dag-orchestrator :dag/completed
                       {:data {:completed (count completed-ids)
                               :failed (count all-failed)
                               :iterations iteration}})
-            (assoc (dag-execution-result (count completed-ids) (count all-failed) artifacts total-tokens)
+            (assoc (dag-execution-result (count completed-ids) (count all-failed) (:artifacts metrics-agg) metrics-agg)
                    :sub-workflow-ids (vec sub-workflow-ids)))
 
           (> iteration 100)

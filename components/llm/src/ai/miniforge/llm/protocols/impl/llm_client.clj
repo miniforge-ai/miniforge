@@ -46,7 +46,13 @@
           (when-let [delta-text (get-in data [:event :delta :text])]
             {:delta delta-text :done? false})
 
-          ;; Ignore system, result, rate_limit_event
+          "result"
+          (let [usage (get-in data [:result :usage])]
+            {:delta "" :done? true
+             :usage {:input-tokens (:input_tokens usage)
+                     :output-tokens (:output_tokens usage)}})
+
+          ;; Ignore system, rate_limit_event
           nil)))
     (catch Exception _e
       nil)))
@@ -221,7 +227,9 @@
           {:success true
            :content (get-in body [:choices 0 :message :content] "")
            :usage {:input-tokens (get-in body [:usage :prompt_tokens])
-                   :output-tokens (get-in body [:usage :completion_tokens])}}
+                   :output-tokens (get-in body [:usage :completion_tokens])}
+           :tokens (+ (or (get-in body [:usage :prompt_tokens]) 0)
+                      (or (get-in body [:usage :completion_tokens]) 0))}
           {:success false
            :anomaly (response/make-anomaly
                      :anomalies/unavailable
@@ -330,6 +338,7 @@
   {:success true
    :content (str/trim output)
    :usage {:input-tokens nil :output-tokens nil}
+   :tokens 0
    :exit-code exit-code})
 
 (defn- error-response [output exit-code stderr]
@@ -477,9 +486,11 @@
                  :content (:content result)}))
     result))
 
-(defn- stream-with-parser [stream-parser on-chunk accumulated-content]
+(defn- stream-with-parser [stream-parser on-chunk accumulated-content accumulated-usage]
   (fn [line]
     (when-let [parsed (stream-parser line)]
+      (when-let [usage (:usage parsed)]
+        (reset! accumulated-usage usage))
       (when-let [delta (:delta parsed)]
         (swap! accumulated-content str delta)
         (on-chunk (assoc parsed :content @accumulated-content))))))
@@ -495,11 +506,13 @@
       (log/debug logger :system :agent/streaming-complete
                  {:data {:response-length content-length}}))))
 
-(defn- streaming-success-response [content exit-code]
-  {:success true
-   :content content
-   :usage {:input-tokens nil :output-tokens nil}
-   :exit-code exit-code})
+(defn- streaming-success-response [content exit-code usage]
+  (let [usage (or usage {:input-tokens nil :output-tokens nil})]
+    {:success true
+     :content content
+     :usage usage
+     :tokens (+ (or (:input-tokens usage) 0) (or (:output-tokens usage) 0))
+     :exit-code exit-code}))
 
 (defn- streaming-error-response [content exit-code err-result timeout-info]
   (let [error-message (or err-result
@@ -525,14 +538,15 @@
         prompt (build-request-prompt request)
         args (args-fn (assoc request :prompt prompt :streaming? true))
         full-cmd (into [cmd] args)
-        accumulated-content (atom "")]
+        accumulated-content (atom "")
+        accumulated-usage (atom nil)]
     (when logger
       (log/debug logger :system :agent/streaming-prompt-sent
                  {:data {:backend backend
                          :prompt-length (count prompt)}}))
     (let [result (stream-exec-fn
                   full-cmd
-                  (stream-with-parser stream-parser on-chunk accumulated-content)
+                  (stream-with-parser stream-parser on-chunk accumulated-content accumulated-usage)
                   {:progress-monitor progress-monitor})
           exit-code (:exit result)
           timeout-info (:timeout result)
@@ -543,7 +557,7 @@
                  :timeout timeout-info})
       (log-streaming-result logger timeout-info (count final-content))
       (if (zero? exit-code)
-        (streaming-success-response final-content exit-code)
+        (streaming-success-response final-content exit-code @accumulated-usage)
         (streaming-error-response final-content exit-code (:err result) timeout-info)))))
 
 (defn complete-stream-impl [client request on-chunk]
