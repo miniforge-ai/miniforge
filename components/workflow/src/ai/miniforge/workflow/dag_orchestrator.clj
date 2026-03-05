@@ -120,26 +120,36 @@
                      (throw (ex-info (str "Invalid UUID string: " x) {:value x})))
     :else (throw (ex-info (str "Cannot convert to UUID: " (pr-str x)) {:value x :type (type x)}))))
 
+(defn- validate-deps
+  "Filter deps to only those referencing actual task IDs. Warns on phantoms."
+  [task-id raw-deps valid-task-ids]
+  (let [valid (set (filter valid-task-ids raw-deps))
+        invalid (remove valid-task-ids raw-deps)]
+    (when (seq invalid)
+      (println "WARN: Task" task-id
+               "has dependencies on non-existent tasks:"
+               (vec invalid) "— dropping them"))
+    valid))
+
+(defn- plan-task->dag-task
+  "Convert a single plan task to a DAG task with validated deps."
+  [t valid-task-ids plan-id workflow-id context]
+  {:task/id (:task/id t)
+   :task/deps (validate-deps (:task/id t)
+                             (map ensure-uuid (:task/dependencies t []))
+                             valid-task-ids)
+   :task/description (:task/description t)
+   :task/type (:task/type t :implement)
+   :task/acceptance-criteria (:task/acceptance-criteria t [])
+   :task/context (merge {:parent-plan-id plan-id
+                         :parent-workflow-id workflow-id}
+                        (select-keys context [:llm-backend :artifact-store]))})
+
 (defn plan->dag-tasks [plan context]
-  (let [all-task-ids (set (map :task/id (:plan/tasks plan [])))
-        dag-tasks (->> (:plan/tasks plan [])
-                       (mapv (fn [t]
-                               (let [raw-deps (map ensure-uuid (:task/dependencies t []))
-                                     valid-deps (set (filter all-task-ids raw-deps))
-                                     invalid-deps (remove all-task-ids raw-deps)]
-                                 (when (seq invalid-deps)
-                                   (println "WARN: Task" (:task/id t)
-                                            "has dependencies on non-existent tasks:"
-                                            (vec invalid-deps) "— dropping them"))
-                                 {:task/id (:task/id t)
-                                  :task/deps valid-deps
-                                  :task/description (:task/description t)
-                                  :task/type (:task/type t :implement)
-                                  :task/acceptance-criteria (:task/acceptance-criteria t [])
-                                  :task/context (merge {:parent-plan-id (:plan/id plan)
-                                                        :parent-workflow-id (:workflow-id context)}
-                                                       (select-keys context [:llm-backend :artifact-store]))}))))]
-    dag-tasks))
+  (let [tasks (:plan/tasks plan [])
+        valid-task-ids (set (map :task/id tasks))]
+    (mapv #(plan-task->dag-task % valid-task-ids (:plan/id plan) (:workflow-id context) context)
+          tasks)))
 
 ;--- Layer 1: Sub-Workflow Construction
 
@@ -338,6 +348,38 @@
   (doseq [tid completed-task-ids]
     (resilience/emit-dag-task-completed! event-stream workflow-id tid (get results tid))))
 
+(defn- find-unreached-tasks
+  "Identify tasks that are neither completed nor failed — stuck due to unmet deps."
+  [tasks-map completed-ids all-failed]
+  (->> (keys tasks-map)
+       (remove #(or (contains? completed-ids %) (contains? all-failed %)))
+       (map (fn [tid]
+              {:task-id tid
+               :unmet-deps (vec (remove completed-ids
+                                        (get-in tasks-map [tid :task/deps] #{})))}))))
+
+(defn- log-unreached-tasks! [logger tasks-map completed-ids all-failed]
+  (let [unreached (find-unreached-tasks tasks-map completed-ids all-failed)]
+    (when (seq unreached)
+      (log/info logger :dag-orchestrator :dag/unreached-tasks
+                {:data {:unreached-count (count unreached)
+                        :stuck-deps unreached}}))))
+
+(defn- finalize-dag
+  "Build the terminal result when no more tasks are ready."
+  [tasks-map completed-ids all-failed all-results sub-workflow-ids iteration logger]
+  (log-unreached-tasks! logger tasks-map completed-ids all-failed)
+  (let [{:keys [artifacts total-tokens]} (aggregate-results all-results)
+        unreached (- (count tasks-map) (count completed-ids) (count all-failed))]
+    (log/info logger :dag-orchestrator :dag/completed
+              {:data {:completed (count completed-ids)
+                      :failed (count all-failed)
+                      :unreached unreached
+                      :iterations iteration}})
+    (assoc (dag-execution-result (count completed-ids) (count all-failed) artifacts total-tokens)
+           :tasks-unreached unreached
+           :sub-workflow-ids (vec sub-workflow-ids))))
+
 (defn- execute-dag-loop [tasks-map context logger]
   (let [{:keys [on-task-start on-task-complete]} context
         max-parallel (get context :max-parallel 4)
@@ -354,31 +396,8 @@
             ready-tasks (compute-ready-tasks tasks-map completed-ids all-failed)]
         (cond
           (empty? ready-tasks)
-          (let [{:keys [artifacts total-tokens]} (aggregate-results all-results)
-                total-tasks (count tasks-map)
-                unreached (- total-tasks (count completed-ids) (count all-failed))]
-            (when (pos? unreached)
-              (let [stuck-ids (->> (keys tasks-map)
-                                   (remove #(or (contains? completed-ids %)
-                                                (contains? all-failed %)))
-                                   set)
-                    stuck-deps (->> stuck-ids
-                                    (map (fn [tid]
-                                           (let [deps (get-in tasks-map [tid :task/deps] #{})]
-                                             {:task-id tid
-                                              :unmet-deps (remove #(contains? completed-ids %) deps)}))))]
-                (log/info logger :dag-orchestrator :dag/unreached-tasks
-                          {:data {:unreached-count unreached
-                                  :stuck-task-ids stuck-ids
-                                  :stuck-deps stuck-deps}})))
-            (log/info logger :dag-orchestrator :dag/completed
-                      {:data {:completed (count completed-ids)
-                              :failed (count all-failed)
-                              :unreached (- (count tasks-map) (count completed-ids) (count all-failed))
-                              :iterations iteration}})
-            (assoc (dag-execution-result (count completed-ids) (count all-failed) artifacts total-tokens)
-                   :tasks-unreached (- (count tasks-map) (count completed-ids) (count all-failed))
-                   :sub-workflow-ids (vec sub-workflow-ids)))
+          (finalize-dag tasks-map completed-ids all-failed all-results
+                        sub-workflow-ids iteration logger)
 
           (> iteration 100)
           (dag-execution-error (count completed-ids) (count all-failed) "Max iterations exceeded")
@@ -392,14 +411,12 @@
                 _ (notify-batch-complete results on-task-complete)
                 {:keys [completed failed]} (partition-results results)
                 batch-sub-ids (map (fn [[tid _]] (keyword (str "dag-task-" tid))) batch)
-                ;; Analyze for rate limits
                 {:keys [rate-limited-ids]} (resilience/analyze-batch-for-rate-limits results)
                 new-completed (into completed-ids completed)]
 
             (emit-completed-checkpoints! completed results event-stream workflow-id)
 
             (if (seq rate-limited-ids)
-              ;; Handle rate-limited batch
               (let [decision (handle-rate-limit-in-batch
                               context rate-limited-ids new-completed failed-ids
                               all-results event-stream workflow-id logger)]
@@ -412,7 +429,6 @@
                          (inc iteration))
                   (:result decision)))
 
-              ;; Normal path — no rate limits
               (recur new-completed
                      (into failed-ids failed)
                      (merge all-results results)
