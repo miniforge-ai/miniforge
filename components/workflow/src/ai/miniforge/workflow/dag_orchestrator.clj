@@ -115,12 +115,16 @@
 
 ;--- Layer 1: Plan to DAG Conversion
 
-(defn- ensure-uuid [x]
+(defn- normalize-task-id
+  "Normalize a task ID to a UUID. Handles UUIDs, UUID strings, keywords, and
+   other values by generating a deterministic UUID from the value's string form."
+  [x]
   (cond
     (uuid? x) x
     (string? x) (or (parse-uuid x)
-                     (throw (ex-info (str "Invalid UUID string: " x) {:value x})))
-    :else (throw (ex-info (str "Cannot convert to UUID: " (pr-str x)) {:value x :type (type x)}))))
+                     (java.util.UUID/nameUUIDFromBytes (.getBytes (str x))))
+    (keyword? x) (java.util.UUID/nameUUIDFromBytes (.getBytes (name x)))
+    :else (java.util.UUID/nameUUIDFromBytes (.getBytes (pr-str x)))))
 
 (defn- validate-deps
   "Filter deps to only those referencing actual task IDs. Warns on phantoms."
@@ -136,20 +140,21 @@
 (defn- plan-task->dag-task
   "Convert a single plan task to a DAG task with validated deps."
   [t valid-task-ids plan-id workflow-id context]
-  {:task/id (:task/id t)
-   :task/deps (validate-deps (:task/id t)
-                             (map ensure-uuid (:task/dependencies t []))
+  (let [task-id (normalize-task-id (:task/id t))]
+  {:task/id task-id
+   :task/deps (validate-deps task-id
+                             (map normalize-task-id (:task/dependencies t []))
                              valid-task-ids)
    :task/description (:task/description t)
    :task/type (:task/type t :implement)
    :task/acceptance-criteria (:task/acceptance-criteria t [])
    :task/context (merge {:parent-plan-id plan-id
                          :parent-workflow-id workflow-id}
-                        (select-keys context [:llm-backend :artifact-store]))})
+                        (select-keys context [:llm-backend :artifact-store]))}))
 
 (defn plan->dag-tasks [plan context]
   (let [tasks (:plan/tasks plan [])
-        valid-task-ids (set (map :task/id tasks))]
+        valid-task-ids (set (map (comp normalize-task-id :task/id) tasks))]
     (mapv #(plan-task->dag-task % valid-task-ids (:plan/id plan) (:workflow-id context) context)
           tasks)))
 
