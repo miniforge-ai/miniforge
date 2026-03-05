@@ -228,8 +228,8 @@
            :content (get-in body [:choices 0 :message :content] "")
            :usage {:input-tokens (get-in body [:usage :prompt_tokens])
                    :output-tokens (get-in body [:usage :completion_tokens])}
-           :tokens (+ (or (get-in body [:usage :prompt_tokens]) 0)
-                      (or (get-in body [:usage :completion_tokens]) 0))}
+           :tokens (+ (get-in body [:usage :prompt_tokens] 0)
+                      (get-in body [:usage :completion_tokens] 0))}
           {:success false
            :anomaly (response/make-anomaly
                      :anomalies/unavailable
