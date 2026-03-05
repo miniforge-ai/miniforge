@@ -38,7 +38,7 @@
 
 (defn- workflow-failure [error metrics]
   {:success? false
-   :error error
+   :error (if (map? error) (:message error (pr-str error)) (str error))
    :metrics (or metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0})})
 
 (defn- dag-execution-result [completed failed artifacts metrics-agg]

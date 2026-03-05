@@ -126,7 +126,8 @@
                  (if (= status :success)
                    (es/workflow-completed event-stream workflow-id status duration-ms)
                    (es/workflow-failed event-stream workflow-id
-                                       {:message (str (first (:execution/errors result)))
+                                       {:message (let [err (first (:execution/errors result))]
+                                              (if (map? err) (:message err (pr-str err)) (str err)))
                                         :errors (:execution/errors result)})))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -139,7 +140,8 @@
       (if-let [sandbox-error (:sandbox-error context)]
         (let [result {:success? false
                       :errors [{:type :sandbox-setup-failed
-                                :message (str (:error sandbox-error))}]}]
+                                :message (let [err (:error sandbox-error)]
+                                  (if (map? err) (:message err (pr-str err)) (str err)))}]}]
           (publish-completion-event event-stream workflow-id result)
           (reset! completed? true)
           (display/print-result result opts)

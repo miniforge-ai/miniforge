@@ -64,7 +64,7 @@
     (when (seq errors)
       (println (colorize :red "\nErrors:"))
       (doseq [err errors]
-        (println (str "  • " err))))))
+        (println (str "  • " (if (map? err) (:message err (pr-str err)) err)))))))
 
 (defn- print-pretty-result [result]
   (println (colorize :cyan (str "\n" (apply str (repeat 65 "━")))))
