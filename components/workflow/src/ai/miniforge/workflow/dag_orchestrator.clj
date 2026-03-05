@@ -238,7 +238,7 @@
         metrics (:execution/metrics result)]
     (if (phase-reg/succeeded? result)
       (workflow-success (first artifacts) metrics)
-      (workflow-failure (or (first (:execution/errors result))
+      (workflow-failure (or (-> result :execution/errors first :message)
                             "Sub-workflow failed")
                         metrics))))
 
