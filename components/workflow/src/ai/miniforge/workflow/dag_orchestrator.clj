@@ -121,16 +121,25 @@
     :else (throw (ex-info (str "Cannot convert to UUID: " (pr-str x)) {:value x :type (type x)}))))
 
 (defn plan->dag-tasks [plan context]
-  (->> (:plan/tasks plan [])
-       (mapv (fn [t]
-               {:task/id (:task/id t)
-                :task/deps (set (map ensure-uuid (:task/dependencies t [])))
-                :task/description (:task/description t)
-                :task/type (:task/type t :implement)
-                :task/acceptance-criteria (:task/acceptance-criteria t [])
-                :task/context (merge {:parent-plan-id (:plan/id plan)
-                                      :parent-workflow-id (:workflow-id context)}
-                                     (select-keys context [:llm-backend :artifact-store]))}))))
+  (let [all-task-ids (set (map :task/id (:plan/tasks plan [])))
+        dag-tasks (->> (:plan/tasks plan [])
+                       (mapv (fn [t]
+                               (let [raw-deps (map ensure-uuid (:task/dependencies t []))
+                                     valid-deps (set (filter all-task-ids raw-deps))
+                                     invalid-deps (remove all-task-ids raw-deps)]
+                                 (when (seq invalid-deps)
+                                   (println "WARN: Task" (:task/id t)
+                                            "has dependencies on non-existent tasks:"
+                                            (vec invalid-deps) "— dropping them"))
+                                 {:task/id (:task/id t)
+                                  :task/deps valid-deps
+                                  :task/description (:task/description t)
+                                  :task/type (:task/type t :implement)
+                                  :task/acceptance-criteria (:task/acceptance-criteria t [])
+                                  :task/context (merge {:parent-plan-id (:plan/id plan)
+                                                        :parent-workflow-id (:workflow-id context)}
+                                                       (select-keys context [:llm-backend :artifact-store]))}))))]
+    dag-tasks))
 
 ;--- Layer 1: Sub-Workflow Construction
 
@@ -345,12 +354,30 @@
             ready-tasks (compute-ready-tasks tasks-map completed-ids all-failed)]
         (cond
           (empty? ready-tasks)
-          (let [{:keys [artifacts total-tokens]} (aggregate-results all-results)]
+          (let [{:keys [artifacts total-tokens]} (aggregate-results all-results)
+                total-tasks (count tasks-map)
+                unreached (- total-tasks (count completed-ids) (count all-failed))]
+            (when (pos? unreached)
+              (let [stuck-ids (->> (keys tasks-map)
+                                   (remove #(or (contains? completed-ids %)
+                                                (contains? all-failed %)))
+                                   set)
+                    stuck-deps (->> stuck-ids
+                                    (map (fn [tid]
+                                           (let [deps (get-in tasks-map [tid :task/deps] #{})]
+                                             {:task-id tid
+                                              :unmet-deps (remove #(contains? completed-ids %) deps)}))))]
+                (log/info logger :dag-orchestrator :dag/unreached-tasks
+                          {:data {:unreached-count unreached
+                                  :stuck-task-ids stuck-ids
+                                  :stuck-deps stuck-deps}})))
             (log/info logger :dag-orchestrator :dag/completed
                       {:data {:completed (count completed-ids)
                               :failed (count all-failed)
+                              :unreached (- (count tasks-map) (count completed-ids) (count all-failed))
                               :iterations iteration}})
             (assoc (dag-execution-result (count completed-ids) (count all-failed) artifacts total-tokens)
+                   :tasks-unreached (- (count tasks-map) (count completed-ids) (count all-failed))
                    :sub-workflow-ids (vec sub-workflow-ids)))
 
           (> iteration 100)
