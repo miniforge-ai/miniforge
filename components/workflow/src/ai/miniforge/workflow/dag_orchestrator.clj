@@ -26,7 +26,8 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.phase.registry :as phase-reg]))
+   [ai.miniforge.phase.registry :as phase-reg]
+   [ai.miniforge.workflow.dag-resilience :as resilience]))
 
 ;--- Layer 0: Result Constructors
 
@@ -54,6 +55,15 @@
    :artifacts []
    :metrics {}
    :error error})
+
+(defn- dag-execution-paused [completed failed artifacts reason]
+  {:success? false
+   :paused? true
+   :tasks-completed completed
+   :tasks-failed failed
+   :artifacts (vec artifacts)
+   :pause-reason reason
+   :metrics {}})
 
 ;--- Layer 0: Level Traversal
 
@@ -103,17 +113,43 @@
 
 ;--- Layer 1: Plan to DAG Conversion
 
+(defn- ensure-uuid [x]
+  (cond
+    (uuid? x) x
+    (string? x) (or (parse-uuid x)
+                     (throw (ex-info (str "Invalid UUID string: " x) {:value x})))
+    :else (throw (ex-info (str "Cannot convert to UUID: " (pr-str x)) {:value x :type (type x)}))))
+
+(defn- validate-deps
+  "Filter deps to only those referencing actual task IDs. Warns on phantoms."
+  [task-id raw-deps valid-task-ids]
+  (let [valid (set (filter valid-task-ids raw-deps))
+        invalid (remove valid-task-ids raw-deps)]
+    (when (seq invalid)
+      (println "WARN: Task" task-id
+               "has dependencies on non-existent tasks:"
+               (vec invalid) "— dropping them"))
+    valid))
+
+(defn- plan-task->dag-task
+  "Convert a single plan task to a DAG task with validated deps."
+  [t valid-task-ids plan-id workflow-id context]
+  {:task/id (:task/id t)
+   :task/deps (validate-deps (:task/id t)
+                             (map ensure-uuid (:task/dependencies t []))
+                             valid-task-ids)
+   :task/description (:task/description t)
+   :task/type (:task/type t :implement)
+   :task/acceptance-criteria (:task/acceptance-criteria t [])
+   :task/context (merge {:parent-plan-id plan-id
+                         :parent-workflow-id workflow-id}
+                        (select-keys context [:llm-backend :artifact-store]))})
+
 (defn plan->dag-tasks [plan context]
-  (->> (:plan/tasks plan [])
-       (mapv (fn [t]
-               {:task/id (:task/id t)
-                :task/deps (set (:task/dependencies t []))
-                :task/description (:task/description t)
-                :task/type (:task/type t :implement)
-                :task/acceptance-criteria (:task/acceptance-criteria t [])
-                :task/context (merge {:parent-plan-id (:plan/id plan)
-                                      :parent-workflow-id (:workflow-id context)}
-                                     (select-keys context [:llm-backend :artifact-store]))}))))
+  (let [tasks (:plan/tasks plan [])
+        valid-task-ids (set (map :task/id tasks))]
+    (mapv #(plan-task->dag-task % valid-task-ids (:plan/id plan) (:workflow-id context) context)
+          tasks)))
 
 ;--- Layer 1: Sub-Workflow Construction
 
@@ -290,25 +326,78 @@
         propagated
         (recur (into propagated newly-failed))))))
 
+(defn- handle-rate-limit-in-batch
+  "Handle rate-limited tasks in a batch. Returns either:
+   - {:action :continue :new-backend X} to re-queue tasks
+   - {:action :pause :result <paused-map>} to stop execution"
+  [context rate-limited-ids new-completed failed-ids all-results
+   event-stream workflow-id logger]
+  (let [decision (resilience/handle-rate-limited-batch
+                  context rate-limited-ids new-completed logger)]
+    (if (= :continue (:action decision))
+      decision
+      (let [{:keys [artifacts]} (aggregate-results all-results)]
+        (resilience/emit-dag-paused! event-stream workflow-id new-completed (:reason decision))
+        {:action :pause
+         :result (dag-execution-paused (count new-completed) (count failed-ids)
+                                       artifacts (:reason decision))}))))
+
+(defn- emit-completed-checkpoints!
+  "Emit task-completed events for checkpointing."
+  [completed-task-ids results event-stream workflow-id]
+  (doseq [tid completed-task-ids]
+    (resilience/emit-dag-task-completed! event-stream workflow-id tid (get results tid))))
+
+(defn- find-unreached-tasks
+  "Identify tasks that are neither completed nor failed — stuck due to unmet deps."
+  [tasks-map completed-ids all-failed]
+  (->> (keys tasks-map)
+       (remove #(or (contains? completed-ids %) (contains? all-failed %)))
+       (map (fn [tid]
+              {:task-id tid
+               :unmet-deps (vec (remove completed-ids
+                                        (get-in tasks-map [tid :task/deps] #{})))}))))
+
+(defn- log-unreached-tasks! [logger tasks-map completed-ids all-failed]
+  (let [unreached (find-unreached-tasks tasks-map completed-ids all-failed)]
+    (when (seq unreached)
+      (log/info logger :dag-orchestrator :dag/unreached-tasks
+                {:data {:unreached-count (count unreached)
+                        :stuck-deps unreached}}))))
+
+(defn- finalize-dag
+  "Build the terminal result when no more tasks are ready."
+  [tasks-map completed-ids all-failed all-results sub-workflow-ids iteration logger]
+  (log-unreached-tasks! logger tasks-map completed-ids all-failed)
+  (let [{:keys [artifacts total-tokens]} (aggregate-results all-results)
+        unreached (- (count tasks-map) (count completed-ids) (count all-failed))]
+    (log/info logger :dag-orchestrator :dag/completed
+              {:data {:completed (count completed-ids)
+                      :failed (count all-failed)
+                      :unreached unreached
+                      :iterations iteration}})
+    (assoc (dag-execution-result (count completed-ids) (count all-failed) artifacts total-tokens)
+           :tasks-unreached unreached
+           :sub-workflow-ids (vec sub-workflow-ids))))
+
 (defn- execute-dag-loop [tasks-map context logger]
   (let [{:keys [on-task-start on-task-complete]} context
-        max-parallel (get context :max-parallel 4)]
-    (loop [completed-ids #{}
+        max-parallel (get context :max-parallel 4)
+        event-stream (or (:event-stream context)
+                         (get-in context [:execution/opts :event-stream]))
+        workflow-id (:workflow-id context)]
+    (loop [completed-ids (get context :pre-completed-ids #{})
            failed-ids #{}
            all-results {}
            sub-workflow-ids []
+           current-backend (get context :current-backend)
            iteration 0]
       (let [all-failed (propagate-failures tasks-map failed-ids)
             ready-tasks (compute-ready-tasks tasks-map completed-ids all-failed)]
         (cond
           (empty? ready-tasks)
-          (let [{:keys [artifacts total-tokens]} (aggregate-results all-results)]
-            (log/info logger :dag-orchestrator :dag/completed
-                      {:data {:completed (count completed-ids)
-                              :failed (count all-failed)
-                              :iterations iteration}})
-            (assoc (dag-execution-result (count completed-ids) (count all-failed) artifacts total-tokens)
-                   :sub-workflow-ids (vec sub-workflow-ids)))
+          (finalize-dag tasks-map completed-ids all-failed all-results
+                        sub-workflow-ids iteration logger)
 
           (> iteration 100)
           (dag-execution-error (count completed-ids) (count all-failed) "Max iterations exceeded")
@@ -316,23 +405,49 @@
           :else
           (let [batch (take max-parallel ready-tasks)
                 _ (notify-batch-start batch on-task-start)
-                results (execute-tasks-batch batch execute-single-task context)
+                ctx (cond-> context
+                      current-backend (assoc :current-backend current-backend))
+                results (execute-tasks-batch batch execute-single-task ctx)
                 _ (notify-batch-complete results on-task-complete)
                 {:keys [completed failed]} (partition-results results)
-                batch-sub-ids (map (fn [[tid _]] (keyword (str "dag-task-" tid))) batch)]
-            (recur (into completed-ids completed)
-                   (into failed-ids failed)
-                   (merge all-results results)
-                   (into sub-workflow-ids batch-sub-ids)
-                   (inc iteration))))))))
+                batch-sub-ids (map (fn [[tid _]] (keyword (str "dag-task-" tid))) batch)
+                {:keys [rate-limited-ids]} (resilience/analyze-batch-for-rate-limits results)
+                new-completed (into completed-ids completed)]
+
+            (emit-completed-checkpoints! completed results event-stream workflow-id)
+
+            (if (seq rate-limited-ids)
+              (let [decision (handle-rate-limit-in-batch
+                              context rate-limited-ids new-completed failed-ids
+                              all-results event-stream workflow-id logger)]
+                (if (= :continue (:action decision))
+                  (recur new-completed
+                         failed-ids
+                         (merge all-results (select-keys results completed))
+                         (into sub-workflow-ids batch-sub-ids)
+                         (:new-backend decision)
+                         (inc iteration))
+                  (:result decision)))
+
+              (recur new-completed
+                     (into failed-ids failed)
+                     (merge all-results results)
+                     (into sub-workflow-ids batch-sub-ids)
+                     current-backend
+                     (inc iteration)))))))))
 
 (defn execute-plan-as-dag [plan context]
   (let [logger (or (:logger context) (log/create-logger {:min-level :info}))
         task-defs (plan->dag-tasks plan context)
-        tasks-map (->> task-defs (map (fn [t] [(:task/id t) t])) (into {}))]
+        tasks-map (->> task-defs (map (fn [t] [(:task/id t) t])) (into {}))
+        pre-completed (get context :pre-completed-ids #{})
+        ctx (cond-> context
+              (seq pre-completed) (assoc :pre-completed-ids pre-completed))]
     (log/info logger :dag-orchestrator :dag/starting
-              {:data {:plan-id (:plan/id plan) :task-count (count task-defs)}})
-    (execute-dag-loop tasks-map context logger)))
+              {:data {:plan-id (:plan/id plan)
+                      :task-count (count task-defs)
+                      :pre-completed (count pre-completed)}})
+    (execute-dag-loop tasks-map ctx logger)))
 
 ;--- Layer 3: Workflow Integration
 
