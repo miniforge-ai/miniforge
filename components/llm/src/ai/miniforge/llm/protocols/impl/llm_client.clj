@@ -12,6 +12,41 @@
    [java.io ByteArrayInputStream]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; LLM response builders
+;;
+;; All LLM responses follow the contract:
+;;   Success: {:success true :content string :usage map}
+;;   Failure: {:success false :error {:type string :message string} :anomaly anomaly-map}
+;;
+;; These builders ensure consistent construction across all backends
+;; (CLI, HTTP/OpenAI, HTTP/Ollama, streaming, non-streaming).
+
+(defn- llm-success
+  "Build a successful LLM response."
+  ([content]
+   (llm-success content nil))
+  ([content {:keys [usage exit-code]}]
+   (cond-> {:success true
+            :content content
+            :usage (or usage {:input-tokens nil :output-tokens nil})}
+     (some? exit-code) (assoc :exit-code exit-code))))
+
+(defn- llm-error
+  "Build a failed LLM response with anomaly."
+  ([category error-type message]
+   (llm-error category error-type message nil))
+  ([category error-type message {:keys [exit-code stderr stdout timeout]}]
+   (cond-> {:success false
+            :error (cond-> {:type error-type :message message}
+                     stderr  (assoc :stderr stderr)
+                     stdout  (assoc :stdout stdout)
+                     timeout (assoc :timeout timeout))
+            :anomaly (response/make-anomaly
+                      category message
+                      {:anomaly/operation :llm-complete})}
+     (some? exit-code) (assoc :exit-code exit-code))))
+
+;------------------------------------------------------------------------------ Layer 0
 ;; Stream parser functions
 
 (defn- parse-claude-stream-line
@@ -211,34 +246,18 @@
   [response]
   ;; If response is already an anomaly map, pass it through
   (if (response/anomaly-map? response)
-    {:success false
-     :anomaly response
-     :error {:type "http_error"
-             :message (:anomaly/message response)}}
+    (llm-error (:anomaly/category response) "http_error" (:anomaly/message response))
     (try
       (let [body (json/parse-string (:body response) true)]
         (if (= 200 (:status response))
-          {:success true
-           :content (get-in body [:choices 0 :message :content] "")
-           :usage {:input-tokens (get-in body [:usage :prompt_tokens])
-                   :output-tokens (get-in body [:usage :completion_tokens])}}
-          {:success false
-           :anomaly (response/make-anomaly
-                     :anomalies/unavailable
-                     (or (get-in body [:error :message]) "Unknown API error")
-                     {:anomaly/operation :llm-api-call
-                      :anomaly.llm/status (:status response)})
-           :error {:type "api_error"
-                   :message (or (get-in body [:error :message])
-                                "Unknown API error")}}))
+          (llm-success (get-in body [:choices 0 :message :content] "")
+                       {:usage {:input-tokens (get-in body [:usage :prompt_tokens])
+                                :output-tokens (get-in body [:usage :completion_tokens])}})
+          (llm-error :anomalies/unavailable "api_error"
+                     (or (get-in body [:error :message]) "Unknown API error"))))
       (catch Exception e
-        {:success false
-         :anomaly (response/make-anomaly
-                   :anomalies/fault
-                   (str "Failed to parse response: " (.getMessage e))
-                   {:anomaly/operation :llm-response-parse})
-         :error {:type "parse_error"
-                 :message (str "Failed to parse response: " (.getMessage e))}}))))
+        (llm-error :anomalies/fault "parse_error"
+                   (str "Failed to parse response: " (.getMessage e)))))))
 
 (defn- parse-ollama-response
   "Parse Ollama API response.
@@ -247,33 +266,16 @@
   [response]
   ;; If response is already an anomaly map, pass it through
   (if (response/anomaly-map? response)
-    {:success false
-     :anomaly response
-     :error {:type "http_error"
-             :message (:anomaly/message response)}}
+    (llm-error (:anomaly/category response) "http_error" (:anomaly/message response))
     (try
       (let [body (json/parse-string (:body response) true)]
         (if (= 200 (:status response))
-          {:success true
-           :content (get-in body [:message :content] "")
-           :usage {:input-tokens nil
-                   :output-tokens nil}}
-          {:success false
-           :anomaly (response/make-anomaly
-                     :anomalies/unavailable
-                     (or (:error body) "Unknown API error")
-                     {:anomaly/operation :llm-api-call
-                      :anomaly.llm/status (:status response)})
-           :error {:type "api_error"
-                   :message (or (:error body) "Unknown API error")}}))
+          (llm-success (get-in body [:message :content] ""))
+          (llm-error :anomalies/unavailable "api_error"
+                     (or (:error body) "Unknown API error"))))
       (catch Exception e
-        {:success false
-         :anomaly (response/make-anomaly
-                   :anomalies/fault
-                   (str "Failed to parse response: " (.getMessage e))
-                   {:anomaly/operation :llm-response-parse})
-         :error {:type "parse_error"
-                 :message (str "Failed to parse response: " (.getMessage e))}}))))
+        (llm-error :anomalies/fault "parse_error"
+                   (str "Failed to parse response: " (.getMessage e)))))))
 
 (defn- http-complete
   "Complete request using HTTP API backend."
@@ -297,9 +299,8 @@
     (case provider
       "OpenAI" (parse-openai-response response)
       "Ollama" (parse-ollama-response response)
-      {:success false
-       :error {:type "unsupported_backend"
-               :message (str "HTTP backend not implemented for: " provider)}})))
+      (llm-error :anomalies/unsupported "unsupported_backend"
+                 (str "HTTP backend not implemented for: " provider)))))
 
 (defn- http-stream-complete
   "Complete request using HTTP API with streaming.
@@ -318,32 +319,16 @@
             (on-chunk {:delta content :done? true :content content})))
         result)
       (catch Exception e
-        {:success false
-         :anomaly (response/make-anomaly
-                   :anomalies/fault
-                   (str "Streaming failed: " (.getMessage e))
-                   {:anomaly/operation :llm-stream})
-         :error {:type "stream_error"
-                 :message (str "Streaming failed: " (.getMessage e))}}))))
+        (llm-error :anomalies/fault "stream_error"
+                   (str "Streaming failed: " (.getMessage e)))))))
 
 (defn- success-response [output exit-code]
-  {:success true
-   :content (str/trim output)
-   :usage {:input-tokens nil :output-tokens nil}
-   :exit-code exit-code})
+  (llm-success (str/trim output) {:exit-code exit-code}))
 
 (defn- error-response [output exit-code stderr]
   (let [error-message (if (and stderr (str/blank? output)) stderr output)]
-    {:success false
-     :error {:type "cli_error"
-             :message (str/trim error-message)
-             :stderr stderr
-             :stdout output}
-     :anomaly (response/make-anomaly
-               :anomalies.agent/llm-error
-               (str/trim error-message)
-               {:anomaly/operation :llm-complete})
-     :exit-code exit-code}))
+    (llm-error :anomalies.agent/llm-error "cli_error" (str/trim error-message)
+               {:exit-code exit-code :stderr stderr :stdout output})))
 
 (defn parse-cli-output
   ([output exit-code]
@@ -453,9 +438,8 @@
     (if (= cmd "http")
       (let [api-key (when api-key-var (System/getenv api-key-var))]
         (if (and api-key-var (not api-key))
-          {:success false
-           :error {:type "missing_api_key"
-                   :message (str "Missing API key: " api-key-var " not set")}}
+          (llm-error :anomalies/incorrect "missing_api_key"
+                     (str "Missing API key: " api-key-var " not set"))
           (let [response (http-complete backend-config request api-key)]
             (log-response logger response)
             response)))
@@ -496,27 +480,16 @@
                  {:data {:response-length content-length}}))))
 
 (defn- streaming-success-response [content exit-code]
-  {:success true
-   :content content
-   :usage {:input-tokens nil :output-tokens nil}
-   :exit-code exit-code})
+  (llm-success content {:exit-code exit-code}))
 
 (defn- streaming-error-response [content exit-code err-result timeout-info]
   (let [error-message (or err-result
                           (when (str/blank? content) "Process failed with no output")
                           "Process failed")
-        category (if timeout-info :anomalies/timeout :anomalies.agent/llm-error)]
-    {:success false
-     :error {:type (if timeout-info "adaptive_timeout" "cli_error")
-             :message (str/trim error-message)
-             :stderr err-result
-             :stdout content
-             :timeout timeout-info}
-     :anomaly (response/make-anomaly
-               category
-               (str/trim error-message)
-               {:anomaly/operation :llm-stream})
-     :exit-code exit-code}))
+        category (if timeout-info :anomalies/timeout :anomalies.agent/llm-error)
+        error-type (if timeout-info "adaptive_timeout" "cli_error")]
+    (llm-error category error-type (str/trim error-message)
+               {:exit-code exit-code :stderr err-result :stdout content :timeout timeout-info})))
 
 (defn- handle-streaming [client request on-chunk backend-config progress-monitor]
   (let [{:keys [logger config]} client
@@ -560,9 +533,8 @@
     (if (= cmd "http")
       (let [api-key (when api-key-var (System/getenv api-key-var))]
         (if (and api-key-var (not api-key))
-          {:success false
-           :error {:type "missing_api_key"
-                   :message (str "Missing API key: " api-key-var " not set")}}
+          (llm-error :anomalies/incorrect "missing_api_key"
+                     (str "Missing API key: " api-key-var " not set"))
           (http-stream-complete backend-config request api-key on-chunk)))
 
       ;; CLI backends
