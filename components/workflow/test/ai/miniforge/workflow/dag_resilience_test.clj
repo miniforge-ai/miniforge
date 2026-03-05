@@ -3,6 +3,7 @@
   (:require
    [clojure.test :refer [deftest testing is are]]
    [ai.miniforge.workflow.dag-resilience :as resilience]
+   [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]))
 
@@ -224,3 +225,186 @@
           (is (= #{task-b} @executed-tasks))
           ;; Both count as completed (1 pre-completed + 1 executed)
           (is (= 2 (:tasks-completed result))))))))
+
+;------------------------------------------------------------------------------ Layer 5
+;; Regression: phantom dependency detection and unreached task reporting
+;;
+;; Bug: Planner generates dependency UUIDs referencing non-existent tasks.
+;; Tasks with phantom deps never become ready (dep not in completed-ids)
+;; and never fail (nothing actually failed). The loop exits on
+;; (empty? ready-tasks) and silently drops them — reporting success
+;; with 0 failures despite tasks never running.
+
+(deftest test-plan->dag-tasks-drops-phantom-deps
+  (testing "dependencies referencing non-existent task IDs are dropped"
+    (let [task-a (random-uuid)
+          task-b (random-uuid)
+          phantom (random-uuid)
+          plan {:plan/id (random-uuid)
+                :plan/tasks [{:task/id task-a
+                              :task/description "Task A"
+                              :task/type :implement
+                              :task/dependencies []}
+                             {:task/id task-b
+                              :task/description "Task B"
+                              :task/type :implement
+                              :task/dependencies [task-a phantom]}]}
+          dag-tasks (dag-orch/plan->dag-tasks plan {})]
+      ;; Task B should only have task-a as a dep; phantom is dropped
+      (is (= #{task-a} (:task/deps (second dag-tasks))))
+      ;; Task A has no deps
+      (is (empty? (:task/deps (first dag-tasks)))))))
+
+(deftest test-plan->dag-tasks-drops-string-phantom-deps
+  (testing "string UUID dependencies to non-existent tasks are also dropped"
+    (let [task-a (random-uuid)
+          task-b (random-uuid)
+          phantom-str (str (random-uuid))
+          plan {:plan/id (random-uuid)
+                :plan/tasks [{:task/id task-a
+                              :task/description "Task A"
+                              :task/type :implement
+                              :task/dependencies []}
+                             {:task/id task-b
+                              :task/description "Task B"
+                              :task/type :implement
+                              :task/dependencies [(str task-a) phantom-str]}]}
+          dag-tasks (dag-orch/plan->dag-tasks plan {})]
+      ;; task-a string should resolve; phantom string should be dropped
+      (is (= #{task-a} (:task/deps (second dag-tasks)))))))
+
+(deftest test-plan->dag-tasks-all-deps-valid
+  (testing "valid dependencies are preserved unchanged"
+    (let [task-a (random-uuid)
+          task-b (random-uuid)
+          task-c (random-uuid)
+          plan {:plan/id (random-uuid)
+                :plan/tasks [{:task/id task-a
+                              :task/description "A" :task/type :implement
+                              :task/dependencies []}
+                             {:task/id task-b
+                              :task/description "B" :task/type :implement
+                              :task/dependencies []}
+                             {:task/id task-c
+                              :task/description "C" :task/type :implement
+                              :task/dependencies [task-a task-b]}]}
+          dag-tasks (dag-orch/plan->dag-tasks plan {})
+          task-c-dag (first (filter #(= task-c (:task/id %)) dag-tasks))]
+      (is (= #{task-a task-b} (:task/deps task-c-dag))))))
+
+(deftest test-phantom-deps-caused-stuck-tasks-before-fix
+  (testing "regression: phantom deps no longer cause silently stuck tasks"
+    (let [[logger _] (log/collecting-logger)
+          task-a (random-uuid)
+          task-b (random-uuid)
+          task-c (random-uuid)
+          phantom (random-uuid)
+          ;; task-c depends on task-a (valid) and phantom (non-existent)
+          ;; Before fix: task-c would never run and never be reported as failed
+          plan {:plan/id (random-uuid)
+                :plan/name "phantom-dep-plan"
+                :plan/tasks [{:task/id task-a
+                              :task/description "Task A"
+                              :task/type :implement
+                              :task/dependencies []}
+                             {:task/id task-b
+                              :task/description "Task B"
+                              :task/type :implement
+                              :task/dependencies []}
+                             {:task/id task-c
+                              :task/description "Task C"
+                              :task/type :implement
+                              :task/dependencies [task-a phantom]}]}
+          executed-tasks (atom #{})]
+      (with-redefs [dag-orch/execute-single-task
+                    (fn [task-def _context]
+                      (swap! executed-tasks conj (:task/id task-def))
+                      (dag/ok {:task-id (:task/id task-def)
+                               :status :implemented
+                               :artifacts []
+                               :metrics {:tokens 0 :cost-usd 0.0}}))]
+        (let [result (dag-orch/execute-plan-as-dag plan {:logger logger})]
+          ;; All 3 tasks should complete — phantom dep dropped at plan conversion
+          (is (:success? result))
+          (is (= 3 (:tasks-completed result)))
+          (is (= 0 (:tasks-failed result)))
+          (is (= #{task-a task-b task-c} @executed-tasks)))))))
+
+(deftest test-unreached-tasks-reported-in-result
+  (testing "tasks stuck due to failed deps are reported as unreached"
+    (let [[logger _] (log/collecting-logger)
+          task-a (random-uuid)
+          task-b (random-uuid)
+          task-c (random-uuid)
+          ;; task-c depends on task-b, which will fail
+          plan {:plan/id (random-uuid)
+                :plan/name "unreached-plan"
+                :plan/tasks [{:task/id task-a
+                              :task/description "Task A"
+                              :task/type :implement
+                              :task/dependencies []}
+                             {:task/id task-b
+                              :task/description "Task B"
+                              :task/type :implement
+                              :task/dependencies []}
+                             {:task/id task-c
+                              :task/description "Task C — depends on B"
+                              :task/type :implement
+                              :task/dependencies [task-b]}]}]
+      (with-redefs [dag-orch/execute-single-task
+                    (fn [task-def _context]
+                      (if (= (:task/id task-def) task-b)
+                        (dag/err :task-execution-failed
+                                 "Compilation error" {})
+                        (dag/ok {:task-id (:task/id task-def)
+                                 :status :implemented
+                                 :artifacts []
+                                 :metrics {:tokens 0 :cost-usd 0.0}})))]
+        (let [result (dag-orch/execute-plan-as-dag plan {:logger logger})]
+          ;; task-a completed, task-b failed, task-c transitively failed
+          (is (not (:success? result)))
+          (is (= 1 (:tasks-completed result)))
+          ;; task-b failed directly + task-c transitively = 2 failed
+          (is (= 2 (:tasks-failed result)))
+          ;; No tasks unreached — all accounted for via propagation
+          (is (= 0 (or (:tasks-unreached result) 0))))))))
+
+(deftest test-all-tasks-accounted-for
+  (testing "completed + failed + unreached = total (no silent data loss)"
+    (let [[logger _] (log/collecting-logger)
+          task-ids (repeatedly 6 random-uuid)
+          [a b c d e f] task-ids
+          ;; a, b: independent. c depends on a. d depends on b.
+          ;; e depends on c and d. f: independent.
+          ;; b will fail -> d transitively fails -> e transitively fails
+          plan {:plan/id (random-uuid)
+                :plan/name "accounting-plan"
+                :plan/tasks [{:task/id a :task/description "A"
+                              :task/type :implement :task/dependencies []}
+                             {:task/id b :task/description "B"
+                              :task/type :implement :task/dependencies []}
+                             {:task/id c :task/description "C"
+                              :task/type :implement :task/dependencies [a]}
+                             {:task/id d :task/description "D"
+                              :task/type :implement :task/dependencies [b]}
+                             {:task/id e :task/description "E"
+                              :task/type :implement :task/dependencies [c d]}
+                             {:task/id f :task/description "F"
+                              :task/type :implement :task/dependencies []}]}]
+      (with-redefs [dag-orch/execute-single-task
+                    (fn [task-def _context]
+                      (if (= (:task/id task-def) b)
+                        (dag/err :task-execution-failed "fail" {})
+                        (dag/ok {:task-id (:task/id task-def)
+                                 :status :implemented :artifacts []
+                                 :metrics {:tokens 0 :cost-usd 0.0}})))]
+        (let [result (dag-orch/execute-plan-as-dag plan {:logger logger})
+              total 6
+              accounted (+ (:tasks-completed result)
+                           (:tasks-failed result)
+                           (or (:tasks-unreached result) 0))]
+          ;; a, c, f complete. b fails. d, e transitively fail.
+          (is (= 3 (:tasks-completed result)))
+          (is (= 3 (:tasks-failed result)))
+          (is (= total accounted)
+              "Every task must be accounted for — no silent drops"))))))
