@@ -254,7 +254,7 @@
                        {:usage {:input-tokens (get-in body [:usage :prompt_tokens])
                                 :output-tokens (get-in body [:usage :completion_tokens])}})
           (llm-error :anomalies/unavailable "api_error"
-                     (or (get-in body [:error :message]) "Unknown API error"))))
+                     (get-in body [:error :message] "Unknown API error"))))
       (catch Exception e
         (llm-error :anomalies/fault "parse_error"
                    (str "Failed to parse response: " (.getMessage e)))))))
