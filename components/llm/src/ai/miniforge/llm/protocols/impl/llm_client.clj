@@ -272,7 +272,7 @@
         (if (= 200 (:status response))
           (llm-success (get-in body [:message :content] ""))
           (llm-error :anomalies/unavailable "api_error"
-                     (or (:error body) "Unknown API error"))))
+                     (get body :error "Unknown API error"))))
       (catch Exception e
         (llm-error :anomalies/fault "parse_error"
                    (str "Failed to parse response: " (.getMessage e)))))))
