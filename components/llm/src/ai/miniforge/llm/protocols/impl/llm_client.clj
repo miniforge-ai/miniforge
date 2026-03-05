@@ -26,10 +26,12 @@
   ([content]
    (llm-success content nil))
   ([content {:keys [usage exit-code]}]
-   (cond-> {:success true
-            :content content
-            :usage (or usage {:input-tokens nil :output-tokens nil})}
-     (some? exit-code) (assoc :exit-code exit-code))))
+   (let [usage (or usage {:input-tokens nil :output-tokens nil})]
+     (cond-> {:success true
+              :content content
+              :usage usage
+              :tokens (+ (or (:input-tokens usage) 0) (or (:output-tokens usage) 0))}
+       (some? exit-code) (assoc :exit-code exit-code)))))
 
 (defn- llm-error
   "Build a failed LLM response with anomaly."
@@ -81,7 +83,13 @@
           (when-let [delta-text (get-in data [:event :delta :text])]
             {:delta delta-text :done? false})
 
-          ;; Ignore system, result, rate_limit_event
+          "result"
+          (let [usage (get-in data [:result :usage])]
+            {:delta "" :done? true
+             :usage {:input-tokens (:input_tokens usage)
+                     :output-tokens (:output_tokens usage)}})
+
+          ;; Ignore system, rate_limit_event
           nil)))
     (catch Exception _e
       nil)))
@@ -461,9 +469,11 @@
                  :content (:content result)}))
     result))
 
-(defn- stream-with-parser [stream-parser on-chunk accumulated-content]
+(defn- stream-with-parser [stream-parser on-chunk accumulated-content accumulated-usage]
   (fn [line]
     (when-let [parsed (stream-parser line)]
+      (when-let [usage (:usage parsed)]
+        (reset! accumulated-usage usage))
       (when-let [delta (:delta parsed)]
         (swap! accumulated-content str delta)
         (on-chunk (assoc parsed :content @accumulated-content))))))
@@ -479,8 +489,8 @@
       (log/debug logger :system :agent/streaming-complete
                  {:data {:response-length content-length}}))))
 
-(defn- streaming-success-response [content exit-code]
-  (llm-success content {:exit-code exit-code}))
+(defn- streaming-success-response [content exit-code usage]
+  (llm-success content {:exit-code exit-code :usage usage}))
 
 (defn- streaming-error-response [content exit-code err-result timeout-info]
   (let [error-message (or err-result
@@ -498,14 +508,15 @@
         prompt (build-request-prompt request)
         args (args-fn (assoc request :prompt prompt :streaming? true))
         full-cmd (into [cmd] args)
-        accumulated-content (atom "")]
+        accumulated-content (atom "")
+        accumulated-usage (atom nil)]
     (when logger
       (log/debug logger :system :agent/streaming-prompt-sent
                  {:data {:backend backend
                          :prompt-length (count prompt)}}))
     (let [result (stream-exec-fn
                   full-cmd
-                  (stream-with-parser stream-parser on-chunk accumulated-content)
+                  (stream-with-parser stream-parser on-chunk accumulated-content accumulated-usage)
                   {:progress-monitor progress-monitor})
           exit-code (:exit result)
           timeout-info (:timeout result)
@@ -516,7 +527,7 @@
                  :timeout timeout-info})
       (log-streaming-result logger timeout-info (count final-content))
       (if (zero? exit-code)
-        (streaming-success-response final-content exit-code)
+        (streaming-success-response final-content exit-code @accumulated-usage)
         (streaming-error-response final-content exit-code (:err result) timeout-info)))))
 
 (defn complete-stream-impl [client request on-chunk]
