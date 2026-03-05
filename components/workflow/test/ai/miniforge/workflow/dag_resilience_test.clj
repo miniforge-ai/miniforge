@@ -292,6 +292,77 @@
           task-c-dag (first (filter #(= task-c (:task/id %)) dag-tasks))]
       (is (= #{task-a task-b} (:task/deps task-c-dag))))))
 
+(deftest test-plan->dag-tasks-keyword-task-ids
+  (testing "keyword task IDs are normalized to deterministic UUIDs"
+    (let [plan {:plan/id (random-uuid)
+                :plan/tasks [{:task/id :task-a
+                              :task/description "A" :task/type :implement
+                              :task/dependencies []}
+                             {:task/id :task-b
+                              :task/description "B" :task/type :implement
+                              :task/dependencies [:task-a]}]}
+          dag-tasks (dag-orch/plan->dag-tasks plan {})
+          id-a (:task/id (first dag-tasks))
+          id-b (:task/id (second dag-tasks))]
+      ;; IDs are UUIDs, not keywords
+      (is (uuid? id-a))
+      (is (uuid? id-b))
+      ;; Same keyword produces same UUID (deterministic)
+      (is (= id-a (java.util.UUID/nameUUIDFromBytes (.getBytes "task-a"))))
+      ;; Dependency resolved correctly
+      (is (= #{id-a} (:task/deps (second dag-tasks)))))))
+
+(deftest test-plan->dag-tasks-keyword-deps-resolve
+  (testing "keyword dependencies resolve to the correct normalized task IDs"
+    (let [plan {:plan/id (random-uuid)
+                :plan/tasks [{:task/id :alpha
+                              :task/description "Alpha" :task/type :implement
+                              :task/dependencies []}
+                             {:task/id :beta
+                              :task/description "Beta" :task/type :implement
+                              :task/dependencies []}
+                             {:task/id :gamma
+                              :task/description "Gamma" :task/type :implement
+                              :task/dependencies [:alpha :beta]}]}
+          dag-tasks (dag-orch/plan->dag-tasks plan {})
+          ids (into {} (map (juxt :task/description :task/id) dag-tasks))
+          gamma-task (first (filter #(= "Gamma" (:task/description %)) dag-tasks))]
+      (is (= #{(ids "Alpha") (ids "Beta")} (:task/deps gamma-task))))))
+
+(deftest test-plan->dag-tasks-mixed-id-types
+  (testing "plan with mixed UUID and keyword IDs normalizes consistently"
+    (let [uuid-id (random-uuid)
+          plan {:plan/id (random-uuid)
+                :plan/tasks [{:task/id uuid-id
+                              :task/description "UUID task" :task/type :implement
+                              :task/dependencies []}
+                             {:task/id :keyword-task
+                              :task/description "Keyword task" :task/type :implement
+                              :task/dependencies [uuid-id]}]}
+          dag-tasks (dag-orch/plan->dag-tasks plan {})]
+      ;; UUID task ID preserved as-is
+      (is (= uuid-id (:task/id (first dag-tasks))))
+      ;; Keyword task ID converted to UUID
+      (is (uuid? (:task/id (second dag-tasks))))
+      ;; Dependency on UUID task resolves
+      (is (= #{uuid-id} (:task/deps (second dag-tasks)))))))
+
+(deftest test-plan->dag-tasks-string-non-uuid-ids
+  (testing "non-UUID string task IDs are normalized to deterministic UUIDs"
+    (let [plan {:plan/id (random-uuid)
+                :plan/tasks [{:task/id "build-fixtures"
+                              :task/description "Build" :task/type :implement
+                              :task/dependencies []}
+                             {:task/id "run-tests"
+                              :task/description "Test" :task/type :test
+                              :task/dependencies ["build-fixtures"]}]}
+          dag-tasks (dag-orch/plan->dag-tasks plan {})
+          id-build (:task/id (first dag-tasks))
+          id-test (:task/id (second dag-tasks))]
+      (is (uuid? id-build))
+      (is (uuid? id-test))
+      (is (= #{id-build} (:task/deps (second dag-tasks)))))))
+
 (deftest test-phantom-deps-caused-stuck-tasks-before-fix
   (testing "regression: phantom deps no longer cause silently stuck tasks"
     (let [[logger _] (log/collecting-logger)
