@@ -26,10 +26,12 @@
   ([content]
    (llm-success content nil))
   ([content {:keys [usage exit-code]}]
-   (cond-> {:success true
-            :content content
-            :usage (or usage {:input-tokens nil :output-tokens nil})}
-     (some? exit-code) (assoc :exit-code exit-code))))
+   (let [usage (or usage {:input-tokens nil :output-tokens nil})]
+     (cond-> {:success true
+              :content content
+              :usage usage
+              :tokens (+ (or (:input-tokens usage) 0) (or (:output-tokens usage) 0))}
+       (some? exit-code) (assoc :exit-code exit-code)))))
 
 (defn- llm-error
   "Build a failed LLM response with anomaly."
@@ -487,8 +489,8 @@
       (log/debug logger :system :agent/streaming-complete
                  {:data {:response-length content-length}}))))
 
-(defn- streaming-success-response [content exit-code]
-  (llm-success content {:exit-code exit-code}))
+(defn- streaming-success-response [content exit-code usage]
+  (llm-success content {:exit-code exit-code :usage usage}))
 
 (defn- streaming-error-response [content exit-code err-result timeout-info]
   (let [error-message (or err-result

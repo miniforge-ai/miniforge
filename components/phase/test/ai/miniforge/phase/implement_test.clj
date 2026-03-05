@@ -198,7 +198,13 @@
         
         (is (= 1500 (get-in final-result [:phase :metrics :tokens]))
             "Token metrics should be recorded")
-        
+
+        (is (= (* 1500 0.000015) (get-in final-result [:phase :metrics :cost-usd]))
+            "Cost-usd should be estimated from token count")
+
+        (is (= (* 1500 0.000015) (get-in final-result [:execution/metrics :cost-usd]))
+            "Cost-usd should be merged into execution metrics")
+
         (is (= :implement (first (get-in final-result [:execution :phases-completed])))
             "Implement should be added to phases-completed")))))
 
