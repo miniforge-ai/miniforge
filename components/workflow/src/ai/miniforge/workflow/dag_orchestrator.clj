@@ -169,10 +169,11 @@
   [task-def context]
   (let [parent-workflow (:execution/workflow context)
         parent-pipeline (or (:workflow/pipeline parent-workflow) [])
-        ;; Keep phases after plan (implement, verify, review, release, done)
-        ;; Drop explore and plan — the task description IS the plan
+        ;; Keep phases after plan (implement, verify, review, done)
+        ;; Drop explore/plan (task description IS the plan) and release
+        ;; (parent workflow handles release after all DAG tasks complete)
         sub-phases (->> parent-pipeline
-                        (remove #(#{:explore :plan} (:phase %)))
+                        (remove #(#{:explore :plan :release} (:phase %)))
                         vec)
         ;; If no implement phase found, use a minimal pipeline
         sub-pipeline (if (seq sub-phases)
