@@ -76,10 +76,10 @@
         ;; Fallback to ad-hoc event if constructor not available
         (publish-event! event-stream
                         {:event/type :workflow/started
-                         :workflow-id (:execution/id context)
-                         :workflow-spec (select-keys (:execution/workflow context)
+                         :workflow/id (:execution/id context)
+                         :workflow/spec (select-keys (:execution/workflow context)
                                                      [:workflow/id :workflow/version])
-                         :timestamp (java.time.Instant/now)})))))
+                         :event/timestamp (java.time.Instant/now)})))))
 
 (defn- publish-workflow-completed!
   "Publish workflow completed/failed event using N3-compliant constructor."
@@ -102,29 +102,48 @@
         ;; Fallback to ad-hoc event
         (publish-event! event-stream
                         {:event/type :workflow/completed
-                         :workflow-id (:execution/id context)
-                         :status (:execution/status context)
-                         :metrics (:execution/metrics context)
-                         :timestamp (java.time.Instant/now)})))))
+                         :workflow/id (:execution/id context)
+                         :workflow/status (:execution/status context)
+                         :workflow/metrics (:execution/metrics context)
+                         :event/timestamp (java.time.Instant/now)})))))
 
 (defn- publish-phase-started!
   "Publish phase started event."
   [event-stream context phase-name]
-  (publish-event! event-stream
-                  {:event/type :workflow/phase-started
-                   :workflow-id (:execution/id context)
-                   :phase phase-name
-                   :timestamp (java.time.Instant/now)}))
+  (when event-stream
+    (try
+      (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/phase-started)]
+        (publish-event! event-stream
+                        (constructor event-stream (:execution/id context) phase-name
+                                     {:phase/index (:execution/phase-index context)})))
+      (catch Exception _
+        (publish-event! event-stream
+                        {:event/type :workflow/phase-started
+                         :workflow/id (:execution/id context)
+                         :workflow/phase phase-name
+                         :event/timestamp (java.time.Instant/now)})))))
 
 (defn- publish-phase-completed!
   "Publish phase completed event."
   [event-stream context phase-name result]
-  (publish-event! event-stream
-                  {:event/type :workflow/phase-completed
-                   :workflow-id (:execution/id context)
-                   :phase phase-name
-                   :success? (:success? result)
-                   :timestamp (java.time.Instant/now)}))
+  (when event-stream
+    (try
+      (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
+        (publish-event! event-stream
+                        (constructor event-stream (:execution/id context) phase-name
+                                     {:outcome (if (or (:success? result)
+                                                       (phase-reg/succeeded-or-done? result))
+                                                 :success
+                                                 :failure)
+                                      :duration-ms (or (get-in result [:phase/metrics :duration-ms])
+                                                       (get-in result [:metrics :duration-ms]))})))
+      (catch Exception _
+        (publish-event! event-stream
+                        {:event/type :workflow/phase-completed
+                         :workflow/id (:execution/id context)
+                         :workflow/phase phase-name
+                         :phase/outcome (if (:success? result) :success :failure)
+                         :event/timestamp (java.time.Instant/now)})))))
 
 (defn- check-backend-health-at-boundary!
   "Check backend health at phase boundary. Returns switch-result or nil."
@@ -207,7 +226,7 @@
 (defn- terminal-state?
   "Check if workflow is in terminal state."
   [context]
-  (#{:completed :failed} (:execution/status context)))
+  (boolean (#{:completed :failed} (:execution/status context))))
 
 (defn- execute-single-iteration
   "Execute single pipeline iteration: health check -> phase execution -> cleanup.
@@ -291,12 +310,14 @@
 
          ;; Wrap callbacks to publish events
          callbacks {:on-phase-start (fn [ctx interceptor]
-                                      (when-let [phase-name (:phase interceptor)]
+                                      (when-let [phase-name (or (:phase interceptor)
+                                                                (get-in interceptor [:config :phase]))]
                                         (publish-phase-started! event-stream ctx phase-name))
                                       (when-let [cb (:on-phase-start opts)]
                                         (cb ctx interceptor)))
                     :on-phase-complete (fn [ctx interceptor result]
-                                         (when-let [phase-name (:phase interceptor)]
+                                         (when-let [phase-name (or (:phase interceptor)
+                                                                   (get-in interceptor [:config :phase]))]
                                            (publish-phase-completed! event-stream ctx phase-name result))
                                          (when-let [cb (:on-phase-complete opts)]
                                            (cb ctx interceptor result)))}
@@ -327,39 +348,39 @@
                  ;; Execute next iteration: health check -> phase -> cleanup
                  :else
                  (recur (execute-single-iteration pipeline context callbacks iteration control-state)
-                        (inc iteration)))))]
+                        (inc iteration)))))
 
-       ;; Validate completed workflows produced results
-       (let [final-ctx (if (and (phase-reg/succeeded? final-ctx)
-                                (empty? (:execution/artifacts final-ctx))
-                                (empty? (:execution/phase-results final-ctx)))
-                         (-> final-ctx
-                             (update :execution/errors conj
-                                     {:type :empty-completion
-                                      :message "Workflow completed but produced no artifacts or phase results"})
-                             (assoc :execution/status :completed-with-warnings))
-                         final-ctx)
-             ;; Extract output and publish workflow completed event
-             output-ctx (extract-output final-ctx)]
-         (when-not skip-lifecycle?
-           (publish-workflow-completed! event-stream output-ctx))
+           ;; Validate completed workflows produced results
+           final-ctx (if (and (phase-reg/succeeded? final-ctx)
+                              (empty? (:execution/artifacts final-ctx))
+                              (empty? (:execution/phase-results final-ctx)))
+                       (-> final-ctx
+                           (update :execution/errors conj
+                                   {:type :empty-completion
+                                    :message "Workflow completed but produced no artifacts or phase results"})
+                           (assoc :execution/status :completed-with-warnings))
+                       final-ctx)
+           ;; Extract output and publish workflow completed event
+           output-ctx (extract-output final-ctx)]
+       (when-not skip-lifecycle?
+         (publish-workflow-completed! event-stream output-ctx))
 
-         ;; Post-workflow: feed signals to operator for pattern analysis
-         (try
-           (when-let [operator (:operator opts)]
-             (let [observe-fn (requiring-resolve 'ai.miniforge.operator.interface/observe-signal)
-                   signal-type (if (phase-reg/succeeded? output-ctx)
-                                 :workflow-complete
-                                 :workflow-failed)]
-               (observe-fn operator
-                           {:signal/type signal-type
-                            :workflow-id (:execution/id output-ctx)
-                            :phase-results (:execution/phase-results output-ctx)
-                            :metrics (:execution/metrics output-ctx)
-                            :timestamp (java.time.Instant/now)})))
-           (catch Exception _e nil))
+       ;; Post-workflow: feed signals to operator for pattern analysis
+       (try
+         (when-let [operator (:operator opts)]
+           (let [observe-fn (requiring-resolve 'ai.miniforge.operator.interface/observe-signal)
+                 signal-type (if (phase-reg/succeeded? output-ctx)
+                               :workflow-complete
+                               :workflow-failed)]
+             (observe-fn operator
+                         {:signal/type signal-type
+                          :workflow-id (:execution/id output-ctx)
+                          :phase-results (:execution/phase-results output-ctx)
+                          :metrics (:execution/metrics output-ctx)
+                          :timestamp (java.time.Instant/now)})))
+         (catch Exception _e nil))
 
-         output-ctx)))))
+       output-ctx))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

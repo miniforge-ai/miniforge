@@ -84,10 +84,11 @@
             {:delta delta-text :done? false})
 
           "result"
-          (let [usage (get-in data [:result :usage])]
+          (let [usage (or (:usage data) (get-in data [:result :usage]))]
             {:delta "" :done? true
              :usage {:input-tokens (:input_tokens usage)
-                     :output-tokens (:output_tokens usage)}})
+                     :output-tokens (:output_tokens usage)}
+             :cost-usd (:total_cost_usd data)})
 
           ;; Ignore system, rate_limit_event
           nil)))
@@ -97,24 +98,43 @@
 (defn- parse-codex-stream-line
   "Parse a line from Codex CLI streaming output.
 
+   Codex uses Anthropic API streaming format:
+   - message_start: initial message with input token count
+   - content_block_delta: content chunks
+   - message_delta: final delta with output token usage
+   - message_stop: end of message
+
    Arguments:
      line - String line from stream
 
-   Returns: {:delta string :done? boolean} or nil"
+   Returns: {:delta string :done? boolean :usage map} or nil"
   [line]
   (try
     (when-not (str/blank? line)
       (let [data (json/parse-string line true)]
         (cond
+          ;; message_start carries input token count
+          (= "message_start" (:type data))
+          (let [usage (get-in data [:message :usage])]
+            {:delta "" :done? false
+             :usage {:input-tokens (:input_tokens usage)}})
+
           ;; Extract content from content_block_delta events
           (= "content_block_delta" (:type data))
           (when-let [delta-text (get-in data [:delta :text])]
             {:delta delta-text :done? false})
 
-          ;; Handle message_delta for streaming text
-          (and (= "message_delta" (:type data))
-               (get-in data [:delta :text]))
-          {:delta (get-in data [:delta :text]) :done? false}
+          ;; message_delta carries output token usage
+          (= "message_delta" (:type data))
+          (let [delta-text (get-in data [:delta :text])
+                usage (get-in data [:usage])]
+            (cond-> {:done? false}
+              delta-text (assoc :delta delta-text)
+              usage (assoc :usage {:output-tokens (:output_tokens usage)})))
+
+          ;; message_stop signals end
+          (= "message_stop" (:type data))
+          {:delta "" :done? true}
 
           ;; Ignore other event types
           :else nil)))
@@ -278,7 +298,9 @@
     (try
       (let [body (json/parse-string (:body response) true)]
         (if (= 200 (:status response))
-          (llm-success (get-in body [:message :content] ""))
+          (llm-success (get-in body [:message :content] "")
+                       {:usage {:input-tokens (:prompt_eval_count body)
+                                :output-tokens (:eval_count body)}})
           (llm-error :anomalies/unavailable "api_error"
                      (get body :error "Unknown API error"))))
       (catch Exception e
@@ -469,11 +491,13 @@
                  :content (:content result)}))
     result))
 
-(defn- stream-with-parser [stream-parser on-chunk accumulated-content accumulated-usage]
+(defn- stream-with-parser [stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost]
   (fn [line]
     (when-let [parsed (stream-parser line)]
       (when-let [usage (:usage parsed)]
-        (reset! accumulated-usage usage))
+        (swap! accumulated-usage (fn [prev] (merge prev usage))))
+      (when-let [cost (:cost-usd parsed)]
+        (reset! accumulated-cost cost))
       (when-let [delta (:delta parsed)]
         (swap! accumulated-content str delta)
         (on-chunk (assoc parsed :content @accumulated-content))))))
@@ -489,8 +513,9 @@
       (log/debug logger :system :agent/streaming-complete
                  {:data {:response-length content-length}}))))
 
-(defn- streaming-success-response [content exit-code usage]
-  (llm-success content {:exit-code exit-code :usage usage}))
+(defn- streaming-success-response [content exit-code usage cost-usd]
+  (cond-> (llm-success content {:exit-code exit-code :usage usage})
+    cost-usd (assoc :cost-usd cost-usd)))
 
 (defn- streaming-error-response [content exit-code err-result timeout-info]
   (let [error-message (or err-result
@@ -509,14 +534,15 @@
         args (args-fn (assoc request :prompt prompt :streaming? true))
         full-cmd (into [cmd] args)
         accumulated-content (atom "")
-        accumulated-usage (atom nil)]
+        accumulated-usage (atom nil)
+        accumulated-cost (atom nil)]
     (when logger
       (log/debug logger :system :agent/streaming-prompt-sent
                  {:data {:backend backend
                          :prompt-length (count prompt)}}))
     (let [result (stream-exec-fn
                   full-cmd
-                  (stream-with-parser stream-parser on-chunk accumulated-content accumulated-usage)
+                  (stream-with-parser stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost)
                   {:progress-monitor progress-monitor})
           exit-code (:exit result)
           timeout-info (:timeout result)
@@ -527,7 +553,7 @@
                  :timeout timeout-info})
       (log-streaming-result logger timeout-info (count final-content))
       (if (zero? exit-code)
-        (streaming-success-response final-content exit-code @accumulated-usage)
+        (streaming-success-response final-content exit-code @accumulated-usage @accumulated-cost)
         (streaming-error-response final-content exit-code (:err result) timeout-info)))))
 
 (defn complete-stream-impl [client request on-chunk]

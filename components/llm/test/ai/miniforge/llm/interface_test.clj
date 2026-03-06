@@ -172,24 +172,28 @@
   (testing "stream-with-parser stores usage from parsed events"
     (let [content (atom "")
           usage (atom nil)
+          cost (atom nil)
           chunks (atom [])
           handler (#'impl/stream-with-parser
                     #'impl/parse-claude-stream-line
                     (fn [chunk] (swap! chunks conj chunk))
                     content
-                    usage)]
+                    usage
+                    cost)]
       ;; Feed an assistant event
       (handler (json/generate-string
                  {:type "assistant"
                   :message {:content [{:type "text" :text "Hello"}]}}))
       (is (= "Hello" @content))
       (is (nil? @usage))
-      ;; Feed a result event with usage
+      ;; Feed a result event with usage (top-level format from Claude CLI)
       (handler (json/generate-string
                  {:type "result"
-                  :result {:usage {:input_tokens 100
-                                   :output_tokens 50}}}))
-      (is (= {:input-tokens 100 :output-tokens 50} @usage)))))
+                  :usage {:input_tokens 100
+                          :output_tokens 50}
+                  :total_cost_usd 0.0045}))
+      (is (= {:input-tokens 100 :output-tokens 50} @usage))
+      (is (= 0.0045 @cost)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

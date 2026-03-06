@@ -2,7 +2,8 @@
   "Terminal output formatting for workflow execution."
   (:require
    [clojure.pprint]
-   [cheshire.core :as json]))
+   [cheshire.core :as json]
+   [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; ANSI color primitives
@@ -50,6 +51,60 @@
                     " " phase-name " "
                     (if success? "completed" "failed")
                     (when duration (str " (" (format-duration duration) ")")))))))
+
+(defn- demo-line
+  "Format concise demo progress lines for key lifecycle events."
+  [event]
+  (let [evt (:event/type event)
+        phase (or (:workflow/phase event) (:phase event))
+        gate (or (:gate/id event) (:gate event))
+        agent (or (:agent/id event) (:agent event))
+        tool-id (:tool/id event)]
+    (case evt
+      :workflow/started (str (colorize :cyan "▶") " Workflow started")
+      :workflow/completed (str (colorize :green "✓") " Workflow completed"
+                               (when-let [d (:workflow/duration-ms event)]
+                                 (str " (" (format-duration d) ")")))
+      :workflow/failed (str (colorize :red "✗") " Workflow failed"
+                            (when-let [r (:workflow/failure-reason event)]
+                              (str ": " r)))
+      :workflow/phase-started (str (colorize :yellow "→") " Phase " phase " started")
+      :workflow/phase-completed (str (colorize :green "✓") " Phase " phase " "
+                                     (name (or (:phase/outcome event) :completed))
+                                     (when-let [d (:phase/duration-ms event)]
+                                       (str " (" (format-duration d) ")")))
+      :workflow/milestone-reached (str (colorize :green "★") " Milestone: "
+                                       (:message event))
+      :agent/started (str "  " (colorize :cyan "•") " Agent " agent " started")
+      :agent/completed (str "  " (colorize :green "•") " Agent " agent " completed")
+      :agent/failed (str "  " (colorize :red "•") " Agent " agent " failed")
+      :agent/status (str "  " (colorize :cyan "•") " Agent " agent ": "
+                         (or (:message event) (:status/type event) "working"))
+      :tool/invoked (str "  " (colorize :yellow "•") " Tool " tool-id " invoked")
+      :tool/completed (str "  " (colorize :green "•") " Tool " tool-id " completed")
+      :gate/started (str "  " (colorize :yellow "•") " Gate " gate " running")
+      :gate/passed (str "  " (colorize :green "•") " Gate " gate " passed")
+      :gate/failed (str "  " (colorize :red "•") " Gate " gate " failed")
+      nil)))
+
+(defn start-demo-progress!
+  "Subscribe to key lifecycle events and print concise demo-friendly output.
+   Returns a cleanup function."
+  [event-stream quiet?]
+  (if (or quiet? (nil? event-stream))
+    (fn [] nil)
+    (let [sub-id (keyword (str "demo-progress-" (random-uuid)))
+          last-line (atom nil)]
+      (println (colorize :cyan "Demo mode: concise live progress enabled"))
+      (es/subscribe! event-stream sub-id
+                     (fn [event]
+                       (when-let [line (demo-line event)]
+                         ;; Deduplicate back-to-back duplicates from layered emitters.
+                         (when-not (= line @last-line)
+                           (reset! last-line line)
+                           (println line)))))
+      (fn []
+        (es/unsubscribe! event-stream sub-id)))))
 
 (defn- print-workflow-summary [result]
   (let [{:execution/keys [status metrics errors]} result

@@ -395,16 +395,17 @@
 
 (defn- build-review-result
   "Build the final result map with metrics."
-  [review counts duration tokens]
+  [review counts duration tokens & {:keys [cost-usd]}]
   {:status :success
    :output review
    :artifact review
-   :metrics {:decision (:review/decision review)
-             :gates-passed (:passed counts)
-             :gates-failed (:failed counts)
-             :gates-total (:total counts)
-             :duration-ms duration
-             :tokens tokens}})
+   :metrics (cond-> {:decision (:review/decision review)
+                     :gates-passed (:passed counts)
+                     :gates-failed (:failed counts)
+                     :gates-total (:total counts)
+                     :duration-ms duration
+                     :tokens tokens}
+              cost-usd (assoc :cost-usd cost-usd))})
 
 (defn- merge-gate-overrides
   "If gates failed, override the LLM decision accordingly."
@@ -482,7 +483,8 @@
                                               {:system @reviewer-system-prompt})
                              (llm/chat llm-client user-prompt
                                        {:system @reviewer-system-prompt}))
-                  tokens (get response :tokens 0)]
+                  tokens (get response :tokens 0)
+                  cost-usd (get response :cost-usd)]
 
               (log/info logger :reviewer :reviewer/llm-called
                         {:data {:success (llm/success? response)
@@ -540,7 +542,7 @@
                                   :llm-issues (count llm-issues)
                                   :duration-ms duration}})
 
-                (build-review-result review counts duration tokens)))
+                (build-review-result review counts duration tokens :cost-usd cost-usd)))
 
             ;; No LLM — gate-only fallback
             (let [gate-feedbacks (run-gates-on-artifact gates artifact context logger)
