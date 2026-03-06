@@ -55,31 +55,11 @@
 ;; Invoke tests
 
 (deftest tester-invoke-test
-  (testing "generates tests from code artifact"
+  (testing "fails explicitly without LLM backend (no silent fallback)"
     (let [agent (tester/create-tester)
           result (core/invoke agent {} {:code sample-code-artifact})]
-      (is (= :success (:status result)))
-      (is (uuid? (get-in result [:output :test/id])))
-      (is (vector? (get-in result [:output :test/files])))
-      (is (keyword? (get-in result [:output :test/type])))))
-
-  (testing "includes metrics in result"
-    (let [agent (tester/create-tester)
-          result (core/invoke agent {} {:code sample-code-artifact})]
-      (is (number? (get-in result [:metrics :test-files])))
-      (is (keyword? (get-in result [:metrics :test-type])))
-      (is (number? (get-in result [:metrics :assertions])))))
-
-  (testing "generates tests with acceptance criteria"
-    (let [agent (tester/create-tester)
-          result (core/invoke agent {}
-                              {:code sample-code-artifact
-                               :spec {:acceptance-criteria ["User can log in"
-                                                            "Error shown for invalid credentials"]}})]
-      (is (= :success (:status result)))
-      ;; Check that test content references criteria
-      (let [content (get-in result [:output :test/files 0 :content])]
-        (is (re-find #"Acceptance criteria" content))))))
+      (is (= :error (:status result)))
+      (is (some? (:error result))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation tests
@@ -193,11 +173,10 @@
 ;; Full cycle tests
 
 (deftest tester-cycle-test
-  (testing "full invoke-validate cycle succeeds"
+  (testing "full invoke-validate cycle fails without LLM (no silent fallback)"
     (let [agent (tester/create-tester)
           result (core/cycle-agent agent {} {:code sample-code-artifact})]
-      (is (= :success (:status result)))
-      (is (uuid? (get-in result [:output :test/id]))))))
+      (is (= :error (:status result))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
