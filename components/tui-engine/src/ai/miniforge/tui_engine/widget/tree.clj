@@ -61,7 +61,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Kanban columns
 
-(def ^:private status-chars
+(def status-chars
   {:running  \●
    :success  \✓
    :failed   \✗
@@ -70,7 +70,7 @@
    :skipped  \─
    :spinning \⟳})
 
-(def ^:private status-colors
+(def status-colors
   {:running  :cyan
    :success  :green
    :failed   :red

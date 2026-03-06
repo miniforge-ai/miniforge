@@ -67,7 +67,7 @@
 ;; Layer 1 - Coordinated Operations
 ;; ============================================================================
 
-(def ^:private default-store
+(def default-store
   "Default in-memory store for heuristics."
   (atom nil))
 

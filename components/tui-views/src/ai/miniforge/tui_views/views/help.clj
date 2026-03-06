@@ -28,7 +28,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Help content
 
-(def ^:private help-sections
+(def help-sections
   "Keybinding help content organized by section."
   [["Navigation"
     [["j / k / ↓ / ↑" "Move cursor down / up"]

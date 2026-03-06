@@ -17,7 +17,7 @@
 ;;------------------------------------------------------------------------------ Layer 0
 ;; Registry state
 
-(defonce ^:private registry
+(defonce registry
   ;; Atom containing the workflow registry.
   ;; Map of workflow-id -> workflow definition
   (atom {}))

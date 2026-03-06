@@ -16,7 +16,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Prompt construction
 
-(def ^:private system-prompt
+(def system-prompt
   "You are a tool-use quality evaluator for a software engineering agent.
 Your job: decide whether a tool call is RELEVANT to the current task.
 You do NOT judge safety (container sandbox handles that).

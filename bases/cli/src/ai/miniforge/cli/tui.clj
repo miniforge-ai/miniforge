@@ -35,7 +35,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Terminal utilities
 
-(def ^:private ansi-colors
+(def ansi-colors
   "ANSI color codes for foreground colors."
   {:red     "31"
    :green   "32"
@@ -53,7 +53,7 @@
    :bright-cyan "96"
    :bright-white "97"})
 
-(def ^:private ansi-bg-colors
+(def ansi-bg-colors
   "ANSI color codes for background colors."
   {:bg-black "40"
    :bg-red "41"

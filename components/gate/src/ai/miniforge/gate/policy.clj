@@ -29,7 +29,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Policy checks
 
-(def ^:private secret-patterns
+(def secret-patterns
   "Patterns that might indicate hardcoded secrets."
   [#"(?i)(password|secret|api[_-]?key|token)\s*=\s*[\"'][^\"']{8,}"
    #"(?i)aws[_-]?(access|secret)[_-]?key[_-]?id?\s*=\s*[\"'][A-Z0-9]{16,}"

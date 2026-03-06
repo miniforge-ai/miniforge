@@ -20,7 +20,7 @@
 ;; Repair registry
 
 ;; Registry of repair functions keyed by rule-id pattern.
-(defonce ^:private repair-registry (atom {}))
+(defonce repair-registry (atom {}))
 
 (defn register-repair!
   "Register a repair function for a rule-id or pattern.

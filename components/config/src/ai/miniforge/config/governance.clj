@@ -24,14 +24,14 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants and helpers
 
-(def ^:private config-key->filename
+(def config-key->filename
   "Map from config key to EDN filename."
   {:readiness        "readiness.edn"
    :risk             "risk.edn"
    :tiers            "tiers.edn"
    :knowledge-safety "knowledge-safety.edn"})
 
-(def ^:private user-config-path
+(def user-config-path
   "Default path to user config file."
   (str (fs/home) "/.miniforge/config.edn"))
 

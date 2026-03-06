@@ -115,7 +115,7 @@
      :properties {}
      :required []}}])
 
-(def ^:private diagnostics-wait-ms
+(def diagnostics-wait-ms
   "Time to wait for diagnostics to arrive via notification."
   2000)
 

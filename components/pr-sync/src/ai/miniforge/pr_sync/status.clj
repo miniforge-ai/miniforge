@@ -31,13 +31,13 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Status constants
 
-(def ^:private failed-check-conclusions
+(def failed-check-conclusions
   #{"FAILURE" "TIMED_OUT" "CANCELLED" "ACTION_REQUIRED" "STARTUP_FAILURE"})
 
-(def ^:private passing-check-conclusions
+(def passing-check-conclusions
   #{"SUCCESS" "NEUTRAL" "SKIPPED"})
 
-(def ^:private pending-check-states
+(def pending-check-states
   #{"PENDING" "QUEUED" "IN_PROGRESS" "WAITING" "REQUESTED"})
 
 ;------------------------------------------------------------------------------ Layer 1

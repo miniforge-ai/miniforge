@@ -80,7 +80,7 @@
               :stale
               :running))))
 
-(def ^:private resolved-get-events
+(def resolved-get-events
   "Cached reference to event-stream get-events fn."
   (delay
     (try

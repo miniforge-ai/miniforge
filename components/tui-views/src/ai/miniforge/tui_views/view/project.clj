@@ -221,7 +221,7 @@
   [action label reason]
   {:action action :label label :reason reason})
 
-(def ^:private labels
+(def labels
   "Action → label mapping."
   {:remediate     "⚡ remediate"
    :review        "⊙ review"
@@ -359,10 +359,10 @@
   ([label depth expandable? fg] {:label label :depth depth :expandable? expandable? :fg fg}))
 
 ;; Semantic status colors — fixed across all themes
-(def ^:private status-pass    :green)
-(def ^:private status-fail    :red)
-(def ^:private status-warning :yellow)
-(def ^:private status-info    :cyan)
+(def status-pass    :green)
+(def status-fail    :red)
+(def status-warning :yellow)
+(def status-info    :cyan)
 
 (defn readiness-state-color
   "Map readiness state to fixed status color."
@@ -800,7 +800,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Projection registry
 
-(def ^:private projections
+(def projections
   "Registry of data projection functions: keyword -> (model -> data)."
   {:project/workflows      project-workflows
    :project/pr-items       project-pr-items
@@ -887,7 +887,7 @@
         repos (get model :fleet-repos [])]
     (str "Repos (" (count repos) ") [" (inc idx) "]")))
 
-(def ^:private contexts
+(def contexts
   "Registry of context functions: keyword -> (model -> string)."
   {:ctx/workflow-count         ctx-workflow-count
    :ctx/pr-fleet-summary       ctx-pr-fleet-summary

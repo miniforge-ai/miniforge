@@ -6,7 +6,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.cli.web.response :as response]))
 
-(def ^:private streams (atom {}))
+(def streams (atom {}))
 
 (defn get-or-create-stream [workflow-id]
   (or (get @streams workflow-id)

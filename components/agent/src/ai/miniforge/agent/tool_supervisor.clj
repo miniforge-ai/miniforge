@@ -23,7 +23,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Bash command policy
 
-(def ^:private dangerous-patterns
+(def dangerous-patterns
   "Regex patterns for commands that should be denied.
    These are destructive or exfiltration-risk commands."
   [#"rm\s+-rf\s+/"

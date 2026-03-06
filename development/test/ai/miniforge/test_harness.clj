@@ -34,7 +34,7 @@
 ;; ============================================================================
 
 ;; Global test state for cleanup tracking
-(defonce ^:private test-state
+(defonce test-state
   (atom {:stores []
          :temp-dirs #{}}))
 

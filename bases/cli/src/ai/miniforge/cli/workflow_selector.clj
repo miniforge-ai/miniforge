@@ -210,7 +210,7 @@
    :confidence :low
    :reason "Unknown task type defaults to lean workflow (safer than simple)"})
 
-(def ^:private selection-rules
+(def selection-rules
   "Ordered list of selection rules. First matching rule wins."
   [match-multi-phase-rule
    match-refactoring-stratification-rule

@@ -487,7 +487,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Structured control action handler (N8)
 
-(def ^:private default-dashboard-requester
+(def default-dashboard-requester
   "Default requester identity when none is provided in the request body."
   {:principal "dashboard" :role :operator})
 

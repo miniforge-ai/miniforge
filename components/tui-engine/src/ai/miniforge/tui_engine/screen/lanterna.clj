@@ -31,7 +31,7 @@
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Color mapping
 
-(def ^:private color-map
+(def color-map
   "Map from keyword colors to Lanterna TextColor.ANSI constants."
   {:black   TextColor$ANSI/BLACK
    :red     TextColor$ANSI/RED

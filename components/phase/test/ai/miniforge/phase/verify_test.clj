@@ -85,7 +85,7 @@
                                   {:result {:status :success
                                             :output mock-code-artifact}}))
                 ctx-with-config (assoc ctx :phase-config {:phase :verify})
-                result (#'verify/enter-verify ctx-with-config)]
+                result (verify/enter-verify ctx-with-config)]
 
             (testing "phase metadata is set"
               (is (= :verify (get-in result [:phase :name])))
@@ -122,7 +122,7 @@
                                   {:result {:status :success
                                             :output mock-code-artifact}})
                         (assoc :phase-config {:phase :verify}))
-                result (#'verify/enter-verify ctx)
+                result (verify/enter-verify ctx)
                 output (get-in result [:phase :result :output])]
             (is (= (:test/id mock-test-artifact) (:test/id output)))))))))
 
@@ -139,7 +139,7 @@
           (let [ctx (-> (create-base-context)
                         (assoc-in [:execution/input :task/code-artifact] mock-code-artifact)
                         (assoc :phase-config {:phase :verify}))
-                result (#'verify/enter-verify ctx)
+                result (verify/enter-verify ctx)
                 output (get-in result [:phase :result :output])]
             (is (= (:test/id mock-test-artifact) (:test/id output)))))))))
 
@@ -152,7 +152,7 @@
       (let [ctx (-> (create-base-context)
                     (assoc-in [:execution/input :code-artifact] mock-code-artifact)
                     (assoc :phase-config {:phase :verify}))
-            result (#'verify/enter-verify ctx)]
+            result (verify/enter-verify ctx)]
         (is (= false (get-in result [:phase :result :success])))
         (is (= "Test generation failed" (get-in result [:phase :result :error :message])))
         (is (= 0 (get-in result [:phase :result :metrics :tokens])))))))

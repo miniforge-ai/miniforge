@@ -50,7 +50,7 @@
 ;; Convenience accessors for backward compatibility
 (def pack-id (:pack-id default-config))
 (def pack-version (:pack-version default-config))
-(def ^:private default-pack-roots (:pack-roots default-config))
+(def default-pack-roots (:pack-roots default-config))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Violation constructor — single shape for all detection results

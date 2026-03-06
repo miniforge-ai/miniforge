@@ -128,7 +128,7 @@
                  {:type "result"
                   :result {:usage {:input_tokens 1234
                                    :output_tokens 567}}})
-          parsed (#'impl/parse-claude-stream-line line)]
+          parsed (impl/parse-claude-stream-line line)]
       (is (= "" (:delta parsed)))
       (is (true? (:done? parsed)))
       (is (= 1234 (get-in parsed [:usage :input-tokens])))
@@ -136,7 +136,7 @@
 
   (testing "result event with no usage returns nil tokens"
     (let [line (json/generate-string {:type "result" :result {}})
-          parsed (#'impl/parse-claude-stream-line line)]
+          parsed (impl/parse-claude-stream-line line)]
       (is (true? (:done? parsed)))
       (is (nil? (get-in parsed [:usage :input-tokens]))))))
 
@@ -174,7 +174,7 @@
           usage (atom nil)
           cost (atom nil)
           chunks (atom [])
-          handler (#'impl/stream-with-parser
+          handler (impl/stream-with-parser
                     #'impl/parse-claude-stream-line
                     (fn [chunk] (swap! chunks conj chunk))
                     content

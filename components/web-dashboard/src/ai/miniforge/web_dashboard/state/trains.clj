@@ -26,46 +26,46 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Fleet repository config and provider helpers
 
-(def ^:private default-fleet-config-path
+(def default-fleet-config-path
   (str (System/getProperty "user.home") "/.miniforge/config.edn"))
 
-(def ^:private external-train-prefix
+(def external-train-prefix
   "External PRs: ")
 
-(def ^:private external-dag-name
+(def external-dag-name
   "External PR Fleet")
 
-(def ^:private repo-slug-pattern
+(def repo-slug-pattern
   #"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
-(def ^:private failed-check-conclusions
+(def failed-check-conclusions
   #{"FAILURE" "TIMED_OUT" "CANCELLED" "ACTION_REQUIRED" "STARTUP_FAILURE"})
 
-(def ^:private passing-check-conclusions
+(def passing-check-conclusions
   #{"SUCCESS" "NEUTRAL" "SKIPPED"})
 
-(def ^:private pending-check-states
+(def pending-check-states
   #{"PENDING" "QUEUED" "IN_PROGRESS" "WAITING" "REQUESTED"})
 
-(def ^:private readiness-factor-order
+(def readiness-factor-order
   [:deps-merged :ci-passed :approved :gates-passed :behind-main])
 
-(def ^:private readiness-weights
+(def readiness-weights
   {:deps-merged 0.25
    :ci-passed 0.25
    :approved 0.20
    :gates-passed 0.15
    :behind-main 0.15})
 
-(def ^:private readiness-threshold 0.85)
+(def readiness-threshold 0.85)
 
-(def ^:private ci-scores
+(def ci-scores
   {:passed 1.0
    :running 0.5
    :pending 0.5
    :failed 0.0})
 
-(def ^:private approval-scores
+(def approval-scores
   {:approved 1.0
    :merged 1.0
    :merging 1.0
@@ -76,7 +76,7 @@
    :closed 0.0
    :failed 0.0})
 
-(def ^:private blocker-rank
+(def blocker-rank
   {:dependency 0
    :review 1
    :ci 2

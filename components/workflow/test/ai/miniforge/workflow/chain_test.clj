@@ -10,17 +10,17 @@
 
 (deftest resolve-binding-string-literal-test
   (testing "string literal passes through unchanged"
-    (is (= "hello" (#'chain/resolve-binding "hello" nil nil)))
-    (is (= "some/path" (#'chain/resolve-binding "some/path" {} {})))))
+    (is (= "hello" (chain/resolve-binding "hello" nil nil)))
+    (is (= "some/path" (chain/resolve-binding "some/path" {} {})))))
 
 (deftest resolve-binding-chain-input-test
   (testing ":chain/input.KEY reads from chain input"
     (is (= "my-task"
-           (#'chain/resolve-binding :chain/input.task nil {:task "my-task"})))
+           (chain/resolve-binding :chain/input.task nil {:task "my-task"})))
     (is (= 42
-           (#'chain/resolve-binding :chain/input.count nil {:count 42}))))
+           (chain/resolve-binding :chain/input.count nil {:count 42}))))
   (testing ":chain/input.KEY returns nil for missing key"
-    (is (nil? (#'chain/resolve-binding :chain/input.missing nil {:task "x"})))))
+    (is (nil? (chain/resolve-binding :chain/input.missing nil {:task "x"})))))
 
 (deftest resolve-binding-vector-path-test
   (testing "vector path navigates into prev-output"
@@ -29,18 +29,18 @@
                        :last-phase-result {:success? true :output "done"}}]
       (testing ":prev/phase-results root"
         (is (= {:success? true :data "planned"}
-               (#'chain/resolve-binding [:prev/phase-results :plan] prev-output nil))))
+               (chain/resolve-binding [:prev/phase-results :plan] prev-output nil))))
       (testing ":prev/artifacts root"
         (is (= [{:title "doc"}]
-               (#'chain/resolve-binding [:prev/artifacts] prev-output nil))))
+               (chain/resolve-binding [:prev/artifacts] prev-output nil))))
       (testing ":prev/last-phase-result root with path"
         (is (= "done"
-               (#'chain/resolve-binding [:prev/last-phase-result :output] prev-output nil)))))))
+               (chain/resolve-binding [:prev/last-phase-result :output] prev-output nil)))))))
 
 (deftest resolve-binding-keyword-fallback-test
   (testing "plain keyword reads from chain input"
-    (is (= "value" (#'chain/resolve-binding :my-key nil {:my-key "value"})))
-    (is (nil? (#'chain/resolve-binding :missing nil {:other "x"})))))
+    (is (= "value" (chain/resolve-binding :my-key nil {:my-key "value"})))
+    (is (nil? (chain/resolve-binding :missing nil {:other "x"})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; resolve-bindings tests
@@ -53,7 +53,7 @@
                     :extra :chain/input.extra}
           prev-output {:last-phase-result {:plan "the plan" :other "x"}}
           chain-input {:task "build feature" :extra "bonus"}
-          result (#'chain/resolve-bindings bindings prev-output chain-input)]
+          result (chain/resolve-bindings bindings prev-output chain-input)]
       (is (= "build feature" (:task result)))
       (is (= "the plan" (:plan result)))
       (is (= "static-label" (:label result)))

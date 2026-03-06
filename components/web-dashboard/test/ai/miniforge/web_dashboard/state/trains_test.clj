@@ -35,57 +35,57 @@
 
 (deftest normalized-limit-test
   (testing "Returns the integer when positive"
-    (is (= 10 (#'sut/normalized-limit 10 50))))
+    (is (= 10 (sut/normalized-limit 10 50))))
   (testing "Falls back to default for non-integer"
-    (is (= 50 (#'sut/normalized-limit "abc" 50)))
-    (is (= 50 (#'sut/normalized-limit nil 50))))
+    (is (= 50 (sut/normalized-limit "abc" 50)))
+    (is (= 50 (sut/normalized-limit nil 50))))
   (testing "Falls back to default for zero or negative"
-    (is (= 50 (#'sut/normalized-limit 0 50)))
-    (is (= 50 (#'sut/normalized-limit -5 50)))))
+    (is (= 50 (sut/normalized-limit 0 50)))
+    (is (= 50 (sut/normalized-limit -5 50)))))
 
 (deftest ensure-message-test
   (testing "Returns message when present and non-blank"
-    (is (= "hello" (#'sut/ensure-message "hello" "fallback"))))
+    (is (= "hello" (sut/ensure-message "hello" "fallback"))))
   (testing "Returns fallback for nil"
-    (is (= "fallback" (#'sut/ensure-message nil "fallback"))))
+    (is (= "fallback" (sut/ensure-message nil "fallback"))))
   (testing "Returns fallback for blank string"
-    (is (= "fallback" (#'sut/ensure-message "  " "fallback"))))
+    (is (= "fallback" (sut/ensure-message "  " "fallback"))))
   (testing "Trims the message"
-    (is (= "hello" (#'sut/ensure-message "  hello  " "fallback")))))
+    (is (= "hello" (sut/ensure-message "  hello  " "fallback")))))
 
 (deftest normalize-repo-slug-test
   (testing "Normalizes case and trims whitespace"
-    (is (= "acme/service" (#'sut/normalize-repo-slug "  Acme/Service  "))))
+    (is (= "acme/service" (sut/normalize-repo-slug "  Acme/Service  "))))
   (testing "Handles already-normalized slugs"
-    (is (= "acme/service" (#'sut/normalize-repo-slug "acme/service")))))
+    (is (= "acme/service" (sut/normalize-repo-slug "acme/service")))))
 
 (deftest valid-repo-slug-test
   (testing "Valid slugs"
-    (is (true? (#'sut/valid-repo-slug? "acme/service")))
-    (is (true? (#'sut/valid-repo-slug? "my-org/my-repo")))
-    (is (true? (#'sut/valid-repo-slug? "org_1/repo.name"))))
+    (is (true? (sut/valid-repo-slug? "acme/service")))
+    (is (true? (sut/valid-repo-slug? "my-org/my-repo")))
+    (is (true? (sut/valid-repo-slug? "org_1/repo.name"))))
   (testing "Invalid slugs"
-    (is (false? (#'sut/valid-repo-slug? "noslash")))
-    (is (false? (#'sut/valid-repo-slug? "too/many/slashes")))
-    (is (false? (#'sut/valid-repo-slug? "")))
-    (is (false? (#'sut/valid-repo-slug? "has spaces/repo")))))
+    (is (false? (sut/valid-repo-slug? "noslash")))
+    (is (false? (sut/valid-repo-slug? "too/many/slashes")))
+    (is (false? (sut/valid-repo-slug? "")))
+    (is (false? (sut/valid-repo-slug? "has spaces/repo")))))
 
 (deftest result-success-test
   (testing "result-success sets success flags"
-    (let [r (#'sut/result-success {:foo :bar})]
+    (let [r (sut/result-success {:foo :bar})]
       (is (true? (:success? r)))
       (is (true? (:success r)))
       (is (= :bar (:foo r))))))
 
 (deftest result-failure-test
   (testing "result-failure sets failure flags with message"
-    (let [r (#'sut/result-failure "bad thing")]
+    (let [r (sut/result-failure "bad thing")]
       (is (false? (:success? r)))
       (is (false? (:success r)))
       (is (= "bad thing" (:error r)))
       (is (some? (:anomaly r)))))
   (testing "result-failure with nil message uses fallback"
-    (let [r (#'sut/result-failure nil)]
+    (let [r (sut/result-failure nil)]
       (is (false? (:success? r)))
       (is (string? (:error r)))
       (is (not (str/blank? (:error r)))))))
@@ -93,7 +93,7 @@
 (deftest result-exception-test
   (testing "result-exception captures exception info"
     (let [ex (ex-info "boom" {:detail 1})
-          r (#'sut/result-exception "wrapped" ex)]
+          r (sut/result-exception "wrapped" ex)]
       (is (false? (:success? r)))
       (is (= "wrapped" (:error r)))
       (is (string? (:exception r)))
@@ -101,12 +101,12 @@
 
 (deftest succeeded?-test
   (testing "Returns true for success maps"
-    (is (true? (#'sut/succeeded? {:success? true}))))
+    (is (true? (sut/succeeded? {:success? true}))))
   (testing "Returns false for failure maps"
-    (is (false? (#'sut/succeeded? {:success? false}))))
+    (is (false? (sut/succeeded? {:success? false}))))
   (testing "Returns false for nil/missing key"
-    (is (false? (#'sut/succeeded? {})))
-    (is (false? (#'sut/succeeded? nil)))))
+    (is (false? (sut/succeeded? {})))
+    (is (false? (sut/succeeded? nil)))))
 
 ;; ============================================================================
 ;; Layer 0: Config management tests
@@ -160,48 +160,48 @@
 
 (deftest pr-status-from-provider-test
   (testing "Closed state"
-    (is (= :closed (#'sut/pr-status-from-provider {:state "CLOSED"})))
-    (is (= :closed (#'sut/pr-status-from-provider {:state "MERGED"}))))
+    (is (= :closed (sut/pr-status-from-provider {:state "CLOSED"})))
+    (is (= :closed (sut/pr-status-from-provider {:state "MERGED"}))))
   (testing "Draft"
-    (is (= :draft (#'sut/pr-status-from-provider {:state "OPEN" :isDraft true}))))
+    (is (= :draft (sut/pr-status-from-provider {:state "OPEN" :isDraft true}))))
   (testing "Approved"
-    (is (= :approved (#'sut/pr-status-from-provider {:state "OPEN" :isDraft false :reviewDecision "APPROVED"}))))
+    (is (= :approved (sut/pr-status-from-provider {:state "OPEN" :isDraft false :reviewDecision "APPROVED"}))))
   (testing "Changes requested"
-    (is (= :changes-requested (#'sut/pr-status-from-provider {:state "OPEN" :isDraft false :reviewDecision "CHANGES_REQUESTED"}))))
+    (is (= :changes-requested (sut/pr-status-from-provider {:state "OPEN" :isDraft false :reviewDecision "CHANGES_REQUESTED"}))))
   (testing "Review required"
-    (is (= :reviewing (#'sut/pr-status-from-provider {:state "OPEN" :isDraft false :reviewDecision "REVIEW_REQUIRED"}))))
+    (is (= :reviewing (sut/pr-status-from-provider {:state "OPEN" :isDraft false :reviewDecision "REVIEW_REQUIRED"}))))
   (testing "Open with no review decision"
-    (is (= :open (#'sut/pr-status-from-provider {:state "OPEN" :isDraft false})))))
+    (is (= :open (sut/pr-status-from-provider {:state "OPEN" :isDraft false})))))
 
 (deftest check-rollup->ci-status-test
   (testing "Nil rollup returns :pending"
-    (is (= :pending (#'sut/check-rollup->ci-status nil))))
+    (is (= :pending (sut/check-rollup->ci-status nil))))
   (testing "Empty list returns :pending"
-    (is (= :pending (#'sut/check-rollup->ci-status []))))
+    (is (= :pending (sut/check-rollup->ci-status []))))
   (testing "All SUCCESS conclusions return :passed"
-    (is (= :passed (#'sut/check-rollup->ci-status [{:conclusion "SUCCESS"} {:conclusion "NEUTRAL"}]))))
+    (is (= :passed (sut/check-rollup->ci-status [{:conclusion "SUCCESS"} {:conclusion "NEUTRAL"}]))))
   (testing "Any FAILURE conclusion returns :failed"
-    (is (= :failed (#'sut/check-rollup->ci-status [{:conclusion "SUCCESS"} {:conclusion "FAILURE"}]))))
+    (is (= :failed (sut/check-rollup->ci-status [{:conclusion "SUCCESS"} {:conclusion "FAILURE"}]))))
   (testing "TIMED_OUT conclusion returns :failed"
-    (is (= :failed (#'sut/check-rollup->ci-status [{:conclusion "TIMED_OUT"}]))))
+    (is (= :failed (sut/check-rollup->ci-status [{:conclusion "TIMED_OUT"}]))))
   (testing "IN_PROGRESS status returns :running"
-    (is (= :running (#'sut/check-rollup->ci-status [{:status "IN_PROGRESS"}]))))
+    (is (= :running (sut/check-rollup->ci-status [{:status "IN_PROGRESS"}]))))
   (testing "PENDING status returns :running"
-    (is (= :running (#'sut/check-rollup->ci-status [{:status "PENDING"}]))))
+    (is (= :running (sut/check-rollup->ci-status [{:status "PENDING"}]))))
   (testing "QUEUED status returns :running"
-    (is (= :running (#'sut/check-rollup->ci-status [{:status "QUEUED"}]))))
+    (is (= :running (sut/check-rollup->ci-status [{:status "QUEUED"}]))))
   (testing "Single non-sequential rollup treated as single-element list"
-    (is (= :failed (#'sut/check-rollup->ci-status {:conclusion "FAILURE"})))))
+    (is (= :failed (sut/check-rollup->ci-status {:conclusion "FAILURE"})))))
 
 (deftest merge-state-status->behind-test
   (testing "BEHIND is behind"
-    (is (true? (#'sut/merge-state-status->behind? "BEHIND"))))
+    (is (true? (sut/merge-state-status->behind? "BEHIND"))))
   (testing "DIRTY is behind"
-    (is (true? (#'sut/merge-state-status->behind? "DIRTY"))))
+    (is (true? (sut/merge-state-status->behind? "DIRTY"))))
   (testing "CLEAN is not behind"
-    (is (false? (#'sut/merge-state-status->behind? "CLEAN"))))
+    (is (false? (sut/merge-state-status->behind? "CLEAN"))))
   (testing "nil is not behind"
-    (is (false? (#'sut/merge-state-status->behind? nil)))))
+    (is (false? (sut/merge-state-status->behind? nil)))))
 
 (deftest provider-pr->train-pr-test
   (testing "Maps all provider fields to train PR map"
@@ -214,7 +214,7 @@
               :reviewDecision "APPROVED"
               :statusCheckRollup [{:conclusion "SUCCESS"}]
               :mergeStateStatus "CLEAN"}
-          result (#'sut/provider-pr->train-pr pr)]
+          result (sut/provider-pr->train-pr pr)]
       (is (= 42 (:pr/number result)))
       (is (= "My PR" (:pr/title result)))
       (is (= "feature/x" (:pr/branch result)))
@@ -246,7 +246,7 @@
                                                    :conclusion "SUCCESS"}]}])
                       :err ""})}
     (fn []
-      (let [result (#'sut/fetch-open-prs "acme/service")
+      (let [result (sut/fetch-open-prs "acme/service")
             prs (:prs result)
             by-number (into {} (map (juxt :pr/number identity) prs))]
         (is (true? (:success? result)))
@@ -262,7 +262,7 @@
                      (fn [& _args]
                        {:success? false :out "" :err "not logged in to any GitHub hosts"})}
       (fn []
-        (let [result (#'sut/fetch-open-prs "acme/service")]
+        (let [result (sut/fetch-open-prs "acme/service")]
           (is (false? (:success? result)))
           (is (= "acme/service" (:repo result)))
           (is (string? (:action result))))))))
@@ -273,7 +273,7 @@
                      (fn [& _args]
                        {:success? true :out "not json" :err ""})}
       (fn []
-        (let [result (#'sut/fetch-open-prs "acme/service")]
+        (let [result (sut/fetch-open-prs "acme/service")]
           (is (false? (:success? result)))
           (is (string? (:error result))))))))
 
@@ -283,64 +283,64 @@
 
 (deftest gates-passed-test
   (testing "No gates means passed"
-    (is (true? (#'sut/gates-passed? {}))))
+    (is (true? (sut/gates-passed? {}))))
   (testing "All gates passed"
-    (is (true? (#'sut/gates-passed? {:pr/gate-results [{:gate/passed? true} {:gate/passed? true}]}))))
+    (is (true? (sut/gates-passed? {:pr/gate-results [{:gate/passed? true} {:gate/passed? true}]}))))
   (testing "One gate failed"
-    (is (false? (#'sut/gates-passed? {:pr/gate-results [{:gate/passed? true} {:gate/passed? false}]})))))
+    (is (false? (sut/gates-passed? {:pr/gate-results [{:gate/passed? true} {:gate/passed? false}]})))))
 
 (deftest gates-score-test
   (testing "Empty gates => 1.0"
-    (is (= 1.0 (#'sut/gates-score {}))))
+    (is (= 1.0 (sut/gates-score {}))))
   (testing "All passed => 1.0"
-    (is (= 1.0 (#'sut/gates-score {:pr/gate-results [{:gate/passed? true}]}))))
+    (is (= 1.0 (sut/gates-score {:pr/gate-results [{:gate/passed? true}]}))))
   (testing "Half passed => 0.5"
-    (is (= 0.5 (#'sut/gates-score {:pr/gate-results [{:gate/passed? true} {:gate/passed? false}]})))))
+    (is (= 0.5 (sut/gates-score {:pr/gate-results [{:gate/passed? true} {:gate/passed? false}]})))))
 
 (deftest pr-sort-key-test
   (testing "Uses merge-order then number"
-    (is (= [1 42] (#'sut/pr-sort-key {:pr/merge-order 1 :pr/number 42}))))
+    (is (= [1 42] (sut/pr-sort-key {:pr/merge-order 1 :pr/number 42}))))
   (testing "Missing merge-order uses MAX_VALUE"
-    (is (= [Long/MAX_VALUE 10] (#'sut/pr-sort-key {:pr/number 10})))))
+    (is (= [Long/MAX_VALUE 10] (sut/pr-sort-key {:pr/number 10})))))
 
 (deftest sort-prs-test
   (testing "PRs sorted by merge-order then number"
     (let [prs [{:pr/number 3 :pr/merge-order 2}
                {:pr/number 1 :pr/merge-order 1}
                {:pr/number 2 :pr/merge-order 1}]
-          sorted (#'sut/sort-prs prs)]
+          sorted (sut/sort-prs prs)]
       (is (= [1 2 3] (mapv :pr/number sorted))))))
 
 (deftest unresolved-deps-test
   (testing "No deps returns empty"
     (let [pm {1 {:pr/number 1 :pr/status :open}}]
-      (is (= [] (#'sut/unresolved-deps pm (get pm 1))))))
+      (is (= [] (sut/unresolved-deps pm (get pm 1))))))
   (testing "Merged dep is resolved"
     (let [pm {1 {:pr/number 1 :pr/status :merged}
               2 {:pr/number 2 :pr/status :open :pr/depends-on [1]}}]
-      (is (= [] (#'sut/unresolved-deps pm (get pm 2))))))
+      (is (= [] (sut/unresolved-deps pm (get pm 2))))))
   (testing "Open dep is unresolved"
     (let [pm {1 {:pr/number 1 :pr/status :open}
               2 {:pr/number 2 :pr/status :open :pr/depends-on [1]}}]
-      (is (= [1] (#'sut/unresolved-deps pm (get pm 2))))))
+      (is (= [1] (sut/unresolved-deps pm (get pm 2))))))
   (testing "Multiple deps, some resolved"
     (let [pm {1 {:pr/number 1 :pr/status :merged}
               3 {:pr/number 3 :pr/status :open}
               5 {:pr/number 5 :pr/status :open :pr/depends-on [1 3]}}]
-      (is (= [3] (#'sut/unresolved-deps pm (get pm 5)))))))
+      (is (= [3] (sut/unresolved-deps pm (get pm 5)))))))
 
 (deftest deps-score-test
   (testing "No deps => 1.0"
     (let [pm {1 {:pr/number 1 :pr/status :open}}]
-      (is (= 1.0 (#'sut/deps-score pm (get pm 1))))))
+      (is (= 1.0 (sut/deps-score pm (get pm 1))))))
   (testing "All deps merged => 1.0"
     (let [pm {1 {:pr/number 1 :pr/status :merged}
               2 {:pr/number 2 :pr/status :open :pr/depends-on [1]}}]
-      (is (= 1.0 (#'sut/deps-score pm (get pm 2))))))
+      (is (= 1.0 (sut/deps-score pm (get pm 2))))))
   (testing "No deps merged => 0.0"
     (let [pm {1 {:pr/number 1 :pr/status :open}
               2 {:pr/number 2 :pr/status :open :pr/depends-on [1]}}]
-      (is (= 0.0 (#'sut/deps-score pm (get pm 2)))))))
+      (is (= 0.0 (sut/deps-score pm (get pm 2)))))))
 
 ;; ============================================================================
 ;; Layer 1: Readiness state tests
@@ -353,54 +353,54 @@
                      :pr/depends-on [1] :pr/behind-main? false}}
           merged-pr (get pr-map 1)
           ready-pr (get pr-map 2)]
-      (is (= :merge-ready (#'sut/readiness-state pr-map merged-pr)))
-      (is (= :merge-ready (#'sut/readiness-state pr-map ready-pr))))))
+      (is (= :merge-ready (sut/readiness-state pr-map merged-pr)))
+      (is (= :merge-ready (sut/readiness-state pr-map ready-pr))))))
 
 (deftest readiness-state-dep-blocked-test
   (testing "PR with unmerged dep is :dep-blocked"
     (let [pr-map {1 {:pr/number 1 :pr/status :open}
                   2 {:pr/number 2 :pr/status :approved :pr/ci-status :passed
                      :pr/depends-on [1] :pr/behind-main? false}}]
-      (is (= :dep-blocked (#'sut/readiness-state pr-map (get pr-map 2)))))))
+      (is (= :dep-blocked (sut/readiness-state pr-map (get pr-map 2)))))))
 
 (deftest readiness-state-ci-failing-test
   (testing "PR with failed CI is :ci-failing"
     (let [pr-map {1 {:pr/number 1 :pr/status :approved :pr/ci-status :failed
                      :pr/behind-main? false}}]
-      (is (= :ci-failing (#'sut/readiness-state pr-map (get pr-map 1)))))))
+      (is (= :ci-failing (sut/readiness-state pr-map (get pr-map 1)))))))
 
 (deftest readiness-state-merge-conflicts-test
   (testing "PR behind main is :merge-conflicts"
     (let [pr-map {1 {:pr/number 1 :pr/status :approved :pr/ci-status :passed
                      :pr/behind-main? true}}]
-      (is (= :merge-conflicts (#'sut/readiness-state pr-map (get pr-map 1)))))))
+      (is (= :merge-conflicts (sut/readiness-state pr-map (get pr-map 1)))))))
 
 (deftest readiness-state-changes-requested-test
   (testing "PR with changes-requested is :changes-requested"
     (let [pr-map {1 {:pr/number 1 :pr/status :changes-requested :pr/ci-status :passed
                      :pr/behind-main? false}}]
-      (is (= :changes-requested (#'sut/readiness-state pr-map (get pr-map 1)))))))
+      (is (= :changes-requested (sut/readiness-state pr-map (get pr-map 1)))))))
 
 (deftest readiness-state-policy-failing-test
   (testing "PR with failed gates is :policy-failing"
     (let [pr-map {1 {:pr/number 1 :pr/status :approved :pr/ci-status :passed
                      :pr/behind-main? false
                      :pr/gate-results [{:gate/passed? false}]}}]
-      (is (= :policy-failing (#'sut/readiness-state pr-map (get pr-map 1)))))))
+      (is (= :policy-failing (sut/readiness-state pr-map (get pr-map 1)))))))
 
 (deftest readiness-state-needs-review-test
   (testing "Open PR with no blockers is :needs-review"
     (let [pr-map {1 {:pr/number 1 :pr/status :open :pr/ci-status :passed
                      :pr/behind-main? false}}]
-      (is (= :needs-review (#'sut/readiness-state pr-map (get pr-map 1))))))
+      (is (= :needs-review (sut/readiness-state pr-map (get pr-map 1))))))
   (testing "Draft PR is :needs-review"
     (let [pr-map {1 {:pr/number 1 :pr/status :draft :pr/ci-status :passed
                      :pr/behind-main? false}}]
-      (is (= :needs-review (#'sut/readiness-state pr-map (get pr-map 1))))))
+      (is (= :needs-review (sut/readiness-state pr-map (get pr-map 1))))))
   (testing "Reviewing PR is :needs-review"
     (let [pr-map {1 {:pr/number 1 :pr/status :reviewing :pr/ci-status :passed
                      :pr/behind-main? false}}]
-      (is (= :needs-review (#'sut/readiness-state pr-map (get pr-map 1)))))))
+      (is (= :needs-review (sut/readiness-state pr-map (get pr-map 1)))))))
 
 ;; ============================================================================
 ;; Layer 1: Blockers tests
@@ -415,7 +415,7 @@
               :pr/depends-on [1]
               :pr/behind-main? true
               :pr/gate-results [{:gate/passed? false}]}
-          result (#'sut/blockers pr-map pr)
+          result (sut/blockers pr-map pr)
           types (mapv :blocker/type result)]
       ;; dependency < review < ci < policy < conflict
       (is (= [:dependency :review :ci :policy :conflict] types))
@@ -427,14 +427,14 @@
     (let [pr-map {1 {:pr/number 1 :pr/status :merged}
                   2 {:pr/number 2 :pr/status :approved :pr/ci-status :passed
                      :pr/depends-on [1] :pr/behind-main? false}}
-          result (#'sut/blockers pr-map (get pr-map 2))]
+          result (sut/blockers pr-map (get pr-map 2))]
       (is (empty? result)))))
 
 (deftest blockers-draft-pr-test
   (testing "Draft PR has review blocker"
     (let [pr-map {1 {:pr/number 1 :pr/status :draft :pr/ci-status :passed
                      :pr/behind-main? false}}
-          result (#'sut/blockers pr-map (get pr-map 1))]
+          result (sut/blockers pr-map (get pr-map 1))]
       (is (= [:review] (mapv :blocker/type result)))
       (is (clojure.string/includes? (:blocker/message (first result)) "draft")))))
 
@@ -442,7 +442,7 @@
   (testing "Reviewing PR has review blocker about approval"
     (let [pr-map {1 {:pr/number 1 :pr/status :reviewing :pr/ci-status :passed
                      :pr/behind-main? false}}
-          result (#'sut/blockers pr-map (get pr-map 1))]
+          result (sut/blockers pr-map (get pr-map 1))]
       (is (some #(= :review (:blocker/type %)) result))
       (is (some #(clojure.string/includes? (:blocker/message %) "approval") result)))))
 
@@ -450,7 +450,7 @@
   (testing "Running CI adds ci blocker"
     (let [pr-map {1 {:pr/number 1 :pr/status :approved :pr/ci-status :running
                      :pr/behind-main? false}}
-          result (#'sut/blockers pr-map (get pr-map 1))]
+          result (sut/blockers pr-map (get pr-map 1))]
       (is (some #(= :ci (:blocker/type %)) result))
       (is (some #(clojure.string/includes? (:blocker/message %) "running") result)))))
 
@@ -461,7 +461,7 @@
                      :pr/gate-results [{:gate/passed? false}
                                        {:gate/passed? false}
                                        {:gate/passed? true}]}}
-          result (#'sut/blockers pr-map (get pr-map 1))
+          result (sut/blockers pr-map (get pr-map 1))
           policy-blockers (filter #(= :policy (:blocker/type %)) result)]
       (is (= 1 (count policy-blockers)))
       (is (clojure.string/includes? (:blocker/message (first policy-blockers)) "2")))))
@@ -470,7 +470,7 @@
   (testing "Each blocker has a :blocker/source"
     (let [pr-map {1 {:pr/number 1 :pr/status :open :pr/ci-status :failed
                      :pr/behind-main? true}}
-          result (#'sut/blockers pr-map (get pr-map 1))]
+          result (sut/blockers pr-map (get pr-map 1))]
       (is (every? #(string? (:blocker/source %)) result)))))
 
 ;; ============================================================================
@@ -482,7 +482,7 @@
     (let [pr-map {1 {:pr/number 1 :pr/status :merged}}
           pr {:pr/number 2 :pr/status :approved :pr/ci-status :passed
               :pr/depends-on [1] :pr/behind-main? false}
-          result (#'sut/readiness pr-map pr)]
+          result (sut/readiness pr-map pr)]
       (is (contains? result :readiness/state))
       (is (contains? result :readiness/score))
       (is (contains? result :readiness/threshold))
@@ -499,26 +499,26 @@
                     {:pr/number 3 :pr/status :draft :pr/ci-status :pending :pr/behind-main? false}]
           pr-map (into {} (map (juxt :pr/number identity) test-prs))]
       (doseq [pr test-prs]
-        (let [score (:readiness/score (#'sut/readiness pr-map pr))]
+        (let [score (:readiness/score (sut/readiness pr-map pr))]
           (is (<= 0.0 score 1.0) (str "Score out of range for PR#" (:pr/number pr))))))))
 
 (deftest readiness-factors-sum-to-score-test
   (testing "Sum of factor contributions equals readiness score"
     (let [pr-map {1 {:pr/number 1 :pr/status :approved :pr/ci-status :passed :pr/behind-main? false}}
-          r (#'sut/readiness pr-map (get pr-map 1))
+          r (sut/readiness pr-map (get pr-map 1))
           computed-sum (reduce + 0.0 (map :contribution (:readiness/factors r)))]
       (is (< (Math/abs (- computed-sum (:readiness/score r))) 0.001)))))
 
 (deftest readiness-ready-requires-merge-ready-state-test
   (testing "ready? is false even with high score if not :merge-ready"
     (let [pr-map {1 {:pr/number 1 :pr/status :open :pr/ci-status :passed :pr/behind-main? false}}
-          r (#'sut/readiness pr-map (get pr-map 1))]
+          r (sut/readiness pr-map (get pr-map 1))]
       (is (false? (:readiness/ready? r))))))
 
 (deftest readiness-factor-weights-sum-to-one-test
   (testing "All factor weights sum to 1.0"
     (let [pr-map {1 {:pr/number 1 :pr/status :approved :pr/ci-status :passed :pr/behind-main? false}}
-          r (#'sut/readiness pr-map (get pr-map 1))
+          r (sut/readiness pr-map (get pr-map 1))
           weight-sum (reduce + 0.0 (map :weight (:readiness/factors r)))]
       (is (< (Math/abs (- weight-sum 1.0)) 0.001)))))
 
@@ -534,7 +534,7 @@
                               :pr/merge-order 2 :pr/behind-main? false}]
                  :train/ready-to-merge [1]
                  :train/blocking-prs [2]}
-          enriched (#'sut/enrich-train train)]
+          enriched (sut/enrich-train train)]
       ;; Each PR has readiness
       (is (every? :pr/readiness (:train/prs enriched)))
       ;; Each PR has blocking-reasons vector
@@ -554,60 +554,60 @@
 
   (deftest classify-sync-error-auth-test
     (testing "Auth errors are classified deterministically"
-      (is (= :auth (:error/category (#'sut/classify-sync-error "authentication required"))))
-      (is (= :auth (:error/category (#'sut/classify-sync-error "not logged in to any GitHub hosts"))))
-      (is (string? (:error/action (#'sut/classify-sync-error "auth failure"))))))
+      (is (= :auth (:error/category (sut/classify-sync-error "authentication required"))))
+      (is (= :auth (:error/category (sut/classify-sync-error "not logged in to any GitHub hosts"))))
+      (is (string? (:error/action (sut/classify-sync-error "auth failure"))))))
 
   (deftest classify-sync-error-access-test
     (testing "Access/permission errors"
-      (is (= :access (:error/category (#'sut/classify-sync-error "repository not found"))))
-      (is (= :access (:error/category (#'sut/classify-sync-error "403 Forbidden"))))
-      (is (= :access (:error/category (#'sut/classify-sync-error "permission denied"))))
-      (is (= :access (:error/category (#'sut/classify-sync-error "access denied for repo"))))))
+      (is (= :access (:error/category (sut/classify-sync-error "repository not found"))))
+      (is (= :access (:error/category (sut/classify-sync-error "403 Forbidden"))))
+      (is (= :access (:error/category (sut/classify-sync-error "permission denied"))))
+      (is (= :access (:error/category (sut/classify-sync-error "access denied for repo"))))))
 
   (deftest classify-sync-error-rate-limit-test
     (testing "Rate limit errors"
-      (is (= :rate-limit (:error/category (#'sut/classify-sync-error "API rate limit exceeded"))))
-      (is (= :rate-limit (:error/category (#'sut/classify-sync-error "secondary rate limit hit"))))))
+      (is (= :rate-limit (:error/category (sut/classify-sync-error "API rate limit exceeded"))))
+      (is (= :rate-limit (:error/category (sut/classify-sync-error "secondary rate limit hit"))))))
 
   (deftest classify-sync-error-parse-test
     (testing "Parse errors"
-      (is (= :parse (:error/category (#'sut/classify-sync-error "failed to parse JSON"))))
-      (is (= :parse (:error/category (#'sut/classify-sync-error "malformed response body"))))
-      (is (= :parse (:error/category (#'sut/classify-sync-error "invalid json token"))))))
+      (is (= :parse (:error/category (sut/classify-sync-error "failed to parse JSON"))))
+      (is (= :parse (:error/category (sut/classify-sync-error "malformed response body"))))
+      (is (= :parse (:error/category (sut/classify-sync-error "invalid json token"))))))
 
   (deftest classify-sync-error-network-test
     (testing "Network/timeout errors"
-      (is (= :network (:error/category (#'sut/classify-sync-error "connection timed out"))))
-      (is (= :network (:error/category (#'sut/classify-sync-error "network unreachable"))))
-      (is (= :network (:error/category (#'sut/classify-sync-error "connection refused"))))
-      (is (= :network (:error/category (#'sut/classify-sync-error "request timeout"))))))
+      (is (= :network (:error/category (sut/classify-sync-error "connection timed out"))))
+      (is (= :network (:error/category (sut/classify-sync-error "network unreachable"))))
+      (is (= :network (:error/category (sut/classify-sync-error "connection refused"))))
+      (is (= :network (:error/category (sut/classify-sync-error "request timeout"))))))
 
   (deftest classify-sync-error-unknown-test
     (testing "Unknown errors get classified with a generic action"
-      (let [result (#'sut/classify-sync-error "some weird error we haven't seen")]
+      (let [result (sut/classify-sync-error "some weird error we haven't seen")]
         (is (= :unknown (:error/category result)))
         (is (string? (:error/action result))))))
 
   (deftest classify-sync-error-nil-test
     (testing "Nil input returns unknown gracefully"
-      (is (= :unknown (:error/category (#'sut/classify-sync-error nil))))))
+      (is (= :unknown (:error/category (sut/classify-sync-error nil))))))
 
   (deftest classify-sync-error-empty-string-test
     (testing "Empty string returns unknown"
-      (is (= :unknown (:error/category (#'sut/classify-sync-error ""))))))
+      (is (= :unknown (:error/category (sut/classify-sync-error ""))))))
 
   (deftest classify-sync-error-case-insensitive-test
     (testing "Classification is case-insensitive"
-      (is (= :auth (:error/category (#'sut/classify-sync-error "AUTHENTICATION REQUIRED"))))
-      (is (= :network (:error/category (#'sut/classify-sync-error "CONNECTION TIMED OUT"))))))) ;; end comment — classify-sync-error
+      (is (= :auth (:error/category (sut/classify-sync-error "AUTHENTICATION REQUIRED"))))
+      (is (= :network (:error/category (sut/classify-sync-error "CONNECTION TIMED OUT"))))))) ;; end comment — classify-sync-error
 
 (deftest with-actionable-error-test
   (testing "Adds action to failure result"
-    (let [r (#'sut/with-actionable-error {:success? false :error "authentication required"})]
+    (let [r (sut/with-actionable-error {:success? false :error "authentication required"})]
       (is (string? (:action r)))))
   (testing "Leaves success result unchanged"
-    (let [r (#'sut/with-actionable-error {:success? true})]
+    (let [r (sut/with-actionable-error {:success? true})]
       (is (nil? (:action r))))))
 
 ;; ============================================================================
@@ -660,7 +660,7 @@
                             {:success? true :repo "c/d"}
                             {:success? true :repo "e/f"}]
                   :summary {:added-prs 5 :removed-prs 1 :tracked-prs 10}}
-          ss (#'sut/sync-status result)]
+          ss (sut/sync-status result)]
       (is (= :success (:status ss)))
       (is (= 3 (:synced ss)))
       (is (= 0 (:failed ss)))
@@ -677,7 +677,7 @@
                             {:success? false :repo "e/f"
                              :error "authentication required"}]
                   :summary {:added-prs 3 :removed-prs 0 :tracked-prs 7}}
-          ss (#'sut/sync-status result)]
+          ss (sut/sync-status result)]
       (is (= :partial (:status ss)))
       (is (= 2 (:synced ss)))
       (is (= 1 (:failed ss)))
@@ -693,7 +693,7 @@
                   :results [{:success? false :repo "a/b" :error "not found"}
                             {:success? false :repo "c/d" :error "rate limit exceeded"}]
                   :summary {:added-prs 0 :removed-prs 0 :tracked-prs 0}}
-          ss (#'sut/sync-status result)]
+          ss (sut/sync-status result)]
       (is (= :failed (:status ss)))
       (is (= 0 (:synced ss)))
       (is (= 2 (:failed ss)))
@@ -706,7 +706,7 @@
 (deftest sync-status-no-results-test
   (testing "Result with no results key still works"
     (let [result {:success? true :synced 0 :failed 0}
-          ss (#'sut/sync-status result)]
+          ss (sut/sync-status result)]
       (is (= :success (:status ss)))
       (is (empty? (:failures ss))))))
 
@@ -719,7 +719,7 @@
     (let [before-train {:train/prs [{:pr/number 1} {:pr/number 2}]}
           prs [{:pr/number 2 :pr/status :open :pr/ci-status :passed}
                {:pr/number 3 :pr/status :open :pr/ci-status :pending}]
-          plan (#'sut/train-sync-plan before-train prs)]
+          plan (sut/train-sync-plan before-train prs)]
       ;; PR#3 is new
       (is (= [3] (mapv :pr/number (:to-add plan))))
       ;; PR#1 was removed
@@ -733,7 +733,7 @@
   (testing "No changes when PRs are the same"
     (let [before-train {:train/prs [{:pr/number 1}]}
           prs [{:pr/number 1 :pr/status :open :pr/ci-status :passed}]
-          plan (#'sut/train-sync-plan before-train prs)]
+          plan (sut/train-sync-plan before-train prs)]
       (is (empty? (:to-add plan)))
       (is (empty? (:to-remove plan))))))
 
@@ -751,7 +751,7 @@
                        (swap! calls conj fn-sym)
                        nil)}
       (fn []
-        (#'sut/apply-sync-plan! :manager train-id "acme/service" plan)
+        (sut/apply-sync-plan! :manager train-id "acme/service" plan)
         (is (= ['add-pr 'remove-pr 'sync-pr-status 'link-prs]
                @calls))))))
 
@@ -923,13 +923,13 @@
           pr-map (into {} (map (juxt :pr/number identity) prs))]
 
       (testing "PR#1 (upstream, CI failing) has :ci-failing readiness state"
-        (let [r (#'sut/readiness pr-map (get pr-map 1))]
+        (let [r (sut/readiness pr-map (get pr-map 1))]
           (is (= :ci-failing (:readiness/state r)))
           (is (false? (:readiness/ready? r)))
           (is (some #(= :ci (:blocker/type %)) (:readiness/blockers r)))))
 
       (testing "PR#2 (downstream, dep blocked) has :dep-blocked readiness state"
-        (let [r (#'sut/readiness pr-map (get pr-map 2))]
+        (let [r (sut/readiness pr-map (get pr-map 2))]
           (is (= :dep-blocked (:readiness/state r)))
           (is (false? (:readiness/ready? r)))
           (is (some #(= :dependency (:blocker/type %)) (:readiness/blockers r)))
@@ -937,15 +937,15 @@
                     (:readiness/blockers r)))))
 
       (testing "PR#3 (independent, all green) has :merge-ready readiness state"
-        (let [r (#'sut/readiness pr-map (get pr-map 3))]
+        (let [r (sut/readiness pr-map (get pr-map 3))]
           (is (= :merge-ready (:readiness/state r)))
           (is (true? (:readiness/ready? r)))
           (is (empty? (:readiness/blockers r)))))
 
       (testing "Readiness scores are monotonically: PR#3 > PR#2, PR#3 > PR#1"
-        (let [s1 (:readiness/score (#'sut/readiness pr-map (get pr-map 1)))
-              s2 (:readiness/score (#'sut/readiness pr-map (get pr-map 2)))
-              s3 (:readiness/score (#'sut/readiness pr-map (get pr-map 3)))]
+        (let [s1 (:readiness/score (sut/readiness pr-map (get pr-map 1)))
+              s2 (:readiness/score (sut/readiness pr-map (get pr-map 2)))
+              s3 (:readiness/score (sut/readiness pr-map (get pr-map 3)))]
           (is (> s3 s1) "Ready PR scores higher than CI-failing")
           (is (> s3 s2) "Ready PR scores higher than dep-blocked"))))))
 
@@ -965,8 +965,8 @@
                       :pr/status :approved :pr/ci-status :passed
                       :pr/merge-order 2 :pr/depends-on [1] :pr/behind-main? false}]
           pm-after (into {} (map (juxt :pr/number identity) prs-after))]
-      (is (= :dep-blocked (:readiness/state (#'sut/readiness pm-before (get pm-before 2)))))
-      (is (= :merge-ready (:readiness/state (#'sut/readiness pm-after (get pm-after 2))))))))
+      (is (= :dep-blocked (:readiness/state (sut/readiness pm-before (get pm-before 2)))))
+      (is (= :merge-ready (:readiness/state (sut/readiness pm-after (get pm-after 2))))))))
 
 ;; ============================================================================
 ;; Layer 4: DAG composite state

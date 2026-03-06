@@ -121,7 +121,7 @@
            :side-effect (effect/sync-prs state)
            :flash-message (str "Syncing " (name state) " PRs..."))))
 
-(def ^:private show-states
+(def show-states
   #{"open" "merged" "closed" "all"})
 
 (defn cmd-show [model args]
@@ -396,7 +396,7 @@
 ;------------------------------------------------------------------------------ Layer 4
 ;; Command table and dispatch
 
-(def ^:private commands
+(def commands
   {"q"           {:handler cmd-quit        :help "Quit the TUI"}
    "quit"        {:handler cmd-quit        :help "Quit the TUI"}
    "view"        {:handler cmd-view        :help "Switch to view (e.g. :view evidence)"

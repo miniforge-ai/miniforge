@@ -86,7 +86,7 @@
       (is (vector? (:bg light)))
       (is (vector? (:fg light))))))
 
-(def ^:private required-theme-keys
+(def required-theme-keys
   #{:bg :fg :border :title :header :selected-bg :selected-fg
     :status/running :status/success :status/failed
     :status/blocked :status/pending

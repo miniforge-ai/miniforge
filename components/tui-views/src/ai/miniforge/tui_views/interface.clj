@@ -135,7 +135,7 @@
     nil))
 
 ;; Lazy LLM client — initialized on first chat message
-(def ^:private llm-client (delay (llm/create-client)))
+(def llm-client (delay (llm/create-client)))
 
 (defn format-check-context [checks]
   (str/join ", " (map #(str (:name %) "=" (-> % (get :conclusion :unknown) name)) checks)))

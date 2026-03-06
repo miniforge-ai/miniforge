@@ -27,7 +27,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Status indicators
 
-(def ^:private status-chars
+(def status-chars
   {:running  \●
    :success  \✓
    :failed   \✗
@@ -36,7 +36,7 @@
    :skipped  \─
    :spinning \⟳})
 
-(def ^:private status-colors
+(def status-colors
   {:running  :cyan
    :success  :green
    :failed   :red
@@ -69,7 +69,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Progress bar
 
-(def ^:private bar-chars
+(def bar-chars
   "Sub-cell progress bar characters (eighths)."
   [\space \▏ \▎ \▍ \▌ \▋ \▊ \▉ \█])
 

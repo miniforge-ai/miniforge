@@ -35,7 +35,7 @@
                                  :configured-repos 6}
                        :trains []
                        :last-sync nil}
-          result (#'sut/fleet-view mock-layout fleet-state)]
+          result (sut/fleet-view mock-layout fleet-state)]
       (is (contains-string? result "3 trains"))
       (is (contains-string? result "12 PRs"))
       (is (contains-string? result "4 repos with PRs"))
@@ -44,7 +44,7 @@
 (deftest fleet-view-renders-empty-summary-test
   (testing "fleet-view handles missing summary gracefully (defaults to 0)"
     (let [fleet-state {:trains [] :last-sync nil}
-          result (#'sut/fleet-view mock-layout fleet-state)]
+          result (sut/fleet-view mock-layout fleet-state)]
       (is (contains-string? result "0 trains"))
       (is (contains-string? result "0 PRs")))))
 
@@ -56,13 +56,13 @@
                                    :timestamp (java.util.Date.)
                                    :synced 1 :failed 0
                                    :failures []}}
-          result (#'sut/fleet-view mock-layout fleet-state)]
+          result (sut/fleet-view mock-layout fleet-state)]
       (is (contains-string? result "success")))))
 
 (deftest fleet-view-renders-action-buttons-test
   (testing "fleet-view contains action buttons"
     (let [fleet-state {:summary {} :trains [] :last-sync nil}
-          result (#'sut/fleet-view mock-layout fleet-state)]
+          result (sut/fleet-view mock-layout fleet-state)]
       (is (contains-string? result "Run Workflow"))
       (is (contains-string? result "Repo"))
       (is (contains-string? result "Discover Repos"))
@@ -71,7 +71,7 @@
 (deftest fleet-view-renders-htmx-attributes-test
   (testing "fleet-view includes htmx refresh attributes"
     (let [fleet-state {:summary {} :trains [] :last-sync nil}
-          result (#'sut/fleet-view mock-layout fleet-state)
+          result (sut/fleet-view mock-layout fleet-state)
           flat (flatten (tree-seq coll? seq result))]
       ;; Check for hx-get endpoint
       (is (some #(and (string? %) (str/includes? % "/api/trains")) flat)))))
@@ -105,7 +105,7 @@
                               :pr/blocking-reasons []
                               :pr/readiness {:readiness/state :merge-ready
                                              :readiness/score 0.95}}]}
-          result (#'sut/train-detail-view mock-layout train)]
+          result (sut/train-detail-view mock-layout train)]
       (is (contains-string? result "Depends: 1")))))
 
 (deftest train-detail-view-renders-blocking-reasons-test
@@ -123,7 +123,7 @@
                               :pr/blocking-reasons ["CI checks failed" "Awaiting review"]
                               :pr/readiness {:readiness/state :ci-failing
                                              :readiness/score 0.30}}]}
-          result (#'sut/train-detail-view mock-layout train)]
+          result (sut/train-detail-view mock-layout train)]
       (is (contains-string? result "CI checks failed"))
       (is (contains-string? result "Awaiting review")))))
 
@@ -142,7 +142,7 @@
                               :pr/blocking-reasons []
                               :pr/readiness {:readiness/state :merge-ready
                                              :readiness/score 0.87654}}]}
-          result (#'sut/train-detail-view mock-layout train)]
+          result (sut/train-detail-view mock-layout train)]
       ;; Should contain formatted score
       (is (contains-string? result "0.88")))))
 
@@ -159,7 +159,7 @@
                               :pr/status :open :pr/ci-status :running
                               :pr/merge-order 2 :pr/depends-on [] :pr/blocking-reasons []
                               :pr/readiness {:readiness/state :needs-review :readiness/score 0.5}}]}
-          result (#'sut/train-detail-view mock-layout train)]
+          result (sut/train-detail-view mock-layout train)]
       ;; Merge order numbers rendered
       (is (contains-string? result "1"))
       (is (contains-string? result "2"))
@@ -173,7 +173,7 @@
                  :train/name "Action Train"
                  :train/description "Test actions"
                  :train/prs []}
-          result (#'sut/train-detail-view mock-layout train)]
+          result (sut/train-detail-view mock-layout train)]
       (is (contains-string? result "Pause"))
       (is (contains-string? result "Merge Next"))
       ;; API endpoints include train-id
@@ -197,7 +197,7 @@
                                             {:pr/number 2 :blocking/reasons ["Changes requested"]}
                                             {:pr/number 3 :blocking/reasons ["Behind main"]}]
                    :train/readiness-summary {:ci-failing 3}}]
-          html-str (str (#'sut/train-list-fragment trains))]
+          html-str (str (sut/train-list-fragment trains))]
       ;; Shows first 2 blocking details
       (is (str/includes? html-str "#1"))
       (is (str/includes? html-str "#2")))))
@@ -212,7 +212,7 @@
                    :train/blocking-prs []
                    :train/blocking-details []
                    :train/readiness-summary {:merge-ready 1}}]
-          html-str (str (#'sut/train-list-fragment trains))]
+          html-str (str (sut/train-list-fragment trains))]
       (is (str/includes? html-str "Done Train"))
       (is (str/includes? html-str "merged")))))
 
@@ -227,7 +227,7 @@
                    :train/blocking-prs []
                    :train/blocking-details []
                    :train/readiness-summary {:merge-ready 1 :needs-review 1}}]
-          html-str (str (#'sut/train-list-fragment trains))]
+          html-str (str (sut/train-list-fragment trains))]
       (is (str/includes? html-str "Half Done")))))
 
 ;; ============================================================================
@@ -236,7 +236,7 @@
 
 (deftest sync-status-fragment-no-timestamp-test
   (testing "Sync with nil timestamp omits time display"
-    (let [result (#'sut/sync-status-fragment {:status :success
+    (let [result (sut/sync-status-fragment {:status :success
                                               :timestamp nil
                                               :synced 1 :failed 0
                                               :failures []})]
@@ -247,7 +247,7 @@
 
 (deftest sync-status-fragment-with-message-test
   (testing "Sync with message renders message div"
-    (let [result (#'sut/sync-status-fragment {:status :partial
+    (let [result (sut/sync-status-fragment {:status :partial
                                               :timestamp (java.util.Date.)
                                               :synced 1 :failed 1
                                               :message "Some repos failed"

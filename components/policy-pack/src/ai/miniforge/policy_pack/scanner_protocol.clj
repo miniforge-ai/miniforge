@@ -62,7 +62,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Scanner registry
 
-(defonce ^:private scanner-registry (atom {}))
+(defonce scanner-registry (atom {}))
 
 (defn register-scanner!
   "Register a scanner in the global registry.

@@ -39,7 +39,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Screen spec loading
 
-(def ^:private screen-specs
+(def screen-specs
   "Load screen specs from EDN at namespace init time."
   (-> (io/resource "config/tui/screens.edn") slurp edn/read-string))
 
