@@ -200,11 +200,11 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Detail screen navigation — sibling items + sub-view cycling
 
-(def ^:private workflow-subviews
+(def workflow-subviews
   "Sub-views for a workflow item, cycled with Tab."
   [:workflow-detail :evidence :artifact-browser])
 
-(def ^:private workflow-subview-set
+(def workflow-subview-set
   (set workflow-subviews))
 
 (defn in-detail-subview?

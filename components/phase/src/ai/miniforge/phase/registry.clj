@@ -59,7 +59,7 @@
    [:error {:optional true} fn?]])
 
 ;; Defaults registry (atom for extensibility)
-(defonce ^:private defaults-registry (atom {}))
+(defonce defaults-registry (atom {}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Multimethod registry
@@ -146,7 +146,7 @@
   "Statuses indicating work is already complete — neutral outcome."
   #{:already-satisfied :already-implemented})
 
-(def ^:private status-keys
+(def status-keys
   "Keys to try when extracting status from a map, in priority order."
   [:status :execution/status :step/status :chain/status])
 

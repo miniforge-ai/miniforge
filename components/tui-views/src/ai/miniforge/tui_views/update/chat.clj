@@ -32,7 +32,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Context builders
 
-(def ^:private chat-views
+(def chat-views
   "Views where chat mode is available."
   #{:pr-fleet :pr-detail})
 

@@ -30,7 +30,7 @@
   (>= (get capability-rank actual 0)
       (get capability-rank required 0)))
 
-(def ^:private privacy->min-capability
+(def privacy->min-capability
   "Map from event privacy level to minimum listener capability required.
    :public events -> any listener (:observe)
    :internal events -> :advise or higher

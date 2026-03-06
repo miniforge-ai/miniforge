@@ -49,20 +49,20 @@
 ;; Flow: raw char → key token (input.clj) → action token (keybindings.edn)
 ;;       → handler fn (action registry below)
 
-(def ^:private keybindings
+(def keybindings
   "Keybinding config loaded from EDN. Maps key tokens to action tokens,
    grouped by mode (:help, :normal, :command, :search, :number-keys)."
   (-> (io/resource "config/tui/keybindings.edn")
       slurp
       edn/read-string))
 
-(def ^:private normal-keybindings  (:normal keybindings))
-(def ^:private help-keybindings    (:help keybindings))
-(def ^:private command-keybindings (:command keybindings))
-(def ^:private search-keybindings  (:search keybindings))
-(def ^:private filter-keybindings  (:filter keybindings))
-(def ^:private chat-keybindings    (:chat keybindings))
-(def ^:private number-key->index   (:number-keys keybindings))
+(def normal-keybindings  (:normal keybindings))
+(def help-keybindings    (:help keybindings))
+(def command-keybindings (:command keybindings))
+(def search-keybindings  (:search keybindings))
+(def filter-keybindings  (:filter keybindings))
+(def chat-keybindings    (:chat keybindings))
+(def number-key->index   (:number-keys keybindings))
 
 ;; ── Input event helpers ──
 
@@ -174,7 +174,7 @@
 (defn nav-top-with-visual   [m] (-> (nav/navigate-top m)    sel/update-visual-selection))
 (defn nav-bottom-with-visual [m] (-> (nav/navigate-bottom m) sel/update-visual-selection))
 
-(def ^:private selectable-views
+(def selectable-views
   #{:workflow-list :pr-fleet :artifact-browser :train-view :repo-manager})
 
 ;; ── Extracted action handlers ──
@@ -292,7 +292,7 @@
 ;; The keybinding EDN maps key tokens → action tokens; these registries
 ;; resolve action tokens to concrete handler functions.
 
-(def ^:private action-handlers
+(def action-handlers
   "Action token → handler function registry.
    Actions that are context-free (same behavior regardless of view)."
   {:action/navigate-down      nav-down-with-visual
@@ -313,7 +313,7 @@
    :action/toggle-help        nav/toggle-help
    :action/quit               handle-quit})
 
-(def ^:private context-action-handlers
+(def context-action-handlers
   "Action token → handler for actions that depend on view context."
   {:action/enter-or-confirm   handle-enter-or-confirm
    :action/escape-cascade     handle-escape-cascade
@@ -386,7 +386,7 @@
         (-> (command/execute-command model buf)
             mode/exit-mode)))))
 
-(def ^:private command-action-handlers
+(def command-action-handlers
   "Action token → handler for command-mode actions."
   {:action/command-escape       command-escape
    :action/command-enter        command-enter
@@ -416,7 +416,7 @@
             completion/dismiss)
         model))))
 
-(def ^:private search-action-handlers
+(def search-action-handlers
   "Action token → handler for search-mode actions."
   {:action/exit-mode        mode/exit-mode
    :action/confirm-search   mode/confirm-search
@@ -437,7 +437,7 @@
 
 ;; ── Filter mode input ──
 
-(def ^:private filter-action-handlers
+(def filter-action-handlers
   "Action token → handler for filter-mode actions."
   {:action/filter-escape    mode/filter-escape
    :action/filter-confirm   mode/filter-confirm
@@ -456,7 +456,7 @@
 
 ;; ── Chat mode input ──
 
-(def ^:private chat-action-handlers
+(def chat-action-handlers
   "Action token → handler for chat-mode actions."
   {:action/chat-escape    chat/escape
    :action/chat-send      chat/send-message

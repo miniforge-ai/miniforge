@@ -93,13 +93,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; MCP config generation
 
-(def ^:private mcp-server-name
+(def mcp-server-name
   "Name used in MCP config for the artifact server.
    Must match the key in mcpServers — Claude CLI derives tool names as
    mcp__<server-name>__<tool-name>."
   "artifact")
 
-(def ^:private mcp-tool-names
+(def mcp-tool-names
   "MCP tool names exposed by the artifact server."
   ["submit_code_artifact"
    "submit_plan"

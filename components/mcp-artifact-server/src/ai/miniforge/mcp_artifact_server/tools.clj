@@ -194,7 +194,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Extensible builder registry (atom — builders register at startup)
 
-(defonce ^:private builder-registry*
+(defonce builder-registry*
   (atom {:submit-code-artifact    build-code-artifact
          :submit-plan             build-plan-artifact
          :submit-test-artifact    build-test-artifact
@@ -225,7 +225,7 @@
     (throw (ex-info "Tool registry config not found on classpath"
                     {:resource "mcp-artifact-server/tool-registry.edn"}))))
 
-(defonce ^:private registry-config* (atom nil))
+(defonce registry-config* (atom nil))
 
 (defn ensure-registry-loaded
   "Ensure the registry config is loaded (once)."

@@ -90,7 +90,7 @@
 ;------------------------------------------------------------------------------ Layer 1c
 ;; RBAC authorization
 
-(def ^:private target-type->category
+(def target-type->category
   "Map from target type to RBAC category keyword."
   {:workflow :workflows
    :agent    :agents
@@ -202,7 +202,7 @@
 ;------------------------------------------------------------------------------ Layer 2b
 ;; Approval-aware control action execution
 
-(def ^:private actions-requiring-approval
+(def actions-requiring-approval
   "Action types that require multi-party approval before execution."
   #{:gate-override :budget-escalation})
 

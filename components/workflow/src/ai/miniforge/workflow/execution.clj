@@ -253,7 +253,7 @@
       ;; Default: move to next
       :else (inc current-index))))
 
-(def ^:private max-redirects
+(def max-redirects
   "Maximum number of phase redirects before failing to prevent infinite loops."
   3)
 

@@ -12,7 +12,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event file parsing
 
-(def ^:private events-dir
+(def events-dir
   (str (fs/home) "/.miniforge/events"))
 
 (defn read-event-file

@@ -27,7 +27,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Box drawing
 
-(def ^:private box-chars
+(def box-chars
   {:single {:tl \┌ :tr \┐ :bl \└ :br \┘ :h \─ :v \│ :lt \├ :rt \┤ :tt \┬ :bt \┴}
    :double {:tl \╔ :tr \╗ :bl \╚ :br \╝ :h \═ :v \║ :lt \╠ :rt \╣ :tt \╦ :bt \╩}
    :none   {:tl \space :tr \space :bl \space :br \space

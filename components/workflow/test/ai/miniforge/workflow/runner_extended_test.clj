@@ -15,7 +15,7 @@
                :execution/phase-results {}
                :execution/current-phase nil
                :execution/status :completed}
-          result (#'runner/extract-output ctx)
+          result (runner/extract-output ctx)
           output (:execution/output result)]
       (is (= [] (:artifacts output)))
       (is (= {} (:phase-results output)))
@@ -28,7 +28,7 @@
                :execution/phase-results {:plan {:phase/status :failed}}
                :execution/current-phase :plan
                :execution/status :failed}
-          output (:execution/output (#'runner/extract-output ctx))]
+          output (:execution/output (runner/extract-output ctx))]
       (is (= :failed (:status output)))
       (is (= {:phase/status :failed} (:last-phase-result output))))))
 
@@ -98,29 +98,29 @@
 (deftest publish-event-nil-stream-test
   (testing "publish-event with nil stream is a no-op"
     ;; Should not throw
-    (is (nil? (#'runner/publish-event! nil {:event/type :test})))))
+    (is (nil? (runner/publish-event! nil {:event/type :test})))))
 
 (deftest publish-event-in-memory-stream-test
   (testing "publish-event with in-memory stream dispatches to event-stream ns"
     ;; This tests the fallback path - it should not throw even if ns not found
-    (is (nil? (#'runner/publish-event! {} {:event/type :test})))))
+    (is (nil? (runner/publish-event! {} {:event/type :test})))))
 
 ;; ---------------------------------------------------------------------------- terminal-state?
 
 (deftest terminal-state-test
   (testing "completed and failed are terminal"
-    (is (true? (#'runner/terminal-state? {:execution/status :completed})))
-    (is (true? (#'runner/terminal-state? {:execution/status :failed}))))
+    (is (true? (runner/terminal-state? {:execution/status :completed})))
+    (is (true? (runner/terminal-state? {:execution/status :failed}))))
 
   (testing "running is not terminal"
-    (is (false? (#'runner/terminal-state? {:execution/status :running})))))
+    (is (false? (runner/terminal-state? {:execution/status :running})))))
 
 ;; ---------------------------------------------------------------------------- handle-empty-pipeline
 
 (deftest handle-empty-pipeline-test
   (testing "adds error and transitions to failed"
     (let [ctx (ctx/create-context {:workflow/id :test} {} {})
-          result (#'runner/handle-empty-pipeline ctx)]
+          result (runner/handle-empty-pipeline ctx)]
       (is (= :failed (:execution/status result)))
       (is (some #(= :empty-pipeline (:type %)) (:execution/errors result))))))
 
@@ -129,7 +129,7 @@
 (deftest handle-max-phases-exceeded-test
   (testing "adds error about max phases"
     (let [ctx (ctx/create-context {:workflow/id :test} {} {})
-          result (#'runner/handle-max-phases-exceeded ctx 10)]
+          result (runner/handle-max-phases-exceeded ctx 10)]
       (is (= :failed (:execution/status result)))
       (is (some #(= :max-phases-exceeded (:type %)) (:execution/errors result))))))
 
@@ -137,27 +137,27 @@
 
 (deftest publish-workflow-started-nil-stream-test
   (testing "no-op with nil event stream"
-    (is (nil? (#'runner/publish-workflow-started! nil {})))))
+    (is (nil? (runner/publish-workflow-started! nil {})))))
 
 (deftest publish-workflow-completed-nil-stream-test
   (testing "no-op with nil event stream"
-    (is (nil? (#'runner/publish-workflow-completed! nil {})))))
+    (is (nil? (runner/publish-workflow-completed! nil {})))))
 
 (deftest publish-phase-started-nil-stream-test
   (testing "no-op with nil event stream"
-    (is (nil? (#'runner/publish-phase-started! nil {} :plan)))))
+    (is (nil? (runner/publish-phase-started! nil {} :plan)))))
 
 (deftest publish-phase-completed-nil-stream-test
   (testing "no-op with nil event stream"
-    (is (nil? (#'runner/publish-phase-completed! nil {} :plan {})))))
+    (is (nil? (runner/publish-phase-completed! nil {} :plan {})))))
 
 ;; TODO: Tests for publish-agent-started!/completed! — not yet implemented in runner.clj
 (comment
 (deftest publish-agent-started-nil-stream-test
   (testing "no-op with nil event stream"
-    (is (nil? (#'runner/publish-agent-started! nil {} :plan)))))
+    (is (nil? (runner/publish-agent-started! nil {} :plan)))))
 
 (deftest publish-agent-completed-nil-stream-test
   (testing "no-op with nil event stream"
-    (is (nil? (#'runner/publish-agent-completed! nil {} :plan {})))))
+    (is (nil? (runner/publish-agent-completed! nil {} :plan {})))))
 ) ;; end comment

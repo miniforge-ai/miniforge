@@ -27,43 +27,43 @@
   (testing "matches when event type and repo match"
     (let [t {:on :pr/merged :repo "org/repo"}
           e {:event/type :pr/merged :pr/repo "org/repo"}]
-      (is (true? (#'trigger/matches-trigger? t e))))))
+      (is (true? (trigger/matches-trigger? t e))))))
 
 (deftest matches-trigger?-nil-repo-matches-any-test
   (testing "nil repo in trigger matches any event repo"
     (let [t {:on :pr/merged}
           e {:event/type :pr/merged :pr/repo "org/any-repo"}]
-      (is (true? (#'trigger/matches-trigger? t e))))))
+      (is (true? (trigger/matches-trigger? t e))))))
 
 (deftest matches-trigger?-repo-mismatch-test
   (testing "does not match when repo differs"
     (let [t {:on :pr/merged :repo "org/repo-a"}
           e {:event/type :pr/merged :pr/repo "org/repo-b"}]
-      (is (false? (#'trigger/matches-trigger? t e))))))
+      (is (false? (trigger/matches-trigger? t e))))))
 
 (deftest matches-trigger?-event-type-mismatch-test
   (testing "does not match when event type differs"
     (let [t {:on :pr/merged}
           e {:event/type :pr/opened}]
-      (is (false? (#'trigger/matches-trigger? t e))))))
+      (is (false? (trigger/matches-trigger? t e))))))
 
 (deftest matches-trigger?-branch-pattern-match-test
   (testing "matches when branch-pattern matches event branch"
     (let [t {:on :pr/merged :branch-pattern "feat/.*"}
           e {:event/type :pr/merged :pr/branch "feat/cool-feature"}]
-      (is (true? (#'trigger/matches-trigger? t e))))))
+      (is (true? (trigger/matches-trigger? t e))))))
 
 (deftest matches-trigger?-branch-pattern-mismatch-test
   (testing "does not match when branch-pattern does not match"
     (let [t {:on :pr/merged :branch-pattern "feat/.*"}
           e {:event/type :pr/merged :pr/branch "fix/hotfix-123"}]
-      (is (false? (#'trigger/matches-trigger? t e))))))
+      (is (false? (trigger/matches-trigger? t e))))))
 
 (deftest matches-trigger?-nil-branch-pattern-matches-any-test
   (testing "nil branch-pattern matches any branch"
     (let [t {:on :pr/merged}
           e {:event/type :pr/merged :pr/branch "anything"}]
-      (is (true? (#'trigger/matches-trigger? t e))))))
+      (is (true? (trigger/matches-trigger? t e))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; extract-input tests
@@ -73,20 +73,20 @@
     (let [t {:run {:input-from-event {:branch :pr/branch
                                        :repo   :pr/repo}}}
           e {:pr/branch "feat/x" :pr/repo "org/repo"}
-          result (#'trigger/extract-input t e)]
+          result (trigger/extract-input t e)]
       (is (= {:branch "feat/x" :repo "org/repo"} result)))))
 
 (deftest extract-input-nil-when-no-mapping-test
   (testing "returns nil when no input-from-event mapping"
     (let [t {:run {:workflow-id :deploy}}
           e {:pr/branch "main"}]
-      (is (nil? (#'trigger/extract-input t e))))))
+      (is (nil? (trigger/extract-input t e))))))
 
 (deftest extract-input-missing-event-key-test
   (testing "maps to nil when event lacks the key"
     (let [t {:run {:input-from-event {:branch :pr/branch}}}
           e {}
-          result (#'trigger/extract-input t e)]
+          result (trigger/extract-input t e)]
       (is (= {:branch nil} result)))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -111,8 +111,8 @@
                             sub-id       :merge-trigger
                             callback     (fn [event]
                                            (doseq [t triggers]
-                                             (when (#'trigger/matches-trigger? t event)
-                                               (let [input (or (#'trigger/extract-input t event) {})]
+                                             (when (trigger/matches-trigger? t event)
+                                               (let [input (or (trigger/extract-input t event) {})]
                                                  (swap! fired conj {:workflow-id (get-in t [:run :workflow-id])
                                                                     :input       input})))))]
                         (swap! subscribers assoc sub-id callback)
@@ -148,7 +148,7 @@
                             sub-id   :merge-trigger
                             callback (fn [event]
                                        (doseq [t triggers]
-                                         (when (#'trigger/matches-trigger? t event)
+                                         (when (trigger/matches-trigger? t event)
                                            (swap! fired conj {:workflow-id (get-in t [:run :workflow-id])}))))]
                         (swap! subscribers assoc sub-id callback)
                         {:subscriber-id sub-id

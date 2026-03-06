@@ -290,7 +290,7 @@
   ;; For now, return empty vector
   [])
 
-(defn ^:private calculate-pack-depths
+(defn calculate-pack-depths
   "Calculate maximum depth for each pack using bottom-up traversal.
    Returns map of pack-id -> {:depth int :chain [pack-ids]}."
   [graph]

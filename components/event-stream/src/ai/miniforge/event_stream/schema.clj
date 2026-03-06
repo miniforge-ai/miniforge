@@ -258,7 +258,7 @@
    - :confidential — restricted to control-plane operators only"
   [:enum :public :internal :confidential])
 
-(def ^:private default-event-privacy
+(def default-event-privacy
   "Built-in privacy level for each event type category.
    Events not listed default to :internal."
   {:workflow/started    :public

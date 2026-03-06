@@ -42,7 +42,7 @@
       (subs s 0 width)
       (str s (apply str (repeat (- width (count s)) \space))))))
 
-(def ^:private col-gap
+(def col-gap
   "Space between adjacent columns."
   1)
 

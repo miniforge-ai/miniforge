@@ -38,13 +38,13 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants
 
-(def ^:private default-fleet-config-path
+(def default-fleet-config-path
   (str (System/getProperty "user.home") "/.miniforge/config.edn"))
 
-(def ^:private github-repo-slug-pattern
+(def github-repo-slug-pattern
   #"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
-(def ^:private gitlab-repo-slug-pattern
+(def gitlab-repo-slug-pattern
   #"^gitlab:[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+$")
 
 ;------------------------------------------------------------------------------ Layer 0b
@@ -342,7 +342,7 @@
           (result-failure "Failed to parse repository list."
                           {:error (ex-msg e)}))))))
 
-(def ^:private viewer-repos-graphql-query
+(def viewer-repos-graphql-query
   "query($perPage:Int!,$after:String){
      viewer {
        repositories(

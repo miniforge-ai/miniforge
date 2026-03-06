@@ -43,7 +43,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Query parsing
 
-(def ^:private field-names
+(def field-names
   "Recognized field qualifiers."
   #{"repo" "author" "readiness" "risk" "policy" "recommend"})
 

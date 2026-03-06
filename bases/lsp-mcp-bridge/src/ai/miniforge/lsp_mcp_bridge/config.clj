@@ -71,7 +71,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Language routing
 
-(def ^:private extension->language
+(def extension->language
   "Map file extensions to LSP language identifiers."
   {"clj"  "clojure"
    "cljs" "clojurescript"

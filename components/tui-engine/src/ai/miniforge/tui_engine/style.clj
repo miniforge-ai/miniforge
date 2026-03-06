@@ -80,7 +80,7 @@
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Color degradation — map extended colors to lower color depths
 
-(def ^:private ansi-reference
+(def ansi-reference
   "ANSI 16 base colors with approximate RGB values for nearest-match."
   [[:black   [0 0 0]]
    [:red     [205 0 0]]
@@ -107,7 +107,7 @@
                  [:white Integer/MAX_VALUE]
                  ansi-reference)))
 
-(def ^:private indexed-to-rgb
+(def indexed-to-rgb
   "Lookup table: ANSI-256 index → approximate [r g b].
    Indices 0-7: standard colors, 8-15: bright, 16-231: color cube, 232-255: grayscale."
   (let [base [[0 0 0] [205 0 0] [0 205 0] [205 205 0]
@@ -172,7 +172,7 @@
 ;; Custom themes from ~/.miniforge/themes/*.edn are merged in at startup.
 ;; This makes themes extensible like policy packs — drop EDN, get a theme.
 
-(def ^:private builtin-themes
+(def builtin-themes
   "Load built-in themes from EDN resource."
   (if-let [r (io/resource "config/tui/themes.edn")]
     (edn/read-string (slurp r))

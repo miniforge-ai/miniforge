@@ -61,7 +61,7 @@
     :failed    {:type :final}
     :cancelled {:type :final}}})
 
-(def ^:private workflow-machine
+(def workflow-machine
   "Compiled workflow state machine."
   (fsm/define-machine workflow-machine-config))
 

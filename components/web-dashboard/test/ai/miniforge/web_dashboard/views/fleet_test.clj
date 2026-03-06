@@ -24,7 +24,7 @@
 
 (deftest sync-status-fragment-nil-test
   (testing "Nil last-sync renders 'no sync' message"
-    (let [result (#'sut/sync-status-fragment nil)]
+    (let [result (sut/sync-status-fragment nil)]
       (is (vector? result))
       (is (= :div.fleet-sync-status (first result)))
       ;; Should contain 'No sync run yet' somewhere in the structure
@@ -33,7 +33,7 @@
 
 (deftest sync-status-fragment-success-test
   (testing "Success sync renders success badge and counts"
-    (let [result (#'sut/sync-status-fragment {:status :success
+    (let [result (sut/sync-status-fragment {:status :success
                                             :timestamp (java.util.Date.)
                                             :synced 3
                                             :failed 0
@@ -45,7 +45,7 @@
 
 (deftest sync-status-fragment-with-failures-test
   (testing "Failures render with error details and action hints"
-    (let [result (#'sut/sync-status-fragment {:status :partial
+    (let [result (sut/sync-status-fragment {:status :partial
                                             :timestamp (java.util.Date.)
                                             :synced 2
                                             :failed 1
@@ -63,7 +63,7 @@
 
 (deftest sync-status-fragment-failed-test
   (testing "Failed sync renders error variant"
-    (let [result (#'sut/sync-status-fragment {:status :failed
+    (let [result (sut/sync-status-fragment {:status :failed
                                             :synced 0
                                             :failed 2
                                             :failures [{:repo "a/b" :error "not found" :error-category :access}
@@ -80,45 +80,45 @@
 
 (deftest error-category-badge-variant-test
   (testing "Maps error categories to badge variants"
-    (is (= :error (#'sut/error-category-badge-variant :auth)))
-    (is (= :error (#'sut/error-category-badge-variant :access)))
-    (is (= :warning (#'sut/error-category-badge-variant :rate-limit)))
-    (is (= :warning (#'sut/error-category-badge-variant :parse)))
-    (is (= :warning (#'sut/error-category-badge-variant :network)))
-    (is (= :neutral (#'sut/error-category-badge-variant :unknown)))
-    (is (= :neutral (#'sut/error-category-badge-variant :something-else)))))
+    (is (= :error (sut/error-category-badge-variant :auth)))
+    (is (= :error (sut/error-category-badge-variant :access)))
+    (is (= :warning (sut/error-category-badge-variant :rate-limit)))
+    (is (= :warning (sut/error-category-badge-variant :parse)))
+    (is (= :warning (sut/error-category-badge-variant :network)))
+    (is (= :neutral (sut/error-category-badge-variant :unknown)))
+    (is (= :neutral (sut/error-category-badge-variant :something-else)))))
 
 (deftest error-category-label-test
   (testing "Maps error categories to human-readable labels"
-    (is (= "Auth" (#'sut/error-category-label :auth)))
-    (is (= "Access" (#'sut/error-category-label :access)))
-    (is (= "Rate Limit" (#'sut/error-category-label :rate-limit)))
-    (is (= "Parse Error" (#'sut/error-category-label :parse)))
-    (is (= "Network" (#'sut/error-category-label :network)))
-    (is (= "Error" (#'sut/error-category-label :unknown)))
-    (is (= "Error" (#'sut/error-category-label :something-else)))))
+    (is (= "Auth" (sut/error-category-label :auth)))
+    (is (= "Access" (sut/error-category-label :access)))
+    (is (= "Rate Limit" (sut/error-category-label :rate-limit)))
+    (is (= "Parse Error" (sut/error-category-label :parse)))
+    (is (= "Network" (sut/error-category-label :network)))
+    (is (= "Error" (sut/error-category-label :unknown)))
+    (is (= "Error" (sut/error-category-label :something-else)))))
 
 (deftest readiness-state-badge-variant-test
   (testing "Maps readiness states to badge variants"
-    (is (= :success (#'sut/readiness-state-badge-variant :merge-ready)))
-    (is (= :error (#'sut/readiness-state-badge-variant :ci-failing)))
-    (is (= :warning (#'sut/readiness-state-badge-variant :changes-requested)))
-    (is (= :warning (#'sut/readiness-state-badge-variant :merge-conflicts)))
-    (is (= :warning (#'sut/readiness-state-badge-variant :policy-failing)))
-    (is (= :neutral (#'sut/readiness-state-badge-variant :dep-blocked)))
-    (is (= :info (#'sut/readiness-state-badge-variant :needs-review)))
-    (is (= :neutral (#'sut/readiness-state-badge-variant :something-else)))))
+    (is (= :success (sut/readiness-state-badge-variant :merge-ready)))
+    (is (= :error (sut/readiness-state-badge-variant :ci-failing)))
+    (is (= :warning (sut/readiness-state-badge-variant :changes-requested)))
+    (is (= :warning (sut/readiness-state-badge-variant :merge-conflicts)))
+    (is (= :warning (sut/readiness-state-badge-variant :policy-failing)))
+    (is (= :neutral (sut/readiness-state-badge-variant :dep-blocked)))
+    (is (= :info (sut/readiness-state-badge-variant :needs-review)))
+    (is (= :neutral (sut/readiness-state-badge-variant :something-else)))))
 
 (deftest readiness-state-label-test
   (testing "Maps readiness states to human-readable labels"
-    (is (= "Ready" (#'sut/readiness-state-label :merge-ready)))
-    (is (= "CI Failing" (#'sut/readiness-state-label :ci-failing)))
-    (is (= "Changes Requested" (#'sut/readiness-state-label :changes-requested)))
-    (is (= "Merge Conflicts" (#'sut/readiness-state-label :merge-conflicts)))
-    (is (= "Policy Failing" (#'sut/readiness-state-label :policy-failing)))
-    (is (= "Dep Blocked" (#'sut/readiness-state-label :dep-blocked)))
-    (is (= "Needs Review" (#'sut/readiness-state-label :needs-review)))
-    (is (= "Unknown" (#'sut/readiness-state-label :something-else)))))
+    (is (= "Ready" (sut/readiness-state-label :merge-ready)))
+    (is (= "CI Failing" (sut/readiness-state-label :ci-failing)))
+    (is (= "Changes Requested" (sut/readiness-state-label :changes-requested)))
+    (is (= "Merge Conflicts" (sut/readiness-state-label :merge-conflicts)))
+    (is (= "Policy Failing" (sut/readiness-state-label :policy-failing)))
+    (is (= "Dep Blocked" (sut/readiness-state-label :dep-blocked)))
+    (is (= "Needs Review" (sut/readiness-state-label :needs-review)))
+    (is (= "Unknown" (sut/readiness-state-label :something-else)))))
 
 ) ;; end comment — unimplemented badge/label helpers
 
@@ -190,11 +190,11 @@
 
 (deftest format-sync-time-test
   (testing "Formats a Date into string"
-    (let [result (#'sut/format-sync-time (java.util.Date.))]
+    (let [result (sut/format-sync-time (java.util.Date.))]
       (is (string? result))
       (is (re-matches #"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}" result))))
   (testing "Returns nil for nil input"
-    (is (nil? (#'sut/format-sync-time nil)))))
+    (is (nil? (sut/format-sync-time nil)))))
 
 ;; ============================================================================
 ;; fleet-action-onclick tests
@@ -202,8 +202,8 @@
 
 (deftest fleet-action-onclick-test
   (testing "Returns correct onclick handlers"
-    (is (str/includes? (#'sut/fleet-action-onclick :add-repo) "addRepo"))
-    (is (str/includes? (#'sut/fleet-action-onclick :discover-repos) "discoverRepos"))
-    (is (str/includes? (#'sut/fleet-action-onclick :sync-prs) "syncPrs"))
-    (is (str/includes? (#'sut/fleet-action-onclick :discover-sync) "discoverAndSync"))
-    (is (= "" (#'sut/fleet-action-onclick :unknown)))))
+    (is (str/includes? (sut/fleet-action-onclick :add-repo) "addRepo"))
+    (is (str/includes? (sut/fleet-action-onclick :discover-repos) "discoverRepos"))
+    (is (str/includes? (sut/fleet-action-onclick :sync-prs) "syncPrs"))
+    (is (str/includes? (sut/fleet-action-onclick :discover-sync) "discoverAndSync"))
+    (is (= "" (sut/fleet-action-onclick :unknown)))))

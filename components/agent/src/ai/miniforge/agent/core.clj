@@ -15,7 +15,7 @@
    [ai.miniforge.logging.interface :as log]))
 
 ;; Module-level logger for agent operations
-(def ^:private default-logger
+(def default-logger
   "Default logger for agent module-level operations."
   (log/create-logger {:min-level :info :output :edn}))
 

@@ -5,9 +5,9 @@
   integration tests that validate files are actually written to disk.
 
   These tests validate:
-  - record-phase-artifacts extracts from nested [:result :output]
-  - track-phase-files extracts :code/files paths from output
-  - extract-output returns non-empty artifacts
+  - execution/record-phase-artifacts extracts from nested [:result :output]
+  - execution/track-phase-files extracts :code/files paths from output
+  - runner/extract-output returns non-empty artifacts
   - Files are written to filesystem
   - Zero-file writes are detected and fail
   - Empty artifacts cause failures
@@ -349,9 +349,6 @@
 
 ;------------------------------------------------------------------------------ Unit Tests: Artifact Extraction
 
-(def ^:private record-phase-artifacts #'execution/record-phase-artifacts)
-(def ^:private track-phase-files #'execution/track-phase-files)
-(def ^:private extract-output #'runner/extract-output)
 
 (deftest test-record-phase-artifacts-extracts-nested-output
   (testing "record-phase-artifacts extracts artifact from [:result :output]"
@@ -363,7 +360,7 @@
                         :result {:status :ok
                                  :output code-output}}
           ctx {:execution/artifacts []}
-          updated (record-phase-artifacts ctx phase-result)]
+          updated (execution/record-phase-artifacts ctx phase-result)]
       (is (= 1 (count (:execution/artifacts updated)))
           "Should extract one artifact from nested output")
       (is (= code-output (first (:execution/artifacts updated)))
@@ -375,7 +372,7 @@
                         :status :completed
                         :result {:status :ok :output "plain string"}}
           ctx {:execution/artifacts []}
-          updated (record-phase-artifacts ctx phase-result)]
+          updated (execution/record-phase-artifacts ctx phase-result)]
       (is (empty? (:execution/artifacts updated))
           "Should not extract artifact from non-map output"))))
 
@@ -387,7 +384,7 @@
                                  :output {:code/files [{:path "src/a.clj" :content "a"}
                                                        {:path "src/b.clj" :content "b"}]}}}
           ctx {:execution/files-written []}
-          updated (track-phase-files ctx phase-result)]
+          updated (execution/track-phase-files ctx phase-result)]
       (is (= ["src/a.clj" "src/b.clj"] (:execution/files-written updated))
           "Should extract file paths from :code/files"))))
 
@@ -400,7 +397,7 @@
                                                      :result {:status :ok :output code-output}}}
                :execution/current-phase :implement
                :execution/status :completed}
-          result (extract-output ctx)]
+          result (runner/extract-output ctx)]
       (is (= 1 (count (get-in result [:execution/output :artifacts])))
           "Output should contain the artifact")
       (is (= :completed (get-in result [:execution/output :status]))

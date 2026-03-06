@@ -54,7 +54,7 @@
   [env-map]
   (mapcat (fn [[k v]] ["-e" (str (name k) "=" v)]) env-map))
 
-(def ^:private secret-pattern
+(def secret-pattern
   "Regex matching env var names that carry sensitive values."
   #"(?i)(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)")
 

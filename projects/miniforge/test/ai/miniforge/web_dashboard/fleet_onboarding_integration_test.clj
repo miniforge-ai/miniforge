@@ -98,7 +98,7 @@
       (with-redefs-fn {#'trains/default-fleet-config-path config-path
                        #'trains/run-gh fake-run-gh}
         (fn []
-          (let [handler (#'server/create-handler state)
+          (let [handler (server/create-handler state)
                 discover-res (route-json handler :post "/api/fleet/repos/discover" "owner=acme")
                 repos-res (route-json handler :get "/api/fleet/repos" nil)
                 sync-res (route-json handler :post "/api/fleet/prs/sync" nil)

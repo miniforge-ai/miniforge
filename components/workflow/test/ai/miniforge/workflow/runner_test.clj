@@ -200,7 +200,7 @@
                     :execution/current-phase :done
                     :execution/status :completed}
           ;; Call extract-output via its var (private fn)
-          result (#'ai.miniforge.workflow.runner/extract-output fake-ctx)
+          result (ai.miniforge.workflow.runner/extract-output fake-ctx)
           output (:execution/output result)]
       (is (some? output) ":execution/output should be present")
       (is (= [{:type :file :path "out.txt"}] (:artifacts output)))

@@ -28,7 +28,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Registry tracking
 
-(defonce ^:private registered-gates (atom #{}))
+(defonce registered-gates (atom #{}))
 
 (defn register-gate!
   "Track a gate as registered."

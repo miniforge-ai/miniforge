@@ -27,7 +27,7 @@
    [ai.miniforge.cli.web.sse :as sse]))
 
 (def ^:dynamic *port* 8787)
-(def ^:private server-atom (atom nil))
+(def server-atom (atom nil))
 
 (defn parse-repos-from-config []
   (-> (str (System/getProperty "user.home") "/.miniforge/config.edn")

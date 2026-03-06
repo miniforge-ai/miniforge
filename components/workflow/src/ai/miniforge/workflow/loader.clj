@@ -31,7 +31,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Cache
 
-(def ^:private workflow-cache
+(def workflow-cache
   "In-memory cache of loaded workflows.
    Map of [workflow-id version] -> workflow-config"
   (atom {}))

@@ -38,7 +38,7 @@
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Lexer table (EDN-driven)
 
-(def ^:private key-tokens
+(def key-tokens
   "Lexer config loaded from EDN. Two sections:
    :char-keys    — string->keyword map (converted to char->keyword at load time)
    :special-keys — Lanterna event type keyword -> key token keyword"
@@ -46,7 +46,7 @@
       slurp
       edn/read-string))
 
-(def ^:private char-key-map
+(def char-key-map
   "Map single characters to semantic key tokens.
    Built from :char-keys in key-tokens.edn.
    Single-char strings are converted to char keys for O(1) lookup."
@@ -54,7 +54,7 @@
     (map (fn [[s token]] [(first s) token]))
     (:char-keys key-tokens)))
 
-(def ^:private special-key-map
+(def special-key-map
   "Map Lanterna event type keywords to semantic key tokens.
    Loaded directly from :special-keys in key-tokens.edn."
   (:special-keys key-tokens))

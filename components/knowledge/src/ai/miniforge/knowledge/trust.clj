@@ -23,7 +23,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Trust level ordering
 
-(def ^:private trust-levels
+(def trust-levels
   "Trust levels in ascending order (lower index = less trusted)."
   [:tainted :untrusted :trusted])
 
@@ -180,32 +180,32 @@
 ;------------------------------------------------------------------------------ Layer 4
 ;; Combined validation helpers
 
-(defn ^:private valid?
+(defn valid?
   "Check if a validation result is valid."
   [result]
   (:valid? result))
 
-(defn ^:private error-from
+(defn error-from
   "Extract error from validation result if invalid, otherwise nil."
   [result]
   (when-not (valid? result)
     (:error result)))
 
-(defn ^:private check-dependency-authority
+(defn check-dependency-authority
   "Check if a dependency violates authority transitivity rules.
    Returns error string or nil."
   [pack-ref dep-id pack-graph]
   (when-let [dep-ref (get pack-graph dep-id)]
     (error-from (validate-instruction-authority-not-transitive pack-ref dep-ref))))
 
-(defn ^:private check-pack-tainted-isolation
+(defn check-pack-tainted-isolation
   "Check if an instruction pack transitively includes tainted content.
    Returns error string or nil."
   [pack-id pack-ref pack-graph]
   (when (= :authority/instruction (:authority pack-ref))
     (error-from (validate-tainted-isolation pack-id pack-graph))))
 
-(defn ^:private collect-authority-errors
+(defn collect-authority-errors
   "Check Rule 1: Instruction authority is not transitive.
 
    Validates that no pack with instruction authority transitively
@@ -223,7 +223,7 @@
         :when error]
     error))
 
-(defn ^:private collect-tainted-errors
+(defn collect-tainted-errors
   "Check Rule 4: Tainted isolation from instruction authority.
 
    Validates that no pack with instruction authority transitively

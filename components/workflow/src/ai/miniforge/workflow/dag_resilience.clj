@@ -48,7 +48,7 @@
             "429|Too Many Requests"
             "resets \\d+[ap]m|resets in \\d+"]))))
 
-(def ^:private rate-limit-patterns
+(def rate-limit-patterns
   (delay (load-rate-limit-patterns)))
 
 (defn rate-limit-error?
