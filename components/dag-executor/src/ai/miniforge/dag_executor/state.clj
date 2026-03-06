@@ -362,7 +362,7 @@
                          :new-status (get-in result [:run/tasks task-id :task/status])}}))
     result))
 
-(defn- emit-task-state-event!
+(defn emit-task-state-event!
   "Emit task/state-changed event via requiring-resolve (no hard dep on event-stream)."
   [run-state task-id from-status to-status]
   (try

@@ -18,11 +18,11 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Evidence fragments
 
-(defn- status-badge [status]
+(defn status-badge [status]
   (let [label (if (keyword? status) (name status) (str status))]
     [:span.wf-badge {:class (str "badge-" label)} label]))
 
-(defn- workflow-evidence-item [wf]
+(defn workflow-evidence-item [wf]
   [:div.evidence-item
    [:div.evidence-info
     [:h4 (:workflow-name wf)]
@@ -37,7 +37,7 @@
        "View Bundle"]
       [:span.evidence-pending "Pending"])]])
 
-(defn- train-evidence-item [train]
+(defn train-evidence-item [train]
   [:div.evidence-item
    [:div.evidence-info
     [:h4 (:train-name train)]

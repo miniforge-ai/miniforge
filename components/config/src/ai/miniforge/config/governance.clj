@@ -35,7 +35,7 @@
   "Default path to user config file."
   (str (fs/home) "/.miniforge/config.edn"))
 
-(defn- resolve-profile
+(defn resolve-profile
   "Resolve governance profile from env var or opts.
    Defaults to :default."
   [opts]
@@ -43,7 +43,7 @@
       (some-> (System/getenv "MINIFORGE_GOVERNANCE_PROFILE") keyword)
       :default))
 
-(defn- deep-merge
+(defn deep-merge
   "Recursively merge maps. Later values win for non-map keys."
   [& maps]
   (reduce (fn [acc m]
@@ -80,14 +80,14 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Config loading and merge chain
 
-(defn- load-resource-config
+(defn load-resource-config
   "Load a governance EDN file from classpath using aero for profile resolution."
   [config-key profile]
   (when-let [filename (get config-key->filename config-key)]
     (when-let [resource (io/resource (str "config/governance/" filename))]
       (aero/read-config resource {:profile profile}))))
 
-(defn- load-user-overrides
+(defn load-user-overrides
   "Load governance overrides from user config file.
    Returns the map at [:governance <config-key>] or nil."
   [config-key]
@@ -99,7 +99,7 @@
     (catch Exception _e
       nil)))
 
-(defn- verify-and-warn
+(defn verify-and-warn
   "Verify governance file content against digest manifest.
    For :knowledge-safety, mismatch throws. For others, logs a warning."
   [config-key content]
@@ -119,12 +119,12 @@
                                    (name config-key)
                                    ". File may have been modified.")))))))
 
-(defn- needs-regex-compilation?
+(defn needs-regex-compilation?
   "Return true if this config key has regex strings that need compilation."
   [config-key]
   (contains? #{:risk :knowledge-safety} config-key))
 
-(defn- compile-patterns
+(defn compile-patterns
   "Compile regex patterns for configs that need it."
   [config-key config]
   (case config-key

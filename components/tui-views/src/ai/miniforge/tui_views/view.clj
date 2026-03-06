@@ -31,7 +31,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; View dispatch — data-driven via screen specs
 
-(defn- render-active-view
+(defn render-active-view
   "Render the active view using the declarative screen spec interpreter."
   [model theme size]
   (if-let [spec (interpret/get-screen-spec (:view model))]
@@ -41,7 +41,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Overlay pipeline — each overlay is (buf, model, theme, [cols rows]) -> buf
 
-(defn- overlay-command-bar
+(defn overlay-command-bar
   "Add command/search bar at the bottom when in command/search mode."
   [buf model theme [cols rows]]
   (if (not= :normal (:mode model))
@@ -52,7 +52,7 @@
       (layout/blit buf cmd-bar 0 (dec rows)))
     buf))
 
-(defn- overlay-completions
+(defn overlay-completions
   "Add tab-completion popup above the command bar when completing."
   [buf model theme [cols rows]]
   (if (and (:completing? model) (seq (:completions model)))
@@ -86,7 +86,7 @@
       (layout/blit buf popup 0 y-off))
     buf))
 
-(defn- overlay-help
+(defn overlay-help
   "Add help overlay centered on screen when help is visible."
   [buf model _theme [cols rows]]
   (if (:help-visible? model)
@@ -98,7 +98,7 @@
       (layout/blit buf overlay x y))
     buf))
 
-(defn- overlay-confirm
+(defn overlay-confirm
   "Add confirmation dialog centered on screen when confirming."
   [buf model _theme [cols rows]]
   (if-let [{:keys [action label ids]} (:confirm model)]
@@ -125,7 +125,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Theme post-processing
 
-(defn- apply-theme-bg
+(defn apply-theme-bg
   "Replace :bg :default cells with the theme's background color."
   [buffer theme]
   (let [bg (:bg theme :default)]

@@ -31,7 +31,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Rendering helpers
 
-(defn- status-char [status]
+(defn status-char [status]
   (case status
     :running  "●"
     :success  "✓"
@@ -40,7 +40,7 @@
     :archived "⊘"
     "○"))
 
-(defn- chain-prefix
+(defn chain-prefix
   "Build a chain progress prefix like '[plan-impl 2/4] ' when this workflow
    is the active chain step. Returns empty string otherwise."
   [wf active-chain]
@@ -50,7 +50,7 @@
       (str "[" (name chain-id) " "
            (inc (:step-index current-step)) "/" step-count "] "))))
 
-(defn- format-workflow-row
+(defn format-workflow-row
   "Transform workflow data into table row format.
    active-chain is the :active-chain map from the model (or nil)."
   [wf active-chain]
@@ -63,11 +63,11 @@
                   (when-let [msg (:message agent)]
                     (subs msg 0 (min 16 (count msg)))))}))
 
-(defn- render-title-bar [[cols rows]]
+(defn render-title-bar [[cols rows]]
   (layout/text [cols rows] " MINIFORGE │ Workflows"
                {:fg :cyan :bold? true}))
 
-(defn- render-table [workflows selected active-chain [cols rows]]
+(defn render-table [workflows selected active-chain [cols rows]]
   (if (empty? workflows)
     (layout/text [cols rows] "  No active workflows. Waiting for events..."
                  {:fg :default})
@@ -80,7 +80,7 @@
        :data (mapv #(format-workflow-row % active-chain) workflows)
        :selected-row selected})))
 
-(defn- render-footer [flash-message [cols rows]]
+(defn render-footer [flash-message [cols rows]]
   (layout/text [cols rows]
     (str " j/k:navigate  Enter:detail  1-5:views  /:search  ::cmd  q:quit"
          (when flash-message (str "  │ " flash-message)))

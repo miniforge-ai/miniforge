@@ -65,7 +65,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Download and extraction
 
-(defn- download-file
+(defn download-file
   "Download a file from a URL to a local path."
   [url dest-path]
   (binding [*out* *err*]
@@ -74,22 +74,22 @@
     (when-not (zero? (:exit result))
       (throw (ex-info "Download failed" {:url url :exit (:exit result)})))))
 
-(defn- extract-zip
+(defn extract-zip
   "Extract a zip archive to a directory."
   [archive-path dest-dir]
   (bp/sh ["unzip" "-o" (str archive-path) "-d" (str dest-dir)]))
 
-(defn- extract-tar-gz
+(defn extract-tar-gz
   "Extract a tar.gz archive to a directory."
   [archive-path dest-dir]
   (bp/sh ["tar" "xzf" (str archive-path) "-C" (str dest-dir)]))
 
-(defn- extract-gzip
+(defn extract-gzip
   "Extract a gzip file (single file, not tar)."
   [archive-path dest-path]
   (bp/sh ["sh" "-c" (str "gunzip -c " archive-path " > " dest-path)]))
 
-(defn- extract-archive
+(defn extract-archive
   "Extract an archive based on its type."
   [archive-path dest-dir extract-type binary-name]
   (case extract-type
@@ -102,7 +102,7 @@
             (fs/copy archive-path dest {:replace-existing true})
             (bp/sh ["chmod" "+x" dest]))))
 
-(defn- github-release-url
+(defn github-release-url
   "Build a GitHub Releases download URL."
   [github-repo version filename]
   (str "https://github.com/" github-repo "/releases/download/" version "/" filename))
@@ -110,14 +110,14 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Installation pipeline — GitHub releases
 
-(defn- failed? [state] (contains? state :failure))
+(defn failed? [state] (contains? state :failure))
 
-(defn- fail
+(defn fail
   "Mark pipeline as failed with anomaly."
   [state message]
   (assoc state :failure (response/make-anomaly :anomalies/fault message)))
 
-(defn- step-resolve-asset
+(defn step-resolve-asset
   "Resolve the platform-specific asset from the server entry."
   [state]
   (if (failed? state) state
@@ -128,7 +128,7 @@
           (fail state (str "No binary available for platform: " platform))
           (assoc state :platform-asset platform-asset)))))
 
-(defn- step-download
+(defn step-download
   "Download the asset archive to a temp directory."
   [state]
   (if (failed? state) state
@@ -148,7 +148,7 @@
             (fs/delete-tree temp-dir)
             (fail state (str "Download failed: " (.getMessage e))))))))
 
-(defn- step-extract
+(defn step-extract
   "Extract the archive and place binary."
   [state]
   (if (failed? state) state
@@ -159,7 +159,7 @@
           (catch Exception e
             (fail state (str "Extraction failed: " (.getMessage e))))))))
 
-(defn- step-place-binary
+(defn step-place-binary
   "Handle nested binary location and set permissions."
   [state]
   (if (failed? state) state
@@ -178,14 +178,14 @@
             (fs/delete-tree temp-dir)
             (fail state (str "Binary placement failed: " (.getMessage e))))))))
 
-(defn- install-pipeline->result
+(defn install-pipeline->result
   "Convert pipeline state to result."
   [state]
   (if (failed? state)
     (:failure state)
     {:installed (:installed state)}))
 
-(defn- install-via-github
+(defn install-via-github
   "Install an LSP binary from GitHub Releases."
   [server-entry platform]
   (-> {:server-entry server-entry :platform platform}
@@ -195,7 +195,7 @@
       step-place-binary
       install-pipeline->result))
 
-(defn- install-via-npm
+(defn install-via-npm
   "Install an LSP binary via npm."
   [server-entry]
   (let [{:keys [npm-package also-requires binary]} server-entry
@@ -208,7 +208,7 @@
         (response/make-anomaly :anomalies/fault
                                (str "npm install failed: " (:err result)))))))
 
-(defn- install-via-go
+(defn install-via-go
   "Install an LSP binary via go install."
   [server-entry]
   (let [{:keys [go-package binary]} server-entry]
@@ -223,7 +223,7 @@
 ;------------------------------------------------------------------------------ Layer 4
 ;; Installation orchestration
 
-(defn- find-server-entry
+(defn find-server-entry
   "Find server entry in registry by tool-id."
   [registry tool-id]
   (->> (:servers registry)
@@ -231,7 +231,7 @@
        (filter #(= tool-id (:tool-id %)))
        first))
 
-(defn- run-install
+(defn run-install
   "Run the appropriate install method for a server entry."
   [server-entry]
   (let [install-method (or (:install-method server-entry) :github)]

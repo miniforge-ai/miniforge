@@ -29,7 +29,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event stream helpers (optional dependency)
 
-(defn- emit-phase-started!
+(defn emit-phase-started!
   "Emit phase-started event if event-stream is available in context."
   [ctx phase]
   (when-let [event-stream (:event-stream ctx)]
@@ -38,7 +38,7 @@
         (let [workflow-id (:execution/id ctx)]
           (publish! event-stream (phase-started event-stream workflow-id phase)))))))
 
-(defn- emit-phase-completed!
+(defn emit-phase-completed!
   "Emit phase-completed event if event-stream is available in context."
   [ctx phase _result]
   (when-let [event-stream (:event-stream ctx)]
@@ -68,7 +68,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Phase context builder
 
-(defn- build-phase-context
+(defn build-phase-context
   "Build the common phase context fields for plan phase."
   [ctx gates budget start-time result]
   (-> ctx
@@ -83,7 +83,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Plan from spec tasks (fast path — no LLM)
 
-(defn- plan-from-spec-tasks
+(defn plan-from-spec-tasks
   "Build a plan directly from spec-provided tasks. No LLM call, 0 tokens."
   [input spec-tasks]
   (let [plan {:plan/id (random-uuid)
@@ -98,7 +98,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Plan from LLM agent (normal path)
 
-(defn- build-planner-task
+(defn build-planner-task
   "Build the task map to pass to the planner agent."
   [input explore-result]
   (let [existing-files (:exploration/files explore-result)]
@@ -111,7 +111,7 @@
       (seq existing-files)
       (assoc :task/existing-files existing-files))))
 
-(defn- create-streaming-callback
+(defn create-streaming-callback
   "Create a streaming callback for agent output, if event-stream is available."
   [ctx]
   (when-let [es (:event-stream ctx)]
@@ -120,7 +120,7 @@
       (create-cb es (:execution/id ctx) :plan
                  {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)}))))
 
-(defn- plan-from-agent
+(defn plan-from-agent
   "Invoke the planner agent to generate a plan via LLM."
   [ctx input]
   (let [explore-result (get-in ctx [:execution/phase-results :explore :result :output])
@@ -136,7 +136,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
-(defn- enter-plan
+(defn enter-plan
   "Execute planning phase.
 
    Reads specification from context, invokes planner agent,
@@ -156,7 +156,7 @@
                  (plan-from-agent ctx input))]
     (build-phase-context ctx gates budget start-time result)))
 
-(defn- leave-plan
+(defn leave-plan
   "Post-processing for planning phase.
 
    Records metrics and updates execution state."
@@ -182,7 +182,7 @@
       (assoc-in updated-ctx [:phase :status] :already-satisfied)
       updated-ctx)))
 
-(defn- error-plan
+(defn error-plan
   "Handle planning phase errors.
 
    Attempts repair if within budget, otherwise propagates error."

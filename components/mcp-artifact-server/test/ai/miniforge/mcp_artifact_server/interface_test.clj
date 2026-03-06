@@ -8,7 +8,7 @@
 
 ;------------------------------------------------------------------------------ Helpers
 
-(defn- with-temp-dir [f]
+(defn with-temp-dir [f]
   (let [dir (str (java.nio.file.Files/createTempDirectory
                    "mcp-test-"
                    (into-array java.nio.file.attribute.FileAttribute [])))]
@@ -18,7 +18,7 @@
         (doseq [file (reverse (file-seq (io/file dir)))]
           (.delete ^java.io.File file))))))
 
-(defn- read-artifact [dir]
+(defn read-artifact [dir]
   (edn/read-string (slurp (str dir "/artifact.edn"))))
 
 ;------------------------------------------------------------------------------ Tool handler tests

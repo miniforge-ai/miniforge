@@ -14,7 +14,7 @@
 
 (def ^:dynamic *test-worktree* nil)
 
-(defn- create-temp-worktree
+(defn create-temp-worktree
   []
   (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")
                           (str "release-test-" (random-uuid)))]
@@ -24,7 +24,7 @@
       (.mkdirs git-dir))
     (.getPath temp-dir)))
 
-(defn- cleanup-temp-worktree
+(defn cleanup-temp-worktree
   [dir-path]
   (when dir-path
     (try
@@ -59,7 +59,7 @@
    :code/files (:code/files mock-code-artifact)
    :code/language "clojure"})
 
-(defn- create-base-context
+(defn create-base-context
   []
   {:execution/id (random-uuid)
    :execution/input {:description "Test release"

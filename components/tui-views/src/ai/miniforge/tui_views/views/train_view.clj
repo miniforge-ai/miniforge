@@ -27,18 +27,18 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Rendering helpers
 
-(defn- format-pr-row [pr]
+(defn format-pr-row [pr]
   {:title (or (:pr/title pr) "Untitled")
    :readiness (str (int (* 100 (or (:pr/readiness pr) 0))) "%")
    :order (str (or (:pr/merge-order pr) "—"))})
 
-(defn- render-title-bar [train [cols rows]]
+(defn render-title-bar [train [cols rows]]
   (layout/text [cols rows]
     (str " MINIFORGE │ Train: "
          (or (:train/name train) "Release Train"))
     {:fg :cyan :bold? true}))
 
-(defn- render-table [prs selected [cols rows]]
+(defn render-table [prs selected [cols rows]]
   (if (empty? prs)
     (layout/text [cols rows] "  No PRs in this train."
                  {:fg :default})
@@ -50,7 +50,7 @@
                (sort-by :pr/merge-order prs))
        :selected-row selected})))
 
-(defn- render-footer [[cols rows]]
+(defn render-footer [[cols rows]]
   (layout/text [cols rows]
     " Esc:back  j/k:navigate  space:select  q:quit"
     {:fg :default}))

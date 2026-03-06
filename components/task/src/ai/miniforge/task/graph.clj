@@ -11,7 +11,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure graph algorithms
 
-(defn- dfs-visit
+(defn dfs-visit
   "Depth-first search visit for cycle detection and topological sort.
    Returns {:visited visited :sorted sorted :cycle? cycle?}"
   [graph node visited temp-marks sorted]

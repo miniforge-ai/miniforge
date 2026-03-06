@@ -36,7 +36,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Manager state
 
-(defn- get-servers-atom
+(defn get-servers-atom
   "Get the servers atom from registry state."
   [registry]
   (or (:lsp-servers @(:state registry))
@@ -44,7 +44,7 @@
         (swap! (:state registry) assoc :lsp-servers servers)
         servers)))
 
-(defn- get-logger
+(defn get-logger
   "Get logger from registry state."
   [registry]
   (:logger @(:state registry)))
@@ -52,12 +52,12 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pipeline helpers
 
-(defn- failed?
+(defn failed?
   "Check if pipeline has failed."
   [state]
   (contains? state :failure))
 
-(defn- fail
+(defn fail
   "Mark pipeline as failed with error."
   [state error-msg]
   (when-let [logger (:logger state)]
@@ -68,7 +68,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Pipeline steps
 
-(defn- step-validate-tool
+(defn step-validate-tool
   "Validate tool exists, is LSP type, and is enabled."
   [state]
   (if (failed? state) state
@@ -85,7 +85,7 @@
 
           :else state))))
 
-(defn- step-check-existing
+(defn step-check-existing
   "Check if server already running; return early or clean up dead process."
   [state]
   (if (failed? state) state
@@ -106,7 +106,7 @@
             (swap! servers dissoc tool-id)
             state)))))
 
-(defn- step-start-process
+(defn step-start-process
   "Start the LSP server process."
   [state]
   (cond
@@ -128,7 +128,7 @@
           (assoc state :process process :config config)
           (fail state error))))))
 
-(defn- step-create-client
+(defn step-create-client
   "Create LSP client from running process."
   [state]
   (cond
@@ -144,7 +144,7 @@
           lsp-client (client/create-client process notification-handler)]
       (assoc state :client lsp-client))))
 
-(defn- step-initialize
+(defn step-initialize
   "Initialize LSP server connection."
   [state]
   (cond
@@ -162,7 +162,7 @@
           (process/stop-process process)
           (fail state (str "Initialization failed: " error)))))))
 
-(defn- step-register
+(defn step-register
   "Register running server in servers atom."
   [state]
   (cond
@@ -179,7 +179,7 @@
                   {:data {:tool-id tool-id}}))
       state)))
 
-(defn- pipeline->result
+(defn pipeline->result
   "Convert pipeline state to result."
   [state]
   (cond

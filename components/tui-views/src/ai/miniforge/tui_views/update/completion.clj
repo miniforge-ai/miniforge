@@ -34,7 +34,7 @@
   [model]
   (assoc model :completing? false :completions [] :completion-idx nil))
 
-(defn- apply-browse-side-effect
+(defn apply-browse-side-effect
   [model result]
   (if-let [fx (:side-effect result)]
     (assoc model
@@ -43,7 +43,7 @@
            :flash-message "Browsing remote repos...")
     model))
 
-(defn- strip-browse-sentinel
+(defn strip-browse-sentinel
   [completions]
   (->> completions
        (remove #{"browse"})
@@ -103,7 +103,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Tab handler
 
-(defn- exact-command-arg-completions
+(defn exact-command-arg-completions
   [model buf]
   (let [partial (subs buf 1)]
     (when (and (not (str/blank? partial))

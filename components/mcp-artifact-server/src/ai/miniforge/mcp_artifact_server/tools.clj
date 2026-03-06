@@ -39,7 +39,7 @@
   {:non-empty (fn [v] (and v (seq v)))
    :non-blank (fn [v] (and (string? v) (not (str/blank? v))))})
 
-(defn- resolve-validator
+(defn resolve-validator
   "Resolve a keyword validator to its predicate function."
   [check-kw]
   (or (get validators check-kw)
@@ -63,7 +63,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Param extractors
 
-(defn- non-blank
+(defn non-blank
   "Return string if non-blank, else nil."
   [s]
   (when-not (str/blank? s) s))
@@ -93,7 +93,7 @@
      :message (str "Code artifact submitted successfully. "
                    (count files) " file(s) written to artifact store.")}))
 
-(defn- build-plan-task
+(defn build-plan-task
   "Build a single plan task from JSON params, resolving dependency UUIDs."
   [task-uuids idx t]
   (let [deps (get t "dependencies" [])
@@ -128,17 +128,17 @@
      :message (str "Plan submitted successfully. "
                    (count tasks) " task(s) in plan '" plan-name "'.")}))
 
-(defn- parse-test-files
+(defn parse-test-files
   "Parse test file params into file maps."
   [files]
   (mapv (fn [f] {:path (get f "path") :content (get f "content")}) files))
 
-(defn- aggregate-test-content
+(defn aggregate-test-content
   "Aggregate all test file content into a single string."
   [files]
   (str/join "\n" (map #(get % "content" "") files)))
 
-(defn- parse-coverage
+(defn parse-coverage
   "Parse coverage params into a map."
   [coverage]
   (when coverage
@@ -206,7 +206,7 @@
   [builder-key builder-fn]
   (swap! builder-registry* assoc builder-key builder-fn))
 
-(defn- resolve-builder
+(defn resolve-builder
   "Resolve a builder keyword to its function."
   [builder-key]
   (or (get @builder-registry* builder-key)
@@ -217,7 +217,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Configuration loading
 
-(defn- load-registry-config
+(defn load-registry-config
   "Load tool registry from classpath EDN configuration."
   []
   (if-let [resource (io/resource "mcp-artifact-server/tool-registry.edn")]
@@ -227,7 +227,7 @@
 
 (defonce ^:private registry-config* (atom nil))
 
-(defn- ensure-registry-loaded
+(defn ensure-registry-loaded
   "Ensure the registry config is loaded (once)."
   []
   (when-not @registry-config*

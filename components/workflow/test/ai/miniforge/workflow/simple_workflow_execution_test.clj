@@ -10,7 +10,7 @@
 ;; Helper functions
 ;; ============================================================================
 
-(defn- load-workflow-edn
+(defn load-workflow-edn
   "Load a workflow EDN file from resources."
   [workflow-id version]
   (let [filename (str "workflows/" (name workflow-id) "-v" version ".edn")
@@ -18,7 +18,7 @@
     (when resource
       (edn/read-string (slurp resource)))))
 
-(defn- create-mock-context
+(defn create-mock-context
   "Create a mock execution context for testing."
   [& {:keys [responses]
       :or {responses [{:content "(defn test [] true)"

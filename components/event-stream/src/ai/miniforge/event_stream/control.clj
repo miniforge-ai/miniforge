@@ -96,12 +96,12 @@
    :agent    :agents
    :fleet    :fleet})
 
-(defn- authorization-granted
+(defn authorization-granted
   "Build a granted authorization result."
   [reason]
   {:authorized? true :reason reason})
 
-(defn- authorization-denied
+(defn authorization-denied
   "Build a denied authorization result with anomaly."
   [anomaly-category message context]
   {:authorized? false

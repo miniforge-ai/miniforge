@@ -391,7 +391,7 @@
 ;; Chains are not workflow-scoped, so workflow-id is nil.
 ;; Message is derived from the event-type keyword.
 
-(defn- chain-envelope
+(defn chain-envelope
   "Create an envelope for chain events. Chains are not workflow-scoped,
    so workflow-id is nil. Message is derived from the event-type keyword."
   [stream event-type]

@@ -3,13 +3,13 @@
    [babashka.process :as p]
    [clojure.string :as str]))
 
-(defn- staged-files []
+(defn staged-files []
   (-> (p/sh "git" "diff" "--cached" "--name-only" "--diff-filter=ACM")
       :out
       str/split-lines
       (->> (remove str/blank?))))
 
-(defn- staged-by-ext [ext]
+(defn staged-by-ext [ext]
   (->> (staged-files)
        (filter (fn [f] (str/ends-with? f ext)))))
 

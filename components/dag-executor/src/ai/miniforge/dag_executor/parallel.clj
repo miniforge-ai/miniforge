@@ -50,13 +50,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Lock acquisition (semaphore-based)
 
-(defn- try-acquire-semaphore
+(defn try-acquire-semaphore
   "Try to acquire a semaphore with timeout.
    Returns true if acquired, false if timeout."
   [^Semaphore sem timeout-ms]
   (.tryAcquire sem timeout-ms TimeUnit/MILLISECONDS))
 
-(defn- release-semaphore
+(defn release-semaphore
   "Release a semaphore permit."
   [^Semaphore sem]
   (.release sem))

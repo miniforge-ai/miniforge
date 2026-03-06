@@ -46,7 +46,7 @@
    #"halt\b"
    #"poweroff\b"])
 
-(defn- matches-dangerous-pattern?
+(defn matches-dangerous-pattern?
   "Check if a command matches any dangerous pattern."
   [command]
   (some #(re-find % command) dangerous-patterns))
@@ -106,7 +106,7 @@
 ;------------------------------------------------------------------------------ Layer 1.5
 ;; Semantic meta-evaluation (LLM-powered quality/relevance check)
 
-(defn- trivially-safe-tool?
+(defn trivially-safe-tool?
   "Tools that are always on-task and never need semantic review."
   [tool-name]
   (contains? #{"Read" "Glob" "Grep" "WebSearch" "WebFetch" "LS"

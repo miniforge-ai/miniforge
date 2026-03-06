@@ -8,7 +8,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; String utilities
 
-(defn- slugify
+(defn slugify
   "Convert a string to a URL-safe slug.
    Handles basic ASCII transliteration and normalizes spacing."
   [s]

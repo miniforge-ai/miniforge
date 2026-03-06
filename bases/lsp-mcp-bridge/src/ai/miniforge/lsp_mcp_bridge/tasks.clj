@@ -19,7 +19,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Name resolution and display helpers
 
-(defn- build-name-index
+(defn build-name-index
   "Build lookup from user-friendly names to registry server entries.
 
    Accepts short language names (clojure, typescript, go) and exact
@@ -35,7 +35,7 @@
    {}
    (:servers registry)))
 
-(defn- resolve-server-names
+(defn resolve-server-names
   "Resolve CLI arg names to server entries.
    Returns seq of {:server-key :entry} or prints error for unknown names."
   [registry names]
@@ -51,13 +51,13 @@
                     nil))))
           names)))
 
-(defn- all-server-entries
+(defn all-server-entries
   "Get all server entries from the registry."
   [registry]
   (map (fn [[k v]] {:server-key k :entry v})
        (:servers registry)))
 
-(defn- method-label
+(defn method-label
   "Human-readable label for an install method."
   [entry]
   (case (or (:install-method entry) :github)
@@ -67,7 +67,7 @@
     :custom     "manual install"
     (name (or (:install-method entry) :github))))
 
-(defn- pad
+(defn pad
   "Right-pad a string to the given width."
   [s width]
   (str s (apply str (repeat (max 1 (- width (count s))) " "))))
@@ -141,19 +141,19 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; lsp:setup — generate MCP config for Claude Code / Claude Desktop / Codex
 
-(defn- project-dir
+(defn project-dir
   "Get the absolute project directory."
   []
   (System/getProperty "user.dir"))
 
-(defn- mcp-server-entry-claude-code
+(defn mcp-server-entry-claude-code
   "Build MCP server config for Claude Code CLI (.mcp.json)."
   []
   {"command" "bb"
    "args"    ["lsp-mcp-bridge"]
    "env"     {"MINIFORGE_PROJECT_DIR" "."}})
 
-(defn- mcp-server-entry-claude-desktop
+(defn mcp-server-entry-claude-desktop
   "Build MCP server config for Claude Desktop."
   []
   (let [dir (project-dir)]
@@ -162,7 +162,7 @@
      "cwd"     dir
      "env"     {"MINIFORGE_PROJECT_DIR" dir}}))
 
-(defn- claude-desktop-config-path
+(defn claude-desktop-config-path
   "Path to Claude Desktop config file."
   []
   (let [platform (installer/platform-key)]
@@ -170,12 +170,12 @@
       (str (fs/home) "/Library/Application Support/Claude/claude_desktop_config.json")
       (str (fs/home) "/.config/Claude/claude_desktop_config.json"))))
 
-(defn- codex-config-path
+(defn codex-config-path
   "Path to Codex config file."
   []
   (str (fs/home) "/.codex/config.toml"))
 
-(defn- read-json-file
+(defn read-json-file
   "Read and parse a JSON file. Returns {} if missing or invalid."
   [path]
   (if (fs/exists? path)
@@ -183,31 +183,31 @@
          (catch Exception _ {}))
     {}))
 
-(defn- write-json-file
+(defn write-json-file
   "Write data as formatted JSON to a file."
   [path data]
   (fs/create-dirs (fs/parent path))
   (spit path (json/generate-string data {:pretty true}))
   (println (str "  Wrote: " path)))
 
-(defn- toml-escape
+(defn toml-escape
   "Escape a string for TOML output."
   [value]
   (-> value
       (str/replace "\\" "\\\\")
       (str/replace "\"" "\\\"")))
 
-(defn- toml-string
+(defn toml-string
   "Render a TOML string value."
   [value]
   (str "\"" (toml-escape value) "\""))
 
-(defn- toml-array
+(defn toml-array
   "Render a TOML array of strings."
   [values]
   (str "[" (str/join ", " (map toml-string values)) "]"))
 
-(defn- toml-inline-table
+(defn toml-inline-table
   "Render a TOML inline table from a string map."
   [m]
   (str "{ "
@@ -217,7 +217,7 @@
                       m))
        " }"))
 
-(defn- remove-toml-block
+(defn remove-toml-block
   "Remove a TOML block by header (e.g., mcp_servers.miniforge-lsp)."
   [content header]
   (let [lines (str/split-lines (or content ""))
@@ -243,7 +243,7 @@
             :else
             (recur (rest remaining) (conj acc line) false)))))))
 
-(defn- append-toml-block
+(defn append-toml-block
   "Append a TOML block to existing content, ensuring separation."
   [content block]
   (let [content (str/trim (or content ""))]
@@ -251,7 +251,7 @@
          block
          "\n")))
 
-(defn- render-codex-mcp-block
+(defn render-codex-mcp-block
   "Render TOML block for Codex MCP server."
   [entry]
   (str "[mcp_servers.miniforge-lsp]\n"
@@ -260,7 +260,7 @@
        "cwd = " (toml-string (get entry "cwd")) "\n"
        "env = " (toml-inline-table (get entry "env")) "\n"))
 
-(defn- setup-claude-code
+(defn setup-claude-code
   "Write or update .mcp.json in the project root for Claude Code CLI."
   []
   (let [path (str (project-dir) "/.mcp.json")
@@ -272,7 +272,7 @@
     (write-json-file path updated)
     (println "  Claude Code configured. Restart Claude Code to pick up changes.")))
 
-(defn- setup-claude-desktop
+(defn setup-claude-desktop
   "Merge miniforge-lsp entry into Claude Desktop config."
   []
   (let [path (claude-desktop-config-path)]
@@ -287,7 +287,7 @@
         (write-json-file path updated)
         (println "  Claude Desktop configured. Restart Claude Desktop to pick up changes.")))))
 
-(defn- setup-codex
+(defn setup-codex
   "Merge miniforge-lsp entry into Codex config (config.toml)."
   []
   (let [path (codex-config-path)
@@ -301,7 +301,7 @@
     (println (str "  Wrote: " path))
     (println "  Codex configured. Restart Codex to pick up changes.")))
 
-(defn- print-config-preview
+(defn print-config-preview
   "Print what the MCP configs would look like, without writing anything."
   []
   (println "\nClaude Code CLI (.mcp.json):")

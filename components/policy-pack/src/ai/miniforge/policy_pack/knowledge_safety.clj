@@ -55,7 +55,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Violation constructor — single shape for all detection results
 
-(defn- violation
+(defn violation
   "Build a violation map. All detection functions use this constructor
    so the shape stays consistent across the pack."
   [severity message & {:as details}]
@@ -66,7 +66,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pattern helpers
 
-(defn- all-injection-patterns
+(defn all-injection-patterns
   "Flatten the categorised injection-patterns map into a single vector of regexes."
   [config]
   (into [] (mapcat val) (:injection-patterns config)))
@@ -118,7 +118,7 @@
     {:remediation "Define agents in structured EDN packs, not markdown files"})
    :agent-behavior "Only load agent definitions from validated EDN packs"))
 
-(defn- make-prompt-injection-rule
+(defn make-prompt-injection-rule
   "Build the prompt-injection-tripwire rule from a config map."
   [config]
   (core/create-rule

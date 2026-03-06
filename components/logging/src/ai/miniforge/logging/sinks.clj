@@ -32,7 +32,7 @@
 
 ;;------------------------------------------------------------------------------ Layer 0: File Sink
 
-(defn- log-file-path
+(defn log-file-path
   "Get path to log file for a workflow.
 
    Arguments:
@@ -46,13 +46,13 @@
     (.mkdirs logs-dir)
     (.getPath (io/file logs-dir log-file))))
 
-(defn- file-size-mb [file-path]
+(defn file-size-mb [file-path]
   (let [file (io/file file-path)]
     (if (.exists file)
       (/ (.length file) 1024.0 1024.0)
       0.0)))
 
-(defn- rotate-log-if-needed [file-path max-size-mb]
+(defn rotate-log-if-needed [file-path max-size-mb]
   (when (> (file-size-mb file-path) max-size-mb)
     (let [timestamp (.format (java.time.LocalDateTime/now)
                              (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss"))

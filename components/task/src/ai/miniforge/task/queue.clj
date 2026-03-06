@@ -17,7 +17,7 @@
    :age-factor 0.001       ; Priority points per millisecond of age
    :ready-bonus 500})      ; Bonus for tasks with no unsatisfied dependencies
 
-(defn- task-age-ms
+(defn task-age-ms
   "Calculate the age of a task in milliseconds.
    Uses :task/created-at if present, otherwise returns 0."
   [task now]

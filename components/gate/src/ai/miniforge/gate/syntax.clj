@@ -25,7 +25,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Syntax checking
 
-(defn- parse-clojure
+(defn parse-clojure
   "Parse Clojure code using read-string for AST validation.
 
    Reads all top-level forms (not just the first one).
@@ -46,7 +46,7 @@
       {:valid? false
        :error (ex-message ex)})))
 
-(defn- check-syntax
+(defn check-syntax
   "Check syntax of artifact content.
 
    Arguments:
@@ -68,7 +68,7 @@
                  :message (:error result)
                  :location nil}]})))
 
-(defn- repair-syntax
+(defn repair-syntax
   "Attempt to repair syntax errors.
 
    Currently returns failure - syntax repair requires LLM."

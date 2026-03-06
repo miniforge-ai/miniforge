@@ -36,7 +36,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; EDN line reading
 
-(defn- safe-read-edn
+(defn safe-read-edn
   "Read a single EDN value from a string, returning nil on parse errors.
    Uses default EDN readers which already handle #uuid and #inst."
   [s]
@@ -44,7 +44,7 @@
     (edn/read-string s)
     (catch Exception _ nil)))
 
-(defn- read-first-and-last
+(defn read-first-and-last
   "Read the first and last EDN events from a workflow file.
    Returns [first-event last-event] or nil on error."
   [file]
@@ -59,7 +59,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Workflow reconstruction
 
-(defn- derive-status
+(defn derive-status
   "Derive workflow status from the last event in the file."
   [last-event]
   (case (:event/type last-event)
@@ -68,13 +68,13 @@
     ;; Still in progress (no terminal event yet) — default clause
     :running))
 
-(defn- derive-phase
+(defn derive-phase
   "Derive current/last phase from events."
   [last-event]
   (when-let [phase (:workflow/phase last-event)]
     phase))
 
-(defn- derive-progress
+(defn derive-progress
   "Estimate progress from the last event."
   [last-event]
   (case (:event/type last-event)
@@ -88,7 +88,7 @@
     :workflow/started         10
     0))
 
-(defn- event-file->workflow
+(defn event-file->workflow
   "Convert a single event file into a workflow summary map for the model.
    Returns nil if the file cannot be read or parsed."
   [file]
@@ -164,7 +164,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; PR enrichment
 
-(defn- packs-dir
+(defn packs-dir
   "Get the policy packs directory path."
   []
   (io/file (System/getProperty "user.home") ".miniforge" "packs"))
@@ -181,7 +181,7 @@
         []))
     (catch Exception _ [])))
 
-(defn- enrich-pr-in-context
+(defn enrich-pr-in-context
   "Enrich a single PR with readiness and risk, using its repo-level
    train snapshot as context (so dependency and fanout factors are correct)."
   [train-snapshot pr]

@@ -31,12 +31,12 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Directory and file helpers
 
-(defn- events-dir
+(defn events-dir
   "Returns ~/.miniforge/events/ as a java.io.File."
   []
   (io/file (System/getProperty "user.home") ".miniforge" "events"))
 
-(defn- scan-event-files
+(defn scan-event-files
   "Find *.edn files in dir, returns sorted list of java.io.File."
   [^java.io.File dir]
   (if (and dir (.exists dir) (.isDirectory dir))
@@ -46,7 +46,7 @@
          vec)
     []))
 
-(defn- read-new-lines
+(defn read-new-lines
   "Read lines added since last position using RandomAccessFile.
    Updates position-atom with new file length. Returns vector of line strings."
   [^java.io.File file position-atom]
@@ -68,7 +68,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Parse and dispatch
 
-(defn- parse-and-dispatch!
+(defn parse-and-dispatch!
   "Parse each line as EDN, translate via subscription/translate-event,
    dispatch non-nil results to dispatch-fn."
   [lines dispatch-fn]
@@ -98,7 +98,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; File tracking and polling
 
-(defn- track-file!
+(defn track-file!
   "Track a new event file: register it in tracked map and hydrate
    all existing lines through dispatch-fn."
   [tracked dispatch-fn ^java.io.File f]
@@ -108,7 +108,7 @@
     (let [lines (read-new-lines f pos)]
       (parse-and-dispatch! lines dispatch-fn))))
 
-(defn- poll-tracked-files!
+(defn poll-tracked-files!
   "Read new lines from all tracked files and dispatch them."
   [tracked dispatch-fn]
   (doseq [[_path {:keys [file position]}] @tracked]
@@ -116,7 +116,7 @@
       (when (seq lines)
         (parse-and-dispatch! lines dispatch-fn)))))
 
-(defn- scan-for-new-files!
+(defn scan-for-new-files!
   "Check for new .edn files in dir and start tracking them."
   [dir tracked dispatch-fn]
   (let [current-files (scan-event-files dir)
@@ -125,7 +125,7 @@
       (when-not (tracked-paths (.getAbsolutePath f))
         (track-file! tracked dispatch-fn f)))))
 
-(defn- poll-loop
+(defn poll-loop
   "Polling loop body for the file-subscription daemon thread.
    Polls tracked files every poll-ms, scans for new files every scan-ms."
   [running? tracked dispatch-fn dir poll-ms scan-ms]
@@ -142,7 +142,7 @@
     (catch InterruptedException _)
     (catch Exception _)))
 
-(defn- stop-subscription!
+(defn stop-subscription!
   "Stop the file-subscription polling thread."
   [running? ^Thread thread]
   (reset! running? false)

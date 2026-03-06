@@ -15,7 +15,7 @@
    [ai.miniforge.gate.test]
    [ai.miniforge.gate.policy]))
 
-(defn- with-mocked-test-runner
+(defn with-mocked-test-runner
   "Run body-fn with run-tests! and write-test-files! mocked to prevent recursive bb test."
   [body-fn]
   (let [write-var (resolve 'ai.miniforge.phase.verify/write-test-files!)

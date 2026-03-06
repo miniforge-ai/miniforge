@@ -25,7 +25,7 @@
 
 ;------------------------------------------------------------------------------ Helpers
 
-(defn- temp-events-dir
+(defn temp-events-dir
   "Create a temporary directory for test event files."
   []
   (let [dir (io/file (System/getProperty "java.io.tmpdir")
@@ -33,7 +33,7 @@
     (.mkdirs dir)
     dir))
 
-(defn- write-event-file!
+(defn write-event-file!
   "Write EDN events to a file in the events directory."
   [dir workflow-id events]
   (let [file (io/file dir (str workflow-id ".edn"))]
@@ -43,7 +43,7 @@
         (.write w "\n")))
     file))
 
-(defn- cleanup-dir!
+(defn cleanup-dir!
   "Remove temporary directory and all files."
   [dir]
   (doseq [f (.listFiles dir)]

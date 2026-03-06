@@ -18,7 +18,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration
 
-(defn- build-repair-learning
+(defn build-repair-learning
   "Build a learning capture map from a repair history entry."
   [agent-role task repair-history]
   (let [last-repair (last repair-history)]
@@ -111,7 +111,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Knowledge Coordinator implementation
 
-(defn- format-zettel-for-context
+(defn format-zettel-for-context
   "Format a zettel for inclusion in agent context."
   [zettel]
   (str "### " (:zettel/title zettel)
@@ -121,7 +121,7 @@
        (:zettel/content zettel)
        "\n"))
 
-(defn- format-knowledge-block
+(defn format-knowledge-block
   "Format injected knowledge as a context block."
   [zettels agent-role]
   (when (seq zettels)

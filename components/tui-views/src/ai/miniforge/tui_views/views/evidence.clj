@@ -32,7 +32,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Evidence tree construction
 
-(defn- build-evidence-tree
+(defn build-evidence-tree
   "Build a tree node list from model evidence data."
   [model]
   (let [detail (:detail model)

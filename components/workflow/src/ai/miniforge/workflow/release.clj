@@ -20,7 +20,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Result predicates
 
-(defn- succeeded?
+(defn succeeded?
   "Check if a result map indicates success."
   [result]
   (boolean (:success? result)))

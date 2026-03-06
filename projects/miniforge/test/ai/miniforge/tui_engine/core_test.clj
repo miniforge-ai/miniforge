@@ -24,7 +24,7 @@
    [ai.miniforge.tui-engine.screen :as screen]
    [ai.miniforge.tui-engine.layout :as layout]))
 
-(defn- test-app
+(defn test-app
   "Create a minimal test app with mock screen."
   []
   (let [mock (screen/create-mock-screen [40 10])]

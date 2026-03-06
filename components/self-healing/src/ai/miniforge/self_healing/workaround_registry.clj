@@ -26,7 +26,7 @@
 ;;------------------------------------------------------------------------------ Layer 0
 ;; File paths and utilities
 
-(defn- workaround-registry-path
+(defn workaround-registry-path
   "Get path to workaround registry file.
 
    Returns: String path to ~/.miniforge/known_workarounds.edn"
@@ -35,7 +35,7 @@
         miniforge-dir (io/file home ".miniforge")]
     (.getPath (io/file miniforge-dir "known_workarounds.edn"))))
 
-(defn- ensure-directory-exists
+(defn ensure-directory-exists
   "Ensure parent directory exists for a file path.
 
    Arguments:
@@ -47,7 +47,7 @@
     (when-not (.exists parent-dir)
       (.mkdirs parent-dir))))
 
-(defn- safe-read-edn
+(defn safe-read-edn
   "Safely read EDN from file, returning default on error.
 
    Arguments:
@@ -62,7 +62,7 @@
     (catch Exception _
       default)))
 
-(defn- atomic-write-edn
+(defn atomic-write-edn
   "Atomically write EDN to file using temp file + rename.
 
    Arguments:

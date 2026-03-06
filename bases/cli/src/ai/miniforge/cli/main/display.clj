@@ -37,7 +37,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Error classification display
 
-(defn- print-agent-backend-error-header
+(defn print-agent-backend-error-header
   [completed-work]
   (println (style "⚠️  Agent System Error (Not Your Fault!)" :foreground :yellow :bold true))
   (when (seq completed-work)
@@ -46,25 +46,25 @@
     (doseq [work completed-work]
       (println (str "  " (style "✅" :foreground :green) " " work)))))
 
-(defn- print-task-code-error-header
+(defn print-task-code-error-header
   []
   (println (style "❌ Task Code Error" :foreground :red :bold true)))
 
-(defn- print-external-error-header
+(defn print-external-error-header
   []
   (println (style "⚠️  External Service Error" :foreground :yellow :bold true)))
 
-(defn- print-generic-error-header
+(defn print-generic-error-header
   []
   (println (style "❌ Error" :foreground :red :bold true)))
 
-(defn- print-agent-backend-error-context
+(defn print-agent-backend-error-context
   [completed-work]
   (if (seq completed-work)
     (println "This is a bug in Claude Code's agent runtime, not in your task or miniforge.\nYour work is complete and safe.")
     (println "This is a bug in Claude Code's agent runtime.")))
 
-(defn- print-task-code-error-context
+(defn print-task-code-error-context
   [completed-work]
   (println "This is an issue with the code being generated or the task specification.")
   (when (seq completed-work)
@@ -73,7 +73,7 @@
     (doseq [work completed-work]
       (println (str "  ⏸️  " work)))))
 
-(defn- print-external-error-context
+(defn print-external-error-context
   [completed-work]
   (println "This is not an issue with your code or miniforge. The external service\nis temporarily unavailable.")
   (when (seq completed-work)
@@ -82,7 +82,7 @@
     (doseq [work completed-work]
       (println (str "  " (style "✅" :foreground :green) " " work)))))
 
-(defn- print-error-header-by-type
+(defn print-error-header-by-type
   [error-type completed-work]
   (case error-type
     :agent-backend (print-agent-backend-error-header completed-work)
@@ -90,7 +90,7 @@
     :external (print-external-error-header)
     (print-generic-error-header)))
 
-(defn- print-error-context
+(defn print-error-context
   [error-type completed-work]
   (case error-type
     :agent-backend (print-agent-backend-error-context completed-work)
@@ -98,14 +98,14 @@
     :external (print-external-error-context completed-work)
     nil))
 
-(defn- print-error-report-url
+(defn print-error-report-url
   [report-url vendor]
   (when report-url
     (println)
     (println (str (style "📝 Please report this to " :foreground :cyan) vendor ":"))
     (println (str "   " report-url))))
 
-(defn- get-retry-recommendation
+(defn get-retry-recommendation
   [error-type]
   (case error-type
     :task-code "Fix the issue and retry the task."
@@ -113,7 +113,7 @@
     :agent-backend "Try again later after the bug is fixed."
     "Check the error and decide if retry is appropriate."))
 
-(defn- print-retry-recommendation
+(defn print-retry-recommendation
   [should-retry error-type completed-work]
   (println)
   (if should-retry

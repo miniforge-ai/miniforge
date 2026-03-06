@@ -28,13 +28,13 @@
 
 (def ^:dynamic *test-worktree* nil)
 
-(defn- create-temp-worktree []
+(defn create-temp-worktree []
   (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")
                           (str "artifact-persist-test-" (random-uuid)))]
     (.mkdirs temp-dir)
     (.getPath temp-dir)))
 
-(defn- cleanup-temp-worktree [dir-path]
+(defn cleanup-temp-worktree [dir-path]
   (when dir-path
     (try (fs/delete-tree dir-path) (catch Exception _e nil))))
 
@@ -60,7 +60,7 @@
 
 ;------------------------------------------------------------------------------ Test Helpers
 
-(defn- create-base-context []
+(defn create-base-context []
   {:execution/id (random-uuid)
    :execution/input {:description "Test implementation"
                      :title "Add feature"
@@ -68,12 +68,12 @@
    :execution/metrics {:tokens 0 :duration-ms 0}
    :execution/phase-results {}})
 
-(defn- execute-phase-enter [phase-name ctx]
+(defn execute-phase-enter [phase-name ctx]
   (let [interceptor (registry/get-phase-interceptor {:phase phase-name})
         enter-fn (:enter interceptor)]
     (enter-fn ctx)))
 
-(defn- execute-phase-leave [phase-name ctx]
+(defn execute-phase-leave [phase-name ctx]
   (let [interceptor (registry/get-phase-interceptor {:phase phase-name})
         leave-fn (:leave interceptor)
         updated-ctx (leave-fn ctx)]

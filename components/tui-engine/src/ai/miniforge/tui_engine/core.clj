@@ -41,7 +41,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Rendering primitives
 
-(defn- paint-screen!
+(defn paint-screen!
   "Impure: diff new-buffer against prev-buffer and write changed cells to screen.
    Must be called under the render lock to prevent concurrent screen writes.
    Returns new-buffer (to be stored as prev-buffer)."
@@ -67,7 +67,7 @@
     (screen/refresh! screen)
     new-buffer))
 
-(defn- do-render!
+(defn do-render!
   "Compute a new buffer from the model and paint it to screen.
    Updates buffer-ref transactionally. Serialized by the render lock."
   [{:keys [view-fn screen buffer-ref render-lock]} model]
@@ -150,7 +150,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Side-effect execution
 
-(defn- execute-side-effect!
+(defn execute-side-effect!
   "Execute a side-effect on a background daemon thread.
    Calls effect-handler-fn with the effect map, then dispatches the result
    message back into the Elm loop via dispatch-fn.
@@ -215,7 +215,7 @@
 ;------------------------------------------------------------------------------ Layer 5
 ;; Input polling thread
 
-(defn- start-input-thread!
+(defn start-input-thread!
   "Start a daemon thread that polls for keyboard input and dispatches messages."
   [app]
   (let [thread (Thread.

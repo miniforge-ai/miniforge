@@ -17,7 +17,7 @@
 
 (def ^:private id-counter (atom 0))
 
-(defn- next-id
+(defn next-id
   "Generate the next message ID."
   []
   (swap! id-counter inc))

@@ -71,7 +71,7 @@
       [:span.status-dot]
       [:span status-text]])))
 
-(defn- workflow-status-icon [run]
+(defn workflow-status-icon [run]
   (let [s (:status run) c (:conclusion run)]
     (cond
       (= s "in_progress") "⏳"
@@ -149,7 +149,7 @@
            :hx-confirm (str "Approve all " (:count low-risk) " low-risk PRs?")}
           (str "Approve " (:count low-risk) " Safe")])]])))
 
-(defn- pr-url [repo number]
+(defn pr-url [repo number]
   (str "/api/pr/" (java.net.URLEncoder/encode repo "UTF-8") "/" number))
 
 (defn pr-detail [{:keys [number title author url repo additions deletions analysis]}]

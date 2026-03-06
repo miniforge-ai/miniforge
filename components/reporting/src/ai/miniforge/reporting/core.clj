@@ -10,7 +10,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helper functions
 
-(defn- safe-get
+(defn safe-get
   "Safely get value from component, returning nil on error."
   [f & args]
   (try
@@ -18,13 +18,13 @@
     (catch Exception _e
       nil)))
 
-(defn- count-by-status
+(defn count-by-status
   "Count workflows by status."
   [workflows status]
   (count (filter #(= status (:workflow/status %)) workflows)))
 
 ;; Note: Keep for future phase-based filtering
-#_(defn- count-by-phase
+#_(defn count-by-phase
     "Count workflows by phase."
     [workflows phase]
     (count (filter #(= phase (:workflow/phase %)) workflows)))
@@ -32,7 +32,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Subscription management (polling-based for BB compatibility)
 
-(defn- create-subscription
+(defn create-subscription
   "Create a new subscription record."
   [topics callback]
   {:subscription/id (random-uuid)
@@ -43,7 +43,7 @@
    :subscription/event-queue (atom [])})
 
 ;; Note: Keep for future event broadcasting support
-#_(defn- add-event-to-subscriptions
+#_(defn add-event-to-subscriptions
     "Add event to relevant subscriptions."
     [subscriptions event]
     (doseq [[_id sub] @subscriptions]
@@ -53,7 +53,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; System status aggregation
 
-(defn- aggregate-workflow-stats
+(defn aggregate-workflow-stats
   "Aggregate workflow statistics."
   [workflow-component]
   (if-let [all-workflows (safe-get wf/get-state workflow-component :all)]
@@ -63,7 +63,7 @@
      :failed (count-by-status all-workflows :failed)}
     {:active 0 :pending 0 :completed 0 :failed 0}))
 
-(defn- aggregate-resource-metrics
+(defn aggregate-resource-metrics
   "Aggregate resource usage metrics."
   [workflow-component]
   (if-let [all-workflows (safe-get wf/get-state workflow-component :all)]
@@ -76,7 +76,7 @@
      all-workflows)
     {:tokens-used 0 :cost-usd 0.0}))
 
-(defn- aggregate-meta-loop-status
+(defn aggregate-meta-loop-status
   "Aggregate meta-loop status."
   [operator-component]
   (if operator-component
@@ -87,7 +87,7 @@
     {:status :not-configured
      :pending-improvements 0}))
 
-(defn- collect-alerts
+(defn collect-alerts
   "Collect system alerts."
   [workflow-stats operator-component]
   (let [alerts []]
@@ -106,7 +106,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Workflow detail aggregation
 
-(defn- build-workflow-timeline
+(defn build-workflow-timeline
   "Build timeline of phase transitions."
   [workflow-state]
   (let [history (:workflow/history workflow-state [])]
@@ -117,7 +117,7 @@
              :completed-at (:completed-at entry)})
           history)))
 
-(defn- get-workflow-artifacts
+(defn get-workflow-artifacts
   "Get artifacts for a workflow."
   [artifact-store workflow-id]
   (if artifact-store
@@ -129,7 +129,7 @@
             (or artifacts [])))
     []))
 
-(defn- get-workflow-logs
+(defn get-workflow-logs
   "Get logs for a workflow."
   [logger _workflow-id]
   (if logger

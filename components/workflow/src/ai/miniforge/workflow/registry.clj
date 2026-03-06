@@ -25,7 +25,7 @@
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Workflow discovery
 
-(defn- load-workflow-from-resource
+(defn load-workflow-from-resource
   "Load workflow definition from classpath resource.
 
    Arguments:
@@ -41,7 +41,7 @@
                         {:resource-path resource-path
                          :error (ex-message e)} e))))))
 
-(defn- load-workflow-registry-config
+(defn load-workflow-registry-config
   "Load workflow registry configuration from resources.
 
    Returns: Vector of workflow names or default list"
@@ -65,7 +65,7 @@
      "standard-sdlc-v2.0.0"
      "canonical-sdlc-v1.0.0"]))
 
-(defn- discover-workflows-from-resources
+(defn discover-workflows-from-resources
   "Discover workflows from classpath resources.
    Workflow names are loaded from resources/config/workflow-registry.edn
 

@@ -29,31 +29,31 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event -> TUI message translation
 
-(defn- workflow-id
+(defn workflow-id
   [event]
   (or (:workflow/id event) (:workflow-id event)))
 
-(defn- workflow-phase
+(defn workflow-phase
   [event]
   (or (:workflow/phase event) (:phase event)))
 
-(defn- agent-id
+(defn agent-id
   [event]
   (or (:agent/id event) (:agent event)))
 
-(defn- status-type
+(defn status-type
   [event]
   (or (:status/type event) (:status-type event)))
 
-(defn- chunk-delta
+(defn chunk-delta
   [event]
   (or (:chunk/delta event) (:delta event)))
 
-(defn- chunk-done?
+(defn chunk-done?
   [event]
   (boolean (or (:chunk/done? event) (:done? event))))
 
-(defn- gate-id
+(defn gate-id
   [event]
   (or (:gate/id event) (:gate event)))
 
@@ -152,7 +152,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Throttled subscription
 
-(defn- create-chunk-aggregator
+(defn create-chunk-aggregator
   "Create a throttled aggregator for agent/chunk events.
    Accumulates deltas and flushes at configurable intervals."
   [dispatch-fn flush-interval-ms]
@@ -180,7 +180,7 @@
               (reset! running? false)
               (.interrupt thread))}))
 
-(defn- buffer-chunk!
+(defn buffer-chunk!
   "Buffer an agent chunk for throttled delivery."
   [aggregator workflow-id agent-id delta]
   (swap! (:buffer aggregator)

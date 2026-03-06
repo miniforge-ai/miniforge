@@ -50,32 +50,32 @@
 ;------------------------------------------------------------------------------ Layer 0b
 ;; Pure helpers
 
-(defn- normalize-repo-slug
+(defn normalize-repo-slug
   [repo]
   (-> (str repo)
       str/trim
       str/lower-case))
 
-(defn- valid-repo-slug?
+(defn valid-repo-slug?
   [repo]
   (boolean
    (or (re-matches github-repo-slug-pattern repo)
        (re-matches gitlab-repo-slug-pattern repo))))
 
-(defn- repo-provider
+(defn repo-provider
   [repo]
   (if (str/starts-with? (or repo "") "gitlab:")
     :gitlab
     :github))
 
-(defn- provider-repo-slug
+(defn provider-repo-slug
   "Strip provider prefix for downstream CLI calls."
   [repo]
   (if (= :gitlab (repo-provider repo))
     (subs repo (count "gitlab:"))
     repo))
 
-(defn- url-encode
+(defn url-encode
   [s]
   (java.net.URLEncoder/encode (str s) "UTF-8"))
 
@@ -84,11 +84,11 @@
   [result]
   (boolean (:success? result)))
 
-(defn- result-success
+(defn result-success
   [data]
   (merge {:success? true} data))
 
-(defn- result-failure
+(defn result-failure
   ([message]
    (result-failure message nil))
   ([message data]
@@ -96,23 +96,23 @@
                                       "Operation failed with no additional error details.")}
           data)))
 
-(defn- gh-error-message
+(defn gh-error-message
   [out err]
   (let [msg (str/trim (or (if (str/blank? err) out err) ""))]
     (when-not (str/blank? msg) msg)))
 
-(defn- ex-msg
+(defn ex-msg
   [^Exception e]
   (or (.getMessage e)
       (some-> e class .getName)
       "unknown exception"))
 
-(defn- normalized-limit
+(defn normalized-limit
   [limit default]
   (let [n (if (integer? limit) limit default)]
     (if (pos? n) n default)))
 
-(defn- normalized-repos
+(defn normalized-repos
   "Extract, normalize, and validate repo slugs from a fleet config map."
   [cfg]
   (->> (get-in cfg [:fleet :repos] [])
@@ -197,7 +197,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Provider CLI interaction (I/O)
 
-(defn- run-gh
+(defn run-gh
   "Execute a `gh` CLI command. Returns {:success? bool :out str :err str}."
   [& args]
   (try
@@ -212,7 +212,7 @@
 
 (declare run-glab)
 
-(defn- fetch-github-prs
+(defn fetch-github-prs
   "Fetch GitHub PRs by state (:open, :closed, :merged, :all)."
   [repo state]
   (let [repo*  (provider-repo-slug repo)
@@ -237,14 +237,14 @@
           (result-failure (str "Failed to parse PR list for " repo ".")
                           {:repo repo :provider :github :error (.getMessage e)}))))))
 
-(defn- fetch-open-github-prs
+(defn fetch-open-github-prs
   [repo]
   (let [result (fetch-github-prs repo :open)]
     (if (succeeded? result)
       (update result :prs (fn [prs] (vec (remove #(#{:closed :merged} (:pr/status %)) prs))))
       result)))
 
-(defn- fetch-open-gitlab-mrs
+(defn fetch-open-gitlab-mrs
   [repo]
   (let [repo* (provider-repo-slug repo)
         endpoint (str "projects/" (url-encode repo*)
@@ -357,7 +357,7 @@
      }
    }")
 
-(defn- run-glab
+(defn run-glab
   "Execute a `glab` CLI command. Returns {:success? bool :out str :err str}."
   [& args]
   (try
@@ -370,7 +370,7 @@
        :out ""
        :err (.getMessage e)})))
 
-(defn- parse-gh-full-name-repos
+(defn parse-gh-full-name-repos
   [out limit]
   (->> (json/parse-string out true)
        (keep :full_name)
@@ -380,7 +380,7 @@
        (take limit)
        vec))
 
-(defn- viewer-repos-gh-args
+(defn viewer-repos-gh-args
   "Build `gh api graphql` arguments for a page of viewer repositories."
   [limit acc after]
   (let [remaining (- limit (count acc))
@@ -390,7 +390,7 @@
              "-F" (str "perPage=" per-page)]
       after (conj "-F" (str "after=" after)))))
 
-(defn- parse-viewer-repos-page
+(defn parse-viewer-repos-page
   "Extract normalized repo slugs and pagination info from a GraphQL viewer response."
   [parsed]
   (let [nodes (or (get-in parsed [:data :viewer :repositories :nodes] []) [])
@@ -405,7 +405,7 @@
      :has-next? (boolean (:hasNextPage page-info))
      :cursor (:endCursor page-info)}))
 
-(defn- list-viewer-repos
+(defn list-viewer-repos
   "List repos visible to the authenticated user across affiliations."
   [limit]
   (try
@@ -430,7 +430,7 @@
       (result-failure "Failed to list accessible repositories."
                       {:error (ex-msg e)}))))
 
-(defn- list-github-owner-repos
+(defn list-github-owner-repos
   [owner limit]
   (let [owner* (some-> owner str str/trim not-empty)
         org-endpoint (str "orgs/" owner* "/repos?per_page=100&type=all&sort=updated")
@@ -451,7 +451,7 @@
           (result-failure "Failed to parse repository list."
                           {:owner owner* :provider :github :error (ex-msg e)}))))))
 
-(defn- list-github-viewer-orgs
+(defn list-github-viewer-orgs
   []
   (let [result (run-gh "api" "user/orgs?per_page=100")]
     (if-not (succeeded? result)
@@ -468,7 +468,7 @@
           (result-failure "Failed to parse organization list."
                           {:provider :github :error-source :orgs :error (ex-msg e)}))))))
 
-(defn- list-github-user-repos-fallback
+(defn list-github-user-repos-fallback
   [limit]
   (let [result (run-gh "api" "user/repos?per_page=100&sort=updated")]
     (if-not (succeeded? result)
@@ -482,7 +482,7 @@
           (result-failure "Failed to parse repository list."
                           {:owner nil :provider :github :error-source :rest :error (ex-msg e)}))))))
 
-(defn- list-github-accessible-repos
+(defn list-github-accessible-repos
   [limit]
   (let [viewer (list-viewer-repos limit)
         orgs-result (list-github-viewer-orgs)
@@ -521,7 +521,7 @@
                               "Failed to list accessible repositories.")
                           {:owner nil :provider :github :error-source :rest}))))))
 
-(defn- parse-glab-project-repos
+(defn parse-glab-project-repos
   [out limit]
   (->> (json/parse-string out true)
        (keep :path_with_namespace)
@@ -532,7 +532,7 @@
        (take limit)
        vec))
 
-(defn- list-gitlab-repos
+(defn list-gitlab-repos
   [{:keys [owner limit]}]
   (let [owner* (some-> owner str str/trim not-empty)
         endpoint (if owner*

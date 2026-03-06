@@ -56,7 +56,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Footer rendering
 
-(defn- resolve-footer-segment
+(defn resolve-footer-segment
   "Pick the right footer segment based on model state."
   [model segments]
   (let [sel-count (count (:selected-ids model))
@@ -76,7 +76,7 @@
       :else
       (get segments :normal ""))))
 
-(defn- render-footer
+(defn render-footer
   "Render a footer node. Appends flash message if present."
   [model theme [cols rows] segments]
   (let [base (resolve-footer-segment model segments)
@@ -87,7 +87,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Widget rendering
 
-(defn- resolve-columns
+(defn resolve-columns
   "Resolve :flex width columns to fill remaining space.
    Accounts for 1-char inter-column gaps matching the table renderer."
   [columns cols sel-w]
@@ -101,7 +101,7 @@
                  0)]
     (mapv (fn [c] (if (= :flex (:width c)) (assoc c :width flex-w) c)) columns)))
 
-(defn- render-table-widget
+(defn render-table-widget
   "Render a table widget from spec."
   [model theme [cols rows] {:keys [data-fn columns selectable? selection-col?]}]
   (let [project-fn (project/get-projection data-fn)
@@ -134,7 +134,7 @@
          :selected-fg (get theme :selected-fg :white)
          :selected-bg (get theme :selected-bg :blue)}))))
 
-(defn- render-tree-widget
+(defn render-tree-widget
   "Render a tree widget from spec."
   [model _theme [cols rows] {:keys [data-fn]}]
   (let [project-fn (project/get-projection data-fn)
@@ -145,7 +145,7 @@
        :expanded expanded
        :selected (:selected-idx model)})))
 
-(defn- render-kanban-widget
+(defn render-kanban-widget
   "Render a kanban widget from spec."
   [model _theme [cols rows] {:keys [data-fn]}]
   (let [project-fn (project/get-projection data-fn)
@@ -157,7 +157,7 @@
 
 (declare interpret-node)
 
-(defn- interpret-split-v
+(defn interpret-split-v
   "Interpret a vertical split node."
   [model theme [cols rows] {:keys [ratio children]}]
   (let [r (if (= :footer ratio)
@@ -167,14 +167,14 @@
       (fn [size] (interpret-node model theme size (first children)))
       (fn [size] (interpret-node model theme size (second children))))))
 
-(defn- interpret-split-h
+(defn interpret-split-h
   "Interpret a horizontal split node."
   [model theme [cols rows] {:keys [ratio children]}]
   (layout/split-h [cols rows] ratio
     (fn [size] (interpret-node model theme size (first children)))
     (fn [size] (interpret-node model theme size (second children)))))
 
-(defn- interpret-box
+(defn interpret-box
   "Interpret a box node."
   [model theme [cols rows] {:keys [title title-fn child]}]
   (let [resolved-title (if title-fn
@@ -185,7 +185,7 @@
       {:title resolved-title :border :single :fg (get theme :border :default)
        :content-fn (fn [size] (interpret-node model theme size child))})))
 
-(defn- interpret-text
+(defn interpret-text
   "Interpret a text node."
   [_model theme [cols rows] {:keys [content style]}]
   (layout/text [cols rows] content

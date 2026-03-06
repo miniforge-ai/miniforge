@@ -13,7 +13,7 @@
 ;; leave-review status tests
 ;; ============================================================================
 
-(defn- simulate-leave-review
+(defn simulate-leave-review
   "Simulate the leave-review logic for a given decision and iteration state.
    Returns the phase map after leave-review processing."
   [decision iterations max-iterations]

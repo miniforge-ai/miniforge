@@ -36,12 +36,12 @@
 ;; Helper Functions
 ;; ============================================================================
 
-(defn- docker-cmd
+(defn docker-cmd
   "Build docker command with optional custom path."
   [docker-path & args]
   (apply vector (or docker-path "docker") args))
 
-(defn- run-docker
+(defn run-docker
   "Execute a docker command and return the result."
   [docker-path & args]
   (try
@@ -49,7 +49,7 @@
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out ""})))
 
-(defn- build-env-args
+(defn build-env-args
   "Build -e arguments for environment variables."
   [env-map]
   (mapcat (fn [[k v]] ["-e" (str (name k) "=" v)]) env-map))
@@ -90,7 +90,7 @@
                 ["-v" mount-str]))
             mounts)))
 
-(defn- build-resource-args
+(defn build-resource-args
   "Build resource limit arguments.
    Merges provided resources with defaults."
   [resources]
@@ -266,7 +266,7 @@
   (let [result (run-docker docker-path "image" "inspect" image)]
     (zero? (:exit result))))
 
-(defn- find-dockerfile-path
+(defn find-dockerfile-path
   "Find the Dockerfile resource on the classpath or filesystem.
    Returns absolute path to the Dockerfile."
   [resource-path]

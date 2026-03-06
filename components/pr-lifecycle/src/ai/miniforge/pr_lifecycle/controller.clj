@@ -78,7 +78,7 @@
          :created-at (java.util.Date.)
          :updated-at (java.util.Date.)}))
 
-(defn- update-status!
+(defn update-status!
   "Update controller status with timestamp."
   [controller new-status]
   (swap! controller assoc
@@ -86,7 +86,7 @@
          :updated-at (java.util.Date.))
   new-status)
 
-(defn- add-history!
+(defn add-history!
   "Add an event to controller history."
   [controller event-type data]
   (swap! controller update :history conj

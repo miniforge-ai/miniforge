@@ -38,9 +38,9 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pipeline helpers and steps
 
-(defn- failed? [state] (contains? state :failure))
+(defn failed? [state] (contains? state :failure))
 
-(defn- step-ensure-installed
+(defn step-ensure-installed
   "Ensure the LSP binary is installed."
   [state]
   (if (failed? state) state
@@ -50,7 +50,7 @@
           (assoc state :failure install-result)
           (assoc state :actual-command (:command install-result))))))
 
-(defn- step-start-process
+(defn step-start-process
   "Start the LSP server subprocess."
   [state]
   (if (failed? state) state
@@ -61,13 +61,13 @@
             (assoc state :failure proc-result)
             (assoc state :process proc-result))))))
 
-(defn- step-create-client
+(defn step-create-client
   "Create the LSP client from the running process."
   [state]
   (if (failed? state) state
       (assoc state :client (client/create-client (:process state) nil))))
 
-(defn- step-initialize
+(defn step-initialize
   "Initialize the LSP server connection."
   [state]
   (if (failed? state) state
@@ -79,7 +79,7 @@
             (assoc state :failure init-result))
           state))))
 
-(defn- step-register
+(defn step-register
   "Register the running server in the manager's servers atom."
   [state]
   (if (failed? state) state
@@ -93,7 +93,7 @@
         (log-fn "LSP server started:" (name tool-id))
         state)))
 
-(defn- pipeline->result
+(defn pipeline->result
   "Convert pipeline state to result."
   [state]
   (if (failed? state)
@@ -103,7 +103,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Server lifecycle
 
-(defn- start-server
+(defn start-server
   "Start an LSP server for a tool.
 
    Returns {:client LSPClient} on success, anomaly map on failure."

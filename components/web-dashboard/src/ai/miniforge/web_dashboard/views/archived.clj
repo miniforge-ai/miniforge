@@ -7,7 +7,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure helpers
 
-(defn- format-date
+(defn format-date
   "Format timestamp as full date+time for historical entries."
   [ts]
   (let [date (cond
@@ -21,7 +21,7 @@
       (.format (java.text.SimpleDateFormat. "yyyy-MM-dd HH:mm") date)
       "—")))
 
-(defn- format-file-size
+(defn format-file-size
   "Format bytes to human-readable size."
   [bytes]
   (cond
@@ -30,7 +30,7 @@
     (< bytes (* 1024 1024))   (str (quot bytes 1024) " KB")
     :else                     (format "%.1f MB" (/ bytes 1024.0 1024.0))))
 
-(defn- status-label
+(defn status-label
   [status]
   (case status
     :running   "Running"

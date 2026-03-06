@@ -171,7 +171,7 @@
   [strategies errors context]
   (first (filter #(can-repair? % errors context) strategies)))
 
-(defn- make-max-attempts-result
+(defn make-max-attempts-result
   "Create a result map for max attempts exceeded."
   [attempt results errors]
   {:success? false
@@ -180,7 +180,7 @@
    :errors errors
    :message "Maximum repair attempts exceeded"})
 
-(defn- make-exhausted-strategies-result
+(defn make-exhausted-strategies-result
   "Create a result map for exhausted strategies."
   [attempt results errors]
   {:success? false
@@ -189,7 +189,7 @@
    :errors errors
    :message "All repair strategies exhausted"})
 
-(defn- make-success-result
+(defn make-success-result
   "Create a result map for successful repair."
   [result attempt results]
   {:success? true
@@ -198,7 +198,7 @@
    :results (conj results result)
    :strategy (:strategy result)})
 
-(defn- make-escalation-result
+(defn make-escalation-result
   "Create a result map for escalation."
   [result attempt results errors]
   {:success? false
@@ -208,14 +208,14 @@
    :errors errors
    :message "Repair escalated to outer loop"})
 
-(defn- try-repair-with-strategy
+(defn try-repair-with-strategy
   "Try to repair using a single strategy.
    Returns result map or nil if strategy can't handle errors."
   [strategy artifact errors context]
   (when (can-repair? strategy errors context)
     (repair strategy artifact errors context)))
 
-(defn- process-repair-result
+(defn process-repair-result
   "Process the result of a repair attempt.
    Returns a map with :action (:success, :escalate, or :continue) and :result."
   [result attempt results errors]

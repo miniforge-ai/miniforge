@@ -15,7 +15,7 @@
 (def ^:private events-dir
   (str (fs/home) "/.miniforge/events"))
 
-(defn- read-event-file
+(defn read-event-file
   "Read all events from a workflow event file (one EDN map per line)."
   [workflow-id]
   (let [path (str events-dir "/" workflow-id ".edn")]
@@ -30,7 +30,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Context reconstruction
 
-(defn- extract-completed-dag-tasks
+(defn extract-completed-dag-tasks
   "Extract task IDs that completed successfully from :dag/task-completed events."
   [events]
   (->> events
@@ -38,7 +38,7 @@
        (map :dag/task-id)
        set))
 
-(defn- extract-dag-pause-info
+(defn extract-dag-pause-info
   "Find last :dag/paused event and extract completed task IDs and reason."
   [events]
   (when-let [pause-event (->> events
@@ -47,7 +47,7 @@
     {:completed-task-ids (set (:dag/completed-task-ids pause-event))
      :pause-reason (:dag/pause-reason pause-event)}))
 
-(defn- extract-completed-phases
+(defn extract-completed-phases
   "Extract phase names that completed successfully from events."
   [events]
   (->> events
@@ -55,7 +55,7 @@
        (filter #(= :success (:phase/outcome %)))
        (mapv :workflow/phase)))
 
-(defn- extract-phase-results
+(defn extract-phase-results
   "Build :execution/phase-results from phase-completed events."
   [events]
   (->> events
@@ -67,7 +67,7 @@
                          :timestamp (:event/timestamp evt)}))
                {})))
 
-(defn- find-workflow-spec
+(defn find-workflow-spec
   "Extract workflow spec from workflow-started event."
   [events]
   (->> events

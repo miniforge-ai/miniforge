@@ -27,14 +27,14 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Rendering helpers
 
-(defn- risk-indicator [risk]
+(defn risk-indicator [risk]
   (case risk
     :low    "LOW"
     :medium "MED"
     :high   "HIGH"
     "---"))
 
-(defn- readiness-bar [readiness cols]
+(defn readiness-bar [readiness cols]
   (let [pct (int (* (or readiness 0) 100))
         bar-width (max 1 (- cols 5))
         filled (int (* bar-width (or readiness 0)))]
@@ -42,17 +42,17 @@
          (apply str (repeat (- bar-width filled) "░"))
          " " pct "%")))
 
-(defn- format-pr-row [pr cols]
+(defn format-pr-row [pr cols]
   {:title (or (:pr/title pr) "Untitled")
    :repo  (or (:pr/repo pr) "")
    :readiness (readiness-bar (:pr/readiness pr) (min 15 (max 8 (quot cols 6))))
    :risk (risk-indicator (:pr/risk pr))})
 
-(defn- render-title-bar [[cols rows]]
+(defn render-title-bar [[cols rows]]
   (layout/text [cols rows] " MINIFORGE │ PR Fleet"
                {:fg :cyan :bold? true}))
 
-(defn- render-table [pr-items selected [cols rows]]
+(defn render-table [pr-items selected [cols rows]]
   (if (empty? pr-items)
     (layout/text [cols rows] "  No PRs tracked. Use :add-repo to add repositories."
                  {:fg :default})
@@ -65,7 +65,7 @@
          :data (mapv #(format-pr-row % cols) pr-items)
          :selected-row selected}))))
 
-(defn- render-footer [flash-message [cols rows]]
+(defn render-footer [flash-message [cols rows]]
   (layout/text [cols rows]
     (str " j/k:navigate  Enter:detail  r:sync  b:kanban  ::cmd  q:quit"
          (when flash-message (str "  │ " flash-message)))

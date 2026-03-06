@@ -53,7 +53,7 @@
 
 ;;------------------------------------------------------------------------------ Layer 0: File Discovery
 
-(defn- event-file-path
+(defn event-file-path
   "Get path to event file for a workflow.
 
    Arguments:
@@ -66,7 +66,7 @@
         event-file (str workflow-id ".edn")]
     (.getPath (io/file events-dir event-file))))
 
-(defn- log-file-path
+(defn log-file-path
   "Get path to log file for a workflow.
 
    Arguments:
@@ -222,7 +222,7 @@
 
 ;;------------------------------------------------------------------------------ Layer 4: Tailing Helpers
 
-(defn- show-last-n-lines
+(defn show-last-n-lines
   "Show last N lines from a file without following.
 
    Arguments:
@@ -240,7 +240,7 @@
           (when (filter-fn entry)
             (println (format-fn entry))))))))
 
-(defn- print-stream-header
+(defn print-stream-header
   "Print header for stream tailing.
 
    Arguments:
@@ -254,7 +254,7 @@
     (println (colorize :gray extra-info)))
   (println (colorize :gray (apply str (repeat 80 "─")))))
 
-(defn- tail-stream-file
+(defn tail-stream-file
   "Generic file tailing for logs/events.
 
    Arguments:
@@ -370,7 +370,7 @@
 
 ;;------------------------------------------------------------------------------ Layer 6: Command Helpers
 
-(defn- list-files-command
+(defn list-files-command
   "List files with sizes.
 
    Arguments:
@@ -386,7 +386,7 @@
             (println (str "  " f " (" (format "%.2f" size-mb) " MB)")))))
       (println (colorize :yellow (str "No " label " found"))))))
 
-(defn- cat-file-command
+(defn cat-file-command
   "Display contents of a file.
 
    Arguments:

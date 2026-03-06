@@ -30,20 +30,20 @@
 
 ;; Helper functions
 
-(defn- find-workflow-idx
+(defn find-workflow-idx
   "Find index of workflow with given ID in workflows vector."
   [workflows workflow-id]
   (some (fn [[i wf]] (when (= (:id wf) workflow-id) i))
         (map-indexed vector workflows)))
 
-(defn- update-workflow-at
+(defn update-workflow-at
   "Update workflow at index using update-fn."
   [model idx update-fn]
   (if idx
     (update-in model [:workflows idx] update-fn)
     model))
 
-(defn- update-detail-if-active
+(defn update-detail-if-active
   "Apply update-fn to detail if workflow-id matches active detail."
   [model workflow-id update-fn]
   (if (and workflow-id
@@ -51,7 +51,7 @@
     (update-fn model)
     model))
 
-(defn- ensure-workflow
+(defn ensure-workflow
   "Ensure a workflow row exists so updates remain visible even if
    :workflow/started arrives late or is missing."
   [model workflow-id]
@@ -63,14 +63,14 @@
 
 ;; Timestamp wrapper
 
-(defn- with-timestamp
+(defn with-timestamp
   "Wrap a handler result with :last-updated timestamp."
   [model]
   (assoc model :last-updated (java.util.Date.)))
 
 ;; Event helpers — extracted to avoid cond-> inside -> antipattern
 
-(defn- apply-phase-change
+(defn apply-phase-change
   "Update workflow phase in list and detail context."
   [model idx workflow-id phase]
   (as-> model m
@@ -78,7 +78,7 @@
     (update-detail-if-active m workflow-id
       #(update-in % [:detail :phases] conj {:phase phase :status :running}))))
 
-(defn- apply-agent-status-update
+(defn apply-agent-status-update
   "Update agent status in workflow list and detail context."
   [model idx workflow-id agent status message]
   (let [agent-entry {:status status :message message}]
@@ -87,7 +87,7 @@
       (update-detail-if-active m workflow-id
         #(assoc-in % [:detail :current-agent] (assoc agent-entry :agent agent))))))
 
-(defn- apply-gate-result
+(defn apply-gate-result
   "Record gate result in workflow list, flash on failure, and update detail."
   [model idx workflow-id gate passed? payload]
   (as-> model m
@@ -101,7 +101,7 @@
 
 ;; Event handlers
 
-(defn- link-chain-instance
+(defn link-chain-instance
   "When a chain step is active, record the workflow instance UUID so
    the view layer can show the chain indicator on the correct row."
   [model workflow-id]
@@ -285,12 +285,12 @@
                                    (count (distinct (map :pr/repo prs))) " repo(s)"))
         with-timestamp)))
 
-(defn- pr-match?
+(defn pr-match?
   "True when pr matches by [repo, number]."
   [repo number pr]
   (and (= (:pr/repo pr) repo) (= (:pr/number pr) number)))
 
-(defn- merge-matching-pr
+(defn merge-matching-pr
   "Merge updated fields into the PR matching [repo, number]; pass others through."
   [repo number pr-data prs]
   (mapv (fn [pr]
@@ -299,7 +299,7 @@
             pr))
         (or prs [])))
 
-(defn- remove-matching-pr
+(defn remove-matching-pr
   "Remove the PR matching [repo, number] from the vector."
   [repo number prs]
   (into [] (remove #(pr-match? repo number %)) (or prs [])))
@@ -427,7 +427,7 @@
            :side-effect (effect/sync-prs))
     (assoc model :flash-message (str "Discover failed: " (or error "unknown error")))))
 
-(defn- repos-browsed-ok
+(defn repos-browsed-ok
   "Success path: populate browse-repos cache, reset repo-manager if source
    is :repo-manager, and flash a summary."
   [model {:keys [repos owner provider warnings source]}]
@@ -456,7 +456,7 @@
                 (when (seq warnings*)
                   (str " | warnings: " (count warnings*)))))))
 
-(defn- repos-browsed-err
+(defn repos-browsed-err
   "Failure path: clear loading flag and flash error details."
   [model {:keys [error error-source provider]}]
   (assoc model

@@ -78,14 +78,14 @@
    :logging {:level :info
              :output :human}})
 
-(defn- get-opts
+(defn get-opts
   "Extract opts from dispatch result."
   [m]
   (if (contains? m :opts)
     (:opts m)
     m))
 
-(defn- check-command
+(defn check-command
   "Check if a command is available."
   [cmd]
   (let [{:keys [exit]} (process/sh "which" cmd)]

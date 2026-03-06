@@ -31,14 +31,14 @@
 ;;------------------------------------------------------------------------------ Layer 0
 ;; Result predicates
 
-(defn- succeeded?
+(defn succeeded?
   "Check if a result map indicates success."
   [result]
   (boolean (:success? result)))
 
 ;; Pattern loading with workaround metadata
 
-(defn- load-workaround-patterns
+(defn load-workaround-patterns
   "Load workaround patterns from resources.
 
    Returns: Vector of pattern maps with :id, :regex, :workaround"
@@ -59,7 +59,7 @@
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Pattern matching
 
-(defn- matches-workaround-pattern?
+(defn matches-workaround-pattern?
   "Check if error message matches a workaround pattern.
 
    Arguments:
@@ -90,14 +90,14 @@
 ;;------------------------------------------------------------------------------ Layer 2
 ;; User approval tracking
 
-(defn- approval-file-path
+(defn approval-file-path
   "Get path to workaround approval tracking file.
 
    Returns: String path to ~/.miniforge/workaround_approvals.edn"
   []
   (str (System/getProperty "user.home") "/.miniforge/workaround_approvals.edn"))
 
-(defn- load-approvals
+(defn load-approvals
   "Load workaround approval history.
 
    Returns: Map of pattern-id -> approval status"
@@ -110,7 +110,7 @@
           {}))
       {})))
 
-(defn- save-approval!
+(defn save-approval!
   "Save workaround approval.
 
    Arguments:
@@ -122,7 +122,7 @@
     (io/make-parents path)
     (spit path (pr-str approvals))))
 
-(defn- check-approval
+(defn check-approval
   "Check if workaround is approved.
 
    Arguments:
@@ -142,7 +142,7 @@
 ;;------------------------------------------------------------------------------ Layer 3
 ;; Workaround execution
 
-(defn- execute-shell-command
+(defn execute-shell-command
   "Execute shell command and return result.
 
    Arguments:
@@ -163,7 +163,7 @@
       {:success? false
        :error (ex-message e)})))
 
-(defn- apply-shell-workaround
+(defn apply-shell-workaround
   "Apply shell command workaround.
 
    Arguments:
@@ -182,7 +182,7 @@
        :message (str "Failed to execute: " command)
        :error (or (:error result) (:output result))})))
 
-(defn- apply-env-var-workaround
+(defn apply-env-var-workaround
   "Apply environment variable workaround.
 
    Arguments:
@@ -196,7 +196,7 @@
    :message (str "Please set environment variable: " (:env-var workaround))
    :suggestion (str "export " (:env-var workaround) "='your-value-here'")})
 
-(defn- apply-backend-switch-workaround
+(defn apply-backend-switch-workaround
   "Apply backend switch workaround.
 
    Arguments:

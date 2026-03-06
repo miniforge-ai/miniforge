@@ -11,7 +11,7 @@
 
 (def ^:dynamic *test-health-path* nil)
 
-(defn- temp-health-path []
+(defn temp-health-path []
   (str (System/getProperty "java.io.tmpdir")
        "/miniforge-test-health-" (random-uuid) ".edn"))
 
@@ -78,13 +78,13 @@
   (shutdown [this] this)
   (abort [this _reason] {:aborted true}))
 
-(defn- make-throwing-agent [ex]
+(defn make-throwing-agent [ex]
   (->ThrowingAgent (random-uuid) :tester #{} {} (random-uuid) {:status :ready} ex))
 
-(defn- make-success-agent []
+(defn make-success-agent []
   (->SuccessAgent (random-uuid) :tester #{} {} (random-uuid) {:status :ready}))
 
-(defn- make-task []
+(defn make-task []
   {:task/id (random-uuid)
    :task/type :test
    :task/status :pending

@@ -68,7 +68,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; FSM-based state transitions
 
-(defn- record-fsm-transition
+(defn record-fsm-transition
   "Record an FSM state transition in history."
   [state from-status to-status event]
   (let [transition {:from-status from-status
@@ -79,7 +79,7 @@
         (update :execution/history conj transition)
         (assoc :execution/updated-at (System/currentTimeMillis)))))
 
-(defn- record-phase-transition
+(defn record-phase-transition
   "Record a phase transition in history."
   [state from-phase to-phase reason]
   (let [transition {:from-phase from-phase

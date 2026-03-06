@@ -3,7 +3,7 @@
    [babashka.process :as p]
    [clojure.string :as str]))
 
-(defn- run-stream! [& args]
+(defn run-stream! [& args]
   (let [{:keys [exit]} (deref (apply p/process {:out :inherit :err :inherit} args))]
     exit))
 

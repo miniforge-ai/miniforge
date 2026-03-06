@@ -71,7 +71,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Status checking
 
-(defn- check-command-available?
+(defn check-command-available?
   "Check if a command is available on PATH."
   [cmd]
   (try
@@ -80,7 +80,7 @@
     (catch Exception _
       false)))
 
-(defn- check-api-key-set?
+(defn check-api-key-set?
   "Check if an API key environment variable is set."
   [var-name]
   (and var-name
@@ -154,7 +154,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Display helpers
 
-(defn- status-icon
+(defn status-icon
   "Get status icon for backend."
   [status]
   (case status

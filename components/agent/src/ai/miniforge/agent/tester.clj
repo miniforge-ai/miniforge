@@ -78,7 +78,7 @@
           :else
           {:valid? true :errors nil})))))
 
-(defn- extract-test-framework
+(defn extract-test-framework
   "Extract the testing framework from file content or context."
   [files context]
   (let [content (str/join "\n" (map :content files))]
@@ -93,7 +93,7 @@
           (re-find #"describe\(" content) "mocha"
           :else "clojure.test"))))
 
-(defn- count-assertions
+(defn count-assertions
   "Count assertions in test content."
   [content]
   (+ (count (re-seq #"\(is\s" content))
@@ -102,7 +102,7 @@
      (count (re-seq #"assert" content))
      (count (re-seq #"expect\(" content))))
 
-(defn- count-test-cases
+(defn count-test-cases
   "Count test cases in test content."
   [content]
   (+ (count (re-seq #"\(deftest\s" content))
@@ -111,7 +111,7 @@
      (count (re-seq #"it\(" content))
      (count (re-seq #"test\(" content))))
 
-(defn- code->text
+(defn code->text
   "Convert code artifact to text for the LLM."
   [code-artifact]
   (if (map? code-artifact)
@@ -122,7 +122,7 @@
       (str/join "\n\n" file-texts))
     (str code-artifact)))
 
-(defn- parse-test-response
+(defn parse-test-response
   "Parse the LLM response to extract test artifact.
    Handles both EDN in code blocks and plain EDN."
   [response-content]
@@ -135,7 +135,7 @@
     (catch Exception _
       nil)))
 
-(defn- extract-test-code-blocks
+(defn extract-test-code-blocks
   "Extract test code blocks from markdown response."
   [response-content]
   (let [blocks (re-seq #"```(?:clojure)?\s*\n(\(ns [^`]+)\n?```" response-content)]
@@ -152,7 +152,7 @@
 ;; make-fallback-tests removed — silent fallback masks real failures,
 ;; prevents retry/repair from working, and short-circuits checkpoint resume.
 
-(defn- repair-test-artifact
+(defn repair-test-artifact
   "Attempt to repair a test artifact based on validation errors."
   [artifact errors _context]
   (let [repaired (atom artifact)]

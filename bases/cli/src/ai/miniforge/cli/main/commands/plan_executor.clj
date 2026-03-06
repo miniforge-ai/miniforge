@@ -12,12 +12,12 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Format normalization
 
-(defn- deterministic-uuid
+(defn deterministic-uuid
   "Generate a deterministic UUID from a string id (for DAG task-id → UUID conversion)."
   [s]
   (UUID/nameUUIDFromBytes (.getBytes (str s) "UTF-8")))
 
-(defn- normalize-dag-task
+(defn normalize-dag-task
   "Normalize a DAG-format task to plan-format task."
   [task]
   (let [task-id (if (uuid? (:task/id task))
@@ -40,14 +40,14 @@
      :task/acceptance-criteria criteria
      :task/type (:task/type task :implement)}))
 
-(defn- normalize-dag-to-plan
+(defn normalize-dag-to-plan
   "Convert DAG format ({:dag-id, :tasks}) to plan format ({:plan/id, :plan/tasks})."
   [dag]
   {:plan/id (:dag-id dag)
    :plan/title (or (:description dag) (:dag-id dag))
    :plan/tasks (mapv normalize-dag-task (:tasks dag))})
 
-(defn- detect-plan-format
+(defn detect-plan-format
   "Detect whether input is already plan format or needs conversion."
   [parsed]
   (cond
@@ -58,7 +58,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Execution context setup
 
-(defn- build-execution-workflow
+(defn build-execution-workflow
   "Build a workflow definition for plan execution (implement → verify → done)."
   [plan-id]
   {:workflow/id (keyword (str "plan-exec-" plan-id))

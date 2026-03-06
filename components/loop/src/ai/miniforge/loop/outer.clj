@@ -159,7 +159,7 @@
 ;------------------------------------------------------------------------------ Layer 1.5
 ;; Result helpers
 
-(defn- phase-succeeded?
+(defn phase-succeeded?
   "Check if a phase result indicates success (supports both :success? and :status patterns)."
   [result]
   (or (:success? result)
@@ -167,7 +167,7 @@
 
 ;; Logging helpers
 
-(defn- log-phase
+(defn log-phase
   "Log a phase event at the specified level, only when logger is available."
   [logger level event-kw phase message & [extra-data]]
   (when logger

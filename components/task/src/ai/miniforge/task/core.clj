@@ -128,7 +128,7 @@
 
 ;; State transitions
 
-(defn- transition-task!
+(defn transition-task!
   "Internal helper to perform a state transition with logging."
   [task-id to-state additional-changes logger event-key message]
   (let [task (get-task task-id)]

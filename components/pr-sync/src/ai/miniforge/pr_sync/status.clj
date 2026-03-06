@@ -118,7 +118,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; GitLab MR status mapping + unified conversion
 
-(defn- gitlab-status
+(defn gitlab-status
   [mr]
   (let [state (some-> (:state mr) str str/lower-case)
         draft? (or (true? (:draft mr))
@@ -133,7 +133,7 @@
       (contains? #{"can_be_merged" "mergeable"} merge-status) :merge-ready
       :else :open)))
 
-(defn- gitlab-ci-status
+(defn gitlab-ci-status
   [mr]
   (let [status (some-> (or (get-in mr [:head_pipeline :status])
                            (get-in mr [:pipeline :status]))

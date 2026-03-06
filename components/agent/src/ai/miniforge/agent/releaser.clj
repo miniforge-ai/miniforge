@@ -65,7 +65,7 @@
         :else
         {:valid? true :errors nil}))))
 
-(defn- summarize-files
+(defn summarize-files
   "Create a summary of file operations."
   [files]
   (let [by-action (group-by :action files)
@@ -80,7 +80,7 @@
       (str/join ", " parts)
       "no file changes")))
 
-(defn- input->text
+(defn input->text
   "Convert input to text for the LLM."
   [input context]
   (let [code-artifact (:code-artifact input)
@@ -101,7 +101,7 @@
          (when-let [repo (:repository context)]
            (str "## Repository\n" repo "\n\n")))))
 
-(defn- parse-release-response
+(defn parse-release-response
   "Parse the LLM response to extract release artifact.
    Handles both EDN in code blocks and plain EDN.
    Returns nil if the parsed result is not a map."
@@ -116,7 +116,7 @@
     (catch Exception _
       nil)))
 
-(defn- slugify
+(defn slugify
   "Convert a string to a URL-safe slug.
    Handles basic ASCII transliteration and normalizes spacing."
   [s]
@@ -142,7 +142,7 @@
 ;; make-fallback-artifact removed — silent fallback masks real failures,
 ;; prevents retry/repair from working, and short-circuits checkpoint resume.
 
-(defn- repair-release-artifact
+(defn repair-release-artifact
   "Attempt to repair a release artifact based on validation errors."
   [artifact errors _context]
   (let [repaired (atom artifact)]

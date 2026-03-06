@@ -20,7 +20,7 @@
 
 ;; System prompt sourced from defaults — override via config :system-prompt
 
-(defn- summarize-signal
+(defn summarize-signal
   "Create a compact string summary of a single signal."
   [sig]
   (let [type-str (name (:signal/type sig))
@@ -35,7 +35,7 @@
          (when (:workflow-id data) (str "wf=" (:workflow-id data) " "))
          "ts=" ts)))
 
-(defn- build-detect-prompt
+(defn build-detect-prompt
   "Build prompt for pattern detection from a sequence of signals.
 
    Keeps total input under ~1000 tokens by limiting signal count and summary length."
@@ -60,7 +60,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Response parsing
 
-(defn- parse-pattern-type
+(defn parse-pattern-type
   "Parse a pattern type string to keyword, returning nil for unknown types."
   [type-str]
   (let [kw (keyword (str/lower-case (str/trim (str type-str))))]
@@ -69,7 +69,7 @@
                      kw)
       kw)))
 
-(defn- parse-pattern
+(defn parse-pattern
   "Parse a single pattern map from LLM JSON output into a canonical pattern map."
   [raw]
   (let [pattern-type (parse-pattern-type (:type raw))]
@@ -86,7 +86,7 @@
        :pattern/rationale   (get raw :rationale "No rationale provided")
        :pattern/source      :llm})))
 
-(defn- parse-detect-response
+(defn parse-detect-response
   "Parse LLM JSON response into a sequence of pattern maps.
 
    Returns empty sequence on parse failure (fail-open)."

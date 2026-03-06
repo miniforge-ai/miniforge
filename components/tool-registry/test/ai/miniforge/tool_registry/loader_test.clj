@@ -31,7 +31,7 @@
 
 ;------------------------------------------------------------------------------ Helper functions
 
-(defn- write-tool-file [dir filename content]
+(defn write-tool-file [dir filename content]
   (let [parent (io/file dir)]
     (.mkdirs parent)
     (spit (io/file parent filename) (pr-str content))))

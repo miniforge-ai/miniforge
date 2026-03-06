@@ -22,7 +22,7 @@
    [ai.miniforge.web-dashboard.state.core :as state-core]
    [ai.miniforge.web-dashboard.state.trains :as trains]))
 
-(defn- temp-config-path
+(defn temp-config-path
   []
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory
                       "fleet-e2e-config"
@@ -30,13 +30,13 @@
     (.deleteOnExit dir)
     (str (.getAbsolutePath dir) "/config.edn")))
 
-(defn- arg-value
+(defn arg-value
   [args flag]
   (some (fn [[a b]]
           (when (= a flag) b))
         (partition 2 1 args)))
 
-(defn- fake-run-gh
+(defn fake-run-gh
   [& args]
   (let [[cmd subcmd] args]
     (cond
@@ -79,7 +79,7 @@
        :out ""
        :err (str "Unexpected gh call: " args)})))
 
-(defn- route-json
+(defn route-json
   [handler method uri query-string]
   (let [response (handler {:uri uri
                            :request-method method

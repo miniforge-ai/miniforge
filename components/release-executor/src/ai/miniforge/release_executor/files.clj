@@ -10,7 +10,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; File operation helpers
 
-(defn- ensure-parent-dir!
+(defn ensure-parent-dir!
   "Create parent directories for a file path if they don't exist."
   [file-path]
   (let [parent (fs/parent file-path)]
@@ -18,14 +18,14 @@
       (fs/create-dirs parent))
     parent))
 
-(defn- write-file!
+(defn write-file!
   "Write content to a file, creating parent directories as needed."
   [file-path content]
   (ensure-parent-dir! file-path)
   (spit (str file-path) content)
   file-path)
 
-(defn- delete-file!
+(defn delete-file!
   "Delete a file if it exists. Returns true if deleted, false if file didn't exist."
   [file-path]
   (if (fs/exists? file-path)

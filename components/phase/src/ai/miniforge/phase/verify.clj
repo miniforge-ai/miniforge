@@ -33,7 +33,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event stream helpers (optional dependency)
 
-(defn- emit-phase-started!
+(defn emit-phase-started!
   "Emit phase-started event if event-stream is available in context."
   [ctx phase]
   (when-let [event-stream (:event-stream ctx)]
@@ -42,7 +42,7 @@
         (let [workflow-id (:execution/id ctx)]
           (publish! event-stream (phase-started event-stream workflow-id phase)))))))
 
-(defn- emit-phase-completed!
+(defn emit-phase-completed!
   "Emit phase-completed event if event-stream is available in context."
   [ctx phase _result]
   (when-let [event-stream (:event-stream ctx)]
@@ -72,7 +72,7 @@
 ;------------------------------------------------------------------------------ Layer 0.5
 ;; Test execution helpers
 
-(defn- write-test-files!
+(defn write-test-files!
   "Write test files from tester agent output to disk.
    Returns vector of written file paths."
   [worktree-path test-files]
@@ -83,7 +83,7 @@
             path))
         test-files))
 
-(defn- parse-test-output
+(defn parse-test-output
   "Parse clojure.test summary output.
    Looks for: 'Ran N tests containing M assertions. F failures, E errors.'
    Returns map with test result counts.
@@ -113,7 +113,7 @@
        :parse-error? true
        :output output})))
 
-(defn- run-tests!
+(defn run-tests!
   "Run tests in the worktree via bb test.
    Returns parsed test results map."
   [worktree-path]
@@ -132,7 +132,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
-(defn- enter-verify
+(defn enter-verify
   "Execute verification phase.
 
    Generates tests for code artifacts, runs them,
@@ -203,7 +203,7 @@
         (assoc-in [:phase :status] :running)
         (assoc-in [:phase :result] result))))
 
-(defn- leave-verify
+(defn leave-verify
   "Post-processing for verification phase.
 
    Records test metrics: count, pass rate, coverage."
@@ -235,7 +235,7 @@
     (emit-phase-completed! updated-ctx :verify result)
     updated-ctx))
 
-(defn- error-verify
+(defn error-verify
   "Handle verification phase errors.
 
    On test failure, can redirect to :implement if on-fail specified."

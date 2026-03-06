@@ -33,7 +33,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; GitHub CLI helpers
 
-(defn- run-gh-command
+(defn run-gh-command
   "Run a gh CLI command and return result."
   [args worktree-path]
   (try

@@ -83,37 +83,37 @@
    :policy 3
    :conflict 4})
 
-(defn- now []
+(defn now []
   (java.util.Date.))
 
-(defn- ex-msg
+(defn ex-msg
   [^Throwable e]
   (or (.getMessage e)
       (some-> e class .getName)
       "unknown exception"))
 
-(defn- ensure-message
+(defn ensure-message
   [message fallback]
   (or (some-> message str str/trim not-empty)
       fallback))
 
-(defn- normalized-limit
+(defn normalized-limit
   [limit default]
   (let [n (if (integer? limit) limit default)]
     (if (pos? n) n default)))
 
-(defn- succeeded?
+(defn succeeded?
   "Check if a result map indicates success."
   [result]
   (boolean (:success? result)))
 
-(defn- result-success
+(defn result-success
   [data]
   (merge {:success? true
           :success true}
          data))
 
-(defn- result-failure
+(defn result-failure
   ([message]
    (result-failure message nil))
   ([message data]
@@ -124,7 +124,7 @@
              :anomaly (response/make-anomaly :anomalies/fault msg)}
             data))))
 
-(defn- result-exception
+(defn result-exception
   ([message ex]
    (result-exception message ex nil))
   ([message ex data]
@@ -136,12 +136,12 @@
              :anomaly (response/from-exception ex)}
             data))))
 
-(defn- gh-error-message
+(defn gh-error-message
   [out err]
   (ensure-message (if (str/blank? err) out err)
                   "Provider command failed. Check authentication and repository access."))
 
-(defn- load-fleet-config
+(defn load-fleet-config
   []
   (try
     (if (.exists (io/file default-fleet-config-path))
@@ -150,23 +150,23 @@
     (catch Exception _
       {:fleet {:repos []}})))
 
-(defn- save-fleet-config!
+(defn save-fleet-config!
   [config]
   (let [file (io/file default-fleet-config-path)]
     (.mkdirs (.getParentFile file))
     (spit file (pr-str config))))
 
-(defn- normalize-repo-slug
+(defn normalize-repo-slug
   [repo]
   (-> (str repo)
       str/trim
       str/lower-case))
 
-(defn- valid-repo-slug?
+(defn valid-repo-slug?
   [repo]
   (boolean (re-matches repo-slug-pattern repo)))
 
-(defn- actionable-error-hint
+(defn actionable-error-hint
   [error-msg]
   (let [msg (str/lower-case (or error-msg ""))]
     (cond
@@ -198,7 +198,7 @@
       :else
       "Retry sync. If it keeps failing, run the equivalent `gh` command locally for details.")))
 
-(defn- with-actionable-error
+(defn with-actionable-error
   [result]
   (if (succeeded? result)
     result
@@ -244,7 +244,7 @@
           :repo repo*
           :repos (get-in next-cfg [:fleet :repos])})))))
 
-(defn- run-gh
+(defn run-gh
   [& args]
   (try
     (let [{:keys [exit out err]} (apply shell/sh "gh" args)]
@@ -256,7 +256,7 @@
        :out ""
        :err (ex-msg e)})))
 
-(defn- gh-api-json
+(defn gh-api-json
   [endpoint]
   (let [{:keys [success? out err]} (run-gh "api" endpoint)]
     (if success?
@@ -313,7 +313,7 @@
           :repos merged
           :added-repos added})))))
 
-(defn- pr-status-from-provider
+(defn pr-status-from-provider
   [pr]
   (let [state (some-> (:state pr) str str/upper-case)
         draft? (boolean (:isDraft pr))
@@ -326,7 +326,7 @@
       (= "REVIEW_REQUIRED" decision) :reviewing
       :else :open)))
 
-(defn- check-rollup->ci-status
+(defn check-rollup->ci-status
   [rollup]
   (let [entries (cond
                   (nil? rollup) []
@@ -342,12 +342,12 @@
       (seq entries) :pending
       :else :pending)))
 
-(defn- merge-state-status->behind?
+(defn merge-state-status->behind?
   [merge-state-status]
   (contains? #{"BEHIND" "DIRTY"}
              (some-> merge-state-status str str/upper-case)))
 
-(defn- provider-pr->train-pr
+(defn provider-pr->train-pr
   [pr]
   {:pr/number (:number pr)
    :pr/title (:title pr)
@@ -357,7 +357,7 @@
    :pr/ci-status (check-rollup->ci-status (:statusCheckRollup pr))
    :pr/behind-main? (merge-state-status->behind? (:mergeStateStatus pr))})
 
-(defn- parse-provider-pr-list
+(defn parse-provider-pr-list
   [repo out]
   (try
     (let [rows (json/parse-string out true)]
@@ -374,7 +374,7 @@
        {:repo repo
         :action "Retry sync. If this persists, inspect `gh pr list --json ...` output."}))))
 
-(defn- fetch-open-prs
+(defn fetch-open-prs
   [repo]
   (let [{:keys [success? out err]} (run-gh "pr" "list"
                                             "--repo" repo
@@ -390,18 +390,18 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Deterministic train rendering enrichment
 
-(defn- gate-results
+(defn gate-results
   [pr]
   (let [gates (:pr/gate-results pr)]
     (if (sequential? gates) gates [])))
 
-(defn- gates-passed?
+(defn gates-passed?
   [pr]
   (let [gates (gate-results pr)]
     (or (empty? gates)
         (every? :gate/passed? gates))))
 
-(defn- gates-score
+(defn gates-score
   [pr]
   (let [gates (gate-results pr)]
     (if (empty? gates)
@@ -409,29 +409,29 @@
       (let [passed (count (filter :gate/passed? gates))]
         (double (/ passed (count gates)))))))
 
-(defn- pr-sort-key
+(defn pr-sort-key
   [pr]
   [(or (:pr/merge-order pr) Long/MAX_VALUE)
    (or (:pr/number pr) Long/MAX_VALUE)])
 
-(defn- sort-prs
+(defn sort-prs
   [prs]
   (->> prs
        (sort-by pr-sort-key)
        vec))
 
-(defn- pr-map
+(defn pr-map
   [prs]
   (into {} (map (juxt :pr/number identity) prs)))
 
-(defn- unresolved-deps
+(defn unresolved-deps
   [prs-by-number pr]
   (->> (:pr/depends-on pr [])
        (filter #(not= :merged (:pr/status (get prs-by-number %))))
        sort
        vec))
 
-(defn- deps-score
+(defn deps-score
   [prs-by-number pr]
   (let [deps (:pr/depends-on pr [])]
     (if (empty? deps)
@@ -439,7 +439,7 @@
       (let [merged-count (count (remove #(contains? (set (unresolved-deps prs-by-number pr)) %) deps))]
         (double (/ merged-count (count deps)))))))
 
-(defn- pr-ready?
+(defn pr-ready?
   [prs-by-number pr]
   (let [status (:pr/status pr)
         ci-passed? (= :passed (:pr/ci-status pr))
@@ -450,7 +450,7 @@
          (gates-passed? pr)
          (not (:pr/behind-main? pr)))))
 
-(defn- readiness-state
+(defn readiness-state
   [prs-by-number pr]
   (let [status (:pr/status pr)]
     (cond
@@ -463,7 +463,7 @@
       (pr-ready? prs-by-number pr) :merge-ready
       :else :needs-review)))
 
-(defn- blockers
+(defn blockers
   [prs-by-number pr]
   (let [status (:pr/status pr)
         ci-status (:pr/ci-status pr)
@@ -522,7 +522,7 @@
                         :blocker/message))
          vec)))
 
-(defn- readiness-factors
+(defn readiness-factors
   [prs-by-number pr]
   (let [scores {:deps-merged (deps-score prs-by-number pr)
                 :ci-passed (get ci-scores (:pr/ci-status pr) 0.0)
@@ -538,7 +538,7 @@
                :contribution (* weight score)}))
           readiness-factor-order)))
 
-(defn- readiness
+(defn readiness
   [prs-by-number pr]
   (let [factors (readiness-factors prs-by-number pr)
         score (transduce (map :contribution) + 0.0 factors)
@@ -552,14 +552,14 @@
      :readiness/factors factors
      :readiness/blockers blocking}))
 
-(defn- enrich-pr
+(defn enrich-pr
   [prs-by-number pr]
   (let [r (readiness prs-by-number pr)]
     (assoc pr
            :pr/readiness r
            :pr/blocking-reasons (mapv :blocker/message (:readiness/blockers r)))))
 
-(defn- blocking-details
+(defn blocking-details
   [prs blocking-prs]
   (let [prs-by-number (pr-map prs)]
     (->> blocking-prs
@@ -571,7 +571,7 @@
                     :blocking/reasons (:pr/blocking-reasons pr)})))
          vec)))
 
-(defn- readiness-summary
+(defn readiness-summary
   [prs]
   (->> prs
        (map (fn [pr]
@@ -579,7 +579,7 @@
        frequencies
        (into (sorted-map))))
 
-(defn- enrich-train
+(defn enrich-train
   [train]
   (let [sorted-prs (sort-prs (:train/prs train))
         raw-pr-map (pr-map sorted-prs)
@@ -647,7 +647,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; External PR onboarding and sync
 
-(defn- classify-error-category
+(defn classify-error-category
   [error-msg]
   (let [msg (str/lower-case (or error-msg ""))]
     (cond
@@ -680,7 +680,7 @@
       :else
       :unknown)))
 
-(defn- sync-status
+(defn sync-status
   [result]
   (let [failed-repos (->> (:results result)
                           (remove succeeded?)
@@ -705,12 +705,12 @@
      :summary (:summary result)
      :failures failed-repos}))
 
-(defn- record-last-sync!
+(defn record-last-sync!
   [state result]
   (swap! state assoc :fleet/last-sync (sync-status result))
   result)
 
-(defn- ensure-default-dag-id!
+(defn ensure-default-dag-id!
   [state]
   (or (:fleet/default-dag-id @state)
       (let [mgr (:repo-dag-manager @state)
@@ -727,7 +727,7 @@
         (swap! state assoc :fleet/default-dag-id dag-id)
         dag-id)))
 
-(defn- ensure-repo-in-dag!
+(defn ensure-repo-in-dag!
   [state dag-id repo]
   (when-let [mgr (:repo-dag-manager @state)]
     (let [dag (core/safe-call 'ai.miniforge.repo-dag.interface 'get-dag mgr dag-id)
@@ -744,11 +744,11 @@
                              :repo/default-branch "main"})
             (catch Exception _ nil)))))))
 
-(defn- train-name-for-repo
+(defn train-name-for-repo
   [repo]
   (str external-train-prefix repo))
 
-(defn- find-existing-repo-train-id
+(defn find-existing-repo-train-id
   [state repo]
   (if-let [mgr (:pr-train-manager @state)]
     (let [expected (train-name-for-repo repo)]
@@ -758,7 +758,7 @@
             (or (core/safe-call 'ai.miniforge.pr-train.interface 'list-trains mgr) [])))
     nil))
 
-(defn- ensure-repo-train!
+(defn ensure-repo-train!
   [state repo]
   (when-let [mgr (:pr-train-manager @state)]
     (let [known-id (get-in @state [:fleet/repo-trains repo])
@@ -776,7 +776,7 @@
         (swap! state assoc-in [:fleet/repo-trains repo] train-id)
         train-id))))
 
-(defn- prs->status-map
+(defn prs->status-map
   [prs]
   (into {}
         (map (fn [pr]
@@ -785,7 +785,7 @@
                  :pr/ci-status (:pr/ci-status pr)}])
              prs)))
 
-(defn- train-sync-plan
+(defn train-sync-plan
   [before-train prs]
   (let [open-numbers (set (map :pr/number prs))
         existing-numbers (set (map :pr/number (:train/prs before-train)))]
@@ -797,19 +797,19 @@
                      vec)
      :status-map (prs->status-map prs)}))
 
-(defn- add-prs!
+(defn add-prs!
   [mgr train-id repo prs]
   (doseq [pr prs]
     (core/safe-call 'ai.miniforge.pr-train.interface 'add-pr
                     mgr train-id repo (:pr/number pr) (:pr/url pr)
                     (:pr/branch pr) (:pr/title pr))))
 
-(defn- remove-prs!
+(defn remove-prs!
   [mgr train-id pr-nums]
   (doseq [pr-num pr-nums]
     (core/safe-call 'ai.miniforge.pr-train.interface 'remove-pr mgr train-id pr-num)))
 
-(defn- apply-sync-plan!
+(defn apply-sync-plan!
   [mgr train-id repo {:keys [to-add to-remove status-map]}]
   ;; Side effects are intentionally ordered: membership first, then status, then dependency linking.
   (add-prs! mgr train-id repo to-add)
@@ -817,7 +817,7 @@
   (core/safe-call 'ai.miniforge.pr-train.interface 'sync-pr-status mgr train-id status-map)
   (core/safe-call 'ai.miniforge.pr-train.interface 'link-prs mgr train-id))
 
-(defn- sync-repo-prs-into-train!
+(defn sync-repo-prs-into-train!
   [state repo]
   (let [fetch-result (try
                        (fetch-open-prs repo)

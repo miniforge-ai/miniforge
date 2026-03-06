@@ -34,7 +34,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pattern matching utilities
 
-(defn- ensure-pattern
+(defn ensure-pattern
   "Convert string or regex to compiled pattern."
   [p]
   (cond
@@ -42,7 +42,7 @@
     (string? p) (re-pattern p)
     :else nil))
 
-(defn- find-matches
+(defn find-matches
   "Find all matches of a pattern in content.
    Returns vector of {:match string :line int :column int :context string}."
   [pattern content context-lines]
@@ -64,7 +64,7 @@
                         :context (str/join "\n" context-vec)}))))
            vec))))
 
-(defn- any-pattern-matches?
+(defn any-pattern-matches?
   "Check if any of the patterns match the content.
    Returns the first matching pattern's matches, or nil."
   [patterns content context-lines]
@@ -75,7 +75,7 @@
                 matches)))
           patterns)))
 
-(defn- extract-patterns
+(defn extract-patterns
   "Extract pattern(s) from detection config.
    Returns vector of patterns."
   [detection]
@@ -150,7 +150,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Plan output detection
 
-(defn- parse-plan-resources
+(defn parse-plan-resources
   "Parse terraform plan output to extract resource changes.
    Returns vector of {:action :resource :details}."
   [plan-output]

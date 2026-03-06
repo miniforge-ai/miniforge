@@ -15,7 +15,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Auto-discovery
 
-(defn- pid-alive?
+(defn pid-alive?
   "Check if a process with the given PID is still running."
   [pid]
   (try

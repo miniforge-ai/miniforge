@@ -29,7 +29,7 @@
    :signal/data data
    :signal/timestamp (System/currentTimeMillis)})
 
-(defn- prune-old-signals
+(defn prune-old-signals
   "Remove signals older than retention period."
   [signals retention-ms]
   (let [cutoff (- (System/currentTimeMillis) retention-ms)]
@@ -38,7 +38,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Pattern detection
 
-(defn- detect-repeated-failures
+(defn detect-repeated-failures
   "Detect repeated failure patterns."
   [signals min-occurrences]
   (let [failures (->> signals
@@ -53,7 +53,7 @@
                  :pattern/confidence (min 1.0 (/ (count sigs) 10.0))
                  :pattern/signals (map :signal/id sigs)})))))
 
-(defn- detect-rollback-patterns
+(defn detect-rollback-patterns
   "Detect rollback patterns."
   [signals min-occurrences]
   (let [rollbacks (->> signals
@@ -69,7 +69,7 @@
                  :pattern/confidence (min 1.0 (/ (count sigs) 5.0))
                  :pattern/signals (map :signal/id sigs)})))))
 
-(defn- detect-repair-patterns
+(defn detect-repair-patterns
   "Detect repair patterns from inner loop."
   [signals min-occurrences]
   (let [repairs (->> signals
@@ -105,7 +105,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Improvement generation
 
-(defn- generate-for-repeated-failure
+(defn generate-for-repeated-failure
   "Generate improvement for repeated phase failures."
   [pattern]
   {:improvement/id (random-uuid)
@@ -122,7 +122,7 @@
    :improvement/status :proposed
    :improvement/created-at (System/currentTimeMillis)})
 
-(defn- generate-for-frequent-rollback
+(defn generate-for-frequent-rollback
   "Generate improvement for frequent rollbacks."
   [pattern]
   {:improvement/id (random-uuid)
@@ -138,7 +138,7 @@
    :improvement/status :proposed
    :improvement/created-at (System/currentTimeMillis)})
 
-(defn- generate-for-recurring-repair
+(defn generate-for-recurring-repair
   "Generate improvement for recurring repair patterns."
   [pattern]
   {:improvement/id (random-uuid)
@@ -394,7 +394,7 @@
                                   :to-phase to-phase
                                   :reason reason}})))
 
-(defn- create-llm-pattern-detector*
+(defn create-llm-pattern-detector*
   "Create an LLM-powered pattern detector via requiring-resolve.
    Returns nil if the namespace cannot be loaded."
   [llm-backend]
@@ -404,7 +404,7 @@
       (create-fn {:llm-client llm-backend}))
     (catch Exception _e nil)))
 
-(defn- create-llm-improvement-generator*
+(defn create-llm-improvement-generator*
   "Create an LLM-powered improvement generator via requiring-resolve.
    Returns nil if the namespace cannot be loaded."
   [llm-backend]

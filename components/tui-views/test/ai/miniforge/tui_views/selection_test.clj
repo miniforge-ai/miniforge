@@ -26,7 +26,7 @@
 (def wf-id-2 (random-uuid))
 (def wf-id-3 (random-uuid))
 
-(defn- three-workflows []
+(defn three-workflows []
   (-> (util/fresh-model)
       (util/with-workflows
         [{:workflow-id wf-id-1 :name "wf-1"}

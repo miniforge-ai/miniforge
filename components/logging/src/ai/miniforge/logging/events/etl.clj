@@ -7,7 +7,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event schema and validation
 
-(defn- make-event-base
+(defn make-event-base
   "Create base event map with required fields."
   [event-type workflow-id]
   {:event/type event-type

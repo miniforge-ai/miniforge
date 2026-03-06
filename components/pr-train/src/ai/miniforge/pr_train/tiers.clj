@@ -46,7 +46,7 @@
   (<= (get risk-level-order actual-level 99)
       (get risk-level-order max-level 99)))
 
-(defn- check-operation
+(defn check-operation
   "Check if a tier definition allows an operation given readiness and risk."
   [tier-def operation-key readiness risk-level]
   (and (get tier-def operation-key)

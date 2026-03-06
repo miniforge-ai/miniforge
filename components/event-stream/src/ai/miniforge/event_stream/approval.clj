@@ -62,17 +62,17 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Approval signing
 
-(defn- signer-authorized?
+(defn signer-authorized?
   "Check if a signer is in the required-signers list."
   [approval-request signer]
   (some #{signer} (:approval/required-signers approval-request)))
 
-(defn- already-signed?
+(defn already-signed?
   "Check if a signer has already signed."
   [approval-request signer]
   (some #(= signer (:signer %)) (:approval/signatures approval-request)))
 
-(defn- expired?
+(defn expired?
   "Check if an approval request has expired."
   [approval-request]
   (let [now (java.util.Date.)

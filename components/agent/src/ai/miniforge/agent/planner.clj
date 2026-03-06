@@ -79,7 +79,7 @@
           {:valid? true :errors nil})))))
 
 ;; NOTE: Helper function for commented-out generate-plan function
-#_(defn- make-task
+#_(defn make-task
   "Helper to create a task with generated ID."
   [{:keys [description type dependencies acceptance-criteria estimated-effort]
     :or {dependencies []
@@ -92,7 +92,7 @@
     (seq acceptance-criteria) (assoc :task/acceptance-criteria acceptance-criteria)
     estimated-effort (assoc :task/estimated-effort estimated-effort)))
 
-(defn- format-existing-files
+(defn format-existing-files
   "Format existing file contents for inclusion in the user prompt.
 
    Arguments:
@@ -109,7 +109,7 @@
                      "\n```\n" content "\n```")))
          (str/join "\n"))))
 
-(defn- spec->text
+(defn spec->text
   "Convert a spec to text for the LLM."
   [spec]
   (if (map? spec)
@@ -119,7 +119,7 @@
         (pr-str spec))
     (str spec)))
 
-(defn- parse-plan-response
+(defn parse-plan-response
   "Parse the LLM response to extract a plan.
    Handles both EDN in code blocks and plain EDN.
    Returns nil if the parsed result is not a map."
@@ -141,7 +141,7 @@
 
 ;; NOTE: This function is currently unused but kept as reference for future implementation
 ;; where plan generation may be delegated to a separate function rather than done inline.
-#_(defn- generate-plan
+#_(defn generate-plan
   "Generate a plan from analyzed specification.
    In a real implementation, this would use an LLM with the system prompt."
   [analysis context]
@@ -197,7 +197,7 @@
                         "Dependencies are available"]
      :plan/created-at (java.util.Date.)}))
 
-(defn- repair-plan
+(defn repair-plan
   "Attempt to repair a plan based on validation errors."
   [plan errors _context]
   ;; Simple repair strategies based on common errors
@@ -243,12 +243,12 @@
      :repairs-made (when (not= plan @repaired)
                      {:original-errors errors})}))
 
-(defn- ensure-task-ids
+(defn ensure-task-ids
   "Ensure all tasks in a plan have proper UUIDs."
   [tasks]
   (mapv (fn [t] (update t :task/id #(or % (random-uuid)))) tasks))
 
-(defn- finalize-plan
+(defn finalize-plan
   "Ensure a plan has proper ID, task IDs, and timestamp."
   [plan]
   (-> plan

@@ -5,7 +5,7 @@
      bb -cp components/mcp-artifact-server/src -m ai.miniforge.mcp-artifact-server.main --artifact-dir /tmp/dir"
   (:require [ai.miniforge.mcp-artifact-server.server :as server]))
 
-(defn- parse-args [args]
+(defn parse-args [args]
   (loop [args args
          opts {}]
     (if (empty? args)

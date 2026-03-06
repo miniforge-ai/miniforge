@@ -34,17 +34,17 @@
 
 ;------------------------------------------------------------------------------ Helpers
 
-(defn- fresh-state
+(defn fresh-state
   "Create a fresh atom state for handler tests."
   []
   (atom {}))
 
-(defn- parse-body
+(defn parse-body
   "Parse a JSON response body into a Clojure map."
   [response]
   (json/parse-string (:body response) true))
 
-(defn- create-approval-body
+(defn create-approval-body
   "Build a JSON body string for POST /api/approvals."
   [action-id signers quorum & [extra]]
   (json/generate-string
@@ -53,7 +53,7 @@
            :quorum quorum}
           extra)))
 
-(defn- sign-body
+(defn sign-body
   "Build a JSON body string for POST /api/approvals/:id/sign."
   [signer decision & [reason]]
   (json/generate-string

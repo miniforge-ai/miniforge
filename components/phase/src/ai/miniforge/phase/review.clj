@@ -29,7 +29,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event stream helpers (optional dependency)
 
-(defn- emit-phase-started!
+(defn emit-phase-started!
   "Emit phase-started event if event-stream is available in context."
   [ctx phase]
   (when-let [event-stream (:event-stream ctx)]
@@ -38,7 +38,7 @@
         (let [workflow-id (:execution/id ctx)]
           (publish! event-stream (phase-started event-stream workflow-id phase)))))))
 
-(defn- emit-phase-completed!
+(defn emit-phase-completed!
   "Emit phase-completed event if event-stream is available in context."
   [ctx phase _result]
   (when-let [event-stream (:event-stream ctx)]
@@ -68,7 +68,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
-(defn- enter-review
+(defn enter-review
   "Execute review phase.
 
    Runs code review, quality checks, and policy validation."
@@ -122,7 +122,7 @@
         (assoc-in [:phase :status] :running)
         (assoc-in [:phase :result] result))))
 
-(defn- leave-review
+(defn leave-review
   "Post-processing for review phase.
 
    Records review metrics: issues found, approval status.
@@ -170,7 +170,7 @@
           (assoc-in [:phase :redirect-to] :implement))
       updated-ctx)))
 
-(defn- error-review
+(defn error-review
   "Handle review phase errors.
 
    On rejection, can redirect to :implement if on-fail specified."

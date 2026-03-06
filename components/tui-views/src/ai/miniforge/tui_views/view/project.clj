@@ -34,17 +34,17 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
 
-(defn- safe-format-time [ts]
+(defn safe-format-time [ts]
   (when ts
     (try
       (.format (SimpleDateFormat. "HH:mm:ss") ts)
       (catch Exception _ ""))))
 
-(defn- status-char [status]
+(defn status-char [status]
   (case status
     :running "●" :success "✓" :failed "✗" :blocked "◐" :archived "⊘" "○"))
 
-(defn- format-progress-bar [pct width]
+(defn format-progress-bar [pct width]
   (let [pct (or pct 0)
         bar-w (max 1 (- width 5))
         filled (int (/ (* pct bar-w) 100))]
@@ -52,7 +52,7 @@
          (apply str (repeat (- bar-w filled) \u2591))
          (format " %3d%%" pct))))
 
-(defn- readiness-bar [score width]
+(defn readiness-bar [score width]
   (let [pct (int (* 100 (or score 0)))
         bar-w (max 1 (- width 5))
         filled (int (/ (* pct bar-w) 100))]
@@ -60,7 +60,7 @@
          (apply str (repeat (- bar-w filled) \u2591))
          (format " %3d%%" pct))))
 
-(defn- risk-label [level]
+(defn risk-label [level]
   (case level :critical "CRIT" :high "high" :medium "med" :low "low" "?"))
 
 ;------------------------------------------------------------------------------ Layer 0b
@@ -180,7 +180,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Projection functions: model -> widget data
 
-(defn- project-workflows
+(defn project-workflows
   "Project workflow list for the table widget."
   [model]
   (let [wfs (vec (remove #(= :archived (:status %)) (:workflows model)))
@@ -198,7 +198,7 @@
                             (subs msg 0 (min 16 (count msg)))))})
           filtered)))
 
-(defn- readiness-indicator
+(defn readiness-indicator
   "Readiness state → status string with indicator character."
   [state]
   (case state
@@ -216,7 +216,7 @@
 ;------------------------------------------------------------------------------ Layer 0c
 ;; Recommendation constructors
 
-(defn- recommend
+(defn recommend
   "Build a recommendation map. Single constructor for all recommendation types."
   [action label reason]
   {:action action :label label :reason reason})
@@ -232,7 +232,7 @@
    :approve       "⊘ approve"
    :merge         "→ merge"})
 
-(defn- recommend-action
+(defn recommend-action
   "Build recommendation for a known action keyword."
   [action reason]
   (recommend action (labels action) reason))
@@ -240,7 +240,7 @@
 ;------------------------------------------------------------------------------ Layer 0d
 ;; Recommendation signal extraction
 
-(defn- extract-pr-signals
+(defn extract-pr-signals
   "Extract enriched signals from a PR for recommendation.
    Returns a flat map of booleans/keywords for predicate use."
   [pr]
@@ -334,7 +334,7 @@
 ;------------------------------------------------------------------------------ Layer 0e
 ;; Enrichment resolution — single fn for readiness/risk/policy lookup
 
-(defn- resolve-enrichment
+(defn resolve-enrichment
   "Resolve enriched readiness/risk/policy for a PR.
    Prefers pr-train/policy-pack data, falls back to naive derivation."
   [pr]
@@ -343,7 +343,7 @@
    :policy    (:pr/policy pr)
    :recommend (derive-recommendation pr)})
 
-(defn- policy-label
+(defn policy-label
   "Policy pass/fail/unknown → display label."
   [policy]
   (case (:evaluation/passed? policy) true "pass" false "FAIL" "?"))
@@ -351,7 +351,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Tree node constructors
 
-(defn- tree-node
+(defn tree-node
   "Build a tree node for the tree widget.
    Optional :fg sets per-node color (theme-independent status color)."
   ([label depth] {:label label :depth depth :expandable? false})
@@ -364,7 +364,7 @@
 (def ^:private status-warning :yellow)
 (def ^:private status-info    :cyan)
 
-(defn- readiness-state-color
+(defn readiness-state-color
   "Map readiness state to fixed status color."
   [state]
   (case state
@@ -378,7 +378,7 @@
     :merge-conflicts status-fail
     nil))
 
-(defn- risk-level-color
+(defn risk-level-color
   "Map risk level to fixed status color."
   [level]
   (case level
@@ -388,7 +388,7 @@
     :critical status-fail
     nil))
 
-(defn- recommend-action-color
+(defn recommend-action-color
   "Map recommendation action to fixed status color."
   [action]
   (case action
@@ -402,7 +402,7 @@
     :wait         status-warning
     nil))
 
-(defn- factor-label
+(defn factor-label
   "Format a readiness/risk factor for display."
   [{:keys [factor weight score contribution]}]
   (str (name factor) ": "
@@ -411,7 +411,7 @@
        (when contribution (str ", c=" (format "%.2f" (double contribution))))
        ")"))
 
-(defn- pr-state-label
+(defn pr-state-label
   "Map normalized PR status keyword to human-readable GitHub-level state."
   [status]
   (case status
@@ -421,7 +421,7 @@
     (:approved :reviewing :changes-requested :open :merge-ready) "open"
     "open"))
 
-(defn- project-pr-row
+(defn project-pr-row
   "Project a single PR into a table row map.
    Includes :<key>-fg entries for per-cell status coloring."
   [pr]
@@ -444,7 +444,7 @@
      :recommend   (:label recommend)
      :recommend-fg (recommend-action-color (:action recommend))}))
 
-(defn- project-pr-items
+(defn project-pr-items
   "Project PR items for the fleet table widget.
    Respects :filtered-indices from search/filter modes."
   [model]
@@ -454,7 +454,7 @@
                    prs)]
     (mapv project-pr-row filtered)))
 
-(defn- resolve-detail-enrichment
+(defn resolve-detail-enrichment
   "Resolve enrichment data for the detail view's selected PR."
   [model]
   (let [pr-data (get-in model [:detail :selected-pr])]
@@ -465,14 +465,14 @@
      :gates     (get pr-data :pr/gate-results [])}))
 
 
-(defn- ci-check-node
+(defn ci-check-node
   "Build a tree node for a single CI check result."
   [{:keys [name conclusion]}]
   (let [icon (case conclusion :success "\u2713" :failure "\u2718" :neutral "\u2500" "\u25cb")
         fg   (case conclusion :success status-pass :failure status-fail nil)]
     (tree-node (str icon " " name) 2 false fg)))
 
-(defn- project-readiness-tree
+(defn project-readiness-tree
   "Build readiness tree nodes for the tree widget.
    Each factor is expandable with detail nodes at depth 1+."
   [model]
@@ -536,7 +536,7 @@
                       gates)))
         [(tree-node "Gates: none" 1)])))))
 
-(defn- risk-factor-label
+(defn risk-factor-label
   "Format a risk factor for display."
   [{:keys [factor explanation weight score]}]
   (str (name factor) ": " (or explanation "")
@@ -544,7 +544,7 @@
          (str " (w=" (int (* 100 weight)) "%, s=" (int (* 100 (or score 0))) "%)"))))
 
 
-(defn- risk-factor-detail-nodes
+(defn risk-factor-detail-nodes
   "Build expandable detail nodes for a risk factor."
   [{:keys [factor value explanation]}]
   (case factor
@@ -586,7 +586,7 @@
     ;; Default: show explanation
     [(tree-node (str (name factor) ": " (or explanation "")) 1)]))
 
-(defn- project-risk-tree
+(defn project-risk-tree
   "Build risk tree nodes for the tree widget.
    Each factor is expandable with concrete values."
   [model]
@@ -599,15 +599,15 @@
                       0 true (risk-level-color level))]
           (mapcat risk-factor-detail-nodes factors))))
 
-(defn- severity-prefix [severity]
+(defn severity-prefix [severity]
   (case severity
     :critical "\u2718 CRIT " :major "\u2718 MAJR "
     :minor    "\u26a0 MINR " :info  "\u2139 INFO " "\u26a0 "))
 
-(defn- severity-color [severity]
+(defn severity-color [severity]
   (case severity :critical status-fail :major status-fail :minor status-warning :info status-info nil))
 
-(defn- policy-tree [policy]
+(defn policy-tree [policy]
   (let [summary    (:evaluation/summary policy)
         violations (:evaluation/violations policy [])
         packs      (:evaluation/packs-applied policy [])
@@ -642,12 +642,12 @@
                                       2 false (severity-color (:severity v))))
                          violations)))))))
 
-(defn- gates-tree [gates]
+(defn gates-tree [gates]
   (mapv #(tree-node (str (if (:gate/passed? %) "pass " "FAIL ") (name (:gate/id %)))
                     0 false (if (:gate/passed? %) status-pass status-fail))
         gates))
 
-(defn- project-gate-list
+(defn project-gate-list
   "Build gate/policy result list for the tree widget."
   [model]
   (let [{:keys [policy gates]} (resolve-detail-enrichment model)]
@@ -657,7 +657,7 @@
       :else       [(tree-node "Policy not yet evaluated" 0)
                    (tree-node "Use :review to evaluate policy packs" 1)])))
 
-(defn- project-train-prs
+(defn project-train-prs
   "Project train PRs for the table widget."
   [model]
   (let [train (get-in model [:detail :selected-train])
@@ -671,7 +671,7 @@
              :ci (some-> (:pr/ci-status pr) name)})
           prs)))
 
-(defn- project-evidence-tree
+(defn project-evidence-tree
   "Build evidence tree nodes."
   [model]
   (let [detail (:detail model)
@@ -704,7 +704,7 @@
                   "✗ Policy violations detected")
          :depth 1 :expandable? false}]))))
 
-(defn- project-artifacts
+(defn project-artifacts
   "Project artifacts for the table widget."
   [model]
   (let [artifacts (get-in model [:detail :artifacts] [])]
@@ -718,7 +718,7 @@
              :time (or (safe-format-time (:created-at a)) "")})
           artifacts)))
 
-(defn- project-kanban-columns
+(defn project-kanban-columns
   "Project workflows into kanban columns."
   [model]
   (let [all-wfs (vec (remove #(= :archived (:status %)) (get model :workflows [])))
@@ -741,7 +741,7 @@
      {:title "DONE" :color :green
       :cards (mapv (fn [wf] {:label (:name wf) :status (get wf :status :success)}) done)}]))
 
-(defn- project-phase-tree
+(defn project-phase-tree
   "Project workflow phases as tree nodes for the detail view."
   [model]
   (let [detail (:detail model)
@@ -762,7 +762,7 @@
                :depth 0 :expandable? false})
             phases))))
 
-(defn- project-agent-output
+(defn project-agent-output
   "Project agent output text as a single-row data vector for a text widget."
   [model]
   (let [detail (:detail model)
@@ -772,7 +772,7 @@
                (str "[" (name (get agent :type :agent)) "] " output)
                (if (seq output) output "No agent output"))}]))
 
-(defn- project-repo-list
+(defn project-repo-list
   "Project repo manager data for the table widget."
   [model]
   (let [source (get model :repo-manager-source :fleet)
@@ -823,14 +823,14 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Context functions (for tab-bar / title-bar text)
 
-(defn- ctx-workflow-count [model]
+(defn ctx-workflow-count [model]
   (let [wfs (:workflows model)
         ts (:last-updated model)]
     (str "[" (count wfs) "]"
          (when ts
            (str " " (safe-format-time ts))))))
 
-(defn- ctx-pr-fleet-summary [model]
+(defn ctx-pr-fleet-summary [model]
   (let [prs (:pr-items model [])
         filter-state (get model :pr-filter-state :open)
         repo-count (count (distinct (map :pr/repo prs)))
@@ -843,14 +843,14 @@
          " | PRs: " (count prs)
          " | Ready: " merge-ready)))
 
-(defn- ctx-pr-detail-title [model]
+(defn ctx-pr-detail-title [model]
   (let [pr-data (get-in model [:detail :selected-pr])]
     (str " MINIFORGE │ PR "
          (when (:pr/repo pr-data) (str (:pr/repo pr-data) " "))
          "#" (:pr/number pr-data "?")
          " " (:pr/title pr-data ""))))
 
-(defn- ctx-train-title [model]
+(defn ctx-train-title [model]
   (let [train (get-in model [:detail :selected-train])
         name (or (:train/name train) "Merge Train")
         progress (:train/progress train)]
@@ -858,23 +858,23 @@
          (when progress
            (str " (" (:merged progress 0) "/" (:total progress 0) ")")))))
 
-(defn- ctx-evidence-title [model]
+(defn ctx-evidence-title [model]
   (let [wf-id (get-in model [:detail :workflow-id])
         wf-name (some #(when (= (:id %) wf-id) (:name %))
                       (:workflows model))]
     (or wf-name "Evidence")))
 
-(defn- ctx-artifact-title [model]
+(defn ctx-artifact-title [model]
   (let [wf-id (get-in model [:detail :workflow-id])
         wf-name (some #(when (= (:id %) wf-id) (:name %))
                       (:workflows model))]
     (or wf-name "Artifacts")))
 
-(defn- ctx-artifact-box-title [model]
+(defn ctx-artifact-box-title [model]
   (let [artifacts (get-in model [:detail :artifacts] [])]
     (str "Artifacts (" (count artifacts) ")")))
 
-(defn- ctx-workflow-detail-title [model]
+(defn ctx-workflow-detail-title [model]
   (let [wf-id (get-in model [:detail :workflow-id])
         wf (some #(when (= (:id %) wf-id) %) (:workflows model []))
         phase (get-in model [:detail :current-phase])]
@@ -882,7 +882,7 @@
          (or (:name wf) (some-> wf-id str (subs 0 8)) "Workflow")
          (when phase (str " │ " (name phase))))))
 
-(defn- ctx-repo-manager-title [model]
+(defn ctx-repo-manager-title [model]
   (let [idx (.indexOf ^java.util.List model/top-level-views :repo-manager)
         repos (get model :fleet-repos [])]
     (str "Repos (" (count repos) ") [" (inc idx) "]")))

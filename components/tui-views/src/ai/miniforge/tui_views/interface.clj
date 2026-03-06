@@ -41,22 +41,22 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Side-effect handlers — each returns [msg-type payload] or nil
 
-(defn- handle-sync-prs [{:keys [state]}]
+(defn handle-sync-prs [{:keys [state]}]
   (msg/prs-synced (persistence/load-pr-items (when state {:state state}))))
 
-(defn- handle-discover-repos [{:keys [owner]}]
+(defn handle-discover-repos [{:keys [owner]}]
   (msg/repos-discovered (persistence/discover-repos owner)))
 
-(defn- handle-browse-repos [{:keys [owner provider limit source]}]
+(defn handle-browse-repos [{:keys [owner provider limit source]}]
   (let [result (persistence/browse-repos {:owner owner :provider provider :limit limit})]
     (msg/repos-browsed (assoc result :source source))))
 
-(defn- handle-open-url [{:keys [url]}]
+(defn handle-open-url [{:keys [url]}]
   (when url
     (try (browse/browse-url url) (catch Exception _ nil)))
   nil)
 
-(defn- handle-evaluate-policy [{:keys [pr pr-id]}]
+(defn handle-evaluate-policy [{:keys [pr pr-id]}]
   (try
     (let [result (policy-pack/evaluate-external-pr
                   (persistence/load-policy-packs) pr)]
@@ -66,7 +66,7 @@
                             {:evaluation/passed? nil
                              :evaluation/error (.getMessage e)}))))
 
-(defn- handle-create-train [train-mgr {:keys [name description]
+(defn handle-create-train [train-mgr {:keys [name description]
                                        :or {description ""}}]
   (try
     (let [train-id (pr-train/create-train
@@ -77,7 +77,7 @@
       (msg/side-effect-error
        (response/error (.getMessage e) {:data {:type :create-train}})))))
 
-(defn- handle-add-to-train [train-mgr {:keys [train-id prs]}]
+(defn handle-add-to-train [train-mgr {:keys [train-id prs]}]
   (try
     (doseq [pr prs]
       (pr-train/add-pr train-mgr train-id
@@ -90,7 +90,7 @@
       (msg/side-effect-error
        (response/error (.getMessage e) {:data {:type :add-to-train}})))))
 
-(defn- handle-merge-next [train-mgr {:keys [train-id]}]
+(defn handle-merge-next [train-mgr {:keys [train-id]}]
   (try
     (let [result (pr-train/merge-next train-mgr train-id)]
       (if result
@@ -101,7 +101,7 @@
       (msg/side-effect-error
        (response/error (.getMessage e) {:data {:type :merge-next}})))))
 
-(defn- handle-review-prs [{:keys [prs]}]
+(defn handle-review-prs [{:keys [prs]}]
   (try
     (let [packs (persistence/load-policy-packs)]
       (msg/review-completed
@@ -117,16 +117,16 @@
       (msg/side-effect-error
        (response/error (.getMessage e) {:data {:type :review-prs}})))))
 
-(defn- handle-remediate-prs [{:keys [prs]}]
+(defn handle-remediate-prs [{:keys [prs]}]
   (let [fixable (count (filter #(seq (get-in % [:pr/policy :evaluation/violations])) prs))]
     (msg/remediation-completed 0 fixable "Remediation via pr-lifecycle not yet wired")))
 
-(defn- handle-decompose-pr [{:keys [pr]}]
+(defn handle-decompose-pr [{:keys [pr]}]
   (msg/decomposition-started [(:pr/repo pr) (:pr/number pr)]
                              {:sub-prs []
                               :message "Decomposition analysis not yet wired"}))
 
-(defn- handle-control-action [{:keys [action workflow-id]}]
+(defn handle-control-action [{:keys [action workflow-id]}]
   (let [commands-dir (io/file (System/getProperty "user.home")
                               ".miniforge" "commands" (str workflow-id))
         cmd-file (io/file commands-dir (str (System/currentTimeMillis) ".edn"))]
@@ -137,10 +137,10 @@
 ;; Lazy LLM client — initialized on first chat message
 (def ^:private llm-client (delay (llm/create-client)))
 
-(defn- format-check-context [checks]
+(defn format-check-context [checks]
   (str/join ", " (map #(str (:name %) "=" (-> % (get :conclusion :unknown) name)) checks)))
 
-(defn- build-pr-context-str
+(defn build-pr-context-str
   "Build a text summary of PR data for the LLM system prompt."
   [{:keys [pr/behind-main? pr/branch pr/ci-status pr/number
            pr/policy pr/readiness pr/repo pr/risk pr/status pr/title]
@@ -176,7 +176,7 @@
                     (str " (packs: " (str/join ", " packs) ")"))
                   "\n"))))))
 
-(defn- build-chat-system-prompt
+(defn build-chat-system-prompt
   "Build a context-aware system prompt for the chat LLM."
   [context]
   (let [ctx-type (get context :type :unknown)]
@@ -204,7 +204,7 @@
 
            "Unknown context."))))
 
-(defn- handle-chat-send [{:keys [message context history]}]
+(defn handle-chat-send [{:keys [message context history]}]
   (try
     (let [system-prompt (build-chat-system-prompt context)
           messages (mapv (fn [m]
@@ -228,7 +228,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Effect dispatcher
 
-(defn- dispatch-effect
+(defn dispatch-effect
   "Route a side-effect to its handler. Returns [msg-type payload] or nil."
   [train-mgr effect]
   (case (:type effect)

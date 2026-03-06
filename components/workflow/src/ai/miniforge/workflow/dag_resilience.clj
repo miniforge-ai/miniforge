@@ -30,7 +30,7 @@
 
 ;--- Layer 0: Rate Limit Detection
 
-(defn- load-rate-limit-patterns
+(defn load-rate-limit-patterns
   "Load and compile rate-limit patterns from external error patterns.
    Returns a seq of compiled regex patterns."
   []
@@ -61,7 +61,7 @@
           msg (if (string? raw) raw (str raw))]
       (boolean (some #(re-find % msg) @rate-limit-patterns)))))
 
-(defn- find-healthy-backend
+(defn find-healthy-backend
   "Find a healthy backend from the allowed list, excluding the current one.
    Records the current backend's failure, then returns the first candidate."
   [current-backend allowed-backends]

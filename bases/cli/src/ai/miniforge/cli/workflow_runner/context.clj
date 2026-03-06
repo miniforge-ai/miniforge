@@ -39,7 +39,7 @@
     input (read-input-file input)
     :else {}))
 
-(defn- get-git-info []
+(defn get-git-info []
   (try
     (let [branch-result (p/shell {:out :string :err :string :continue true}
                                  "git" "rev-parse" "--abbrev-ref" "HEAD")
@@ -51,7 +51,7 @@
          :git-commit (clojure.string/trim (:out commit-result))}))
     (catch Exception _ nil)))
 
-(defn- get-files-in-scope
+(defn get-files-in-scope
   "Resolve scope paths to actual file paths.
 
    Handles both individual files and directories. Directories are expanded

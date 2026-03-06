@@ -89,7 +89,7 @@
   (list-tools [this] "List all registered tools.")
   (find-tools [this query] "Find tools matching query."))
 
-(defn- emit-tool-event!
+(defn emit-tool-event!
   "Emit a tool lifecycle event via requiring-resolve (no hard dep on event-stream)."
   [context tool-id event-type & [extra]]
   (try

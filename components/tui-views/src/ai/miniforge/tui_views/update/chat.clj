@@ -36,7 +36,7 @@
   "Views where chat mode is available."
   #{:pr-fleet :pr-detail})
 
-(defn- pr-detail-context
+(defn pr-detail-context
   "Build chat context from a PR detail view."
   [model]
   (let [pr (get-in model [:detail :selected-pr])]
@@ -46,7 +46,7 @@
      :risk      (:pr/risk pr)
      :policy    (:pr/policy pr)}))
 
-(defn- pr-fleet-context
+(defn pr-fleet-context
   "Build chat context from a PR fleet view."
   [model]
   (let [sel-ids (:selected-ids model #{})
@@ -60,7 +60,7 @@
      :active-filter (:active-filter model)
      :total-prs     (count (:pr-items model []))}))
 
-(defn- build-context
+(defn build-context
   "Build chat context from the current view."
   [model]
   (case (:view model)
@@ -90,7 +90,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Input handling
 
-(defn- sync-command-buf
+(defn sync-command-buf
   "Keep :command-buf in sync with chat input for the command bar overlay."
   [model]
   (assoc model :command-buf (str "chat> " (get-in model [:chat :input-buf] ""))))

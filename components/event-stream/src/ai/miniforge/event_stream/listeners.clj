@@ -39,7 +39,7 @@
    :internal     :observe
    :confidential :control})
 
-(defn- event-requires-capability
+(defn event-requires-capability
   "Return the minimum capability level required to receive an event.
 
    Uses schema-defined privacy levels with fallback overrides for
@@ -53,13 +53,13 @@
                   (catch Exception _e :internal))]
     (get privacy->min-capability privacy :observe)))
 
-(defn- matches-workflow?
+(defn matches-workflow?
   "Check if event matches the workflow ID filter (nil/empty = match all)."
   [wf-ids event]
   (or (empty? wf-ids)
       (contains? (set wf-ids) (:workflow/id event))))
 
-(defn- matches-event-type?
+(defn matches-event-type?
   "Check if event matches the event type filter (nil/empty = match all)."
   [event-types event]
   (or (empty? event-types)

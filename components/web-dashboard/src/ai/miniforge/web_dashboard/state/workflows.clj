@@ -18,7 +18,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure helpers
 
-(defn- normalize-ts
+(defn normalize-ts
   "Normalize timestamp inputs to java.util.Date for UI rendering."
   [ts]
   (cond
@@ -35,11 +35,11 @@
 
     :else nil))
 
-(defn- wf-id
+(defn wf-id
   [event]
   (or (:workflow/id event) (:workflow-id event)))
 
-(defn- wf-name-from-started
+(defn wf-name-from-started
   [started id]
   (or (get-in started [:workflow/spec :spec/title])
       (get-in started [:workflow/spec :title])
@@ -50,7 +50,7 @@
       (get-in started [:spec :name])
       (str "Workflow " (subs (str id) 0 (min 8 (count (str id)))))))
 
-(defn- wf-phase
+(defn wf-phase
   [events started]
   (or (:workflow/phase started)
       (:phase started)
@@ -61,7 +61,7 @@
                ((fn [e] (or (:workflow/phase e) (:phase e)))))
       "unknown"))
 
-(defn- wf-status
+(defn wf-status
   [completed failed last-event-ts]
   (cond
     failed :failed

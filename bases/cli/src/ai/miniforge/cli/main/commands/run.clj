@@ -12,7 +12,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Input type detection
 
-(defn- detect-input-type
+(defn detect-input-type
   "Detect the type of a parsed input file.
    Returns :spec, :dag, :plan, or nil."
   [parsed]
@@ -22,7 +22,7 @@
     (:plan/id parsed)    :plan
     :else                nil))
 
-(defn- read-edn-file
+(defn read-edn-file
   "Read an EDN file, returning the parsed data."
   [path]
   (edn/read-string (slurp (str path))))

@@ -48,7 +48,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
-(defn- enter-explore
+(defn enter-explore
   "Execute exploration phase.
 
    Reads files-in-scope from execution input, loads their contents
@@ -82,7 +82,7 @@
         (assoc-in [:phase :result] {:status :completed
                                     :output exploration}))))
 
-(defn- leave-explore
+(defn leave-explore
   "Post-processing for exploration phase.
 
    Records metrics (file count, load time)."
@@ -101,7 +101,7 @@
         (update-in [:execution :phases-completed] (fnil conj []) :explore)
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
-(defn- error-explore
+(defn error-explore
   "Handle exploration phase errors.
 
    Simple retry within budget."
