@@ -26,7 +26,7 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.phase.registry :as phase-reg]
+   [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.workflow.dag-resilience :as resilience]))
 
 ;--- Layer 0: Result Constructors
@@ -236,7 +236,7 @@
         result (run-pipeline sub-workflow sub-input sub-opts)
         artifacts (:execution/artifacts result)
         metrics (:execution/metrics result)]
-    (if (phase-reg/succeeded? result)
+    (if (phase/succeeded? result)
       (workflow-success (first artifacts) metrics)
       (workflow-failure (or (-> result :execution/errors first :message)
                             "Sub-workflow failed")

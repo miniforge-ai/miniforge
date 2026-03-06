@@ -13,7 +13,7 @@
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.sandbox :as sandbox]
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
-   [ai.miniforge.phase.registry :as phase-reg]))
+   [ai.miniforge.phase.interface :as phase]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Workflow interface resolution and pipeline helpers
@@ -114,7 +114,7 @@
       (->> (run-pipeline workflow input))))
 
 (defn publish-completion-event [event-stream workflow-id result]
-  (let [status (if (phase-reg/succeeded? result) :success :failure)
+  (let [status (if (phase/succeeded? result) :success :failure)
         duration-ms (get-in result [:execution/metrics :duration-ms])]
     (es/publish! event-stream
                  (if (= status :success)
@@ -352,11 +352,11 @@
           duration (:chain/duration-ms result)]
       (println)
       (println (display/colorize :cyan (apply str (repeat 60 "─"))))
-      (if (phase-reg/succeeded? result)
+      (if (phase/succeeded? result)
         (println (display/colorize :green (str "✓ Chain completed — "
                                                 (count steps) " steps in "
                                                 duration "ms")))
-        (let [failed-step (some #(when (phase-reg/failed? %) (:step/id %)) steps)]
+        (let [failed-step (some #(when (phase/failed? %) (:step/id %)) steps)]
           (println (display/colorize :red (str "✗ Chain failed at step: "
                                                 (when failed-step (name failed-step))))))))))
 

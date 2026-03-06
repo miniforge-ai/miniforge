@@ -4,14 +4,14 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.workflow.chain :as chain]
    [ai.miniforge.workflow.runner :as runner]
-   [ai.miniforge.event-stream.core :as es-core]))
+   [ai.miniforge.event-stream.interface :as event-stream]))
 
 ;------------------------------------------------------------------------------ Helpers
 
 (defn create-test-stream
   "Create a minimal event stream with no sinks for testing."
   []
-  (es-core/create-event-stream {:sinks []}))
+  (event-stream/create-event-stream {:sinks []}))
 
 (defn event-types
   "Extract ordered event types from a stream."

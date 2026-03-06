@@ -20,7 +20,7 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [babashka.fs :as fs]
-   [ai.miniforge.phase.registry :as registry]
+   [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.release-executor.interface :as release-executor]
@@ -130,7 +130,7 @@
                   :execution/metrics {:tokens 0 :duration-ms 0}
                   :execution/phase-results {}}
         
-        plan-interceptor (registry/get-phase-interceptor {:phase :plan})
+        plan-interceptor (phase/get-phase-interceptor {:phase :plan})
         plan-result-ctx (-> plan-ctx
                            (assoc :phase-config {:phase :plan})
                            ((:enter plan-interceptor))
@@ -143,7 +143,7 @@
         
         ;; Execute implement phase
         impl-ctx (assoc plan-result-ctx :phase-config {:phase :implement})
-        impl-interceptor (registry/get-phase-interceptor {:phase :implement})
+        impl-interceptor (phase/get-phase-interceptor {:phase :implement})
         impl-result-ctx (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                                       agent/invoke (or implement-agent-fn
                                                       (fn [_ _ _]
@@ -161,7 +161,7 @@
         ;; Execute verify phase (optional)
         verify-result-ctx (when verify-agent-fn
                            (let [verify-ctx (assoc impl-result-ctx :phase-config {:phase :verify})
-                                 verify-interceptor (registry/get-phase-interceptor {:phase :verify})]
+                                 verify-interceptor (phase/get-phase-interceptor {:phase :verify})]
                              (with-redefs [agent/create-tester (fn [_] {:type :mock-tester})
                                           agent/invoke verify-agent-fn]
                                (-> verify-ctx
@@ -173,7 +173,7 @@
         release-ctx (assoc release-ctx 
                           :phase-config {:phase :release}
                           :worktree-path *test-worktree-path*)
-        release-interceptor (registry/get-phase-interceptor {:phase :release})]
+        release-interceptor (phase/get-phase-interceptor {:phase :release})]
     
     (if release-opts
       ;; Custom release executor for testing
@@ -286,7 +286,7 @@
                :execution/phase-results {}
                :phase-config {:phase :verify}}
 
-          verify-interceptor (registry/get-phase-interceptor {:phase :verify})]
+          verify-interceptor (phase/get-phase-interceptor {:phase :verify})]
 
       (with-redefs [agent/create-tester (fn [_] {:type :mock-tester})
                     agent/invoke (fn [_agent _task _ctx]

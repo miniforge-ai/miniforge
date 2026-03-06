@@ -72,6 +72,34 @@
      Default config map or nil if unknown"
   registry/phase-defaults)
 
+(def merge-with-defaults
+  "Merge user config with phase defaults."
+  registry/merge-with-defaults)
+
+(def extract-status
+  "Extract a status keyword from a map by trying known status keys."
+  registry/extract-status)
+
+(def succeeded?
+  "Check if a result map indicates success."
+  registry/succeeded?)
+
+(def failed?
+  "Check if a result map indicates failure."
+  registry/failed?)
+
+(def already-done?
+  "Check if a result map indicates work was already complete (neutral outcome)."
+  registry/already-done?)
+
+(def succeeded-or-done?
+  "Check if a result map indicates success or already-done (neutral)."
+  registry/succeeded-or-done?)
+
+(def retrying?
+  "Check if a result map indicates retry."
+  registry/retrying?)
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pipeline construction
 

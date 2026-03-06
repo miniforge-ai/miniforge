@@ -6,8 +6,7 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]
-   ;; :done is registered by release.clj
-   [ai.miniforge.phase.release]))
+   [ai.miniforge.phase.interface]))
 
 ;; ============================================================================
 ;; Context creation tests

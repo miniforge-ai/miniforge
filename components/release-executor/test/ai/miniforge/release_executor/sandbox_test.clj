@@ -4,11 +4,10 @@
    Uses a mock executor to verify correct command generation
    without requiring Docker."
   (:require
-   [ai.miniforge.dag-executor.protocols.executor]
+   [ai.miniforge.dag-executor.interface :as dag]
    [clojure.string]
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.release-executor.sandbox :as sandbox]
-   [ai.miniforge.dag-executor.result :as dag-result]))
+   [ai.miniforge.release-executor.sandbox :as sandbox]))
 
 ;; ============================================================================
 ;; Mock executor
@@ -27,10 +26,10 @@
            default-response {:exit-code 0 :stdout "" :stderr ""}}}]
   (let [commands (atom [])]
     [(reify
-       ai.miniforge.dag-executor.protocols.executor/TaskExecutor
+       dag/TaskExecutor
        (executor-type [_] :mock)
-       (available? [_] (dag-result/ok {:available? true}))
-       (acquire-environment! [_ _ _] (dag-result/ok {:environment-id "mock-env"}))
+       (available? [_] (dag/ok {:available? true}))
+       (acquire-environment! [_ _ _] (dag/ok {:environment-id "mock-env"}))
        (execute! [_ _env-id command _opts]
          (swap! commands conj command)
          (let [response (or (some (fn [[substr resp]]
@@ -38,11 +37,11 @@
                                       resp))
                                   responses)
                             default-response)]
-           (dag-result/ok response)))
-       (copy-to! [_ _ _ _] (dag-result/ok {}))
-       (copy-from! [_ _ _ _] (dag-result/ok {}))
-       (release-environment! [_ _] (dag-result/ok {:released? true}))
-       (environment-status [_ _] (dag-result/ok {:status :running})))
+           (dag/ok response)))
+       (copy-to! [_ _ _ _] (dag/ok {}))
+       (copy-from! [_ _ _ _] (dag/ok {}))
+       (release-environment! [_ _] (dag/ok {:released? true}))
+       (environment-status [_ _] (dag/ok {:status :running})))
      commands]))
 
 ;; ============================================================================

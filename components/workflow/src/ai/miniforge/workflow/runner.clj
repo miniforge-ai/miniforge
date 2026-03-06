@@ -26,7 +26,6 @@
 
    Provides the main run-pipeline entry point."
   (:require [ai.miniforge.phase.interface :as phase]
-            [ai.miniforge.phase.registry :as phase-reg]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.execution :as exec]
@@ -132,7 +131,7 @@
         (publish-event! event-stream
                         (constructor event-stream (:execution/id context) phase-name
                                      {:outcome (if (or (:success? result)
-                                                       (phase-reg/succeeded-or-done? result))
+                                                       (phase/succeeded-or-done? result))
                                                  :success
                                                  :failure)
                                       :duration-ms (or (get-in result [:phase/metrics :duration-ms])
@@ -351,7 +350,7 @@
                         (inc iteration)))))
 
            ;; Validate completed workflows produced results
-           final-ctx (if (and (phase-reg/succeeded? final-ctx)
+           final-ctx (if (and (phase/succeeded? final-ctx)
                               (empty? (:execution/artifacts final-ctx))
                               (empty? (:execution/phase-results final-ctx)))
                        (-> final-ctx
@@ -369,7 +368,7 @@
        (try
          (when-let [operator (:operator opts)]
            (let [observe-fn (requiring-resolve 'ai.miniforge.operator.interface/observe-signal)
-                 signal-type (if (phase-reg/succeeded? output-ctx)
+                 signal-type (if (phase/succeeded? output-ctx)
                                :workflow-complete
                                :workflow-failed)]
              (observe-fn operator
