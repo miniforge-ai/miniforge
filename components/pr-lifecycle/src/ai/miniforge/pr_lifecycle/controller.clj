@@ -96,7 +96,92 @@
   nil)
 
 ;------------------------------------------------------------------------------ Layer 1
-;; PR creation
+;; PR creation steps
+
+(defn fail-controller!
+  "Mark controller as failed and return a DAG error."
+  [controller error-key error-msg]
+  (update-status! controller :failed)
+  (dag/err error-key error-msg))
+
+(defn create-and-checkout-branch!
+  "Create and checkout a new branch for the task.
+   Returns the branch result or a DAG error."
+  [controller worktree-path branch-name]
+  (let [branch-result (release/create-branch! worktree-path branch-name)]
+    (if (:success? branch-result)
+      branch-result
+      (do
+        (add-history! controller :pr-creation-failed {:error (:error branch-result)})
+        (fail-controller! controller :branch-creation-failed (:error branch-result))))))
+
+(defn apply-code-to-files!
+  "Apply the code artifact to the worktree.
+   Returns the apply result or a DAG error."
+  [controller worktree-path code-artifact logger]
+  (let [apply-result (fix/apply-fix-to-worktree worktree-path code-artifact logger)]
+    (if (dag/err? apply-result)
+      (fail-controller! controller :artifact-apply-failed (:error apply-result))
+      apply-result)))
+
+(defn commit-changes!
+  "Stage and commit all changes with the given task info.
+   Returns the commit result or a DAG error."
+  [controller worktree-path task task-id]
+  (let [commit-msg (str "feat: " (or (:task/title task) "implement task")
+                        "\n\nTask: " task-id)
+        commit-result (release/commit-changes! worktree-path commit-msg)]
+    (if (:success? commit-result)
+      commit-result
+      (fail-controller! controller :commit-failed (:error commit-result)))))
+
+(defn push-and-create-pr!
+  "Push the branch and open a GitHub PR.
+   Returns the PR info map or a DAG error."
+  [controller worktree-path branch-name base-branch task task-id commit-result]
+  (let [push-result (release/push-branch! worktree-path branch-name)]
+    (if-not (:success? push-result)
+      (fail-controller! controller :push-failed (:error push-result))
+      (let [pr-title (or (:task/title task) (str "Task " (subs (str task-id) 0 8)))
+            pr-body  (str "## Task\n\n"
+                          (or (:task/description task) "Automated task implementation")
+                          "\n\n"
+                          "## Acceptance Criteria\n\n"
+                          (when-let [criteria (:task/acceptance-criteria task)]
+                            (str/join "\n" (map #(str "- " %) criteria))))
+            pr-result (release/create-pr! worktree-path
+                                          {:title pr-title
+                                           :body pr-body
+                                           :base-branch base-branch})]
+        (if-not (:success? pr-result)
+          (fail-controller! controller :pr-creation-failed (:error pr-result))
+          {:pr/id       (:pr-number pr-result)
+           :pr/url      (:pr-url pr-result)
+           :pr/branch   branch-name
+           :pr/base-sha nil
+           :pr/head-sha (:commit-sha commit-result)})))))
+
+(defn finalize-pr-creation!
+  "Record PR info on the controller, publish the event, and log success."
+  [controller pr-info dag-id run-id task-id event-bus logger]
+  (swap! controller assoc :pr pr-info)
+  (add-history! controller :pr-created pr-info)
+  (when event-bus
+    (events/publish! event-bus
+                     (events/pr-opened dag-id run-id task-id
+                                       (:pr/id pr-info)
+                                       (:pr/url pr-info)
+                                       (:pr/branch pr-info)
+                                       (:pr/head-sha pr-info))
+                     logger))
+  (when logger
+    (log/info logger :pr-lifecycle :controller/pr-created
+              {:message "PR created successfully"
+               :data {:pr-url (:pr/url pr-info)}}))
+  (dag/ok pr-info))
+
+;------------------------------------------------------------------------------ Layer 1
+;; PR creation orchestrator
 
 (defn create-pr!
   "Create a PR for the task.
@@ -120,78 +205,23 @@
                 {:message "Creating PR for task"
                  :data {:task-id task-id :branch branch-name}}))
 
-    ;; Create branch
-    (let [branch-result (release/create-branch! worktree-path branch-name)]
-      (if-not (:success? branch-result)
-        (do
-          (update-status! controller :failed)
-          (add-history! controller :pr-creation-failed {:error (:error branch-result)})
-          (dag/err :branch-creation-failed (:error branch-result)))
-
-        ;; Apply code artifact
-        (let [apply-result (fix/apply-fix-to-worktree worktree-path code-artifact logger)]
+    (let [branch-result (create-and-checkout-branch! controller worktree-path branch-name)]
+      (if (dag/err? branch-result)
+        branch-result
+        (let [apply-result (apply-code-to-files! controller worktree-path code-artifact logger)]
           (if (dag/err? apply-result)
-            (do
-              (update-status! controller :failed)
-              (dag/err :artifact-apply-failed (:error apply-result)))
-
-            ;; Stage and commit
-            (let [commit-msg (str "feat: " (or (:task/title task) "implement task")
-                                  "\n\nTask: " task-id)
-                  commit-result (release/commit-changes! worktree-path commit-msg)]
-              (if-not (:success? commit-result)
-                (do
-                  (update-status! controller :failed)
-                  (dag/err :commit-failed (:error commit-result)))
-
-                ;; Push and create PR
-                (let [push-result (release/push-branch! worktree-path branch-name)]
-                  (if-not (:success? push-result)
-                    (do
-                      (update-status! controller :failed)
-                      (dag/err :push-failed (:error push-result)))
-
-                    (let [pr-title (or (:task/title task) (str "Task " (subs (str task-id) 0 8)))
-                          pr-body (str "## Task\n\n"
-                                       (or (:task/description task) "Automated task implementation")
-                                       "\n\n"
-                                       "## Acceptance Criteria\n\n"
-                                       (when-let [criteria (:task/acceptance-criteria task)]
-                                         (str/join "\n" (map #(str "- " %) criteria))))
-                          pr-result (release/create-pr! worktree-path
-                                                        {:title pr-title
-                                                         :body pr-body
-                                                         :base-branch (:base-branch branch-result)})]
-                      (if-not (:success? pr-result)
-                        (do
-                          (update-status! controller :failed)
-                          (dag/err :pr-creation-failed (:error pr-result)))
-
-                        ;; Success!
-                        (let [pr-info {:pr/id (:pr-number pr-result)
-                                       :pr/url (:pr-url pr-result)
-                                       :pr/branch branch-name
-                                       :pr/base-sha nil
-                                       :pr/head-sha (:commit-sha commit-result)}]
-                          (swap! controller assoc :pr pr-info)
-                          (add-history! controller :pr-created pr-info)
-
-                          ;; Publish event
-                          (when event-bus
-                            (events/publish! event-bus
-                                             (events/pr-opened dag-id run-id task-id
-                                                               (:pr/id pr-info)
-                                                               (:pr/url pr-info)
-                                                               branch-name
-                                                               (:pr/head-sha pr-info))
-                                             logger))
-
-                          (when logger
-                            (log/info logger :pr-lifecycle :controller/pr-created
-                                      {:message "PR created successfully"
-                                       :data {:pr-url (:pr/url pr-info)}}))
-
-                          (dag/ok pr-info))))))))))))))
+            apply-result
+            (let [commit-result (commit-changes! controller worktree-path task task-id)]
+              (if (dag/err? commit-result)
+                commit-result
+                (let [pr-info (push-and-create-pr! controller worktree-path branch-name
+                                                   (:base-branch branch-result)
+                                                   task task-id commit-result)]
+                  (if (dag/err? pr-info)
+                    pr-info
+                    (finalize-pr-creation! controller pr-info
+                                           dag-id run-id task-id
+                                           event-bus logger)))))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Monitoring
