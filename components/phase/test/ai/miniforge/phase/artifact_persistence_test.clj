@@ -184,7 +184,7 @@
                   agent/invoke (fn [_ _ _]
                                  (response/error "LLM timeout" {:tokens 0 :duration-ms 5000}))]
       (let [ctx (-> (create-base-context)
-                    (assoc-in [:phase :iterations] 5)) ;; At max budget
+                    (assoc-in [:phase :iterations] 8)) ;; At max budget (iterations=8)
             ctx-entered (execute-phase-enter :implement ctx)
             ctx-left (execute-phase-leave :implement ctx-entered)]
         (is (= :failed (get-in ctx-left [:phase :status]))

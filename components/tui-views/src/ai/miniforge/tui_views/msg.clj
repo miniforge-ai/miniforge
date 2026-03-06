@@ -87,6 +87,15 @@
   [:msg/agent-output {:workflow-id wf-id :agent agent-id
                       :delta delta :done? done?}])
 
+(defn agent-started [wf-id agent-id context]
+  [:msg/agent-started {:workflow-id wf-id :agent agent-id :context context}])
+
+(defn agent-completed [wf-id agent-id result]
+  [:msg/agent-completed {:workflow-id wf-id :agent agent-id :result result}])
+
+(defn agent-failed [wf-id agent-id error]
+  [:msg/agent-failed {:workflow-id wf-id :agent agent-id :error error}])
+
 (defn workflow-done [wf-id status]
   [:msg/workflow-done {:workflow-id wf-id :status status}])
 
@@ -95,6 +104,15 @@
 
 (defn gate-result [wf-id gate passed?]
   [:msg/gate-result {:workflow-id wf-id :gate gate :passed? passed?}])
+
+(defn gate-started [wf-id gate]
+  [:msg/gate-started {:workflow-id wf-id :gate gate}])
+
+(defn tool-invoked [wf-id agent-id tool-id]
+  [:msg/tool-invoked {:workflow-id wf-id :agent agent-id :tool tool-id}])
+
+(defn tool-completed [wf-id agent-id tool-id]
+  [:msg/tool-completed {:workflow-id wf-id :agent agent-id :tool tool-id}])
 
 ;------------------------------------------------------------------------------ Layer 0c
 ;; Chain event messages (from subscription.clj)

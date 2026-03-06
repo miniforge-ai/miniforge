@@ -273,7 +273,8 @@
                         (llm/chat llm-client user-prompt
                                   (merge {:system @tester-system-prompt} mcp-opts)))))
                   response llm-result
-                  tokens (get response :tokens 0)]
+                  tokens (get response :tokens 0)
+                  cost-usd (get response :cost-usd)]
               (log/info logger :tester :tester/llm-called
                         {:data {:success (llm/success? response)
                                 :tokens tokens
@@ -317,7 +318,8 @@
                                                :test-type (:test/type tests-with-meta)
                                                :assertions (:test/assertions-count tests-with-meta)
                                                :cases (:test/cases-count tests-with-meta)
-                                               :tokens tokens}}))
+                                               :tokens tokens
+                                               :cost-usd cost-usd}}))
                     ;; LLM returned content but no parseable tests — fail explicitly
                     (response/error "LLM response could not be parsed as test artifact"
                                     {:tokens tokens})))

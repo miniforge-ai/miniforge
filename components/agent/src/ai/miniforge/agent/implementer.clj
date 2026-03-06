@@ -283,7 +283,8 @@
                         (llm/chat llm-client user-prompt
                                   (merge {:system effective-system-prompt} mcp-opts)))))
                   response llm-result
-                  tokens (get response :tokens 0)]
+                  tokens (get response :tokens 0)
+                  cost-usd (get response :cost-usd)]
               (log/info logger :implementer :implementer/llm-called
                         {:data {:success (llm/success? response)
                                 :tokens tokens
@@ -307,6 +308,7 @@
                               :code/created-at (java.util.Date.)}
                      :summary (:summary parsed)
                      :metrics {:tokens tokens
+                               :cost-usd cost-usd
                                :files-created 0
                                :skipped-reason :already-implemented}}
                     ;; Normal code artifact parsing
@@ -328,7 +330,8 @@
                                                      :files-modified (count (filter #(= :modify (:action %)) (:code/files code-with-meta)))
                                                      :files-deleted (count (filter #(= :delete (:action %)) (:code/files code-with-meta)))
                                                      :language lang
-                                                     :tokens tokens}}))
+                                                     :tokens tokens
+                                                     :cost-usd cost-usd}}))
                       ;; LLM returned content but no parseable code — fail explicitly
                       (response/error "LLM response could not be parsed as code artifact"
                                       {:tokens tokens}))))

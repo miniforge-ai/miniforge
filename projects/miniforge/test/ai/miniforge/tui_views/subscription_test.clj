@@ -51,7 +51,7 @@
       (is (= :plan (get-in (first @messages) [1 :phase])))
       (cleanup))))
 
-(deftest translate-workflow-completed-test
+(deftest translate-workflow-done-event-test
   (testing "Workflow completed translates correctly"
     (let [stream (es/create-event-stream)
           messages (atom [])
@@ -98,3 +98,19 @@
       (es/publish! stream (es/workflow-started stream wf-id {:name "test"}))
       (Thread/sleep 50)
       (is (empty? @messages)))))
+
+(deftest translate-agent-tool-and-gate-events-test
+  (testing "Canonical event fields translate to TUI messages"
+    (let [stream (es/create-event-stream {:sinks []})
+          wf-id (random-uuid)
+          events [(es/agent-status stream wf-id :planner :thinking "Working")
+                  (es/gate-started stream wf-id :lint)
+                  (es/gate-passed stream wf-id :lint 12)
+                  (es/tool-invoked stream wf-id :planner :tools/read-file {:path "src/core.clj"})
+                  (es/tool-completed stream wf-id :planner :tools/read-file {:ok true})]
+          messages (mapv sub/translate-event events)]
+      (is (= :msg/agent-status (first (nth messages 0))))
+      (is (= :msg/gate-started (first (nth messages 1))))
+      (is (= :msg/gate-result (first (nth messages 2))))
+      (is (= :msg/tool-invoked (first (nth messages 3))))
+      (is (= :msg/tool-completed (first (nth messages 4)))))))

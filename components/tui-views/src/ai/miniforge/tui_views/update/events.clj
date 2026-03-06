@@ -46,9 +46,20 @@
 (defn- update-detail-if-active
   "Apply update-fn to detail if workflow-id matches active detail."
   [model workflow-id update-fn]
-  (if (= workflow-id (get-in model [:detail :workflow-id]))
+  (if (and workflow-id
+           (= workflow-id (get-in model [:detail :workflow-id])))
     (update-fn model)
     model))
+
+(defn- ensure-workflow
+  "Ensure a workflow row exists so updates remain visible even if
+   :workflow/started arrives late or is missing."
+  [model workflow-id]
+  (if (or (nil? workflow-id)
+          (find-workflow-idx (:workflows model) workflow-id))
+    model
+    (update model :workflows conj (model/make-workflow {:id workflow-id
+                                                        :status :running}))))
 
 ;; Timestamp wrapper
 
@@ -110,45 +121,87 @@
         with-timestamp)))
 
 (defn handle-phase-changed [model {:keys [workflow-id phase]}]
-  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
+  (let [model (ensure-workflow model workflow-id)
+        idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
         (apply-phase-change idx workflow-id phase)
         with-timestamp)))
 
 (defn handle-phase-done [model {:keys [workflow-id]}]
-  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
+  (let [model (ensure-workflow model workflow-id)
+        idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
         (update-workflow-at idx #(update % :progress (fn [p] (min 100 (+ (or p 0) 20)))))
         with-timestamp)))
 
 (defn handle-agent-status [model {:keys [workflow-id agent status message]}]
-  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
+  (let [model (ensure-workflow model workflow-id)
+        idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
         (apply-agent-status-update idx workflow-id agent status message)
         with-timestamp)))
 
+(defn handle-agent-started [model {:keys [workflow-id agent]}]
+  (handle-agent-status model {:workflow-id workflow-id :agent agent
+                              :status :started :message nil}))
+
+(defn handle-agent-completed [model {:keys [workflow-id agent]}]
+  (handle-agent-status model {:workflow-id workflow-id :agent agent
+                              :status :completed :message nil}))
+
+(defn handle-agent-failed [model {:keys [workflow-id agent]}]
+  (let [agent-kw (or agent :unknown)]
+    (-> (handle-agent-status model {:workflow-id workflow-id :agent agent-kw
+                                    :status :failed :message nil})
+        (assoc :flash-message (str "Agent " (name agent-kw) " failed")))))
+
 (defn handle-agent-output [model {:keys [workflow-id delta]}]
-  (-> model
+  (-> (ensure-workflow model workflow-id)
       (update-detail-if-active workflow-id
         #(update-in % [:detail :agent-output] str delta))
       with-timestamp))
 
 (defn handle-workflow-done [model {:keys [workflow-id status]}]
-  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
+  (let [model (ensure-workflow model workflow-id)
+        idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
         (update-workflow-at idx #(assoc % :status (or status :success) :progress 100))
         with-timestamp)))
 
 (defn handle-workflow-failed [model {:keys [workflow-id error]}]
-  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
+  (let [model (ensure-workflow model workflow-id)
+        idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
         (update-workflow-at idx #(assoc % :status :failed :error error))
         with-timestamp)))
 
 (defn handle-gate-result [model {:keys [workflow-id gate passed?] :as payload}]
-  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
+  (let [model (ensure-workflow model workflow-id)
+        idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
         (apply-gate-result idx workflow-id gate passed? payload)
+        with-timestamp)))
+
+(defn handle-gate-started [model {:keys [workflow-id gate]}]
+  (let [model (ensure-workflow model workflow-id)]
+    (-> model
+        (assoc :flash-message (str "Gate running: " (if gate (name gate) "unknown")))
+        with-timestamp)))
+
+(defn handle-tool-invoked [model {:keys [workflow-id agent tool]}]
+  (let [model (ensure-workflow model workflow-id)
+        idx (find-workflow-idx (:workflows model) workflow-id)
+        status-message (str "Tool " (if tool (name tool) "unknown") " invoked")]
+    (-> model
+        (apply-agent-status-update idx workflow-id (or agent :agent) :tool-running status-message)
+        with-timestamp)))
+
+(defn handle-tool-completed [model {:keys [workflow-id agent tool]}]
+  (let [model (ensure-workflow model workflow-id)
+        idx (find-workflow-idx (:workflows model) workflow-id)
+        status-message (str "Tool " (if tool (name tool) "unknown") " completed")]
+    (-> model
+        (apply-agent-status-update idx workflow-id (or agent :agent) :tool-completed status-message)
         with-timestamp)))
 
 ;------------------------------------------------------------------------------ Layer 2b

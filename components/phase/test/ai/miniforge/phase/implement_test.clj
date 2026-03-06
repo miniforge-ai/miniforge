@@ -49,7 +49,7 @@
     (is (= [:syntax :lint] (:gates implement/default-config)))
     (is (map? (:budget implement/default-config)))
     (is (= 30000 (get-in implement/default-config [:budget :tokens])))
-    (is (= 5 (get-in implement/default-config [:budget :iterations])))
+    (is (= 8 (get-in implement/default-config [:budget :iterations])))
     (is (= 600 (get-in implement/default-config [:budget :time-seconds])))))
 
 (deftest phase-defaults-registration-test

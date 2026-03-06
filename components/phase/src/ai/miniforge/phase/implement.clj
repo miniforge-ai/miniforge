@@ -59,7 +59,7 @@
   {:agent :implementer
    :gates [:syntax :lint]
    :budget {:tokens 30000
-            :iterations 5
+            :iterations 8
             :time-seconds 600}
    ;; Implementation is code-heavy - hint at Sonnet
    :model-hint :sonnet-4.5})
@@ -81,21 +81,21 @@
                            (get-in input [:intent :scope]))
         existing-files (file-ctx/load-files-in-scope worktree-path files-in-scope)
         behavior-addendum (agent-beh/load-and-filter-behaviors
-                            :implement {:task {:task/intent (:intent input)}})]
-    (let [base-task {:task/id (random-uuid)
-                     :task/type :implement
-                     :task/description (:description input)
-                     :task/title (:title input)
-                     :task/intent (:intent input)
-                     :task/constraints (:constraints input)
-                     :task/plan plan-result
-                     :task/existing-files existing-files
-                     :task/behavior-addendum behavior-addendum}]
-      (cond-> base-task
-        verify-failure
-        (assoc :task/verify-failures
-               {:test-results (get-in verify-failure [:result :output :metadata :test-results])
-                :test-output (get-in verify-failure [:result :output :metadata :test-results :output])})))))
+                            :implement {:task {:task/intent (:intent input)}})
+        base-task {:task/id (random-uuid)
+                   :task/type :implement
+                   :task/description (:description input)
+                   :task/title (:title input)
+                   :task/intent (:intent input)
+                   :task/constraints (:constraints input)
+                   :task/plan plan-result
+                   :task/existing-files existing-files
+                   :task/behavior-addendum behavior-addendum}]
+    (cond-> base-task
+      verify-failure
+      (assoc :task/verify-failures
+             {:test-results (get-in verify-failure [:result :output :metadata :test-results])
+              :test-output (get-in verify-failure [:result :output :metadata :test-results :output])}))))
 
 (defn- create-streaming-callback
   "Create a streaming callback for agent output if event-stream is available."
@@ -166,7 +166,9 @@
                        :else (registry/determine-phase-status
                                agent-status iterations max-iterations))
         metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
-        cost-usd (* (:tokens metrics 0) 0.000015)
+        cost-usd (or (:cost-usd result)
+                     (:cost-usd metrics)
+                     (* (:tokens metrics 0) 0.000015))
         metrics (assoc metrics :cost-usd cost-usd)
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)

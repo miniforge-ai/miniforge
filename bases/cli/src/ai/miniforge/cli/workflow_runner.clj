@@ -47,16 +47,10 @@
     {:load-workflow load-workflow
      :run-pipeline run-pipeline}))
 
-(defn- create-phase-callbacks [quiet]
-  {:on-phase-start
-   (fn [_ctx interceptor]
-     (when-let [phase-name (get-in interceptor [:config :phase])]
-       (display/print-phase-start phase-name quiet)))
-
-   :on-phase-complete
-   (fn [_ctx interceptor result]
-     (when-let [phase-name (get-in interceptor [:config :phase])]
-       (display/print-phase-complete phase-name result quiet)))})
+(defn- create-phase-callbacks [_quiet]
+  ;; Phase progress is handled by the event-stream subscription
+  ;; (display/start-progress!). Callbacks retained as extension point.
+  {})
 
 (defn- load-and-validate-workflow [load-workflow workflow-id version]
   (let [{:keys [workflow validation]} (load-workflow workflow-id version {})]
@@ -196,10 +190,14 @@
             ;; Pass dashboard-url in callbacks if provided
             callbacks-with-url (cond-> callbacks
                                  dashboard-url (assoc :dashboard-url dashboard-url))
-            result (execute-workflow-pipeline run-pipeline workflow workflow-input callbacks-with-url artifact-store es)]
-        (close-artifact-store artifact-store)
-        (display/print-result result opts)
-        result))
+            progress-cleanup (display/start-progress! es quiet)]
+        (try
+          (let [result (execute-workflow-pipeline run-pipeline workflow workflow-input callbacks-with-url artifact-store es)]
+            (close-artifact-store artifact-store)
+            (display/print-result result opts)
+            result)
+          (finally
+            (progress-cleanup)))))
     (catch Exception e
       (when-not quiet
         (println (display/colorize :red (str "\n✗ Error: " (ex-message e)))))
@@ -298,7 +296,8 @@
                                                         :control-state control-state
                                                         :skip-lifecycle-events true})
           sandbox? (or (:sandbox opts) (:spec/sandbox spec))
-          [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)]
+          [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)
+          progress-cleanup (display/start-progress! event-stream quiet)]
       (when-not quiet
         (display/print-workflow-header (keyword (str "adhoc-" (hash spec))) "adhoc" quiet))
       (dashboard/print-dashboard-status! quiet)
@@ -313,6 +312,7 @@
                               :sandbox-cleanup sandbox-cleanup
                               :opts opts})
         (finally
+          (progress-cleanup)
           (when command-poller-cleanup (command-poller-cleanup)))))
     (catch Exception e
       (when-not quiet
@@ -386,12 +386,16 @@
                                                       :workflow-type chain-id
                                                       :workflow-version version
                                                       :spec-title (str "Chain: " (name chain-id))
-                                                      :control-state (es/create-control-state)})]
+                                                      :control-state (es/create-control-state)})
+            progress-cleanup (display/start-progress! event-stream quiet)]
         (print-chain-header chain-id chain-def quiet)
         (dashboard/print-dashboard-status! quiet)
-        (let [result (run-chain-fn chain-def chain-input context)]
-          (print-chain-result result quiet)
-          result))
+        (try
+          (let [result (run-chain-fn chain-def chain-input context)]
+            (print-chain-result result quiet)
+            result)
+          (finally
+            (progress-cleanup))))
       (catch Exception e
         (when-not quiet
           (println (display/colorize :red (str "\n❌ Chain execution failed: " (ex-message e)))))

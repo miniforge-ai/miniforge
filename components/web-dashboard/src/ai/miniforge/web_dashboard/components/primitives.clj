@@ -46,10 +46,13 @@
 
    Example: (button \"Approve\" {:variant :primary :size :md})"
   [label & [{:keys [variant size disabled] :or {variant :primary size :md} :as opts}]]
-  [:button
-   {:class (build-class opts "btn" (str "btn-" (name variant)) (str "btn-" (name size)))
-    :disabled disabled}
-   label])
+  (let [html-attrs (dissoc opts :variant :size :disabled :class)]
+    [:button
+     (merge
+      {:class (build-class opts "btn" (str "btn-" (name variant)) (str "btn-" (name size)))
+       :disabled disabled}
+      html-attrs)
+     label]))
 
 (defn badge
   "Badge component for labels and status indicators.

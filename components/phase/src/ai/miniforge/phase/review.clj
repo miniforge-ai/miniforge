@@ -57,7 +57,7 @@
   {:agent :reviewer
    :gates [:review-approved :quality-check]
    :budget {:tokens 20000
-            :iterations 2
+            :iterations 4
             :time-seconds 180}
    ;; Code review needs balanced capabilities - hint at Sonnet
    :model-hint :sonnet-4.5})
