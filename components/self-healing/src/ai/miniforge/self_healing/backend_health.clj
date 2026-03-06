@@ -26,7 +26,7 @@
 ;;------------------------------------------------------------------------------ Layer 0
 ;; File paths and utilities
 
-(defn- backend-health-path
+(defn backend-health-path
   "Get path to backend health tracking file.
 
    Returns: String path to ~/.miniforge/backend_health.edn"
@@ -35,7 +35,7 @@
         miniforge-dir (io/file home ".miniforge")]
     (.getPath (io/file miniforge-dir "backend_health.edn"))))
 
-(defn- ensure-directory-exists
+(defn ensure-directory-exists
   "Ensure parent directory exists for a file path.
 
    Arguments:
@@ -47,7 +47,7 @@
     (when-not (.exists parent-dir)
       (.mkdirs parent-dir))))
 
-(defn- safe-read-edn
+(defn safe-read-edn
   "Safely read EDN from file, returning default on error.
 
    Arguments:
@@ -62,7 +62,7 @@
     (catch Exception _
       default)))
 
-(defn- atomic-write-edn
+(defn atomic-write-edn
   "Atomically write EDN to file using temp file + rename.
 
    Arguments:
@@ -79,7 +79,7 @@
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Default health data structure
 
-(defn- default-health-data
+(defn default-health-data
   "Create default health data structure.
 
    Returns: Map with default backends, cooldowns, and fallback order"

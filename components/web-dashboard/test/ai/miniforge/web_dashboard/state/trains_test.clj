@@ -21,7 +21,7 @@
    [ai.miniforge.web-dashboard.state.core :as core]
    [ai.miniforge.web-dashboard.state.trains :as sut]))
 
-(defn- temp-config-path
+(defn temp-config-path
   []
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory
                       "fleet-config"

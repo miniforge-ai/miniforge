@@ -31,17 +31,17 @@
 
 ;--- Layer 0: Result Constructors
 
-(defn- workflow-success [artifact metrics]
+(defn workflow-success [artifact metrics]
   {:success? true
    :artifact artifact
    :metrics (or metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0})})
 
-(defn- workflow-failure [error metrics]
+(defn workflow-failure [error metrics]
   {:success? false
    :error error
    :metrics (or metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0})})
 
-(defn- dag-execution-result [completed failed artifacts metrics-agg]
+(defn dag-execution-result [completed failed artifacts metrics-agg]
   {:success? (zero? failed)
    :tasks-completed completed
    :tasks-failed failed
@@ -50,7 +50,7 @@
              :cost-usd (:total-cost metrics-agg 0.0)
              :duration-ms (:total-duration metrics-agg 0)}})
 
-(defn- dag-execution-error [completed failed error]
+(defn dag-execution-error [completed failed error]
   {:success? false
    :tasks-completed completed
    :tasks-failed failed
@@ -58,7 +58,7 @@
    :metrics {}
    :error error})
 
-(defn- dag-execution-paused [completed failed artifacts reason]
+(defn dag-execution-paused [completed failed artifacts reason]
   {:success? false
    :paused? true
    :tasks-completed completed
@@ -69,12 +69,12 @@
 
 ;--- Layer 0: Level Traversal
 
-(defn- build-deps-map [tasks]
+(defn build-deps-map [tasks]
   (->> tasks
        (map (fn [t] [(:task/id t) (set (:task/dependencies t []))]))
        (into {})))
 
-(defn- traverse-levels [task-ids deps-map]
+(defn traverse-levels [task-ids deps-map]
   (loop [remaining (set task-ids)
          completed #{}
          level-count 0
@@ -89,7 +89,7 @@
                (inc level-count)
                (max max-width width))))))
 
-(defn- compute-max-level-width [tasks]
+(defn compute-max-level-width [tasks]
   (-> tasks
       ((juxt #(map :task/id %) build-deps-map))
       ((fn [[ids deps]] (traverse-levels ids deps)))
@@ -115,7 +115,7 @@
 
 ;--- Layer 1: Plan to DAG Conversion
 
-(defn- normalize-task-id
+(defn normalize-task-id
   "Normalize a task ID to a UUID. Handles UUIDs, UUID strings, keywords, and
    other values by generating a deterministic UUID from the value's string form."
   [x]
@@ -126,7 +126,7 @@
     (keyword? x) (java.util.UUID/nameUUIDFromBytes (.getBytes (name x)))
     :else (java.util.UUID/nameUUIDFromBytes (.getBytes (pr-str x)))))
 
-(defn- validate-deps
+(defn validate-deps
   "Filter deps to only those referencing actual task IDs. Warns on phantoms."
   [task-id raw-deps valid-task-ids]
   (let [valid (set (filter valid-task-ids raw-deps))
@@ -137,7 +137,7 @@
                (vec invalid) "— dropping them"))
     valid))
 
-(defn- plan-task->dag-task
+(defn plan-task->dag-task
   "Convert a single plan task to a DAG task with validated deps."
   [t valid-task-ids plan-id workflow-id context]
   (let [task-id (normalize-task-id (:task/id t))]
@@ -160,7 +160,7 @@
 
 ;--- Layer 1: Sub-Workflow Construction
 
-(defn- task-sub-workflow
+(defn task-sub-workflow
   "Build a sub-workflow config for a single DAG task.
 
    Derives pipeline from the parent workflow, removing explore/plan phases
@@ -184,7 +184,7 @@
                                                 0 (min 60 (count (str (:task/description task-def "task"))))))
      :workflow/pipeline sub-pipeline}))
 
-(defn- task-sub-input
+(defn task-sub-input
   "Build input map for a DAG task's sub-workflow.
 
    The task description becomes the spec description, and the task itself
@@ -201,7 +201,7 @@
                  :task/description (:task/description task-def "Implement task")
                  :task/type (:task/type task-def :implement)}]})
 
-(defn- task-sub-opts
+(defn task-sub-opts
   "Build execution opts for a DAG task's sub-workflow.
 
    Carries forward LLM backend, event stream, and sandbox/isolation config
@@ -222,7 +222,7 @@
 
 ;--- Layer 1: Mini-Workflow Execution
 
-(defn- run-mini-workflow
+(defn run-mini-workflow
   "Execute a full sub-workflow pipeline for a single DAG task.
 
    Each task gets its own workflow (implement → verify → review → done)
@@ -242,7 +242,7 @@
                             "Sub-workflow failed")
                         metrics))))
 
-(defn- workflow-result->dag-result [task-id description wf-result]
+(defn workflow-result->dag-result [task-id description wf-result]
   (if (:success? wf-result)
     (dag/ok {:task-id task-id
              :description description
@@ -253,7 +253,7 @@
              (:error wf-result)
              {:task-id task-id :metrics (:metrics wf-result)})))
 
-(defn- placeholder-result [task-id description]
+(defn placeholder-result [task-id description]
   (dag/ok {:task-id task-id
            :description description
            :status :implemented
@@ -283,34 +283,34 @@
 
 ;--- Layer 2: Synchronous DAG Execution
 
-(defn- compute-ready-tasks [tasks-map completed-ids failed-ids]
+(defn compute-ready-tasks [tasks-map completed-ids failed-ids]
   (->> tasks-map
        (filter (fn [[task-id task]]
                  (and (not (contains? completed-ids task-id))
                       (not (contains? failed-ids task-id))
                       (every? #(contains? completed-ids %) (:task/deps task #{})))))))
 
-(defn- execute-tasks-batch [tasks execute-fn context]
+(defn execute-tasks-batch [tasks execute-fn context]
   (->> tasks
        (map (fn [[task-id task]] [task-id (future (execute-fn task context))]))
        doall
        (map (fn [[task-id f]] [task-id @f]))
        (into {})))
 
-(defn- notify-batch-start [batch on-task-start]
+(defn notify-batch-start [batch on-task-start]
   (when on-task-start
     (doseq [[task-id _] batch] (on-task-start task-id))))
 
-(defn- notify-batch-complete [results on-task-complete]
+(defn notify-batch-complete [results on-task-complete]
   (when on-task-complete
     (doseq [[task-id result] results] (on-task-complete task-id result))))
 
-(defn- partition-results [results]
+(defn partition-results [results]
   (let [ok-results (->> results (filter #(dag/ok? (second %))) (map first))
         err-results (->> results (filter #(not (dag/ok? (second %)))) (map first))]
     {:completed ok-results :failed err-results}))
 
-(defn- aggregate-results [all-results]
+(defn aggregate-results [all-results]
   (let [results (vals all-results)
         artifacts (->> results (mapcat #(get-in % [:data :artifacts] [])))
         total-tokens (->> results (map #(get-in % [:data :metrics :tokens] 0)) (reduce + 0))
@@ -318,12 +318,12 @@
         total-duration (->> results (map #(get-in % [:data :metrics :duration-ms] 0)) (reduce + 0))]
     {:artifacts artifacts :total-tokens total-tokens :total-cost total-cost :total-duration total-duration}))
 
-(defn- has-failed-dependency?
+(defn has-failed-dependency?
   "Check if a task depends on any task in the failed set."
   [task failed-ids]
   (some failed-ids (get task :task/deps #{})))
 
-(defn- propagate-failures
+(defn propagate-failures
   "Mark tasks whose deps include any failed task as transitively failed."
   [tasks-map failed-ids]
   (loop [propagated failed-ids]
@@ -336,7 +336,7 @@
         propagated
         (recur (into propagated newly-failed))))))
 
-(defn- handle-rate-limit-in-batch
+(defn handle-rate-limit-in-batch
   "Handle rate-limited tasks in a batch. Returns either:
    - {:action :continue :new-backend X} to re-queue tasks
    - {:action :pause :result <paused-map>} to stop execution"
@@ -352,13 +352,13 @@
          :result (dag-execution-paused (count new-completed) (count failed-ids)
                                        artifacts (:reason decision))}))))
 
-(defn- emit-completed-checkpoints!
+(defn emit-completed-checkpoints!
   "Emit task-completed events for checkpointing."
   [completed-task-ids results event-stream workflow-id]
   (doseq [tid completed-task-ids]
     (resilience/emit-dag-task-completed! event-stream workflow-id tid (get results tid))))
 
-(defn- find-unreached-tasks
+(defn find-unreached-tasks
   "Identify tasks that are neither completed nor failed — stuck due to unmet deps."
   [tasks-map completed-ids all-failed]
   (->> (keys tasks-map)
@@ -368,14 +368,14 @@
                :unmet-deps (vec (remove completed-ids
                                         (get-in tasks-map [tid :task/deps] #{})))}))))
 
-(defn- log-unreached-tasks! [logger tasks-map completed-ids all-failed]
+(defn log-unreached-tasks! [logger tasks-map completed-ids all-failed]
   (let [unreached (find-unreached-tasks tasks-map completed-ids all-failed)]
     (when (seq unreached)
       (log/info logger :dag-orchestrator :dag/unreached-tasks
                 {:data {:unreached-count (count unreached)
                         :stuck-deps unreached}}))))
 
-(defn- finalize-dag
+(defn finalize-dag
   "Build the terminal result when no more tasks are ready."
   [tasks-map completed-ids all-failed all-results sub-workflow-ids iteration logger]
   (log-unreached-tasks! logger tasks-map completed-ids all-failed)
@@ -390,7 +390,7 @@
            :tasks-unreached unreached
            :sub-workflow-ids (vec sub-workflow-ids))))
 
-(defn- execute-dag-loop [tasks-map context logger]
+(defn execute-dag-loop [tasks-map context logger]
   (let [{:keys [on-task-start on-task-complete]} context
         max-parallel (get context :max-parallel 4)
         event-stream (or (:event-stream context)

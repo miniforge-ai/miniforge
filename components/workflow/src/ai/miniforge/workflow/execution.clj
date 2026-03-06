@@ -28,7 +28,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0: Atomic operations
 
-(defn- execute-enter
+(defn execute-enter
   "Execute the :enter function of an interceptor.
 
    Returns updated context."
@@ -57,7 +57,7 @@
                            :data (ex-data ex)}))))))
       ctx)))
 
-(defn- execute-leave
+(defn execute-leave
   "Execute the :leave function of an interceptor.
 
    Returns updated context."
@@ -81,18 +81,18 @@
                         {:error (ex-message ex)})))))
       ctx)))
 
-(defn- extract-phase-result
+(defn extract-phase-result
   "Extract phase result from context."
   [ctx]
   (get-in ctx [:phase]))
 
-(defn- already-done?
+(defn already-done?
   "Check if phase result indicates work was already done."
   [phase-result]
   (or (phase-reg/already-done? phase-result)
       (phase-reg/already-done? (:result phase-result))))
 
-(defn- apply-gate-validation
+(defn apply-gate-validation
   "Apply gate validation to phase result.
 
    Returns updated phase-result with :phase/status and :phase/gate-errors if gates fail.
@@ -113,13 +113,13 @@
                    :phase/gate-errors (:failed-gates gate-result))))
         phase-result))))
 
-(defn- phase-succeeded?
+(defn phase-succeeded?
   "Check if phase completed successfully or work was already done."
   [phase-result]
   (or (phase-reg/succeeded-or-done? phase-result)
       (already-done? phase-result)))
 
-(defn- update-response-chain
+(defn update-response-chain
   "Update response chain with phase result."
   [ctx phase-name phase-result]
   (if (phase-succeeded? phase-result)
@@ -141,13 +141,13 @@
               anomaly
               phase-result))))
 
-(defn- record-phase-metrics
+(defn record-phase-metrics
   "Record phase metrics in execution context."
   [ctx phase-result merge-metrics-fn]
   (update ctx :execution/metrics merge-metrics-fn
           (get phase-result :metrics {})))
 
-(defn- track-phase-files
+(defn track-phase-files
   "Track files written by phase for meta-agent monitoring."
   [ctx phase-result]
   (let [output (get-in phase-result [:result :output])
@@ -155,7 +155,7 @@
                      (mapv :path (:code/files output)))]
     (update ctx :execution/files-written into (or file-paths []))))
 
-(defn- record-phase-artifacts
+(defn record-phase-artifacts
   "Record phase artifacts in execution context."
   [ctx phase-result]
   (let [output (get-in phase-result [:result :output])
@@ -164,7 +164,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1: Composition
 
-(defn- execute-phase-lifecycle
+(defn execute-phase-lifecycle
   "Execute phase enter -> gates -> leave lifecycle.
 
    Returns [ctx phase-result]."
@@ -175,7 +175,7 @@
         ctx-left (execute-leave interceptor (assoc ctx-entered :phase phase-result-gated))]
     [ctx-left (extract-phase-result ctx-left)]))
 
-(defn- process-phase-result
+(defn process-phase-result
   "Process phase result: update response chain, record metrics/files/artifacts.
 
    Returns updated context."
@@ -187,7 +187,7 @@
       (record-phase-artifacts phase-result)
       (track-phase-files phase-result)))
 
-(defn- determine-next-index
+(defn determine-next-index
   "Determine next phase index based on result and config.
 
    Arguments:
@@ -257,7 +257,7 @@
   "Maximum number of phase redirects before failing to prevent infinite loops."
   3)
 
-(defn- apply-phase-transition
+(defn apply-phase-transition
   "Apply phase transition based on next-index.
 
    Returns context with updated status/phase-index or terminal state."
@@ -311,14 +311,14 @@
 
 ;------------------------------------------------------------------------------ Layer 1.5: DAG integration helpers
 
-(defn- extract-plan-from-phase-result
+(defn extract-plan-from-phase-result
   "Extract a plan map from an interceptor-style phase result, if present."
   [phase-result]
   (let [output (get-in phase-result [:result :output])]
     (when (and (map? output) (:plan/id output))
       output)))
 
-(defn- index-after-phase
+(defn index-after-phase
   "Find the index of the phase immediately after the named phase in the pipeline."
   [pipeline phase-kw]
   (some (fn [[i ic]]
@@ -326,7 +326,7 @@
             (inc i)))
         (map-indexed vector pipeline)))
 
-(defn- dag-applicable?
+(defn dag-applicable?
   "Check whether DAG execution should be attempted for this phase result.
    Returns the plan map if applicable, nil otherwise."
   [phase-name phase-result ctx]
@@ -334,7 +334,7 @@
              (not (:disable-dag-execution ctx)))
     (extract-plan-from-phase-result phase-result)))
 
-(defn- apply-dag-success
+(defn apply-dag-success
   "Apply a successful DAG result to the execution context.
    Merges artifacts and advances past the implement phase."
   [ctx dag-result pipeline transition-to-completed-fn]
@@ -346,7 +346,7 @@
       (assoc ctx-with-dag :execution/phase-index post-impl-idx)
       (transition-to-completed-fn ctx-with-dag))))
 
-(defn- apply-dag-failure
+(defn apply-dag-failure
   "Apply a failed DAG result to the execution context."
   [ctx dag-result transition-to-failed-fn]
   (transition-to-failed-fn
@@ -354,7 +354,7 @@
            {:type :dag-execution-failed
             :dag-result dag-result})))
 
-(defn- try-dag-execution
+(defn try-dag-execution
   "After plan phase, execute all plans via the DAG executor.
 
    The DAG executor is the universal executor — it handles both parallel

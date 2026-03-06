@@ -61,7 +61,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Gate running and feedback
 
-(defn- gate-result->feedback
+(defn gate-result->feedback
   "Convert a loop gate result to reviewer feedback format."
   [gate result]
   (let [gate-id (:gate/id gate :unknown)
@@ -76,7 +76,7 @@
      :warnings warnings
      :duration-ms (or (:gate/duration-ms result) 0)}))
 
-(defn- create-exception-feedback
+(defn create-exception-feedback
   "Create error feedback when gate throws exception."
   [gate idx exception duration]
   {:gate-id (or (:gate/id gate) (keyword (str "gate-" idx)))
@@ -86,7 +86,7 @@
              :message (str "Gate execution failed: " (ex-message exception))}]
    :duration-ms duration})
 
-(defn- run-single-gate
+(defn run-single-gate
   "Run a single gate and return feedback with timing.
    Handles exceptions gracefully."
   [gate idx artifact context logger]
@@ -110,7 +110,7 @@
                              :error (ex-message e)}})
           (create-exception-feedback gate idx e duration))))))
 
-(defn- run-gates-on-artifact
+(defn run-gates-on-artifact
   "Run all gates on the artifact and collect results.
    Returns vector of GateFeedback maps."
   [gates artifact context logger]
@@ -121,7 +121,7 @@
                       (run-single-gate gate idx artifact context logger)))
        vec))
 
-(defn- extract-blocking-issues
+(defn extract-blocking-issues
   "Extract blocking errors from failed gates."
   [failed-gates]
   (->> failed-gates
@@ -129,7 +129,7 @@
        (filter #(= :blocking (:severity % :blocking)))
        vec))
 
-(defn- extract-warning-messages
+(defn extract-warning-messages
   "Extract warning messages from all gates."
   [gate-feedbacks]
   (->> gate-feedbacks
@@ -137,7 +137,7 @@
        (map :message)
        vec))
 
-(defn- extract-error-messages
+(defn extract-error-messages
   "Extract error messages from failed gates."
   [failed-gates]
   (->> failed-gates
@@ -145,7 +145,7 @@
        (map :message)
        vec))
 
-(defn- decide-on-failures
+(defn decide-on-failures
   "Determine decision when there are gate failures."
   [failed-gates blocking-issues config]
   (if (seq blocking-issues)
@@ -158,7 +158,7 @@
                         [])
      :warnings (extract-error-messages failed-gates)}))
 
-(defn- make-review-decision
+(defn make-review-decision
   "Determine review decision based on gate results."
   [gate-feedbacks config]
   (let [failed (filter (complement :passed?) gate-feedbacks)
@@ -170,7 +170,7 @@
       (let [blocking-issues (extract-blocking-issues failed)]
         (decide-on-failures failed blocking-issues config)))))
 
-(defn- generate-summary
+(defn generate-summary
   "Generate human-readable summary of review."
   [decision gate-feedbacks]
   (let [passed (filter :passed? gate-feedbacks)
@@ -191,7 +191,7 @@
       ;; default for :changes-requested or other LLM-sourced decisions
       (format "Review complete: %s (%d gates evaluated)" (name decision) total))))
 
-(defn- generate-recommendations
+(defn generate-recommendations
   "Generate recommendations based on gate results."
   [gate-feedbacks]
   (->> gate-feedbacks
@@ -208,7 +208,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; LLM review: prompt building and response parsing
 
-(defn- format-artifact-for-review
+(defn format-artifact-for-review
   "Format a code artifact into a readable string for the LLM prompt."
   [artifact]
   (cond
@@ -228,7 +228,7 @@
     :else
     (pr-str artifact)))
 
-(defn- build-review-prompt
+(defn build-review-prompt
   "Construct the user prompt for LLM review from task data."
   [input]
   (let [artifact (or (:task/artifact input) input)
@@ -254,7 +254,7 @@
                 (if (string? tests) tests (pr-str tests))))
          "\n\nOutput your review as a Clojure map inside a ```clojure code block.")))
 
-(defn- parse-review-response
+(defn parse-review-response
   "Parse the LLM response to extract review feedback.
    Handles EDN in code blocks and plain EDN."
   [response-content]
@@ -267,7 +267,7 @@
     (catch Exception _
       nil)))
 
-(defn- normalize-llm-decision
+(defn normalize-llm-decision
   "Map LLM decision keywords to ReviewArtifact-compatible decisions."
   [decision]
   (case decision
@@ -277,21 +277,21 @@
     ;; default
     :changes-requested))
 
-(defn- llm-issues->blocking-strings
+(defn llm-issues->blocking-strings
   "Extract blocking issue descriptions from LLM issues."
   [issues]
   (->> issues
        (filter #(= :blocking (:severity %)))
        (mapv :description)))
 
-(defn- llm-issues->warning-strings
+(defn llm-issues->warning-strings
   "Extract warning descriptions from LLM issues."
   [issues]
   (->> issues
        (filter #(= :warning (:severity %)))
        (mapv :description)))
 
-(defn- llm-issues->recommendations
+(defn llm-issues->recommendations
   "Extract suggestions from LLM issues as recommendations."
   [issues]
   (->> issues
@@ -319,7 +319,7 @@
            :errors {:gates "Gate counts don't add up"}}
           {:valid? true :errors nil})))))
 
-(defn- repair-review-artifact
+(defn repair-review-artifact
   "Attempt to repair a review artifact."
   [artifact _errors _context]
   (let [repaired (atom artifact)]
@@ -357,7 +357,7 @@
 ;------------------------------------------------------------------------------ Layer 4
 ;; Public API - Helper functions
 
-(defn- extract-artifact-and-id
+(defn extract-artifact-and-id
   "Extract artifact and its ID from input."
   [input]
   (let [artifact (or (:task/artifact input) (:artifact input) input)
@@ -366,7 +366,7 @@
                         (random-uuid))]
     [artifact artifact-id]))
 
-(defn- calculate-gate-counts
+(defn calculate-gate-counts
   "Calculate passed, failed, and total gate counts."
   [gate-feedbacks]
   (let [passed (count (filter :passed? gate-feedbacks))
@@ -374,7 +374,7 @@
         total (count gate-feedbacks)]
     {:passed passed :failed failed :total total}))
 
-(defn- build-review-artifact
+(defn build-review-artifact
   "Build the review artifact from gate results, LLM feedback, and decision."
   [gate-feedbacks decision blocking-issues warnings artifact-id counts
    & {:keys [issues strengths summary]}]
@@ -393,7 +393,7 @@
     (seq issues) (assoc :review/issues issues)
     (seq strengths) (assoc :review/strengths strengths)))
 
-(defn- build-review-result
+(defn build-review-result
   "Build the final result map with metrics."
   [review counts duration tokens & {:keys [cost-usd]}]
   {:status :success
@@ -407,7 +407,7 @@
                      :tokens tokens}
               cost-usd (assoc :cost-usd cost-usd))})
 
-(defn- merge-gate-overrides
+(defn merge-gate-overrides
   "If gates failed, override the LLM decision accordingly."
   [llm-decision gate-decision config]
   (cond

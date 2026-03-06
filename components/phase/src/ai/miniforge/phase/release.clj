@@ -29,7 +29,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event stream helpers (optional dependency)
 
-(defn- emit-phase-started!
+(defn emit-phase-started!
   "Emit phase-started event if event-stream is available in context."
   [ctx phase]
   (when-let [event-stream (:event-stream ctx)]
@@ -38,7 +38,7 @@
         (let [workflow-id (:execution/id ctx)]
           (publish! event-stream (phase-started event-stream workflow-id phase)))))))
 
-(defn- emit-phase-completed!
+(defn emit-phase-completed!
   "Emit phase-completed event if event-stream is available in context."
   [ctx phase _result]
   (when-let [event-stream (:event-stream ctx)]
@@ -72,7 +72,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
-(defn- build-workflow-state
+(defn build-workflow-state
   "Build workflow state from phase context for the release executor."
   [ctx]
   ;; Read implement result from execution phase results (not :phases)
@@ -102,7 +102,7 @@
                                            "implement changes")}
      :workflow/artifacts code-artifacts}))
 
-(defn- build-executor-context
+(defn build-executor-context
   "Build context for the release executor from phase context."
   [ctx config]
   {:worktree-path (or (get-in ctx [:execution/worktree-path])
@@ -114,7 +114,7 @@
    ;; Allow disabling PR creation via config
    :create-pr? (get config :create-pr? true)})
 
-(defn- enter-release
+(defn enter-release
   "Execute release phase.
 
    Uses the workflow release executor to:
@@ -176,7 +176,7 @@
         (cond-> (= :success (:status result))
           (assoc-in [:workflow/pr-info] (get-in (:output result) [:workflow/pr-info]))))))
 
-(defn- leave-release
+(defn leave-release
   "Post-processing for release phase.
 
    Records release metrics and PR info."
@@ -219,7 +219,7 @@
                     (or (get-in result [:error :message])
                         "Release phase failed"))))))
 
-(defn- error-release
+(defn error-release
   "Handle release phase errors."
   [ctx ex]
   (let [iterations (get-in ctx [:phase :iterations] 0)

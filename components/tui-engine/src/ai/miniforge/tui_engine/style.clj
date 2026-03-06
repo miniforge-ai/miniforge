@@ -91,14 +91,14 @@
    [:cyan    [0 205 205]]
    [:white   [229 229 229]]])
 
-(defn- rgb-distance-sq
+(defn rgb-distance-sq
   "Squared Euclidean distance between two [r g b] triples."
   [[r1 g1 b1] [r2 g2 b2]]
   (+ (* (- r1 r2) (- r1 r2))
      (* (- g1 g2) (- g1 g2))
      (* (- b1 b2) (- b1 b2))))
 
-(defn- nearest-ansi
+(defn nearest-ansi
   "Find the nearest ANSI keyword for an [r g b] triple."
   [rgb]
   (first (reduce (fn [[best-kw best-d] [kw ref-rgb]]
@@ -178,7 +178,7 @@
     (edn/read-string (slurp r))
     {}))
 
-(defn- load-user-themes
+(defn load-user-themes
   "Load custom themes from ~/.miniforge/themes/*.edn.
    Each file should contain a single map: {theme-keyword theme-map}."
   []

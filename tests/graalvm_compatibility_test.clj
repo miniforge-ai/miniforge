@@ -18,7 +18,7 @@
 ;; Discovery
 ;; ============================================================================
 
-(defn- discover-interface-namespaces
+(defn discover-interface-namespaces
   "Scan components/ for interface.clj files and derive namespace symbols.
    Returns a sorted seq of namespace symbols."
   []
@@ -35,7 +35,7 @@
                                            [(symbol (str "ai.miniforge." brick-name ".interface"))])))))]
     (sort-by str interface-files)))
 
-(defn- path->namespace
+(defn path->namespace
   "Convert a .clj file path (relative to src/) to a namespace symbol.
    e.g. ai/miniforge/cli/main.clj -> ai.miniforge.cli.main"
   [src-root clj-file]
@@ -48,7 +48,7 @@
         (str/replace "_" "-")
         symbol)))
 
-(defn- discover-base-namespaces
+(defn discover-base-namespaces
   "Scan bases/ for all .clj source files and derive namespace symbols.
    Returns a sorted seq of namespace symbols."
   []
@@ -67,7 +67,7 @@
 ;; Helpers
 ;; ============================================================================
 
-(defn- require-namespace
+(defn require-namespace
   "Try to require a namespace. Returns [success? error-message]."
   [ns-symbol]
   (try
@@ -76,7 +76,7 @@
     (catch Exception e
       [false (str "Failed to require " ns-symbol ": " (ex-message e))])))
 
-(defn- classpath-error?
+(defn classpath-error?
   "Check if the error is a classpath/file-not-found issue (not a compatibility issue)."
   [error-msg]
   (some #(str/includes? (or error-msg "") %)
@@ -84,7 +84,7 @@
          "FileNotFoundException"
          "on classpath"]))
 
-(defn- jvm-only-error?
+(defn jvm-only-error?
   "Check if the error indicates JVM-only features that block GraalVM/Babashka."
   [error-msg]
   (some #(str/includes? (or error-msg "") %)

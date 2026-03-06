@@ -42,7 +42,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0: Binding resolution
 
-(defn- resolve-binding
+(defn resolve-binding
   "Resolve a single input binding against previous output and chain input.
    Path expressions:
    - :chain/input.KEY — reads KEY from the chain's initial input
@@ -75,7 +75,7 @@
     ;; Keyword — try chain-input
     (keyword? binding) (get chain-input binding)))
 
-(defn- resolve-bindings
+(defn resolve-bindings
   "Resolve all input bindings for a step."
   [input-bindings prev-output chain-input]
   (reduce-kv
@@ -86,7 +86,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1: Event emission
 
-(defn- emit!
+(defn emit!
   "Emit a chain event if event-stream is present in opts."
   [opts constructor-sym & args]
   (when-let [stream (:event-stream opts)]

@@ -29,7 +29,7 @@
 (def ^:dynamic *port* 8787)
 (def ^:private server-atom (atom nil))
 
-(defn- parse-repos-from-config []
+(defn parse-repos-from-config []
   (-> (str (System/getProperty "user.home") "/.miniforge/config.edn")
       java.io.File.
       (as-> f (when (.exists f) (slurp f)))

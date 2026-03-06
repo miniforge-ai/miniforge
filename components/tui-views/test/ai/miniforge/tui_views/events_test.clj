@@ -9,9 +9,9 @@
 
 ;; ---------------------------------------------------------------------------- Helpers
 
-(defn- fresh [] (model/init-model))
+(defn fresh [] (model/init-model))
 
-(defn- with-workflow
+(defn with-workflow
   "Add a single workflow to the model."
   [model wf-id & {:keys [name] :or {name "test"}}]
   (events/handle-workflow-added model {:workflow-id wf-id :name name :spec nil}))

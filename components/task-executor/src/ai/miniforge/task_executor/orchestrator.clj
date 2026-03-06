@@ -41,7 +41,7 @@
      :lock-pool lock-pool
      :config config}))
 
-(defn- log-event
+(defn log-event
   "Log an event if logger is available."
   [logger event-type data]
   (when logger
@@ -49,7 +49,7 @@
               {:message (str "Task orchestrator: " (name event-type))
                :data data})))
 
-(defn- skip-dependent-tasks!
+(defn skip-dependent-tasks!
   "Skip all tasks that depend on a failed task."
   [run-atom task-id logger]
   (log-event logger :skipping-dependents {:failed-task-id task-id})

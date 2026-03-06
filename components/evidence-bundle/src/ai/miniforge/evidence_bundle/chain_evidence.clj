@@ -55,14 +55,14 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Chain Evidence Creation
 
-(defn- derive-chain-status
+(defn derive-chain-status
   "Derive chain evidence status from the chain result."
   [chain-result]
   (if (phase-reg/succeeded? chain-result)
     :completed
     :failed))
 
-(defn- build-step-summaries
+(defn build-step-summaries
   "Build step summaries from chain step results."
   [step-results]
   (vec (map-indexed (fn [idx sr] (summarize-step sr idx)) step-results)))

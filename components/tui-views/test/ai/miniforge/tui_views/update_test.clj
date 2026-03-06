@@ -28,7 +28,7 @@
 (def wf-id-1 (random-uuid))
 (def wf-id-2 (random-uuid))
 
-(defn- two-workflows
+(defn two-workflows
   "Create a model with 2 workflows in the workflow-list view."
   []
   (-> (util/fresh-model)
@@ -584,7 +584,7 @@
 ;; Batch command tests — archive, delete, cancel, rerun via command mode
 ;; ---------------------------------------------------------------------------
 
-(defn- execute-command
+(defn execute-command
   "Apply a command string to model: enters command mode, types it, presses Enter."
   [model cmd-str]
   (util/apply-updates model

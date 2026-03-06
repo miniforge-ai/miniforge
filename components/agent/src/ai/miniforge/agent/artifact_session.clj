@@ -39,7 +39,7 @@
     {:valid? false
      :errors (m/explain Session session)}))
 
-(defn- command-on-path?
+(defn command-on-path?
   "Check if a command exists on PATH."
   [cmd]
   (try
@@ -47,7 +47,7 @@
       (zero? (.waitFor proc)))
     (catch Exception _ false)))
 
-(defn- resolve-miniforge-command
+(defn resolve-miniforge-command
   "Resolve the miniforge command to use for spawning subprocesses.
 
    Resolution order:
@@ -68,7 +68,7 @@
     :else
     ["bb" "miniforge"]))
 
-(defn- server-command
+(defn server-command
   "Build the MCP config command map for starting the artifact server."
   [artifact-dir]
   (let [[cmd & args] (resolve-miniforge-command)]
@@ -106,7 +106,7 @@
    "submit_test_artifact"
    "submit_release_artifact"])
 
-(defn- write-codex-mcp-config!
+(defn write-codex-mcp-config!
   "Write or update .codex/config.toml with [mcp_servers.artifact] block.
 
    If the file exists and already has an [mcp_servers.artifact] block,
@@ -135,7 +135,7 @@
       (spit config-file block))
     (str config-file)))
 
-(defn- write-cursor-mcp-config!
+(defn write-cursor-mcp-config!
   "Write or update .cursor/mcp.json with mcpServers.artifact entry.
 
    If the file exists, merges into existing JSON. Creates .cursor/ dir if needed.
@@ -154,7 +154,7 @@
     (spit config-file (json/generate-string config {:pretty true}))
     (str config-file)))
 
-(defn- write-claude-settings!
+(defn write-claude-settings!
   "Write Claude CLI settings JSON with PreToolUse hook for supervision.
 
    The hook invokes `bb miniforge hook-eval` which reads the tool request
@@ -213,25 +213,25 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Artifact reading
 
-(defn- uuid-str?
+(defn uuid-str?
   "Check if a value is a UUID-shaped string."
   [v]
   (and (string? v)
        (re-matches #"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}" v)))
 
-(defn- instant-str?
+(defn instant-str?
   "Check if a value looks like an ISO instant string."
   [v]
   (and (string? v)
        (re-matches #"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.*" v)))
 
-(defn- key-ends-with?
+(defn key-ends-with?
   "Check if a namespaced keyword ends with the given suffix."
   [k suffix]
   (and (keyword? k)
        (str/ends-with? (name k) suffix)))
 
-(defn- parse-uuid-strings
+(defn parse-uuid-strings
   "Convert string UUIDs and ISO instant strings in an artifact map.
    The MCP server writes UUIDs and instants as strings since it runs in babashka.
 
@@ -294,7 +294,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; High-level session helpers
 
-(defn- cleanup-codex-mcp-config!
+(defn cleanup-codex-mcp-config!
   "Remove [mcp_servers.artifact] block from .codex/config.toml.
    Deletes the file if it becomes empty."
   [path]
@@ -308,7 +308,7 @@
           (.delete f)
           (spit f cleaned))))))
 
-(defn- cleanup-cursor-mcp-config!
+(defn cleanup-cursor-mcp-config!
   "Remove artifact key from .cursor/mcp.json.
    Deletes the file if mcpServers becomes empty."
   [path]

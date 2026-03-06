@@ -10,7 +10,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure parsing helpers
 
-(defn- parse-array-value
+(defn parse-array-value
   "Parse array-style value [item1, item2] into vector.
    Returns parsed vector or original string on failure."
   [v]
@@ -20,7 +20,7 @@
       ;; If EDN parsing fails, split by comma
       (vec (map str/trim (str/split (str/replace v #"[\[\]]" "") #","))))))
 
-(defn- parse-scalar-value
+(defn parse-scalar-value
   "Parse a scalar YAML value into appropriate Clojure type.
    Handles: booleans, numbers, and strings (with quote removal)."
   [v]
@@ -37,14 +37,14 @@
     :else
     (str/replace v #"^[\"']|[\"']$" "")))
 
-(defn- parse-value
+(defn parse-value
   "Parse a YAML value, handling arrays and scalars."
   [v]
   (if (str/starts-with? v "[")
     (parse-array-value v)
     (parse-scalar-value v)))
 
-(defn- parse-key-value-line
+(defn parse-key-value-line
   "Parse a key: value line into [key value] pair.
    Returns [key nil] for key with no value, or nil if line doesn't match pattern."
   [line]
@@ -53,14 +53,14 @@
       [(keyword k) nil]
       [(keyword k) (parse-value v)])))
 
-(defn- parse-list-item
+(defn parse-list-item
   "Parse a list item line (e.g., '  - item').
    Returns the item value or nil if not a list item."
   [line]
   (when (str/starts-with? line "  - ")
     (str/trim (subs line 4))))
 
-(defn- add-to-collection
+(defn add-to-collection
   "Add a value to an existing collection field.
    Creates vector if field doesn't exist, appends to existing vector."
   [existing value]
@@ -72,7 +72,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Stateful accumulation (using reduce instead of atom)
 
-(defn- process-yaml-line
+(defn process-yaml-line
   "Process a single YAML line and update accumulator.
    Returns updated accumulator map."
   [acc line]

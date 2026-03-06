@@ -22,7 +22,7 @@
    [ai.miniforge.release-executor.interface :as release-executor]
    [babashka.process :as process]))
 
-(defn- with-mocked-test-runner
+(defn with-mocked-test-runner
   "Run body-fn with run-tests! and write-test-files! mocked to prevent subprocess spawning."
   [body-fn]
   (let [write-var (resolve 'ai.miniforge.phase.verify/write-test-files!)

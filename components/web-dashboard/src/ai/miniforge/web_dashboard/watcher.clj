@@ -14,7 +14,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; File reading
 
-(defn- read-new-lines
+(defn read-new-lines
   "Read new lines from file starting at byte offset.
    Returns [new-offset lines] where lines is a vector of strings."
   [^java.io.File file ^long offset]
@@ -43,7 +43,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Polling
 
-(defn- poll-once!
+(defn poll-once!
   "Scan events dir, read new EDN lines from each .edn file,
    call publish-fn for each parsed event. Returns updated offsets map."
   [events-dir offsets publish-fn]
@@ -69,7 +69,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Watcher lifecycle
 
-(defn- initialize-offsets
+(defn initialize-offsets
   "Scan existing .edn files and set offsets to end-of-file.
    This skips historical data so the watcher only sees new events."
   [events-dir]

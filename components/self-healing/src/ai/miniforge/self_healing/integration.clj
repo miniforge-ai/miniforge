@@ -27,7 +27,7 @@
 ;;------------------------------------------------------------------------------ Layer 0
 ;; Configuration helpers
 
-(defn- get-self-healing-config
+(defn get-self-healing-config
   "Extract self-healing configuration from context or use defaults.
 
    Arguments:
@@ -42,7 +42,7 @@
      :threshold (get config :backend-health-threshold 0.90)
      :cooldown-ms (get config :backend-switch-cooldown-ms 1800000)}))
 
-(defn- get-current-backend
+(defn get-current-backend
   "Get current backend from context or config.
 
    Arguments:

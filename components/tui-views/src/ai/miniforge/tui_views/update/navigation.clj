@@ -43,7 +43,7 @@
       (count fi)
       raw-count)))
 
-(defn- raw-workflow-index
+(defn raw-workflow-index
   "Map a cursor index to a raw workflow vector index via filtered-indices.
    Returns cursor index directly when no filter is active."
   [model idx]
@@ -51,7 +51,7 @@
     (nth (vec (sort fi)) idx nil)
     idx))
 
-(defn- scrollable-view?
+(defn scrollable-view?
   "Views where j/k scroll content rather than moving a list cursor."
   [view]
   (= :workflow-detail view))
@@ -78,7 +78,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; View navigation
 
-(defn- visible-prs
+(defn visible-prs
   "Return the visible PR list, respecting any active filter."
   [model]
   (let [prs (:pr-items model)]
@@ -86,7 +86,7 @@
       (into [] (keep-indexed #(when (contains? fi %1) %2)) prs)
       prs)))
 
-(defn- enter-workflow-detail [model]
+(defn enter-workflow-detail [model]
   (let [raw-idx (raw-workflow-index model (:selected-idx model))]
     (if-let [wf (when raw-idx (get (:workflows model) raw-idx))]
       (-> model
@@ -108,7 +108,7 @@
                  :scroll-offset nil :search-matches [] :search-match-idx nil))
       model)))
 
-(defn- enter-pr-detail [model]
+(defn enter-pr-detail [model]
   (if-let [pr (get (visible-prs model) (:selected-idx model))]
     (let [pr-id [(:pr/repo pr) (:pr/number pr)]]
       (cond-> (-> model
@@ -119,7 +119,7 @@
         (assoc :side-effect (effect/evaluate-policy pr-id pr))))
     model))
 
-(defn- enter-train-detail [model]
+(defn enter-train-detail [model]
   (let [prs (get-in model [:detail :selected-train :train/prs])]
     (if-let [pr (get (vec prs) (:selected-idx model))]
       (-> model
@@ -232,7 +232,7 @@
     :else
     model/top-level-views))
 
-(defn- find-workflow-idx
+(defn find-workflow-idx
   "Find the index of a workflow-id in the workflows vector."
   [workflows wf-id]
   (some (fn [[i wf]] (when (= (:id wf) wf-id) i))

@@ -79,14 +79,14 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Text primitives
 
-(defn- truncate-str
+(defn truncate-str
   "Truncate string to max-width, adding ellipsis if truncated."
   [s max-width]
   (if (<= (count s) max-width)
     s
     (str (subs s 0 (max 0 (- max-width 1))) "…")))
 
-(defn- pad-right
+(defn pad-right
   "Pad string to width with spaces."
   [s width]
   (let [s (or s "")]

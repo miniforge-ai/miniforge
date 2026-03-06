@@ -27,14 +27,14 @@
 ;------------------------------------------------------------------------------ Layer 4
 ;; Table
 
-(defn- truncate-str
+(defn truncate-str
   "Truncate string to max-width, adding ellipsis if truncated."
   [s max-width]
   (if (<= (count s) max-width)
     s
     (str (subs s 0 (max 0 (- max-width 1))) "…")))
 
-(defn- pad-right
+(defn pad-right
   "Pad string to width with spaces."
   [s width]
   (let [s (or s "")]
@@ -46,7 +46,7 @@
   "Space between adjacent columns."
   1)
 
-(defn- compute-col-widths
+(defn compute-col-widths
   "Compute column widths from specs. Fixed :width honored, remainder distributed.
    Subtracts inter-column gaps from available space before distributing to flex."
   [col-specs total-width]
@@ -59,13 +59,13 @@
                     0)]
     (mapv (fn [spec] (get spec :width flex-each)) col-specs)))
 
-(defn- compute-col-offset
+(defn compute-col-offset
   "Compute x-offset for column at index, including inter-column gaps."
   [col-widths idx]
   (+ (reduce + 0 (take idx col-widths))
      (* col-gap idx)))
 
-(defn- render-header-row
+(defn render-header-row
   "Render table header row."
   [buffer columns col-widths header-fg header-bg]
   (reduce (fn [b [idx {:keys [header]} width]]
@@ -76,7 +76,7 @@
           buffer
           (map vector (range) columns col-widths)))
 
-(defn- render-separator
+(defn render-separator
   "Render horizontal separator line."
   [buffer cols rows separator-fg]
   (if (>= rows 2)
@@ -85,7 +85,7 @@
                         {:fg (or separator-fg :default) :bg :default :bold? false})
     buffer))
 
-(defn- render-data-cell
+(defn render-data-cell
   "Render single data cell. Supports per-cell color via :<key>-fg in row data."
   [buffer row-data col-idx col-spec width col-widths render-row fg bg]
   (let [val (str (get row-data (:key col-spec) ""))
@@ -95,7 +95,7 @@
     (buf/buf-put-string buffer x-offset render-row txt
                         {:fg cell-fg :bg bg :bold? false})))
 
-(defn- render-data-row
+(defn render-data-row
   "Render single data row across all columns."
   [buffer row-idx row-data columns col-widths rows selected-row row-fg row-bg selected-fg selected-bg]
   (let [selected? (= row-idx selected-row)

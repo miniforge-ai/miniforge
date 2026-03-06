@@ -37,7 +37,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Discovery file
 
-(defn- write-discovery-file!
+(defn write-discovery-file!
   "Write dashboard discovery file for auto-connect."
   [port]
   (try
@@ -52,7 +52,7 @@
     (catch Exception e
       (println "Warning: Could not write discovery file:" (ex-message e)))))
 
-(defn- delete-discovery-file!
+(defn delete-discovery-file!
   "Remove dashboard discovery file on shutdown."
   []
   (try
@@ -64,7 +64,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Request routing
 
-(defn- create-handler
+(defn create-handler
   "Create main HTTP request handler with routing and workflow event integration."
   [state]
   (let [workflow-connections (atom #{})

@@ -20,7 +20,7 @@
 
 ;; System prompt and improvement types sourced from defaults — override via config
 
-(defn- summarize-pattern
+(defn summarize-pattern
   "Create a compact string summary of a single detected pattern."
   [pattern]
   (let [type-str  (name (:pattern/type pattern))
@@ -36,7 +36,7 @@
          "  Description: " desc "\n"
          "  Rationale: " rationale)))
 
-(defn- build-generate-prompt
+(defn build-generate-prompt
   "Build prompt for improvement generation from detected patterns.
 
    context may contain :workflow-id, :phase, :budget, etc. for additional grounding."
@@ -59,14 +59,14 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Response parsing
 
-(defn- parse-improvement-type
+(defn parse-improvement-type
   "Parse an improvement type string to keyword, returning nil for unknown types."
   [type-str allowed-types]
   (let [kw (keyword (str/lower-case (str/trim (str type-str))))]
     (when (contains? allowed-types kw)
       kw)))
 
-(defn- parse-improvement
+(defn parse-improvement
   "Parse a single improvement map from LLM JSON output into a canonical improvement map."
   [raw allowed-types]
   (let [imp-type (parse-improvement-type (:type raw) allowed-types)]
@@ -86,7 +86,7 @@
        :improvement/created-at   (System/currentTimeMillis)
        :improvement/source       :llm})))
 
-(defn- parse-generate-response
+(defn parse-generate-response
   "Parse LLM JSON response into a sequence of improvement maps.
 
    Returns empty sequence on parse failure (fail-open)."

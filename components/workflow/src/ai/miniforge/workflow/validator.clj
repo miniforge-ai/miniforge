@@ -106,7 +106,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; DAG validation
 
-(defn- build-phase-graph
+(defn build-phase-graph
   "Build adjacency list from phases.
    Returns map of phase-id -> #{target-phase-ids}"
   [phases]
@@ -119,7 +119,7 @@
    {}
    phases))
 
-(defn- reachable-phases
+(defn reachable-phases
   "Find all phases reachable from entry-phase.
    Returns set of phase-ids."
   [graph entry-phase]

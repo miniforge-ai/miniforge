@@ -12,7 +12,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Result predicates
 
-(defn- succeeded?
+(defn succeeded?
   "Check if a repair result indicates success."
   [result]
   (boolean (:success? result)))

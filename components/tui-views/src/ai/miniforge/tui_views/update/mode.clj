@@ -69,7 +69,7 @@
 ;------------------------------------------------------------------------------ Layer 4
 ;; Search filtering
 
-(defn- search-lines
+(defn search-lines
   "Find line indices matching query in a vector of strings.
    Returns vector of {:line-idx N :text line}."
   [lines query]
@@ -81,7 +81,7 @@
             {:line-idx idx :text line})))
       lines)))
 
-(defn- matching-indices
+(defn matching-indices
   "Return set of indices whose item matches query via name-fn."
   [items name-fn query]
   (->> items
@@ -90,7 +90,7 @@
        (map first)
        set))
 
-(defn- compute-aggregate-search
+(defn compute-aggregate-search
   "Filter items by name match. Sets :filtered-indices."
   [model query items name-fn]
   (if (str/blank? query)
@@ -100,7 +100,7 @@
                :selected-idx 0
                :search-matches []))))
 
-(defn- compute-detail-search
+(defn compute-detail-search
   "Find matches in scrollable content. Sets :search-matches."
   [model query lines]
   (if (str/blank? query)
@@ -110,7 +110,7 @@
                    :search-match-idx (when (seq matches) 0)
                    :filtered-indices nil))))
 
-(defn- evidence-labels
+(defn evidence-labels
   "Build searchable label strings from evidence tree."
   [model]
   (let [phases (get-in model [:detail :phases] [])
@@ -128,7 +128,7 @@
          (if (get-in evidence [:policy :compliant?])
            "Policy compliant" "Policy violations")]))))
 
-(defn- compute-evidence-search
+(defn compute-evidence-search
   "Search evidence tree node labels."
   [model query]
   (compute-detail-search model query (evidence-labels model)))
@@ -179,7 +179,7 @@
     (transition/enter-filter model)
     model))
 
-(defn- filter-query
+(defn filter-query
   "Extract the filter query from the command buffer (strip '>' prefix)."
   [model]
   (let [buf (get model :command-buf ">")]

@@ -85,7 +85,7 @@
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Gate operations
 
-(defn- emit-gate-event!
+(defn emit-gate-event!
   "Emit a gate lifecycle event via requiring-resolve (no hard dep on event-stream)."
   [ctx gate-kw event-type & [extra]]
   (try

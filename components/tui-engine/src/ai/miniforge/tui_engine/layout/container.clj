@@ -33,7 +33,7 @@
    :none   {:tl \space :tr \space :bl \space :br \space
             :h \space :v \space :lt \space :rt \space :tt \space :bt \space}})
 
-(defn- truncate-str
+(defn truncate-str
   "Truncate string to max-width, adding ellipsis if truncated."
   [s max-width]
   (if (<= (count s) max-width)

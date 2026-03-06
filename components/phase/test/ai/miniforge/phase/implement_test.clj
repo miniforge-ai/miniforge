@@ -30,7 +30,7 @@
    :code/language "clojure"
    :code/summary "No code generated"})
 
-(defn- create-base-context
+(defn create-base-context
   "Create minimal execution context for testing."
   []
   {:execution/id (random-uuid)

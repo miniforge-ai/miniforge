@@ -25,7 +25,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Content extraction helpers
 
-(defn- extract-content-str
+(defn extract-content-str
   "Extract content string from an artifact."
   [artifact]
   (let [content (or (:content artifact)
@@ -35,14 +35,14 @@
 
 ;; Lint checking (simplified - real impl would call clj-kondo)
 
-(defn- check-unused-vars
+(defn check-unused-vars
   "Check for obvious unused variable patterns."
   [code-str]
   (let [_bindings (re-seq #"\[([a-z_][a-z0-9_-]*)\s+" code-str)]
     ;; Simplified: just check if binding is used after definition
     []))
 
-(defn- run-policy-pack-check
+(defn run-policy-pack-check
   "Delegate lint checking to policy-pack if available.
    Returns nil if policy-pack is not loaded."
   [artifact ctx]
@@ -67,7 +67,7 @@
                            (:warnings result))})))
     (catch Exception _e nil)))
 
-(defn- check-lint
+(defn check-lint
   "Check lint rules on artifact content.
 
    Delegates to policy-pack when available, falls back to basic checks.
@@ -90,7 +90,7 @@
            :errors errors
            :warnings warnings}))))
 
-(defn- repair-lint
+(defn repair-lint
   "Attempt to repair lint errors.
 
    Currently returns failure - lint repair requires LLM."

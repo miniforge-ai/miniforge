@@ -9,7 +9,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; File Operations
 
-(defn- write-file
+(defn write-file
   "Write content to a file path.
    Creates parent directories if needed.
 
@@ -22,7 +22,7 @@
     (catch Exception e
       {:path path :action action :success false :error (.getMessage e)})))
 
-(defn- delete-file-safe
+(defn delete-file-safe
   "Delete a file if it exists.
 
    Returns: {:path path :action :delete :success true/false :error optional}"
@@ -131,7 +131,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation
 
-(defn- add-error
+(defn add-error
   "Add an error to the errors vector if condition is true."
   [errors condition message]
   (if condition

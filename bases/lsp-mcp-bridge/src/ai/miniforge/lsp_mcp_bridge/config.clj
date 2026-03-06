@@ -18,7 +18,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; File discovery and reading
 
-(defn- read-edn-file
+(defn read-edn-file
   "Read and parse an EDN file. Returns nil on error."
   [path]
   (try
@@ -28,7 +28,7 @@
         (println "Warning: Failed to read" (str path) "-" (.getMessage e)))
       nil)))
 
-(defn- discover-resource-configs
+(defn discover-resource-configs
   "Discover built-in LSP configs from classpath resources."
   []
   (let [resource-dir (io/resource "tools/lsp")]
@@ -49,7 +49,7 @@
                 ["clojure.edn" "typescript.edn" "python.edn"
                  "go.edn" "rust.edn" "lua.edn" "java.edn"]))))))
 
-(defn- discover-directory-configs
+(defn discover-directory-configs
   "Discover LSP configs from a directory."
   [dir-path]
   (let [dir (io/file (str dir-path))]
@@ -58,12 +58,12 @@
            (filter #(str/ends-with? (.getName ^java.io.File %) ".edn"))
            (keep read-edn-file)))))
 
-(defn- user-tools-dir
+(defn user-tools-dir
   "Get the user tools directory (~/.miniforge/tools/lsp/)."
   []
   (str (fs/home) "/.miniforge/tools/lsp"))
 
-(defn- project-tools-dir
+(defn project-tools-dir
   "Get the project tools directory (.miniforge/tools/lsp/)."
   [project-dir]
   (str project-dir "/.miniforge/tools/lsp"))
@@ -102,7 +102,7 @@
   [file-path]
   (get extension->language (file-extension file-path)))
 
-(defn- build-language-to-tool-index
+(defn build-language-to-tool-index
   "Build a lookup table from language ID to tool config."
   [tools]
   (reduce (fn [index tool]

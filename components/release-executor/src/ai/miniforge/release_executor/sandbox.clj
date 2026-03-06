@@ -12,7 +12,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
 
-(defn- exec!
+(defn exec!
   "Execute a command in the sandbox environment.
    Returns {:success? bool :output string :error string}."
   [executor env-id command]
@@ -35,7 +35,7 @@
       {:available? true :authenticated? true :user "container-token"}
       {:available? true :authenticated? false :error (:error r)})))
 
-(defn- detect-default-branch
+(defn detect-default-branch
   "Detect the default branch from the remote."
   [executor env-id]
   (let [r (exec! executor env-id
@@ -44,7 +44,7 @@
         str/trim
         (str/replace #"refs/remotes/origin/" ""))))
 
-(defn- try-checkout-branch
+(defn try-checkout-branch
   "Try to checkout a branch, retrying with timestamp suffix if it already exists."
   [executor env-id branch-name base-branch]
   (let [checkout-r (exec! executor env-id
@@ -132,7 +132,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; File batch operations (mirrors files.clj write-and-stage-files!)
 
-(defn- apply-file-operation!
+(defn apply-file-operation!
   "Apply a single file operation (create, modify, delete) in the sandbox."
   [executor env-id {:keys [action path content]}]
   (case action
@@ -141,7 +141,7 @@
     :delete (delete-file! executor env-id path)
     (result/shell-failure (str "Unknown action: " action))))
 
-(defn- track-operation
+(defn track-operation
   "Update metrics for a completed file operation."
   [metrics {:keys [action path]} op-result]
   (if (result/succeeded? op-result)
@@ -156,7 +156,7 @@
             :file path
             :action action})))
 
-(defn- metrics->result
+(defn metrics->result
   "Convert operation metrics to a final result, staging files if no errors."
   [executor env-id written-paths {:keys [created modified deleted errors]}]
   (let [file-metrics {:files-written created

@@ -36,7 +36,7 @@
    #"sk-[a-zA-Z0-9]{32,}"  ; OpenAI keys
    #"ghp_[a-zA-Z0-9]{36}"]) ; GitHub tokens
 
-(defn- check-no-secrets
+(defn check-no-secrets
   "Check for hardcoded secrets in content."
   [artifact _ctx]
   (let [content (or (:content artifact)
@@ -55,7 +55,7 @@
                  :message "Potential hardcoded secrets detected"
                  :matches matches}]})))
 
-(defn- check-plan-complete
+(defn check-plan-complete
   "Check if plan artifact is complete."
   [artifact _ctx]
   (let [plan (or (:plan artifact)
@@ -84,7 +84,7 @@
       {:passed? true
        :step-count (count steps)})))
 
-(defn- check-review-approved
+(defn check-review-approved
   "Check if review is approved."
   [artifact _ctx]
   (let [approved? (or (get-in artifact [:metadata :approved])
@@ -96,7 +96,7 @@
        :errors [{:type :not-approved
                  :message "Review not approved"}]})))
 
-(defn- check-quality
+(defn check-quality
   "Generic quality check - passes if no explicit failures."
   [artifact _ctx]
   (let [quality-issues (get-in artifact [:metadata :quality-issues] [])]
@@ -105,7 +105,7 @@
       {:passed? false
        :errors quality-issues})))
 
-(defn- check-release-ready
+(defn check-release-ready
   "Check release readiness."
   [artifact _ctx]
   (let [ready? (or (get-in artifact [:metadata :release-ready])
@@ -218,7 +218,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Policy Pack Gate (delegates to policy-pack component with severity cascade)
 
-(defn- violation->gate-result
+(defn violation->gate-result
   "Convert a violation map to a gate result entry."
   [result-type violation]
   (cond-> {:type result-type
@@ -227,7 +227,7 @@
     (:violation/rule-id violation) (assoc :rule-id (:violation/rule-id violation))
     (:violation/remediation violation) (assoc :remediation (:violation/remediation violation))))
 
-(defn- check-policy-pack
+(defn check-policy-pack
   "Check artifact against loaded policy packs with severity cascade.
 
    Severity cascade:
@@ -266,7 +266,7 @@
        :warnings [{:type :policy-check-error
                     :message (str "Policy check failed: " (ex-message e))}]})))
 
-(defn- repair-policy-pack
+(defn repair-policy-pack
   "Attempt to repair policy violations.
    Currently returns failure — repair requires LLM agent."
   [artifact errors _ctx]

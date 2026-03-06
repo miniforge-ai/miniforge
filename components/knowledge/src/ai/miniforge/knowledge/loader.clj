@@ -17,7 +17,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure path and file utilities
 
-(defn- find-mdc-files
+(defn find-mdc-files
   "Recursively find all .mdc files in a directory.
    Returns sequence of java.io.File objects."
   [dir]
@@ -26,7 +26,7 @@
          (filter #(.isFile %))
          (filter #(str/ends-with? (.getName %) ".mdc")))))
 
-(defn- extract-dewey-from-filename
+(defn extract-dewey-from-filename
   "Extract Dewey code from filename.
    Examples:
      '210-clojure.mdc' -> '210'
@@ -36,7 +36,7 @@
   (when-let [match (re-find #"^(\d{3})-" filename)]
     (second match)))
 
-(defn- extract-tags-from-path
+(defn extract-tags-from-path
   "Extract tags from file path relative to rules root.
    Examples:
      '000-foundations/001-stratified-design.mdc' -> [:foundations :architecture]
@@ -58,7 +58,7 @@
 
     (vec (remove nil? [dir-tag file-tag]))))
 
-(defn- generate-title-from-filename
+(defn generate-title-from-filename
   "Generate a human-readable title from a filename.
    Examples:
      '210-clojure.mdc' -> 'Clojure'
@@ -73,7 +73,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; File loading operations
 
-(defn- load-mdc-file
+(defn load-mdc-file
   "Load a single .mdc file and convert to zettel data.
    Returns zettel map or nil if parsing fails."
   [file rules-root]
@@ -117,7 +117,7 @@
       (println "Error loading" (.getName file) ":" (.getMessage e))
       nil)))
 
-(defn- load-markdown-file
+(defn load-markdown-file
   "Load a markdown file and convert to zettel.
    For files like agents.md, claude.md, etc."
   [file zettel-type]
@@ -153,7 +153,7 @@
       (println "Error loading" (.getName file) ":" (.getMessage e))
       nil)))
 
-(defn- load-files-from-directory
+(defn load-files-from-directory
   "Load files from directory using provided loader function.
    Returns {:loaded int :failed int :items [items...]}."
   [knowledge-store files loader-fn]
@@ -215,14 +215,14 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Orchestration
 
-(defn- load-rules
+(defn load-rules
   "Load rules and return result with stats.
    Pure orchestration - delegates I/O to loader function."
   [knowledge-store rules-dir]
   (let [result (load-rules-from-directory knowledge-store rules-dir)]
     (select-keys result [:loaded :failed])))
 
-(defn- load-docs
+(defn load-docs
   "Load documentation and return result with stats and file list.
    Pure orchestration - delegates I/O to loader function."
   [knowledge-store project-root]

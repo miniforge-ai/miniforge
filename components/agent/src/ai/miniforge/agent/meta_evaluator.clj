@@ -27,7 +27,7 @@ Respond with ONLY a JSON object, no other text:
  \"reasoning\": \"one sentence\",
  \"confidence\": 0.0 to 1.0}")
 
-(defn- build-eval-prompt
+(defn build-eval-prompt
   "Build a focused prompt for the meta-evaluator LLM call.
 
    Keeps total input under ~500 tokens by truncating tool-input."
@@ -48,7 +48,7 @@ Respond with ONLY a JSON object, no other text:
 ;------------------------------------------------------------------------------ Layer 1
 ;; Response parsing
 
-(defn- parse-eval-response
+(defn parse-eval-response
   "Parse the LLM response into a structured decision map.
 
    Returns {:decision :allow|:deny|:ask :reasoning string :confidence float}

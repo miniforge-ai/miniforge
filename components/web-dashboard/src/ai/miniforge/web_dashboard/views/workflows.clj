@@ -22,7 +22,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Workflow fragments
 
-(defn- format-time
+(defn format-time
   [ts]
   (let [date (cond
                (instance? java.util.Date ts) ts
@@ -55,7 +55,7 @@
            (when-let [msg (or (:message evt) (:event/message evt))]
              [:span.event-message msg])]))])))
 
-(defn- status-label
+(defn status-label
   "Human-readable status label."
   [status]
   (case status

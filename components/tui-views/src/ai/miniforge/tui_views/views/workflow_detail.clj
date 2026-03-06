@@ -31,23 +31,23 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
 
-(defn- find-workflow [model]
+(defn find-workflow [model]
   (let [wf-id (get-in model [:detail :workflow-id])]
     (some #(when (= (:id %) wf-id) %) (:workflows model))))
 
-(defn- status-suffix [status]
+(defn status-suffix [status]
   (case status
     :running  " ●"
     :success  " ✓"
     :failed   " ✗"
     ""))
 
-(defn- format-phase-node [{:keys [phase status]}]
+(defn format-phase-node [{:keys [phase status]}]
   {:label (str (name phase) (status-suffix status))
    :depth 0
    :expandable? false})
 
-(defn- render-title-bar [wf [cols rows]]
+(defn render-title-bar [wf [cols rows]]
   (layout/text [cols rows]
                (str " MINIFORGE │ "
                     (get wf :name "Workflow Detail")
@@ -55,7 +55,7 @@
                       (str " │ " (name phase))))
                {:fg :cyan :bold? true}))
 
-(defn- render-phase-list [phases [cols rows]]
+(defn render-phase-list [phases [cols rows]]
   (layout/box [cols rows]
     {:title "Phases" :border :single :fg :default
      :content-fn
@@ -66,7 +66,7 @@
            {:nodes (mapv format-phase-node phases)
             :selected 0})))}))
 
-(defn- render-agent-output [agent output [cols rows]]
+(defn render-agent-output [agent output [cols rows]]
   (layout/box [cols rows]
     {:title (if agent
               (str (name (:agent agent)) " - " (name (:status agent :idle)))
@@ -83,7 +83,7 @@
             :offset offset
             :fg :white})))}))
 
-(defn- render-footer [[cols rows]]
+(defn render-footer [[cols rows]]
   (layout/text [cols rows]
     " Esc:back  3:evidence  4:artifacts  5:dag  j/k:scroll  q:quit"
     {:fg :default}))

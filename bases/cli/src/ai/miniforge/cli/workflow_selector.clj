@@ -31,7 +31,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Spec feature extraction
 
-(defn- extract-type
+(defn extract-type
   "Extract task type from spec.
    After normalization, :spec/intent is guaranteed to be set."
   [spec]
@@ -39,21 +39,21 @@
       (get-in spec [:spec/raw-data :type])
       :unknown))
 
-(defn- extract-implementation-plan
+(defn extract-implementation-plan
   "Extract implementation plan details from spec."
   [spec]
   (or (get-in spec [:spec/raw-data :implementation-plan])
       (get-in spec [:spec/intent :implementation-plan])
       (:implementation-plan spec)))
 
-(defn- count-prs
+(defn count-prs
   "Count number of PRs/phases in implementation plan."
   [impl-plan]
   (when impl-plan
     (count (filter (fn [[k _v]] (str/starts-with? (name k) "pr-"))
                    impl-plan))))
 
-(defn- has-dependencies?
+(defn has-dependencies?
   "Check if implementation plan has dependencies between phases."
   [impl-plan]
   (when impl-plan
@@ -63,7 +63,7 @@
                      (not-empty (:base v)))))
           impl-plan)))
 
-(defn- extract-description-keywords
+(defn extract-description-keywords
   "Extract significant keywords from spec description."
   [spec]
   (let [desc (str/lower-case (or (:spec/description spec) ""))
@@ -95,7 +95,7 @@
                     (str/includes? desc "quick"))
             [:small-scope])))))
 
-(defn- estimate-size
+(defn estimate-size
   "Estimate scope size from spec."
   [spec impl-plan]
   (let [keywords (extract-description-keywords spec)
@@ -107,7 +107,7 @@
       (and pr-count (>= pr-count 3)) :medium
       :else :unknown)))
 
-(defn- extract-constraints-mentions
+(defn extract-constraints-mentions
   "Extract constraint mentions from spec."
   [spec]
   (let [constraints (or (:spec/constraints spec) [])]
@@ -153,7 +153,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Rule matching
 
-(defn- match-multi-phase-rule
+(defn match-multi-phase-rule
   "Multi-phase implementation → canonical-sdlc-v1"
   [features]
   (when (and (:pr-count features)
@@ -164,7 +164,7 @@
                   (:pr-count features)
                   " PRs requires comprehensive review")}))
 
-(defn- match-refactoring-stratification-rule
+(defn match-refactoring-stratification-rule
   "Refactoring with stratification → canonical-sdlc-v1"
   [features]
   (when (and (or (= (:type features) :refactoring)
@@ -175,7 +175,7 @@
      :confidence :high
      :reason "Refactoring with stratification requires comprehensive design review"}))
 
-(defn- match-large-feature-rule
+(defn match-large-feature-rule
   "Large feature → canonical-sdlc-v1"
   [features]
   (when (and (= (:size features) :large)
@@ -185,7 +185,7 @@
      :confidence :medium
      :reason "Large feature requires comprehensive SDLC phases"}))
 
-(defn- match-bugfix-rule
+(defn match-bugfix-rule
   "Bug fix → lean-sdlc-v1"
   [features]
   (when (or (= (:type features) :bugfix)
@@ -194,7 +194,7 @@
      :confidence :high
      :reason "Bug fix is well-suited for lean workflow"}))
 
-(defn- match-docs-only-rule
+(defn match-docs-only-rule
   "Docs only → lean-sdlc-v1"
   [features]
   (when (or (= (:type features) :docs)
@@ -203,7 +203,7 @@
      :confidence :high
      :reason "Documentation changes use lean workflow"}))
 
-(defn- match-unknown-rule
+(defn match-unknown-rule
   "Unknown/ambiguous → lean-sdlc-v1 (safer default than simple)"
   [_features]
   {:workflow-type :lean-sdlc-v1

@@ -29,7 +29,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event stream helpers (optional dependency)
 
-(defn- emit-phase-started!
+(defn emit-phase-started!
   "Emit phase-started event if event-stream is available in context."
   [ctx phase]
   (when-let [event-stream (:event-stream ctx)]
@@ -38,7 +38,7 @@
         (let [workflow-id (:execution/id ctx)]
           (publish! event-stream (phase-started event-stream workflow-id phase)))))))
 
-(defn- emit-phase-completed!
+(defn emit-phase-completed!
   "Emit phase-completed event if event-stream is available in context."
   [ctx phase _result]
   (when-let [event-stream (:event-stream ctx)]
@@ -68,7 +68,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
-(defn- enter-review
+(defn enter-review
   "Execute review phase.
 
    Runs code review, quality checks, and policy validation."
@@ -122,12 +122,13 @@
         (assoc-in [:phase :status] :running)
         (assoc-in [:phase :result] result))))
 
-(defn- leave-review
+(defn leave-review
   "Post-processing for review phase.
 
    Records review metrics: issues found, approval status.
-   When review decision is :changes-requested, sets status to :retrying
-   and stores review feedback for the implement phase to consume."
+   When review decision is :changes-requested and within iteration budget,
+   sets status to :failed with :redirect-to :implement so the execution engine
+   jumps back to implement with the review feedback attached."
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
@@ -138,8 +139,12 @@
         iterations (get-in ctx [:phase :iterations] 1)
         max-iterations (get-in ctx [:phase :budget :iterations]
                                (get-in default-config [:budget :iterations]))
+        ;; changes-requested always sets :failed — the redirect-to :implement
+        ;; tells the execution engine to jump back (not stay at review).
+        ;; Within budget: redirect to implement for repair.
+        ;; Over budget: fail without redirect (terminal failure).
         phase-status (if (= :changes-requested review-decision)
-                       (if (< iterations max-iterations) :retrying :failed)
+                       :failed
                        :completed)
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
@@ -154,15 +159,18 @@
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
     ;; Emit phase completed event
     (emit-phase-completed! updated-ctx :review result)
-    ;; Handle retrying: store review feedback for implement phase
-    (cond-> updated-ctx
-      (registry/retrying? (:phase updated-ctx))
-      (-> (update-in [:phase :iterations] (fnil inc 1))
+    ;; Handle changes-requested: redirect to implement with review feedback
+    (if (and (= :changes-requested review-decision)
+             (< iterations max-iterations))
+      (-> updated-ctx
+          (update-in [:phase :iterations] (fnil inc 1))
           (assoc-in [:phase :review-feedback]
-                    (get-in result [:output :review/feedback]))
-          (assoc-in [:phase :redirect-to] :implement)))))
+                    (or (get-in result [:output :review/feedback])
+                        (get-in result [:output :review/issues])))
+          (assoc-in [:phase :redirect-to] :implement))
+      updated-ctx)))
 
-(defn- error-review
+(defn error-review
   "Handle review phase errors.
 
    On rejection, can redirect to :implement if on-fail specified."

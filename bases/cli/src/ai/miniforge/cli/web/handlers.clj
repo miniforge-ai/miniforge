@@ -11,12 +11,12 @@
    [ai.miniforge.cli.web.sse :as sse]
    [ai.miniforge.response.interface :as anomaly]))
 
-(defn- parse-pr-path [uri]
+(defn parse-pr-path [uri]
   (let [path-parts (str/split (subs uri 8) #"/")]
     {:repo (java.net.URLDecoder/decode (first path-parts) "UTF-8")
      :number (Integer/parseInt (second path-parts))}))
 
-(defn- parse-body-question [req]
+(defn parse-body-question [req]
   (when-let [body-str (some-> req :body slurp)]
     (cond
       (str/starts-with? (str/trim body-str) "{")

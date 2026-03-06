@@ -16,17 +16,17 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Request handlers
 
-(defn- handle-initialize
+(defn handle-initialize
   "Handle MCP initialize request."
   [_params]
   (proto/initialize-result))
 
-(defn- handle-tools-list
+(defn handle-tools-list
   "Handle MCP tools/list request."
   [_params]
   (proto/tools-list-result tools/tool-definitions))
 
-(defn- handle-tools-call
+(defn handle-tools-call
   "Handle MCP tools/call request."
   [params manager]
   (tools/call-tool params manager))
@@ -34,7 +34,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Server loop
 
-(defn- dispatch-request
+(defn dispatch-request
   "Dispatch a JSON-RPC request to the appropriate handler.
 
    Returns the result to include in the response, or nil for notifications."

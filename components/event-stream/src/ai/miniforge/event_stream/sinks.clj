@@ -32,7 +32,7 @@
 
 ;;------------------------------------------------------------------------------ Layer 0: File Sink
 
-(defn- event-file-path
+(defn event-file-path
   "Get path to event file for a workflow.
 
    Arguments:

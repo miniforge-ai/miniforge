@@ -145,7 +145,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Value extraction
 
-(defn- extract-value
+(defn extract-value
   "Extract value from item using filter spec."
   [item {:keys [filter/value]}]
   (case (:kind value)
@@ -166,7 +166,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Filter AST evaluation
 
-(defn- eval-clause
+(defn eval-clause
   "Evaluate a single filter clause against an item."
   [item {:keys [filter/id op value]}]
   (let [spec (first (filter #(= id (:filter/id %)) filter-specs))

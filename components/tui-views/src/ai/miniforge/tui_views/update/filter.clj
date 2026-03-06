@@ -47,7 +47,7 @@
   "Recognized field qualifiers."
   #{"repo" "author" "readiness" "risk" "policy" "recommend"})
 
-(defn- parse-token
+(defn parse-token
   "Parse a single whitespace-delimited token.
    Returns [:field field-name value], [:neg-field field-name value], or [:text word]."
   [token]
@@ -98,28 +98,28 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Matching
 
-(defn- fuzzy-match?
+(defn fuzzy-match?
   "Case-insensitive substring match."
   [haystack needle]
   (str/includes? (str/lower-case (or haystack ""))
                  (str/lower-case (or needle ""))))
 
-(defn- any-match?
+(defn any-match?
   "True if haystack matches any of the values (OR semantics)."
   [haystack values]
   (some #(fuzzy-match? haystack %) values))
 
-(defn- none-match?
+(defn none-match?
   "True if haystack matches none of the values (negation)."
   [haystack values]
   (not (any-match? haystack values)))
 
-(defn- resolve-or
+(defn resolve-or
   "Try each path-fn in order, returning the first non-nil result or default."
   [default & path-fns]
   (or (some #(%) path-fns) default))
 
-(defn- pr-field-value
+(defn pr-field-value
   "Extract the string value for a field from a PR for matching."
   [pr field-kw]
   (case field-kw
@@ -139,33 +139,33 @@
                         #(:action (project/derive-recommendation pr))))
     ""))
 
-(defn- positive-field?
+(defn positive-field?
   "True if the key is a positive (non-negated, non-text) field with values."
   [[field-kw values]]
   (and (not= field-kw :text)
        (not (str/starts-with? (name field-kw) "neg-"))
        (seq values)))
 
-(defn- negated-field?
+(defn negated-field?
   "True if the key is a negation field with values."
   [[field-kw values]]
   (and (str/starts-with? (name field-kw) "neg-")
        (seq values)))
 
-(defn- negated->real-field
+(defn negated->real-field
   "Convert :neg-risk → :risk."
   [field-kw]
   (keyword (subs (name field-kw) 4)))
 
-(defn- matches-text? [pr text]
+(defn matches-text? [pr text]
   (or (str/blank? text) (fuzzy-match? (:pr/title pr) text)))
 
-(defn- matches-positive-fields? [pr parsed-filter]
+(defn matches-positive-fields? [pr parsed-filter]
   (every? (fn [[field-kw values]]
             (any-match? (pr-field-value pr field-kw) values))
           (filter positive-field? parsed-filter)))
 
-(defn- matches-negated-fields? [pr parsed-filter]
+(defn matches-negated-fields? [pr parsed-filter]
   (every? (fn [[field-kw values]]
             (none-match? (pr-field-value pr (negated->real-field field-kw)) values))
           (filter negated-field? parsed-filter)))

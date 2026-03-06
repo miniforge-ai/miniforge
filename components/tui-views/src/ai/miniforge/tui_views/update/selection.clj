@@ -29,7 +29,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Filtered index resolution
 
-(defn- raw-index
+(defn raw-index
   "Map a cursor index to a raw list index, respecting filtered-indices.
    When a search filter is active, cursor index n refers to the nth visible
    item, not the nth item in the raw vector."
@@ -41,14 +41,14 @@
 
 ;; ID resolution
 
-(defn- item-at
+(defn item-at
   "Get the item at cursor idx, resolving through filtered-indices.
    Returns nil if index is out of bounds."
   [model items idx]
   (when-let [raw-idx (raw-index model idx)]
     (get items raw-idx)))
 
-(defn- pr-id
+(defn pr-id
   "Extract selectable ID [repo, number] from a PR map."
   [pr]
   (when pr [(:pr/repo pr) (:pr/number pr)]))
@@ -87,7 +87,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Individual toggle
 
-(defn- toggle-id
+(defn toggle-id
   "Add id to set if absent, remove if present."
   [ids id]
   (let [ids (or ids #{})]

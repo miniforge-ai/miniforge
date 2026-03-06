@@ -152,7 +152,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Workflow execution
 
-(defn- extract-plan-from-result
+(defn extract-plan-from-result
   "Extract plan artifact from phase result if present."
   [phase-result]
   (when-let [artifacts (:artifacts phase-result)]
@@ -160,7 +160,7 @@
                         (= :plan (:artifact/type %)))
                    artifacts))))
 
-(defn- execute-dag-for-plan
+(defn execute-dag-for-plan
   "Execute plan tasks via DAG orchestrator.
    Returns updated exec-state with DAG results merged."
   [exec-state plan context callbacks]
@@ -191,7 +191,7 @@
         (assoc-in [:execution/phase-results :dag-execution] dag-result)
         (assoc :execution/dag-result dag-result))))
 
-(defn- execute-phase-step
+(defn execute-phase-step
   "Execute a single phase step in the workflow.
    Returns updated execution state or [:continue new-state] to continue loop.
 

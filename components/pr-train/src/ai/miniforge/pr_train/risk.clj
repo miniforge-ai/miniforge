@@ -36,7 +36,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Threshold scoring helper
 
-(defn- score-by-thresholds
+(defn score-by-thresholds
   "Score a value against descending thresholds. Returns the score for the first
    threshold exceeded, or 0.0 if none match."
   [value thresholds scores compare-fn]
@@ -48,7 +48,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Factor assessment functions — each returns {:value any :score 0.0-1.0 :explanation str}
 
-(defn- assess-change-size
+(defn assess-change-size
   "Assess risk from change size. Larger changes = higher risk."
   [pr-data cfg]
   (let [{:keys [additions deletions]} (get pr-data :change-size {:additions 0 :deletions 0})
@@ -60,7 +60,7 @@
      :explanation (str total " lines changed"
                        (when (> total 500) " (large change)"))}))
 
-(defn- assess-dependency-fanout
+(defn assess-dependency-fanout
   "Assess risk from dependency fanout. More dependents = higher risk."
   [_train pr cfg]
   (let [blocks (:pr/blocks pr [])
@@ -73,7 +73,7 @@
      :score score
      :explanation (str fanout " downstream PRs depend on this")}))
 
-(defn- assess-test-coverage-delta
+(defn assess-test-coverage-delta
   "Assess risk from test coverage changes. Decreased coverage = higher risk."
   [pr-data cfg]
   (let [delta (get pr-data :test-coverage-delta 0.0)
@@ -85,7 +85,7 @@
                     (str "Coverage decreased by " (Math/abs delta) "%")
                     (str "Coverage changed by " (if (pos? delta) "+" "") delta "%"))}))
 
-(defn- assess-author-experience
+(defn assess-author-experience
   "Assess risk from author experience. Less experience = higher risk."
   [author-history cfg]
   (let [commits (get author-history :total-commits 0)
@@ -101,7 +101,7 @@
      :score score
      :explanation (str commits " total commits, " recent " recent")}))
 
-(defn- assess-review-staleness
+(defn assess-review-staleness
   "Assess risk from review staleness. Stale reviews = higher risk."
   [pr-data cfg]
   (let [hours (get pr-data :hours-since-last-review 0)
@@ -111,7 +111,7 @@
      :score score
      :explanation (str hours " hours since last review")}))
 
-(defn- assess-complexity-delta
+(defn assess-complexity-delta
   "Assess risk from complexity changes. Increased complexity = higher risk."
   [pr-data cfg]
   (let [delta (get pr-data :complexity-delta 0)
@@ -122,7 +122,7 @@
      :explanation (str "Complexity " (if (pos? delta) "increased" "changed")
                        " by " delta)}))
 
-(defn- assess-critical-files
+(defn assess-critical-files
   "Assess risk from modifications to critical files."
   [pr-data cfg]
   (let [changed-files (get pr-data :changed-files [])

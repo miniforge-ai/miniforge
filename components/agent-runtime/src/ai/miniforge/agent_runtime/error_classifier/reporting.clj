@@ -23,7 +23,7 @@
 ;;------------------------------------------------------------------------------ Layer 1
 ;; URL generation
 
-(defn- build-issue-title
+(defn build-issue-title
   "Build issue title based on error type."
   [error-type]
   (case error-type
@@ -32,7 +32,7 @@
     :external "External Service Error"
     "Error"))
 
-(defn- build-issue-body
+(defn build-issue-body
   "Build issue body with error context."
   [error-context]
   (let [{:keys [message task-id timestamp]} error-context]

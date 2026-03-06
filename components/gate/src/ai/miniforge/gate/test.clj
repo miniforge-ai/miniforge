@@ -26,7 +26,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test checking
 
-(defn- check-tests-pass
+(defn check-tests-pass
   "Check if tests pass.
 
    In real impl, this would run tests and check results.
@@ -51,7 +51,7 @@
                  :message (str (:fail-count test-results) " tests failed")
                  :failures (:failures test-results)}]})))
 
-(defn- check-coverage
+(defn check-coverage
   "Check if coverage meets threshold.
 
    Default threshold: 80%"

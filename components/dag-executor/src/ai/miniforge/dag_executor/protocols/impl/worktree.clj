@@ -24,7 +24,7 @@
 ;; Helper Functions
 ;; ============================================================================
 
-(defn- run-git
+(defn run-git
   "Execute a git command and return the result."
   [& args]
   (try
@@ -32,7 +32,7 @@
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out ""})))
 
-(defn- run-shell
+(defn run-shell
   "Execute a shell command and return the result."
   [& args]
   (try
@@ -40,7 +40,7 @@
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out ""})))
 
-(defn- ensure-directory
+(defn ensure-directory
   "Ensure a directory exists."
   [path]
   (.mkdirs (File. ^String path)))

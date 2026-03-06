@@ -31,7 +31,7 @@
 
 (def ^:dynamic *test-worktree-path* nil)
 
-(defn- create-test-worktree
+(defn create-test-worktree
   "Create a temporary worktree directory for testing."
   []
   (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")
@@ -44,7 +44,7 @@
       (spit (io/file temp-dir "README.md") "# Test Repository"))
     (.getPath temp-dir)))
 
-(defn- cleanup-test-worktree
+(defn cleanup-test-worktree
   "Delete test worktree directory and all contents."
   [dir-path]
   (when dir-path
@@ -94,13 +94,13 @@
 
 ;------------------------------------------------------------------------------ Test Helpers
 
-(defn- file-exists-in-worktree?
+(defn file-exists-in-worktree?
   "Check if a file exists in the test worktree."
   [relative-path]
   (when *test-worktree-path*
     (.exists (io/file *test-worktree-path* relative-path))))
 
-(defn- read-worktree-file
+(defn read-worktree-file
   "Read content of a file from the test worktree."
   [relative-path]
   (when *test-worktree-path*
@@ -108,7 +108,7 @@
       (when (.exists file)
         (slurp file)))))
 
-(defn- count-files-in-worktree
+(defn count-files-in-worktree
   "Count files in test worktree (excluding .git)."
   []
   (when *test-worktree-path*
@@ -117,7 +117,7 @@
          (remove #(str/includes? (.getPath %) ".git"))
          count)))
 
-(defn- execute-phase-pipeline
+(defn execute-phase-pipeline
   "Execute a phase pipeline: plan -> implement -> verify -> release."
   [opts]
   (let [{:keys [implement-agent-fn verify-agent-fn release-opts]} opts

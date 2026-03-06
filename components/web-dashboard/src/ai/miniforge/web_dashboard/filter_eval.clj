@@ -7,7 +7,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Value extraction
 
-(defn- extract-value
+(defn extract-value
   "Extract value from item using filter spec."
   [item {:keys [filter/value]}]
   (case (:kind value)
@@ -27,7 +27,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Clause evaluation
 
-(defn- eval-clause
+(defn eval-clause
   "Evaluate a single filter clause against an item."
   [item {:keys [filter/id op value]}]
   (let [spec (specs/get-filter-spec-by-id id)

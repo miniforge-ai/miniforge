@@ -8,24 +8,24 @@
 
 ;------------------------------------------------------------------------------ Helpers
 
-(defn- create-test-stream
+(defn create-test-stream
   "Create a minimal event stream with no sinks for testing."
   []
   (es-core/create-event-stream {:sinks []}))
 
-(defn- event-types
+(defn event-types
   "Extract ordered event types from a stream."
   [stream]
   (mapv :event/type (:events @stream)))
 
-(defn- mock-load-workflow
+(defn mock-load-workflow
   "Mock load-workflow that returns a stub workflow."
   [_wf-id _version _opts]
   {:workflow {:workflow/id :mock
               :workflow/pipeline [{:phase :plan}]}
    :source :mock})
 
-(defn- mock-pipeline-success
+(defn mock-pipeline-success
   "Mock run-pipeline that always succeeds."
   [_workflow _input _opts]
   {:execution/status :completed
@@ -34,7 +34,7 @@
                       :last-phase-result {:plan "the-plan"}
                       :status :completed}})
 
-(defn- mock-pipeline-failure
+(defn mock-pipeline-failure
   "Mock run-pipeline that always fails."
   [_workflow _input _opts]
   {:execution/status :failed

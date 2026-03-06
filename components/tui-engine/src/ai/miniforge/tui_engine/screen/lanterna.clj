@@ -43,7 +43,7 @@
    :white   TextColor$ANSI/WHITE
    :default TextColor$ANSI/DEFAULT})
 
-(defn- resolve-lanterna-color
+(defn resolve-lanterna-color
   "Resolve a color value to a Lanterna TextColor.
    Accepts:
    - keyword  (:cyan, :red, etc.)  → TextColor.ANSI

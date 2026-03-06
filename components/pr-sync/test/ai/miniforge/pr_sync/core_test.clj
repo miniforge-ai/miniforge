@@ -25,7 +25,7 @@
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Test helpers
 
-(defn- temp-config-path []
+(defn temp-config-path []
   (let [f (java.io.File/createTempFile "miniforge-test-config" ".edn")]
     (.deleteOnExit f)
     (.getAbsolutePath f)))

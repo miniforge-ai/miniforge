@@ -9,7 +9,7 @@
 ;; Workflow loading tests
 ;; ============================================================================
 
-(defn- load-workflow-edn
+(defn load-workflow-edn
   "Load a workflow EDN file from resources."
   [workflow-id version]
   (let [filename (str "workflows/" (name workflow-id) "-v" version ".edn")

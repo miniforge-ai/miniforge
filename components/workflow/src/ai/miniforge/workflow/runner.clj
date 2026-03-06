@@ -35,7 +35,7 @@
 
 ;------------------------------------------------------------------------------ Layer -1: Event publishing
 
-(defn- publish-event!
+(defn publish-event!
   "Publish event to event stream or dashboard WebSocket."
   [event-stream event]
   (when event-stream
@@ -61,7 +61,7 @@
       (catch Exception e
         (println "Warning: Failed to publish event:" (ex-message e))))))
 
-(defn- publish-workflow-started!
+(defn publish-workflow-started!
   "Publish workflow started event using N3-compliant constructor."
   [event-stream context]
   (when event-stream
@@ -81,7 +81,7 @@
                                                      [:workflow/id :workflow/version])
                          :event/timestamp (java.time.Instant/now)})))))
 
-(defn- publish-workflow-completed!
+(defn publish-workflow-completed!
   "Publish workflow completed/failed event using N3-compliant constructor."
   [event-stream context]
   (when event-stream
@@ -107,7 +107,7 @@
                          :workflow/metrics (:execution/metrics context)
                          :event/timestamp (java.time.Instant/now)})))))
 
-(defn- publish-phase-started!
+(defn publish-phase-started!
   "Publish phase started event."
   [event-stream context phase-name]
   (when event-stream
@@ -123,7 +123,7 @@
                          :workflow/phase phase-name
                          :event/timestamp (java.time.Instant/now)})))))
 
-(defn- publish-phase-completed!
+(defn publish-phase-completed!
   "Publish phase completed event."
   [event-stream context phase-name result]
   (when event-stream
@@ -145,7 +145,7 @@
                          :phase/outcome (if (:success? result) :success :failure)
                          :event/timestamp (java.time.Instant/now)})))))
 
-(defn- check-backend-health-at-boundary!
+(defn check-backend-health-at-boundary!
   "Check backend health at phase boundary. Returns switch-result or nil."
   [event-stream context]
   (try
@@ -196,7 +196,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1: Orchestration helpers
 
-(defn- handle-empty-pipeline
+(defn handle-empty-pipeline
   "Handle error case of empty pipeline."
   [context]
   (-> context
@@ -209,7 +209,7 @@
               {:error "Workflow has no phases"})
       (ctx/transition-to-failed)))
 
-(defn- handle-max-phases-exceeded
+(defn handle-max-phases-exceeded
   "Handle error case of max phases exceeded."
   [context max-phases]
   (-> context
@@ -223,12 +223,12 @@
                :max-phases max-phases})
       (ctx/transition-to-failed)))
 
-(defn- terminal-state?
+(defn terminal-state?
   "Check if workflow is in terminal state."
   [context]
   (boolean (#{:completed :failed} (:execution/status context))))
 
-(defn- execute-single-iteration
+(defn execute-single-iteration
   "Execute single pipeline iteration: health check -> phase execution -> cleanup.
 
    Returns updated context."
@@ -270,7 +270,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1.5: Output extraction
 
-(defn- extract-output
+(defn extract-output
   "Synthesize :execution/output from completed pipeline context.
    Provides a stable interface for chaining: downstream consumers
    read :execution/output instead of reaching into phase-results."

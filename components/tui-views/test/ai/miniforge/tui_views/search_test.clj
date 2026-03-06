@@ -29,7 +29,7 @@
 (def wf-id-2 (random-uuid))
 (def wf-id-3 (random-uuid))
 
-(defn- three-workflows []
+(defn three-workflows []
   (-> (util/fresh-model)
       (util/with-workflows
         [{:workflow-id wf-id-1 :name "deploy-api"}
@@ -141,7 +141,7 @@
 ;; Detail view search — find-in-page
 ;; ---------------------------------------------------------------------------
 
-(defn- detail-model-with-output
+(defn detail-model-with-output
   "Create a model in workflow-detail with agent output text."
   [output-text]
   (let [wf-id (random-uuid)]

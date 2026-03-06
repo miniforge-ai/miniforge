@@ -31,7 +31,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event stream helpers (optional dependency)
 
-(defn- emit-phase-started!
+(defn emit-phase-started!
   "Emit phase-started event if event-stream is available in context."
   [ctx phase]
   (when-let [event-stream (:event-stream ctx)]
@@ -40,7 +40,7 @@
         (let [workflow-id (:execution/id ctx)]
           (publish! event-stream (phase-started event-stream workflow-id phase)))))))
 
-(defn- emit-phase-completed!
+(defn emit-phase-completed!
   "Emit phase-completed event if event-stream is available in context."
   [ctx phase _result]
   (when-let [event-stream (:event-stream ctx)]
@@ -70,7 +70,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
-(defn- build-implement-task
+(defn build-implement-task
   "Build the task map for the implementer agent from execution context."
   [ctx]
   (let [input (get-in ctx [:execution/input])
@@ -82,6 +82,7 @@
         existing-files (file-ctx/load-files-in-scope worktree-path files-in-scope)
         behavior-addendum (agent-beh/load-and-filter-behaviors
                             :implement {:task {:task/intent (:intent input)}})
+        review-feedback (get-in ctx [:phase :review-feedback])
         base-task {:task/id (random-uuid)
                    :task/type :implement
                    :task/description (:description input)
@@ -95,9 +96,11 @@
       verify-failure
       (assoc :task/verify-failures
              {:test-results (get-in verify-failure [:result :output :metadata :test-results])
-              :test-output (get-in verify-failure [:result :output :metadata :test-results :output])}))))
+              :test-output (get-in verify-failure [:result :output :metadata :test-results :output])})
+      review-feedback
+      (assoc :task/review-feedback review-feedback))))
 
-(defn- create-streaming-callback
+(defn create-streaming-callback
   "Create a streaming callback for agent output if event-stream is available."
   [ctx]
   (when-let [es (:event-stream ctx)]
@@ -106,7 +109,7 @@
       (create-cb es (:execution/id ctx) :implement
                  {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)}))))
 
-(defn- collect-peer-advice
+(defn collect-peer-advice
   "Collect peer messages for the implementer agent if a message router is available."
   [ctx]
   (when-let [msg-router (:message-router ctx)]
@@ -118,7 +121,7 @@
           {:peer-messages (vec msgs)}))
       (catch Exception _e nil))))
 
-(defn- enter-implement
+(defn enter-implement
   "Execute implementation phase.
 
    Reads plan from context, invokes implementer agent,
@@ -148,7 +151,7 @@
         (assoc-in [:phase :status] :running)
         (assoc-in [:phase :result] result))))
 
-(defn- leave-implement
+(defn leave-implement
   "Post-processing for implementation phase.
 
    Records metrics, captures code artifacts."
@@ -200,7 +203,7 @@
       (= :already-implemented agent-status)
       (assoc-in [:phase :skipped-reason] :already-implemented))))
 
-(defn- error-implement
+(defn error-implement
   "Handle implementation phase errors.
 
    Attempts repair via inner loop if within budget."

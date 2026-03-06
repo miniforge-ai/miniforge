@@ -205,22 +205,22 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Two-pane layout rendering
 
-(defn- repeat-char [c n]
+(defn repeat-char [c n]
   (apply str (repeat n c)))
 
-(defn- truncate [s max-len]
+(defn truncate [s max-len]
   (if (> (count s) max-len)
     (str (subs s 0 (- max-len 1)) "…")
     s))
 
-(defn- pad-right [s width]
+(defn pad-right [s width]
   (let [s (or s "")
         len (count s)]
     (if (>= len width)
       (subs s 0 width)
       (str s (repeat-char " " (- width len))))))
 
-(defn- render-box
+(defn render-box
   "Render a box with title and content lines.
    Uses blue borders for XTreeGold-style visibility.
    Returns vector of strings (one per line)."
@@ -243,7 +243,7 @@
                                                 (style "│" :fg :blue)))))]
     (vec (concat [top-line] padded-lines [bottom-line]))))
 
-(defn- render-tree-item
+(defn render-tree-item
   "Render a single tree item with proper indentation and icons.
    Uses XTreeGold-inspired blue highlight for selected items."
   [{:keys [label selected? expanded? has-children? depth risk]} width]
@@ -440,7 +440,7 @@
 ;------------------------------------------------------------------------------ Layer 6
 ;; Keyboard input handling
 
-(defn- map-char-to-key
+(defn map-char-to-key
   "Map a character to a key command."
   [c]
   (case c

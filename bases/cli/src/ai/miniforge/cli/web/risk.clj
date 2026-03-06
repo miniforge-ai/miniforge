@@ -12,10 +12,10 @@
    :medium "rgba(234, 179, 8, 0.1)"
    :high "rgba(239, 68, 68, 0.1)"})
 
-(defn- title-contains? [title-lower & terms]
+(defn title-contains? [title-lower & terms]
   (some #(str/includes? title-lower %) terms))
 
-(defn- classify-risk [total-changes file-count is-docs? is-deps? is-refactor?]
+(defn classify-risk [total-changes file-count is-docs? is-deps? is-refactor?]
   (cond
     (and is-docs? (< total-changes 100)) :low
     (and is-deps? (< file-count 3)) :low
@@ -25,14 +25,14 @@
     (and is-refactor? (> total-changes 200)) :high
     :else :medium))
 
-(defn- classify-complexity [total-changes]
+(defn classify-complexity [total-changes]
   (cond
     (< total-changes 20) :trivial
     (< total-changes 100) :simple
     (< total-changes 300) :moderate
     :else :complex))
 
-(defn- summarize-type [is-docs? is-deps? is-fix? is-refactor? is-feature?]
+(defn summarize-type [is-docs? is-deps? is-fix? is-refactor? is-feature?]
   (cond
     is-docs? "Documentation update"
     is-deps? "Dependency version bump"
@@ -41,7 +41,7 @@
     is-feature? "New feature"
     :else "Code changes"))
 
-(defn- build-reasons [total-changes file-count is-refactor?]
+(defn build-reasons [total-changes file-count is-refactor?]
   (cond-> []
     (> total-changes 300) (conj (str total-changes " lines changed"))
     (> file-count 10) (conj (str file-count " files modified"))

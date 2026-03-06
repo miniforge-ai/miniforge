@@ -21,7 +21,7 @@
 ;; These builders ensure consistent construction across all backends
 ;; (CLI, HTTP/OpenAI, HTTP/Ollama, streaming, non-streaming).
 
-(defn- llm-success
+(defn llm-success
   "Build a successful LLM response."
   ([content]
    (llm-success content nil))
@@ -33,7 +33,7 @@
               :tokens (+ (or (:input-tokens usage) 0) (or (:output-tokens usage) 0))}
        (some? exit-code) (assoc :exit-code exit-code)))))
 
-(defn- llm-error
+(defn llm-error
   "Build a failed LLM response with anomaly."
   ([category error-type message]
    (llm-error category error-type message nil))
@@ -51,7 +51,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Stream parser functions
 
-(defn- parse-claude-stream-line
+(defn parse-claude-stream-line
   "Parse a line from Claude CLI streaming output.
 
    Claude CLI stream-json emits:
@@ -95,7 +95,7 @@
     (catch Exception _e
       nil)))
 
-(defn- parse-codex-stream-line
+(defn parse-codex-stream-line
   "Parse a line from Codex CLI streaming output.
 
    Codex uses Anthropic API streaming format:
@@ -230,7 +230,7 @@
 
 ;------------------------------------------------------------------------------ HTTP Backend Support
 
-(defn- openai-request-body
+(defn openai-request-body
   "Build OpenAI API request body."
   [{:keys [prompt messages model max-tokens streaming?]}]
   (let [model (or model "gpt-4-turbo")
@@ -241,7 +241,7 @@
      :stream (boolean streaming?)
      :max_tokens (or max-tokens 4000)}))
 
-(defn- ollama-request-body
+(defn ollama-request-body
   "Build Ollama API request body."
   [{:keys [prompt messages model streaming?]}]
   (let [model (or model "codellama")
@@ -251,7 +251,7 @@
      :messages [{:role "user" :content msg-content}]
      :stream (boolean streaming?)}))
 
-(defn- http-post-request
+(defn http-post-request
   "Make HTTP POST request to LLM API.
 
    Returns HTTP response map or anomaly map on exception."
@@ -267,7 +267,7 @@
        {:anomaly/operation :http-request
         :anomaly.llm/url url}))))
 
-(defn- parse-openai-response
+(defn parse-openai-response
   "Parse OpenAI API response.
 
    Handles anomaly maps from http-post-request or HTTP response maps."
@@ -287,7 +287,7 @@
         (llm-error :anomalies/fault "parse_error"
                    (str "Failed to parse response: " (.getMessage e)))))))
 
-(defn- parse-ollama-response
+(defn parse-ollama-response
   "Parse Ollama API response.
 
    Handles anomaly maps from http-post-request or HTTP response maps."
@@ -307,7 +307,7 @@
         (llm-error :anomalies/fault "parse_error"
                    (str "Failed to parse response: " (.getMessage e)))))))
 
-(defn- http-complete
+(defn http-complete
   "Complete request using HTTP API backend."
   [backend-config request api-key]
   (let [{:keys [api-endpoint provider]} backend-config
@@ -332,7 +332,7 @@
       (llm-error :anomalies/unsupported "unsupported_backend"
                  (str "HTTP backend not implemented for: " provider)))))
 
-(defn- http-stream-complete
+(defn http-stream-complete
   "Complete request using HTTP API with streaming.
 
    Note: Currently falls back to non-streaming as babashka.http-client
@@ -352,10 +352,10 @@
         (llm-error :anomalies/fault "stream_error"
                    (str "Streaming failed: " (.getMessage e)))))))
 
-(defn- success-response [output exit-code]
+(defn success-response [output exit-code]
   (llm-success (str/trim output) {:exit-code exit-code}))
 
-(defn- error-response [output exit-code stderr]
+(defn error-response [output exit-code stderr]
   (let [error-message (if (and stderr (str/blank? output)) stderr output)]
     (llm-error :anomalies.agent/llm-error "cli_error" (str/trim error-message)
                {:exit-code exit-code :stderr stderr :stdout output})))
@@ -368,37 +368,37 @@
      (success-response output exit-code)
      (error-response output exit-code stderr))))
 
-(defn- default-progress-monitor []
+(defn default-progress-monitor []
   (pm/create-progress-monitor
    {:stagnation-threshold-ms 120000
     :max-total-ms 600000
     :min-activity-interval-ms 5000}))
 
-(defn- format-timeout-error [{:keys [message type elapsed-ms]}]
+(defn format-timeout-error [{:keys [message type elapsed-ms]}]
   (format "Adaptive timeout: %s (type: %s, elapsed: %dms)"
           message (name type) elapsed-ms))
 
-(defn- timeout-result [out-lines timeout-reason]
+(defn timeout-result [out-lines timeout-reason]
   {:out (str/join "\n" out-lines)
    :err (format-timeout-error timeout-reason)
    :exit -1
    :timeout timeout-reason})
 
-(defn- success-result [out-lines process-result]
+(defn success-result [out-lines process-result]
   {:out (str/join "\n" out-lines)
    :err (:err process-result)
    :exit (:exit process-result)})
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- read-line-with-timeout [reader timeout-ms]
+(defn read-line-with-timeout [reader timeout-ms]
   (let [read-future (future (.readLine reader))]
     (try
       (deref read-future timeout-ms nil)
       (catch java.util.concurrent.TimeoutException _
         nil))))
 
-(defn- process-stream-lines [out-reader monitor on-line]
+(defn process-stream-lines [out-reader monitor on-line]
   (let [out-lines (atom [])
         timeout-reason (atom nil)
         line-timeout-ms 60000]
@@ -413,7 +413,7 @@
     {:lines @out-lines
      :timeout @timeout-reason}))
 
-(defn- clean-env
+(defn clean-env
   "Build environment map without CLAUDECODE to allow nested Claude CLI sessions.
    Returns nil if CLAUDECODE is not set (use default env)."
   []
@@ -438,17 +438,17 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn- build-request-prompt [request]
+(defn build-request-prompt [request]
   (or (:prompt request)
       (build-messages-prompt (:messages request))))
 
-(defn- log-prompt-sent [logger backend prompt]
+(defn log-prompt-sent [logger backend prompt]
   (when logger
     (log/debug logger :system :agent/prompt-sent
                {:data {:backend backend
                        :prompt-length (count prompt)}})))
 
-(defn- log-response [logger response]
+(defn log-response [logger response]
   (when logger
     (if (:success response)
       (log/debug logger :system :agent/response-received
@@ -483,7 +483,7 @@
         (log-response logger response)
         response))))
 
-(defn- handle-non-streaming-fallback [client request on-chunk]
+(defn handle-non-streaming-fallback [client request on-chunk]
   (let [result (complete-impl client request)]
     (when (:success result)
       (on-chunk {:delta (:content result)
@@ -491,7 +491,7 @@
                  :content (:content result)}))
     result))
 
-(defn- stream-with-parser [stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost]
+(defn stream-with-parser [stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost]
   (fn [line]
     (when-let [parsed (stream-parser line)]
       (when-let [usage (:usage parsed)]
@@ -502,7 +502,7 @@
         (swap! accumulated-content str delta)
         (on-chunk (assoc parsed :content @accumulated-content))))))
 
-(defn- log-streaming-result [logger timeout-info content-length]
+(defn log-streaming-result [logger timeout-info content-length]
   (when logger
     (if timeout-info
       (log/warn logger :system :agent/streaming-timeout
@@ -513,11 +513,11 @@
       (log/debug logger :system :agent/streaming-complete
                  {:data {:response-length content-length}}))))
 
-(defn- streaming-success-response [content exit-code usage cost-usd]
+(defn streaming-success-response [content exit-code usage cost-usd]
   (cond-> (llm-success content {:exit-code exit-code :usage usage})
     cost-usd (assoc :cost-usd cost-usd)))
 
-(defn- streaming-error-response [content exit-code err-result timeout-info]
+(defn streaming-error-response [content exit-code err-result timeout-info]
   (let [error-message (or err-result
                           (when (str/blank? content) "Process failed with no output")
                           "Process failed")
@@ -526,7 +526,7 @@
     (llm-error category error-type (str/trim error-message)
                {:exit-code exit-code :stderr err-result :stdout content :timeout timeout-info})))
 
-(defn- handle-streaming [client request on-chunk backend-config progress-monitor]
+(defn handle-streaming [client request on-chunk backend-config progress-monitor]
   (let [{:keys [logger config]} client
         {:keys [backend]} config
         {:keys [cmd args-fn stream-parser]} backend-config

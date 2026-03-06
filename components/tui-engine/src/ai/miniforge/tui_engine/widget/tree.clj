@@ -79,7 +79,7 @@
    :skipped  :default
    :spinning :cyan})
 
-(defn- render-column-header
+(defn render-column-header
   "Render column header with title."
   [buffer x-offset avail-w title color]
   (let [header (subs (str " " title (apply str (repeat avail-w \space)))
@@ -87,7 +87,7 @@
     (buf/buf-put-string buffer x-offset 0 header
                         {:fg (or color :white) :bg :default :bold? true})))
 
-(defn- render-column-separator
+(defn render-column-separator
   "Render horizontal separator below header."
   [buffer x-offset avail-w rows]
   (if (>= rows 2)
@@ -96,14 +96,14 @@
                         {:fg :default :bg :default :bold? false})
     buffer))
 
-(defn- format-card-line
+(defn format-card-line
   "Format card text with status indicator."
   [label status avail-w]
   (let [indicator (get status-chars status \○)
         line (str indicator " " (subs label 0 (min (count label) (- avail-w 2))))]
     (subs line 0 (min (count line) avail-w))))
 
-(defn- render-card
+(defn render-card
   "Render single card in column."
   [buffer x-offset card-idx label status avail-w rows]
   (let [r (+ card-idx 2)]
@@ -114,7 +114,7 @@
                             {:fg (get status-colors status :white)
                              :bg :default :bold? false})))))
 
-(defn- render-column
+(defn render-column
   "Render complete kanban column."
   [buffer idx {:keys [title color cards]} col-width cols rows]
   (let [x-offset (* idx col-width)

@@ -57,7 +57,7 @@
      ["?"      "Toggle this help"]
      ["q"      "Quit"]]]])
 
-(defn- format-help-lines
+(defn format-help-lines
   "Build flat lines from help sections."
   []
   (into []

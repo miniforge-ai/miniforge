@@ -19,7 +19,7 @@
   "Default location for user config file."
   (str (fs/home) "/.miniforge/config.edn"))
 
-(defn- load-default-config
+(defn load-default-config
   "Load default configuration from resources.
 
    Returns: Default config map or hardcoded fallback"
@@ -85,7 +85,7 @@
   "Default configuration values loaded from resources/config/default-user-config.edn"
   (load-default-config))
 
-(defn- read-edn-file
+(defn read-edn-file
   "Safely read an EDN file, returning nil on error."
   [path]
   (try
@@ -94,7 +94,7 @@
     (catch Exception _e
       nil)))
 
-(defn- write-edn-file
+(defn write-edn-file
   "Write EDN data to a file, creating parent directories if needed."
   [path data]
   (fs/create-dirs (fs/parent path))
@@ -103,12 +103,12 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Environment variable overrides
 
-(defn- get-env-var
+(defn get-env-var
   "Get environment variable value."
   [var-name]
   (System/getenv var-name))
 
-(defn- parse-env-value
+(defn parse-env-value
   "Parse environment variable value (string -> EDN)."
   [value]
   (when value
@@ -117,7 +117,7 @@
       (catch Exception _
         value))))
 
-(defn- apply-env-overrides
+(defn apply-env-overrides
   "Apply environment variable overrides to config.
 
    Supports these env vars:

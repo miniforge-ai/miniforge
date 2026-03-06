@@ -14,7 +14,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Diff parsing
 
-(defn- parse-diff-header
+(defn parse-diff-header
   "Parse a diff header to extract the file path.
    Handles 'diff --git a/path b/path' format."
   [header-line]
@@ -61,12 +61,12 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pack selection
 
-(defn- path-matches-glob?
+(defn path-matches-glob?
   "Test a single path against a single glob pattern."
   [glob-fn glob path]
   (try (glob-fn glob path) (catch Exception _ false)))
 
-(defn- files-match-globs?
+(defn files-match-globs?
   "True if any path in `paths` matches any pattern in `globs`."
   [paths globs]
   (let [glob-fn @(requiring-resolve 'ai.miniforge.policy-pack.registry/glob-matches?)]
@@ -74,7 +74,7 @@
             (some #(path-matches-glob? glob-fn % path) globs))
           paths)))
 
-(defn- pack-applies?
+(defn pack-applies?
   "True if a pack applies to the given changed files.
    Packs with no :file-globs constraint apply to everything."
   [changed-files pack]

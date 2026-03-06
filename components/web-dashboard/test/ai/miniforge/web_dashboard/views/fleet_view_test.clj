@@ -9,16 +9,16 @@
    [clojure.string :as str]
    [ai.miniforge.web-dashboard.views.fleet :as sut]))
 
-(defn- mock-layout [title body]
+(defn mock-layout [title body]
   [:html [:head [:title title]] [:body body]])
 
-(defn- flat-strings
+(defn flat-strings
   "Extract all string leaves from a nested hiccup structure."
   [hiccup]
   (->> (tree-seq coll? seq hiccup)
        (filter string?)))
 
-(defn- contains-string?
+(defn contains-string?
   "Check if any string in the hiccup tree contains the substring."
   [hiccup substr]
   (some #(str/includes? % substr) (flat-strings hiccup)))

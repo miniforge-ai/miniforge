@@ -15,7 +15,7 @@
 ;;------------------------------------------------------------------------------ Layer 0
 ;; Prompt templates
 
-(defn- build-workflow-summary
+(defn build-workflow-summary
   "Build a concise summary of a workflow for LLM prompt.
 
    Arguments:
@@ -32,7 +32,7 @@
          (when (:has-review chars) "\n  Includes code review")
          (when (:has-testing chars) "\n  Includes testing"))))
 
-(defn- build-workflow-summaries
+(defn build-workflow-summaries
   "Build summaries for all available workflows.
 
    Arguments:
@@ -42,7 +42,7 @@
   [workflows]
   (str/join "\n\n" (map build-workflow-summary workflows)))
 
-(defn- extract-spec-summary
+(defn extract-spec-summary
   "Extract key information from spec for LLM analysis.
 
    Arguments:
@@ -61,7 +61,7 @@
          (when constraints (str "Constraints: " (pr-str constraints) "\n\n"))
          (when workflow-type (str "Preferred workflow: " workflow-type)))))
 
-(defn- build-recommendation-prompt
+(defn build-recommendation-prompt
   "Build LLM prompt for workflow recommendation.
 
    Arguments:
@@ -96,7 +96,7 @@
 ;;------------------------------------------------------------------------------ Layer 1
 ;; LLM interaction
 
-(defn- parse-llm-response
+(defn parse-llm-response
   "Parse JSON response from LLM.
 
    Arguments:
@@ -117,7 +117,7 @@
       (println "Warning: Failed to parse LLM response:" (ex-message e))
       nil)))
 
-(defn- call-llm-for-recommendation
+(defn call-llm-for-recommendation
   "Call LLM to get workflow recommendation.
 
    Arguments:
@@ -184,7 +184,7 @@
 ;;------------------------------------------------------------------------------ Layer 3
 ;; Fallback recommendations
 
-(defn- recommend-by-task-type
+(defn recommend-by-task-type
   "Fallback recommendation based on task type.
 
    Arguments:

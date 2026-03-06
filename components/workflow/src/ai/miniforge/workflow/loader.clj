@@ -44,7 +44,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Resource loading
 
-(defn- jar-entry-names
+(defn jar-entry-names
   "List entry names under dir-prefix inside a JAR file."
   [^java.net.URL jar-url dir-prefix]
   (let [jar-path (-> (.getPath jar-url)
@@ -57,7 +57,7 @@
            (remove #(= % dir-prefix))
            vec))))
 
-(defn- list-resource-names
+(defn list-resource-names
   "List resource names under a classpath directory.
    Works for both filesystem directories and JAR entries."
   [dir-name]
@@ -77,12 +77,12 @@
                     vec)
         nil))))
 
-(defn- latest?
+(defn latest?
   "True when version represents 'latest' (keyword or string)."
   [version]
   (or (= version :latest) (= version "latest")))
 
-(defn- find-latest-versioned-resource
+(defn find-latest-versioned-resource
   "Scan classpath for the highest versioned workflow file matching workflow-id.
    Looks for workflows/<workflow-id>-v*.edn files and returns the path with
    the highest version number. Works inside uberjars."
@@ -154,7 +154,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Combined loading with caching
 
-(defn- try-load-from-cache
+(defn try-load-from-cache
   "Try loading workflow from cache.
 
    Returns workflow or nil if not cached or skip-cache requested."
@@ -162,7 +162,7 @@
   (when-not skip-cache?
     (get @workflow-cache cache-key)))
 
-(defn- try-load-from-sources
+(defn try-load-from-sources
   "Try loading workflow from resource or store.
 
    Returns workflow or nil if not found."
@@ -170,7 +170,7 @@
   (or (load-from-resource workflow-id version)
       (load-from-store workflow-id version opts)))
 
-(defn- validate-and-cache-workflow
+(defn validate-and-cache-workflow
   "Validate workflow and add to cache.
 
    Throws ex-info if validation fails.

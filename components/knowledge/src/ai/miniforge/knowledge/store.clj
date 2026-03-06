@@ -32,7 +32,7 @@
   (query [this query-map]
     "Query zettels matching criteria. Returns vector of zettels."))
 
-(defn- matches-query?
+(defn matches-query?
   "Check if a zettel matches query criteria."
   [zettel {:keys [tags dewey-prefixes include-types exclude-types
                   text-search]}]

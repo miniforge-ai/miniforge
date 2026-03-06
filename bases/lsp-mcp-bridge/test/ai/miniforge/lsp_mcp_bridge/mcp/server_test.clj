@@ -10,7 +10,7 @@
    [java.io BufferedReader BufferedWriter InputStreamReader OutputStreamWriter]))
 
 ;; Helper: send a JSON line and read response
-(defn- send-recv
+(defn send-recv
   "Send a JSON-RPC message and read one line response."
   [^BufferedWriter writer ^BufferedReader reader msg]
   (let [json-str (json/generate-string msg)]

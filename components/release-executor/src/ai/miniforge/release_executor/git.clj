@@ -9,17 +9,17 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; gh auth result helpers
 
-(defn- gh-unavailable
+(defn gh-unavailable
   "Create result for gh CLI not available."
   [error-msg]
   {:available? false :authenticated? false :error error-msg})
 
-(defn- gh-available-unauthenticated
+(defn gh-available-unauthenticated
   "Create result for gh CLI available but not authenticated."
   [error-msg]
   {:available? true :authenticated? false :error error-msg})
 
-(defn- gh-authenticated
+(defn gh-authenticated
   "Create result for gh CLI available and authenticated."
   [user]
   {:available? true :authenticated? true :user user})

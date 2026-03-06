@@ -22,7 +22,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Subscribe/unsubscribe
 
-(defn- subscribe-client!
+(defn subscribe-client!
   "Subscribe WebSocket client to event stream."
   [event-stream ch]
   (when event-stream
@@ -40,7 +40,7 @@
         (catch Exception e
           (println "Error subscribing to event stream:" (ex-message e)))))))
 
-(defn- unsubscribe-client!
+(defn unsubscribe-client!
   "Unsubscribe WebSocket client from event stream."
   [event-stream ch]
   (when event-stream
@@ -56,7 +56,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Message handling
 
-(defn- handle-ws-message
+(defn handle-ws-message
   "Handle incoming WebSocket message from dashboard UI."
   [state workflow-connections ch data]
   (try

@@ -10,13 +10,13 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures
 
-(defn- ok-result [task-id]
+(defn ok-result [task-id]
   (dag/ok {:task-id task-id :status :implemented}))
 
-(defn- rate-limit-err [message]
+(defn rate-limit-err [message]
   (dag/err :task-execution-failed message {:task-id :test}))
 
-(defn- generic-err [message]
+(defn generic-err [message]
   (dag/err :task-execution-failed message {:task-id :test}))
 
 ;------------------------------------------------------------------------------ Layer 1

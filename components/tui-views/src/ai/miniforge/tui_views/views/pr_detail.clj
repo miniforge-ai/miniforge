@@ -28,13 +28,13 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Rendering helpers
 
-(defn- render-title-bar [pr [cols rows]]
+(defn render-title-bar [pr [cols rows]]
   (layout/text [cols rows]
     (str " MINIFORGE │ "
          (or (:pr/title pr) "PR Detail"))
     {:fg :cyan :bold? true}))
 
-(defn- render-info-panel [pr [cols rows]]
+(defn render-info-panel [pr [cols rows]]
   (layout/box [cols rows]
     {:title "PR Info" :border :single :fg :default
      :content-fn
@@ -47,7 +47,7 @@
                     (str "  Author:    " (or (:pr/author pr) "—"))]]
          (layout/text [ic ir] (str/join "\n" lines))))}))
 
-(defn- render-footer [[cols rows]]
+(defn render-footer [[cols rows]]
   (layout/text [cols rows]
     " Esc:back  Tab:pane  e:evidence  /:search  q:quit"
     {:fg :default}))

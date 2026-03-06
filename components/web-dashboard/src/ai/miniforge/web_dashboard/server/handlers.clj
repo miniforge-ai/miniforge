@@ -27,18 +27,18 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Anomaly/response helpers (via requiring-resolve, no hard dep on response component)
 
-(defn- make-anomaly
+(defn make-anomaly
   "Create an anomaly map via response/make-anomaly."
   [category message & [context]]
   ((requiring-resolve 'ai.miniforge.response.interface/make-anomaly)
    category message (or context {})))
 
-(defn- from-exception
+(defn from-exception
   "Convert an exception to an anomaly map via response/from-exception."
   [^Throwable e]
   ((requiring-resolve 'ai.miniforge.response.interface/from-exception) e))
 
-(defn- anomaly-http-response
+(defn anomaly-http-response
   "Translate an anomaly map to a Ring HTTP response.
    Body is JSON-encoded for wire transport."
   [anomaly-map]
@@ -48,21 +48,21 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Filter helpers
 
-(defn- maybe-apply-filters
+(defn maybe-apply-filters
   [items filter-ast pane]
   (if filter-ast
     (filters-new/apply-filters items filter-ast pane)
     items))
 
-(defn- filtered-fleet-trains
+(defn filtered-fleet-trains
   [state filter-ast]
   (maybe-apply-filters (:trains (state/get-fleet-state state)) filter-ast :fleet))
 
-(defn- filtered-workflow-runs
+(defn filtered-workflow-runs
   [state filter-ast]
   (maybe-apply-filters (state/get-workflows state) filter-ast :workflows))
 
-(defn- filtered-activity
+(defn filtered-activity
   [state trains filter-ast]
   (let [activities (state/get-recent-activity state)]
     (if filter-ast
@@ -70,7 +70,7 @@
         (filter #(contains? allowed-train-ids (:train-id %)) activities))
       activities)))
 
-(defn- pane-data
+(defn pane-data
   "Get pane data used for facet computation/filtering."
   [state pane]
   (case pane
@@ -81,7 +81,7 @@
     :fleet (:trains (state/get-fleet-state state))
     []))
 
-(defn- normalize-facet-counts
+(defn normalize-facet-counts
   "Normalize facet output into a map."
   [facets]
   (cond
@@ -89,7 +89,7 @@
     (sequential? facets) (into {} facets)
     :else {}))
 
-(defn- compute-global-facets
+(defn compute-global-facets
   "Compute facet counts for global filters across all applicable panes."
   [state global-filters]
   (into {}
@@ -321,7 +321,7 @@
                  [])]
     (responses/html-response (views/workflow-detail-panel workflow events))))
 
-(defn- write-command-file!
+(defn write-command-file!
   "Atomic write of a command file to ~/.miniforge/commands/<workflow-id>/<timestamp>.edn.
    Writes to .tmp then renames for atomicity."
   [workflow-id command]
@@ -491,7 +491,7 @@
   "Default requester identity when none is provided in the request body."
   {:principal "dashboard" :role :operator})
 
-(defn- build-control-action
+(defn build-control-action
   "Build a control action map from parsed request data."
   [data workflow-id]
   (let [create-fn (requiring-resolve 'ai.miniforge.event-stream.interface/create-control-action)]
@@ -501,7 +501,7 @@
                {:justification (:action/justification data)
                 :parameters (:action/parameters data)})))
 
-(defn- execute-via-command!
+(defn execute-via-command!
   "Execution function that bridges control actions to the legacy command system."
   [state workflow-id action]
   (let [cmd (name (:action/type action))]
@@ -509,7 +509,7 @@
     (state/enqueue-command! state workflow-id cmd)
     {:command cmd :workflow-id workflow-id}))
 
-(defn- execute-authorized-action
+(defn execute-authorized-action
   "Execute a control action that has passed authorization."
   [state workflow-id action]
   (let [es (:event-stream @state)
@@ -517,7 +517,7 @@
         result (exec-fn es action (partial execute-via-command! state workflow-id))]
     (responses/json-response {:status "executed" :result result})))
 
-(defn- authorization-error-response
+(defn authorization-error-response
   "Build an anomaly response for a failed authorization check."
   [auth-result action-type]
   (anomaly-http-response
@@ -526,7 +526,7 @@
                      (:reason auth-result)
                      {:action-type action-type}))))
 
-(defn- handle-structured-control-action
+(defn handle-structured-control-action
   "Handle a structured control action request (has :action/type)."
   [state workflow-id data]
   (let [action (build-control-action data workflow-id)

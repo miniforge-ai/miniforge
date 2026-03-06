@@ -25,7 +25,7 @@
    (atom {})
    (atom [])))
 
-(defn- should-check-agent?
+(defn should-check-agent?
   "Determine if an agent should be checked now based on interval."
   [agent last-check-time]
   (if-not last-check-time
@@ -36,7 +36,7 @@
           elapsed (- now last-check-time)]
       (>= elapsed interval))))
 
-(defn- record-check!
+(defn record-check!
   "Record a health check result."
   [coordinator agent-id result]
   (let [now (System/currentTimeMillis)]

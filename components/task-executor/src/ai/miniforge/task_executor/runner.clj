@@ -38,7 +38,7 @@
      :run-atom (:run-atom run-context)
      :config config}))
 
-(defn- log-event
+(defn log-event
   "Log an event if logger is available."
   [logger event-type task-id data]
   (when logger
@@ -46,7 +46,7 @@
               {:message (str "Task executor: " (name event-type))
                :data (assoc data :task-id task-id)})))
 
-(defn- acquire-resources!
+(defn acquire-resources!
   "Acquire worktree and environment for task execution.
 
   Returns: {:worktree-acquired? bool, :env-record map} or throws on error"
@@ -78,7 +78,7 @@
       {:worktree-acquired? true
        :env-record (:value env-result)})))
 
-(defn- generate-code!
+(defn generate-code!
   "Run inner loop to generate code artifact.
 
   Returns: {:artifact map, :tokens int}"
@@ -99,7 +99,7 @@
 
     (gen-fn task context)))
 
-(defn- create-event-bridge
+(defn create-event-bridge
   "Create callback that bridges PR events to scheduler events.
 
   Returns: Function (fn [pr-event] -> nil) that translates and forwards events"
@@ -111,7 +111,7 @@
                   :scheduler-action (:event/action scheduler-event)})
       (dag/handle-task-event run-atom scheduler-event))))
 
-(defn- run-pr-lifecycle!
+(defn run-pr-lifecycle!
   "Create PR controller and run full lifecycle.
 
   Returns: Final status map from run-lifecycle!"
@@ -153,7 +153,7 @@
     ;; Run blocking lifecycle
     (pr/run-lifecycle! controller code-artifact)))
 
-(defn- cleanup-resources!
+(defn cleanup-resources!
   "Clean up environment and locks in finally block."
   [task-id lock-pool executor env-record logger]
   (when env-record
@@ -174,7 +174,7 @@
         (log-event logger :release-locks-error task-id
                    {:error (ex-message e)})))))
 
-(defn- calculate-cost-usd
+(defn calculate-cost-usd
   "Calculate estimated cost in USD based on tokens used.
    Using Claude Sonnet pricing as baseline: ~$3/million input, ~$15/million output.
    Assume 70% input / 30% output ratio for simplicity."
@@ -187,7 +187,7 @@
                 (/ (* output-tokens output-cost-per-million) 1000000.0))]
     (double cost)))
 
-(defn- update-task-metrics!
+(defn update-task-metrics!
   "Update comprehensive task metrics in run-atom.
 
    Collects:

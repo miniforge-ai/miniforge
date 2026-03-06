@@ -36,7 +36,7 @@
     (println (str "  Version:  " (colorize :cyan version)))
     (println (colorize :cyan (str (apply str (repeat 65 "━")) "\n")))))
 
-(defn- format-event-line
+(defn format-event-line
   "Format a concise progress line for a lifecycle event. Returns nil for unknown events."
   [event]
   (let [evt (:event/type event)
@@ -89,7 +89,7 @@
       (fn []
         (es/unsubscribe! event-stream sub-id)))))
 
-(defn- print-workflow-summary [result]
+(defn print-workflow-summary [result]
   (let [{:execution/keys [status metrics errors]} result
         success? (= status :completed)]
     (println (if success?
@@ -104,7 +104,7 @@
       (doseq [err errors]
         (println (str "  • " err))))))
 
-(defn- print-pretty-result [result]
+(defn print-pretty-result [result]
   (println (colorize :cyan (str "\n" (apply str (repeat 65 "━")))))
   (print-workflow-summary result)
   (println (colorize :cyan (str (apply str (repeat 65 "━")) "\n")))

@@ -34,7 +34,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Task grouping
 
-(defn- group-tasks-by-status
+(defn group-tasks-by-status
   "Group workflow tasks into kanban columns."
   [workflows]
   (let [all-wfs (or workflows [])

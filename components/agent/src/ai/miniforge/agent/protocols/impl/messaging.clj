@@ -217,7 +217,7 @@
 ;------------------------------------------------------------------------------ Layer 5
 ;; InterAgentMessaging protocol implementations
 
-(defn- publish-to-event-stream!
+(defn publish-to-event-stream!
   "Publish an event to the event stream if available (no hard dep on event-stream)."
   [agent-messaging event]
   (try

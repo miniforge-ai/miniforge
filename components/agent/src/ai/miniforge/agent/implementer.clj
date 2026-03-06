@@ -73,7 +73,7 @@
           :else
           {:valid? true :errors nil})))))
 
-(defn- extract-language
+(defn extract-language
   "Extract the programming language from file paths or context."
   [files context]
   (let [extensions (->> files
@@ -96,7 +96,7 @@
           "rs" "rust"
           most-common))))
 
-(defn- format-existing-files
+(defn format-existing-files
   "Format existing file contents for inclusion in the user prompt.
 
    Arguments:
@@ -115,7 +115,7 @@
                           "\n```\n" content "\n```")))
               (str/join "\n")))))
 
-(defn- task->text
+(defn task->text
   "Convert a task to text for the LLM.
    Includes plan and intent when available for richer context."
   [task]
@@ -126,17 +126,23 @@
                                (:content task))
                       plan (:task/plan task)
                       intent (:task/intent task)
+                      review-feedback (:task/review-feedback task)
                       parts (cond-> []
                               desc (conj desc)
                               plan (conj (str "\n\n## Plan\n\n" (if (string? plan) plan (pr-str plan))))
                               (and intent (map? intent))
-                              (conj (str "\n\n## Intent\n\n" (pr-str intent))))]
+                              (conj (str "\n\n## Intent\n\n" (pr-str intent)))
+                              review-feedback
+                              (conj (str "\n\n## Review Feedback (MUST FIX)\n\n"
+                                         "The previous implementation was reviewed and changes were requested. "
+                                         "You MUST address ALL of the following issues:\n\n"
+                                         (if (string? review-feedback) review-feedback (pr-str review-feedback)))))]
                   (if (seq parts)
                     (str/join "" parts)
                     (pr-str task)))
     :else (str task)))
 
-(defn- parse-code-response
+(defn parse-code-response
   "Parse the LLM response to extract code artifact.
    Handles both EDN in code blocks and plain EDN.
    Returns nil if the parsed result is not a map."
@@ -152,7 +158,7 @@
     (catch Exception _
       nil)))
 
-(defn- extract-code-blocks
+(defn extract-code-blocks
   "Extract code blocks from markdown response and convert to file list."
   [response-content]
   (let [blocks (re-seq #"```(?:(\w+)\n)?([^`]+)```" response-content)]
@@ -174,7 +180,7 @@
 ;; make-fallback-code removed — silent fallback masks real failures,
 ;; prevents retry/repair from working, and short-circuits checkpoint resume.
 
-(defn- repair-code-artifact
+(defn repair-code-artifact
   "Attempt to repair a code artifact based on validation errors."
   [artifact errors _context]
   (let [repaired (atom artifact)]

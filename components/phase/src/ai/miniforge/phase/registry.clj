@@ -150,7 +150,7 @@
   "Keys to try when extracting status from a map, in priority order."
   [:status :execution/status :step/status :chain/status])
 
-(defn- extract-status
+(defn extract-status
   "Extract a status keyword from a map by trying known status keys."
   [m]
   (when m (some m status-keys)))

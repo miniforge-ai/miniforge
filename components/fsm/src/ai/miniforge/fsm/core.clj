@@ -40,7 +40,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Internal helpers
 
-(defn- compile-transitions
+(defn compile-transitions
   "Compile transition definitions.
 
    Supports shorthand and full forms:
@@ -57,7 +57,7 @@
    {}
    transitions))
 
-(defn- compile-state
+(defn compile-state
   "Compile a state definition to clj-statecharts format.
 
    Supports:
@@ -76,7 +76,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Machine definition
 
-(defn- extract-final-states
+(defn extract-final-states
   "Extract the set of states marked as :type :final."
   [states]
   (into #{}

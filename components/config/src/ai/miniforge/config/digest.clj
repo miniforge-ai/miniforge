@@ -15,7 +15,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; SHA-256 computation
 
-(defn- bytes->hex
+(defn bytes->hex
   "Convert byte array to lowercase hex string. Babashka/GraalVM compatible."
   [^bytes ba]
   (let [sb (StringBuilder. (* 2 (alength ba)))]

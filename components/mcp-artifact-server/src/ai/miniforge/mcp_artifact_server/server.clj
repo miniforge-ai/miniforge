@@ -8,7 +8,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Artifact persistence
 
-(defn- write-artifact!
+(defn write-artifact!
   "Write an artifact EDN map to the artifact directory. Returns the path."
   [artifact-dir artifact]
   (let [path (str artifact-dir "/artifact.edn")]
@@ -18,7 +18,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Logging (stderr only — stdout is the JSON-RPC transport)
 
-(defn- log-stderr
+(defn log-stderr
   "Print message to stderr (stdout is reserved for JSON-RPC)."
   [& args]
   (binding [*out* *err*]
@@ -55,7 +55,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Message processing — one extracted function per message shape
 
-(defn- handle-request
+(defn handle-request
   "Handle a JSON-RPC request (has id, expects response)."
   [id method params artifact-dir]
   (try
@@ -66,7 +66,7 @@
         (log-stderr "Error handling" method ":" (ex-message e))
         (protocol/write-error id code (ex-message e))))))
 
-(defn- handle-notification
+(defn handle-notification
   "Handle a JSON-RPC notification (no id, no response)."
   [method params artifact-dir]
   (try
@@ -74,7 +74,7 @@
     (catch Exception e
       (log-stderr "Notification error:" (ex-message e)))))
 
-(defn- process-message
+(defn process-message
   "Parse and dispatch a single JSON-RPC message."
   [line artifact-dir]
   (if-let [msg (protocol/parse-message line)]
@@ -86,7 +86,7 @@
         (handle-notification method params artifact-dir)))
     (log-stderr "Parse error: invalid JSON")))
 
-(defn- process-line
+(defn process-line
   "Process a single line from stdin. Skips blank lines."
   [line artifact-dir]
   (when-not (str/blank? line)

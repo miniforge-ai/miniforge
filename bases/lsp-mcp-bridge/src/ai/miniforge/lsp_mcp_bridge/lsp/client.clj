@@ -36,7 +36,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Message dispatch — extracted from reader loop
 
-(defn- dispatch-response
+(defn dispatch-response
   "Deliver a response to its pending promise."
   [pending-requests msg]
   (let [id (:id msg)
@@ -46,7 +46,7 @@
         (swap! pending-requests dissoc id)
         (deliver p msg)))))
 
-(defn- dispatch-notification
+(defn dispatch-notification
   "Buffer diagnostics and invoke notification handler."
   [diagnostics-buffer notification-handler msg]
   (when (and diagnostics-buffer
@@ -61,7 +61,7 @@
         (binding [*out* *err*]
           (println "Notification handler error:" (.getMessage e)))))))
 
-(defn- dispatch-message
+(defn dispatch-message
   "Route an incoming LSP message to the appropriate handler."
   [client msg]
   (let [{:keys [pending-requests diagnostics-buffer notification-handler]} client]
@@ -79,7 +79,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Message I/O
 
-(defn- start-reader-loop
+(defn start-reader-loop
   "Start a background thread reading messages from the LSP server."
   [client]
   (let [{:keys [reader]} client

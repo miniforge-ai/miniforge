@@ -30,7 +30,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Resource enumeration
 
-(defn- jar-entry-names
+(defn jar-entry-names
   "List entry names under dir-prefix inside a JAR file."
   [^java.net.URL jar-url dir-prefix]
   (let [jar-path (-> (.getPath jar-url)
@@ -43,7 +43,7 @@
            (remove #(= % dir-prefix))
            vec))))
 
-(defn- list-resource-names
+(defn list-resource-names
   "List resource names under a classpath directory.
    Works for both filesystem directories and JAR entries."
   [dir-name]
@@ -63,7 +63,7 @@
                     vec)
         nil))))
 
-(defn- parse-chain-resource
+(defn parse-chain-resource
   "Parse a chain resource path into a summary map, or nil on failure."
   [resource-path]
   (try
@@ -78,7 +78,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Resource loading
 
-(defn- find-latest-chain-resource
+(defn find-latest-chain-resource
   "Find the highest-versioned chain EDN resource path for chain-id.
    Returns a resource path string like \"chains/spec-to-pr-v1.0.0.edn\"."
   [chain-id]
@@ -91,7 +91,7 @@
     (when-let [filename (first candidates)]
       (str "chains/" filename))))
 
-(defn- load-chain-resource
+(defn load-chain-resource
   "Load a chain EDN file from classpath."
   [resource-path]
   (when-let [resource (io/resource resource-path)]

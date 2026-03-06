@@ -8,8 +8,8 @@
 
 ;; ---------------------------------------------------------------------------- Helpers
 
-(defn- msg-type [msg] (first msg))
-(defn- msg-payload [msg] (second msg))
+(defn msg-type [msg] (first msg))
+(defn msg-payload [msg] (second msg))
 
 ;; ---------------------------------------------------------------------------- Layer 0: Side-effect result messages
 

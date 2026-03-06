@@ -24,7 +24,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Fleet fragments
 
-(defn- readiness-state-label
+(defn readiness-state-label
   "Maps readiness state keywords to human-readable labels."
   [state]
   (case state
@@ -37,7 +37,7 @@
     :needs-review "Needs Review"
     (if state (name state) "Unknown")))
 
-(defn- fleet-action-onclick
+(defn fleet-action-onclick
   [action]
   (case action
     :add-repo "window.miniforge.fleet.addRepo()"
@@ -46,14 +46,14 @@
     :discover-sync "window.miniforge.fleet.discoverAndSync()"
     ""))
 
-(defn- format-sync-time
+(defn format-sync-time
   [ts]
   (when ts
     (try
       (.format (SimpleDateFormat. "yyyy-MM-dd HH:mm:ss") ts)
       (catch Exception _ nil))))
 
-(defn- sync-status-fragment
+(defn sync-status-fragment
   [last-sync]
   (if-not last-sync
     [:div.fleet-sync-status
