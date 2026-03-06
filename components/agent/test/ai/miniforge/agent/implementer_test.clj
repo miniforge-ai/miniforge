@@ -48,30 +48,14 @@
 ;; Invoke tests
 
 (deftest implementer-invoke-test
-  (testing "generates code from task"
+  (testing "fails explicitly without LLM backend (no silent fallback)"
     (let [agent (implementer/create-implementer)
           result (core/invoke agent
                               {:suggested-path "src/auth/login.clj"}
                               {:task/description "Implement user login"
                                :task/type :implement})]
-      (is (= :success (:status result)))
-      (is (uuid? (get-in result [:output :code/id])))
-      (is (vector? (get-in result [:output :code/files])))
-      (is (= :create (get-in result [:output :code/files 0 :action])))))
-
-  (testing "includes metrics in result"
-    (let [agent (implementer/create-implementer)
-          result (core/invoke agent {} {:description "Simple task"})]
-      (is (number? (get-in result [:metrics :files-created])))
-      (is (string? (get-in result [:metrics :language])))))
-
-  (testing "detects language from file extension"
-    (let [agent (implementer/create-implementer)
-          result (core/invoke agent
-                              {:suggested-path "src/app.py"}
-                              {:description "Python task"})]
-      ;; Note: actual language detection happens during generation
-      (is (= :success (:status result))))))
+      (is (= :error (:status result)))
+      (is (some? (:error result))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation tests
@@ -179,12 +163,11 @@
 ;; Full cycle tests
 
 (deftest implementer-cycle-test
-  (testing "full invoke-validate cycle succeeds"
+  (testing "full invoke-validate cycle fails without LLM (no silent fallback)"
     (let [agent (implementer/create-implementer)
           result (core/cycle-agent agent {} {:task/description "Create a helper function"
                                               :task/type :implement})]
-      (is (= :success (:status result)))
-      (is (uuid? (get-in result [:output :code/id]))))))
+      (is (= :error (:status result))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

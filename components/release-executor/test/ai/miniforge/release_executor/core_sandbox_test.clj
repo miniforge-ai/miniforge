@@ -52,6 +52,15 @@
                                            :code/files files}}]
    :workflow/spec {:spec/description "test task"}})
 
+(def test-release-meta
+  "Pre-built release metadata so tests don't need an LLM backend."
+  {:release/id (random-uuid)
+   :release/branch-name "feature/test-change"
+   :release/commit-message "feat: test change"
+   :release/pr-title "feat: test change"
+   :release/pr-description "## Summary\nTest change"
+   :release/created-at (java.util.Date.)})
+
 ;; ============================================================================
 ;; Sandbox mode detection tests
 ;; ============================================================================
@@ -72,7 +81,8 @@
           context {:executor exec
                    :environment-id "mock-env"
                    :create-pr? false}  ;; skip PR creation for simplicity
-          result (core/execute-release-phase workflow-state context {})]
+          result (core/execute-release-phase workflow-state context
+                                             {:release-meta test-release-meta})]
       ;; Should succeed via sandbox path
       (is (:success? result))
       ;; Commands should have been sent to the mock executor
@@ -108,7 +118,8 @@
           context {:executor exec
                    :environment-id "mock-env"
                    :create-pr? false}
-          result (core/execute-release-phase workflow-state context {})]
+          result (core/execute-release-phase workflow-state context
+                                             {:release-meta test-release-meta})]
       (is (:success? result)))))
 
 (deftest sandbox-no-code-artifacts-still-fails

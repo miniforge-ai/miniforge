@@ -82,10 +82,15 @@
 (defn- step-generate-metadata [state]
   (if (failed? state)
     state
-    (let [{:keys [releaser code-artifacts task-description context logger]} state
-          release-meta (metadata/generate-release-metadata
-                        releaser code-artifacts task-description context logger)]
-      (assoc state :release-meta release-meta))))
+    (if (:release-meta state)
+      state ;; Already provided (e.g. by caller or test)
+      (let [{:keys [releaser code-artifacts task-description context logger]} state
+            release-meta (metadata/generate-release-metadata
+                          releaser code-artifacts task-description context logger)]
+        (if release-meta
+          (assoc state :release-meta release-meta)
+          (fail state :metadata-generation-failed
+                "Releaser agent failed to generate release metadata"))))))
 
 (defn- step-create-branch [state]
   (if (failed? state)
@@ -248,17 +253,18 @@
         executor (:executor context)
         environment-id (:environment-id context)
         sandbox? (boolean (and executor environment-id))
-        initial-state {:logger logger
-                       :worktree-path (:worktree-path context)
-                       :artifact-store (:artifact-store context)
-                       :context context
-                       :create-pr? (get context :create-pr? true)
-                       :releaser (:releaser opts)
-                       :task-description (get-in workflow-state [:workflow/spec :spec/description])
-                       :code-artifacts (extract-code-artifacts (:workflow/artifacts workflow-state))
-                       :executor executor
-                       :environment-id environment-id
-                       :sandbox? sandbox?}]
+        initial-state (cond-> {:logger logger
+                               :worktree-path (:worktree-path context)
+                               :artifact-store (:artifact-store context)
+                               :context context
+                               :create-pr? (get context :create-pr? true)
+                               :releaser (:releaser opts)
+                               :task-description (get-in workflow-state [:workflow/spec :spec/description])
+                               :code-artifacts (extract-code-artifacts (:workflow/artifacts workflow-state))
+                               :executor executor
+                               :environment-id environment-id
+                               :sandbox? sandbox?}
+                       (:release-meta opts) (assoc :release-meta (:release-meta opts)))]
 
     (when logger
       (log/info logger :release-executor :phase-started
