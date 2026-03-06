@@ -91,7 +91,19 @@
     (if-let [wf (when raw-idx (get (:workflows model) raw-idx))]
       (-> model
           (assoc :view :workflow-detail)
-          (assoc-in [:detail :workflow-id] (:id wf))
+          ;; Reset all detail fields to prevent stale data from previous workflow
+          (assoc :detail {:workflow-id    (:id wf)
+                          :phases         []
+                          :current-agent  nil
+                          :agent-output   ""
+                          :evidence       nil
+                          :artifacts      []
+                          :expanded-nodes #{}
+                          :focused-pane   0
+                          :selected-pr    nil
+                          :pr-readiness   nil
+                          :pr-risk        nil
+                          :selected-train nil})
           (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil
                  :scroll-offset nil :search-matches [] :search-match-idx nil))
       model)))
