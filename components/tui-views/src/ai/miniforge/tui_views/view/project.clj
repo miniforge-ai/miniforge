@@ -66,6 +66,96 @@
 ;------------------------------------------------------------------------------ Layer 0b
 ;; Readiness + risk derivation (pure, from provider signals)
 
+(defn readiness-state
+  "Classify PR into [state score] from status and CI signals."
+  [status ci-ok? ci-fail? behind?]
+  (cond
+    (and (#{:merge-ready :approved} status) ci-ok? (not behind?))
+    [:merge-ready 1.0]
+
+    (and (#{:merge-ready :approved} status) ci-ok? behind?)
+    [:behind-main 0.85]
+
+    (and (= :approved status) ci-fail?)
+    [:ci-failing 0.5]
+
+    (and (= :approved status) (not ci-ok?))
+    [:needs-review 0.7]
+
+    (= :changes-requested status)
+    [:changes-requested 0.25]
+
+    (= :reviewing status)
+    [:needs-review 0.5]
+
+    (and (= :open status) ci-fail?)
+    [:ci-failing 0.25]
+
+    (= :open status)
+    [:needs-review 0.4]
+
+    (= :draft status)
+    [:draft 0.1]
+
+    :else
+    [:unknown 0.0]))
+
+(defn readiness-blockers
+  "Compute blocker list from PR status and CI signals."
+  [status ci-fail? behind?]
+  (cond-> []
+    ci-fail?
+    (conj {:blocker/type :ci
+           :blocker/message "CI checks failing"
+           :blocker/source "provider"})
+    behind?
+    (conj {:blocker/type :behind-main
+           :blocker/message "Branch is behind main"
+           :blocker/source "provider"})
+    (#{:open :reviewing :needs-review} status)
+    (conj {:blocker/type :review
+           :blocker/message "Needs review approval"
+           :blocker/source "provider"})
+    (= :changes-requested status)
+    (conj {:blocker/type :review
+           :blocker/message "Reviewer requested changes"
+           :blocker/source "provider"})
+    (= :draft status)
+    (conj {:blocker/type :review
+           :blocker/message "PR is in draft"
+           :blocker/source "author"})))
+
+(defn readiness-factors
+  "Compute weighted readiness factors and score.
+   Weights: deps=0.25 ci=0.25 approved=0.20 gates=0.15 behind-main=0.15.
+   Deps and gates default to 1.0 in naive derivation (no train context).
+   Returns {:weighted float :factors [...]
+            :ci-score float :review-score float :behind-score float}."
+  [status ci-ok? ci-fail? behind?]
+  (let [ci-score     (if ci-ok? 1.0 (if ci-fail? 0.0 0.5))
+        review-score (case status
+                       (:merge-ready :approved) 1.0
+                       :reviewing 0.5
+                       :changes-requested 0.25
+                       :open 0.3
+                       :draft 0.0
+                       0.0)
+        behind-score (if behind? 0.0 1.0)
+        weighted     (+ (* 0.25 1.0)
+                       (* 0.25 ci-score)
+                       (* 0.20 review-score)
+                       (* 0.15 1.0)
+                       (* 0.15 behind-score))]
+    {:weighted     weighted
+     :ci-score     ci-score
+     :review-score review-score
+     :behind-score behind-score
+     :factors      [{:factor :deps-merged  :weight 0.25 :score 1.0}
+                    {:factor :ci-passed    :weight 0.25 :score ci-score}
+                    {:factor :approved     :weight 0.20 :score review-score}
+                    {:factor :gates-passed :weight 0.15 :score 1.0}
+                    {:factor :behind-main  :weight 0.15 :score behind-score}]}))
+
 (defn derive-readiness
   "Derive N9 readiness state from provider signals.
    Returns {:readiness/state kw :readiness/score float :readiness/ready? bool
@@ -77,86 +167,14 @@
         ci-ok?       (= :passed ci)
         ci-fail?     (= :failed ci)
         behind?      (:pr/behind-main? pr false)
-        ;; Determine readiness state
-        [state score]
-        (cond
-          (and (#{:merge-ready :approved} status) ci-ok? (not behind?))
-          [:merge-ready 1.0]
-
-          (and (#{:merge-ready :approved} status) ci-ok? behind?)
-          [:behind-main 0.85]
-
-          (and (= :approved status) ci-fail?)
-          [:ci-failing 0.5]
-
-          (and (= :approved status) (not ci-ok?))
-          [:needs-review 0.7]
-
-          (= :changes-requested status)
-          [:changes-requested 0.25]
-
-          (= :reviewing status)
-          [:needs-review 0.5]
-
-          (and (= :open status) ci-fail?)
-          [:ci-failing 0.25]
-
-          (= :open status)
-          [:needs-review 0.4]
-
-          (= :draft status)
-          [:draft 0.1]
-
-          :else
-          [:unknown 0.0])
-        ;; Compute blockers
-        blockers (cond-> []
-                   ci-fail?
-                   (conj {:blocker/type :ci
-                          :blocker/message "CI checks failing"
-                          :blocker/source "provider"})
-                   behind?
-                   (conj {:blocker/type :behind-main
-                          :blocker/message "Branch is behind main"
-                          :blocker/source "provider"})
-                   (#{:open :reviewing :needs-review} status)
-                   (conj {:blocker/type :review
-                          :blocker/message "Needs review approval"
-                          :blocker/source "provider"})
-                   (= :changes-requested status)
-                   (conj {:blocker/type :review
-                          :blocker/message "Reviewer requested changes"
-                          :blocker/source "provider"})
-                   (= :draft status)
-                   (conj {:blocker/type :review
-                          :blocker/message "PR is in draft"
-                          :blocker/source "author"}))
-        ;; Compute factors — aligned with pr-train readiness weights
-        ci-score     (if ci-ok? 1.0 (if ci-fail? 0.0 0.5))
-        review-score (case status
-                       (:merge-ready :approved) 1.0
-                       :reviewing 0.5
-                       :changes-requested 0.25
-                       :open 0.3
-                       :draft 0.0
-                       0.0)
-        behind-score (if behind? 0.0 1.0)
-        ;; Weighted: deps=0.25 ci=0.25 approved=0.20 gates=0.15 behind-main=0.15
-        ;; Deps and gates default to 1.0 in naive derivation (no train context)
-        weighted     (+ (* 0.25 1.0)      ;; deps — assumed ok without train context
-                       (* 0.25 ci-score)
-                       (* 0.20 review-score)
-                       (* 0.15 1.0)        ;; gates — assumed ok without gate data
-                       (* 0.15 behind-score))]
+        [state _]    (readiness-state status ci-ok? ci-fail? behind?)
+        blockers     (readiness-blockers status ci-fail? behind?)
+        {:keys [weighted factors]} (readiness-factors status ci-ok? ci-fail? behind?)]
     {:readiness/state    state
      :readiness/score    weighted
      :readiness/ready?   (>= weighted 0.85)
      :readiness/blockers blockers
-     :readiness/factors  [{:factor :deps-merged  :weight 0.25 :score 1.0}
-                          {:factor :ci-passed    :weight 0.25 :score ci-score}
-                          {:factor :approved     :weight 0.20 :score review-score}
-                          {:factor :gates-passed :weight 0.15 :score 1.0}
-                          {:factor :behind-main  :weight 0.15 :score behind-score}]}))
+     :readiness/factors  factors}))
 
 (defn derive-risk
   "Derive N9 risk assessment from provider signals.
@@ -472,6 +490,50 @@
         fg   (case conclusion :success status-pass :failure status-fail nil)]
     (tree-node (str icon " " name) 2 false fg)))
 
+(defn ci-section-nodes
+  "Build CI status header + individual check nodes."
+  [ci-status ci-checks]
+  (let [ci-fg (case ci-status :passed status-pass :failed status-fail status-warning)]
+    (into [(tree-node (str "CI: " (case ci-status
+                                    :passed "\u2713 passed" :failed "\u2718 failed"
+                                    :running "\u25cb running" "\u25cb pending"))
+                      1 true ci-fg)]
+          (mapv ci-check-node ci-checks))))
+
+(defn behind-main-node
+  "Build the behind-main indicator node."
+  [behind? merge-st]
+  (tree-node (str "Behind main: " (if behind?
+                                    (str "yes (" (or merge-st "BEHIND") ")")
+                                    "no"))
+             1 false (if behind? status-fail status-pass)))
+
+(defn review-node
+  "Build the review/approval status node."
+  [pr-status]
+  (let [[review-label review-fg]
+        (case pr-status
+          :approved           ["\u2713 approved"           status-pass]
+          :changes-requested  ["\u25d0 changes requested"  status-fail]
+          :reviewing          ["\u25cb review required"    status-warning]
+          :draft              ["\u25d1 draft"              nil]
+                              ["\u25cb pending"            status-warning])]
+    (tree-node (str "Review: " review-label) 1 false review-fg)))
+
+(defn gates-section-nodes
+  "Build gate status header + individual gate nodes."
+  [gates]
+  (if (seq gates)
+    (let [passed (count (filter :gate/passed? gates))
+          all?   (= passed (count gates))]
+      (into [(tree-node (str "Gates: " passed "/" (count gates) " passed")
+                        1 true (if all? status-pass status-warning))]
+            (mapv #(tree-node (str (if (:gate/passed? %) "\u2713 " "\u2718 ")
+                                   (name (:gate/id %)))
+                              2 false (if (:gate/passed? %) status-pass status-fail))
+                  gates)))
+    [(tree-node "Gates: none" 1)]))
+
 (defn project-readiness-tree
   "Build readiness tree nodes for the tree widget.
    Each factor is expandable with detail nodes at depth 1+."
@@ -479,16 +541,8 @@
   (let [{:keys [pr readiness]} (resolve-detail-enrichment model)
         score     (or (:readiness/score readiness) 0)
         ready?    (:readiness/ready? readiness)
-        recommend (when pr (derive-recommendation pr))
-        ci-checks (get pr :pr/ci-checks [])
-        ci-status (:pr/ci-status pr)
-        behind?   (:pr/behind-main? pr)
-        merge-st  (:pr/merge-state pr)
-        pr-status (:pr/status pr)
-        deps      (get pr :pr/depends-on [])
-        gates     (get pr :pr/gate-results [])]
+        recommend (when pr (derive-recommendation pr))]
     (into
-     ;; Header + recommendation
      (cond-> [(tree-node (str "Readiness: " (int (* 100 score)) "%"
                                (when ready? " \u2714 ready"))
                           0 true (if ready? status-pass status-warning))]
@@ -496,45 +550,12 @@
        (conj (tree-node (str "Recommend: " (:label recommend) " \u2014 " (:reason recommend))
                          0 false (recommend-action-color (:action recommend)))))
      (concat
-      ;; CI factor — boolean with individual check drill-down
-      (let [ci-fg (case ci-status :passed status-pass :failed status-fail status-warning)]
-        [(tree-node (str "CI: " (case ci-status
-                                   :passed "\u2713 passed" :failed "\u2718 failed"
-                                   :running "\u25cb running" "\u25cb pending"))
-                    1 true ci-fg)])
-      (mapv ci-check-node ci-checks)
-
-      ;; Behind main — replaces age/staleness
-      [(tree-node (str "Behind main: " (if behind?
-                                          (str "yes (" (or merge-st "BEHIND") ")")
-                                          "no"))
-                  1 false (if behind? status-fail status-pass))]
-
-      ;; Review/approval status
-      (let [[review-label review-fg]
-            (case pr-status
-              :approved           ["\u2713 approved"        status-pass]
-              :changes-requested  ["\u25d0 changes requested" status-fail]
-              :reviewing          ["\u25cb review required"   status-warning]
-              :draft              ["\u25d1 draft"             nil]
-                                  ["\u25cb pending"           status-warning])]
-        [(tree-node (str "Review: " review-label) 1 false review-fg)])
-
-      ;; Dependent PRs
-      (when (seq deps)
-        [(tree-node (str "Dependent PRs: " (count deps)) 1 true)])
-
-      ;; Gates
-      (if (seq gates)
-        (let [passed (count (filter :gate/passed? gates))
-              all?   (= passed (count gates))]
-          (into [(tree-node (str "Gates: " passed "/" (count gates) " passed")
-                            1 true (if all? status-pass status-warning))]
-                (mapv #(tree-node (str (if (:gate/passed? %) "\u2713 " "\u2718 ")
-                                       (name (:gate/id %)))
-                                  2 false (if (:gate/passed? %) status-pass status-fail))
-                      gates)))
-        [(tree-node "Gates: none" 1)])))))
+      (ci-section-nodes (:pr/ci-status pr) (get pr :pr/ci-checks []))
+      [(behind-main-node (:pr/behind-main? pr) (:pr/merge-state pr))]
+      [(review-node (:pr/status pr))]
+      (when (seq (get pr :pr/depends-on []))
+        [(tree-node (str "Dependent PRs: " (count (get pr :pr/depends-on))) 1 true)])
+      (gates-section-nodes (get pr :pr/gate-results []))))))
 
 (defn risk-factor-label
   "Format a risk factor for display."
@@ -607,6 +628,37 @@
 (defn severity-color [severity]
   (case severity :critical status-fail :major status-fail :minor status-warning :info status-info nil))
 
+(defn packs-applied-nodes
+  "Build tree nodes for policy packs applied."
+  [packs]
+  (when (seq packs)
+    (into [(tree-node (str "Packs applied (" (count packs) "):") 1 true)]
+          (mapv #(tree-node (str "  " %) 2) packs))))
+
+(defn severity-summary-nodes
+  "Build a summary node listing violation counts by severity."
+  [summary]
+  (when summary
+    (let [parts (cond-> []
+                  (pos? (:critical summary 0)) (conj (str (:critical summary) " critical"))
+                  (pos? (:major summary 0))    (conj (str (:major summary) " major"))
+                  (pos? (:minor summary 0))    (conj (str (:minor summary) " minor"))
+                  (pos? (:info summary 0))     (conj (str (:info summary) " info")))]
+      (when (seq parts)
+        [(tree-node (str "Summary: " (str/join ", " parts)) 1)]))))
+
+(defn violation-nodes
+  "Build tree nodes for individual policy violations."
+  [violations]
+  (when (seq violations)
+    (into [(tree-node (str "Violations (" (count violations) "):") 1 true)]
+          (mapv (fn [v]
+                  (tree-node (str (severity-prefix (:severity v))
+                                  (or (:message v) (name (get v :rule-id "")))
+                                  (when (:auto-fixable? v) " [auto-fix]"))
+                             2 false (severity-color (:severity v))))
+                violations))))
+
 (defn policy-tree [policy]
   (let [summary    (:evaluation/summary policy)
         violations (:evaluation/violations policy [])
@@ -617,30 +669,9 @@
                            " (" (:total summary 0) " violations)")
                       0 true (if passed? status-pass status-fail))]
           (concat
-           ;; Packs applied
-           (when (seq packs)
-             (into [(tree-node (str "Packs applied (" (count packs) "):") 1 true)]
-                   (mapv #(tree-node (str "  " %) 2) packs)))
-
-           ;; Summary by severity
-           (when summary
-             (let [parts (cond-> []
-                           (pos? (:critical summary 0)) (conj (str (:critical summary) " critical"))
-                           (pos? (:major summary 0))    (conj (str (:major summary) " major"))
-                           (pos? (:minor summary 0))    (conj (str (:minor summary) " minor"))
-                           (pos? (:info summary 0))     (conj (str (:info summary) " info")))]
-               (when (seq parts)
-                 [(tree-node (str "Summary: " (str/join ", " parts)) 1)])))
-
-           ;; Individual violations
-           (when (seq violations)
-             (into [(tree-node (str "Violations (" (count violations) "):") 1 true)]
-                   (mapv (fn [v]
-                           (tree-node (str (severity-prefix (:severity v))
-                                           (or (:message v) (name (get v :rule-id "")))
-                                           (when (:auto-fixable? v) " [auto-fix]"))
-                                      2 false (severity-color (:severity v))))
-                         violations)))))))
+           (packs-applied-nodes packs)
+           (severity-summary-nodes summary)
+           (violation-nodes violations)))))
 
 (defn gates-tree [gates]
   (mapv #(tree-node (str (if (:gate/passed? %) "pass " "FAIL ") (name (:gate/id %)))
@@ -671,6 +702,46 @@
              :ci (some-> (:pr/ci-status pr) name)})
           prs)))
 
+(defn intent-nodes
+  "Build intent section nodes for evidence tree."
+  [evidence]
+  [{:label "Intent" :depth 0 :expandable? true}
+   {:label (or (get-in evidence [:intent :description])
+               "No intent data available")
+    :depth 1 :expandable? false}])
+
+(defn phase-nodes
+  "Build phase section nodes for evidence tree."
+  [phases]
+  (into [{:label "Phases" :depth 0 :expandable? true}]
+        (mapv (fn [{:keys [phase status]}]
+                {:label (str (name phase)
+                             (case status
+                               :running  " ● running"
+                               :success  " ✓ passed"
+                               :failed   " ✗ failed"
+                               ""))
+                 :depth 1 :expandable? false})
+              phases)))
+
+(defn validation-nodes
+  "Build validation section nodes for evidence tree."
+  [evidence]
+  [{:label "Validation" :depth 0 :expandable? true}
+   {:label (if (get-in evidence [:validation :passed?])
+             "✓ All gates passed"
+             (str "✗ " (count (get-in evidence [:validation :errors] [])) " error(s)"))
+    :depth 1 :expandable? false}])
+
+(defn policy-evidence-nodes
+  "Build policy section nodes for evidence tree."
+  [evidence]
+  [{:label "Policy" :depth 0 :expandable? true}
+   {:label (if (get-in evidence [:policy :compliant?])
+             "✓ Policy compliant"
+             "✗ Policy violations detected")
+    :depth 1 :expandable? false}])
+
 (defn project-evidence-tree
   "Build evidence tree nodes."
   [model]
@@ -679,30 +750,10 @@
         phases (:phases detail)]
     (into []
       (concat
-       [{:label "Intent" :depth 0 :expandable? true}
-        {:label (or (get-in evidence [:intent :description])
-                    "No intent data available")
-         :depth 1 :expandable? false}]
-       [{:label "Phases" :depth 0 :expandable? true}]
-       (mapv (fn [{:keys [phase status]}]
-               {:label (str (name phase)
-                            (case status
-                              :running  " ● running"
-                              :success  " ✓ passed"
-                              :failed   " ✗ failed"
-                              ""))
-                :depth 1 :expandable? false})
-             phases)
-       [{:label "Validation" :depth 0 :expandable? true}
-        {:label (if (get-in evidence [:validation :passed?])
-                  "✓ All gates passed"
-                  (str "✗ " (count (get-in evidence [:validation :errors] [])) " error(s)"))
-         :depth 1 :expandable? false}]
-       [{:label "Policy" :depth 0 :expandable? true}
-        {:label (if (get-in evidence [:policy :compliant?])
-                  "✓ Policy compliant"
-                  "✗ Policy violations detected")
-         :depth 1 :expandable? false}]))))
+       (intent-nodes evidence)
+       (phase-nodes phases)
+       (validation-nodes evidence)
+       (policy-evidence-nodes evidence)))))
 
 (defn project-artifacts
   "Project artifacts for the table widget."
