@@ -4,7 +4,7 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.reporting.interface :as reporting]
    [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.workflow.protocol :as workflow-proto]))
+   [ai.miniforge.workflow.interface :as workflow]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures
@@ -28,7 +28,7 @@
                           :workflow/created-at (System/currentTimeMillis)
                           :workflow/metrics {:tokens 200 :cost-usd 0.01}}])]
     (reify
-      workflow-proto/Workflow
+      workflow/Workflow
       (get-state [_this workflow-id]
         (if (= workflow-id :all)
           @workflows
