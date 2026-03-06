@@ -166,37 +166,30 @@
   [repo]
   (boolean (re-matches repo-slug-pattern repo)))
 
+(def error-hint-rules
+  "Data-driven error categorization: [pattern-keywords hint-string]."
+  [[["auth" "authentication" "not logged"]
+    "Run `gh auth login` and retry."]
+   [["not found" "forbidden" "permission" "access denied"]
+    "Verify repository slug and access permissions, then retry sync."]
+   [["rate limit" "secondary rate"]
+    "Provider rate-limited this request. Wait briefly, then retry sync."]
+   [["parse" "malformed" "invalid json"]
+    "Provider returned malformed data. Retry sync; if it repeats, inspect provider CLI output."]
+   [["timeout" "network" "connection"]
+    "Transient provider/network failure. Retry sync."]])
+
+(def default-error-hint
+  "Retry sync. If it keeps failing, run the equivalent `gh` command locally for details.")
+
 (defn actionable-error-hint
   [error-msg]
   (let [msg (str/lower-case (or error-msg ""))]
-    (cond
-      (or (str/includes? msg "auth")
-          (str/includes? msg "authentication")
-          (str/includes? msg "not logged"))
-      "Run `gh auth login` and retry."
-
-      (or (str/includes? msg "not found")
-          (str/includes? msg "forbidden")
-          (str/includes? msg "permission")
-          (str/includes? msg "access denied"))
-      "Verify repository slug and access permissions, then retry sync."
-
-      (or (str/includes? msg "rate limit")
-          (str/includes? msg "secondary rate"))
-      "Provider rate-limited this request. Wait briefly, then retry sync."
-
-      (or (str/includes? msg "parse")
-          (str/includes? msg "malformed")
-          (str/includes? msg "invalid json"))
-      "Provider returned malformed data. Retry sync; if it repeats, inspect provider CLI output."
-
-      (or (str/includes? msg "timeout")
-          (str/includes? msg "network")
-          (str/includes? msg "connection"))
-      "Transient provider/network failure. Retry sync."
-
-      :else
-      "Retry sync. If it keeps failing, run the equivalent `gh` command locally for details.")))
+    (or (some (fn [[patterns hint]]
+                (when (some #(str/includes? msg %) patterns)
+                  hint))
+              error-hint-rules)
+        default-error-hint)))
 
 (defn with-actionable-error
   [result]
@@ -817,36 +810,43 @@
   (core/safe-call 'ai.miniforge.pr-train.interface 'sync-pr-status mgr train-id status-map)
   (core/safe-call 'ai.miniforge.pr-train.interface 'link-prs mgr train-id))
 
+(defn fetch-repo-prs
+  "Fetch open PRs for a repo, returning a result map."
+  [repo]
+  (try
+    (fetch-open-prs repo)
+    (catch Exception e
+      (result-exception
+       (str "Failed to fetch PRs for " repo ".")
+       e
+       {:repo repo}))))
+
+(defn apply-pr-sync!
+  "Apply a sync plan for a repo's PRs into its train. Returns result-success."
+  [state mgr train-id repo prs]
+  (let [dag-id (ensure-default-dag-id! state)
+        _ (ensure-repo-in-dag! state dag-id repo)
+        before-train (or (core/safe-call 'ai.miniforge.pr-train.interface 'get-train mgr train-id)
+                         {:train/prs []})
+        sync-plan (train-sync-plan before-train prs)
+        _ (apply-sync-plan! mgr train-id repo sync-plan)
+        after-train (core/safe-call 'ai.miniforge.pr-train.interface 'get-train mgr train-id)]
+    (result-success
+     {:repo repo
+      :train-id train-id
+      :added (count (:to-add sync-plan))
+      :removed (count (:to-remove sync-plan))
+      :open-prs (count prs)
+      :tracked-prs (count (:train/prs after-train))})))
+
 (defn sync-repo-prs-into-train!
   [state repo]
-  (let [fetch-result (try
-                       (fetch-open-prs repo)
-                       (catch Exception e
-                         (result-exception
-                          (str "Failed to fetch PRs for " repo ".")
-                          e
-                          {:repo repo})))]
+  (let [fetch-result (fetch-repo-prs repo)]
     (if-not (succeeded? fetch-result)
-      (-> fetch-result
-          (assoc :repo repo)
-          with-actionable-error)
+      (-> fetch-result (assoc :repo repo) with-actionable-error)
       (if-let [mgr (:pr-train-manager @state)]
         (if-let [train-id (ensure-repo-train! state repo)]
-          (let [dag-id (ensure-default-dag-id! state)
-                _ (ensure-repo-in-dag! state dag-id repo)
-                prs (:prs fetch-result)
-                before-train (or (core/safe-call 'ai.miniforge.pr-train.interface 'get-train mgr train-id)
-                                 {:train/prs []})
-                sync-plan (train-sync-plan before-train prs)
-                _ (apply-sync-plan! mgr train-id repo sync-plan)
-                after-train (core/safe-call 'ai.miniforge.pr-train.interface 'get-train mgr train-id)]
-            (result-success
-             {:repo repo
-              :train-id train-id
-              :added (count (:to-add sync-plan))
-              :removed (count (:to-remove sync-plan))
-              :open-prs (count prs)
-              :tracked-prs (count (:train/prs after-train))}))
+          (apply-pr-sync! state mgr train-id repo (:prs fetch-result))
           (result-failure
            "Unable to create or locate PR train for repository."
            {:repo repo
@@ -856,69 +856,55 @@
          {:repo repo
           :action "Start dashboard with a PR train manager and retry sync."})))))
 
+(defn empty-sync-summary []
+  {:added-prs 0 :removed-prs 0 :tracked-prs 0})
+
+(defn aggregate-sync-results
+  "Aggregate per-repo sync results into a single sync result."
+  [repos results]
+  (let [ok (->> results (filter succeeded?) vec)
+        failed (->> results (remove succeeded?) (mapv with-actionable-error))
+        failures (->> failed
+                      (map (fn [entry]
+                             {:repo (:repo entry)
+                              :error (:error entry)
+                              :action (:action entry)}))
+                      (sort-by :repo)
+                      vec)
+        summary {:added-prs (reduce + 0 (map :added ok))
+                 :removed-prs (reduce + 0 (map :removed ok))
+                 :tracked-prs (reduce + 0 (map :tracked-prs ok))}]
+    (if (empty? failed)
+      (result-success
+       {:repos repos :synced (count ok) :failed 0
+        :failures [] :results results :summary summary})
+      (result-failure
+       (if (seq ok)
+         (str "Sync completed with failures for " (count failed) " repo(s).")
+         (str "Sync failed for " (count failed) " configured repo(s)."))
+       {:repos repos :synced (count ok) :failed (count failed)
+        :failures failures :results (vec (concat ok failed))
+        :summary summary :partial? (boolean (seq ok))}))))
+
 (defn sync-configured-repos!
   "Sync configured repositories into PR trains and ingest open PRs from provider."
   [state]
   (let [repos (get-configured-repos state)]
-    (cond
-      (empty? repos)
-      (record-last-sync!
-       state
+    (record-last-sync!
+     state
+     (cond
+       (empty? repos)
        (result-failure
         "No repositories configured. Add one or discover repositories first."
-        {:repos []
-         :synced 0
-         :failed 0
-         :summary {:added-prs 0
-                   :removed-prs 0
-                   :tracked-prs 0}}))
+        {:repos [] :synced 0 :failed 0 :summary (empty-sync-summary)})
 
-      (nil? (:pr-train-manager @state))
-      (record-last-sync!
-       state
+       (nil? (:pr-train-manager @state))
        (result-failure
         "PR train manager is not available in this runtime."
-        {:repos repos
-         :synced 0
-         :failed (count repos)
-         :summary {:added-prs 0
-                   :removed-prs 0
-                   :tracked-prs 0}}))
+        {:repos repos :synced 0 :failed (count repos) :summary (empty-sync-summary)})
 
-      :else
-      (let [results (mapv #(sync-repo-prs-into-train! state %) repos)
-            ok (->> results (filter succeeded?) vec)
-            failed (->> results (remove succeeded?) (mapv with-actionable-error))
-            failures (->> failed
-                          (map (fn [entry]
-                                 {:repo (:repo entry)
-                                  :error (:error entry)
-                                  :action (:action entry)}))
-                          (sort-by :repo)
-                          vec)
-            summary {:added-prs (reduce + 0 (map :added ok))
-                     :removed-prs (reduce + 0 (map :removed ok))
-                     :tracked-prs (reduce + 0 (map :tracked-prs ok))}
-            result (if (empty? failed)
-                     (result-success
-                      {:repos repos
-                       :synced (count ok)
-                       :failed 0
-                       :failures []
-                       :results results
-                       :summary summary})
-                     (result-failure
-                      (if (seq ok)
-                        (str "Sync completed with failures for " (count failed) " repo(s).")
-                        (str "Sync failed for " (count failed) " configured repo(s)."))
-                      {:repos repos
-                       :synced (count ok)
-                       :failed (count failed)
-                       :failures failures
-                       :results (vec (concat ok failed))
-                       :summary summary
-                       :partial? (boolean (seq ok))}))]
-        (record-last-sync! state result)))))
+       :else
+       (aggregate-sync-results repos (mapv #(sync-repo-prs-into-train! state %) repos))))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; DAG composite state
