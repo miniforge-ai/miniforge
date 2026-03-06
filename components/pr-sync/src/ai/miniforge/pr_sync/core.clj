@@ -241,7 +241,7 @@
   [repo]
   (let [result (fetch-github-prs repo :open)]
     (if (succeeded? result)
-      (update result :prs (fn [prs] (vec (remove #(= :closed (:pr/status %)) prs))))
+      (update result :prs (fn [prs] (vec (remove #(#{:closed :merged} (:pr/status %)) prs))))
       result)))
 
 (defn- fetch-open-gitlab-mrs
