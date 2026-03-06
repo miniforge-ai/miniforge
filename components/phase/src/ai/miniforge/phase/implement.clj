@@ -82,6 +82,7 @@
         existing-files (file-ctx/load-files-in-scope worktree-path files-in-scope)
         behavior-addendum (agent-beh/load-and-filter-behaviors
                             :implement {:task {:task/intent (:intent input)}})
+        review-feedback (get-in ctx [:phase :review-feedback])
         base-task {:task/id (random-uuid)
                    :task/type :implement
                    :task/description (:description input)
@@ -95,7 +96,9 @@
       verify-failure
       (assoc :task/verify-failures
              {:test-results (get-in verify-failure [:result :output :metadata :test-results])
-              :test-output (get-in verify-failure [:result :output :metadata :test-results :output])}))))
+              :test-output (get-in verify-failure [:result :output :metadata :test-results :output])})
+      review-feedback
+      (assoc :task/review-feedback review-feedback))))
 
 (defn- create-streaming-callback
   "Create a streaming callback for agent output if event-stream is available."

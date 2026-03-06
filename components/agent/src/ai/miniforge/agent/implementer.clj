@@ -126,11 +126,17 @@
                                (:content task))
                       plan (:task/plan task)
                       intent (:task/intent task)
+                      review-feedback (:task/review-feedback task)
                       parts (cond-> []
                               desc (conj desc)
                               plan (conj (str "\n\n## Plan\n\n" (if (string? plan) plan (pr-str plan))))
                               (and intent (map? intent))
-                              (conj (str "\n\n## Intent\n\n" (pr-str intent))))]
+                              (conj (str "\n\n## Intent\n\n" (pr-str intent)))
+                              review-feedback
+                              (conj (str "\n\n## Review Feedback (MUST FIX)\n\n"
+                                         "The previous implementation was reviewed and changes were requested. "
+                                         "You MUST address ALL of the following issues:\n\n"
+                                         (if (string? review-feedback) review-feedback (pr-str review-feedback)))))]
                   (if (seq parts)
                     (str/join "" parts)
                     (pr-str task)))
