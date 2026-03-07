@@ -131,8 +131,7 @@
         with-timestamp)))
 
 (defn handle-phase-changed [model {:keys [workflow-id phase]}]
-  (let [model (ensure-workflow model workflow-id)
-        idx (find-workflow-idx (:workflows model) workflow-id)]
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
         (apply-phase-change idx workflow-id phase)
         with-timestamp)))
@@ -164,8 +163,7 @@
       model)))
 
 (defn handle-phase-done [model {:keys [workflow-id phase outcome artifacts duration-ms]}]
-  (let [model (ensure-workflow model workflow-id)
-        idx (find-workflow-idx (:workflows model) workflow-id)
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)
         phase-status (case outcome :success :success :failed :failed :success)]
     (-> model
         (update-workflow-at idx #(update % :progress (fn [p] (min 100 (+ (or p 0) 20)))))
@@ -174,8 +172,7 @@
         with-timestamp)))
 
 (defn handle-agent-status [model {:keys [workflow-id agent status message]}]
-  (let [model (ensure-workflow model workflow-id)
-        idx (find-workflow-idx (:workflows model) workflow-id)]
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
         (apply-agent-status-update idx workflow-id agent status message)
         with-timestamp)))
@@ -195,7 +192,7 @@
         (assoc :flash-message (str "Agent " (name agent-kw) " failed")))))
 
 (defn handle-agent-output [model {:keys [workflow-id delta]}]
-  (-> (ensure-workflow model workflow-id)
+  (-> model
       (update-detail-if-active workflow-id
         #(update-in % [:detail :agent-output] str delta))
       with-timestamp))
@@ -208,8 +205,7 @@
     duration-ms        (assoc-in [:detail :duration-ms] duration-ms)))
 
 (defn handle-workflow-done [model {:keys [workflow-id status duration-ms evidence-bundle-id]}]
-  (let [model (ensure-workflow model workflow-id)
-        idx (find-workflow-idx (:workflows model) workflow-id)]
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
         (update-workflow-at idx #(assoc % :status (or status :success) :progress 100
                                           :duration-ms duration-ms))
@@ -218,36 +214,31 @@
         with-timestamp)))
 
 (defn handle-workflow-failed [model {:keys [workflow-id error]}]
-  (let [model (ensure-workflow model workflow-id)
-        idx (find-workflow-idx (:workflows model) workflow-id)]
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
         (update-workflow-at idx #(assoc % :status :failed :error error))
         with-timestamp)))
 
 (defn handle-gate-result [model {:keys [workflow-id gate passed?] :as payload}]
-  (let [model (ensure-workflow model workflow-id)
-        idx (find-workflow-idx (:workflows model) workflow-id)]
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
         (apply-gate-result idx workflow-id gate passed? payload)
         with-timestamp)))
 
-(defn handle-gate-started [model {:keys [workflow-id gate]}]
-  (let [model (ensure-workflow model workflow-id)]
-    (-> model
-        (assoc :flash-message (str "Gate running: " (if gate (name gate) "unknown")))
-        with-timestamp)))
+(defn handle-gate-started [model {:keys [gate]}]
+  (-> model
+      (assoc :flash-message (str "Gate running: " (if gate (name gate) "unknown")))
+      with-timestamp))
 
 (defn handle-tool-invoked [model {:keys [workflow-id agent tool]}]
-  (let [model (ensure-workflow model workflow-id)
-        idx (find-workflow-idx (:workflows model) workflow-id)
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)
         status-message (str "Tool " (if tool (name tool) "unknown") " invoked")]
     (-> model
         (apply-agent-status-update idx workflow-id (or agent :agent) :tool-running status-message)
         with-timestamp)))
 
 (defn handle-tool-completed [model {:keys [workflow-id agent tool]}]
-  (let [model (ensure-workflow model workflow-id)
-        idx (find-workflow-idx (:workflows model) workflow-id)
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)
         status-message (str "Tool " (if tool (name tool) "unknown") " completed")]
     (-> model
         (apply-agent-status-update idx workflow-id (or agent :agent) :tool-completed status-message)

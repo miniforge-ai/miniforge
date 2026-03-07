@@ -41,11 +41,10 @@
                 (events/handle-phase-changed {:workflow-id wf-id :phase :implement}))]
       (is (= :implement (get-in m [:workflows 0 :phase])))))
 
-  (testing "creates workflow row if missing (late event)"
+  (testing "ignores phase event for unknown workflow (DAG child)"
     (let [wf-id (random-uuid)
           m (events/handle-phase-changed (fresh) {:workflow-id wf-id :phase :plan})]
-      (is (= 1 (count (:workflows m))))
-      (is (= :plan (get-in m [:workflows 0 :phase]))))))
+      (is (= 0 (count (:workflows m)))))))
 
 (deftest handle-phase-changed-updates-detail-test
   (testing "updates detail phases when workflow is active in detail"
@@ -400,23 +399,21 @@
     (let [m (events/handle-chat-action-result (fresh) {:success? false})]
       (is (= "Action failed" (:flash-message m))))))
 
-;; ---------------------------------------------------------------------------- ensure-workflow helper
+;; ---------------------------------------------------------------------------- Unknown workflow-id handling
 
-(deftest ensure-workflow-creates-row-for-unknown-id-test
-  (testing "events for unknown workflow-ids auto-create a row"
+(deftest unknown-workflow-id-is-noop-test
+  (testing "events for unknown workflow-ids are no-ops (DAG children)"
     (let [wf-id (random-uuid)
           m (events/handle-agent-status (fresh)
               {:workflow-id wf-id :agent :planner :status :thinking :message "hi"})]
-      (is (= 1 (count (:workflows m))))
-      (is (= wf-id (get-in m [:workflows 0 :id]))))))
+      (is (= 0 (count (:workflows m)))))))
 
-(deftest ensure-workflow-does-not-duplicate-test
-  (testing "ensure-workflow doesn't add duplicates"
+(deftest known-workflow-not-duplicated-test
+  (testing "multiple events for same known workflow don't add duplicates"
     (let [wf-id (random-uuid)
           m (-> (fresh)
                 (with-workflow wf-id)
                 (events/handle-agent-status {:workflow-id wf-id :agent :a :status :ok :message ""}))
-          ;; Apply another event to same workflow
           m2 (events/handle-phase-changed m {:workflow-id wf-id :phase :plan})]
       (is (= 1 (count (:workflows m2)))))))
 
