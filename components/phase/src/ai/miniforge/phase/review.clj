@@ -109,7 +109,8 @@
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
         review-decision (get-in result [:output :review/decision])
-        metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
+        metrics (-> (get result :metrics {:tokens 0 :duration-ms duration-ms})
+                    (assoc :duration-ms duration-ms))
         iterations (get-in ctx [:phase :iterations] 1)
         max-iterations (get-in ctx [:phase :budget :iterations]
                                (get-in default-config [:budget :iterations]))

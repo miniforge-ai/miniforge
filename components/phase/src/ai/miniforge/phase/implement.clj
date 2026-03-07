@@ -147,7 +147,7 @@
         cost-usd (or (:cost-usd result)
                      (:cost-usd metrics)
                      (* (:tokens metrics 0) 0.000015))
-        metrics (assoc metrics :cost-usd cost-usd)
+        metrics (assoc metrics :cost-usd cost-usd :duration-ms duration-ms)
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)

@@ -140,7 +140,8 @@
         end-time (System/currentTimeMillis)
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
-        metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
+        metrics (-> (get result :metrics {:tokens 0 :duration-ms duration-ms})
+                    (assoc :duration-ms duration-ms))
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)

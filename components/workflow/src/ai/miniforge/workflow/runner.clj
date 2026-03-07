@@ -89,14 +89,25 @@
             wf-id (:execution/id context)
             duration-ms (get-in context [:execution/metrics :duration-ms])]
         (if (= status :failed)
-          (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-failed)]
+          (if-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-failed)]
             (publish-event! event-stream
                             (constructor event-stream wf-id
                                          {:message "Workflow failed"
-                                          :errors (:execution/errors context)})))
-          (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-completed)]
+                                          :errors (:execution/errors context)}))
             (publish-event! event-stream
-                            (constructor event-stream wf-id status duration-ms)))))
+                            {:event/type :workflow/failed
+                             :workflow/id wf-id
+                             :workflow/errors (:execution/errors context)
+                             :event/timestamp (java.time.Instant/now)}))
+          (if-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-completed)]
+            (publish-event! event-stream
+                            (constructor event-stream wf-id status duration-ms))
+            (publish-event! event-stream
+                            {:event/type :workflow/completed
+                             :workflow/id wf-id
+                             :workflow/status status
+                             :workflow/duration-ms duration-ms
+                             :event/timestamp (java.time.Instant/now)}))))
       (catch Exception _
         ;; Fallback to ad-hoc event
         (publish-event! event-stream
@@ -129,9 +140,9 @@
     (let [succeeded? (or (:success? result)
                          (phase/succeeded-or-done? result))
           outcome (if succeeded? :success :failure)
-          duration-ms (or (get-in result [:phase/metrics :duration-ms])
-                          (get-in result [:metrics :duration-ms])
-                          (:duration-ms result))
+          duration-ms (or (:duration-ms result)
+                          (get-in result [:phase/metrics :duration-ms])
+                          (get-in result [:metrics :duration-ms]))
           error-info (when-not succeeded?
                        (or (:error result)
                            (when-let [msg (get-in result [:phase/gate-errors])]
