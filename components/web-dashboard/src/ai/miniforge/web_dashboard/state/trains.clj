@@ -198,6 +198,36 @@
     (assoc result :action (or (:action result)
                               (actionable-error-hint (:error result))))))
 
+(defn empty-sync-summary []
+  {:added-prs 0 :removed-prs 0 :tracked-prs 0})
+
+(defn aggregate-sync-results
+  "Aggregate per-repo sync results into a single sync result."
+  [repos results]
+  (let [ok (->> results (filter succeeded?) vec)
+        failed (->> results (remove succeeded?) (mapv with-actionable-error))
+        failures (->> failed
+                      (map (fn [entry]
+                             {:repo (:repo entry)
+                              :error (:error entry)
+                              :action (:action entry)}))
+                      (sort-by :repo)
+                      vec)
+        summary {:added-prs (reduce + 0 (map :added ok))
+                 :removed-prs (reduce + 0 (map :removed ok))
+                 :tracked-prs (reduce + 0 (map :tracked-prs ok))}]
+    (if (empty? failed)
+      (result-success
+       {:repos repos :synced (count ok) :failed 0
+        :failures [] :results results :summary summary})
+      (result-failure
+       (if (seq ok)
+         (str "Sync completed with failures for " (count failed) " repo(s).")
+         (str "Sync failed for " (count failed) " configured repo(s)."))
+       {:repos repos :synced (count ok) :failed (count failed)
+        :failures failures :results (vec (concat ok failed))
+        :summary summary :partial? (boolean (seq ok))}))))
+
 (defn get-configured-repos
   "Get configured fleet repositories from ~/.miniforge/config.edn."
   [_state]
@@ -855,36 +885,6 @@
          "PR train manager is not available."
          {:repo repo
           :action "Start dashboard with a PR train manager and retry sync."})))))
-
-(defn empty-sync-summary []
-  {:added-prs 0 :removed-prs 0 :tracked-prs 0})
-
-(defn aggregate-sync-results
-  "Aggregate per-repo sync results into a single sync result."
-  [repos results]
-  (let [ok (->> results (filter succeeded?) vec)
-        failed (->> results (remove succeeded?) (mapv with-actionable-error))
-        failures (->> failed
-                      (map (fn [entry]
-                             {:repo (:repo entry)
-                              :error (:error entry)
-                              :action (:action entry)}))
-                      (sort-by :repo)
-                      vec)
-        summary {:added-prs (reduce + 0 (map :added ok))
-                 :removed-prs (reduce + 0 (map :removed ok))
-                 :tracked-prs (reduce + 0 (map :tracked-prs ok))}]
-    (if (empty? failed)
-      (result-success
-       {:repos repos :synced (count ok) :failed 0
-        :failures [] :results results :summary summary})
-      (result-failure
-       (if (seq ok)
-         (str "Sync completed with failures for " (count failed) " repo(s).")
-         (str "Sync failed for " (count failed) " configured repo(s)."))
-       {:repos repos :synced (count ok) :failed (count failed)
-        :failures failures :results (vec (concat ok failed))
-        :summary summary :partial? (boolean (seq ok))}))))
 
 (defn sync-configured-repos!
   "Sync configured repositories into PR trains and ingest open PRs from provider."
