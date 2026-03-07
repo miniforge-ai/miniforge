@@ -29,30 +29,6 @@
             [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Event stream helpers (optional dependency)
-
-(defn emit-phase-started!
-  "Emit phase-started event if event-stream is available in context."
-  [ctx phase]
-  (when-let [event-stream (:event-stream ctx)]
-    (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-      (when-let [phase-started (requiring-resolve 'ai.miniforge.event-stream.interface/phase-started)]
-        (let [workflow-id (:execution/id ctx)]
-          (publish! event-stream (phase-started event-stream workflow-id phase)))))))
-
-(defn emit-phase-completed!
-  "Emit phase-completed event if event-stream is available in context."
-  [ctx phase _result]
-  (when-let [event-stream (:event-stream ctx)]
-    (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-      (when-let [phase-completed (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
-        (let [workflow-id (:execution/id ctx)
-              outcome (if (registry/succeeded-or-done? (:phase ctx)) :success :failure)
-              duration-ms (get-in ctx [:phase :duration-ms])]
-          (publish! event-stream (phase-completed event-stream workflow-id phase
-                                                   {:outcome outcome :duration-ms duration-ms})))))))
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
 
 (def default-config
@@ -127,7 +103,6 @@
    Reads plan from context, invokes implementer agent,
    runs through inner loop with syntax/lint gates."
   [ctx]
-  (emit-phase-started! ctx :implement)
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
@@ -189,9 +164,7 @@
     (when (and (not= :already-implemented agent-status)
                (nil? (:output result)))
       (println "WARNING: implement phase result has no :output — artifact may be nil"))
-    ;; Emit phase completed event
-    (emit-phase-completed! updated-ctx :implement result)
-    ;; Handle retrying: increment iteration counter and record last error
+    ;; Handle retrying, failure, or already-implemented outcomes
     (cond-> updated-ctx
       (registry/retrying? (:phase updated-ctx))
       (-> (update-in [:phase :iterations] (fnil inc 1))
@@ -199,6 +172,14 @@
                     (or (get-in result [:error :message])
                         (get-in result [:output :error])
                         "Agent returned error status")))
+
+      (= :failed phase-status)
+      (assoc-in [:phase :error]
+                {:message (or (get-in result [:error :message])
+                              (get-in result [:output :error])
+                              "Implementation failed after exhausting retry budget")
+                 :agent-status agent-status
+                 :iterations iterations})
 
       (= :already-implemented agent-status)
       (assoc-in [:phase :skipped-reason] :already-implemented))))
