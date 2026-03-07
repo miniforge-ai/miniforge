@@ -65,20 +65,14 @@
   [event-stream context]
   (when event-stream
     (try
-      (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-started)]
+      (let [workflow-started (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-started)]
         (publish-event! event-stream
-                        (constructor event-stream
-                                     (:execution/id context)
-                                     (select-keys (:execution/workflow context)
-                                                  [:workflow/id :workflow/version]))))
-      (catch Exception _
-        ;; Fallback to ad-hoc event if constructor not available
-        (publish-event! event-stream
-                        {:event/type :workflow/started
-                         :workflow/id (:execution/id context)
-                         :workflow/spec (select-keys (:execution/workflow context)
-                                                     [:workflow/id :workflow/version])
-                         :event/timestamp (java.time.Instant/now)})))))
+                        (workflow-started event-stream
+                                         (:execution/id context)
+                                         (select-keys (:execution/workflow context)
+                                                      [:workflow/id :workflow/version]))))
+      (catch Exception e
+        (println "Warning: Failed to publish workflow-started event:" (ex-message e))))))
 
 (defn publish-workflow-completed!
   "Publish workflow completed/failed event using N3-compliant constructor."
@@ -87,51 +81,30 @@
     (try
       (let [status (:execution/status context)
             wf-id (:execution/id context)
-            duration-ms (get-in context [:execution/metrics :duration-ms])]
+            duration-ms (get-in context [:execution/metrics :duration-ms])
+            workflow-failed (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-failed)
+            workflow-completed (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-completed)]
         (if (= status :failed)
-          (if-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-failed)]
-            (publish-event! event-stream
-                            (constructor event-stream wf-id
-                                         {:message "Workflow failed"
-                                          :errors (:execution/errors context)}))
-            (publish-event! event-stream
-                            {:event/type :workflow/failed
-                             :workflow/id wf-id
-                             :workflow/errors (:execution/errors context)
-                             :event/timestamp (java.time.Instant/now)}))
-          (if-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-completed)]
-            (publish-event! event-stream
-                            (constructor event-stream wf-id status duration-ms))
-            (publish-event! event-stream
-                            {:event/type :workflow/completed
-                             :workflow/id wf-id
-                             :workflow/status status
-                             :workflow/duration-ms duration-ms
-                             :event/timestamp (java.time.Instant/now)}))))
-      (catch Exception _
-        ;; Fallback to ad-hoc event
-        (publish-event! event-stream
-                        {:event/type :workflow/completed
-                         :workflow/id (:execution/id context)
-                         :workflow/status (:execution/status context)
-                         :workflow/metrics (:execution/metrics context)
-                         :event/timestamp (java.time.Instant/now)})))))
+          (publish-event! event-stream
+                          (workflow-failed event-stream wf-id
+                                          {:message "Workflow failed"
+                                           :errors (:execution/errors context)}))
+          (publish-event! event-stream
+                          (workflow-completed event-stream wf-id status duration-ms))))
+      (catch Exception e
+        (println "Warning: Failed to publish workflow-completed event:" (ex-message e))))))
 
 (defn publish-phase-started!
   "Publish phase started event."
   [event-stream context phase-name]
   (when event-stream
     (try
-      (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/phase-started)]
+      (let [phase-started (requiring-resolve 'ai.miniforge.event-stream.interface/phase-started)]
         (publish-event! event-stream
-                        (constructor event-stream (:execution/id context) phase-name
-                                     {:phase/index (:execution/phase-index context)})))
-      (catch Exception _
-        (publish-event! event-stream
-                        {:event/type :workflow/phase-started
-                         :workflow/id (:execution/id context)
-                         :workflow/phase phase-name
-                         :event/timestamp (java.time.Instant/now)})))))
+                        (phase-started event-stream (:execution/id context) phase-name
+                                       {:phase/index (:execution/phase-index context)})))
+      (catch Exception e
+        (println "Warning: Failed to publish phase-started event:" (ex-message e))))))
 
 (defn publish-phase-completed!
   "Publish phase completed event."
@@ -154,18 +127,12 @@
                        error-info (assoc :error error-info)
                        redirect-to (assoc :redirect-to redirect-to))]
       (try
-        (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
+        (let [phase-completed (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
           (publish-event! event-stream
-                          (constructor event-stream (:execution/id context) phase-name
-                                       event-data)))
-        (catch Exception _
-          (publish-event! event-stream
-                          {:event/type :workflow/phase-completed
-                           :workflow/id (:execution/id context)
-                           :workflow/phase phase-name
-                           :phase/outcome outcome
-                           :phase/error error-info
-                           :event/timestamp (java.time.Instant/now)}))))))
+                          (phase-completed event-stream (:execution/id context) phase-name
+                                           event-data)))
+        (catch Exception e
+          (println "Warning: Failed to publish phase-completed event:" (ex-message e)))))))
 
 (defn check-backend-health-at-boundary!
   "Check backend health at phase boundary. Returns switch-result or nil."
