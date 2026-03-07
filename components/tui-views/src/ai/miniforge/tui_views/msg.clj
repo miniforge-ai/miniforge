@@ -76,8 +76,8 @@
 (defn phase-changed [wf-id phase]
   [:msg/phase-changed {:workflow-id wf-id :phase phase}])
 
-(defn phase-done [wf-id phase outcome]
-  [:msg/phase-done {:workflow-id wf-id :phase phase :outcome outcome}])
+(defn phase-done [wf-id phase outcome & [extras]]
+  [:msg/phase-done (merge {:workflow-id wf-id :phase phase :outcome outcome} extras)])
 
 (defn agent-status [wf-id agent-id status-type message]
   [:msg/agent-status {:workflow-id wf-id :agent agent-id
@@ -96,8 +96,8 @@
 (defn agent-failed [wf-id agent-id error]
   [:msg/agent-failed {:workflow-id wf-id :agent agent-id :error error}])
 
-(defn workflow-done [wf-id status]
-  [:msg/workflow-done {:workflow-id wf-id :status status}])
+(defn workflow-done [wf-id status & [extras]]
+  [:msg/workflow-done (merge {:workflow-id wf-id :status status} extras)])
 
 (defn workflow-failed [wf-id error]
   [:msg/workflow-failed {:workflow-id wf-id :error error}])

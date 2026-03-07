@@ -420,6 +420,76 @@
           m2 (events/handle-phase-changed m {:workflow-id wf-id :phase :plan})]
       (is (= 1 (count (:workflows m2)))))))
 
+;; ---------------------------------------------------------------------------- Extracted helper functions
+
+(deftest update-phase-status-test
+  (testing "updates matching phase status and duration"
+    (let [phases [{:phase :plan :status :running}
+                  {:phase :implement :status :running}]
+          result (events/update-phase-status phases :plan :success 1200)]
+      (is (= :success (:status (first result))))
+      (is (= 1200 (:duration-ms (first result))))
+      (is (= :running (:status (second result))))))
+
+  (testing "leaves phases unchanged when no match"
+    (let [phases [{:phase :plan :status :running}]
+          result (events/update-phase-status phases :review :success 500)]
+      (is (= :running (:status (first result))))
+      (is (nil? (:duration-ms (first result)))))))
+
+(deftest normalize-artifact-test
+  (testing "map artifact gets phase key added"
+    (let [a (events/normalize-artifact {:id "a1" :type :file :name "foo.clj"} :implement)]
+      (is (= :implement (:phase a)))
+      (is (= "a1" (:id a)))))
+
+  (testing "non-map artifact gets wrapped with defaults"
+    (let [a (events/normalize-artifact "some-id" :plan)]
+      (is (= "some-id" (:id a)))
+      (is (= :plan (:phase a)))
+      (is (= :unknown (:type a)))
+      (is (= "some-id" (:name a))))))
+
+(deftest apply-phase-completion-test
+  (testing "updates phase status and appends artifacts"
+    (let [model {:detail {:phases [{:phase :plan :status :running}]
+                          :artifacts []}}
+          result (events/apply-phase-completion model :plan :success 800
+                   [{:id "a1" :type :file :name "f.clj"}])]
+      (is (= :success (get-in result [:detail :phases 0 :status])))
+      (is (= 800 (get-in result [:detail :phases 0 :duration-ms])))
+      (is (= 1 (count (get-in result [:detail :artifacts]))))))
+
+  (testing "no artifacts leaves artifacts unchanged"
+    (let [model {:detail {:phases [{:phase :plan :status :running}]
+                          :artifacts [{:id "existing"}]}}
+          result (events/apply-phase-completion model :plan :success 500 nil)]
+      (is (= 1 (count (get-in result [:detail :artifacts])))))))
+
+(deftest apply-workflow-completion-test
+  (testing "sets evidence bundle-id and duration"
+    (let [result (events/apply-workflow-completion {} "bundle-123" 5000)]
+      (is (= "bundle-123" (get-in result [:detail :evidence :bundle-id])))
+      (is (= 5000 (get-in result [:detail :duration-ms])))))
+
+  (testing "nil values are not assoc'd"
+    (let [result (events/apply-workflow-completion {} nil nil)]
+      (is (nil? (get-in result [:detail :evidence :bundle-id])))
+      (is (nil? (get-in result [:detail :duration-ms]))))))
+
+(deftest apply-evidence-intent-test
+  (testing "sets evidence intent from spec"
+    (let [result (events/apply-evidence-intent {} {:name "My Spec"} "fallback")]
+      (is (= "My Spec" (get-in result [:detail :evidence :intent :description])))))
+
+  (testing "uses name fallback when spec has no :name"
+    (let [result (events/apply-evidence-intent {} {:tasks []} "fallback")]
+      (is (= "fallback" (get-in result [:detail :evidence :intent :description])))))
+
+  (testing "nil spec is a no-op"
+    (let [result (events/apply-evidence-intent {:existing :data} nil "name")]
+      (is (= {:existing :data} result)))))
+
 ;; ---------------------------------------------------------------------------- PR update/remove
 
 (deftest handle-pr-updated-test
