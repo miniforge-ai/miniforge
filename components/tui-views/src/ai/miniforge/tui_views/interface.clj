@@ -42,7 +42,8 @@
 ;; Side-effect handlers — each returns [msg-type payload] or nil
 
 (defn handle-sync-prs [{:keys [state]}]
-  (msg/prs-synced (persistence/load-pr-items (when state {:state state}))))
+  (let [{:keys [prs error]} (persistence/load-pr-items (when state {:state state}))]
+    (msg/prs-synced (or prs []) error)))
 
 (defn handle-discover-repos [{:keys [owner]}]
   (msg/repos-discovered (persistence/discover-repos owner)))

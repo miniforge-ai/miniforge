@@ -28,8 +28,10 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Side-effect result messages (returned by effect handlers)
 
-(defn prs-synced [pr-items]
-  [:msg/prs-synced {:pr-items pr-items}])
+(defn prs-synced
+  ([pr-items] [:msg/prs-synced {:pr-items pr-items}])
+  ([pr-items error] [:msg/prs-synced (cond-> {:pr-items pr-items}
+                                       error (assoc :error error))]))
 
 (defn repos-discovered [result]
   [:msg/repos-discovered result])

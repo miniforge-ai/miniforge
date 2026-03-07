@@ -370,7 +370,7 @@
   "Handle result of a :sync-prs side effect.
    Replaces :pr-items with freshly fetched data.
    Preserves the current selection position, clamping to new bounds."
-  [model {:keys [pr-items]}]
+  [model {:keys [pr-items error]}]
   (let [prs (vec (or pr-items []))
         active-pr (get-in model [:detail :selected-pr])
         refreshed-pr (when active-pr
@@ -390,8 +390,17 @@
                :selected-idx clamped-idx)
         (cond-> refreshed-pr
           (assoc-in [:detail :selected-pr] refreshed-pr))
-        (assoc :flash-message (str "Synced " (count prs) " PRs from "
-                                   (count (distinct (map :pr/repo prs))) " repo(s)"))
+        (assoc :flash-message
+               (cond
+                 error
+                 (str "PR sync failed: " error)
+
+                 (seq prs)
+                 (str "Synced " (count prs) " PRs from "
+                      (count (distinct (map :pr/repo prs))) " repo(s)")
+
+                 :else
+                 "No PRs found in fleet repos"))
         with-timestamp)))
 
 (defn pr-match?
