@@ -570,6 +570,16 @@
       :msg/remediation-completed (events/handle-remediation-completed model payload)
       :msg/decomposition-started (events/handle-decomposition-started model payload)
 
+      ;; Archival result
+      :msg/workflows-archived
+      (let [{:keys [archived errors]} payload]
+        (-> model
+            (update :workflows (fn [wfs] (vec (remove #(= :archived (:status %)) wfs))))
+            (assoc :flash-message
+                   (if (seq errors)
+                     (str "Archived " archived ", " (count errors) " failed")
+                     (str "Archived " archived " workflow(s) to disk")))))
+
       ;; Chat messages
       :msg/chat-response         (events/handle-chat-response model payload)
       :msg/chat-action-result    (events/handle-chat-action-result model payload)

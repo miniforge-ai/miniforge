@@ -69,6 +69,9 @@
 (defn side-effect-error [error-data]
   [:msg/side-effect-error error-data])
 
+(defn workflows-archived [result]
+  [:msg/workflows-archived result])
+
 ;------------------------------------------------------------------------------ Layer 0b
 ;; Event stream translation messages (from subscription.clj)
 

@@ -96,3 +96,8 @@
   "Send a chat message to the orchestrator."
   [context message history]
   {:type :chat-send :context context :message message :history history})
+
+(defn archive-workflows
+  "Persistently archive workflows by moving their event files to archive/."
+  [workflow-ids]
+  {:type :archive-workflows :workflow-ids workflow-ids})

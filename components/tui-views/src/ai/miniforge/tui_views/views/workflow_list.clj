@@ -24,11 +24,61 @@
    - Workflow name
    - Current phase
    - Progress bar
-   - Agent status"
+   - Agent status
+   - Temporal grouping (Today, This Week, Older)"
   (:require
-   [ai.miniforge.tui-engine.interface.layout :as layout]))
+   [ai.miniforge.tui-engine.interface.layout :as layout])
+  (:import
+   [java.time LocalDate ZoneId]
+   [java.time.temporal ChronoUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Temporal grouping
+
+(defn temporal-bucket
+  "Classify a workflow's started-at into a temporal group."
+  [wf]
+  (if-let [started (:started-at wf)]
+    (let [wf-date (-> (if (instance? java.util.Date started)
+                        (.toInstant ^java.util.Date started)
+                        (java.time.Instant/parse (str started)))
+                      (.atZone (ZoneId/systemDefault))
+                      .toLocalDate)
+          today (LocalDate/now)
+          days-ago (.between ChronoUnit/DAYS wf-date today)]
+      (cond
+        (zero? days-ago)                   :today
+        (= 1 days-ago)                     :yesterday
+        (<= days-ago 7)                    :this-week
+        (<= days-ago 30)                   :this-month
+        :else                              :older))
+    :unknown))
+
+(def bucket-labels
+  {:today      "Today"
+   :yesterday  "Yesterday"
+   :this-week  "This Week"
+   :this-month "This Month"
+   :older      "Older"
+   :unknown    "Unknown"})
+
+(def bucket-order [:today :yesterday :this-week :this-month :older :unknown])
+
+(defn group-workflows
+  "Group workflows into temporal buckets, preserving order within each group.
+   Returns flat vector of {:type :header/:row, ...} entries for table rendering."
+  [workflows]
+  (let [grouped (group-by temporal-bucket workflows)
+        buckets (filter #(contains? grouped %) bucket-order)]
+    (into []
+          (mapcat (fn [bucket]
+                    (let [wfs (get grouped bucket)
+                          label (str "── " (get bucket-labels bucket) " (" (count wfs) ") ")]
+                      (cons {:type :header :label label :bucket bucket}
+                            (map (fn [wf] {:type :row :wf wf}) wfs)))))
+          buckets)))
+
+;------------------------------------------------------------------------------ Layer 0b
 ;; Rendering helpers
 
 (defn status-char [status]
@@ -75,25 +125,57 @@
       0
       (inc (- sel visible-count)))))
 
+(defn format-grouped-row
+  "Format a grouped entry (header or workflow row) for table rendering."
+  [entry active-chain cols]
+  (if (= :header (:type entry))
+    ;; Section header — spans full width with dimmed color
+    {:status-char ""
+     :name (:label entry)
+     :name-fg :cyan
+     :phase ""
+     :progress-str ""
+     :agent-msg ""
+     :header? true}
+    (format-workflow-row (:wf entry) active-chain)))
+
+(defn grouped-selected-row
+  "Map a flat selected-idx (over non-header workflows) to the row index
+   within the grouped list (which includes header rows)."
+  [grouped-entries selected-idx]
+  (loop [entries grouped-entries
+         wf-idx 0
+         row-idx 0]
+    (if (empty? entries)
+      row-idx
+      (let [entry (first entries)]
+        (if (= :header (:type entry))
+          (recur (rest entries) wf-idx (inc row-idx))
+          (if (= wf-idx selected-idx)
+            row-idx
+            (recur (rest entries) (inc wf-idx) (inc row-idx))))))))
+
 (defn render-table [workflows selected active-chain [cols rows]]
   (if (empty? workflows)
     (layout/text [cols rows] "  No active workflows. Waiting for events..."
                  {:fg :default})
-    (let [visible-count (max 0 (- rows 2))
-          offset (auto-scroll-offset selected visible-count)]
+    (let [grouped (group-workflows workflows)
+          visible-count (max 0 (- rows 2))
+          mapped-selected (grouped-selected-row grouped selected)
+          offset (auto-scroll-offset mapped-selected visible-count)]
       (layout/table [cols rows]
         {:columns [{:key :status-char :header "  " :width 2}
                    {:key :name :header "Workflow" :width (max 10 (- cols 50))}
                    {:key :phase :header "Phase" :width 12}
                    {:key :progress-str :header "Progress" :width 20}
                    {:key :agent-msg :header "Agent" :width 16}]
-         :data (mapv #(format-workflow-row % active-chain) workflows)
-         :selected-row selected
+         :data (mapv #(format-grouped-row % active-chain cols) grouped)
+         :selected-row mapped-selected
          :offset offset}))))
 
 (defn render-footer [flash-message [cols rows]]
   (layout/text [cols rows]
-    (str " j/k:navigate  Enter:detail  1-5:views  /:search  ::cmd  q:quit"
+    (str " j/k:nav  Enter:detail  /:search(status:failed)  ::cmd  q:quit"
          (when flash-message (str "  │ " flash-message)))
     {:fg :default}))
 
@@ -102,12 +184,20 @@
    model: full app model
    [cols rows]: available screen area"
   [model [cols rows]]
-  (let [workflows (vec (remove #(= :archived (:status %)) (:workflows model)))
+  (let [all-wfs (vec (remove #(= :archived (:status %)) (:workflows model)))
+        workflows (if-let [fi (:filtered-indices model)]
+                    (vec (keep-indexed (fn [i wf] (when (contains? fi i) wf)) all-wfs))
+                    all-wfs)
         selected (:selected-idx model)
         active-chain (:active-chain model)
-        flash (:flash-message model)]
+        flash (:flash-message model)
+        search-active? (and (:filtered-indices model) (= :search (:mode model)))]
     (layout/split-v [cols rows] (/ 2.0 rows)
-      (fn [size] (render-title-bar size))
+      (fn [[tc tr]]
+        (layout/text [tc tr]
+          (str " MINIFORGE │ Workflows"
+               (when search-active? (str " [" (count workflows) " matches]")))
+          {:fg :cyan :bold? true}))
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)
           (fn [size] (render-table workflows selected active-chain size))

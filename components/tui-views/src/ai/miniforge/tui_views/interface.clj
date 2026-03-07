@@ -135,6 +135,10 @@
     (spit cmd-file (pr-str {:command action :timestamp (java.util.Date.)}))
     nil))
 
+(defn handle-archive-workflows [{:keys [workflow-ids]}]
+  (let [result (persistence/archive-workflows! workflow-ids)]
+    (msg/workflows-archived result)))
+
 ;; Lazy LLM client — initialized on first chat message
 (def llm-client (delay (llm/create-client)))
 
@@ -245,6 +249,7 @@
     :remediate-prs     (handle-remediate-prs effect)
     :decompose-pr      (handle-decompose-pr effect)
     :control-action    (handle-control-action effect)
+    :archive-workflows (handle-archive-workflows effect)
     :chat-send         (handle-chat-send effect)
     :chat-execute-action (msg/chat-action-result
                           (response/failure "Chat action execution not yet wired" {}))

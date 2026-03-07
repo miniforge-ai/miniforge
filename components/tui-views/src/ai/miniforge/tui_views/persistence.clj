@@ -492,8 +492,108 @@
         (when (seq events)
           (detail-from-events workflow-id events))))))
 
+;------------------------------------------------------------------------------ Layer 2b
+;; Workflow index — lightweight cache for fast startup
+;;
+;; The index stores one summary map per workflow, avoiding the need to re-parse
+;; event files on every TUI launch. Stored at ~/.miniforge/events/index.edn.
+
+(defn index-file
+  "Returns the index file path."
+  [& [{:keys [dir]}]]
+  (io/file (or dir (events-dir)) "index.edn"))
+
+(defn workflow->index-entry
+  "Extract the indexable fields from a workflow summary map."
+  [wf]
+  {:id (:id wf)
+   :name (:name wf)
+   :status (:status wf)
+   :phase (:phase wf)
+   :progress (:progress wf)
+   :started-at (:started-at wf)
+   :duration-ms (:duration-ms wf)
+   :error (:error wf)})
+
+(defn read-index
+  "Read the workflow index from disk. Returns map of {workflow-id -> entry}."
+  [& [opts]]
+  (let [f (index-file opts)]
+    (if (.exists f)
+      (try
+        (let [entries (edn/read-string (slurp f))]
+          (if (map? entries) entries {}))
+        (catch Exception _ {}))
+      {})))
+
+(defn write-index!
+  "Write the workflow index to disk. entries is a map of {workflow-id -> entry}."
+  [entries & [opts]]
+  (let [f (index-file opts)]
+    (.mkdirs (.getParentFile f))
+    (spit f (pr-str entries))))
+
+(defn update-index!
+  "Update the index from the current set of loaded workflows.
+   Merges new entries and updates changed ones."
+  [workflows & [opts]]
+  (let [existing (read-index opts)
+        updated (reduce (fn [idx wf]
+                          (assoc idx (:id wf) (workflow->index-entry wf)))
+                        existing
+                        workflows)]
+    (write-index! updated opts)
+    updated))
+
+(defn load-workflows-indexed
+  "Load workflows using the index for speed.
+
+   Strategy:
+   1. Read index from disk (instant)
+   2. Scan events dir for files newer than the index
+   3. Parse only new/changed files
+   4. Merge with index entries
+   5. Write updated index
+
+   Returns vector of workflow summary maps sorted by started-at (newest first)."
+  [& [{:keys [limit dir] :or {limit 100} :as opts}]]
+  (let [events-directory (or dir (events-dir))
+        idx-file (index-file opts)
+        idx-mtime (if (.exists idx-file) (.lastModified idx-file) 0)
+        existing-index (read-index opts)]
+    (if (and (.exists events-directory) (.isDirectory events-directory))
+      (let [all-edn (->> (.listFiles events-directory)
+                         (filter #(and (.endsWith (.getName ^java.io.File %) ".edn")
+                                       (not= (.getName ^java.io.File %) "index.edn"))))
+            ;; Files newer than the index need re-parsing
+            new-files (->> all-edn
+                          (filter #(> (.lastModified ^java.io.File %) idx-mtime))
+                          (filter quick-named-workflow?))
+            ;; Parse only new files
+            new-workflows (->> new-files
+                              (pmap event-file->workflow)
+                              (filter some?))
+            ;; Merge: new workflows override index entries
+            merged-index (reduce (fn [idx wf]
+                                   (assoc idx (:id wf) (workflow->index-entry wf)))
+                                 existing-index
+                                 new-workflows)
+            ;; Build full workflow list from merged index
+            all-workflows (->> (vals merged-index)
+                              (sort-by :started-at #(compare %2 %1))
+                              (take limit)
+                              vec)]
+        ;; Write updated index in background
+        (future (try (write-index! merged-index opts) (catch Exception _ nil)))
+        ;; Return workflow maps (index entries are already the right shape)
+        (mapv model/make-workflow all-workflows))
+      [])))
+
 (defn load-workflows-into-model
   "Load persisted workflows and merge them into the given model.
+
+   Uses the indexed loader for fast startup when an index exists,
+   falling back to full scan on first run.
 
    Arguments:
    - model - The initial TUI model from model/init-model
@@ -501,13 +601,51 @@
 
    Returns: Updated model with :workflows populated and :last-updated set."
   [model & [opts]]
-  (let [workflows (load-workflows opts)]
+  (let [idx-file (index-file opts)
+        workflows (if (.exists idx-file)
+                    (load-workflows-indexed opts)
+                    (let [wfs (load-workflows opts)]
+                      ;; First run: build the index
+                      (future (try (update-index! wfs opts) (catch Exception _ nil)))
+                      wfs))]
     (if (seq workflows)
       (-> model
           (assoc :workflows workflows)
           (assoc :last-updated (java.util.Date.))
-          (assoc :flash-message (str "Loaded " (count workflows) " workflows from disk")))
+          (assoc :flash-message (str "Loaded " (count workflows) " workflows")))
       model)))
+
+;------------------------------------------------------------------------------ Layer 2c
+;; Persistent archival — moves event files to archive subdirectory
+
+(defn archive-dir
+  "Get the archive directory path."
+  [& [{:keys [dir]}]]
+  (io/file (or dir (events-dir)) "archive"))
+
+(defn archive-workflows!
+  "Move event files for the given workflow IDs to the archive directory.
+   Returns {:archived N :errors [...]}."
+  [workflow-ids & [opts]]
+  (let [arch-dir (archive-dir opts)
+        events-directory (or (:dir opts) (events-dir))]
+    (.mkdirs arch-dir)
+    (reduce
+     (fn [{:keys [archived errors]} wf-id]
+       (let [src (io/file events-directory (str wf-id ".edn"))
+             dst (io/file arch-dir (str wf-id ".edn"))]
+         (if (.exists src)
+           (try
+             (.renameTo src dst)
+             ;; Remove from index
+             (let [idx (read-index opts)]
+               (write-index! (dissoc idx wf-id) opts))
+             {:archived (inc archived) :errors errors}
+             (catch Exception e
+               {:archived archived :errors (conj errors (str wf-id ": " (.getMessage e)))}))
+           {:archived archived :errors errors})))
+     {:archived 0 :errors []}
+     workflow-ids)))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; PR enrichment
