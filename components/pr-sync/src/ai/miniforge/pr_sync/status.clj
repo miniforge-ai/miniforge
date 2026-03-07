@@ -49,8 +49,10 @@
   [pr]
   (let [state (some-> (:state pr) str str/upper-case)
         draft? (boolean (:isDraft pr))
+        merged? (boolean (or (:mergedAt pr) (= "MERGED" state)))
         decision (some-> (:reviewDecision pr) str str/upper-case)]
     (cond
+      merged? :merged
       (and state (not= "OPEN" state)) :closed
       draft? :draft
       (= "APPROVED" decision) :approved
@@ -109,6 +111,7 @@
               :pr/url           (:url pr)
               :pr/branch        (:headRefName pr)
               :pr/status        (pr-status-from-provider pr)
+              :pr/merged-at     (:mergedAt pr)
               :pr/ci-status     (check-rollup->ci-status (:statusCheckRollup pr))
               :pr/ci-checks     (check-rollup->ci-checks (:statusCheckRollup pr))
               :pr/merge-state   (some-> merge-state str str/upper-case)

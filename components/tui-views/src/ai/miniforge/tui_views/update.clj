@@ -531,11 +531,17 @@
       :msg/workflow-added   (events/handle-workflow-added model payload)
       :msg/phase-changed    (events/handle-phase-changed model payload)
       :msg/phase-done       (events/handle-phase-done model payload)
+      :msg/agent-started    (events/handle-agent-started model payload)
+      :msg/agent-completed  (events/handle-agent-completed model payload)
+      :msg/agent-failed     (events/handle-agent-failed model payload)
       :msg/agent-status     (events/handle-agent-status model payload)
       :msg/agent-output     (events/handle-agent-output model payload)
       :msg/workflow-done    (events/handle-workflow-done model payload)
       :msg/workflow-failed  (events/handle-workflow-failed model payload)
+      :msg/gate-started     (events/handle-gate-started model payload)
       :msg/gate-result      (events/handle-gate-result model payload)
+      :msg/tool-invoked     (events/handle-tool-invoked model payload)
+      :msg/tool-completed   (events/handle-tool-completed model payload)
 
       ;; Chain lifecycle messages
       :msg/chain-started         (events/handle-chain-started model payload)

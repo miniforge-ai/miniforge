@@ -321,7 +321,8 @@
                 (file-subscription/subscribe-to-files!
                  dispatch-fn
                  {:poll-ms (:poll-ms opts 500)
-                  :scan-ms (:scan-ms opts 2000)}))})]
+                  :scan-ms (:scan-ms opts 2000)
+                  :hydrate-existing? false}))})]
     (tui/start! app)
     (try
       (while (not (:quit? (tui/get-model app)))

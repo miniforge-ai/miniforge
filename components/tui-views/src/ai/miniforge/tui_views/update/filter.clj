@@ -28,7 +28,7 @@
      neg-field   = '-' field-name ':' value
      field       = field-name ':' value
      free-text   = word (anything not field-qualified)
-     field-name  = 'repo' | 'author' | 'readiness' | 'risk' | 'policy' | 'recommend'
+     field-name  = 'repo' | 'author' | 'readiness' | 'risk' | 'policy' | 'recommend' | 'state' | 'status'
 
    Examples:
      'repo:miniforge risk:high dark mode'
@@ -45,7 +45,7 @@
 
 (def field-names
   "Recognized field qualifiers."
-  #{"repo" "author" "readiness" "risk" "policy" "recommend"})
+  #{"repo" "author" "readiness" "risk" "policy" "recommend" "state" "status"})
 
 (defn parse-token
   "Parse a single whitespace-delimited token.
@@ -135,6 +135,8 @@
                   true "pass"
                   false "fail"
                   "unknown")
+    (:state :status)
+    (name (or (:pr/status pr) :unknown))
     :recommend  (name (resolve-or :wait
                         #(:action (project/derive-recommendation pr))))
     ""))

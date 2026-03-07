@@ -101,12 +101,13 @@
 (defn track-file!
   "Track a new event file: register it in tracked map and hydrate
    all existing lines through dispatch-fn."
-  [tracked dispatch-fn ^java.io.File f]
+  [tracked dispatch-fn ^java.io.File f & [{:keys [hydrate?] :or {hydrate? true}}]]
   (let [path (.getAbsolutePath f)
-        pos  (atom 0)]
+        pos  (atom (if hydrate? 0 (.length f)))]
     (swap! tracked assoc path {:file f :position pos})
-    (let [lines (read-new-lines f pos)]
-      (parse-and-dispatch! lines dispatch-fn))))
+    (when hydrate?
+      (let [lines (read-new-lines f pos)]
+        (parse-and-dispatch! lines dispatch-fn)))))
 
 (defn poll-tracked-files!
   "Read new lines from all tracked files and dispatch them."
@@ -123,7 +124,7 @@
         tracked-paths (set (keys @tracked))]
     (doseq [^java.io.File f current-files]
       (when-not (tracked-paths (.getAbsolutePath f))
-        (track-file! tracked dispatch-fn f)))))
+        (track-file! tracked dispatch-fn f {:hydrate? true})))))
 
 (defn poll-loop
   "Polling loop body for the file-subscription daemon thread.
@@ -166,11 +167,12 @@
   [dispatch-fn & [opts]]
   (let [poll-ms   (get opts :poll-ms 500)
         scan-ms   (get opts :scan-ms 2000)
+        hydrate-existing? (get opts :hydrate-existing? true)
         dir       (events-dir)
         tracked   (atom {})
         running?  (atom true)
         _         (doseq [f (scan-event-files dir)]
-                    (track-file! tracked dispatch-fn f))
+                    (track-file! tracked dispatch-fn f {:hydrate? hydrate-existing?}))
         thread    (doto (Thread. #(poll-loop running? tracked dispatch-fn dir poll-ms scan-ms))
                     (.setDaemon true)
                     (.setName "tui-file-subscription")

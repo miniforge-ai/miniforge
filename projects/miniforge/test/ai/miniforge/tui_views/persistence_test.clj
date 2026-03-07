@@ -276,6 +276,92 @@
           (is (= 100 (:progress (first wfs)))))
         (finally (cleanup-dir! dir))))))
 
+(deftest load-workflows-ignores-phase-only-files-test
+  (testing "Phase-only event files are ignored in the top-level workflow list"
+    (let [dir (temp-events-dir)
+          wf-id (java.util.UUID/randomUUID)]
+      (try
+        (write-event-file! dir wf-id
+          [{:event/type :workflow/phase-started
+            :event/id (java.util.UUID/randomUUID)
+            :event/timestamp (java.util.Date.)
+            :event/version "1.0.0"
+            :event/sequence-number 0
+            :workflow/id wf-id
+            :workflow/phase :implement
+            :message "implement phase started"}])
+        (is (= [] (persistence/load-workflows {:dir dir})))
+        (finally (cleanup-dir! dir))))))
+
+(deftest load-workflow-detail-test
+  (testing "Reconstructs phases, agent output, validation, and artifacts from the event file"
+    (let [dir (temp-events-dir)
+          wf-id (java.util.UUID/randomUUID)
+          artifact-id (java.util.UUID/randomUUID)]
+      (try
+        (write-event-file! dir wf-id
+          [{:event/type :workflow/started
+            :event/id (java.util.UUID/randomUUID)
+            :event/timestamp (java.util.Date.)
+            :event/version "1.0.0"
+            :event/sequence-number 0
+            :workflow/id wf-id
+            :workflow/spec {:name "detail-test"}
+            :message "Workflow started"}
+           {:event/type :workflow/phase-started
+            :event/id (java.util.UUID/randomUUID)
+            :event/timestamp (java.util.Date.)
+            :event/version "1.0.0"
+            :event/sequence-number 1
+            :workflow/id wf-id
+            :workflow/phase :implement
+            :message "implement phase started"}
+           {:event/type :agent/status
+            :event/id (java.util.UUID/randomUUID)
+            :event/timestamp (java.util.Date.)
+            :event/version "1.0.0"
+            :event/sequence-number 2
+            :workflow/id wf-id
+            :agent/id :implement
+            :status/type :thinking
+            :message "Thinking"}
+           {:event/type :agent/chunk
+            :event/id (java.util.UUID/randomUUID)
+            :event/timestamp (java.util.Date.)
+            :event/version "1.0.0"
+            :event/sequence-number 3
+            :workflow/id wf-id
+            :agent/id :implement
+            :chunk/delta "hello"}
+           {:event/type :gate/failed
+            :event/id (java.util.UUID/randomUUID)
+            :event/timestamp (java.util.Date.)
+            :event/version "1.0.0"
+            :event/sequence-number 4
+            :workflow/id wf-id
+            :gate/id :lint
+            :message "lint failed"}
+           {:event/type :workflow/phase-completed
+            :event/id (java.util.UUID/randomUUID)
+            :event/timestamp (java.util.Date.)
+            :event/version "1.0.0"
+            :event/sequence-number 5
+            :workflow/id wf-id
+            :workflow/phase :implement
+            :phase/outcome :success
+            :phase/duration-ms 123
+            :phase/artifacts [artifact-id]
+            :message "implement phase success"}])
+        (let [detail (persistence/load-workflow-detail wf-id {:dir dir})]
+          (is (= wf-id (:workflow-id detail)))
+          (is (= :implement (:current-phase detail)))
+          (is (= "hello" (:agent-output detail)))
+          (is (= :thinking (get-in detail [:current-agent :status])))
+          (is (= 1 (count (:phases detail))))
+          (is (= 1 (count (get-in detail [:evidence :validation :results]))))
+          (is (= artifact-id (:id (first (:artifacts detail))))))
+        (finally (cleanup-dir! dir))))))
+
 (deftest load-corrupted-file-test
   (testing "Gracefully handles corrupted event files"
     (let [dir (temp-events-dir)

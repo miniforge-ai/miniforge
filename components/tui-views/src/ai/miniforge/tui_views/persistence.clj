@@ -36,6 +36,9 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; EDN line reading
 
+(def lifecycle-event-types
+  #{:workflow/started :workflow/completed :workflow/failed})
+
 (defn safe-read-edn
   "Read a single EDN value from a string, returning nil on parse errors.
    Uses default EDN readers which already handle #uuid and #inst."
@@ -44,72 +47,266 @@
     (edn/read-string s)
     (catch Exception _ nil)))
 
-(defn read-first-and-last
-  "Read the first and last EDN events from a workflow file.
-   Returns [first-event last-event] or nil on error."
+(defn read-events
+  "Read all valid EDN events from a workflow file in file order."
   [file]
   (try
     (with-open [rdr (io/reader file)]
-      (let [lines (vec (line-seq rdr))]
-        (when (seq lines)
-          [(safe-read-edn (first lines))
-           (safe-read-edn (peek lines))])))
-    (catch Exception _ nil)))
+      (->> (line-seq rdr)
+           (keep safe-read-edn)
+           vec))
+    (catch Exception _
+      [])))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Workflow reconstruction
+;; Workflow reconstruction helpers
+
+(defn workflow-start-event
+  [events]
+  (first (filter #(= :workflow/started (:event/type %)) events)))
+
+(defn workflow-terminal-event
+  [events]
+  (last (filter #(contains? lifecycle-event-types (:event/type %)) events)))
+
+(defn workflow-id-from-events
+  [events]
+  (some :workflow/id events))
+
+(defn top-level-workflow-events?
+  "True when the file contains lifecycle events for a real workflow.
+   Phase-only files are typically DAG child traces and should not appear in the
+   top-level workflow list."
+  [events]
+  (boolean (some #(contains? lifecycle-event-types (:event/type %)) events)))
+
+(defn event-phase
+  [event]
+  (or (:workflow/phase event) (:phase event)))
+
+(defn phase-status
+  [outcome]
+  (case outcome
+    :failure :failed
+    :failed  :failed
+    :skipped :skipped
+    :success :success
+    :running))
+
+(defn update-phase-entry
+  [phases phase status duration-ms]
+  (let [entry (cond-> {:phase phase :status status}
+                duration-ms (assoc :duration-ms duration-ms))
+        idx (first (keep-indexed (fn [i p] (when (= phase (:phase p)) i)) phases))]
+    (if idx
+      (assoc phases idx (merge (get phases idx) entry))
+      (conj (vec phases) entry))))
+
+(defn normalize-artifact
+  [artifact phase]
+  (if (map? artifact)
+    (assoc artifact :phase phase)
+    {:id artifact :phase phase :type :unknown :name (str artifact)}))
+
+(defn nested-dag-artifacts
+  "Extract artifacts persisted inside DAG terminal errors/results."
+  [event]
+  (or (get-in event [:workflow/error-details :dag-result :artifacts])
+      (mapcat #(get-in % [:dag-result :artifacts] [])
+              (get-in event [:workflow/error-details :errors] []))
+      []))
+
+(defn empty-detail
+  [workflow-id]
+  {:workflow-id workflow-id
+   :phases []
+   :current-phase nil
+   :current-agent nil
+   :agent-output ""
+   :agents {}
+   :evidence nil
+   :artifacts []
+   :expanded-nodes #{}
+   :focused-pane 0
+   :selected-pr nil
+   :pr-readiness nil
+   :pr-risk nil
+   :selected-train nil
+   :duration-ms nil
+   :error nil})
+
+(defn ensure-evidence-intent
+  [detail event]
+  (if-let [spec (:workflow/spec event)]
+    (assoc-in detail [:evidence :intent]
+              {:description (or (:name spec)
+                                (:workflow/name spec))
+               :spec spec})
+    detail))
+
+(defn append-artifacts
+  [detail phase artifacts]
+  (if (seq artifacts)
+    (update detail :artifacts into (map #(normalize-artifact % phase) artifacts))
+    detail))
+
+(defn append-validation-result
+  [detail event passed?]
+  (update-in detail [:evidence :validation :results]
+             (fnil conj [])
+             {:gate (:gate/id event)
+              :passed? passed?
+              :event/type (:event/type event)
+              :event/timestamp (:event/timestamp event)}))
+
+(defn apply-detail-event
+  [detail event]
+  (case (:event/type event)
+    :workflow/started
+    (ensure-evidence-intent detail event)
+
+    :workflow/phase-started
+    (let [phase (event-phase event)]
+      (-> detail
+          (assoc :current-phase phase)
+          (update :phases update-phase-entry phase :running nil)))
+
+    :workflow/phase-completed
+    (let [phase (event-phase event)
+          outcome (:phase/outcome event)
+          duration-ms (:phase/duration-ms event)
+          artifacts (:phase/artifacts event)]
+      (-> detail
+          (assoc :current-phase phase)
+          (update :phases update-phase-entry phase (phase-status outcome) duration-ms)
+          (append-artifacts phase artifacts)))
+
+    :agent/started
+    (let [agent (:agent/id event)
+          entry {:status :started :message (:message event)}]
+      (-> detail
+          (assoc :current-agent (assoc entry :agent agent))
+          (assoc-in [:agents agent] entry)))
+
+    :agent/completed
+    (let [agent (:agent/id event)
+          entry {:status :completed :message (:message event)}]
+      (-> detail
+          (assoc :current-agent (assoc entry :agent agent))
+          (assoc-in [:agents agent] entry)))
+
+    :agent/failed
+    (let [agent (:agent/id event)
+          entry {:status :failed :message (:message event)}]
+      (-> detail
+          (assoc :current-agent (assoc entry :agent agent))
+          (assoc :error (or (:agent/error event) (:message event)))
+          (assoc-in [:agents agent] entry)))
+
+    :agent/status
+    (let [agent (:agent/id event)
+          entry {:status (:status/type event) :message (:message event)}]
+      (-> detail
+          (assoc :current-agent (assoc entry :agent agent))
+          (assoc-in [:agents agent] entry)))
+
+    :agent/chunk
+    (update detail :agent-output str (or (:chunk/delta event) ""))
+
+    :gate/started
+    detail
+
+    :gate/passed
+    (append-validation-result detail event true)
+
+    :gate/failed
+    (append-validation-result detail event false)
+
+    :workflow/completed
+    (-> detail
+        (assoc :duration-ms (:workflow/duration-ms event))
+        (append-artifacts (or (:current-phase detail) :done) (nested-dag-artifacts event)))
+
+    :workflow/failed
+    (-> detail
+        (assoc :error (or (:workflow/failure-reason event)
+                          (get-in event [:workflow/error-details :message])))
+        (append-artifacts (or (:current-phase detail) :failed) (nested-dag-artifacts event)))
+
+    detail))
+
+(defn detail-from-events
+  [workflow-id events]
+  (reduce apply-detail-event (empty-detail workflow-id) events))
+
+(defn workflow-name
+  [workflow-id events]
+  (or (get-in (workflow-start-event events) [:workflow/spec :name])
+      (get-in (workflow-start-event events) [:workflow/spec :workflow/name])
+      (str "workflow-" (subs (str workflow-id) 0 8))))
 
 (defn derive-status
-  "Derive workflow status from the last event in the file."
-  [last-event]
-  (case (:event/type last-event)
-    :workflow/completed (or (:workflow/status last-event) :success)
-    :workflow/failed    :failed
-    ;; Still in progress (no terminal event yet) — default clause
-    :running))
+  "Derive workflow status from the event sequence."
+  [events]
+  (let [terminal (workflow-terminal-event events)
+        last-event (last events)]
+    (case (:event/type terminal)
+      :workflow/completed (or (:workflow/status terminal) :success)
+      :workflow/failed    :failed
+      (case (:event/type last-event)
+        :workflow/phase-completed :running
+        :workflow/phase-started   :running
+        :agent/chunk              :running
+        :agent/status             :running
+        :workflow/started         :running
+        :running))))
 
 (defn derive-phase
   "Derive current/last phase from events."
-  [last-event]
-  (when-let [phase (:workflow/phase last-event)]
-    phase))
+  [events]
+  (some->> events reverse (keep event-phase) first))
 
 (defn derive-progress
-  "Estimate progress from the last event."
-  [last-event]
-  (case (:event/type last-event)
-    :workflow/completed 100
-    :workflow/failed    100
-    ;; Rough estimate based on event type
-    :workflow/phase-completed 60
-    :workflow/phase-started   40
-    :agent/chunk              50
-    :agent/status             50
-    :workflow/started         10
-    0))
+  "Estimate progress from the full event sequence."
+  [events]
+  (let [status (derive-status events)
+        phase-completions (count (filter #(= :workflow/phase-completed (:event/type %)) events))
+        last-event (last events)]
+    (cond
+      (#{:success :failed :cancelled :completed} status) 100
+      (pos? phase-completions) (min 95 (* 20 phase-completions))
+      (= :workflow/phase-started (:event/type last-event)) 40
+      (#{:agent/chunk :agent/status} (:event/type last-event)) 50
+      (= :workflow/started (:event/type last-event)) 10
+      :else 0)))
 
 (defn event-file->workflow
   "Convert a single event file into a workflow summary map for the model.
    Returns nil if the file cannot be read or parsed."
   [file]
   (try
-    (when-let [[first-event last-event] (read-first-and-last file)]
-      (when (and first-event (:workflow/id first-event))
-        (let [workflow-id (:workflow/id first-event)
-              name        (or (get-in first-event [:workflow/spec :name])
-                             (str "workflow-" (subs (str workflow-id) 0 8)))
-              status      (derive-status last-event)
-              phase       (or (derive-phase last-event)
-                             (derive-phase first-event))
-              progress    (derive-progress last-event)
-              started-at  (:event/timestamp first-event)]
-          (model/make-workflow
-           {:id         workflow-id
-            :name       name
-            :status     status
-            :phase      phase
-            :progress   progress
-            :started-at started-at}))))
+    (let [events (read-events file)
+          workflow-id (workflow-id-from-events events)]
+      (when (and workflow-id
+                 (seq events)
+                 (top-level-workflow-events? events))
+        (let [detail     (detail-from-events workflow-id events)
+              start      (workflow-start-event events)
+              started-at (or (:event/timestamp start)
+                             (:event/timestamp (first events)))
+              workflow   (model/make-workflow
+                          {:id         workflow-id
+                           :name       (workflow-name workflow-id events)
+                           :status     (derive-status events)
+                           :phase      (derive-phase events)
+                           :progress   (derive-progress events)
+                           :started-at started-at})]
+          (assoc workflow
+                 :agents (:agents detail)
+                 :gate-results (get-in detail [:evidence :validation :results] [])
+                 :duration-ms (:duration-ms detail)
+                 :error (:error detail)
+                 :detail-snapshot detail))))
     (catch Exception _ nil)))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -119,6 +316,11 @@
   "Get the events directory path. Returns a java.io.File."
   []
   (io/file (System/getProperty "user.home") ".miniforge" "events"))
+
+(defn workflow-events-file
+  "Resolve the persisted event file for a workflow UUID."
+  [workflow-id & [{:keys [dir]}]]
+  (io/file (or dir (events-dir)) (str workflow-id ".edn")))
 
 (defn load-workflows
   "Scan the events directory and load workflow summaries.
@@ -143,6 +345,15 @@
              (sort-by :started-at #(compare %2 %1))
              vec))
       [])))
+
+(defn load-workflow-detail
+  "Load the reconstructed detail snapshot for a single workflow from disk."
+  [workflow-id & [{:keys [dir]}]]
+  (let [file (workflow-events-file workflow-id {:dir dir})]
+    (when (.exists file)
+      (let [events (read-events file)]
+        (when (seq events)
+          (detail-from-events workflow-id events))))))
 
 (defn load-workflows-into-model
   "Load persisted workflows and merge them into the given model.
