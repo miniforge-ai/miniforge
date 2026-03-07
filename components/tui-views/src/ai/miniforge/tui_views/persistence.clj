@@ -34,6 +34,57 @@
    [ai.miniforge.policy-pack.interface :as policy-pack]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Event constructors — canonical shapes consumed by apply-detail-event
+
+(defn workflow-started-event [workflow-id spec]
+  {:event/type :workflow/started
+   :workflow/id workflow-id
+   :workflow/spec spec})
+
+(defn phase-started-event [workflow-id phase]
+  {:event/type :workflow/phase-started
+   :workflow/id workflow-id
+   :workflow/phase phase})
+
+(defn phase-completed-event [workflow-id phase outcome artifacts duration-ms]
+  {:event/type :workflow/phase-completed
+   :workflow/id workflow-id
+   :workflow/phase phase
+   :phase/outcome outcome
+   :phase/artifacts artifacts
+   :phase/duration-ms duration-ms})
+
+(defn agent-status-event [workflow-id agent-id status message]
+  {:event/type :agent/status
+   :workflow/id workflow-id
+   :agent/id agent-id
+   :status/type status
+   :message message})
+
+(defn agent-chunk-event [workflow-id delta]
+  {:event/type :agent/chunk
+   :workflow/id workflow-id
+   :chunk/delta delta})
+
+(defn workflow-completed-event [workflow-id status duration-ms evidence-bundle-id]
+  {:event/type :workflow/completed
+   :workflow/id workflow-id
+   :workflow/status status
+   :workflow/duration-ms duration-ms
+   :workflow/evidence-bundle-id evidence-bundle-id})
+
+(defn workflow-failed-event [workflow-id error]
+  {:event/type :workflow/failed
+   :workflow/id workflow-id
+   :workflow/failure-reason error
+   :workflow/error-details {:message error}})
+
+(defn gate-event [workflow-id gate passed? timestamp]
+  {:event/type (if passed? :gate/passed :gate/failed)
+   :workflow/id workflow-id
+   :gate/id gate
+   :event/timestamp timestamp})
+
 ;; EDN line reading
 
 (def lifecycle-event-types
