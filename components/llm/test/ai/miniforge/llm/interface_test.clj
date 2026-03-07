@@ -1,5 +1,6 @@
 (ns ai.miniforge.llm.interface-test
   (:require [clojure.test :as test :refer [deftest testing is]]
+            [clojure.string :as str]
             [ai.miniforge.llm.interface :as llm]
             [ai.miniforge.llm.protocols.records.llm-client]
             [ai.miniforge.llm.protocols.impl.llm-client :as impl]
@@ -139,6 +140,57 @@
           parsed (impl/parse-claude-stream-line line)]
       (is (true? (:done? parsed)))
       (is (nil? (get-in parsed [:usage :input-tokens]))))))
+
+(deftest parse-codex-stream-line-test
+  (testing "agent_message item extracts text delta"
+    (let [line (json/generate-string
+                 {:type "item.completed"
+                  :item {:id "item_1" :type "agent_message"
+                         :text "Hello world"}})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (= "Hello world\n" (:delta parsed)))
+      (is (false? (:done? parsed)))))
+
+  (testing "turn.completed extracts usage and signals done"
+    (let [line (json/generate-string
+                 {:type "turn.completed"
+                  :usage {:input_tokens 9971
+                          :output_tokens 206}})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (true? (:done? parsed)))
+      (is (= 9971 (get-in parsed [:usage :input-tokens])))
+      (is (= 206 (get-in parsed [:usage :output-tokens])))))
+
+  (testing "mcp_tool_call item returns empty delta"
+    (let [line (json/generate-string
+                 {:type "item.completed"
+                  :item {:id "item_2" :type "mcp_tool_call"
+                         :server "artifact" :tool "submit_code_artifact"
+                         :status "completed"}})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (= "" (:delta parsed)))
+      (is (false? (:done? parsed)))))
+
+  (testing "reasoning item is ignored"
+    (let [line (json/generate-string
+                 {:type "item.completed"
+                  :item {:id "item_0" :type "reasoning"
+                         :text "Thinking..."}})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (nil? parsed))))
+
+  (testing "turn.failed returns error and done"
+    (let [line (json/generate-string
+                 {:type "turn.failed"
+                  :error {:message "Rate limited"}})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (true? (:done? parsed)))
+      (is (str/includes? (:delta parsed) "Rate limited"))))
+
+  (testing "thread.started is ignored"
+    (let [line (json/generate-string {:type "thread.started" :thread_id "abc"})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (nil? parsed)))))
 
 (deftest parse-cli-output-includes-metrics-test
   (testing "success response includes :tokens and :usage keys"

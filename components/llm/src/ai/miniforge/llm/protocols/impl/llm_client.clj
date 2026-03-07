@@ -107,11 +107,12 @@
 (defn parse-codex-stream-line
   "Parse a line from Codex CLI streaming output.
 
-   Codex uses Anthropic API streaming format:
-   - message_start: initial message with input token count
-   - content_block_delta: content chunks
-   - message_delta: final delta with output token usage
-   - message_stop: end of message
+   Codex emits JSONL events:
+   - thread.started: session began
+   - turn.started: turn began
+   - item.completed: reasoning, agent_message, mcp_tool_call, etc.
+   - turn.completed: carries usage data
+   - turn.failed / error: failure events
 
    Arguments:
      line - String line from stream
@@ -121,32 +122,37 @@
   (try
     (when-not (str/blank? line)
       (let [data (json/parse-string line true)]
-        (cond
-          ;; message_start carries input token count
-          (= "message_start" (:type data))
-          (let [usage (get-in data [:message :usage])]
-            {:delta "" :done? false
-             :usage {:input-tokens (:input_tokens usage)}})
+        (case (:type data)
+          ;; Agent message — the actual text output
+          "item.completed"
+          (let [item (:item data)
+                item-type (:type item)]
+            (case item-type
+              "agent_message"
+              {:delta (str (:text item) "\n") :done? false}
 
-          ;; Extract content from content_block_delta events
-          (= "content_block_delta" (:type data))
-          (when-let [delta-text (get-in data [:delta :text])]
-            {:delta delta-text :done? false})
+              "mcp_tool_call"
+              {:delta "" :done? false}
 
-          ;; message_delta carries output token usage
-          (= "message_delta" (:type data))
-          (let [delta-text (get-in data [:delta :text])
-                usage (get-in data [:usage])]
-            (cond-> {:done? false}
-              delta-text (assoc :delta delta-text)
-              usage (assoc :usage {:output-tokens (:output_tokens usage)})))
+              ;; reasoning, tool_call, etc. — ignore content
+              nil))
 
-          ;; message_stop signals end
-          (= "message_stop" (:type data))
-          {:delta "" :done? true}
+          ;; Turn completed carries usage
+          "turn.completed"
+          (let [usage (:usage data)]
+            {:delta "" :done? true
+             :usage {:input-tokens (:input_tokens usage)
+                     :output-tokens (:output_tokens usage)}})
 
-          ;; Ignore other event types
-          :else nil)))
+          ;; Turn failed
+          "turn.failed"
+          {:delta (str "\nError: " (get-in data [:error :message] "unknown")) :done? true}
+
+          "error"
+          {:delta (str "\nError: " (:message data "unknown")) :done? true}
+
+          ;; thread.started, turn.started, item.started — ignore
+          nil)))
     (catch Exception _e
       nil)))
 
