@@ -75,7 +75,11 @@
     (msg/phase-done (workflow-id event)
                     (workflow-phase event)
                     (or (:phase/outcome event)
-                        (get-in event [:result :outcome])))
+                        (get-in event [:result :outcome]))
+                    (cond-> {}
+                      (:phase/artifacts event) (assoc :artifacts (:phase/artifacts event))
+                      (:phase/duration-ms event) (assoc :duration-ms (:phase/duration-ms event))
+                      (:phase/error event) (assoc :error (:phase/error event))))
 
     :agent/started
     (msg/agent-started (workflow-id event) (agent-id event)
@@ -99,7 +103,10 @@
 
     :workflow/completed
     (msg/workflow-done (workflow-id event)
-                       (or (:workflow/status event) (:status event)))
+                       (or (:workflow/status event) (:status event))
+                       (cond-> {}
+                         (:workflow/duration-ms event) (assoc :duration-ms (:workflow/duration-ms event))
+                         (:workflow/evidence-bundle-id event) (assoc :evidence-bundle-id (:workflow/evidence-bundle-id event))))
 
     :workflow/failed
     (msg/workflow-failed (workflow-id event)

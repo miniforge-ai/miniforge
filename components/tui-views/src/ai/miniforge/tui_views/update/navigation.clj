@@ -91,19 +91,25 @@
     (if-let [wf (when raw-idx (get (:workflows model) raw-idx))]
       (-> model
           (assoc :view :workflow-detail)
-          ;; Reset all detail fields to prevent stale data from previous workflow
+          ;; Reset detail, seeding from existing workflow row data
           (assoc :detail {:workflow-id    (:id wf)
-                          :phases         []
-                          :current-agent  nil
+                          :phases         (if-let [p (:phase wf)]
+                                            [{:phase p :status (if (= :failed (:status wf))
+                                                                 :failed :running)}]
+                                            [])
+                          :current-agent  (when-let [[agent-kw entry] (first (:agents wf))]
+                                            (assoc entry :agent agent-kw))
                           :agent-output   ""
-                          :evidence       nil
+                          :evidence       (when (seq (:gate-results wf))
+                                            {:validation {:results (:gate-results wf)}})
                           :artifacts      []
                           :expanded-nodes #{}
                           :focused-pane   0
                           :selected-pr    nil
                           :pr-readiness   nil
                           :pr-risk        nil
-                          :selected-train nil})
+                          :selected-train nil
+                          :duration-ms    (:duration-ms wf)})
           (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil
                  :scroll-offset nil :search-matches [] :search-match-idx nil))
       model)))
