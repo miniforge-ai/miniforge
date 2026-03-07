@@ -169,14 +169,14 @@
       (registry/retrying? (:phase updated-ctx))
       (-> (update-in [:phase :iterations] (fnil inc 1))
           (assoc-in [:phase :last-error]
-                    (or (get-in result [:error :message])
-                        (get-in result [:output :error])
+                    (or (not-empty (get-in result [:error :message]))
+                        (not-empty (get-in result [:output :error]))
                         "Agent returned error status")))
 
       (= :failed phase-status)
       (assoc-in [:phase :error]
-                {:message (or (get-in result [:error :message])
-                              (get-in result [:output :error])
+                {:message (or (not-empty (get-in result [:error :message]))
+                              (not-empty (get-in result [:output :error]))
                               "Implementation failed after exhausting retry budget")
                  :agent-status agent-status
                  :iterations iterations})

@@ -341,25 +341,33 @@
        (publish-workflow-started! event-stream initial-ctx))
 
      (let [final-ctx
-           (if (empty? pipeline)
-             (handle-empty-pipeline initial-ctx)
+           (try
+             (if (empty? pipeline)
+               (handle-empty-pipeline initial-ctx)
 
-             ;; Execute pipeline loop
-             (loop [context initial-ctx
-                    iteration 0]
-               (cond
-                 ;; Terminal state reached
-                 (terminal-state? context)
-                 context
+               ;; Execute pipeline loop
+               (loop [context initial-ctx
+                      iteration 0]
+                 (cond
+                   ;; Terminal state reached
+                   (terminal-state? context)
+                   context
 
-                 ;; Max iterations exceeded
-                 (>= iteration max-phases)
-                 (handle-max-phases-exceeded context max-phases)
+                   ;; Max iterations exceeded
+                   (>= iteration max-phases)
+                   (handle-max-phases-exceeded context max-phases)
 
-                 ;; Execute next iteration: health check -> phase -> cleanup
-                 :else
-                 (recur (execute-single-iteration pipeline context callbacks iteration control-state)
-                        (inc iteration)))))
+                   ;; Execute next iteration: health check -> phase -> cleanup
+                   :else
+                   (recur (execute-single-iteration pipeline context callbacks iteration control-state)
+                          (inc iteration)))))
+             (catch Exception e
+               (-> initial-ctx
+                   (update :execution/errors conj
+                           {:type :pipeline-exception
+                            :message (ex-message e)
+                            :data (ex-data e)})
+                   (assoc :execution/status :failed))))
 
            ;; Validate completed workflows produced results
            final-ctx (if (and (phase/succeeded? final-ctx)

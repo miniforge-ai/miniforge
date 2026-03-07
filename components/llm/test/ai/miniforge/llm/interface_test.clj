@@ -195,6 +195,45 @@
       (is (= {:input-tokens 100 :output-tokens 50} @usage))
       (is (= 0.0045 @cost)))))
 
+;------------------------------------------------------------------------------ Layer 3
+;; Rate limit detection tests
+
+(deftest rate-limited?-test
+  (testing "detects Claude CLI rate limit message"
+    (is (impl/rate-limited? "You've hit your limit · resets 7pm (America/Los_Angeles)"))
+    (is (impl/rate-limited? "You've hit your limit · resets 3am (UTC)")))
+
+  (testing "detects generic rate limit phrasing"
+    (is (impl/rate-limited? "rate limit exceeded")))
+
+  (testing "does not flag normal content"
+    (is (not (impl/rate-limited? "(ns example.core)\n(defn hello [] \"world\")")))
+    (is (not (impl/rate-limited? "Here is the implementation...")))
+    (is (not (impl/rate-limited? nil)))))
+
+(deftest rate-limited-success-response-test
+  (testing "rate limit content in success-response returns error"
+    (let [resp (impl/success-response
+                 "You've hit your limit · resets 7pm (America/Los_Angeles)" 0)]
+      (is (not (:success resp)))
+      (is (some? (:error resp)))
+      (is (re-find #"rate limited" (:message (:error resp))))))
+
+  (testing "normal content in success-response returns success"
+    (let [resp (impl/success-response "(defn hello [] \"world\")" 0)]
+      (is (:success resp)))))
+
+(deftest rate-limited-streaming-success-response-test
+  (testing "rate limit content in streaming-success-response returns error"
+    (let [resp (impl/streaming-success-response
+                 "You've hit your limit · resets 7pm (America/Los_Angeles)" 0 nil nil)]
+      (is (not (:success resp)))
+      (is (some? (:error resp)))))
+
+  (testing "normal content in streaming-success-response returns success"
+    (let [resp (impl/streaming-success-response "(defn foo [] 42)" 0 nil nil)]
+      (is (:success resp)))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (test/run-tests 'ai.miniforge.llm.interface-test)

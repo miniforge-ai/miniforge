@@ -361,8 +361,20 @@
         (llm-error :anomalies/fault "stream_error"
                    (str "Streaming failed: " (.getMessage e)))))))
 
+(defn rate-limited?
+  "Detect Claude CLI rate limit messages in content.
+   Claude CLI returns exit 0 but emits a rate limit message as content."
+  [content]
+  (and (string? content)
+       (re-find #"(?i)you've hit your limit|rate limit|resets \d+[ap]m" content)))
+
 (defn success-response [output exit-code]
-  (llm-success (str/trim output) {:exit-code exit-code}))
+  (let [trimmed (str/trim output)]
+    (if (rate-limited? trimmed)
+      (llm-error :anomalies.agent/rate-limited "rate_limit"
+                 (str "Claude CLI rate limited: " trimmed)
+                 {:exit-code exit-code :stdout output})
+      (llm-success trimmed {:exit-code exit-code}))))
 
 (defn error-response [output exit-code stderr]
   (let [error-message (if (and stderr (str/blank? output)) stderr output)]
@@ -527,8 +539,12 @@
                  {:data {:response-length content-length}}))))
 
 (defn streaming-success-response [content exit-code usage cost-usd]
-  (cond-> (llm-success content {:exit-code exit-code :usage usage})
-    cost-usd (assoc :cost-usd cost-usd)))
+  (if (rate-limited? content)
+    (llm-error :anomalies.agent/rate-limited "rate_limit"
+               (str "Claude CLI rate limited: " (str/trim content))
+               {:exit-code exit-code :stdout content})
+    (cond-> (llm-success content {:exit-code exit-code :usage usage})
+      cost-usd (assoc :cost-usd cost-usd))))
 
 (defn streaming-error-response [content exit-code err-result timeout-info]
   (let [error-message (or err-result
