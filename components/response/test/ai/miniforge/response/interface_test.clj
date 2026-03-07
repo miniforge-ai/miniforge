@@ -386,6 +386,35 @@
       (is (= "claude-sonnet-4" (:anomaly.llm/model anom))))))
 
 ;; ============================================================================
+;; Builder error-details tests (empty message fix)
+;; ============================================================================
+
+(deftest error-details-never-empty-test
+  (testing "exception with nil message produces non-empty error message"
+    (let [ex (NullPointerException.)
+          resp (r/error ex)]
+      (is (some? (get-in resp [:error :message])))
+      (is (pos? (count (get-in resp [:error :message]))))))
+
+  (testing "exception with empty message produces non-empty error message"
+    (let [ex (Exception. "")
+          resp (r/error ex)]
+      (is (pos? (count (get-in resp [:error :message]))))))
+
+  (testing "nil message argument produces non-empty error message"
+    (let [resp (r/error nil)]
+      (is (pos? (count (get-in resp [:error :message]))))))
+
+  (testing "normal exception message preserved"
+    (let [resp (r/error (Exception. "Timeout in verify phase"))]
+      (is (= "Timeout in verify phase" (get-in resp [:error :message])))))
+
+  (testing "failure with nil-message exception produces non-empty error"
+    (let [resp (r/failure (NullPointerException.))]
+      (is (some? (get-in resp [:error :message])))
+      (is (pos? (count (get-in resp [:error :message])))))))
+
+;; ============================================================================
 ;; Boundary translator tests
 ;; ============================================================================
 

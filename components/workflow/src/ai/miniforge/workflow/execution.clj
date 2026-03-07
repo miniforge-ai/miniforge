@@ -169,7 +169,10 @@
 
    Returns [ctx phase-result]."
   [interceptor ctx]
-  (let [ctx-entered (execute-enter interceptor ctx)
+  ;; Clear :phase map before each phase to prevent stale state (e.g. :redirect-to)
+  ;; from leaking across phase boundaries
+  (let [ctx-clean (dissoc ctx :phase)
+        ctx-entered (execute-enter interceptor ctx-clean)
         phase-result (extract-phase-result ctx-entered)
         phase-result-gated (apply-gate-validation interceptor phase-result ctx-entered)
         ctx-left (execute-leave interceptor (assoc ctx-entered :phase phase-result-gated))]

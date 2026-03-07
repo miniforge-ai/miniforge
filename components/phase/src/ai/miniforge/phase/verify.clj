@@ -214,7 +214,7 @@
       (-> updated-ctx
           (assoc-in [:phase :redirect-to] on-fail)
           (assoc-in [:phase :error]
-                    {:message (or (get-in result [:error :message])
+                    {:message (or (not-empty (get-in result [:error :message]))
                                   (when gate-failed? "Gate validation failed")
                                   "Verification failed")
                      :agent-status agent-status
