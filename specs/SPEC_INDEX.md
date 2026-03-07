@@ -178,6 +178,27 @@ Defines:
 - Fleet Mode disambiguation: N9 (SDLC governance) vs N7 (runtime policy synthesis)
 - CLI/TUI/API extensions: `fleet prs`, `fleet trains` commands and views
 
+### N10 — Governed Tool Execution 🆕
+
+**File:** [normative/N10-governed-tool-execution.md](normative/N10-governed-tool-execution.md)
+**Status:** Draft
+**Purpose:** Safe, bounded, auditable execution of tool actions against external systems
+
+Defines:
+
+- Operational intent model: agents express intent, not commands; compiled to Operational IR
+- Action classification (A-E): tool-declared risk levels from observational to irreversible
+- Verification pipeline: target resolution, policy evaluation (N4), rollback verification
+- Validation requirements: static analysis (all), provider dry-run (Class C+), adapter hooks
+- Capability model: ephemeral, scoped, TTL-bounded, revocable authority grants
+- Execution capsules: sandboxed runtime with filesystem, network, and time isolation
+- Crown jewel protection: separation of authority, no autonomous mutation
+- Postcondition monitoring: expected outcome verification with auto-rollback
+- Safety invariants: ten mechanically-enforced rules preventing catastrophic operations
+- External system integration: MCP servers and SaaS platforms as tool-registry entries
+- Trust level progression (L0-L4): progressive autonomy gated by demonstrated safety
+- Audit integration: full event stream (N3) and evidence bundle (N6) linkage
+
 ---
 
 ## Informative Documentation (Non-Normative)
@@ -217,6 +238,13 @@ These documents provide guidance, examples, and context but do NOT define contra
 - [informative/I-ANOMALY-SYSTEM.md](informative/I-ANOMALY-SYSTEM.md) - Canonical error representation and boundary translators
 - [informative/I-DAG-ORCHESTRATION.md](informative/I-DAG-ORCHESTRATION.md) - DAG executor with PR lifecycle
 - [informative/I-TASK-EXECUTOR.md](informative/I-TASK-EXECUTOR.md) - DAG-to-PR lifecycle integration
+
+### Operational Workflows (N10 Extensions)
+
+- [informative/I-VALIDATION-STRATEGIES.md](informative/I-VALIDATION-STRATEGIES.md) -
+  Extended validation: formal verification, Shipyard, Tonic, canary execution
+- [informative/I-INCIDENT-DIAGNOSTICS.md](informative/I-INCIDENT-DIAGNOSTICS.md) -
+  Autonomous incident diagnostics and response workflow patterns
 
 ### Roadmaps (Experimental/Future)
 
