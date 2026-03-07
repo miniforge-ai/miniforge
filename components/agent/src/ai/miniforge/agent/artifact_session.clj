@@ -279,7 +279,8 @@
     (if-not (.exists f)
       (do
         (binding [*out* *err*]
-          (println "WARN: artifact file not found at" (:artifact-path session)))
+          (println "ERROR: artifact file not found at" (:artifact-path session)
+                   "— MCP tool was likely not called by the LLM"))
         nil)
       (try
         (-> (slurp f)

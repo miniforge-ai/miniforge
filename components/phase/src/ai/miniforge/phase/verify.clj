@@ -194,7 +194,8 @@
                        gate-failed?                :failed
                        (= :error agent-status)     :failed
                        :else                       :completed)
-        metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
+        metrics (-> (get result :metrics {:tokens 0 :duration-ms duration-ms})
+                    (assoc :duration-ms duration-ms))
         iterations (get-in ctx [:phase :iterations] 1)
         on-fail (get-in ctx [:phase-config :on-fail])
         updated-ctx (-> ctx
