@@ -127,7 +127,7 @@
 
 (defn format-grouped-row
   "Format a grouped entry (header or workflow row) for table rendering."
-  [entry active-chain cols]
+  [entry active-chain _cols]
   (if (= :header (:type entry))
     ;; Section header — spans full width with dimmed color
     {:status-char ""
