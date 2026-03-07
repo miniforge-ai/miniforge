@@ -225,7 +225,7 @@
         (apply-gate-result idx workflow-id gate passed? payload)
         with-timestamp)))
 
-(defn handle-gate-started [model {:keys [workflow-id gate]}]
+(defn handle-gate-started [model {:keys [gate]}]
   (-> model
       (assoc :flash-message (str "Gate running: " (if gate (name gate) "unknown")))
       with-timestamp))
