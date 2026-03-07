@@ -336,7 +336,8 @@ Examples:
     :args->opts [:spec]
     :spec {:interactive {:coerce :boolean :alias :i}
            :worktree    {:alias :w}
-           :resume      {:alias :r}}}
+           :resume      {:alias :r}
+           :backend     {:coerce :keyword :alias :b}}}
 
    ;; Status command
    {:cmds ["status"]

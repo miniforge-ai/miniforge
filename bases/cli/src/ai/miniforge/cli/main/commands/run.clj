@@ -75,8 +75,8 @@
                     (display/print-info (str "Running workflow: " (:spec/title parsed-spec)))
                     (workflow-runner/run-workflow-from-spec!
                      parsed-spec
-                     {:output :pretty
-                      :quiet false})))))
+                     (cond-> {:output :pretty :quiet false}
+                       (:backend opts) (assoc :backend (:backend opts))))))))
 
             ;; DAG or Plan file — execute directly
             (:dag :plan)
