@@ -216,19 +216,23 @@
 ;; Input polling thread
 
 (defn start-input-thread!
-  "Start a daemon thread that polls for keyboard input and dispatches messages."
+  "Start a daemon thread that polls for keyboard input and dispatches messages.
+   Catches exceptions per-keystroke so a single dispatch failure doesn't kill
+   the input thread (which would freeze the TUI)."
   [app]
   (let [thread (Thread.
                 (fn []
                   (try
                     (while (:running? @app)
-                      (let [screen (:screen @app)
-                            key (input/poll-key screen)]
-                        (if key
-                          (dispatch! app [:input key])
-                          (Thread/sleep 16)))) ; ~60Hz polling
-                    (catch InterruptedException _)
-                    (catch Exception _))))]
+                      (try
+                        (let [screen (:screen @app)
+                              key (input/poll-key screen)]
+                          (if key
+                            (dispatch! app [:input key])
+                            (Thread/sleep 16))) ; ~60Hz polling
+                        (catch InterruptedException e (throw e))
+                        (catch Exception _)))
+                    (catch InterruptedException _))))]
     (.setDaemon thread true)
     (.setName thread "tui-input-poll")
     (.start thread)
