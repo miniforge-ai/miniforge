@@ -169,4 +169,18 @@
                                               :draft true :source_branch "wip"
                                               :web_url "https://gl.com/x/y/-/merge_requests/1"}
                                              "gitlab:x/y")]
-      (is (= :draft (:pr/status result))))))
+      (is (= :draft (:pr/status result)))))
+
+  (testing "Merged MR maps to :merged not :closed"
+    (let [result (status/gitlab-mr->train-pr {:iid 10 :title "Done MR" :state "merged"
+                                              :source_branch "feat"
+                                              :web_url "https://gl.com/x/y/-/merge_requests/10"}
+                                             "gitlab:x/y")]
+      (is (= :merged (:pr/status result)))))
+
+  (testing "Closed MR remains :closed"
+    (let [result (status/gitlab-mr->train-pr {:iid 11 :title "Closed MR" :state "closed"
+                                              :source_branch "old"
+                                              :web_url "https://gl.com/x/y/-/merge_requests/11"}
+                                             "gitlab:x/y")]
+      (is (= :closed (:pr/status result))))))

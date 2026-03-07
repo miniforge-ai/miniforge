@@ -130,6 +130,7 @@
         merge-status (some-> (:merge_status mr) str str/lower-case)
         conflicts? (true? (:has_conflicts mr))]
     (cond
+      (= "merged" state) :merged
       (not= "opened" state) :closed
       draft? :draft
       conflicts? :changes-requested

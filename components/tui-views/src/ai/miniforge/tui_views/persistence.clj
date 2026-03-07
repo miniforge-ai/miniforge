@@ -102,10 +102,34 @@
       (assoc phases idx (merge (get phases idx) entry))
       (conj (vec phases) entry))))
 
+(defn infer-artifact-type
+  "Infer artifact type from map keys when :type is not set."
+  [artifact]
+  (cond
+    (:type artifact)         (:type artifact)
+    (:code/files artifact)   :code
+    (:plan/tasks artifact)   :plan
+    (:test/files artifact)   :test
+    (:review/id artifact)    :review
+    (:evidence/id artifact)  :evidence
+    :else                    :unknown))
+
+(defn infer-artifact-name
+  "Derive a display name from artifact data."
+  [artifact type]
+  (or (:name artifact)
+      (:code/summary artifact)
+      (:plan/name artifact)
+      (str (name type) " artifact")))
+
 (defn normalize-artifact
   [artifact phase]
   (if (map? artifact)
-    (assoc artifact :phase phase)
+    (let [type (infer-artifact-type artifact)]
+      (assoc artifact
+             :phase phase
+             :type type
+             :name (infer-artifact-name artifact type)))
     {:id artifact :phase phase :type :unknown :name (str artifact)}))
 
 (defn nested-dag-artifacts
@@ -245,21 +269,27 @@
       (get-in (workflow-start-event events) [:workflow/spec :workflow/name])
       (str "workflow-" (subs (str workflow-id) 0 8))))
 
+(def ^:private stale-threshold-ms
+  "Workflows without a terminal event and no activity for this long are :stale."
+  (* 60 60 1000)) ;; 1 hour
+
 (defn derive-status
-  "Derive workflow status from the event sequence."
-  [events]
-  (let [terminal (workflow-terminal-event events)
-        last-event (last events)]
-    (case (:event/type terminal)
-      :workflow/completed (or (:workflow/status terminal) :success)
-      :workflow/failed    :failed
-      (case (:event/type last-event)
-        :workflow/phase-completed :running
-        :workflow/phase-started   :running
-        :agent/chunk              :running
-        :agent/status             :running
-        :workflow/started         :running
-        :running))))
+  "Derive workflow status from the event sequence.
+   Accepts an optional file for age-based stale detection."
+  ([events] (derive-status events nil))
+  ([events file]
+   (let [terminal (workflow-terminal-event events)
+         last-event (last events)]
+     (case (:event/type terminal)
+       :workflow/completed (or (:workflow/status terminal) :success)
+       :workflow/failed    :failed
+       (let [active? (contains? #{:workflow/phase-completed :workflow/phase-started
+                                   :agent/chunk :agent/status :workflow/started}
+                                (:event/type last-event))
+             stale?  (when (and active? file (.exists ^java.io.File file))
+                       (> (- (System/currentTimeMillis) (.lastModified ^java.io.File file))
+                          stale-threshold-ms))]
+         (if stale? :stale :running))))))
 
 (defn derive-phase
   "Derive current/last phase from events."
@@ -297,7 +327,7 @@
               workflow   (model/make-workflow
                           {:id         workflow-id
                            :name       (workflow-name workflow-id events)
-                           :status     (derive-status events)
+                           :status     (derive-status events file)
                            :phase      (derive-phase events)
                            :progress   (derive-progress events)
                            :started-at started-at})]

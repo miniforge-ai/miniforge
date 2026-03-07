@@ -244,11 +244,24 @@
       (update result :prs (fn [prs] (vec (remove #(#{:closed :merged} (:pr/status %)) prs))))
       result)))
 
-(defn fetch-open-gitlab-mrs
-  [repo]
-  (let [repo* (provider-repo-slug repo)
+(defn gitlab-state-param
+  "Map canonical state keyword to GitLab API state parameter."
+  [state]
+  (case state
+    :open   "opened"
+    :closed "closed"
+    :merged "merged"
+    :all    "all"
+    "opened"))
+
+(defn fetch-gitlab-mrs-by-state
+  "Fetch GitLab merge requests by state (:open, :closed, :merged, :all)."
+  [repo state]
+  (let [repo*    (provider-repo-slug repo)
+        gl-state (gitlab-state-param state)
         endpoint (str "projects/" (url-encode repo*)
-                      "/merge_requests?state=opened&per_page=100&with_merge_status_recheck=true")
+                      "/merge_requests?state=" gl-state
+                      "&per_page=100&with_merge_status_recheck=true")
         {:keys [success? out err]} (run-glab "api" endpoint)]
     (if-not success?
       (result-failure (gh-error-message out err) {:repo repo :provider :gitlab})
@@ -259,12 +272,18 @@
             :provider :gitlab
             :prs (->> rows
                       (map #(status/gitlab-mr->train-pr % repo))
-                      (remove #(= :closed (:pr/status %)))
                       (sort-by :pr/number)
                       vec)}))
         (catch Exception e
           (result-failure (str "Failed to parse merge request list for " repo ".")
                           {:repo repo :provider :gitlab :error (.getMessage e)}))))))
+
+(defn fetch-open-gitlab-mrs
+  [repo]
+  (let [result (fetch-gitlab-mrs-by-state repo :open)]
+    (if (succeeded? result)
+      (update result :prs (fn [prs] (vec (remove #(#{:closed :merged} (:pr/status %)) prs))))
+      result)))
 
 (defn fetch-open-prs
   "Fetch open PR/MR items for a single configured repository.
@@ -280,7 +299,7 @@
    Returns {:success? bool :repo str :prs [TrainPR ...]}."
   [repo state]
   (case (repo-provider repo)
-    :gitlab (fetch-open-gitlab-mrs repo) ;; GitLab API only supports opened for now
+    :gitlab (fetch-gitlab-mrs-by-state repo state)
     (fetch-github-prs repo state)))
 
 (defn fetch-all-fleet-prs

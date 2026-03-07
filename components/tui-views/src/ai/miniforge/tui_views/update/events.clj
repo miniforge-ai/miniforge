@@ -175,9 +175,7 @@
 (defn normalize-artifact
   "Normalize an artifact entry, ensuring it has phase and required keys."
   [artifact phase]
-  (if (map? artifact)
-    (assoc artifact :phase phase)
-    {:id artifact :phase phase :type :unknown :name (str artifact)}))
+  (persistence/normalize-artifact artifact phase))
 
 (defn apply-phase-completion
   "Update detail model with phase completion data: status and artifacts."
