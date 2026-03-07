@@ -136,7 +136,18 @@
                               (conj (str "\n\n## Review Feedback (MUST FIX)\n\n"
                                          "The previous implementation was reviewed and changes were requested. "
                                          "You MUST address ALL of the following issues:\n\n"
-                                         (if (string? review-feedback) review-feedback (pr-str review-feedback)))))]
+                                         (if (string? review-feedback) review-feedback (pr-str review-feedback)))))
+                      verify-failures (:task/verify-failures task)
+                      parts (cond-> parts
+                              verify-failures
+                              (conj (str "\n\n## Test Failures (MUST FIX)\n\n"
+                                         "The previous implementation failed verification. "
+                                         "You MUST fix these failing tests:\n\n"
+                                         (if-let [test-results (:test-results verify-failures)]
+                                           (str "Test results:\n" (pr-str test-results))
+                                           (str "Verify failure details:\n" (pr-str verify-failures)))
+                                         (when-let [test-output (:test-output verify-failures)]
+                                           (str "\n\nTest output:\n" test-output)))))]
                   (if (seq parts)
                     (str/join "" parts)
                     (pr-str task)))
