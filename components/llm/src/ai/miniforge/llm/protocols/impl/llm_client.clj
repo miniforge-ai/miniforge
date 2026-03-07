@@ -90,8 +90,17 @@
                      :output-tokens (:output_tokens usage)}
              :cost-usd (:total_cost_usd data)})
 
-          ;; Ignore system, rate_limit_event
-          nil)))
+          ;; Tool use events — signal activity without text content
+          "tool_use"
+          {:delta "" :done? false :tool-use true}
+
+          ;; System and rate_limit_event are known no-ops
+          ("system" "rate_limit_event")
+          nil
+
+          ;; Any other unrecognised event type — emit a heartbeat so the
+          ;; stream stays alive during tool-heavy phases
+          {:delta "" :done? false :heartbeat true})))
     (catch Exception _e
       nil)))
 
@@ -498,9 +507,13 @@
         (swap! accumulated-usage (fn [prev] (merge prev usage))))
       (when-let [cost (:cost-usd parsed)]
         (reset! accumulated-cost cost))
-      (when-let [delta (:delta parsed)]
-        (swap! accumulated-content str delta)
-        (on-chunk (assoc parsed :content @accumulated-content))))))
+      (if (or (:tool-use parsed) (:heartbeat parsed))
+        ;; Tool-use and heartbeat events: fire on-chunk without accumulating text
+        (on-chunk (assoc parsed :content @accumulated-content))
+        ;; Normal text deltas
+        (when-let [delta (:delta parsed)]
+          (swap! accumulated-content str delta)
+          (on-chunk (assoc parsed :content @accumulated-content)))))))
 
 (defn log-streaming-result [logger timeout-info content-length]
   (when logger
