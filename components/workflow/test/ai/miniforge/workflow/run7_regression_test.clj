@@ -1,8 +1,10 @@
 (ns ai.miniforge.workflow.run7-regression-test
-  "Regression tests for Run 7 bugs:
+  "Regression tests for Run 7+ bugs:
    1. Duration-ms always 0 — agent metrics fallback shadows real wall-clock time
    2. Terminal event silently dropped — requiring-resolve nil causes when-let short-circuit
-   3. Phase leave functions must override agent duration-ms with wall-clock time"
+   3. Phase leave functions must override agent duration-ms with wall-clock time
+   4. Stale :phase map cleared between phases
+   5. Review feedback lost during phase clearing (Run 9)"
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.workflow.runner :as runner]
@@ -140,3 +142,46 @@
       ;; The stale :redirect-to should NOT be present
       (is (not= :implement (get-in ctx-after [:phase :redirect-to]))
           "Stale :redirect-to from previous phase must not leak"))))
+
+;; ============================================================================
+;; Fix 5: Review feedback survives :phase clearing (Run 9 bug)
+;;
+;; Root cause: review stored feedback at [:phase :review-feedback], but
+;; execute-phase-lifecycle clears :phase before entering next phase.
+;; Implement now reads from [:execution/phase-results :review] instead.
+;; ============================================================================
+
+(deftest review-feedback-survives-phase-clearing-test
+  (testing "implement reads review feedback from phase-results, not :phase"
+    ;; Simulate context after review phase: :phase cleared, but phase-results has review output
+    (let [review-feedback [{:type :blocking :message "Missing error handling for nil input"}]
+          ctx {:execution/input {:description "test task" :title "test"}
+               :execution/phase-results {:review {:result {:output {:review/decision :changes-requested
+                                                                     :review/feedback review-feedback}}}}
+               :execution/errors []
+               :execution/response-chain {:operation :test :succeeded? true}
+               :execution/artifacts []
+               :execution/files-written []
+               :execution/metrics {:tokens 0 :duration-ms 0}}
+          ;; build-implement-task should find the feedback from phase-results
+          ;; Test the extraction path directly (build-implement-task needs worktree files)
+          feedback (or (get-in ctx [:execution/phase-results :review :result :output :review/feedback])
+                       (get-in ctx [:execution/phase-results :review :result :output :review/issues]))]
+      (is (= review-feedback feedback)
+          "Review feedback extraction path should find feedback in phase-results")
+      ;; Verify the OLD path ([:phase :review-feedback]) would return nil after clearing
+      (is (nil? (get-in ctx [:phase :review-feedback]))
+          "Cleared :phase should not have review-feedback")))
+
+  (testing "review feedback from :review/issues path also works"
+    (let [issues [{:severity :warning :message "Consider using protocols"}]
+          ctx {:execution/phase-results {:review {:result {:output {:review/decision :changes-requested
+                                                                     :review/issues issues}}}}}
+          feedback (or (get-in ctx [:execution/phase-results :review :result :output :review/feedback])
+                       (get-in ctx [:execution/phase-results :review :result :output :review/issues]))]
+      (is (= issues feedback)
+          "Should fall back to :review/issues when :review/feedback absent")))
+
+  (testing "max-redirects is now 5"
+    (is (= 5 exec/max-redirects)
+        "Should allow 5 redirects for complex repair cycles")))

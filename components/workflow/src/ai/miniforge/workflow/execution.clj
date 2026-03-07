@@ -258,7 +258,7 @@
 
 (def max-redirects
   "Maximum number of phase redirects before failing to prevent infinite loops."
-  3)
+  5)
 
 (defn apply-phase-transition
   "Apply phase transition based on next-index.
