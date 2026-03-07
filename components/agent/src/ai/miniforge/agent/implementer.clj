@@ -155,15 +155,20 @@
 
 (defn parse-code-response
   "Parse the LLM response to extract code artifact.
-   Handles both EDN in code blocks and plain EDN.
-   Returns nil if the parsed result is not a map."
+   Handles EDN in code blocks, plain EDN, and inline EDN maps
+   embedded in reasoning text (e.g. {:status :already-implemented ...}).
+   Returns nil if no parseable map is found."
   [response-content]
   (try
     (let [parsed (if-let [match (re-find #"```(?:clojure|edn)?\s*\n([\s\S]*?)\n```" response-content)]
                    (edn/read-string (second match))
                    ;; Try to parse the whole response as EDN
-                   (edn/read-string response-content))]
-      ;; Validate that the parsed result is a map (code artifact should be a map)
+                   (or (try (let [r (edn/read-string response-content)]
+                              (when (map? r) r))
+                            (catch Exception _ nil))
+                       ;; Scan for inline EDN map (e.g. {:status :already-implemented ...})
+                       (when-let [match (re-find #"\{:status\s+:already-implemented[^}]*\}" response-content)]
+                         (edn/read-string match))))]
       (when (map? parsed)
         parsed))
     (catch Exception _

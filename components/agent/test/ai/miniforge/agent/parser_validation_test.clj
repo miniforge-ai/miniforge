@@ -62,4 +62,13 @@
     
     (testing "returns map from code block"
       (let [response "```edn\n{:code/id #uuid \"123e4567-e89b-12d3-a456-426614174000\" :code/files []}\n```"]
-        (is (map? (implementer/parse-code-response response)))))))
+        (is (map? (implementer/parse-code-response response)))))
+
+    (testing "extracts inline {:status :already-implemented} from reasoning text"
+      (let [response "Looking at the existing files, this feature is already fully implemented.\n\n{:status :already-implemented :summary \"The login module already exists with email verification.\"}"]
+        (is (= :already-implemented (:status (implementer/parse-code-response response))))
+        (is (string? (:summary (implementer/parse-code-response response))))))
+
+    (testing "returns nil for reasoning text without EDN map"
+      (let [response "I've analyzed the codebase and the feature looks good. No changes needed."]
+        (is (nil? (implementer/parse-code-response response)))))))
