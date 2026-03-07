@@ -488,3 +488,29 @@
           (is (= 3 (:tasks-failed result)))
           (is (= total accounted)
               "Every task must be accounted for — no silent drops"))))))
+
+(deftest test-sub-workflow-strips-release-phase
+  (testing "sub-workflow pipeline excludes :explore, :plan, and :release phases"
+    (let [task-def {:task/id (random-uuid)
+                    :task/description "Test task"}
+          context {:execution/workflow
+                   {:workflow/pipeline
+                    [{:phase :explore}
+                     {:phase :plan}
+                     {:phase :implement}
+                     {:phase :verify}
+                     {:phase :review}
+                     {:phase :release}
+                     {:phase :done}]}}
+          sub-wf (dag-orch/task-sub-workflow task-def context)
+          phase-names (mapv :phase (:workflow/pipeline sub-wf))]
+      (is (= [:implement :verify :review :done] phase-names)
+          "Sub-workflow should strip :explore, :plan, and :release")))
+
+  (testing "sub-workflow with no parent pipeline falls back to minimal"
+    (let [task-def {:task/id (random-uuid)
+                    :task/description "Test task"}
+          context {:execution/workflow {:workflow/pipeline []}}
+          sub-wf (dag-orch/task-sub-workflow task-def context)
+          phase-names (mapv :phase (:workflow/pipeline sub-wf))]
+      (is (= [:implement :done] phase-names)))))
