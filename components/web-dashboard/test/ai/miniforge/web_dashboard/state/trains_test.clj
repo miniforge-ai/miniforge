@@ -1079,3 +1079,128 @@
           (let [result (sut/discover-configured-repos! state {:limit 5})]
             (is (true? (:success? result)))
             (is (= 5 (:discovered result)))))))))
+
+;; ============================================================================
+;; Data-driven error hints (extracted in refactor/elevate-trains-state-fns)
+;; ============================================================================
+
+(deftest error-hint-rules-structure-test
+  (testing "Each rule has non-empty patterns and a non-blank hint"
+    (doseq [[patterns hint] sut/error-hint-rules]
+      (is (seq patterns) "Pattern list must not be empty")
+      (is (string? hint) "Hint must be a string")
+      (is (pos? (count hint)) "Hint must be non-blank"))))
+
+(deftest actionable-error-hint-auth-test
+  (testing "Auth-related messages match the auth rule"
+    (let [expected "Run `gh auth login` and retry."]
+      (is (= expected (sut/actionable-error-hint "authentication failed")))
+      (is (= expected (sut/actionable-error-hint "You are not logged in")))
+      (is (= expected (sut/actionable-error-hint "AUTH error"))))))
+
+(deftest actionable-error-hint-access-test
+  (testing "Access-related messages match the access rule"
+    (let [expected "Verify repository slug and access permissions, then retry sync."]
+      (is (= expected (sut/actionable-error-hint "repository not found")))
+      (is (= expected (sut/actionable-error-hint "403 Forbidden")))
+      (is (= expected (sut/actionable-error-hint "permission denied")))
+      (is (= expected (sut/actionable-error-hint "Access Denied"))))))
+
+(deftest actionable-error-hint-rate-limit-test
+  (testing "Rate limit messages match"
+    (is (= "Provider rate-limited this request. Wait briefly, then retry sync."
+           (sut/actionable-error-hint "secondary rate limit exceeded")))))
+
+(deftest actionable-error-hint-parse-test
+  (testing "Parse/malformed messages match"
+    (is (= "Provider returned malformed data. Retry sync; if it repeats, inspect provider CLI output."
+           (sut/actionable-error-hint "invalid json response")))))
+
+(deftest actionable-error-hint-network-test
+  (testing "Network/timeout messages match"
+    (let [expected "Transient provider/network failure. Retry sync."]
+      (is (= expected (sut/actionable-error-hint "connection refused")))
+      (is (= expected (sut/actionable-error-hint "request timeout"))))))
+
+(deftest actionable-error-hint-default-test
+  (testing "Unknown errors return default hint"
+    (is (= sut/default-error-hint (sut/actionable-error-hint "something totally unknown")))
+    (is (= sut/default-error-hint (sut/actionable-error-hint nil)))
+    (is (= sut/default-error-hint (sut/actionable-error-hint "")))))
+
+(deftest actionable-error-hint-case-insensitive-test
+  (testing "Matching is case-insensitive"
+    (is (= "Run `gh auth login` and retry."
+           (sut/actionable-error-hint "AUTHENTICATION FAILURE")))))
+
+;; ============================================================================
+;; empty-sync-summary (extracted in refactor/elevate-trains-state-fns)
+;; ============================================================================
+
+(deftest empty-sync-summary-test
+  (testing "Returns zeroed summary map with expected keys"
+    (let [s (sut/empty-sync-summary)]
+      (is (= {:added-prs 0 :removed-prs 0 :tracked-prs 0} s)))))
+
+;; ============================================================================
+;; aggregate-sync-results (extracted in refactor/elevate-trains-state-fns)
+;; ============================================================================
+
+(deftest aggregate-sync-results-all-success-test
+  (testing "All repos succeed → success result with summed counts"
+    (let [repos ["org/a" "org/b"]
+          results [{:success? true :added 3 :removed 1 :tracked-prs 5 :repo "org/a"}
+                   {:success? true :added 0 :removed 2 :tracked-prs 3 :repo "org/b"}]
+          agg (sut/aggregate-sync-results repos results)]
+      (is (true? (:success? agg)))
+      (is (= 2 (:synced agg)))
+      (is (= 0 (:failed agg)))
+      (is (= 3 (get-in agg [:summary :added-prs])))
+      (is (= 3 (get-in agg [:summary :removed-prs])))
+      (is (= 8 (get-in agg [:summary :tracked-prs])))
+      (is (empty? (:failures agg))))))
+
+(deftest aggregate-sync-results-partial-failure-test
+  (testing "Some repos fail → partial result with failure details"
+    (let [repos ["org/a" "org/b"]
+          results [{:success? true :added 2 :removed 0 :tracked-prs 4 :repo "org/a"}
+                   {:success? false :error "not found" :repo "org/b"}]
+          agg (sut/aggregate-sync-results repos results)]
+      (is (false? (:success? agg)))
+      (is (= 1 (:synced agg)))
+      (is (= 1 (:failed agg)))
+      (is (true? (:partial? agg)))
+      (is (= 1 (count (:failures agg))))
+      (is (= "org/b" (-> agg :failures first :repo))))))
+
+(deftest aggregate-sync-results-all-fail-test
+  (testing "All repos fail → failure result"
+    (let [repos ["org/a"]
+          results [{:success? false :error "timeout" :repo "org/a"}]
+          agg (sut/aggregate-sync-results repos results)]
+      (is (false? (:success? agg)))
+      (is (= 0 (:synced agg)))
+      (is (= 1 (:failed agg)))
+      (is (false? (:partial? agg))))))
+
+(deftest aggregate-sync-results-empty-test
+  (testing "No results → success with zero counts"
+    (let [agg (sut/aggregate-sync-results [] [])]
+      (is (true? (:success? agg)))
+      (is (= 0 (:synced agg))))))
+
+(deftest aggregate-sync-results-failures-sorted-by-repo-test
+  (testing "Failures are sorted by repo name"
+    (let [repos ["z/repo" "a/repo"]
+          results [{:success? false :error "err" :repo "z/repo"}
+                   {:success? false :error "err" :repo "a/repo"}]
+          agg (sut/aggregate-sync-results repos results)]
+      (is (= ["a/repo" "z/repo"] (mapv :repo (:failures agg)))))))
+
+(deftest aggregate-sync-results-failures-have-action-hints-test
+  (testing "Each failure entry gets an actionable :action hint"
+    (let [repos ["org/a"]
+          results [{:success? false :error "authentication failed" :repo "org/a"}]
+          agg (sut/aggregate-sync-results repos results)]
+      (is (= "Run `gh auth login` and retry."
+             (-> agg :failures first :action))))))
