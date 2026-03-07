@@ -366,8 +366,8 @@
   [policy]
   (case (:evaluation/passed? policy) true "pass" false "FAIL" "?"))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Tree node constructors
+;------------------------------------------------------------------------------ Layer 0f
+;; Tree node primitives and pure node builders
 
 (defn tree-node
   "Build a tree node for the tree widget.
@@ -439,50 +439,6 @@
     (:approved :reviewing :changes-requested :open :merge-ready) "open"
     "open"))
 
-(defn project-pr-row
-  "Project a single PR into a table row map.
-   Includes :<key>-fg entries for per-cell status coloring."
-  [pr]
-  (let [{:keys [readiness risk policy recommend]} (resolve-enrichment pr)
-        r-state   (or (:readiness/state readiness) :unknown)
-        risk-lvl  (or (:risk/level risk) :low)
-        pol-pass? (:evaluation/passed? policy)]
-    {:_id [(:pr/repo pr) (:pr/number pr)]
-     :repo (or (:pr/repo pr) "")
-     :number (str "#" (:pr/number pr))
-     :title (or (:pr/title pr) "")
-     :state (pr-state-label (:pr/status pr))
-     :status      (readiness-indicator r-state)
-     :status-fg   (readiness-state-color r-state)
-     :ready       (readiness-bar (or (:readiness/score readiness) 0) 15)
-     :risk        (risk-label risk-lvl)
-     :risk-fg     (risk-level-color risk-lvl)
-     :policy      (policy-label policy)
-     :policy-fg   (case pol-pass? true status-pass false status-fail nil)
-     :recommend   (:label recommend)
-     :recommend-fg (recommend-action-color (:action recommend))}))
-
-(defn project-pr-items
-  "Project PR items for the fleet table widget.
-   Respects :filtered-indices from search/filter modes."
-  [model]
-  (let [prs (:pr-items model [])
-        filtered (if-let [fi (:filtered-indices model)]
-                   (vec (keep-indexed (fn [i pr] (when (contains? fi i) pr)) prs))
-                   prs)]
-    (mapv project-pr-row filtered)))
-
-(defn resolve-detail-enrichment
-  "Resolve enrichment data for the detail view's selected PR."
-  [model]
-  (let [pr-data (get-in model [:detail :selected-pr])]
-    {:pr        pr-data
-     :readiness (:pr/readiness pr-data)
-     :risk      (:pr/risk pr-data)
-     :policy    (:pr/policy pr-data)
-     :gates     (get pr-data :pr/gate-results [])}))
-
-
 (defn ci-check-node
   "Build a tree node for a single CI check result."
   [{:keys [name conclusion]}]
@@ -534,36 +490,12 @@
                   gates)))
     [(tree-node "Gates: none" 1)]))
 
-(defn project-readiness-tree
-  "Build readiness tree nodes for the tree widget.
-   Each factor is expandable with detail nodes at depth 1+."
-  [model]
-  (let [{:keys [pr readiness]} (resolve-detail-enrichment model)
-        score     (or (:readiness/score readiness) 0)
-        ready?    (:readiness/ready? readiness)
-        recommend (when pr (derive-recommendation pr))]
-    (into
-     (cond-> [(tree-node (str "Readiness: " (int (* 100 score)) "%"
-                               (when ready? " \u2714 ready"))
-                          0 true (if ready? status-pass status-warning))]
-       recommend
-       (conj (tree-node (str "Recommend: " (:label recommend) " \u2014 " (:reason recommend))
-                         0 false (recommend-action-color (:action recommend)))))
-     (concat
-      (ci-section-nodes (:pr/ci-status pr) (get pr :pr/ci-checks []))
-      [(behind-main-node (:pr/behind-main? pr) (:pr/merge-state pr))]
-      [(review-node (:pr/status pr))]
-      (when (seq (get pr :pr/depends-on []))
-        [(tree-node (str "Dependent PRs: " (count (get pr :pr/depends-on))) 1 true)])
-      (gates-section-nodes (get pr :pr/gate-results []))))))
-
 (defn risk-factor-label
   "Format a risk factor for display."
   [{:keys [factor explanation weight score]}]
   (str (name factor) ": " (or explanation "")
        (when weight
          (str " (w=" (int (* 100 weight)) "%, s=" (int (* 100 (or score 0))) "%)"))))
-
 
 (defn risk-factor-detail-nodes
   "Build expandable detail nodes for a risk factor."
@@ -606,19 +538,6 @@
 
     ;; Default: show explanation
     [(tree-node (str (name factor) ": " (or explanation "")) 1)]))
-
-(defn project-risk-tree
-  "Build risk tree nodes for the tree widget.
-   Each factor is expandable with concrete values."
-  [model]
-  (let [{:keys [risk]} (resolve-detail-enrichment model)
-        level   (or (:risk/level risk) :unknown)
-        score   (:risk/score risk)
-        factors (:risk/factors risk [])]
-    (into [(tree-node (str "Risk: " (name level)
-                           (when score (str " (" (format "%.2f" (double score)) ")")))
-                      0 true (risk-level-color level))]
-          (mapcat risk-factor-detail-nodes factors))))
 
 (defn severity-prefix [severity]
   (case severity
@@ -678,30 +597,6 @@
                     0 false (if (:gate/passed? %) status-pass status-fail))
         gates))
 
-(defn project-gate-list
-  "Build gate/policy result list for the tree widget."
-  [model]
-  (let [{:keys [policy gates]} (resolve-detail-enrichment model)]
-    (cond
-      policy      (policy-tree policy)
-      (seq gates) (gates-tree gates)
-      :else       [(tree-node "Policy not yet evaluated" 0)
-                   (tree-node "Use :review to evaluate policy packs" 1)])))
-
-(defn project-train-prs
-  "Project train PRs for the table widget."
-  [model]
-  (let [train (get-in model [:detail :selected-train])
-        prs (:train/prs train [])]
-    (mapv (fn [pr]
-            {:order (str (:pr/merge-order pr))
-             :repo (get pr :pr/repo "")
-             :pr (str "#" (:pr/number pr))
-             :title (get pr :pr/title "")
-             :status (some-> (:pr/status pr) name)
-             :ci (some-> (:pr/ci-status pr) name)})
-          prs)))
-
 (defn intent-nodes
   "Build intent section nodes for evidence tree."
   [evidence]
@@ -741,6 +636,112 @@
              "✓ Policy compliant"
              "✗ Policy violations detected")
     :depth 1 :expandable? false}])
+
+;------------------------------------------------------------------------------ Layer 1
+;; Model projections: (model) -> widget data
+
+(defn project-pr-row
+  "Project a single PR into a table row map.
+   Includes :<key>-fg entries for per-cell status coloring."
+  [pr]
+  (let [{:keys [readiness risk policy recommend]} (resolve-enrichment pr)
+        r-state   (or (:readiness/state readiness) :unknown)
+        risk-lvl  (or (:risk/level risk) :low)
+        pol-pass? (:evaluation/passed? policy)]
+    {:_id [(:pr/repo pr) (:pr/number pr)]
+     :repo (or (:pr/repo pr) "")
+     :number (str "#" (:pr/number pr))
+     :title (or (:pr/title pr) "")
+     :state (pr-state-label (:pr/status pr))
+     :status      (readiness-indicator r-state)
+     :status-fg   (readiness-state-color r-state)
+     :ready       (readiness-bar (or (:readiness/score readiness) 0) 15)
+     :risk        (risk-label risk-lvl)
+     :risk-fg     (risk-level-color risk-lvl)
+     :policy      (policy-label policy)
+     :policy-fg   (case pol-pass? true status-pass false status-fail nil)
+     :recommend   (:label recommend)
+     :recommend-fg (recommend-action-color (:action recommend))}))
+
+(defn project-pr-items
+  "Project PR items for the fleet table widget.
+   Respects :filtered-indices from search/filter modes."
+  [model]
+  (let [prs (:pr-items model [])
+        filtered (if-let [fi (:filtered-indices model)]
+                   (vec (keep-indexed (fn [i pr] (when (contains? fi i) pr)) prs))
+                   prs)]
+    (mapv project-pr-row filtered)))
+
+(defn resolve-detail-enrichment
+  "Resolve enrichment data for the detail view's selected PR."
+  [model]
+  (let [pr-data (get-in model [:detail :selected-pr])]
+    {:pr        pr-data
+     :readiness (:pr/readiness pr-data)
+     :risk      (:pr/risk pr-data)
+     :policy    (:pr/policy pr-data)
+     :gates     (get pr-data :pr/gate-results [])}))
+
+(defn project-readiness-tree
+  "Build readiness tree nodes for the tree widget.
+   Each factor is expandable with detail nodes at depth 1+."
+  [model]
+  (let [{:keys [pr readiness]} (resolve-detail-enrichment model)
+        score     (or (:readiness/score readiness) 0)
+        ready?    (:readiness/ready? readiness)
+        recommend (when pr (derive-recommendation pr))]
+    (into
+     (cond-> [(tree-node (str "Readiness: " (int (* 100 score)) "%"
+                               (when ready? " \u2714 ready"))
+                          0 true (if ready? status-pass status-warning))]
+       recommend
+       (conj (tree-node (str "Recommend: " (:label recommend) " \u2014 " (:reason recommend))
+                         0 false (recommend-action-color (:action recommend)))))
+     (concat
+      (ci-section-nodes (:pr/ci-status pr) (get pr :pr/ci-checks []))
+      [(behind-main-node (:pr/behind-main? pr) (:pr/merge-state pr))]
+      [(review-node (:pr/status pr))]
+      (when (seq (get pr :pr/depends-on []))
+        [(tree-node (str "Dependent PRs: " (count (get pr :pr/depends-on))) 1 true)])
+      (gates-section-nodes (get pr :pr/gate-results []))))))
+
+(defn project-risk-tree
+  "Build risk tree nodes for the tree widget.
+   Each factor is expandable with concrete values."
+  [model]
+  (let [{:keys [risk]} (resolve-detail-enrichment model)
+        level   (or (:risk/level risk) :unknown)
+        score   (:risk/score risk)
+        factors (:risk/factors risk [])]
+    (into [(tree-node (str "Risk: " (name level)
+                           (when score (str " (" (format "%.2f" (double score)) ")")))
+                      0 true (risk-level-color level))]
+          (mapcat risk-factor-detail-nodes factors))))
+
+(defn project-gate-list
+  "Build gate/policy result list for the tree widget."
+  [model]
+  (let [{:keys [policy gates]} (resolve-detail-enrichment model)]
+    (cond
+      policy      (policy-tree policy)
+      (seq gates) (gates-tree gates)
+      :else       [(tree-node "Policy not yet evaluated" 0)
+                   (tree-node "Use :review to evaluate policy packs" 1)])))
+
+(defn project-train-prs
+  "Project train PRs for the table widget."
+  [model]
+  (let [train (get-in model [:detail :selected-train])
+        prs (:train/prs train [])]
+    (mapv (fn [pr]
+            {:order (str (:pr/merge-order pr))
+             :repo (get pr :pr/repo "")
+             :pr (str "#" (:pr/number pr))
+             :title (get pr :pr/title "")
+             :status (some-> (:pr/status pr) name)
+             :ci (some-> (:pr/ci-status pr) name)})
+          prs)))
 
 (defn project-evidence-tree
   "Build evidence tree nodes."
