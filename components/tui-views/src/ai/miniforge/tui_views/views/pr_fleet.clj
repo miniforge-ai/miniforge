@@ -22,7 +22,8 @@
    Displays a table of PRs with title, readiness score, risk level,
    CI status, and repo information."
   (:require
-   [ai.miniforge.tui-engine.interface.layout :as layout]))
+   [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.update.navigation :as nav]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Rendering helpers
@@ -76,7 +77,7 @@
    model: full app model
    [cols rows]: available screen area"
   [model [cols rows]]
-  (let [pr-items (:pr-items model)
+  (let [pr-items (nav/visible-prs model)
         selected (:selected-idx model)
         flash (:flash-message model)]
     (layout/split-v [cols rows] (/ 2.0 rows)

@@ -368,7 +368,8 @@
 
 (defn handle-prs-synced
   "Handle result of a :sync-prs side effect.
-   Replaces :pr-items with freshly fetched data."
+   Replaces :pr-items with freshly fetched data.
+   Preserves the current selection position, clamping to new bounds."
   [model {:keys [pr-items]}]
   (let [prs (vec (or pr-items []))
         active-pr (get-in model [:detail :selected-pr])
@@ -378,11 +379,15 @@
                                 %)
                              prs))
         filtered-indices (when-let [query (:active-filter model)]
-                           (filter/compute-filter-indices prs query))]
+                           (filter/compute-filter-indices prs query))
+        max-idx (max 0 (dec (if filtered-indices
+                              (count filtered-indices)
+                              (count prs))))
+        clamped-idx (min (or (:selected-idx model) 0) max-idx)]
     (-> model
         (assoc :pr-items prs
                :filtered-indices filtered-indices
-               :selected-idx 0)
+               :selected-idx clamped-idx)
         (cond-> refreshed-pr
           (assoc-in [:detail :selected-pr] refreshed-pr))
         (assoc :flash-message (str "Synced " (count prs) " PRs from "
