@@ -42,18 +42,39 @@
     :failed   " ✗"
     ""))
 
-(defn format-phase-node [{:keys [phase status]}]
-  {:label (str (name phase) (status-suffix status))
-   :depth 0
-   :expandable? false})
+(defn format-cost [cost-usd]
+  (when (and cost-usd (pos? cost-usd))
+    (format "$%.4f" (double cost-usd))))
 
-(defn render-title-bar [wf [cols rows]]
-  (layout/text [cols rows]
-               (str " MINIFORGE │ "
-                    (get wf :name "Workflow Detail")
-                    (when-let [phase (:phase wf)]
-                      (str " │ " (name phase))))
-               {:fg :cyan :bold? true}))
+(defn format-tokens [tokens]
+  (when (and tokens (pos? tokens))
+    (if (>= tokens 1000)
+      (format "%.1fk" (/ (double tokens) 1000.0))
+      (str tokens))))
+
+(defn format-phase-node [{:keys [phase status tokens cost-usd]}]
+  (let [suffix (status-suffix status)
+        metrics (str/join " " (keep identity
+                                     [(format-tokens tokens)
+                                      (format-cost cost-usd)]))]
+    {:label (str (name phase) suffix
+                 (when (seq metrics) (str "  " metrics)))
+     :depth 0
+     :expandable? false}))
+
+(defn render-title-bar [wf detail [cols rows]]
+  (let [metrics-parts (keep identity
+                             [(format-tokens (:tokens detail))
+                              (format-cost (:cost-usd detail))])
+        metrics-str (when (seq metrics-parts)
+                      (str " │ " (str/join " " metrics-parts)))]
+    (layout/text [cols rows]
+                 (str " MINIFORGE │ "
+                      (get wf :name "Workflow Detail")
+                      (when-let [phase (:phase wf)]
+                        (str " │ " (name phase)))
+                      metrics-str)
+                 {:fg :cyan :bold? true})))
 
 (defn render-phase-list [phases [cols rows]]
   (layout/box [cols rows]
@@ -99,7 +120,7 @@
         agent (:current-agent detail)
         output (:agent-output detail)]
     (layout/split-v [cols rows] (/ 2.0 rows)
-      (fn [size] (render-title-bar wf size))
+      (fn [size] (render-title-bar wf detail size))
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)
           (fn [[mc mr]]

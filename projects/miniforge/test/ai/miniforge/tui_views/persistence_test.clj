@@ -435,3 +435,46 @@
   (testing "Non-map artifact gets :unknown type"
     (let [a (persistence/normalize-artifact (java.util.UUID/randomUUID) :implement)]
       (is (= :unknown (:type a))))))
+
+;; ──────────────────────────────────────────────────────────────────────────────
+;; Token and cost tracking
+
+(deftest metrics-accumulation-test
+  (testing "Phase-completed events accumulate tokens and cost"
+    (let [wf-id (random-uuid)
+          events [(persistence/workflow-started-event wf-id {:name "test"})
+                  (persistence/phase-started-event wf-id :plan)
+                  (persistence/phase-completed-event wf-id :plan :success nil 5000
+                                                      {:tokens 1200 :cost-usd 0.05})
+                  (persistence/phase-started-event wf-id :implement)
+                  (persistence/phase-completed-event wf-id :implement :success nil 10000
+                                                      {:tokens 3800 :cost-usd 0.12})]
+          detail (persistence/detail-from-events wf-id events)]
+      (is (= 5000 (:tokens detail)))
+      (is (< (abs (- 0.17 (:cost-usd detail))) 0.001))
+      ;; Per-phase metrics
+      (let [plan-phase (first (filter #(= :plan (:phase %)) (:phases detail)))
+            impl-phase (first (filter #(= :implement (:phase %)) (:phases detail)))]
+        (is (= 1200 (:tokens plan-phase)))
+        (is (= 0.05 (:cost-usd plan-phase)))
+        (is (= 3800 (:tokens impl-phase)))
+        (is (= 0.12 (:cost-usd impl-phase))))))
+
+  (testing "Workflow-completed overrides totals when present"
+    (let [wf-id (random-uuid)
+          events [(persistence/workflow-started-event wf-id {:name "test"})
+                  (persistence/phase-completed-event wf-id :plan :success nil 5000
+                                                      {:tokens 1200 :cost-usd 0.05})
+                  (persistence/workflow-completed-event wf-id :success 15000 nil
+                                                         {:tokens 5000 :cost-usd 0.20})]
+          detail (persistence/detail-from-events wf-id events)]
+      (is (= 5000 (:tokens detail)))
+      (is (= 0.20 (:cost-usd detail)))))
+
+  (testing "Zero defaults when no metrics present"
+    (let [wf-id (random-uuid)
+          events [(persistence/workflow-started-event wf-id {:name "test"})
+                  (persistence/phase-completed-event wf-id :plan :success nil 5000)]
+          detail (persistence/detail-from-events wf-id events)]
+      (is (= 0 (:tokens detail)))
+      (is (= 0.0 (:cost-usd detail))))))

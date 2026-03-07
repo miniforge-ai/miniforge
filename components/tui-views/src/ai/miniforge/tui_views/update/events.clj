@@ -184,13 +184,16 @@
                  (mapv #(normalize-artifact % phase) artifacts))
       model)))
 
-(defn handle-phase-done [model {:keys [workflow-id phase outcome artifacts duration-ms]}]
+(defn handle-phase-done [model {:keys [workflow-id phase outcome artifacts duration-ms
+                                       tokens cost-usd]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)
         phase-status (case outcome :success :success :failed :failed :success)]
     (-> model
         (update-workflow-snapshot idx workflow-id
                                   (persistence/phase-completed-event workflow-id phase outcome
-                                                                     artifacts duration-ms))
+                                                                     artifacts duration-ms
+                                                                     {:tokens tokens
+                                                                      :cost-usd cost-usd}))
         (update-workflow-at idx #(update % :progress (fn [p] (min 100 (+ (or p 0) 20)))))
         (update-detail-if-active workflow-id
           #(apply-phase-completion % phase phase-status duration-ms artifacts))
@@ -234,12 +237,15 @@
     evidence-bundle-id (assoc-in [:detail :evidence :bundle-id] evidence-bundle-id)
     duration-ms        (assoc-in [:detail :duration-ms] duration-ms)))
 
-(defn handle-workflow-done [model {:keys [workflow-id status duration-ms evidence-bundle-id]}]
+(defn handle-workflow-done [model {:keys [workflow-id status duration-ms evidence-bundle-id
+                                          tokens cost-usd]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
         (update-workflow-snapshot idx workflow-id
                                   (persistence/workflow-completed-event workflow-id status
-                                                                       duration-ms evidence-bundle-id))
+                                                                       duration-ms evidence-bundle-id
+                                                                       {:tokens tokens
+                                                                        :cost-usd cost-usd}))
         (update-workflow-at idx #(assoc % :status (or status :success) :progress 100
                                           :duration-ms duration-ms))
         (update-detail-if-active workflow-id

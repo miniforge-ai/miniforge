@@ -46,13 +46,16 @@
    :workflow/id workflow-id
    :workflow/phase phase})
 
-(defn phase-completed-event [workflow-id phase outcome artifacts duration-ms]
-  {:event/type :workflow/phase-completed
-   :workflow/id workflow-id
-   :workflow/phase phase
-   :phase/outcome outcome
-   :phase/artifacts artifacts
-   :phase/duration-ms duration-ms})
+(defn phase-completed-event [workflow-id phase outcome artifacts duration-ms
+                             & [{:keys [tokens cost-usd]}]]
+  (cond-> {:event/type :workflow/phase-completed
+           :workflow/id workflow-id
+           :workflow/phase phase
+           :phase/outcome outcome
+           :phase/artifacts artifacts
+           :phase/duration-ms duration-ms}
+    tokens (assoc :phase/tokens tokens)
+    cost-usd (assoc :phase/cost-usd cost-usd)))
 
 (defn agent-status-event [workflow-id agent-id status message]
   {:event/type :agent/status
@@ -66,12 +69,15 @@
    :workflow/id workflow-id
    :chunk/delta delta})
 
-(defn workflow-completed-event [workflow-id status duration-ms evidence-bundle-id]
-  {:event/type :workflow/completed
-   :workflow/id workflow-id
-   :workflow/status status
-   :workflow/duration-ms duration-ms
-   :workflow/evidence-bundle-id evidence-bundle-id})
+(defn workflow-completed-event [workflow-id status duration-ms evidence-bundle-id
+                                & [{:keys [tokens cost-usd]}]]
+  (cond-> {:event/type :workflow/completed
+           :workflow/id workflow-id
+           :workflow/status status
+           :workflow/duration-ms duration-ms
+           :workflow/evidence-bundle-id evidence-bundle-id}
+    tokens (assoc :workflow/tokens tokens)
+    cost-usd (assoc :workflow/cost-usd cost-usd)))
 
 (defn workflow-failed-event [workflow-id error]
   {:event/type :workflow/failed
@@ -145,9 +151,11 @@
     :running))
 
 (defn update-phase-entry
-  [phases phase status duration-ms]
+  [phases phase status duration-ms & [{:keys [tokens cost-usd]}]]
   (let [entry (cond-> {:phase phase :status status}
-                duration-ms (assoc :duration-ms duration-ms))
+                duration-ms (assoc :duration-ms duration-ms)
+                tokens (assoc :tokens tokens)
+                cost-usd (assoc :cost-usd cost-usd))
         idx (first (keep-indexed (fn [i p] (when (= phase (:phase p)) i)) phases))]
     (if idx
       (assoc phases idx (merge (get phases idx) entry))
@@ -208,6 +216,8 @@
    :pr-risk nil
    :selected-train nil
    :duration-ms nil
+   :tokens 0
+   :cost-usd 0.0
    :error nil})
 
 (defn ensure-evidence-intent
@@ -250,11 +260,17 @@
     (let [phase (event-phase event)
           outcome (:phase/outcome event)
           duration-ms (:phase/duration-ms event)
-          artifacts (:phase/artifacts event)]
+          artifacts (:phase/artifacts event)
+          tokens (:phase/tokens event)
+          cost-usd (:phase/cost-usd event)]
       (-> detail
           (assoc :current-phase phase)
-          (update :phases update-phase-entry phase (phase-status outcome) duration-ms)
-          (append-artifacts phase artifacts)))
+          (update :phases update-phase-entry phase (phase-status outcome) duration-ms
+                  {:tokens tokens :cost-usd cost-usd})
+          (append-artifacts phase artifacts)
+          (cond->
+            tokens (update :tokens + tokens)
+            cost-usd (update :cost-usd + cost-usd))))
 
     :agent/started
     (let [agent (:agent/id event)
@@ -300,6 +316,9 @@
     :workflow/completed
     (-> detail
         (assoc :duration-ms (:workflow/duration-ms event))
+        (cond->
+          (:workflow/tokens event) (assoc :tokens (:workflow/tokens event))
+          (:workflow/cost-usd event) (assoc :cost-usd (:workflow/cost-usd event)))
         (append-artifacts (or (:current-phase detail) :done) (nested-dag-artifacts event)))
 
     :workflow/failed

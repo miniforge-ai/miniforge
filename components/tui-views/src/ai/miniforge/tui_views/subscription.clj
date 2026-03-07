@@ -79,7 +79,9 @@
                     (cond-> {}
                       (:phase/artifacts event) (assoc :artifacts (:phase/artifacts event))
                       (:phase/duration-ms event) (assoc :duration-ms (:phase/duration-ms event))
-                      (:phase/error event) (assoc :error (:phase/error event))))
+                      (:phase/error event) (assoc :error (:phase/error event))
+                      (:phase/tokens event) (assoc :tokens (:phase/tokens event))
+                      (:phase/cost-usd event) (assoc :cost-usd (:phase/cost-usd event))))
 
     :agent/started
     (msg/agent-started (workflow-id event) (agent-id event)
@@ -106,7 +108,9 @@
                        (or (:workflow/status event) (:status event))
                        (cond-> {}
                          (:workflow/duration-ms event) (assoc :duration-ms (:workflow/duration-ms event))
-                         (:workflow/evidence-bundle-id event) (assoc :evidence-bundle-id (:workflow/evidence-bundle-id event))))
+                         (:workflow/evidence-bundle-id event) (assoc :evidence-bundle-id (:workflow/evidence-bundle-id event))
+                         (:workflow/tokens event) (assoc :tokens (:workflow/tokens event))
+                         (:workflow/cost-usd event) (assoc :cost-usd (:workflow/cost-usd event))))
 
     :workflow/failed
     (msg/workflow-failed (workflow-id event)

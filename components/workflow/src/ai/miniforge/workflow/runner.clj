@@ -81,7 +81,13 @@
     (try
       (let [status (:execution/status context)
             wf-id (:execution/id context)
-            duration-ms (get-in context [:execution/metrics :duration-ms])
+            metrics (:execution/metrics context)
+            duration-ms (:duration-ms metrics)
+            tokens (:tokens metrics)
+            cost-usd (:cost-usd metrics)
+            metrics-opts (cond-> {}
+                           tokens (assoc :tokens tokens)
+                           cost-usd (assoc :cost-usd cost-usd))
             workflow-failed (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-failed)
             workflow-completed (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-completed)]
         (if (= status :failed)
@@ -90,7 +96,8 @@
                                           {:message "Workflow failed"
                                            :errors (:execution/errors context)}))
           (publish-event! event-stream
-                          (workflow-completed event-stream wf-id status duration-ms))))
+                          (workflow-completed event-stream wf-id status duration-ms
+                                              (when (seq metrics-opts) metrics-opts)))))
       (catch Exception e
         (println "Warning: Failed to publish workflow-completed event:" (ex-message e))))))
 
@@ -123,9 +130,15 @@
                            (when-let [msg (:message result)]
                              {:message msg})))
           redirect-to (:redirect-to result)
+          tokens (or (get-in result [:metrics :tokens])
+                     (get-in result [:phase/metrics :tokens]))
+          cost-usd (or (get-in result [:metrics :cost-usd])
+                       (get-in result [:phase/metrics :cost-usd]))
           event-data (cond-> {:outcome outcome :duration-ms duration-ms}
                        error-info (assoc :error error-info)
-                       redirect-to (assoc :redirect-to redirect-to))]
+                       redirect-to (assoc :redirect-to redirect-to)
+                       tokens (assoc :tokens tokens)
+                       cost-usd (assoc :cost-usd cost-usd))]
       (try
         (let [phase-completed (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
           (publish-event! event-stream
