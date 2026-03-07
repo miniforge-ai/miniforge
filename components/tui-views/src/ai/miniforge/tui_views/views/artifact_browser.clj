@@ -59,18 +59,23 @@
                  :border :single :fg :default
                  :content-fn
                  (fn [[ic ir]]
-                   (layout/table [ic ir]
-                     {:columns [{:key :type :header "Type" :width 10}
-                                {:key :name :header "Name" :width (max 10 (- ic 35))}
-                                {:key :size :header "Size" :width 8}
-                                {:key :status :header "Status" :width 8}]
-                      :data (mapv (fn [a]
-                                    {:type (some-> (:type a) name)
-                                     :name (or (:name a) (:path a) "unnamed")
-                                     :size (get a :size "-")
-                                     :status (some-> (:status a) name)})
-                                  artifacts)
-                      :selected-row selected}))})))
+                   (let [visible-count (max 0 (- ir 2))
+                         offset (let [sel (or selected 0)]
+                                  (if (<= (inc sel) visible-count) 0
+                                      (inc (- sel visible-count))))]
+                     (layout/table [ic ir]
+                       {:columns [{:key :type :header "Type" :width 10}
+                                  {:key :name :header "Name" :width (max 10 (- ic 35))}
+                                  {:key :size :header "Size" :width 8}
+                                  {:key :status :header "Status" :width 8}]
+                        :data (mapv (fn [a]
+                                      {:type (some-> (:type a) name)
+                                       :name (or (:name a) (:path a) "unnamed")
+                                       :size (get a :size "-")
+                                       :status (some-> (:status a) name)})
+                                    artifacts)
+                        :selected-row selected
+                        :offset offset})))})))
           ;; Footer
           (fn [[fc fr]]
             (layout/text [fc fr]

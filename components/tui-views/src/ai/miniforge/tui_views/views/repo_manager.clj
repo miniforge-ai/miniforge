@@ -53,15 +53,26 @@
     (layout/text [cols rows] label
                  {:fg :cyan :bold? true})))
 
+(defn auto-scroll-offset
+  "Compute scroll offset so selected-idx is always visible within visible-count rows."
+  [selected-idx visible-count]
+  (let [sel (or selected-idx 0)]
+    (if (<= (inc sel) visible-count)
+      0
+      (inc (- sel visible-count)))))
+
 (defn render-table [items selected selected-ids [cols rows]]
   (if (empty? items)
     (layout/text [cols rows] "  No repositories configured. Use :add-repo or b to browse."
                  {:fg :default})
-    (layout/table [cols rows]
-      {:columns [{:key :marker :header " " :width 2}
-                 {:key :repo :header "Repository" :width (max 10 (- cols 8))}]
-       :data (mapv #(format-repo-row % selected-ids) items)
-       :selected-row selected})))
+    (let [visible-count (max 0 (- rows 2))
+          offset (auto-scroll-offset selected visible-count)]
+      (layout/table [cols rows]
+        {:columns [{:key :marker :header " " :width 2}
+                   {:key :repo :header "Repository" :width (max 10 (- cols 8))}]
+         :data (mapv #(format-repo-row % selected-ids) items)
+         :selected-row selected
+         :offset offset}))))
 
 (defn render-footer [model [cols rows]]
   (let [source (if (= :browse (:repo-manager-source model)) :browse :fleet)]

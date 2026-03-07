@@ -287,10 +287,16 @@
                    event-stream dispatch-fn
                    {:throttle-ms throttle-ms})))})]
     (tui/start! app)
+    ;; Install SIGINT handler so Ctrl+C triggers graceful quit
+    (let [quit-fn #(dosync (alter (:model-ref @app) assoc :quit? true))]
+      (try
+        (.addShutdownHook (Runtime/getRuntime)
+                          (Thread. ^Runnable quit-fn))
+        (catch Exception _)))
     ;; Block until quit
     (try
       (while (not (:quit? (tui/get-model app)))
-        (Thread/sleep 100))
+        (Thread/sleep 50))
       (finally
         (tui/stop! app)))
     app))
@@ -324,9 +330,15 @@
                   :scan-ms (:scan-ms opts 2000)
                   :hydrate-existing? false}))})]
     (tui/start! app)
+    ;; Install SIGINT handler so Ctrl+C triggers graceful quit
+    (let [quit-fn #(dosync (alter (:model-ref @app) assoc :quit? true))]
+      (try
+        (.addShutdownHook (Runtime/getRuntime)
+                          (Thread. ^Runnable quit-fn))
+        (catch Exception _)))
     (try
       (while (not (:quit? (tui/get-model app)))
-        (Thread/sleep 100))
+        (Thread/sleep 50))
       (finally
         (tui/stop! app)))
     app))

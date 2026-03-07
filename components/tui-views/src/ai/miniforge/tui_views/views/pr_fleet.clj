@@ -53,18 +53,29 @@
   (layout/text [cols rows] " MINIFORGE │ PR Fleet"
                {:fg :cyan :bold? true}))
 
+(defn auto-scroll-offset
+  "Compute scroll offset so selected-idx is always visible within visible-count rows."
+  [selected-idx visible-count]
+  (let [sel (or selected-idx 0)]
+    (if (<= (inc sel) visible-count)
+      0
+      (inc (- sel visible-count)))))
+
 (defn render-table [pr-items selected [cols rows]]
   (if (empty? pr-items)
     (layout/text [cols rows] "  No PRs tracked. Use :add-repo to add repositories."
                  {:fg :default})
-    (let [title-width (max 10 (- cols 60))]
+    (let [title-width (max 10 (- cols 60))
+          visible-count (max 0 (- rows 2))
+          offset (auto-scroll-offset selected visible-count)]
       (layout/table [cols rows]
         {:columns [{:key :title :header "PR Title" :width title-width}
                    {:key :repo :header "Repository" :width 25}
                    {:key :readiness :header "Readiness" :width 18}
                    {:key :risk :header "Risk" :width 6}]
          :data (mapv #(format-pr-row % cols) pr-items)
-         :selected-row selected}))))
+         :selected-row selected
+         :offset offset}))))
 
 (defn render-footer [flash-message [cols rows]]
   (layout/text [cols rows]

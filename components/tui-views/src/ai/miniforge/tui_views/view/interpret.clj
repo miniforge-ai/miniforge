@@ -125,14 +125,19 @@
     (if (empty? data)
       (layout/text [cols rows] "  No data available."
                    {:fg (get theme :fg :default)})
-      (layout/table [cols rows]
-        {:columns resolved-cols :data data
-         :selected-row (when selectable? selected)
-         :header-fg (get theme :header :cyan)
-         :row-fg (get theme :row-fg :default)
-         :row-bg (get theme :row-bg :default)
-         :selected-fg (get theme :selected-fg :white)
-         :selected-bg (get theme :selected-bg :blue)}))))
+      (let [visible-count (max 0 (- rows 2))
+            sel (or selected 0)
+            offset (if (<= (inc sel) visible-count) 0
+                       (inc (- sel visible-count)))]
+        (layout/table [cols rows]
+          {:columns resolved-cols :data data
+           :selected-row (when selectable? selected)
+           :offset offset
+           :header-fg (get theme :header :cyan)
+           :row-fg (get theme :row-fg :default)
+           :row-bg (get theme :row-bg :default)
+           :selected-fg (get theme :selected-fg :white)
+           :selected-bg (get theme :selected-bg :blue)})))))
 
 (defn render-tree-widget
   "Render a tree widget from spec."
