@@ -55,6 +55,10 @@ projects/**/pom.xml
 artifacts
 dist/
 
+# Tool config (local)
+.codex/
+.cursor/
+
 # Checkpoints (local development snapshots)
 docs/checkpoints/
 
