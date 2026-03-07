@@ -131,11 +131,14 @@
   (some :workflow/id events))
 
 (defn top-level-workflow-events?
-  "True when the file contains lifecycle events for a real workflow.
-   Phase-only files are typically DAG child traces and should not appear in the
-   top-level workflow list."
+  "True when the file contains lifecycle events for a real, named workflow.
+   Excludes:
+   - Phase-only files (DAG child traces without lifecycle events)
+   - Anonymous workflows (no spec name — typically test artifacts or sub-workflows)"
   [events]
-  (boolean (some #(contains? lifecycle-event-types (:event/type %)) events)))
+  (when-let [start (first (filter #(= :workflow/started (:event/type %)) events))]
+    (boolean (or (get-in start [:workflow/spec :name])
+                 (get-in start [:workflow/spec :workflow/name])))))
 
 (defn event-phase
   [event]
