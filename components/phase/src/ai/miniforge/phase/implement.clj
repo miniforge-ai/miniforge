@@ -58,7 +58,9 @@
         existing-files (file-ctx/load-files-in-scope worktree-path files-in-scope)
         behavior-addendum (agent-beh/load-and-filter-behaviors
                             :implement {:task {:task/intent (:intent input)}})
-        review-feedback (get-in ctx [:phase :review-feedback])
+        ;; Read review feedback from phase results (survives :phase clearing between phases)
+        review-feedback (or (get-in ctx [:execution/phase-results :review :result :output :review/feedback])
+                            (get-in ctx [:execution/phase-results :review :result :output :review/issues]))
         base-task {:task/id (random-uuid)
                    :task/type :implement
                    :task/description (:description input)

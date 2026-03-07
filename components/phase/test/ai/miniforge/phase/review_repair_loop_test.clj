@@ -117,13 +117,14 @@
 
 (deftest implement-task-includes-review-feedback-from-context
   (testing "build-implement-task passes review-feedback through to task"
-    ;; The implement phase reads :phase :review-feedback from context
-    ;; and includes it in the task map as :task/review-feedback
+    ;; The implement phase reads review feedback from execution/phase-results
+    ;; (survives :phase clearing between phases) and includes it as :task/review-feedback
     (let [build-implement-task #'ai.miniforge.phase.implement/build-implement-task
-          ctx {:phase {:review-feedback [{:severity :blocking
-                                          :description "Missing require"}]}
-               :execution/input {:description "Build widget"}
-               :execution/phase-results {:plan {:result {:output nil}}}}
+          ctx {:execution/input {:description "Build widget"}
+               :execution/phase-results {:plan {:result {:output nil}}
+                                         :review {:result {:output {:review/decision :changes-requested
+                                                                     :review/feedback [{:severity :blocking
+                                                                                         :description "Missing require"}]}}}}}
           task (build-implement-task ctx)]
       (is (= [{:severity :blocking :description "Missing require"}]
              (:task/review-feedback task))
