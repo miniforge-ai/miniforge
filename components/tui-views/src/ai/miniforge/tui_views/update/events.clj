@@ -111,6 +111,14 @@
     (assoc-in model [:active-chain :current-step :instance-id] workflow-id)
     model))
 
+(defn apply-evidence-intent
+  "Seed evidence intent from workflow spec."
+  [model spec name]
+  (if spec
+    (assoc-in model [:detail :evidence :intent]
+              {:description (or (:name spec) name) :spec spec})
+    model))
+
 (defn handle-workflow-added [model {:keys [workflow-id name spec]}]
   (let [wf (model/make-workflow {:id workflow-id
                                   :name (or name (:name spec))
@@ -118,14 +126,8 @@
     (-> model
         (update :workflows conj wf)
         (link-chain-instance workflow-id)
-        ;; Populate evidence intent from spec when detail is active
         (update-detail-if-active workflow-id
-          (fn [m]
-            (if spec
-              (assoc-in m [:detail :evidence :intent]
-                        {:description (or (:name spec) name)
-                         :spec spec})
-              m)))
+          #(apply-evidence-intent % spec name))
         with-timestamp)))
 
 (defn handle-phase-changed [model {:keys [workflow-id phase]}]
@@ -135,31 +137,40 @@
         (apply-phase-change idx workflow-id phase)
         with-timestamp)))
 
+(defn update-phase-status
+  "Update a phase entry's status and duration in the phases vector."
+  [phases phase phase-status duration-ms]
+  (mapv (fn [p]
+          (if (= (:phase p) phase)
+            (assoc p :status phase-status :duration-ms duration-ms)
+            p))
+        phases))
+
+(defn normalize-artifact
+  "Normalize an artifact entry, ensuring it has phase and required keys."
+  [artifact phase]
+  (if (map? artifact)
+    (assoc artifact :phase phase)
+    {:id artifact :phase phase :type :unknown :name (str artifact)}))
+
+(defn apply-phase-completion
+  "Update detail model with phase completion data: status and artifacts."
+  [model phase phase-status duration-ms artifacts]
+  (let [model (update-in model [:detail :phases]
+                          update-phase-status phase phase-status duration-ms)]
+    (if (seq artifacts)
+      (update-in model [:detail :artifacts] into
+                 (mapv #(normalize-artifact % phase) artifacts))
+      model)))
+
 (defn handle-phase-done [model {:keys [workflow-id phase outcome artifacts duration-ms]}]
   (let [model (ensure-workflow model workflow-id)
         idx (find-workflow-idx (:workflows model) workflow-id)
         phase-status (case outcome :success :success :failed :failed :success)]
     (-> model
         (update-workflow-at idx #(update % :progress (fn [p] (min 100 (+ (or p 0) 20)))))
-        ;; Update phase status in detail
         (update-detail-if-active workflow-id
-          (fn [m]
-            (let [m (update-in m [:detail :phases]
-                      (fn [phases]
-                        (mapv (fn [p]
-                                (if (= (:phase p) phase)
-                                  (assoc p :status phase-status
-                                           :duration-ms duration-ms)
-                                  p))
-                              phases)))]
-              ;; Append artifacts from this phase
-              (if (seq artifacts)
-                (update-in m [:detail :artifacts] into
-                  (mapv (fn [a]
-                          (if (map? a) (assoc a :phase phase)
-                            {:id a :phase phase :type :unknown :name (str a)}))
-                        artifacts))
-                m))))
+          #(apply-phase-completion % phase phase-status duration-ms artifacts))
         with-timestamp)))
 
 (defn handle-agent-status [model {:keys [workflow-id agent status message]}]
@@ -189,6 +200,13 @@
         #(update-in % [:detail :agent-output] str delta))
       with-timestamp))
 
+(defn apply-workflow-completion
+  "Update detail model with workflow completion data."
+  [model evidence-bundle-id duration-ms]
+  (cond-> model
+    evidence-bundle-id (assoc-in [:detail :evidence :bundle-id] evidence-bundle-id)
+    duration-ms        (assoc-in [:detail :duration-ms] duration-ms)))
+
 (defn handle-workflow-done [model {:keys [workflow-id status duration-ms evidence-bundle-id]}]
   (let [model (ensure-workflow model workflow-id)
         idx (find-workflow-idx (:workflows model) workflow-id)]
@@ -196,12 +214,7 @@
         (update-workflow-at idx #(assoc % :status (or status :success) :progress 100
                                           :duration-ms duration-ms))
         (update-detail-if-active workflow-id
-          (fn [m]
-            (cond-> m
-              evidence-bundle-id
-              (assoc-in [:detail :evidence :bundle-id] evidence-bundle-id)
-              duration-ms
-              (assoc-in [:detail :duration-ms] duration-ms))))
+          #(apply-workflow-completion % evidence-bundle-id duration-ms))
         with-timestamp)))
 
 (defn handle-workflow-failed [model {:keys [workflow-id error]}]
