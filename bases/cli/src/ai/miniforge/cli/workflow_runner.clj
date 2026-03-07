@@ -269,7 +269,8 @@
   (try
     (let [{:keys [load-workflow run-pipeline]} (resolve-workflow-interface)
           ;; Create initial LLM client for workflow selection
-          selection-llm-client (context/create-llm-client nil spec quiet)
+          backend-override (:backend opts)
+          selection-llm-client (context/create-llm-client nil spec quiet backend-override)
           workflow-type (select-workflow-type spec selection-llm-client quiet)
           workflow-version (or (:spec/workflow-version spec) "latest")
           workflow (load-or-create-workflow load-workflow workflow-type workflow-version)
@@ -282,7 +283,7 @@
           control-state (es/create-control-state)
           command-poller-cleanup (dashboard/start-command-poller! workflow-id control-state)
           ;; Create workflow-specific LLM client for execution
-          llm-client (context/create-llm-client workflow spec quiet)
+          llm-client (context/create-llm-client workflow spec quiet backend-override)
           callbacks (create-phase-callbacks quiet)
           base-context (context/create-workflow-context {:callbacks callbacks
                                                         :artifact-store artifact-store
