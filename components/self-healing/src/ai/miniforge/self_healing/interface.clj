@@ -111,6 +111,10 @@
   "Check current backend health and switch if necessary."
   health/check-and-switch-if-needed)
 
+(def reset-backend-health!
+  "Reset all backend health data to defaults, clearing stale metrics."
+  health/reset-backend-health!)
+
 ;;------------------------------------------------------------------------------ Integration
 
 (def execute-with-health-tracking
