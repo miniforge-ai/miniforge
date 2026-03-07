@@ -126,23 +126,35 @@
   "Publish phase completed event."
   [event-stream context phase-name result]
   (when event-stream
-    (try
-      (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
-        (publish-event! event-stream
-                        (constructor event-stream (:execution/id context) phase-name
-                                     {:outcome (if (or (:success? result)
-                                                       (phase/succeeded-or-done? result))
-                                                 :success
-                                                 :failure)
-                                      :duration-ms (or (get-in result [:phase/metrics :duration-ms])
-                                                       (get-in result [:metrics :duration-ms]))})))
-      (catch Exception _
-        (publish-event! event-stream
-                        {:event/type :workflow/phase-completed
-                         :workflow/id (:execution/id context)
-                         :workflow/phase phase-name
-                         :phase/outcome (if (:success? result) :success :failure)
-                         :event/timestamp (java.time.Instant/now)})))))
+    (let [succeeded? (or (:success? result)
+                         (phase/succeeded-or-done? result))
+          outcome (if succeeded? :success :failure)
+          duration-ms (or (get-in result [:phase/metrics :duration-ms])
+                          (get-in result [:metrics :duration-ms])
+                          (:duration-ms result))
+          error-info (when-not succeeded?
+                       (or (:error result)
+                           (when-let [msg (get-in result [:phase/gate-errors])]
+                             {:message "Gate validation failed" :details msg})
+                           (when-let [msg (:message result)]
+                             {:message msg})))
+          redirect-to (:redirect-to result)
+          event-data (cond-> {:outcome outcome :duration-ms duration-ms}
+                       error-info (assoc :error error-info)
+                       redirect-to (assoc :redirect-to redirect-to))]
+      (try
+        (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
+          (publish-event! event-stream
+                          (constructor event-stream (:execution/id context) phase-name
+                                       event-data)))
+        (catch Exception _
+          (publish-event! event-stream
+                          {:event/type :workflow/phase-completed
+                           :workflow/id (:execution/id context)
+                           :workflow/phase phase-name
+                           :phase/outcome outcome
+                           :phase/error error-info
+                           :event/timestamp (java.time.Instant/now)}))))))
 
 (defn check-backend-health-at-boundary!
   "Check backend health at phase boundary. Returns switch-result or nil."

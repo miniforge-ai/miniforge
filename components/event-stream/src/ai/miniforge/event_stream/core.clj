@@ -183,7 +183,9 @@
                :phase/outcome outcome)
         (cond->
           (:duration-ms result) (assoc :phase/duration-ms (:duration-ms result))
-          (:artifacts result) (assoc :phase/artifacts (:artifacts result))))))
+          (:artifacts result) (assoc :phase/artifacts (:artifacts result))
+          (:error result) (assoc :phase/error (:error result))
+          (:redirect-to result) (assoc :phase/redirect-to (:redirect-to result))))))
 
 (defn agent-chunk [stream workflow-id agent-id delta & [done?]]
   (-> (create-envelope stream :agent/chunk workflow-id
