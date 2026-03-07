@@ -109,19 +109,22 @@
                     :iteration iteration}
              parent-task-id (assoc :parent-task-id parent-task-id)))))
 
-(defn create-llm-client [workflow spec quiet]
+(defn create-llm-client
+  ([workflow spec quiet] (create-llm-client workflow spec quiet nil))
+  ([workflow spec quiet backend-override]
   (try
     (let [cfg (config/load-config)
           llm-backend (config/get-llm-backend
                        cfg
-                       (or (get-in workflow [:workflow/config :llm-backend])
+                       (or backend-override
+                           (get-in workflow [:workflow/config :llm-backend])
                            (:spec/llm-backend spec)))]
       (when-let [create-client (requiring-resolve 'ai.miniforge.llm.interface/create-client)]
         (create-client {:backend llm-backend})))
     (catch Exception e
       (when-not quiet
         (println (display/colorize :yellow (str "Warning: Could not create LLM client (" (ex-message e) "), agents will use fallback mode"))))
-      nil)))
+      nil))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Workflow context assembly
