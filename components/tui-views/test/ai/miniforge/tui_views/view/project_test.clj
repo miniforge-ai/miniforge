@@ -369,3 +369,75 @@
   (testing "Non-compliant policy → violations label"
     (let [nodes (sut/policy-evidence-nodes {:policy {:compliant? false}})]
       (is (.contains (:label (second nodes)) "violations detected")))))
+
+;; ============================================================================
+;; derive-recommendation — regression: readiness state resolution
+;; ============================================================================
+
+(deftest recommend-not-wait-when-enriched
+  (testing "PR with pr-train enrichment (no :readiness/state) produces actionable recommendation, not :wait"
+    ;; Regression: explain-readiness returns {:readiness/score :readiness/ready? :readiness/factors}
+    ;; but NOT :readiness/state. extract-pr-signals must derive the state from PR status/CI.
+    (let [pr {:pr/status :open :pr/ci-status :passed
+              :pr/additions 100 :pr/deletions 50
+              :pr/readiness {:readiness/score 0.4
+                             :readiness/ready? false
+                             :readiness/factors []}}
+          rec (sut/derive-recommendation pr)]
+      (is (not= :wait (:action rec))
+          "Should not be :wait — :open + ci:passed should derive :needs-review state")
+      (is (= :review (:action rec))))))
+
+(deftest recommend-merge-when-all-green
+  (testing "Approved PR with passing CI, low risk, policy pass → merge"
+    (let [pr {:pr/status :approved :pr/ci-status :passed
+              :pr/additions 50 :pr/deletions 10
+              :pr/policy {:evaluation/passed? true}
+              :pr/readiness {:readiness/score 1.0
+                             :readiness/ready? true
+                             :readiness/factors []}}
+          rec (sut/derive-recommendation pr)]
+      (is (= :merge (:action rec))))))
+
+(deftest recommend-do-not-merge-ci-failing
+  (testing "Open PR with failing CI → do-not-merge"
+    (let [pr {:pr/status :open :pr/ci-status :failed
+              :pr/additions 100 :pr/deletions 50}
+          rec (sut/derive-recommendation pr)]
+      (is (= :do-not-merge (:action rec))))))
+
+(deftest recommend-evaluate-when-ready-no-policy
+  (testing "Ready PR without policy evaluation → evaluate"
+    (let [pr {:pr/status :approved :pr/ci-status :passed
+              :pr/additions 50 :pr/deletions 10
+              :pr/readiness {:readiness/score 1.0
+                             :readiness/ready? true
+                             :readiness/factors []}}
+          rec (sut/derive-recommendation pr)]
+      (is (= :evaluate (:action rec))))))
+
+(deftest recommend-decompose-large-pr
+  (testing "Large open PR with policy evaluated → decompose"
+    (let [pr {:pr/status :open :pr/ci-status :passed
+              :pr/additions 400 :pr/deletions 200
+              :pr/policy {:evaluation/passed? true}}
+          rec (sut/derive-recommendation pr)]
+      (is (= :decompose (:action rec))))))
+
+(deftest recommend-approve-elevated-risk
+  (testing "Ready PR with medium risk → approve (human sign-off)"
+    (let [pr {:pr/status :approved :pr/ci-status :passed
+              :pr/additions 50 :pr/deletions 10
+              :pr/policy {:evaluation/passed? true}
+              :pr/risk {:risk/level :medium :risk/score 0.6}
+              :pr/readiness {:readiness/score 1.0
+                             :readiness/ready? true
+                             :readiness/factors []}}
+          rec (sut/derive-recommendation pr)]
+      (is (= :approve (:action rec))))))
+
+(deftest extract-pr-signals-uses-pr-additions
+  (testing "extract-pr-signals reads :pr/additions not [:change-size :additions]"
+    (let [signals (sut/extract-pr-signals {:pr/status :open :pr/ci-status :passed
+                                           :pr/additions 400 :pr/deletions 200})]
+      (is (true? (:large? signals)) "600 LOC should be large"))))
