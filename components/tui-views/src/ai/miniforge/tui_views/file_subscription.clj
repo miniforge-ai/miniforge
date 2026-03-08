@@ -24,8 +24,8 @@
    workflows without an in-memory event stream — cross-process via
    the filesystem protocol used by event-stream file-sink."
   (:require
-   [clojure.edn :as edn]
    [clojure.java.io :as io]
+   [ai.miniforge.tui-views.persistence :as persistence]
    [ai.miniforge.tui-views.subscription :as subscription]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -74,13 +74,9 @@
   [lines dispatch-fn]
   (doseq [line lines]
     (when (seq line)
-      (try
-        (let [event (edn/read-string line)]
-          (when-let [msg (subscription/translate-event event)]
-            (dispatch-fn msg)))
-        (catch Exception _
-          ;; Malformed EDN line — skip silently
-          nil)))))
+      (when-let [event (persistence/safe-read-edn line)]
+        (when-let [msg (subscription/translate-event event)]
+          (dispatch-fn msg))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Command sending
@@ -141,7 +137,7 @@
           (when (>= @scan-counter scan-ms)
             (reset! scan-counter 0)
             (scan-for-new-files! dir tracked dispatch-fn)))
-        (catch InterruptedException e (throw e))
+        (catch InterruptedException _ (reset! running? false))
         (catch Exception _)))))
 
 (defn stop-subscription!

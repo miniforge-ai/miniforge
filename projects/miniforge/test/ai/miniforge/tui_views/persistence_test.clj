@@ -225,7 +225,7 @@
         (let [m (persistence/load-workflows-into-model (model/init-model) {:dir dir})]
           (is (= 1 (count (:workflows m))))
           (is (some? (:last-updated m)))
-          (is (= "Loaded 1 workflows from disk" (:flash-message m))))
+          (is (= "Loaded 1 workflows" (:flash-message m))))
         (finally (cleanup-dir! dir))))))
 
 (deftest load-workflows-into-model-empty-test
@@ -240,7 +240,8 @@
         (finally (cleanup-dir! dir))))))
 
 (deftest load-workflow-no-spec-name-test
-  (testing "Falls back to workflow-id prefix when no spec name"
+  (testing "Workflows without a spec name are excluded from top-level list
+            (quick-named-workflow? pre-filter rejects anonymous workflows)"
     (let [dir (temp-events-dir)
           wf-id (java.util.UUID/randomUUID)
           ts (java.util.Date.)]
@@ -250,14 +251,19 @@
             :event/timestamp ts :event/version "1.0.0"
             :event/sequence-number 0 :workflow/id wf-id
             :message "Workflow started"}])
-        (let [wfs (persistence/load-workflows {:dir dir})
-              wf (first wfs)]
-          (is (= 1 (count wfs)))
-          (is (.startsWith (:name wf) "workflow-")))
-        (finally (cleanup-dir! dir))))))
+        (let [wfs (persistence/load-workflows {:dir dir})]
+          ;; Anonymous workflows (no spec name) are filtered out
+          (is (= 0 (count wfs))))
+        (finally (cleanup-dir! dir)))))
+
+  (testing "workflow-name falls back to id prefix when no spec name"
+    (let [wf-id (java.util.UUID/randomUUID)
+          events [{:event/type :workflow/started :workflow/id wf-id}]]
+      (is (.startsWith (persistence/workflow-name wf-id events) "workflow-")))))
 
 (deftest load-workflow-only-completed-event-test
-  (testing "Handles files with only a completed event (no started event)"
+  (testing "Files with only a completed event (no started) are excluded —
+            quick-named-workflow? requires a :workflow/started with a named spec"
     (let [dir (temp-events-dir)
           wf-id (java.util.UUID/randomUUID)]
       (try
@@ -271,9 +277,7 @@
             :message "Workflow success"
             :workflow/status :success}])
         (let [wfs (persistence/load-workflows {:dir dir})]
-          (is (= 1 (count wfs)))
-          (is (= :success (:status (first wfs))))
-          (is (= 100 (:progress (first wfs)))))
+          (is (= 0 (count wfs)) "no started event means filtered out"))
         (finally (cleanup-dir! dir))))))
 
 (deftest load-workflows-ignores-phase-only-files-test

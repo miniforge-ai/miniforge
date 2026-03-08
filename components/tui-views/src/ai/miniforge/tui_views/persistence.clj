@@ -95,10 +95,11 @@
 
 (defn safe-read-edn
   "Read a single EDN value from a string, returning nil on parse errors.
-   Uses default EDN readers which already handle #uuid and #inst."
+   Uses a :default tagged-literal handler so unknown tags (e.g. a stale
+   #object from pre-fix events) don't crash the parse."
   [s]
   (try
-    (edn/read-string s)
+    (edn/read-string {:default tagged-literal} s)
     (catch Exception _ nil)))
 
 (defn read-events
