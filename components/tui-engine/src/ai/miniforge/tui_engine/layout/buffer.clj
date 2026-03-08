@@ -45,31 +45,47 @@
     buf))
 
 (defn buf-put-string
-  "Write a string into the buffer at [col row] with given style."
+  "Write a string into the buffer at [col row] with given style.
+   Uses transient inner vector for batch character writes."
   [buf col row text {:keys [fg bg bold?] :or {fg :default bg :default bold? false}}]
-  (reduce (fn [b i]
-            (if (< (+ col i) (count (first b)))
-              (buf-put-char b (+ col i) row
-                            {:char (.charAt text i) :fg fg :bg bg :bold? bold?})
-              b))
-          buf
-          (range (count text))))
+  (if (or (neg? row) (>= row (count buf)))
+    buf
+    (let [row-vec (nth buf row)
+          row-width (count row-vec)
+          text-len (count text)
+          end (min text-len (- row-width col))]
+      (if (<= end 0)
+        buf
+        (let [t-row (transient row-vec)]
+          (dotimes [i end]
+            (assoc! t-row (+ col i)
+                    {:char (.charAt ^String text i) :fg fg :bg bg :bold? bold?}))
+          (assoc buf row (persistent! t-row)))))))
 
 (defn blit
-  "Copy source buffer onto dest buffer at [col row] offset."
+  "Copy source buffer onto dest buffer at [col row] offset.
+   Uses transient inner vectors for batch row copying."
   [dest src col row]
-  (reduce (fn [d r]
-            (reduce (fn [d2 c]
-                      (let [cell (get-in src [r c])]
-                        (if (and cell
-                                 (< (+ row r) (count d2))
-                                 (< (+ col c) (count (first d2))))
-                          (assoc-in d2 [(+ row r) (+ col c)] cell)
-                          d2)))
-                    d
-                    (range (count (first src)))))
-          dest
-          (range (count src))))
+  (let [dest-rows (count dest)
+        dest-cols (if (pos? dest-rows) (count (nth dest 0)) 0)
+        src-rows (count src)
+        src-cols (if (pos? src-rows) (count (nth src 0)) 0)]
+    (loop [d dest r 0]
+      (if (>= r src-rows)
+        d
+        (let [dst-row (+ row r)]
+          (if (>= dst-row dest-rows)
+            d
+            (let [src-row-vec (nth src r)
+                  dst-row-vec (nth d dst-row)
+                  copy-end (min src-cols (- dest-cols col))
+                  t-row (transient dst-row-vec)]
+              (dotimes [c copy-end]
+                (let [cell (nth src-row-vec c)]
+                  (when cell
+                    (assoc! t-row (+ col c) cell))))
+              (recur (assoc d dst-row (persistent! t-row))
+                     (inc r)))))))))
 
 (defn buf->strings
   "Convert a cell buffer to a vector of plain strings (for testing)."

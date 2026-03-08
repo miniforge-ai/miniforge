@@ -1,0 +1,180 @@
+;; TUI React-style Renderer: Virtual Widget Tree + Direct-Write Buffer
+;;
+;; Phase 2 & 3 of the React/re-frame adoption plan for the TUI engine.
+;; Phase 1 (memoized projections) is already implemented.
+
+{:name "tui-react-renderer"
+ :version "0.1.0"
+
+ :description
+ "Adopt React-style virtual widget tree diffing and direct-write rendering
+  for the TUI engine. Eliminates redundant buffer allocation and achieves
+  component-level dirty tracking. Two phases, implementable independently."
+
+ :context
+ {:current-architecture
+  "The TUI engine uses an Elm architecture (model → update → view).
+   The view function (view.clj → interpret.clj) takes the full model and
+   produces a complete cell buffer (vector of vectors of {:char :fg :bg :bold?}).
+   Layout primitives (split-v, split-h, box) each allocate their own sub-buffer
+   via make-buffer, render into it, then blit (copy cell-by-cell) into a parent
+   buffer. paint-screen! diffs the final buffer against the previous frame and
+   writes changed cells to the Lanterna terminal.
+
+   Phase 1 (DONE): Projections are memoized by input signals — when you press
+   j/k, project-workflows returns cached data in 0.01ms instead of 1.6ms.
+   But the buffer layer still rebuilds 5100+ cells per frame."
+
+  :key-files
+  ["components/tui-engine/src/ai/miniforge/tui_engine/core.clj"
+   "components/tui-engine/src/ai/miniforge/tui_engine/layout/buffer.clj"
+   "components/tui-engine/src/ai/miniforge/tui_engine/layout/container.clj"
+   "components/tui-engine/src/ai/miniforge/tui_engine/layout/table.clj"
+   "components/tui-engine/src/ai/miniforge/tui_engine/screen/lanterna.clj"
+   "components/tui-views/src/ai/miniforge/tui_views/view.clj"
+   "components/tui-views/src/ai/miniforge/tui_views/view/interpret.clj"
+   "components/tui-views/src/ai/miniforge/tui_views/view/project.clj"
+   "components/tui-views/resources/config/tui/screens.edn"]}
+
+ :phases
+ [{:phase :phase-2
+   :name "Virtual widget tree with component-level diffing"
+   :description
+   "Replace the current 'view returns cell buffer' contract with 'view returns
+    widget tree'. The runtime diffs the tree and only re-renders widgets whose
+    props changed. This is the React virtual DOM equivalent for the terminal."
+
+   :tasks
+   [{:task "Define widget tree data structure"
+     :detail
+     "Create a widget descriptor format. Each node is a map:
+        {:type :split-v/:table/:text/:box/...
+         :key  unique-id (for stable diffing)
+         :props {...widget-specific data...}
+         :children [...]}
+      Props should use the MEMOIZED projection results directly so that
+      identical? checks on props catch unchanged widgets.
+      File: components/tui-engine/src/ai/miniforge/tui_engine/vtree.clj"}
+
+    {:task "Implement tree differ"
+     :detail
+     "Diff old-tree vs new-tree. For each node:
+        - If (identical? old-node new-node) → skip entirely (fast path)
+        - If same :key and :type but different :props → mark dirty, re-render
+        - If :key mismatch → unmount old, mount new
+      Output: list of dirty widget paths that need re-rendering.
+      The differ should be O(tree-size) in the worst case but O(1) for
+      unchanged subtrees thanks to identical? checks on memoized data.
+      File: components/tui-engine/src/ai/miniforge/tui_engine/vtree.clj"}
+
+    {:task "Add render cache per widget"
+     :detail
+     "Each widget node caches its last rendered cell buffer region.
+      When a widget is clean (props identical?), its cached buffer region
+      is reused without calling any render function. Store cache in an
+      atom keyed by widget :key.
+      File: components/tui-engine/src/ai/miniforge/tui_engine/vtree.clj"}
+
+    {:task "Update interpret.clj to return widget tree instead of cell buffer"
+     :detail
+     "Change interpret-node to return widget descriptors instead of calling
+      layout primitives directly. The screen spec walker becomes:
+        screens.edn → interpret (returns vtree) → differ → selective render
+      Keep backward compatibility: if no vtree support, fall back to
+      current buffer rendering.
+      File: components/tui-views/src/ai/miniforge/tui_views/view/interpret.clj"}
+
+    {:task "Update core.clj do-render! to use tree differ"
+     :detail
+     "Change do-render! flow:
+        1. Call view-fn → get new widget tree
+        2. Diff against cached previous tree
+        3. For dirty widgets only: call their render fn → get cell regions
+        4. Composite dirty regions into the frame buffer
+        5. paint-screen! diffs the frame buffer (unchanged cells = no-op)
+      File: components/tui-engine/src/ai/miniforge/tui_engine/core.clj"}
+
+    {:task "Wire overlay pipeline into widget tree"
+     :detail
+     "Overlays (command bar, help, completions, confirm dialog) should be
+      widget tree nodes too, so they get the same dirty tracking. When the
+      overlay hasn't changed, skip its render entirely.
+      File: components/tui-views/src/ai/miniforge/tui_views/view.clj"}]
+
+   :acceptance-criteria
+   ["Pressing j/k on the workflow list only re-renders the table widget, not the tab bar or footer"
+    "Switching views re-renders everything (clean behavior)"
+    "All 250 existing tests pass without modification"
+    "Overlay rendering (command bar, help) is skipped when not active"
+    "Benchmark: j/k navigation renders in <5ms for 55 workflows on a 170x30 terminal"]}
+
+  {:phase :phase-3
+   :name "Direct-write renderer (eliminate intermediate buffers)"
+   :description
+   "Replace the allocate-then-blit pattern with direct writes into a single
+    target buffer. Each widget renders with offset coordinates instead of
+    allocating its own sub-buffer. Eliminates ~80% of buffer allocations."
+
+   :tasks
+   [{:task "Create RenderTarget abstraction"
+     :detail
+     "A mutable render target that widgets write into directly:
+        (defprotocol IRenderTarget
+          (put-string! [this x y text style])
+          (get-cell [this x y])
+          (sub-region [this x y w h]))
+      sub-region returns a view into the same backing store with offset
+      coordinates, NOT a new buffer. Use a Java 2D array backing store
+      for O(1) random access.
+      File: components/tui-engine/src/ai/miniforge/tui_engine/render_target.clj"}
+
+    {:task "Port layout primitives to RenderTarget"
+     :detail
+     "Change split-v, split-h, box to accept a RenderTarget + region bounds
+      instead of [cols rows] and returning a buffer. They call sub-region
+      to get offset views and pass them to children.
+
+      Before: (split-v [cols rows] ratio top-fn bottom-fn) → buffer
+      After:  (split-v! target x y cols rows ratio top-fn bottom-fn) → nil
+
+      Keep the old buffer-based API as a compatibility shim that creates
+      a RenderTarget, renders into it, then extracts the buffer.
+      Files: container.clj, table.clj, buffer.clj"}
+
+    {:task "Port widget renderers to RenderTarget"
+     :detail
+     "Update render-table-widget, render-tree-widget, render-kanban-widget
+      to write directly into a RenderTarget region instead of creating
+      intermediate buffers. The table renderer is the highest priority —
+      it's the most-rendered widget.
+      File: interpret.clj, table.clj"}
+
+    {:task "Update paint-screen! for RenderTarget"
+     :detail
+     "paint-screen! should diff the RenderTarget's backing array directly
+      against the previous frame's array. Array element access is O(1)
+      vs get-in on nested vectors. Store prev-frame as a plain 2D array.
+      File: core.clj"}
+
+    {:task "Benchmark and validate"
+     :detail
+     "Measure frame render time before and after for:
+        - j/k navigation on 55 workflows (170x30 terminal)
+        - Full view switch (workflow-list → pr-fleet)
+        - Overlay toggle (help screen on/off)
+      Target: <2ms per navigation frame, <10ms per full rerender."}]
+
+   :acceptance-criteria
+   ["Zero intermediate buffer allocations during split-v/split-h/box rendering"
+    "All 250 existing tests pass (buffer-based API shim preserves compatibility)"
+    "paint-screen! uses array access instead of get-in for cell diffing"
+    "Frame render time for j/k navigation is <2ms on 170x30 terminal"
+    "Memory allocation per frame reduced by >50% vs current implementation"]}]
+
+ :constraints
+ ["Must maintain the Elm architecture contract: view is a pure function of model"
+  "Must not break the declarative screens.edn spec format"
+  "Must preserve the IScreen protocol — Lanterna and MockScreen both work"
+  "Phase 2 and Phase 3 are independent — either can be implemented first"
+  "All changes are in tui-engine and tui-views components only"
+  "Backward compatibility: old buffer-based tests should still work via shim"]}

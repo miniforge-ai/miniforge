@@ -133,6 +133,63 @@
   [model query]
   (compute-detail-search model query (evidence-labels model)))
 
+(def workflow-field-names
+  "Recognized field qualifiers for workflow search."
+  #{"status" "name" "phase" "error"})
+
+(defn parse-workflow-query
+  "Parse a workflow search query into {:fields {kw [vals]} :text str}.
+   Supports field:value tokens like status:failed, name:deploy."
+  [query]
+  (let [tokens (remove str/blank? (str/split (str/trim (or query "")) #"\s+"))]
+    (reduce
+     (fn [acc token]
+       (if (str/includes? token ":")
+         (let [[field value] (str/split token #":" 2)]
+           (if (contains? workflow-field-names field)
+             (update-in acc [:fields (keyword field)] (fnil conj []) value)
+             (update acc :text (fn [t] (if (str/blank? t) token (str t " " token))))))
+         (update acc :text (fn [t] (if (str/blank? t) token (str t " " token))))))
+     {:fields {} :text ""}
+     tokens)))
+
+(defn workflow-field-value
+  "Extract the string value for a field from a workflow."
+  [wf field-kw]
+  (case field-kw
+    :status (some-> (:status wf) name)
+    :name   (:name wf)
+    :phase  (some-> (:phase wf) name)
+    :error  (or (:error wf) "")
+    ""))
+
+(defn workflow-matches-query?
+  "Test if a workflow matches a parsed query.
+   AND across fields, OR within same field, free-text matches name."
+  [wf parsed]
+  (let [{:keys [fields text]} parsed
+        text-match? (or (str/blank? text)
+                        (str/includes? (str/lower-case (or (:name wf) ""))
+                                       (str/lower-case text)))
+        fields-match? (every? (fn [[field-kw values]]
+                                (let [val (str/lower-case (or (workflow-field-value wf field-kw) ""))]
+                                  (some #(str/includes? val (str/lower-case %)) values)))
+                              fields)]
+    (and text-match? fields-match?)))
+
+(defn compute-workflow-search
+  "Faceted search over workflows. Supports status:failed, name:deploy, etc."
+  [model query workflows]
+  (if (str/blank? query)
+    (assoc model :filtered-indices nil :search-matches [])
+    (let [parsed (parse-workflow-query query)
+          indices (into #{} (keep-indexed
+                              (fn [idx wf]
+                                (when (workflow-matches-query? wf parsed)
+                                  idx)))
+                        workflows)]
+      (assoc model :filtered-indices indices :selected-idx 0 :search-matches []))))
+
 (defn compute-search-results
   "Dispatch search by current view.
    Aggregate views: filter list items via :filtered-indices.
@@ -142,7 +199,7 @@
         view (:view model)]
     (case view
       ;; Aggregate views — filter the list
-      :workflow-list (compute-aggregate-search model query (:workflows model) :name)
+      :workflow-list (compute-workflow-search model query (:workflows model))
       :pr-fleet      (compute-aggregate-search model query (:pr-items model)
                        #(or (:pr/title %) (:name %)))
       :train-view    (compute-aggregate-search model query

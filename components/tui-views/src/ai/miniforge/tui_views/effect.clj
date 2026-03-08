@@ -96,3 +96,14 @@
   "Send a chat message to the orchestrator."
   [context message history]
   {:type :chat-send :context context :message message :history history})
+
+(defn fleet-risk-triage
+  "Request LLM risk triage across all fleet PRs.
+   pr-summaries is a vector of {:id [repo num] :summary str} maps."
+  [pr-summaries]
+  {:type :fleet-risk-triage :pr-summaries pr-summaries})
+
+(defn archive-workflows
+  "Persistently archive workflows by moving their event files to archive/."
+  [workflow-ids]
+  {:type :archive-workflows :workflow-ids workflow-ids})

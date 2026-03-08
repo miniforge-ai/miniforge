@@ -110,7 +110,8 @@
                          (:workflow/duration-ms event) (assoc :duration-ms (:workflow/duration-ms event))
                          (:workflow/evidence-bundle-id event) (assoc :evidence-bundle-id (:workflow/evidence-bundle-id event))
                          (:workflow/tokens event) (assoc :tokens (:workflow/tokens event))
-                         (:workflow/cost-usd event) (assoc :cost-usd (:workflow/cost-usd event))))
+                         (:workflow/cost-usd event) (assoc :cost-usd (:workflow/cost-usd event))
+                         (:workflow/pr-info event) (assoc :pr-info (:workflow/pr-info event))))
 
     :workflow/failed
     (msg/workflow-failed (workflow-id event)

@@ -24,7 +24,8 @@
   (:require
    [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.model :as model]
-   [ai.miniforge.tui-views.transition :as transition]))
+   [ai.miniforge.tui-views.transition :as transition]
+   [ai.miniforge.tui-views.update.chat :as chat]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Navigation helpers
@@ -143,13 +144,37 @@
 
 (defn enter-pr-detail [model]
   (if-let [pr (get (visible-prs model) (:selected-idx model))]
-    (let [pr-id [(:pr/repo pr) (:pr/number pr)]]
-      (cond-> (-> model
-                  (assoc :view :pr-detail)
-                  (assoc-in [:detail :selected-pr] pr)
-                  (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
-        (nil? (:pr/policy pr))
-        (assoc :side-effect (effect/evaluate-policy pr-id pr))))
+    (let [pr-id  [(:pr/repo pr) (:pr/number pr)]
+          detail (-> model
+                     (assoc :view :pr-detail)
+                     (assoc-in [:detail :selected-pr] pr)
+                     (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
+          ;; Check if this PR already has a chat thread
+          tk      (chat/chat-thread-key detail)
+          thread  (get-in detail [:chat-threads tk])
+          fresh?  (or (nil? thread) (empty? (:messages thread)))
+          ;; Build side-effects: policy eval (if needed) + auto-analysis (if fresh)
+          effects (cond-> []
+                    (nil? (:pr/policy pr))
+                    (conj (effect/evaluate-policy pr-id pr))
+                    fresh?
+                    (conj (let [context (chat/pr-detail-context detail)
+                                auto-msg "Briefly analyze this PR: risk, readiness, and key concerns. Suggest 2-3 actions."
+                                user-msg {:role :user :content auto-msg :timestamp (java.util.Date.)}]
+                            (effect/chat-send context auto-msg [user-msg]))))]
+      (cond-> detail
+        ;; Set up chat state for auto-analysis
+        fresh?
+        (-> (assoc-in [:chat :messages]
+                      [{:role :user :content "Briefly analyze this PR: risk, readiness, and key concerns. Suggest 2-3 actions."
+                        :timestamp (java.util.Date.)}])
+            (assoc-in [:chat :pending?] true)
+            (assoc-in [:chat :pending-since] (System/currentTimeMillis))
+            (assoc-in [:chat :context] (chat/pr-detail-context detail))
+            (assoc :chat-active-key tk))
+        ;; Fire side-effects
+        (seq effects)
+        (assoc :side-effects effects)))
     model))
 
 (defn enter-train-detail [model]

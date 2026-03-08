@@ -32,6 +32,46 @@
 
 ;; Helper functions
 
+(defn repo-from-pr-url
+  "Extract 'owner/repo' from a GitHub PR URL.
+   e.g. 'https://github.com/owner/repo/pull/123' → 'owner/repo'."
+  [url]
+  (when-let [[_ owner-repo] (re-find #"github\.com/([^/]+/[^/]+)/pull/" (str url))]
+    owner-repo))
+
+(defn index-workflow-pr
+  "Add a [repo, pr-number] → workflow-id entry to the reverse index.
+   No-op when pr-info lacks required fields or repo can't be extracted."
+  [model workflow-id pr-info]
+  (if-let [repo (and pr-info
+                     (:pr-number pr-info)
+                     (:pr-url pr-info)
+                     (repo-from-pr-url (:pr-url pr-info)))]
+    (assoc-in model [:workflow-pr-index [repo (:pr-number pr-info)]] workflow-id)
+    model))
+
+(defn annotate-pr-with-workflow
+  "Annotate a PR with :pr/workflow-id from the reverse index, if present."
+  [wf-pr-idx pr]
+  (let [pr-key [(:pr/repo pr) (:pr/number pr)]
+        wf-id  (get wf-pr-idx pr-key)]
+    (cond-> pr wf-id (assoc :pr/workflow-id wf-id))))
+
+(defn pr-match?
+  "True when pr matches by [repo, number]."
+  [repo number pr]
+  (and (= (:pr/repo pr) repo) (= (:pr/number pr) number)))
+
+(defn assessment->risk-entry
+  "Convert a single LLM triage assessment into a [pr-id risk-map] pair."
+  [{:keys [id level reason]}]
+  [id {:level (keyword level) :reason reason}])
+
+(defn assessments->risk-map
+  "Convert a vector of LLM triage assessments into {[repo num] {:level :reason}}."
+  [assessments]
+  (into {} (map assessment->risk-entry) assessments))
+
 (defn find-workflow-idx
   "Find index of workflow with given ID in workflows vector."
   [workflows workflow-id]
@@ -238,7 +278,7 @@
     duration-ms        (assoc-in [:detail :duration-ms] duration-ms)))
 
 (defn handle-workflow-done [model {:keys [workflow-id status duration-ms evidence-bundle-id
-                                          tokens cost-usd]}]
+                                          tokens cost-usd pr-info]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
         (update-workflow-snapshot idx workflow-id
@@ -246,8 +286,10 @@
                                                                        duration-ms evidence-bundle-id
                                                                        {:tokens tokens
                                                                         :cost-usd cost-usd}))
-        (update-workflow-at idx #(assoc % :status (or status :success) :progress 100
-                                          :duration-ms duration-ms))
+        (update-workflow-at idx #(cond-> (assoc % :status (or status :success)
+                                                   :progress 100 :duration-ms duration-ms)
+                                    pr-info (assoc :pr-info pr-info)))
+        (index-workflow-pr workflow-id pr-info)
         (update-detail-if-active workflow-id
           #(apply-workflow-completion % evidence-bundle-id duration-ms))
         with-timestamp)))
@@ -366,16 +408,40 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; PR event handlers
 
+(defn build-pr-summary-for-triage
+  "Build a compact text summary of a PR for fleet-level risk triage."
+  [pr]
+  (let [risk (:pr/risk pr)
+        adds (get pr :pr/additions 0)
+        dels (get pr :pr/deletions 0)]
+    (cond-> (str (:pr/repo pr) "#" (:pr/number pr)
+                 " \"" (:pr/title pr) "\""
+                 " | " (name (get pr :pr/status :unknown))
+                 " | ci:" (name (get pr :pr/ci-status :unknown))
+                 " | +" adds "/-" dels
+                 (when risk
+                   (str " | risk:" (name (get risk :risk/level :unknown))
+                        " (" (format "%.0f" (* 100.0 (get risk :risk/score 0))) "%)")))
+      (:pr/workflow-id pr) (str " | miniforge-sourced"))))
+
+(defn pr-triage-summary
+  "Build a {:id [repo num] :summary str} map for fleet risk triage."
+  [pr]
+  {:id      [(:pr/repo pr) (:pr/number pr)]
+   :summary (build-pr-summary-for-triage pr)})
+
 (defn handle-prs-synced
   "Handle result of a :sync-prs side effect.
    Replaces :pr-items with freshly fetched data.
    Preserves the current selection position, clamping to new bounds."
-  [model {:keys [pr-items]}]
-  (let [prs (vec (or pr-items []))
+  [model {:keys [pr-items error]}]
+  (let [wf-pr-idx (get model :workflow-pr-index {})
+        prs (mapv (partial annotate-pr-with-workflow wf-pr-idx)
+                  (or pr-items []))
         active-pr (get-in model [:detail :selected-pr])
         refreshed-pr (when active-pr
-                       (some #(when (and (= (:pr/repo %) (:pr/repo active-pr))
-                                         (= (:pr/number %) (:pr/number active-pr)))
+                       (some #(when (pr-match? (:pr/repo active-pr)
+                                               (:pr/number active-pr) %)
                                 %)
                              prs))
         filtered-indices (when-let [query (:active-filter model)]
@@ -383,21 +449,33 @@
         max-idx (max 0 (dec (if filtered-indices
                               (count filtered-indices)
                               (count prs))))
-        clamped-idx (min (or (:selected-idx model) 0) max-idx)]
-    (-> model
-        (assoc :pr-items prs
-               :filtered-indices filtered-indices
-               :selected-idx clamped-idx)
-        (cond-> refreshed-pr
-          (assoc-in [:detail :selected-pr] refreshed-pr))
-        (assoc :flash-message (str "Synced " (count prs) " PRs from "
-                                   (count (distinct (map :pr/repo prs))) " repo(s)"))
-        with-timestamp)))
+        clamped-idx (min (get model :selected-idx 0) max-idx)
+        updated (-> model
+                    (assoc :pr-items prs
+                           :filtered-indices filtered-indices
+                           :selected-idx clamped-idx)
+                    (cond-> refreshed-pr
+                      (assoc-in [:detail :selected-pr] refreshed-pr))
+                    (assoc :flash-message
+                           (cond
+                             error
+                             (str "PR sync failed: " error)
 
-(defn pr-match?
-  "True when pr matches by [repo, number]."
-  [repo number pr]
-  (and (= (:pr/repo pr) repo) (= (:pr/number pr) number)))
+                             (seq prs)
+                             (str "Synced " (count prs) " PRs from "
+                                  (count (distinct (map :pr/repo prs))) " repo(s)")
+
+                             :else
+                             "No PRs found in fleet repos"))
+                    with-timestamp)
+        pr-hash (hash (mapv #(select-keys % [:pr/repo :pr/number :pr/additions
+                                              :pr/deletions :pr/status :pr/ci-status])
+                            prs))]
+    (if (and (seq prs) (not= pr-hash (:agent-risk-hash model)))
+      (-> updated
+          (assoc :agent-risk-hash pr-hash)
+          (assoc :side-effect (effect/fleet-risk-triage (mapv pr-triage-summary prs))))
+      updated)))
 
 (defn merge-matching-pr
   "Merge updated fields into the PR matching [repo, number]; pass others through."
@@ -554,7 +632,8 @@
                       :filtered-indices nil
                       :search-matches []
                       :search-match-idx nil
-                      :selected-ids #{}
+                      ;; Pre-select fleet repos so they appear checked
+                      :selected-ids (set (get base :fleet-repos []))
                       :visual-anchor nil)
                base)]
     (assoc base :flash-message
@@ -591,17 +670,24 @@
 
 (defn handle-chat-response
   "Handle result of a :chat-send side effect.
-   Appends assistant message to chat history, clears pending state."
+   Appends assistant message to chat history, clears pending state.
+   Stores suggested actions for execution via number keys."
   [model {:keys [content actions workflow-id]}]
-  (let [assistant-msg {:role :assistant
+  (let [actions-vec (or actions [])
+        assistant-msg {:role :assistant
                        :content (or content "No response")
                        :timestamp (java.util.Date.)
-                       :actions (or actions [])
+                       :actions actions-vec
                        :workflow-id workflow-id}]
-    (-> model
-        (update-in [:chat :messages] conj assistant-msg)
-        (assoc-in [:chat :pending?] false)
-        with-timestamp)))
+    (let [updated (-> model
+                      (update-in [:chat :messages] conj assistant-msg)
+                      (assoc-in [:chat :pending?] false)
+                      (assoc-in [:chat :suggested-actions] actions-vec)
+                      (assoc-in [:chat :scroll-offset] nil) ;; pin to bottom on new message
+                      with-timestamp)
+          tk (get updated :chat-active-key)]
+      (cond-> updated
+        tk (assoc-in [:chat-threads tk] (:chat updated))))))
 
 (defn handle-chat-action-result
   "Handle result of a :chat-execute-action side effect.
@@ -610,3 +696,15 @@
   (-> model
       (assoc :flash-message (or message (if success? "Action completed" "Action failed")))
       with-timestamp))
+
+(defn handle-fleet-risk-triaged
+  "Handle result of :fleet-risk-triage side effect.
+   Merges per-PR agent risk assessments into the model."
+  [model {:keys [assessments error]}]
+  (if error
+    (-> model
+        (assoc :flash-message (str "Risk triage: " error))
+        with-timestamp)
+    (-> model
+        (assoc :agent-risk (assessments->risk-map assessments))
+        with-timestamp)))

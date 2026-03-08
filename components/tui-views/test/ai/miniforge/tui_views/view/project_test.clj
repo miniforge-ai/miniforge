@@ -53,10 +53,20 @@
     (is (= [:draft 0.1]
            (sut/readiness-state :draft false false false)))))
 
+(deftest readiness-state-merged
+  (testing "Merged → merged with score 1.0"
+    (is (= [:merged 1.0]
+           (sut/readiness-state :merged false false false)))))
+
+(deftest readiness-state-closed
+  (testing "Closed → closed with score 0.0"
+    (is (= [:closed 0.0]
+           (sut/readiness-state :closed false false false)))))
+
 (deftest readiness-state-unknown
   (testing "Unknown status → unknown"
     (is (= [:unknown 0.0]
-           (sut/readiness-state :closed false false false)))))
+           (sut/readiness-state :something-else false false false)))))
 
 ;; ============================================================================
 ;; readiness-blockers

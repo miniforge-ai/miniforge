@@ -212,6 +212,30 @@
              :selected-idx 0 :scroll-offset 0
              :selected-ids #{} :visual-anchor nil))))
 
+;------------------------------------------------------------------------------ Layer 1d
+;; Sort command
+
+(def sort-fields
+  {"name" :name "date" :started-at "status" :status "progress" :progress})
+
+(defn cmd-sort [model args]
+  (let [field-str (some-> args str/trim str/lower-case)
+        field-kw (get sort-fields field-str)]
+    (if field-kw
+      (let [comparator (if (= field-kw :started-at)
+                         #(compare %2 %1) ;; date: newest first
+                         compare)
+            sorted (vec (sort-by (fn [wf] (or (get wf field-kw) ""))
+                                 comparator
+                                 (:workflows model)))]
+        (assoc model
+               :workflows sorted
+               :workflow-sort field-str
+               :selected-idx 0
+               :flash-message (str "Sorted by " field-str)))
+      (assoc model :flash-message
+             (str "Sort by: " (str/join ", " (keys sort-fields)))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Batch action handlers (destructive actions prompt for confirmation)
 
@@ -223,8 +247,17 @@
       (assoc model :confirm {:action action :label label :ids ids})
       (assoc model :flash-message (str "Nothing to " (name action))))))
 
-(defn cmd-archive [model _args]
-  (request-confirmation model :archive "Archive"))
+(defn cmd-archive [model args]
+  (if (= "all-done" (some-> args str/trim))
+    ;; :archive all-done — archive all completed/failed workflows
+    (let [done-ids (->> (:workflows model)
+                        (filter #(#{:success :failed :completed} (:status %)))
+                        (map :id)
+                        set)]
+      (if (seq done-ids)
+        (request-confirmation model :archive "Archive done")
+        (assoc model :flash-message "No completed workflows to archive")))
+    (request-confirmation model :archive "Archive")))
 
 (defn cmd-delete [model _args]
   (request-confirmation model :delete "Delete"))
@@ -351,7 +384,8 @@
   (let [{:keys [action ids]} (:confirm model)]
     (case action
       :delete       (confirm-delete model ids)
-      :archive      (confirm-set-status model ids "Archived" :archived)
+      :archive      (-> (confirm-set-status model ids "Archived" :archived)
+                        (assoc :side-effect (effect/archive-workflows ids)))
       :cancel       (confirm-set-status model ids "Cancelled" :cancelled
                                         #(= :running (:status %)))
       :remove-repos (confirm-remove-repos model ids)
@@ -414,7 +448,9 @@
                                             (map name)
                                             sort
                                             vec))}
-   "archive"     {:handler cmd-archive     :help "Archive selected workflows"}
+   "archive"     {:handler cmd-archive     :help "Archive selected workflows (or :archive all-done)"}
+   "sort"        {:handler cmd-sort       :help "Sort workflows (name, date, status, progress)"
+                  :completions (fn [_] (vec (keys sort-fields)))}
    "delete"      {:handler cmd-delete      :help "Delete selected workflows"}
    "cancel"      {:handler cmd-cancel      :help "Cancel running workflows"}
    "pause"       {:handler cmd-pause       :help "Pause a running workflow"}

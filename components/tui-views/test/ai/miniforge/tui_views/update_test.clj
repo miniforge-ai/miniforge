@@ -260,7 +260,7 @@
         (is (= {:type :sync-prs} (:side-effect m)))
         (is (str/includes? (:flash-message m) "Syncing")))))
 
-  (testing "x requests repo removal confirm in fleet mode; y removes"
+  (testing "d requests repo removal confirm in fleet mode; y removes"
     (with-redefs [pr-sync/remove-repo! (fn [_repo] {:success? true
                                                     :removed? true
                                                     :repo "acme/one"
@@ -269,7 +269,7 @@
                   (assoc :view :repo-manager
                          :repo-manager-source :fleet
                          :fleet-repos ["acme/one"])
-                  (update/update-model [:input {:key :key/x :char \x}]))]
+                  (update/update-model [:input {:key :key/d :char \d}]))]
         (is (= :remove-repos (get-in m [:confirm :action])))
         (is (= #{"acme/one"} (get-in m [:confirm :ids])))
         (let [m2 (update/update-model m [:input {:key :key/y :char \y}])]

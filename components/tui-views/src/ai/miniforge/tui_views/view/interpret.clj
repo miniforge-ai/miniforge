@@ -106,17 +106,21 @@
   [model theme [cols rows] {:keys [data-fn columns selectable? selection-col?]}]
   (let [project-fn (project/get-projection data-fn)
         data-raw (project-fn model)
-        selected (:selected-idx model)
+        ;; Use mapped selection from metadata if available (e.g. temporal grouping)
+        mapped-selected (some-> (meta data-raw) :mapped-selected)
+        selected (or mapped-selected (:selected-idx model))
         selected-ids (get model :selected-ids #{})
         show-sel? (and selection-col? (seq selected-ids))
         sel-w (if show-sel? 3 0)
-        ;; Add selection column to data if needed
+        ;; Add selection column to data if needed (skip header rows)
         data (if show-sel?
                (mapv (fn [row]
-                       (assoc row :sel
-                              (if (contains? selected-ids
-                                             (or (:_id row) (:id row)))
-                                "[x]" "[ ]")))
+                       (if (:_header? row)
+                         row
+                         (assoc row :sel
+                                (if (contains? selected-ids
+                                               (or (:_id row) (:id row)))
+                                  "[x]" "[ ]"))))
                      data-raw)
                data-raw)
         resolved-cols (cond-> []
@@ -143,12 +147,23 @@
   "Render a tree widget from spec."
   [model _theme [cols rows] {:keys [data-fn]}]
   (let [project-fn (project/get-projection data-fn)
-        nodes (project-fn model)
-        expanded (or (get-in model [:detail :expanded-nodes]) #{0})]
+        nodes (project-fn (assoc model :_panel-cols cols))
+        expanded (or (get-in model [:detail :expanded-nodes]) #{0})
+        n (count nodes)
+        chat? (= data-fn :project/chat-messages)
+        ;; Chat: user scroll-offset (nil = pinned to bottom), else 0
+        max-scroll (max 0 (- n rows))
+        scroll (if chat?
+                 (let [user-offset (get-in model [:chat :scroll-offset])]
+                   (if (nil? user-offset)
+                     max-scroll   ;; pinned to bottom
+                     (min user-offset max-scroll)))
+                 0)]
     (widget/tree [cols rows]
       {:nodes nodes
        :expanded expanded
-       :selected (:selected-idx model)})))
+       :selected (:selected-idx model)
+       :scroll-offset scroll})))
 
 (defn render-kanban-widget
   "Render a kanban widget from spec."

@@ -17,33 +17,64 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.tui-engine.core
-  "Elm-architecture runtime for the TUI engine.
+  "Rendering core for the TUI engine.
 
-   Implements the core application loop:
-   1. Messages arrive via dispatch! (from input polling or external subscriptions)
-   2. The update function produces a new model (pure, in dosync)
-   3. An add-watch on the model ref triggers rendering
-   4. The render function diffs the cell buffer and writes only changed cells
+   Handles rendering primitives, app state creation, and the public
+   render entry point. Runtime concerns (side-effects, dispatch,
+   input polling, lifecycle) live in ai.miniforge.tui-engine.runtime.
 
    Concurrency model:
    - model and prev-buffer are refs, coordinated via dosync
    - add-watch on model-ref triggers rendering after every state transition
-   - Rendering is serialized via a lock to prevent concurrent screen writes
-   - Side-effects are extracted during dosync and executed asynchronously
-
-   Throttling: user input renders immediately. External messages are batched
-   and rendered at a configurable frame rate (default 1 fps)."
+   - Rendering is serialized via a lock to prevent concurrent screen writes"
   (:require
    [ai.miniforge.tui-engine.screen :as screen]
-   [ai.miniforge.tui-engine.input :as input]
    [ai.miniforge.tui-engine.layout :as layout]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Rendering primitives
 
+(defn- flush-run!
+  "Write a batched run of same-style characters to screen."
+  [screen ^StringBuilder sb start-col row fg bg bold?]
+  (when (pos? (.length sb))
+    (screen/put-string! screen start-col row (.toString sb) fg bg bold?)
+    (.setLength sb 0)))
+
+(defn- paint-row!
+  "Diff a single row between old and new buffers, writing changed cells to screen.
+   Batches consecutive same-style cells into single put-string! calls."
+  [screen ^StringBuilder sb row new-row old-row max-col resized?]
+  (loop [col 0
+         run-col 0
+         run-fg nil
+         run-bg nil
+         run-bold? false]
+    (if (< col max-col)
+      (let [new-cell (nth new-row col)
+            old-cell (when old-row (nth old-row col nil))
+            changed? (or resized? (not= new-cell old-cell))]
+        (if changed?
+          (let [{:keys [char fg bg bold?]} new-cell
+                same-style? (and (pos? (.length sb))
+                                 (= fg run-fg) (= bg run-bg)
+                                 (= (boolean bold?) run-bold?))]
+            (if same-style?
+              (do (.append sb (or char \space))
+                  (recur (inc col) run-col run-fg run-bg run-bold?))
+              (do (flush-run! screen sb run-col row run-fg run-bg run-bold?)
+                  (.append sb (or char \space))
+                  (recur (inc col) col fg bg (boolean bold?)))))
+          ;; Not changed — flush any pending run
+          (do (flush-run! screen sb run-col row run-fg run-bg run-bold?)
+              (recur (inc col) (inc col) nil nil false))))
+      ;; End of row — flush remaining
+      (flush-run! screen sb run-col row run-fg run-bg run-bold?))))
+
 (defn paint-screen!
   "Impure: diff new-buffer against prev-buffer and write changed cells to screen.
    Must be called under the render lock to prevent concurrent screen writes.
+   Batches consecutive same-style cells into single put-string! calls.
    Returns new-buffer (to be stored as prev-buffer)."
   [screen prev-buffer new-buffer]
   (let [buf-rows (count new-buffer)
@@ -53,17 +84,13 @@
                      (not= buf-rows (count prev-buffer))
                      (and (pos? buf-rows) (seq prev-buffer)
                           (not= buf-cols (count (first prev-buffer)))))]
-    ;; Only clear on first render or resize — never on normal frames
     (when resized? (screen/clear! screen))
-    ;; Cell-level diff: only write cells that actually changed
-    (doseq [row (range (min scr-rows buf-rows))
-            col (range (min scr-cols (count (nth new-buffer row))))]
-      (let [new-cell (get-in new-buffer [row col])
-            old-cell (when-not resized? (get-in prev-buffer [row col]))]
-        (when (or resized? (not= new-cell old-cell))
-          (let [{:keys [char fg bg bold?]} new-cell]
-            (when char
-              (screen/put-string! screen col row (str char) fg bg (boolean bold?)))))))
+    (let [sb (StringBuilder. 64)]
+      (doseq [row (range (min scr-rows buf-rows))]
+        (let [new-row (nth new-buffer row)
+              old-row (when-not resized? (nth prev-buffer row nil))
+              max-col (min scr-cols (count new-row))]
+          (paint-row! screen sb row new-row old-row max-col resized?))))
     (screen/refresh! screen)
     new-buffer))
 
@@ -147,214 +174,18 @@
     (do-render! app-state @model-ref)
     app-state))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Side-effect execution
-
-(defn execute-side-effect!
-  "Execute a side-effect on a background daemon thread.
-   Calls effect-handler-fn with the effect map, then dispatches the result
-   message back into the Elm loop via dispatch-fn.
-   Tracks the thread in effect-threads so stop! can interrupt in-flight effects."
-  [effect effect-handler-fn dispatch-fn effect-threads]
-  (let [thread (Thread.
-                (fn []
-                  (try
-                    (when-let [result-msg (effect-handler-fn effect)]
-                      (dispatch-fn result-msg))
-                    (catch InterruptedException _)
-                    (catch Exception e
-                      (when-not (Thread/interrupted)
-                        (dispatch-fn [:msg/side-effect-error
-                                      {:type (:type effect)
-                                       :error (.getMessage e)}]))))
-                  (when effect-threads
-                    (swap! effect-threads disj (Thread/currentThread)))))]
-    (.setDaemon thread true)
-    (.setName thread (str "tui-effect-" (name (get effect :type "unknown"))))
-    (when effect-threads
-      (swap! effect-threads conj thread))
-    (.start thread)))
-
-;------------------------------------------------------------------------------ Layer 4
-;; Message dispatch
-
-(defn dispatch!
-  "Dispatch a message into the Elm update loop.
-
-   Uses dosync to atomically update the model ref. The add-watch
-   installed in create-app triggers rendering after each state transition.
-   dispatch! only does the pure model update — no screen I/O.
-
-   Side-effect protocol:
-   If the new model contains a :side-effect key, it is stripped from the model
-   and executed asynchronously via the registered :effect-handler. The handler
-   runs on a background thread and its result message is dispatched back into
-   the update loop."
-  [app msg]
-  (let [{:keys [model-ref update-fn]} @app
-        pending-effect (atom nil)]
-    ;; Atomic model update — watcher fires after commit to handle rendering
-    (dosync
-     (let [new-model (update-fn @model-ref msg)
-           fx (:side-effect new-model)
-           clean-model (dissoc new-model :side-effect)]
-       (when fx (reset! pending-effect fx))
-       (ref-set model-ref clean-model)))
-    ;; Side-effects executed outside the transaction
-    (when-let [fx @pending-effect]
-      (when-let [handler (:effect-handler @app)]
-        (execute-side-effect! fx handler
-                              (fn [result-msg] (dispatch! app result-msg))
-                              (:effect-threads @app))))))
-
-(defn get-model
-  "Get current model snapshot."
-  [app]
-  @(:model-ref @app))
-
-;------------------------------------------------------------------------------ Layer 5
-;; Input polling thread
-
-(defn start-input-thread!
-  "Start a daemon thread that polls for keyboard input and dispatches messages.
-   Catches exceptions per-keystroke so a single dispatch failure doesn't kill
-   the input thread (which would freeze the TUI)."
-  [app]
-  (let [thread (Thread.
-                (fn []
-                  (try
-                    (while (:running? @app)
-                      (try
-                        (let [screen (:screen @app)
-                              key (input/poll-key screen)]
-                          (if key
-                            (dispatch! app [:input key])
-                            (Thread/sleep 16))) ; ~60Hz polling
-                        (catch InterruptedException e (throw e))
-                        (catch Exception _)))
-                    (catch InterruptedException _))))]
-    (.setDaemon thread true)
-    (.setName thread "tui-input-poll")
-    (.start thread)
-    thread))
-
-(defn start-resize-thread!
-  "Start a daemon thread that checks for terminal size changes and forces
-   a re-render when the size changes. Checks every 250ms."
-  [app]
-  (let [last-size (atom nil)
-        thread (Thread.
-                (fn []
-                  (try
-                    (while (:running? @app)
-                      (try
-                        (Thread/sleep 250)
-                        (let [screen (:screen @app)
-                              size (screen/get-size screen)]
-                          (when (and size (not= size @last-size))
-                            (reset! last-size size)
-                            ;; Force re-render by dispatching a no-op tick
-                            (do-render! @app @(:model-ref @app))))
-                        (catch InterruptedException e (throw e))
-                        (catch Exception _)))
-                    (catch InterruptedException _))))]
-    (.setDaemon thread true)
-    (.setName thread "tui-resize-check")
-    (.start thread)
-    thread))
-
-;------------------------------------------------------------------------------ Layer 6
-;; Application lifecycle
-
-(defn start!
-  "Start the TUI application.
-   1. Enter alternate screen
-   2. Initial render
-   3. Start input polling thread
-   4. Register subscriptions
-
-   The model-ref watcher (installed in create-app) handles all subsequent
-   renders triggered by dispatch!.
-
-   Returns the app atom."
-  [app]
-  (let [screen (:screen @app)]
-    (screen/start-screen! screen)
-    (swap! app assoc :running? true)
-    ;; Initial render
-    (swap! app render!)
-    ;; Start input thread
-    (let [thread (start-input-thread! app)]
-      (swap! app assoc :input-thread thread))
-    ;; Start resize detection thread
-    (let [thread (start-resize-thread! app)]
-      (swap! app assoc :resize-thread thread))
-    ;; Register subscriptions
-    (when-let [sub-fn (:subscriptions @app)]
-      (let [unsub (sub-fn (fn [msg] (dispatch! app msg)))]
-        (swap! app assoc :unsub-fn unsub)))
-    ;; JVM shutdown hook for terminal restoration
-    (.addShutdownHook (Runtime/getRuntime)
-                      (Thread. (fn []
-                                 (try
-                                   (screen/stop-screen! screen)
-                                   (catch Exception _)))))
-    app))
-
-(defn stop!
-  "Stop the TUI application.
-   1. Remove render watcher
-   2. Unregister subscriptions
-   3. Stop input thread
-   4. Interrupt in-flight side-effect threads
-   5. Exit alternate screen
-
-   Safe to call multiple times."
-  [app]
-  (when (:running? @app)
-    (swap! app assoc :running? false)
-    ;; Remove render watcher to stop rendering
-    (remove-watch (:model-ref @app) ::render)
-    ;; Unsubscribe
-    (when-let [unsub (:unsub-fn @app)]
-      (try (unsub) (catch Exception _)))
-    ;; Stop input thread
-    (when-let [thread (:input-thread @app)]
-      (.interrupt thread))
-    ;; Stop resize thread
-    (when-let [thread (:resize-thread @app)]
-      (.interrupt thread))
-    ;; Interrupt all in-flight side-effect threads
-    (when-let [threads-atom (:effect-threads @app)]
-      (doseq [^Thread t @threads-atom]
-        (try (.interrupt t) (catch Exception _)))
-      (reset! threads-atom #{}))
-    ;; Restore terminal
-    (try
-      (screen/stop-screen! (:screen @app))
-      (catch Exception _))
-    (swap! app assoc :unsub-fn nil :input-thread nil :resize-thread nil)))
-
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; Minimal app example
-  (def my-app
+  ;; Minimal rendering example (see runtime.clj for full app lifecycle)
+  (def sample-app
     (create-app
      {:init   (fn [] {:count 0})
-      :update (fn [model msg]
-                (case (first msg)
-                  :input (let [key (second msg)]
-                           (case key
-                             :key/j (update model :count inc)
-                             :key/k (update model :count dec)
-                             model))
-                  model))
+      :update (fn [model msg] model)
       :view   (fn [model [cols rows]]
                 (layout/text [cols rows]
                              (str "Count: " (:count model))))}))
 
-  (start! my-app)
-  ;; Press j/k to increment/decrement
-  (stop! my-app)
+  ;; Render manually for testing
+  (render! @sample-app)
 
   :leave-this-here)

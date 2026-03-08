@@ -92,30 +92,39 @@
       :else :pending)))
 
 (defn merge-state-status->behind?
-  "Map GitHub mergeStateStatus to a boolean indicating if the PR is behind main.
-   Values: BEHIND, CLEAN, DIRTY, BLOCKED, HAS_HOOKS, UNKNOWN, UNSTABLE."
+  "Map mergeStateStatus to a boolean indicating if the PR is behind main.
+   Accepts strings or keywords. Values: BEHIND, CLEAN, DIRTY, BLOCKED, HAS_HOOKS, UNKNOWN, UNSTABLE."
   [merge-state-status]
-  (let [s (some-> merge-state-status str str/upper-case)]
+  (let [s (some-> merge-state-status name str/upper-case)]
     (contains? #{"BEHIND" "DIRTY"} s)))
 
 (defn provider-pr->train-pr
   "Convert a GitHub provider PR map to a normalized TrainPR map.
    Adds :pr/repo when repo is provided.
-   Includes :pr/ci-checks for individual check results and
-   :pr/merge-state / :pr/behind-main? for branch-behind-main detection."
+   Includes :pr/ci-checks for individual check results,
+   :pr/merge-state / :pr/behind-main? for branch-behind-main detection,
+   and :pr/additions / :pr/deletions / :pr/changed-files-count for risk assessment."
   ([pr] (provider-pr->train-pr pr nil))
   ([pr repo]
-   (let [merge-state (:mergeStateStatus pr)]
-     (cond-> {:pr/number        (:number pr)
-              :pr/title         (:title pr)
-              :pr/url           (:url pr)
-              :pr/branch        (:headRefName pr)
-              :pr/status        (pr-status-from-provider pr)
-              :pr/merged-at     (:mergedAt pr)
-              :pr/ci-status     (check-rollup->ci-status (:statusCheckRollup pr))
-              :pr/ci-checks     (check-rollup->ci-checks (:statusCheckRollup pr))
-              :pr/merge-state   (some-> merge-state str str/upper-case)
-              :pr/behind-main?  (merge-state-status->behind? merge-state)}
+   (let [merge-state (:mergeStateStatus pr)
+         additions   (get pr :additions 0)
+         deletions   (get pr :deletions 0)
+         changed     (get pr :changedFiles 0)
+         author-login (get-in pr [:author :login] "")]
+     (cond-> {:pr/number             (:number pr)
+              :pr/title              (:title pr)
+              :pr/url                (:url pr)
+              :pr/branch             (:headRefName pr)
+              :pr/status             (pr-status-from-provider pr)
+              :pr/merged-at          (:mergedAt pr)
+              :pr/ci-status          (check-rollup->ci-status (:statusCheckRollup pr))
+              :pr/ci-checks          (check-rollup->ci-checks (:statusCheckRollup pr))
+              :pr/merge-state        (some-> merge-state str str/upper-case keyword)
+              :pr/behind-main?       (merge-state-status->behind? merge-state)
+              :pr/additions          additions
+              :pr/deletions          deletions
+              :pr/changed-files-count changed
+              :pr/author             author-login}
        repo (assoc :pr/repo repo)))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -124,13 +133,18 @@
 (defn gitlab-status
   [mr]
   (let [state (some-> (:state mr) str str/lower-case)
+        merged-at (:merged_at mr)
+        closed-at (:closed_at mr)
         draft? (or (true? (:draft mr))
                    (true? (:work_in_progress mr))
                    (str/starts-with? (str/lower-case (or (:title mr) "")) "draft:"))
         merge-status (some-> (:merge_status mr) str str/lower-case)
         conflicts? (true? (:has_conflicts mr))]
     (cond
+      ;; merged_at is definitive — catches cases where state lags behind
+      (some? merged-at) :merged
       (= "merged" state) :merged
+      (some? closed-at) :closed
       (not= "opened" state) :closed
       draft? :draft
       conflicts? :changes-requested
@@ -149,16 +163,53 @@
       ("running" "pending" "created" "preparing" "waiting_for_resource") :running
       :pending)))
 
+(defn gitlab-merge-state
+  "Map GitLab merge_status to a keyword merge state (GitHub parity)."
+  [mr]
+  (let [ms (some-> (:merge_status mr) str str/lower-case)]
+    (case ms
+      ("can_be_merged" "mergeable") :CLEAN
+      "cannot_be_merged"            :DIRTY
+      "unchecked"                   :UNKNOWN
+      "checking"                    :UNKNOWN
+      nil)))
+
+(defn gitlab-behind-main?
+  "Estimate if a GitLab MR is behind the target branch.
+   GitLab signals this via merge_status and has_conflicts."
+  [mr]
+  (let [ms (some-> (:merge_status mr) str str/lower-case)]
+    (or (true? (:has_conflicts mr))
+        (= "cannot_be_merged" ms))))
+
 (defn gitlab-mr->train-pr
-  "Convert a GitLab MR map to a normalized TrainPR map."
+  "Convert a GitLab MR map to a normalized TrainPR map.
+   Extracts all available fields from the MR list response including
+   author, merge state, timestamps, and diff stats (when enriched)."
   [mr repo]
-  {:pr/number    (:iid mr)
-   :pr/title     (:title mr)
-   :pr/url       (:web_url mr)
-   :pr/branch    (:source_branch mr)
-   :pr/status    (gitlab-status mr)
-   :pr/ci-status (gitlab-ci-status mr)
-   :pr/repo      repo})
+  (let [author-login (or (get-in mr [:author :username]) "")
+        changes      (:changes_count mr)
+        ;; diff stats are only present when enriched via single-MR fetch
+        additions    (:additions mr)
+        deletions    (:deletions mr)]
+    {:pr/number              (:iid mr)
+     :pr/title               (:title mr)
+     :pr/url                 (:web_url mr)
+     :pr/branch              (:source_branch mr)
+     :pr/status              (gitlab-status mr)
+     :pr/ci-status           (gitlab-ci-status mr)
+     :pr/repo                repo
+     :pr/author              author-login
+     :pr/merged-at           (:merged_at mr)
+     :pr/merge-state         (gitlab-merge-state mr)
+     :pr/behind-main?        (gitlab-behind-main? mr)
+     :pr/additions           (or additions 0)
+     :pr/deletions           (or deletions 0)
+     :pr/changed-files-count (if changes
+                               (if (string? changes)
+                                 (try (Integer/parseInt changes) (catch Exception _ 0))
+                                 (int changes))
+                               0)}))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
