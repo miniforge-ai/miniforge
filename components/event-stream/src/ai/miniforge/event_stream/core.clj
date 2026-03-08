@@ -185,7 +185,9 @@
           (:duration-ms result) (assoc :phase/duration-ms (:duration-ms result))
           (:artifacts result) (assoc :phase/artifacts (:artifacts result))
           (:error result) (assoc :phase/error (:error result))
-          (:redirect-to result) (assoc :phase/redirect-to (:redirect-to result))))))
+          (:redirect-to result) (assoc :phase/redirect-to (:redirect-to result))
+          (:tokens result) (assoc :phase/tokens (:tokens result))
+          (:cost-usd result) (assoc :phase/cost-usd (:cost-usd result))))))
 
 (defn agent-chunk [stream workflow-id agent-id delta & [done?]]
   (-> (create-envelope stream :agent/chunk workflow-id
@@ -199,11 +201,13 @@
       (assoc :agent/id agent-id
              :status/type status-type)))
 
-(defn workflow-completed [stream workflow-id status & [duration-ms]]
+(defn workflow-completed [stream workflow-id status & [duration-ms opts]]
   (-> (create-envelope stream :workflow/completed workflow-id
                        (str "Workflow " (name status)))
       (assoc :workflow/status status)
-      (cond-> duration-ms (assoc :workflow/duration-ms duration-ms))))
+      (cond-> duration-ms (assoc :workflow/duration-ms duration-ms)
+              (:tokens opts) (assoc :workflow/tokens (:tokens opts))
+              (:cost-usd opts) (assoc :workflow/cost-usd (:cost-usd opts)))))
 
 (defn workflow-failed [stream workflow-id error]
   (let [;; Handle anomaly maps, Throwables, and plain error maps

@@ -45,9 +45,14 @@
     (is (= :reviewing (status/pr-status-from-provider
                         {:state "OPEN" :isDraft false :reviewDecision "REVIEW_REQUIRED"}))))
 
-  (testing "Closed/merged PR"
-    (is (= :closed (status/pr-status-from-provider
+  (testing "Merged PR"
+    (is (= :merged (status/pr-status-from-provider
                      {:state "MERGED" :isDraft false :reviewDecision nil})))
+    (is (= :merged (status/pr-status-from-provider
+                     {:state "CLOSED" :mergedAt "2026-03-06T00:00:00Z"
+                      :isDraft false :reviewDecision nil}))))
+
+  (testing "Closed PR"
     (is (= :closed (status/pr-status-from-provider
                      {:state "CLOSED" :isDraft false :reviewDecision nil})))))
 
@@ -104,6 +109,7 @@
               :url "https://github.com/owner/repo/pull/42"
               :headRefName "fix-auth"
               :state "OPEN"
+              :mergedAt nil
               :isDraft false
               :reviewDecision "APPROVED"
               :statusCheckRollup [{:name "lint" :conclusion "SUCCESS"}]
@@ -121,6 +127,15 @@
       (is (= "lint" (:name (first (:pr/ci-checks result)))))
       (is (= "CLEAN" (:pr/merge-state result)))
       (is (false? (:pr/behind-main? result)))))
+
+  (testing "Merged PR retains merged state"
+    (let [result (status/provider-pr->train-pr
+                  {:number 7
+                   :title "Done"
+                   :state "CLOSED"
+                   :mergedAt "2026-03-06T00:00:00Z"})]
+      (is (= :merged (:pr/status result)))
+      (is (= "2026-03-06T00:00:00Z" (:pr/merged-at result)))))
 
   (testing "Behind main PR"
     (let [result (status/provider-pr->train-pr
@@ -154,4 +169,18 @@
                                               :draft true :source_branch "wip"
                                               :web_url "https://gl.com/x/y/-/merge_requests/1"}
                                              "gitlab:x/y")]
-      (is (= :draft (:pr/status result))))))
+      (is (= :draft (:pr/status result)))))
+
+  (testing "Merged MR maps to :merged not :closed"
+    (let [result (status/gitlab-mr->train-pr {:iid 10 :title "Done MR" :state "merged"
+                                              :source_branch "feat"
+                                              :web_url "https://gl.com/x/y/-/merge_requests/10"}
+                                             "gitlab:x/y")]
+      (is (= :merged (:pr/status result)))))
+
+  (testing "Closed MR remains :closed"
+    (let [result (status/gitlab-mr->train-pr {:iid 11 :title "Closed MR" :state "closed"
+                                              :source_branch "old"
+                                              :web_url "https://gl.com/x/y/-/merge_requests/11"}
+                                             "gitlab:x/y")]
+      (is (= :closed (:pr/status result))))))

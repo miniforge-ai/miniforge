@@ -86,30 +86,57 @@
       (into [] (keep-indexed #(when (contains? fi %1) %2)) prs)
       prs)))
 
+(defn empty-workflow-detail
+  [workflow-id]
+  {:workflow-id workflow-id
+   :phases []
+   :current-phase nil
+   :current-agent nil
+   :agent-output ""
+   :evidence nil
+   :artifacts []
+   :expanded-nodes #{}
+   :focused-pane 0
+   :selected-pr nil
+   :pr-readiness nil
+   :pr-risk nil
+   :selected-train nil
+   :duration-ms nil
+   :error nil})
+
+(defn workflow-row->detail
+  [wf]
+  (merge (empty-workflow-detail (:id wf))
+         {:current-phase (:phase wf)
+          :phases (if-let [phase (:phase wf)]
+                    [{:phase phase
+                      :status (case (:status wf)
+                                :failed :failed
+                                :success :success
+                                :completed :success
+                                :running)}]
+                    [])
+          :current-agent (when-let [[agent entry] (first (:agents wf))]
+                           (assoc entry :agent agent))
+          :evidence (when (seq (:gate-results wf))
+                      {:validation {:results (:gate-results wf)}})
+          :duration-ms (:duration-ms wf)
+          :error (:error wf)}))
+
+(defn workflow-detail-context
+  "Build detail context from the workflow row and any snapshot data already
+   stored on the row."
+  [wf]
+  (merge (workflow-row->detail wf)
+         (or (:detail-snapshot wf) {})
+         {:workflow-id (:id wf)}))
+
 (defn enter-workflow-detail [model]
   (let [raw-idx (raw-workflow-index model (:selected-idx model))]
     (if-let [wf (when raw-idx (get (:workflows model) raw-idx))]
       (-> model
           (assoc :view :workflow-detail)
-          ;; Reset detail, seeding from existing workflow row data
-          (assoc :detail {:workflow-id    (:id wf)
-                          :phases         (if-let [p (:phase wf)]
-                                            [{:phase p :status (if (= :failed (:status wf))
-                                                                 :failed :running)}]
-                                            [])
-                          :current-agent  (when-let [[agent-kw entry] (first (:agents wf))]
-                                            (assoc entry :agent agent-kw))
-                          :agent-output   ""
-                          :evidence       (when (seq (:gate-results wf))
-                                            {:validation {:results (:gate-results wf)}})
-                          :artifacts      []
-                          :expanded-nodes #{}
-                          :focused-pane   0
-                          :selected-pr    nil
-                          :pr-readiness   nil
-                          :pr-risk        nil
-                          :selected-train nil
-                          :duration-ms    (:duration-ms wf)})
+          (assoc :detail (workflow-detail-context wf))
           (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil
                  :scroll-offset nil :search-matches [] :search-match-idx nil))
       model)))
@@ -259,7 +286,7 @@
       (if (and prev-idx (>= prev-idx 0))
         (let [wf (get workflows prev-idx)]
           (-> model
-              (assoc-in [:detail :workflow-id] (:id wf))
+              (assoc :detail (workflow-detail-context wf))
               (assoc :selected-idx 0)
               (assoc-in [:detail :expanded-nodes] #{})))
         model))
@@ -295,7 +322,7 @@
       (if (and next-idx (< next-idx (count workflows)))
         (let [wf (get workflows next-idx)]
           (-> model
-              (assoc-in [:detail :workflow-id] (:id wf))
+              (assoc :detail (workflow-detail-context wf))
               (assoc :selected-idx 0)
               (assoc-in [:detail :expanded-nodes] #{})))
         model))

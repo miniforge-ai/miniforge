@@ -34,6 +34,13 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Task grouping
 
+(defn column-title
+  "Column title with item count."
+  [label cards]
+  (if (seq cards)
+    (str label " (" (count cards) ")")
+    label))
+
 (defn group-tasks-by-status
   "Group workflow tasks into kanban columns."
   [workflows]
@@ -41,22 +48,28 @@
         blocked (filterv #(= :blocked (:status %)) all-wfs)
         pending (filterv #(= :pending (:status %)) all-wfs)
         running (filterv #(= :running (:status %)) all-wfs)
-        done (filterv #(#{:success :completed} (:status %)) all-wfs)
-        failed (filterv #(= :failed (:status %)) all-wfs)]
-    [{:title "BLOCKED"
+        stale   (filterv #(= :stale (:status %)) all-wfs)
+        done    (filterv #(#{:success :completed} (:status %)) all-wfs)
+        failed  (filterv #(= :failed (:status %)) all-wfs)
+        done-cards (vec (concat
+                         (mapv (fn [wf] {:label (:name wf) :status :success}) done)
+                         (mapv (fn [wf] {:label (:name wf) :status :failed}) failed)
+                         (mapv (fn [wf] {:label (:name wf) :status :stale}) stale)))
+        blocked-cards (mapv (fn [wf] {:label (:name wf) :status :blocked}) blocked)
+        pending-cards (mapv (fn [wf] {:label (:name wf) :status :pending}) pending)
+        running-cards (mapv (fn [wf] {:label (:name wf) :status :running}) running)]
+    [{:title (column-title "BLOCKED" blocked-cards)
       :color :red
-      :cards (mapv (fn [wf] {:label (:name wf) :status :blocked}) blocked)}
-     {:title "PENDING"
+      :cards blocked-cards}
+     {:title (column-title "PENDING" pending-cards)
       :color :yellow
-      :cards (mapv (fn [wf] {:label (:name wf) :status :pending}) pending)}
-     {:title "RUNNING"
+      :cards pending-cards}
+     {:title (column-title "RUNNING" running-cards)
       :color :cyan
-      :cards (mapv (fn [wf] {:label (:name wf) :status :running}) running)}
-     {:title "DONE"
+      :cards running-cards}
+     {:title (column-title "DONE" done-cards)
       :color :green
-      :cards (concat
-              (mapv (fn [wf] {:label (:name wf) :status :success}) done)
-              (mapv (fn [wf] {:label (:name wf) :status :failed}) failed))}]))
+      :cards done-cards}]))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Rendering

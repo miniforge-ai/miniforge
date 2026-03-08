@@ -97,9 +97,11 @@
     (let [result (pr-sync/add-repo! (str/trim args))]
       (if (pr-sync/succeeded? result)
         (-> (with-fleet-repos model (:repos result))
+            (cond-> (:added? result)
+              (assoc :side-effect (effect/sync-prs)))
             (assoc :flash-message
                    (if (:added? result)
-                     (str "Added " (:repo result) " to fleet")
+                     (str "Added " (:repo result) " to fleet. Syncing PRs...")
                      (str (:repo result) " already in fleet"))))
         (assoc model :flash-message (str "Error: " (:error result)))))))
 
@@ -109,9 +111,11 @@
     (let [result (pr-sync/remove-repo! (str/trim args))]
       (if (pr-sync/succeeded? result)
         (-> (with-fleet-repos model (:repos result))
+            (cond-> (:removed? result)
+              (assoc :side-effect (effect/sync-prs)))
             (assoc :flash-message
                    (if (:removed? result)
-                     (str "Removed " (:repo result) " from fleet")
+                     (str "Removed " (:repo result) " from fleet. Syncing PRs...")
                      (str (:repo result) " not in fleet"))))
         (assoc model :flash-message (str "Error: " (:error result)))))))
 
@@ -323,21 +327,22 @@
                        sel/clear-selection)
         removed (:removed result)
         failures (count (:errors result))]
-    (assoc next-model
-           :flash-message
-           (cond
-             (zero? (count targets))
-             "No repositories selected for removal."
+    (cond-> (assoc next-model
+                    :flash-message
+                    (cond
+                      (zero? (count targets))
+                      "No repositories selected for removal."
 
-             (and (pos? removed) (zero? failures))
-             (str "Removed " removed " repo(s) from fleet")
+                      (and (pos? removed) (zero? failures))
+                      (str "Removed " removed " repo(s) from fleet. Syncing PRs...")
 
-             (and (zero? removed) (pos? failures))
-             (str "Failed to remove selected repos: "
-                  (str/join "; " (:errors result)))
+                      (and (zero? removed) (pos? failures))
+                      (str "Failed to remove selected repos: "
+                           (str/join "; " (:errors result)))
 
-             :else
-             (str "Removed " removed " repo(s), " failures " failed")))))
+                      :else
+                      (str "Removed " removed " repo(s), " failures " failed. Syncing PRs...")))
+      (pos? removed) (assoc :side-effect (effect/sync-prs)))))
 
 (defn execute-confirmed-action
   "Execute the action stored in :confirm after user presses 'y'.

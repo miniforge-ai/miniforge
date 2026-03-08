@@ -42,13 +42,18 @@
   (if (empty? prs)
     (layout/text [cols rows] "  No PRs in this train."
                  {:fg :default})
-    (layout/table [cols rows]
-      {:columns [{:key :order :header "#" :width 4}
-                 {:key :title :header "PR Title" :width (max 10 (- cols 30))}
-                 {:key :readiness :header "Ready" :width 8}]
-       :data (mapv format-pr-row
-               (sort-by :pr/merge-order prs))
-       :selected-row selected})))
+    (let [visible-count (max 0 (- rows 2))
+          offset (let [sel (or selected 0)]
+                   (if (<= (inc sel) visible-count) 0
+                       (inc (- sel visible-count))))]
+      (layout/table [cols rows]
+        {:columns [{:key :order :header "#" :width 4}
+                   {:key :title :header "PR Title" :width (max 10 (- cols 30))}
+                   {:key :readiness :header "Ready" :width 8}]
+         :data (mapv format-pr-row
+                 (sort-by :pr/merge-order prs))
+         :selected-row selected
+         :offset offset}))))
 
 (defn render-footer [[cols rows]]
   (layout/text [cols rows]

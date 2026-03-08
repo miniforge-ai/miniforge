@@ -295,11 +295,13 @@
    - workflow-id: UUID of the workflow
    - status: Keyword status (:success, :failure, :cancelled)
    - duration-ms: Optional total workflow duration in milliseconds
+   - opts: Optional map with :tokens and :cost-usd
 
    Example:
-     (workflow-completed stream wf-id :success 120000)"
-  [stream workflow-id status & [duration-ms]]
-  (core/workflow-completed stream workflow-id status duration-ms))
+     (workflow-completed stream wf-id :success 120000)
+     (workflow-completed stream wf-id :success 120000 {:tokens 5000 :cost-usd 0.15})"
+  [stream workflow-id status & [duration-ms opts]]
+  (core/workflow-completed stream workflow-id status duration-ms opts))
 
 (defn workflow-failed
   "Create a workflow/failed event.

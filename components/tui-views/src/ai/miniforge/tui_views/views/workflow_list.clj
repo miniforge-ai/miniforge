@@ -67,18 +67,29 @@
   (layout/text [cols rows] " MINIFORGE │ Workflows"
                {:fg :cyan :bold? true}))
 
+(defn auto-scroll-offset
+  "Compute scroll offset so selected-idx is always visible within visible-count rows."
+  [selected-idx visible-count]
+  (let [sel (or selected-idx 0)]
+    (if (<= (inc sel) visible-count)
+      0
+      (inc (- sel visible-count)))))
+
 (defn render-table [workflows selected active-chain [cols rows]]
   (if (empty? workflows)
     (layout/text [cols rows] "  No active workflows. Waiting for events..."
                  {:fg :default})
-    (layout/table [cols rows]
-      {:columns [{:key :status-char :header "  " :width 2}
-                 {:key :name :header "Workflow" :width (max 10 (- cols 50))}
-                 {:key :phase :header "Phase" :width 12}
-                 {:key :progress-str :header "Progress" :width 20}
-                 {:key :agent-msg :header "Agent" :width 16}]
-       :data (mapv #(format-workflow-row % active-chain) workflows)
-       :selected-row selected})))
+    (let [visible-count (max 0 (- rows 2))
+          offset (auto-scroll-offset selected visible-count)]
+      (layout/table [cols rows]
+        {:columns [{:key :status-char :header "  " :width 2}
+                   {:key :name :header "Workflow" :width (max 10 (- cols 50))}
+                   {:key :phase :header "Phase" :width 12}
+                   {:key :progress-str :header "Progress" :width 20}
+                   {:key :agent-msg :header "Agent" :width 16}]
+         :data (mapv #(format-workflow-row % active-chain) workflows)
+         :selected-row selected
+         :offset offset}))))
 
 (defn render-footer [flash-message [cols rows]]
   (layout/text [cols rows]

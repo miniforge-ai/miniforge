@@ -76,6 +76,18 @@
       (is (util/view-is? m :workflow-detail))
       (is (= wf-id-1 (get-in m [:detail :workflow-id])))))
 
+  (testing "Workflow detail entry uses the row detail snapshot when present"
+    (let [m (-> (two-workflows)
+                (assoc-in [:workflows 0 :detail-snapshot]
+                          {:workflow-id wf-id-1
+                           :phases [{:phase :plan :status :success}
+                                    {:phase :implement :status :running}]
+                           :agent-output "streamed output"})
+                (assoc :view :workflow-list)
+                (update/update-model [:input :key/enter]))]
+      (is (= 2 (count (get-in m [:detail :phases]))))
+      (is (= "streamed output" (get-in m [:detail :agent-output])))))
+
   (testing "Escape from workflow-detail returns to workflow-list"
     (let [m (util/apply-updates
               (assoc (two-workflows) :view :workflow-list)
@@ -117,6 +129,12 @@
                [:msg/workflow-done {:workflow-id wf-id-1 :status :success}]])]
       (is (util/workflow-has-status? m 0 :success))
       (is (= 100 (get-in m [:workflows 0 :progress]))))))
+
+  (testing "Agent started message is routed through the root update"
+    (let [m (util/apply-updates (util/fresh-model)
+              [[:msg/workflow-added {:workflow-id wf-id-1 :name "test"}]
+               [:msg/agent-started {:workflow-id wf-id-1 :agent :planner}]])]
+      (is (= :started (get-in m [:workflows 0 :agents :planner :status])))))
 
 (deftest mode-switching-test
   (testing "Colon enters command mode"

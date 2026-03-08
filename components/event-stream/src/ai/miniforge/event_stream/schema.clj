@@ -82,6 +82,8 @@
    [:phase/duration-ms {:optional true} int?]
    [:phase/outcome {:optional true} [:enum :success :failure :skipped]]
    [:phase/artifacts {:optional true} [:vector uuid?]]
+   [:phase/tokens {:optional true} int?]
+   [:phase/cost-usd {:optional true} number?]
    [:message string?]])
 
 (def WorkflowCompleted
@@ -96,6 +98,8 @@
    [:workflow/status [:enum :success :failure :cancelled]]
    [:workflow/duration-ms {:optional true} int?]
    [:workflow/evidence-bundle-id {:optional true} uuid?]
+   [:workflow/tokens {:optional true} int?]
+   [:workflow/cost-usd {:optional true} number?]
    [:message string?]])
 
 (def WorkflowFailed

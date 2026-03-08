@@ -23,7 +23,9 @@
    Layer 2."
   (:require
    [ai.miniforge.tui-views.effect :as effect]
-   [ai.miniforge.tui-views.model :as model]))
+   [ai.miniforge.tui-views.model :as model]
+   [ai.miniforge.tui-views.persistence :as persistence]
+   [ai.miniforge.tui-views.update.filter :as filter]))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Event stream message handlers
@@ -42,6 +44,22 @@
   (if idx
     (update-in model [:workflows idx] update-fn)
     model))
+
+(defn update-workflow-snapshot
+  "Apply a persisted-detail event reducer to the workflow row snapshot."
+  [model idx workflow-id event]
+  (if idx
+    (update-in model [:workflows idx :detail-snapshot]
+               #(persistence/apply-detail-event (or % (persistence/empty-detail workflow-id))
+                                                event))
+    model))
+
+(defn upsert-workflow
+  "Insert a workflow row or merge it into the existing row with the same id."
+  [model workflow]
+  (if-let [idx (find-workflow-idx (:workflows model) (:id workflow))]
+    (assoc-in model [:workflows idx] (merge (get-in model [:workflows idx]) workflow))
+    (update model :workflows conj workflow)))
 
 (defn update-detail-if-active
   "Apply update-fn to detail if workflow-id matches active detail."
@@ -120,11 +138,15 @@
     model))
 
 (defn handle-workflow-added [model {:keys [workflow-id name spec]}]
-  (let [wf (model/make-workflow {:id workflow-id
-                                  :name (or name (:name spec))
-                                  :status :running})]
+  (let [event (persistence/workflow-started-event workflow-id spec)
+        wf (assoc (model/make-workflow {:id workflow-id
+                                        :name (or name (:name spec))
+                                        :status :running})
+                  :detail-snapshot (persistence/apply-detail-event
+                                    (persistence/empty-detail workflow-id)
+                                    event))]
     (-> model
-        (update :workflows conj wf)
+        (upsert-workflow wf)
         (link-chain-instance workflow-id)
         (update-detail-if-active workflow-id
           #(apply-evidence-intent % spec name))
@@ -133,6 +155,8 @@
 (defn handle-phase-changed [model {:keys [workflow-id phase]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
+        (update-workflow-snapshot idx workflow-id
+                                  (persistence/phase-started-event workflow-id phase))
         (apply-phase-change idx workflow-id phase)
         with-timestamp)))
 
@@ -148,9 +172,7 @@
 (defn normalize-artifact
   "Normalize an artifact entry, ensuring it has phase and required keys."
   [artifact phase]
-  (if (map? artifact)
-    (assoc artifact :phase phase)
-    {:id artifact :phase phase :type :unknown :name (str artifact)}))
+  (persistence/normalize-artifact artifact phase))
 
 (defn apply-phase-completion
   "Update detail model with phase completion data: status and artifacts."
@@ -162,10 +184,16 @@
                  (mapv #(normalize-artifact % phase) artifacts))
       model)))
 
-(defn handle-phase-done [model {:keys [workflow-id phase outcome artifacts duration-ms]}]
+(defn handle-phase-done [model {:keys [workflow-id phase outcome artifacts duration-ms
+                                       tokens cost-usd]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)
         phase-status (case outcome :success :success :failed :failed :success)]
     (-> model
+        (update-workflow-snapshot idx workflow-id
+                                  (persistence/phase-completed-event workflow-id phase outcome
+                                                                     artifacts duration-ms
+                                                                     {:tokens tokens
+                                                                      :cost-usd cost-usd}))
         (update-workflow-at idx #(update % :progress (fn [p] (min 100 (+ (or p 0) 20)))))
         (update-detail-if-active workflow-id
           #(apply-phase-completion % phase phase-status duration-ms artifacts))
@@ -174,6 +202,8 @@
 (defn handle-agent-status [model {:keys [workflow-id agent status message]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
+        (update-workflow-snapshot idx workflow-id
+                                  (persistence/agent-status-event workflow-id agent status message))
         (apply-agent-status-update idx workflow-id agent status message)
         with-timestamp)))
 
@@ -193,6 +223,9 @@
 
 (defn handle-agent-output [model {:keys [workflow-id delta]}]
   (-> model
+      (update-workflow-snapshot (find-workflow-idx (:workflows model) workflow-id)
+                                workflow-id
+                                (persistence/agent-chunk-event workflow-id delta))
       (update-detail-if-active workflow-id
         #(update-in % [:detail :agent-output] str delta))
       with-timestamp))
@@ -204,9 +237,15 @@
     evidence-bundle-id (assoc-in [:detail :evidence :bundle-id] evidence-bundle-id)
     duration-ms        (assoc-in [:detail :duration-ms] duration-ms)))
 
-(defn handle-workflow-done [model {:keys [workflow-id status duration-ms evidence-bundle-id]}]
+(defn handle-workflow-done [model {:keys [workflow-id status duration-ms evidence-bundle-id
+                                          tokens cost-usd]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
+        (update-workflow-snapshot idx workflow-id
+                                  (persistence/workflow-completed-event workflow-id status
+                                                                       duration-ms evidence-bundle-id
+                                                                       {:tokens tokens
+                                                                        :cost-usd cost-usd}))
         (update-workflow-at idx #(assoc % :status (or status :success) :progress 100
                                           :duration-ms duration-ms))
         (update-detail-if-active workflow-id
@@ -216,12 +255,17 @@
 (defn handle-workflow-failed [model {:keys [workflow-id error]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
+        (update-workflow-snapshot idx workflow-id
+                                  (persistence/workflow-failed-event workflow-id error))
         (update-workflow-at idx #(assoc % :status :failed :error error))
         with-timestamp)))
 
 (defn handle-gate-result [model {:keys [workflow-id gate passed?] :as payload}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)]
     (-> model
+        (update-workflow-snapshot idx workflow-id
+                                  (persistence/gate-event workflow-id gate passed?
+                                                          (:event/timestamp payload)))
         (apply-gate-result idx workflow-id gate passed? payload)
         with-timestamp)))
 
@@ -232,16 +276,24 @@
 
 (defn handle-tool-invoked [model {:keys [workflow-id agent tool]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)
+        agent-id (or agent :agent)
         status-message (str "Tool " (if tool (name tool) "unknown") " invoked")]
     (-> model
-        (apply-agent-status-update idx workflow-id (or agent :agent) :tool-running status-message)
+        (update-workflow-snapshot idx workflow-id
+                                  (persistence/agent-status-event workflow-id agent-id
+                                                                  :tool-running status-message))
+        (apply-agent-status-update idx workflow-id agent-id :tool-running status-message)
         with-timestamp)))
 
 (defn handle-tool-completed [model {:keys [workflow-id agent tool]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)
+        agent-id (or agent :agent)
         status-message (str "Tool " (if tool (name tool) "unknown") " completed")]
     (-> model
-        (apply-agent-status-update idx workflow-id (or agent :agent) :tool-completed status-message)
+        (update-workflow-snapshot idx workflow-id
+                                  (persistence/agent-status-event workflow-id agent-id
+                                                                  :tool-completed status-message))
+        (apply-agent-status-update idx workflow-id agent-id :tool-completed status-message)
         with-timestamp)))
 
 ;------------------------------------------------------------------------------ Layer 2b
@@ -316,11 +368,28 @@
 
 (defn handle-prs-synced
   "Handle result of a :sync-prs side effect.
-   Replaces :pr-items with freshly fetched data."
+   Replaces :pr-items with freshly fetched data.
+   Preserves the current selection position, clamping to new bounds."
   [model {:keys [pr-items]}]
-  (let [prs (or pr-items [])]
+  (let [prs (vec (or pr-items []))
+        active-pr (get-in model [:detail :selected-pr])
+        refreshed-pr (when active-pr
+                       (some #(when (and (= (:pr/repo %) (:pr/repo active-pr))
+                                         (= (:pr/number %) (:pr/number active-pr)))
+                                %)
+                             prs))
+        filtered-indices (when-let [query (:active-filter model)]
+                           (filter/compute-filter-indices prs query))
+        max-idx (max 0 (dec (if filtered-indices
+                              (count filtered-indices)
+                              (count prs))))
+        clamped-idx (min (or (:selected-idx model) 0) max-idx)]
     (-> model
-        (assoc :pr-items (vec prs))
+        (assoc :pr-items prs
+               :filtered-indices filtered-indices
+               :selected-idx clamped-idx)
+        (cond-> refreshed-pr
+          (assoc-in [:detail :selected-pr] refreshed-pr))
         (assoc :flash-message (str "Synced " (count prs) " PRs from "
                                    (count (distinct (map :pr/repo prs))) " repo(s)"))
         with-timestamp)))

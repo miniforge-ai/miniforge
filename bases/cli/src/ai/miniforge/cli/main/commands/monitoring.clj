@@ -116,7 +116,11 @@
       (try
         (let [start-standalone! (requiring-resolve 'ai.miniforge.tui-views.interface/start-standalone-tui!)]
           ;; Start standalone TUI (blocks until quit)
-          (start-standalone! opts))
+          (start-standalone! opts)
+          ;; Force immediate JVM exit — Clojure's agent thread pool
+          ;; keeps the process alive for ~60s otherwise
+          (shutdown-agents)
+          (System/exit 0))
         (catch Exception e
           (display/print-error (str "Failed to start TUI: " (.getMessage e)))
           (when (str/includes? (str e) "terminal")

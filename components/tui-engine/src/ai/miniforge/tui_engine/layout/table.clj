@@ -115,24 +115,29 @@
    - :columns - vector of {:key kw, :header str, :width int (opt), :align :left/:right/:center}
    - :rows    - vector of maps keyed by column :key
    - :selected-row - index of highlighted row (nil for none)
+   - :offset - number of rows to skip from the top of data (default 0)
    - :header-fg, :header-bg - Header style
    - :row-fg, :row-bg - Default row style
    - :selected-fg, :selected-bg - Selected row style
    - :separator-fg - Separator line color (defaults to header-fg)"
-  [[cols rows] & [{:keys [columns data selected-row
+  [[cols rows] & [{:keys [columns data selected-row offset
                            header-fg header-bg row-fg row-bg
                            selected-fg selected-bg separator-fg]
                     :or {header-fg :cyan header-bg :default
                          row-fg :default row-bg :default
-                         selected-fg :white selected-bg :blue}}]]
+                         selected-fg :white selected-bg :blue
+                         offset 0}}]]
   (let [col-widths (compute-col-widths columns cols)
         buffer (buf/make-buffer [cols rows])
         buffer (render-header-row buffer columns col-widths header-fg header-bg)
         buffer (render-separator buffer cols rows (or separator-fg header-fg))
-        visible-rows (take (max 0 (- rows 2)) (or data []))]
+        off (or offset 0)
+        visible-rows (take (max 0 (- rows 2)) (drop off (or data [])))
+        ;; Adjust selected-row to be relative to the visible window
+        adj-selected (when selected-row (- selected-row off))]
     (reduce (fn [b [row-idx row-data]]
               (render-data-row b row-idx row-data columns col-widths rows
-                               selected-row row-fg row-bg selected-fg selected-bg))
+                               adj-selected row-fg row-bg selected-fg selected-bg))
             buffer
             (map-indexed vector visible-rows))))
 

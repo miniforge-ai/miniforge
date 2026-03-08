@@ -27,6 +27,15 @@
       (is (= :running (:status (first (:workflows m)))))
       (is (some? (:last-updated m))))))
 
+(deftest handle-workflow-added-upserts-existing-row-test
+  (testing "workflow-added updates an existing row instead of duplicating it"
+    (let [wf-id (random-uuid)
+          m (-> (fresh)
+                (with-workflow wf-id :name "old-name")
+                (events/handle-workflow-added {:workflow-id wf-id :name "new-name" :spec nil}))]
+      (is (= 1 (count (:workflows m))))
+      (is (= "new-name" (get-in m [:workflows 0 :name]))))))
+
 (deftest handle-workflow-added-uses-spec-name-test
   (testing "uses spec name when name is nil"
     (let [m (events/handle-workflow-added (fresh)
@@ -221,6 +230,18 @@
           m (events/handle-prs-synced (fresh) {:pr-items prs})]
       (is (= 2 (count (:pr-items m))))
       (is (str/includes? (:flash-message m) "2 PRs")))))
+
+(deftest handle-prs-synced-refreshes-active-detail-and-filter-test
+  (testing "sync updates the active PR detail and recomputes an active filter"
+    (let [old-pr {:pr/repo "r1" :pr/number 1 :pr/title "Old"}
+          new-pr {:pr/repo "r1" :pr/number 1 :pr/title "New" :pr/status :merged}
+          other-pr {:pr/repo "r2" :pr/number 2 :pr/title "Other" :pr/status :open}
+          m (-> (fresh)
+                (assoc :active-filter "status:merged")
+                (assoc-in [:detail :selected-pr] old-pr)
+                (events/handle-prs-synced {:pr-items [new-pr other-pr]}))]
+      (is (= "New" (get-in m [:detail :selected-pr :pr/title])))
+      (is (= #{0} (:filtered-indices m))))))
 
 (deftest handle-prs-synced-empty-test
   (testing "empty sync clears items"

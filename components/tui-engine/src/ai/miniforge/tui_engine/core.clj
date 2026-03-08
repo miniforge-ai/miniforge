@@ -238,6 +238,31 @@
     (.start thread)
     thread))
 
+(defn start-resize-thread!
+  "Start a daemon thread that checks for terminal size changes and forces
+   a re-render when the size changes. Checks every 250ms."
+  [app]
+  (let [last-size (atom nil)
+        thread (Thread.
+                (fn []
+                  (try
+                    (while (:running? @app)
+                      (try
+                        (Thread/sleep 250)
+                        (let [screen (:screen @app)
+                              size (screen/get-size screen)]
+                          (when (and size (not= size @last-size))
+                            (reset! last-size size)
+                            ;; Force re-render by dispatching a no-op tick
+                            (do-render! @app @(:model-ref @app))))
+                        (catch InterruptedException e (throw e))
+                        (catch Exception _)))
+                    (catch InterruptedException _))))]
+    (.setDaemon thread true)
+    (.setName thread "tui-resize-check")
+    (.start thread)
+    thread))
+
 ;------------------------------------------------------------------------------ Layer 6
 ;; Application lifecycle
 
@@ -261,6 +286,9 @@
     ;; Start input thread
     (let [thread (start-input-thread! app)]
       (swap! app assoc :input-thread thread))
+    ;; Start resize detection thread
+    (let [thread (start-resize-thread! app)]
+      (swap! app assoc :resize-thread thread))
     ;; Register subscriptions
     (when-let [sub-fn (:subscriptions @app)]
       (let [unsub (sub-fn (fn [msg] (dispatch! app msg)))]
@@ -293,6 +321,9 @@
     ;; Stop input thread
     (when-let [thread (:input-thread @app)]
       (.interrupt thread))
+    ;; Stop resize thread
+    (when-let [thread (:resize-thread @app)]
+      (.interrupt thread))
     ;; Interrupt all in-flight side-effect threads
     (when-let [threads-atom (:effect-threads @app)]
       (doseq [^Thread t @threads-atom]
@@ -302,7 +333,7 @@
     (try
       (screen/stop-screen! (:screen @app))
       (catch Exception _))
-    (swap! app assoc :unsub-fn nil :input-thread nil)))
+    (swap! app assoc :unsub-fn nil :input-thread nil :resize-thread nil)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
