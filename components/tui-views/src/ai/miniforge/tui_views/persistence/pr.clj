@@ -29,6 +29,7 @@
    [clojure.java.io :as io]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.persistence :as persistence]
+   [ai.miniforge.tui-views.persistence.pr-cache :as pr-cache]
    [ai.miniforge.pr-sync.interface :as pr-sync]
    [ai.miniforge.pr-train.interface :as pr-train]
    [ai.miniforge.policy-pack.interface :as policy-pack]))
@@ -125,6 +126,8 @@
 
 (defn load-pr-items-into-model
   "Load PRs from configured repos and merge into model.
+   Applies cached policy and risk analysis results to avoid re-running
+   expensive evaluations on startup.
 
    Arguments:
    - model - The TUI model
@@ -132,14 +135,23 @@
 
    Returns: Updated model with :pr-items populated."
   [model & [opts]]
-  (let [{:keys [prs error]} (load-pr-items opts)]
+  (let [{:keys [prs error]} (load-pr-items opts)
+        cache (pr-cache/read-cache)]
     (cond
       (seq prs)
-      (-> model
-          (assoc :pr-items (vec prs))
-          (assoc :last-updated (java.util.Date.))
-          (assoc :flash-message (str "Loaded " (count prs) " PRs from "
-                                     (count (distinct (map :pr/repo prs))) " repo(s)")))
+      (let [prs-with-cache (pr-cache/apply-cached-policy prs cache)
+            cached-risk (pr-cache/apply-cached-agent-risk prs cache)
+            cache-hits (count (filter :pr/policy prs-with-cache))
+            fresh (- (count prs-with-cache) cache-hits)]
+        (-> model
+            (assoc :pr-items (vec prs-with-cache))
+            (cond-> (seq cached-risk) (assoc :agent-risk cached-risk))
+            (assoc :last-updated (java.util.Date.))
+            (assoc :flash-message
+                   (str "Loaded " (count prs) " PRs from "
+                        (count (distinct (map :pr/repo prs))) " repo(s)"
+                        (when (pos? cache-hits)
+                          (str " (" cache-hits " cached, " fresh " need eval)"))))))
 
       error
       (assoc model :flash-message (str "PR sync failed: " error))

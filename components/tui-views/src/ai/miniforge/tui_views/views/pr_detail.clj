@@ -32,7 +32,7 @@
   (layout/text [cols rows]
     (str " MINIFORGE │ "
          (or (:pr/title pr) "PR Detail"))
-    {:fg :cyan :bold? true}))
+    {:fg [0 150 180] :bold? true}))
 
 (defn render-info-panel [pr [cols rows]]
   (layout/box [cols rows]

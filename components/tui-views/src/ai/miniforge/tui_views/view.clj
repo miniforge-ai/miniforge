@@ -98,27 +98,56 @@
       (layout/blit buf overlay x y))
     buf))
 
+(defn- confirm-item-label
+  "Format a confirmation item ID for display."
+  [id]
+  (cond
+    (and (vector? id) (= 2 (count id)))
+    (let [[repo num] id]
+      (str "  " repo " #" num))
+    (string? id) (str "  " id)
+    :else (str "  " id)))
+
 (defn overlay-confirm
-  "Add confirmation dialog centered on screen when confirming."
+  "Add confirmation dialog centered on screen showing affected items."
   [buf model _theme [cols rows]]
   (if-let [{:keys [action label ids]} (:confirm model)]
-    (let [msg (str label " " (count ids) " item(s)?")
-          hint "(y)es / (n)o"
-          box-w (min (+ (max (count msg) (count hint)) 4) (- cols 4))
-          box-h 5
+    (let [id-list (sort (map confirm-item-label ids))
+          max-show (min (count id-list) (- rows 8))
+          shown (take max-show id-list)
+          truncated? (> (count id-list) max-show)
+          header (str label " " (count ids) " item(s)?")
+          hint "  (Y)es  /  (C)ancel"
+          max-label-w (reduce max 0 (map count (cons header (cons hint shown))))
+          box-w (min (+ max-label-w 4) (- cols 4))
+          ;; 2 border + 1 header + items + 1 blank + 1 hint
+          box-h (+ 4 (count shown) (if truncated? 1 0))
           x-off (max 0 (quot (- cols box-w) 2))
           y-off (max 0 (quot (- rows box-h) 2))
+          content-h (- box-h 2) ;; inside borders
           overlay (layout/box [box-w box-h]
                     {:title (str " " (name action) " ")
                      :border :single
-                     :fg :yellow
+                     :fg [200 160 0]
                      :content-fn
                      (fn [[ic _ir]]
-                       (-> (layout/make-buffer [ic 2])
-                           (layout/buf-put-string 1 0 msg
-                             {:fg :white :bg :default :bold? true})
-                           (layout/buf-put-string 1 1 hint
-                             {:fg :default :bg :default :bold? false})))})]
+                       (let [cbuf (layout/make-buffer [ic content-h])
+                             cbuf (layout/buf-put-string cbuf 1 0 header
+                                    {:fg :default :bg :default :bold? true})
+                             cbuf (reduce (fn [b [i lbl]]
+                                            (layout/buf-put-string b 1 (inc i) lbl
+                                              {:fg :default :bg :default :bold? false}))
+                                          cbuf
+                                          (map-indexed vector shown))
+                             trunc-row (inc (count shown))
+                             cbuf (if truncated?
+                                    (layout/buf-put-string cbuf 1 trunc-row
+                                      (str "  ... and " (- (count id-list) max-show) " more")
+                                      {:fg :default :bg :default :bold? false})
+                                    cbuf)
+                             hint-row (dec content-h)]
+                         (layout/buf-put-string cbuf 1 hint-row hint
+                           {:fg :default :bg :default :bold? false})))})]
       (layout/blit buf overlay x-off y-off))
     buf))
 
@@ -149,7 +178,7 @@
    model -> [cols rows] -> cell-buffer"
   [model [cols rows]]
   (if (< rows 4)
-    (layout/text [cols rows] "Terminal too small" {:fg :red})
+    (layout/text [cols rows] "Terminal too small" {:fg [220 50 40]})
     (let [theme (engine/get-theme (:theme model))
           model (assoc model :resolved-theme theme)
           cmd-active? (not= :normal (:mode model))

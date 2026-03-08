@@ -101,7 +101,8 @@
 
   (poll-input [_]
     (when-let [key (.pollInput screen)]
-      (let [kind (.getKeyType key)]
+      (let [kind (.getKeyType key)
+            shift? (.isShiftDown key)]
         (cond
           (= kind com.googlecode.lanterna.input.KeyType/Character)
           {:type :character :char (.getCharacter key)}
@@ -116,10 +117,10 @@
           {:type :backspace}
 
           (= kind com.googlecode.lanterna.input.KeyType/ArrowUp)
-          {:type :arrow-up}
+          {:type (if shift? :shift-arrow-up :arrow-up)}
 
           (= kind com.googlecode.lanterna.input.KeyType/ArrowDown)
-          {:type :arrow-down}
+          {:type (if shift? :shift-arrow-down :arrow-down)}
 
           (= kind com.googlecode.lanterna.input.KeyType/ArrowLeft)
           {:type :arrow-left}

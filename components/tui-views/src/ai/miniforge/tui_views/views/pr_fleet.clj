@@ -32,7 +32,8 @@
   (case risk
     :low    "LOW"
     :medium "MED"
-    :high   "HIGH"
+    :high        "HIGH"
+    :unevaluated "?"
     "---"))
 
 (defn readiness-bar [readiness cols]
@@ -51,7 +52,7 @@
 
 (defn render-title-bar [[cols rows]]
   (layout/text [cols rows] " MINIFORGE │ PR Fleet"
-               {:fg :cyan :bold? true}))
+               {:fg [0 150 180] :bold? true}))
 
 (defn auto-scroll-offset
   "Compute scroll offset so selected-idx is always visible within visible-count rows."

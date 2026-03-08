@@ -137,15 +137,17 @@
           {:columns resolved-cols :data data
            :selected-row (when selectable? selected)
            :offset offset
-           :header-fg (get theme :header :cyan)
+           :header-fg (get theme :header [0 150 180])
            :row-fg (get theme :row-fg :default)
            :row-bg (get theme :row-bg :default)
            :selected-fg (get theme :selected-fg :white)
            :selected-bg (get theme :selected-bg :blue)})))))
 
 (defn render-tree-widget
-  "Render a tree widget from spec."
-  [model _theme [cols rows] {:keys [data-fn]}]
+  "Render a tree widget from spec.
+   When a :pane-id is present in the widget config, selection highlight is
+   shown only when this pane is the focused pane (per-pane selection)."
+  [model _theme [cols rows] {:keys [data-fn pane-id]}]
   (let [project-fn (project/get-projection data-fn)
         nodes (project-fn (assoc model :_panel-cols cols))
         expanded (or (get-in model [:detail :expanded-nodes]) #{0})
@@ -158,11 +160,19 @@
                    (if (nil? user-offset)
                      max-scroll   ;; pinned to bottom
                      (min user-offset max-scroll)))
-                 0)]
+                 0)
+        ;; Per-pane selection: only show highlight on the focused pane
+        focused-pane (get-in model [:detail :focused-pane] 0)
+        focused? (or (nil? pane-id) (= pane-id focused-pane))
+        pane-sel (when pane-id
+                   (get-in model [:detail :pane-selections pane-id] 0))
+        selected (if focused?
+                   (or pane-sel (:selected-idx model))
+                   -1)]
     (widget/tree [cols rows]
       {:nodes nodes
        :expanded expanded
-       :selected (:selected-idx model)
+       :selected selected
        :scroll-offset scroll})))
 
 (defn render-kanban-widget
@@ -251,7 +261,7 @@
                          (ctx-fn model))
                        "MINIFORGE")]
             (layout/text [c r] text
-              {:fg (get theme :header :cyan) :bold? true}))
+              {:fg (get theme :header [0 150 180]) :bold? true}))
 
           :else
           (tab-bar/render model nil [c r])))

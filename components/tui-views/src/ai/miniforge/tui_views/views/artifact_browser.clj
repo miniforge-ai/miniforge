@@ -41,7 +41,7 @@
       ;; Title bar
       (fn [[c r]]
         (layout/text [c r] " MINIFORGE │ Artifact Browser"
-                     {:fg :cyan :bold? true}))
+                     {:fg [0 150 180] :bold? true}))
       ;; Content + footer
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)

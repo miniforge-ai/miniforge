@@ -83,9 +83,9 @@
         box-h (min (- rows 2) (+ (count lines) 2))]
     (layout/box [box-w box-h]
       {:title "Help — Key Bindings" :border :single
-       :fg :cyan
+       :fg [0 150 180]
        :content-fn
        (fn [[ic ir]]
          (layout/text [ic ir]
            (str/join "\n" (take ir lines))
-           {:fg :white}))})))
+           {:fg :default}))})))

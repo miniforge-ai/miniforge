@@ -40,11 +40,12 @@
 
   ;; Selection
   :key/space     :action/toggle-or-expand
+  :key/shift-up  :action/select-up
+  :key/shift-down :action/select-down
   :key/v         :action/enter-visual-mode
   :key/a         :action/add-or-select-all
   :key/d         :action/delete-or-noop
-  :key/c         :action/chat-or-clear
-  :key/C         :action/clear-selection
+  :key/c         :action/chat
 
   ;; Filter + Train
   :key/p         :action/enter-filter-mode

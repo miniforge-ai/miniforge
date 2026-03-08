@@ -37,8 +37,8 @@
      :selection-col? true}
     {:type :node/footer
      :segments
-     {:normal "j/k:nav  Enter:detail  Space:select  v:visual  1-0:views  /:search  ::cmd  q:quit"
-      :selected "{n} selected │ Space:toggle  v:visual  a:all  c:clear  :archive :delete :cancel"
+     {:normal "j/k:nav  Enter:detail  Space:select  Shift+↑↓:range  1-0:views  /:search  ::cmd  q:quit"
+      :selected "{n} selected │ Space:toggle  Shift+↑↓:range  v:visual  a:all  Esc:clear  :archive :delete :cancel"
       :visual "VISUAL │ j/k:extend  Space:toggle  Esc:exit  a:all"
       :filtered "FILTER [{n}] │ Space:select  a:all  v:visual  Esc:clear filter"}}]}}
 
@@ -53,8 +53,7 @@
      :columns [{:key :repo      :header "Repo"      :width 30}
                {:key :number   :header "PR"        :width 6}
                {:key :title    :header "Title"     :width :flex}
-               {:key :state    :header "State"     :width 7}
-               {:key :status   :header "Status"    :width 12}
+               {:key :status   :header "State"     :width 14}
                {:key :ready    :header "Readiness" :width 15}
                {:key :risk     :header "Risk"      :width 6}
                {:key :policy   :header "Policy"    :width 6}
@@ -63,8 +62,8 @@
      :selection-col? true}
     {:type :node/footer
      :segments
-     {:normal "j/k:nav  Enter:detail  O:open  Space:select  p:filter  c:chat  r:sync  /:search  ::cmd  Tab:views  q:quit"
-      :selected "{n} selected │ Space:toggle  v:visual  a:all  c:chat  C:clear  :review :remediate :decompose"
+     {:normal "j/k:nav  Enter:detail  O:open  Shift+↑↓:select  p:filter  c:chat  r:sync  /:search  ::cmd  Tab:views  q:quit"
+      :selected "{n} selected │ Shift+↑↓:range  v:visual  a:all  c:chat  Esc:clear  :approve :merge :review :reject :decompose"
       :visual "VISUAL │ j/k:extend  Space:toggle  Esc:exit  a:all"
       :filtered "FILTER [{n}] │ Space:select  a:all  v:visual  Esc:clear filter"}}]}}
 
@@ -82,7 +81,7 @@
        :children
        [{:type :node/box
          :title "Summary"
-         :child {:type :widget/tree :data-fn :project/pr-summary}}
+         :child {:type :widget/tree :data-fn :project/pr-summary :pane-id 0}}
         {:type :node/split-h
          :ratio 0.5
          :children
@@ -91,16 +90,16 @@
            :children
            [{:type :node/box
              :title "Readiness"
-             :child {:type :widget/tree :data-fn :project/readiness-tree}}
+             :child {:type :widget/tree :data-fn :project/readiness-tree :pane-id 1}}
             {:type :node/box
              :title "Risk"
-             :child {:type :widget/tree :data-fn :project/risk-tree}}]}
+             :child {:type :widget/tree :data-fn :project/risk-tree :pane-id 2}}]}
           {:type :node/box
            :title "Checks & Policy"
-           :child {:type :widget/tree :data-fn :project/gate-list}}]}]}
+           :child {:type :widget/tree :data-fn :project/gate-list :pane-id 3}}]}]}
       {:type :node/box
        :title "Agent"
-       :child {:type :widget/tree :data-fn :project/chat-messages}}]}
+       :child {:type :widget/tree :data-fn :project/chat-messages :pane-id 4}}]}
     {:type :node/footer
      :segments
      {:normal "Esc:back  O:open  c:chat  ←/→:prev/next  Tab:pane  q:quit"}}]}}
@@ -156,8 +155,8 @@
              :selection-col? true}}
     {:type :node/footer
      :segments
-     {:normal "j/k:navigate  Space:select  /:search  Tab:cycle  Esc:back  q:quit"
-      :selected "{n} selected │ Space:toggle  v:visual  a:all  c:clear"
+     {:normal "j/k:navigate  Space:select  Shift+↑↓:range  /:search  Tab:cycle  Esc:back  q:quit"
+      :selected "{n} selected │ Shift+↑↓:range  v:visual  a:all  Esc:clear"
       :visual "VISUAL │ j/k:extend  Space:toggle  Esc:exit  a:all"}}]}}
 
  :dag-kanban
@@ -208,6 +207,6 @@
      :selection-col? true}
     {:type :node/footer
      :segments
-     {:normal "j/k:nav  a:add  d:delete  Space:select  b:browse  f:fleet  r:sync  /:search  Tab:views  q:quit"
-      :selected "{n} selected │ d:delete  Space:toggle  v:visual  C:clear"
+     {:normal "j/k:nav  a:add  d:delete  Space:select  Shift+↑↓:range  b:browse  f:fleet  r:sync  /:search  Tab:views  q:quit"
+      :selected "{n} selected │ d:delete  Shift+↑↓:range  v:visual  Esc:clear"
       :visual "VISUAL │ j/k:extend  Space:toggle  Esc:exit"}}]}}}

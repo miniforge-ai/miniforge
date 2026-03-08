@@ -74,7 +74,7 @@
                       (when-let [phase (:phase wf)]
                         (str " │ " (name phase)))
                       metrics-str)
-                 {:fg :cyan :bold? true})))
+                 {:fg [0 150 180] :bold? true})))
 
 (defn render-phase-list [phases [cols rows]]
   (layout/box [cols rows]
@@ -102,7 +102,7 @@
          (widget/scrollable [ic ir]
            {:lines lines
             :offset offset
-            :fg :white})))}))
+            :fg :default})))}))
 
 (defn render-footer [[cols rows]]
   (layout/text [cols rows]

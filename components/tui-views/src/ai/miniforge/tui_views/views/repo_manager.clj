@@ -51,7 +51,7 @@
                    (source-label model) " — "
                    (count items) " repo(s)")]
     (layout/text [cols rows] label
-                 {:fg :cyan :bold? true})))
+                 {:fg [0 150 180] :bold? true})))
 
 (defn auto-scroll-offset
   "Compute scroll offset so selected-idx is always visible within visible-count rows."

@@ -115,7 +115,7 @@
 
 (defn render-title-bar [[cols rows]]
   (layout/text [cols rows] " MINIFORGE │ Workflows"
-               {:fg :cyan :bold? true}))
+               {:fg [0 150 180] :bold? true}))
 
 (defn auto-scroll-offset
   "Compute scroll offset so selected-idx is always visible within visible-count rows."
@@ -132,7 +132,7 @@
     ;; Section header — spans full width with dimmed color
     {:status-char ""
      :name (:label entry)
-     :name-fg :cyan
+     :name-fg [0 150 180]
      :phase ""
      :progress-str ""
      :agent-msg ""
@@ -202,7 +202,7 @@
             (layout/text [tc tr]
               (str " MINIFORGE │ Workflows"
                    (when search-active? (str " [" (count workflows) " matches]")))
-              {:fg :cyan :bold? true}))
+              {:fg [0 150 180] :bold? true}))
 
           render-content-area
           (fn [[c r]]

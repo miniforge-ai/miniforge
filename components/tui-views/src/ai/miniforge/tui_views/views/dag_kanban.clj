@@ -59,16 +59,16 @@
         pending-cards (mapv (fn [wf] {:label (:name wf) :status :pending}) pending)
         running-cards (mapv (fn [wf] {:label (:name wf) :status :running}) running)]
     [{:title (column-title "BLOCKED" blocked-cards)
-      :color :red
+      :color [220 50 40]
       :cards blocked-cards}
      {:title (column-title "PENDING" pending-cards)
-      :color :yellow
+      :color [200 160 0]
       :cards pending-cards}
      {:title (column-title "RUNNING" running-cards)
-      :color :cyan
+      :color [0 150 180]
       :cards running-cards}
      {:title (column-title "DONE" done-cards)
-      :color :green
+      :color [0 180 80]
       :cards done-cards}]))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -84,7 +84,7 @@
       ;; Title bar
       (fn [[c r]]
         (layout/text [c r] " MINIFORGE │ DAG Kanban"
-                     {:fg :cyan :bold? true}))
+                     {:fg [0 150 180] :bold? true}))
       ;; Content + footer
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)

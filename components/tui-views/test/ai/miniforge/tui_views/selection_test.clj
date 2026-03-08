@@ -112,11 +112,11 @@
                [:input {:key :key/a :char \a}]])]
       (is (util/selection-count-is? m 3))))
 
-  (testing "c clears all selections"
+  (testing "Esc clears all selections"
     (let [m (util/apply-updates (three-workflows)
               [[:input {:key :key/space :char \space}]
                [:input {:key :key/a :char \a}]
-               [:input {:key :key/c :char \c}]])]
+               [:input :key/escape]])]
       (is (util/selection-count-is? m 0)))))
 
 ;; ---------------------------------------------------------------------------

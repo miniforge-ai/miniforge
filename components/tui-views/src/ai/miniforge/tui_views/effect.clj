@@ -54,6 +54,11 @@
   [pr-id pr]
   {:type :evaluate-policy :pr-id pr-id :pr pr})
 
+(defn batch-evaluate-policy
+  "Evaluate policy for multiple PRs that don't have evaluation results."
+  [prs]
+  {:type :batch-evaluate-policy :prs prs})
+
 (defn create-train
   "Create a new merge train with the given name."
   [train-name]
@@ -83,6 +88,21 @@
   "Analyze a PR for decomposition into sub-PRs."
   [pr]
   {:type :decompose-pr :pr pr})
+
+(defn approve-prs
+  "Approve a set of PRs (post approval review on GitHub)."
+  [prs]
+  {:type :approve-prs :prs prs})
+
+(defn merge-prs
+  "Merge a set of PRs on GitHub."
+  [prs]
+  {:type :merge-prs :prs prs})
+
+(defn reject-prs
+  "Request changes on a set of PRs (post review with 'changes requested')."
+  [prs]
+  {:type :reject-prs :prs prs})
 
 (defn control-action
   "Create a control action effect to pause/resume/cancel a workflow.

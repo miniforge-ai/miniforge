@@ -57,24 +57,51 @@
   [view]
   (= :workflow-detail view))
 
+(defn- pane-detail-view?
+  "Views where j/k should navigate per-pane selection."
+  [view]
+  (= :pr-detail view))
+
 (defn navigate-up [model]
-  (if (scrollable-view? (:view model))
+  (cond
+    (scrollable-view? (:view model))
     (update model :scroll-offset #(max 0 (dec (or % 0))))
+
+    (pane-detail-view? (:view model))
+    (let [pane (get-in model [:detail :focused-pane] 0)]
+      (update-in model [:detail :pane-selections pane] #(max 0 (dec (or % 0)))))
+
+    :else
     (update model :selected-idx #(max 0 (dec %)))))
 
 (defn navigate-down [model]
-  (if (scrollable-view? (:view model))
+  (cond
+    (scrollable-view? (:view model))
     ;; scroll-offset upper bound is clamped at render time
     (update model :scroll-offset #(inc (or % 0)))
+
+    (pane-detail-view? (:view model))
+    (let [pane (get-in model [:detail :focused-pane] 0)]
+      (update-in model [:detail :pane-selections pane] #(inc (or % 0))))
+
+    :else
     (let [max-idx (max 0 (dec (list-count model)))]
       (update model :selected-idx #(min max-idx (inc %))))))
 
 (defn navigate-top [model]
-  (assoc model :selected-idx 0 :scroll-offset 0))
+  (if (pane-detail-view? (:view model))
+    (let [pane (get-in model [:detail :focused-pane] 0)]
+      (assoc-in model [:detail :pane-selections pane] 0))
+    (assoc model :selected-idx 0 :scroll-offset 0)))
 
 (defn navigate-bottom [model]
-  (let [max-idx (max 0 (dec (list-count model)))]
-    (assoc model :selected-idx max-idx)))
+  (if (pane-detail-view? (:view model))
+    ;; In detail views we don't know the exact item count per pane,
+    ;; so set a high value; the tree renderer clamps naturally.
+    (let [pane (get-in model [:detail :focused-pane] 0)]
+      (update-in model [:detail :pane-selections pane] (constantly 999)))
+    (let [max-idx (max 0 (dec (list-count model)))]
+      (assoc model :selected-idx max-idx))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; View navigation
@@ -148,6 +175,9 @@
           detail (-> model
                      (assoc :view :pr-detail)
                      (assoc-in [:detail :selected-pr] pr)
+                     (assoc-in [:detail :expanded-nodes] #{0})
+                     (assoc-in [:detail :focused-pane] 0)
+                     (assoc-in [:detail :pane-selections] {0 0, 1 0, 2 0, 3 0})
                      (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
           ;; Check if this PR already has a chat thread
           tk      (chat/chat-thread-key detail)
@@ -183,6 +213,9 @@
       (-> model
           (assoc :view :pr-detail)
           (assoc-in [:detail :selected-pr] pr)
+          (assoc-in [:detail :expanded-nodes] #{0})
+          (assoc-in [:detail :focused-pane] 0)
+          (assoc-in [:detail :pane-selections] {0 0, 1 0, 2 0, 3 0})
           (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
       model)))
 
@@ -244,16 +277,17 @@
 (defn cycle-pane
   "Cycle Tab focus between panes in multi-pane views.
    Views with multiple columns/panes define their pane count;
-   single-pane views are a no-op."
+   single-pane views are a no-op.
+   Saves the current pane's selected-idx and restores the next pane's."
   [model]
   (let [pane-count (case (:view model)
                      :workflow-detail 2   ;; phases | agent output
-                     :pr-detail       3   ;; readiness | risk | gates
+                     :pr-detail       5   ;; summary | readiness | risk | gates | chat
                      :dag-kanban      6   ;; 6 kanban columns
                      1)
-        current (get-in model [:detail :focused-pane] 0)]
-    (assoc-in model [:detail :focused-pane]
-              (mod (inc current) pane-count))))
+        current (get-in model [:detail :focused-pane] 0)
+        next-pane (mod (inc current) pane-count)]
+    (assoc-in model [:detail :focused-pane] next-pane)))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Detail screen navigation — sibling items + sub-view cycling
@@ -467,7 +501,7 @@
   [model]
   (let [pane-count (case (:view model)
                      :workflow-detail 2
-                     :pr-detail       3
+                     :pr-detail       5
                      :dag-kanban      6
                      1)
         current (get-in model [:detail :focused-pane] 0)]

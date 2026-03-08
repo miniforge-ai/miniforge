@@ -69,6 +69,25 @@
                             {:evaluation/passed? nil
                              :evaluation/error (.getMessage e)}))))
 
+(defn handle-batch-evaluate-policy
+  "Evaluate policy for multiple PRs in batch.
+   Returns a single :msg/review-completed message with all results,
+   reusing the existing review-completed handler to merge policy data."
+  [{:keys [prs]}]
+  (try
+    (let [packs (persistence-pr/load-policy-packs)]
+      (msg/review-completed
+       (mapv (fn [pr]
+               {:pr-id  [(:pr/repo pr) (:pr/number pr)]
+                :result (try
+                          (policy-pack/evaluate-external-pr packs pr)
+                          (catch Exception e
+                            {:evaluation/passed? nil
+                             :evaluation/error (.getMessage e)}))})
+             prs)))
+    (catch Exception e
+      (msg/review-completed []))))
+
 (defn handle-create-train [train-mgr {:keys [name description]
                                        :or {description ""}}]
   (try
@@ -128,6 +147,24 @@
   (msg/decomposition-started [(:pr/repo pr) (:pr/number pr)]
                              {:sub-prs []
                               :message "Decomposition analysis not yet wired"}))
+
+(defn handle-approve-prs [{:keys [prs]}]
+  ;; TODO: Wire to pr-lifecycle/approve-pr (GitHub API)
+  (msg/chat-action-result
+   {:success? false
+    :message (str "Approve " (count prs) " PR(s): not yet wired to GitHub API")}))
+
+(defn handle-merge-prs [{:keys [prs]}]
+  ;; TODO: Wire to pr-lifecycle/merge-pr (GitHub API)
+  (msg/chat-action-result
+   {:success? false
+    :message (str "Merge " (count prs) " PR(s): not yet wired to GitHub API")}))
+
+(defn handle-reject-prs [{:keys [prs]}]
+  ;; TODO: Wire to pr-lifecycle/request-changes (GitHub API)
+  (msg/chat-action-result
+   {:success? false
+    :message (str "Reject " (count prs) " PR(s): not yet wired to GitHub API")}))
 
 (defn handle-control-action [{:keys [action workflow-id]}]
   (let [commands-dir (io/file (System/getProperty "user.home")
@@ -382,10 +419,14 @@
     :browse-repos      (handle-browse-repos effect)
     :open-url          (handle-open-url effect)
     :evaluate-policy   (handle-evaluate-policy effect)
+    :batch-evaluate-policy (handle-batch-evaluate-policy effect)
     :create-train      (handle-create-train train-mgr effect)
     :add-to-train      (handle-add-to-train train-mgr effect)
     :merge-next        (handle-merge-next train-mgr effect)
+    :approve-prs       (handle-approve-prs effect)
+    :merge-prs         (handle-merge-prs effect)
     :review-prs        (handle-review-prs effect)
+    :reject-prs        (handle-reject-prs effect)
     :remediate-prs     (handle-remediate-prs effect)
     :decompose-pr      (handle-decompose-pr effect)
     :control-action    (handle-control-action effect)

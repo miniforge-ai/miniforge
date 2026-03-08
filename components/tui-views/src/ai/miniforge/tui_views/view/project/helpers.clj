@@ -86,7 +86,7 @@
          (format " %3d%%" pct))))
 
 (defn risk-label [level]
-  (case level :critical "CRIT" :high "high" :medium "med" :low "low" "?"))
+  (case level :critical "CRIT" :high "high" :medium "med" :low "low" :unevaluated "?" "?"))
 
 ;------------------------------------------------------------------------------ Layer 0c
 ;; Readiness + risk derivation (pure, from provider signals)
@@ -330,7 +330,7 @@
               header {:_header? true
                       :status-char ""
                       :name (str "── " (get bucket-labels bucket) " (" (count wfs) ") ")
-                      :name-fg :cyan
+                      :name-fg [0 150 180]
                       :phase ""
                       :time ""
                       :progress-str ""
@@ -410,7 +410,7 @@
                        (get-in pr [:change-size :deletions] 0))]
     {:ready?          (:readiness/ready? readiness)
      :state           (get readiness :readiness/state :unknown)
-     :risk-level      (get risk :risk/level :low)
+     :risk-level      (get risk :risk/level :unevaluated)
      :policy-pass?    (:evaluation/passed? policy)
      :policy-unknown? (nil? policy)
      :has-violations? (boolean (seq violations))
@@ -477,6 +477,9 @@
       (recommend-action :review "Awaiting review")
 
       ;; Ready — risk-gated merge
+      (and ready? (= :unevaluated risk-level))
+      (recommend-action :evaluate "Risk not yet assessed")
+
       (and ready? (#{:medium :high :critical} risk-level))
       (recommend-action :approve (str "Ready but " (name risk-level) " risk"))
 
@@ -539,11 +542,15 @@
   "Map normalized PR status keyword to human-readable GitHub-level state."
   [status]
   (case status
-    :closed  "closed"
-    :draft   "draft"
-    :merged  "merged"
-    (:approved :reviewing :changes-requested :open :merge-ready) "open"
-    "open"))
+    :closed             "closed"
+    :draft              "draft"
+    :merged             "merged"
+    :open               "open"
+    :approved           "approved"
+    :reviewing          "in review"
+    :changes-requested  "changes req"
+    :merge-ready        "merge ready"
+    (if (nil? status) "—" "open")))
 
 (defn wrap-text
   "Word-wrap a string to fit within max-width characters.

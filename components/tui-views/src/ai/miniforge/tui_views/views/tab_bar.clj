@@ -37,4 +37,4 @@
         label (get model/view-labels active-view "MINIFORGE")
         text (str " MINIFORGE │ " label
                   (when (seq context) (str " │ " context)))]
-    (layout/text [cols rows] text {:fg :cyan :bold? true})))
+    (layout/text [cols rows] text {:fg [0 150 180] :bold? true})))

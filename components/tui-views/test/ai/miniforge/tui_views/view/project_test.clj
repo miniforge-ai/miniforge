@@ -154,13 +154,13 @@
   (testing "Passed CI produces green header"
     (let [nodes (sut/ci-section-nodes :passed [])]
       (is (= 1 (count nodes)))
-      (is (= :green (:fg (first nodes))))
+      (is (= sut/status-pass (:fg (first nodes))))
       (is (.contains (:label (first nodes)) "passed")))))
 
 (deftest ci-section-nodes-failed
   (testing "Failed CI produces red header"
     (let [nodes (sut/ci-section-nodes :failed [])]
-      (is (= :red (:fg (first nodes)))))))
+      (is (= sut/status-fail (:fg (first nodes)))))))
 
 (deftest ci-section-nodes-with-checks
   (testing "Individual checks are appended as child nodes"
@@ -179,13 +179,13 @@
     (let [node (sut/behind-main-node true "DIRTY")]
       (is (.contains (:label node) "yes"))
       (is (.contains (:label node) "DIRTY"))
-      (is (= :red (:fg node))))))
+      (is (= sut/status-fail (:fg node))))))
 
 (deftest behind-main-node-not-behind
   (testing "Not behind → green node"
     (let [node (sut/behind-main-node false nil)]
       (is (.contains (:label node) "no"))
-      (is (= :green (:fg node))))))
+      (is (= sut/status-pass (:fg node))))))
 
 ;; ============================================================================
 ;; review-node
@@ -195,19 +195,19 @@
   (testing "Approved → green node"
     (let [node (sut/review-node :approved)]
       (is (.contains (:label node) "approved"))
-      (is (= :green (:fg node))))))
+      (is (= sut/status-pass (:fg node))))))
 
 (deftest review-node-changes-requested
   (testing "Changes requested → red node"
     (let [node (sut/review-node :changes-requested)]
       (is (.contains (:label node) "changes requested"))
-      (is (= :red (:fg node))))))
+      (is (= sut/status-fail (:fg node))))))
 
 (deftest review-node-reviewing
   (testing "Reviewing → yellow node"
     (let [node (sut/review-node :reviewing)]
       (is (.contains (:label node) "review required"))
-      (is (= :yellow (:fg node))))))
+      (is (= sut/status-warning (:fg node))))))
 
 (deftest review-node-draft
   (testing "Draft → no color"
@@ -219,7 +219,7 @@
   (testing "Unknown status → pending with yellow"
     (let [node (sut/review-node :unknown)]
       (is (.contains (:label node) "pending"))
-      (is (= :yellow (:fg node))))))
+      (is (= sut/status-warning (:fg node))))))
 
 ;; ============================================================================
 ;; gates-section-nodes
@@ -237,7 +237,7 @@
                  {:gate/id :test :gate/passed? true}]
           nodes (sut/gates-section-nodes gates)]
       (is (= 3 (count nodes)))
-      (is (= :green (:fg (first nodes))))
+      (is (= sut/status-pass (:fg (first nodes))))
       (is (.contains (:label (first nodes)) "2/2 passed")))))
 
 (deftest gates-section-nodes-some-failed
@@ -246,10 +246,10 @@
                  {:gate/id :test :gate/passed? false}]
           nodes (sut/gates-section-nodes gates)]
       (is (= 3 (count nodes)))
-      (is (= :yellow (:fg (first nodes))))
+      (is (= sut/status-warning (:fg (first nodes))))
       (is (.contains (:label (first nodes)) "1/2 passed"))
-      (is (= :green (:fg (second nodes))))
-      (is (= :red (:fg (nth nodes 2)))))))
+      (is (= sut/status-pass (:fg (second nodes))))
+      (is (= sut/status-fail (:fg (nth nodes 2)))))))
 
 ;; ============================================================================
 ;; packs-applied-nodes
@@ -302,7 +302,7 @@
           nodes (sut/violation-nodes violations)]
       (is (= 3 (count nodes)))
       (is (.contains (:label (first nodes)) "2"))
-      (is (= :red (:fg (second nodes))))
+      (is (= sut/status-fail (:fg (second nodes))))
       (is (.contains (:label (nth nodes 2)) "[auto-fix]")))))
 
 ;; ============================================================================

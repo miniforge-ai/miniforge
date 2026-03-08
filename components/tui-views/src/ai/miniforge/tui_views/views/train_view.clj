@@ -36,7 +36,7 @@
   (layout/text [cols rows]
     (str " MINIFORGE │ Train: "
          (or (:train/name train) "Release Train"))
-    {:fg :cyan :bold? true}))
+    {:fg [0 150 180] :bold? true}))
 
 (defn render-table [prs selected [cols rows]]
   (if (empty? prs)

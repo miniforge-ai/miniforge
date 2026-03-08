@@ -25,6 +25,7 @@
    [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.persistence :as persistence]
+   [ai.miniforge.tui-views.persistence.pr-cache :as pr-cache]
    [ai.miniforge.tui-views.update.filter :as filter]))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -436,8 +437,10 @@
    Preserves the current selection position, clamping to new bounds."
   [model {:keys [pr-items error]}]
   (let [wf-pr-idx (get model :workflow-pr-index {})
-        prs (mapv (partial annotate-pr-with-workflow wf-pr-idx)
-                  (or pr-items []))
+        cache (pr-cache/read-cache)
+        raw-prs (mapv (partial annotate-pr-with-workflow wf-pr-idx)
+                      (or pr-items []))
+        prs (pr-cache/apply-cached-policy raw-prs cache)
         active-pr (get-in model [:detail :selected-pr])
         refreshed-pr (when active-pr
                        (some #(when (pr-match? (:pr/repo active-pr)
@@ -468,14 +471,24 @@
                              :else
                              "No PRs found in fleet repos"))
                     with-timestamp)
+        ;; Apply cached agent-risk if model doesn't have any yet
+        cached-risk (when (empty? (:agent-risk model))
+                      (pr-cache/apply-cached-agent-risk prs cache))
+        updated (cond-> updated
+                  (seq cached-risk) (assoc :agent-risk cached-risk))
         pr-hash (hash (mapv #(select-keys % [:pr/repo :pr/number :pr/additions
                                               :pr/deletions :pr/status :pr/ci-status])
                             prs))]
-    (if (and (seq prs) (not= pr-hash (:agent-risk-hash model)))
-      (-> updated
-          (assoc :agent-risk-hash pr-hash)
-          (assoc :side-effect (effect/fleet-risk-triage (mapv pr-triage-summary prs))))
-      updated)))
+    (let [risk-changed? (and (seq prs) (not= pr-hash (:agent-risk-hash model)))
+          unevaluated-prs (filterv #(nil? (:pr/policy %)) prs)
+          effects (cond-> []
+                    risk-changed?
+                    (conj (effect/fleet-risk-triage (mapv pr-triage-summary prs)))
+                    (seq unevaluated-prs)
+                    (conj (effect/batch-evaluate-policy unevaluated-prs)))]
+      (cond-> updated
+        risk-changed?    (assoc :agent-risk-hash pr-hash)
+        (seq effects)    (assoc :side-effects effects)))))
 
 (defn merge-matching-pr
   "Merge updated fields into the PR matching [repo, number]; pass others through."
@@ -524,6 +537,8 @@
                        (= (:pr/number active-pr) number))
                 (assoc-in model [:detail :selected-pr :pr/policy] result)
                 model)]
+    ;; Persist to disk cache (async, non-blocking)
+    (pr-cache/persist-policy-result! pr-id result (:pr-items model))
     (-> model
         (assoc :flash-message
                (if (:evaluation/passed? result)
@@ -581,6 +596,9 @@
                           (:pr-items model []))
         passed (count (filter #(get-in % [:result :evaluation/passed?]) results))
         failed (- (count results) passed)]
+    ;; Persist all policy results to disk cache (async)
+    (doseq [{:keys [pr-id result]} results]
+      (pr-cache/persist-policy-result! pr-id result updated-prs))
     (-> model
         (assoc :pr-items updated-prs)
         (assoc :flash-message (str "Review complete: " passed " passed, " failed " with violations"))
@@ -705,6 +723,9 @@
     (-> model
         (assoc :flash-message (str "Risk triage: " error))
         with-timestamp)
-    (-> model
-        (assoc :agent-risk (assessments->risk-map assessments))
-        with-timestamp)))
+    (let [risk-map (assessments->risk-map assessments)]
+      ;; Persist to disk cache (async, non-blocking)
+      (pr-cache/persist-risk-triage! risk-map (:pr-items model))
+      (-> model
+          (assoc :agent-risk risk-map)
+          with-timestamp))))

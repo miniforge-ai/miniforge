@@ -103,6 +103,26 @@
         (nav/navigate-down))
     model))
 
+(defn select-down
+  "Select the item at cursor and move down. Shift+Arrow-Down behavior:
+   extends selection by one item downward (word-processor style)."
+  [model]
+  (if-let [id (current-item-id model)]
+    (-> model
+        (update :selected-ids (fnil conj #{}) id)
+        (nav/navigate-down))
+    model))
+
+(defn select-up
+  "Select the item at cursor and move up. Shift+Arrow-Up behavior:
+   extends selection by one item upward (word-processor style)."
+  [model]
+  (if-let [id (current-item-id model)]
+    (-> model
+        (update :selected-ids (fnil conj #{}) id)
+        (nav/navigate-up))
+    model))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Visual mode
 

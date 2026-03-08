@@ -209,10 +209,10 @@
     (sel/toggle-selection model)
     (nav/toggle-expand model)))
 
-(defn handle-chat-or-clear [model]
+(defn handle-chat [model]
   (if (#{:pr-fleet :pr-detail} (:view model))
     (chat/enter model)
-    (sel/clear-selection model)))
+    model))
 
 (defn handle-train-view [model]
   (if (:active-train-id model)
@@ -325,7 +325,8 @@
    :action/enter-filter-mode  mode/enter-filter-mode
    :action/next-search-match  nav/next-search-match
    :action/prev-search-match  nav/prev-search-match
-   :action/clear-selection    sel/clear-selection
+   :action/select-up          sel/select-up
+   :action/select-down        sel/select-down
    :action/evidence-view      nav-to-evidence
    :action/toggle-help        nav/toggle-help
    :action/quit               handle-quit})
@@ -335,7 +336,7 @@
   {:action/enter-or-confirm   handle-enter-or-confirm
    :action/escape-cascade     handle-escape-cascade
    :action/toggle-or-expand   handle-toggle-or-expand
-   :action/chat-or-clear      handle-chat-or-clear
+   :action/chat               handle-chat
    :action/train-view         handle-train-view
    :action/refresh-or-sync    handle-refresh-or-sync
    :action/sync               handle-sync
@@ -539,13 +540,14 @@
       ;; User input
       :input
       (if (:confirm model)
-        ;; Confirmation prompt active -- only y/n/escape accepted
+        ;; Confirmation prompt active -- Y(es) / C(ancel) / Esc
         (let [k (extract-key payload)]
           (case k
             :key/y     (-> model
                            (command/execute-confirmed-action)
                            (assoc :confirm nil))
             :key/n     (assoc model :confirm nil :flash-message "Cancelled")
+            :key/c     (assoc model :confirm nil :flash-message "Cancelled")
             :key/escape (assoc model :confirm nil :flash-message "Cancelled")
             model))
         ;; Normal input routing by mode
