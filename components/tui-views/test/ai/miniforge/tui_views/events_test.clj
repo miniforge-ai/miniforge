@@ -526,3 +526,89 @@
                 (events/handle-pr-removed {:pr/repo "r1" :pr/number 1}))]
       (is (= 1 (count (:pr-items m))))
       (is (= "r2" (get-in m [:pr-items 0 :pr/repo]))))))
+
+;; ---------------------------------------------------------------------------- PR sync with cached risk
+
+(deftest handle-prs-synced-applies-cached-risk-test
+  (testing "cached-risk is merged into model when agent-risk is empty"
+    (let [cached {["r1" 1] {:level :high :reason "risky"}}
+          m (events/handle-prs-synced (fresh)
+              {:pr-items [{:pr/repo "r1" :pr/number 1}]
+               :cached-risk cached})]
+      (is (= cached (:agent-risk m)))))
+
+  (testing "cached-risk is NOT applied when model already has agent-risk"
+    (let [existing {["r1" 1] {:level :low :reason "safe"}}
+          cached {["r1" 1] {:level :high :reason "risky"}}
+          m (-> (fresh)
+                (assoc :agent-risk existing)
+                (events/handle-prs-synced {:pr-items [{:pr/repo "r1" :pr/number 1}]
+                                           :cached-risk cached}))]
+      (is (= existing (:agent-risk m))))))
+
+(deftest handle-prs-synced-triggers-batch-policy-eval-test
+  (testing "unevaluated PRs trigger batch-evaluate-policy side-effect"
+    (let [prs [{:pr/repo "r1" :pr/number 1 :pr/title "t1"}
+               {:pr/repo "r2" :pr/number 2 :pr/title "t2" :pr/policy {:evaluation/passed? true}}]
+          m (events/handle-prs-synced (fresh) {:pr-items prs})]
+      ;; Should fire side-effects for risk triage and batch policy eval
+      (is (some? (:side-effects m)))
+      (is (some #(= :batch-evaluate-policy (:type %)) (:side-effects m))))))
+
+(deftest handle-prs-synced-triggers-risk-triage-test
+  (testing "new PRs trigger fleet-risk-triage side-effect"
+    (let [prs [{:pr/repo "r1" :pr/number 1 :pr/title "t1"}]
+          m (events/handle-prs-synced (fresh) {:pr-items prs})]
+      (is (some #(= :fleet-risk-triage (:type %)) (:side-effects m))))))
+
+(deftest handle-prs-synced-skips-triage-when-hash-unchanged-test
+  (testing "no risk triage when PR hash hasn't changed"
+    (let [prs [{:pr/repo "r1" :pr/number 1 :pr/title "t1" :pr/policy {:evaluation/passed? true}}]
+          ;; First sync — establishes the hash
+          m1 (events/handle-prs-synced (fresh) {:pr-items prs})
+          ;; Second sync — same PRs, hash unchanged
+          m2 (events/handle-prs-synced (dissoc m1 :side-effects :side-effect) {:pr-items prs})]
+      (is (nil? (some #(= :fleet-risk-triage (:type %)) (:side-effects m2)))))))
+
+(deftest handle-prs-synced-error-test
+  (testing "error payload shows error flash"
+    (let [m (events/handle-prs-synced (fresh) {:pr-items [] :error "API timeout"})]
+      (is (str/includes? (:flash-message m) "PR sync failed")))))
+
+;; ---------------------------------------------------------------------------- Policy cache side-effect
+
+(deftest handle-policy-evaluated-emits-cache-side-effect-test
+  (testing "policy evaluation emits cache-policy-result side-effect"
+    (let [m (-> (fresh)
+                (assoc :pr-items [{:pr/repo "r1" :pr/number 42}])
+                (events/handle-policy-evaluated
+                  {:pr-id ["r1" 42]
+                   :result {:evaluation/passed? true}}))]
+      (is (= :cache-policy-result (:type (:side-effect m))))
+      (is (= ["r1" 42] (:pr-id (:side-effect m)))))))
+
+;; ---------------------------------------------------------------------------- Fleet risk triage — cache side-effect
+
+(deftest handle-fleet-risk-triaged-emits-cache-side-effect-test
+  (testing "risk triage emits cache-risk-triage side-effect"
+    (let [m (events/handle-fleet-risk-triaged (fresh)
+              {:assessments [{:id ["r1" 1] :level "high" :reason "risky"}]})]
+      (is (= :cache-risk-triage (:type (:side-effect m)))))))
+
+;; ---------------------------------------------------------------------------- ensure-workflow
+
+(deftest ensure-workflow-test
+  (testing "adds placeholder workflow when id is unknown"
+    (let [wf-id (random-uuid)
+          m (events/ensure-workflow (fresh) wf-id)]
+      (is (= 1 (count (:workflows m))))
+      (is (= :running (:status (first (:workflows m)))))))
+
+  (testing "no-op when workflow already exists"
+    (let [wf-id (random-uuid)
+          m (-> (fresh) (with-workflow wf-id) (events/ensure-workflow wf-id))]
+      (is (= 1 (count (:workflows m))))))
+
+  (testing "no-op when workflow-id is nil"
+    (let [m (events/ensure-workflow (fresh) nil)]
+      (is (= 0 (count (:workflows m)))))))

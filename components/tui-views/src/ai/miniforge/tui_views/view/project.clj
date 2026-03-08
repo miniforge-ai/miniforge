@@ -34,12 +34,20 @@
    Layer 2: Projection and context registries."
   (:require
    [clojure.string :as str]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.palette :as palette]
    [ai.miniforge.tui-views.view.project.helpers :as helpers]
    [ai.miniforge.tui-views.view.project.trees :as trees]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Config — loaded once at namespace init
+
+(def ^:private size-display-config
+  "Change-size color thresholds from governance/risk.edn."
+  (get-in (config/load-governance-config :risk) [:change-size :display]
+          {:red 1000 :yellow 500 :green 200}))
+
 ;; Re-exports — external code refers to these via project/<fn>
 
 ;; helpers re-exports
@@ -184,12 +192,13 @@
                       (if (and (zero? adds) (zero? dels))
                         "—"
                         (str "+" adds "/-" dels)))
-       :ready-fg    (let [total (+ (get pr :pr/additions 0) (get pr :pr/deletions 0))]
+       :ready-fg    (let [total (+ (get pr :pr/additions 0) (get pr :pr/deletions 0))
+                          {:keys [red yellow green]} size-display-config]
                       (cond
-                        (> total 1000) palette/status-fail
-                        (> total 500)  palette/status-warning
-                        (> total 200)  nil
-                        :else          palette/status-pass))
+                        (> total red)    palette/status-fail
+                        (> total yellow) palette/status-warning
+                        (> total green)  nil
+                        :else            palette/status-pass))
        :risk        (helpers/risk-label display-risk)
        :risk-fg     (trees/risk-level-color display-risk)
        :policy      (helpers/policy-label policy)

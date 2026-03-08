@@ -11,7 +11,9 @@
           :medium   0.25}
 
  :change-size {:thresholds [1000 500 200 50]
-               :scores     [1.0  0.75 0.50 0.25]}
+               :scores     [1.0  0.75 0.50 0.25]
+               ;; TUI fleet table color thresholds for the Size column
+               :display    {:red 1000 :yellow 500 :green 200}}
 
  :dependency-fanout {:thresholds [5 3 1]
                      :scores     [1.0 0.75 0.50]

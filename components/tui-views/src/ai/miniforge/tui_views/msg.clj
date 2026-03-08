@@ -86,6 +86,9 @@
 (defn workflows-archived [result]
   [:msg/workflows-archived result])
 
+(defn workflow-detail-loaded [workflow-id detail]
+  [:msg/workflow-detail-loaded {:workflow-id workflow-id :detail detail}])
+
 ;------------------------------------------------------------------------------ Layer 0b
 ;; Event stream translation messages (from subscription.clj)
 

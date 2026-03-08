@@ -814,3 +814,81 @@
     (let [m (execute-command (util/fresh-model) "sync")]
       (is (= :sync-prs (:type (:side-effect m))))
       (is (str/includes? (:flash-message m) "Syncing")))))
+
+;; ---------------------------------------------------------------------------
+;; Workflow detail entry fires reload side-effect
+;; ---------------------------------------------------------------------------
+
+(deftest enter-workflow-detail-fires-reload-side-effect-test
+  (testing "entering workflow detail fires reload-workflow-detail side-effect"
+    (let [m (-> (two-workflows)
+                (assoc :view :workflow-list)
+                (update/update-model [:input :key/enter]))]
+      (is (util/view-is? m :workflow-detail))
+      (is (= :reload-workflow-detail (:type (:side-effect m))))
+      (is (= wf-id-1 (:workflow-id (:side-effect m)))))))
+
+;; ---------------------------------------------------------------------------
+;; :msg/workflow-detail-loaded merges data into model
+;; ---------------------------------------------------------------------------
+
+(deftest workflow-detail-loaded-test
+  (testing "merges loaded detail into active view"
+    (let [detail {:workflow-id wf-id-1
+                  :phases [{:phase :plan :status :success}
+                           {:phase :implement :status :running}]
+                  :agent-output "output text"
+                  :artifacts [{:id "a1" :type :file :name "f.clj" :phase :plan}]}
+          m (-> (two-workflows)
+                (assoc :view :workflow-detail)
+                (assoc-in [:detail :workflow-id] wf-id-1)
+                (update/update-model [:msg/workflow-detail-loaded
+                                      {:workflow-id wf-id-1 :detail detail}]))]
+      (is (= 2 (count (get-in m [:detail :phases]))))
+      (is (= "output text" (get-in m [:detail :agent-output])))
+      (is (= 1 (count (get-in m [:detail :artifacts]))))))
+
+  (testing "updates workflow row snapshot even when detail view is not active"
+    (let [detail {:workflow-id wf-id-1
+                  :phases [{:phase :verify :status :success}]}
+          m (-> (two-workflows)
+                (assoc :view :workflow-list)  ;; NOT in detail view
+                (update/update-model [:msg/workflow-detail-loaded
+                                      {:workflow-id wf-id-1 :detail detail}]))]
+      ;; Row snapshot should be updated for future detail entry
+      (is (= 1 (count (get-in m [:workflows 0 :detail-snapshot :phases]))))))
+
+  (testing "ignores detail-loaded for non-matching workflow-id"
+    (let [other-id (random-uuid)
+          m (-> (two-workflows)
+                (assoc :view :workflow-detail)
+                (assoc-in [:detail :workflow-id] wf-id-1)
+                (assoc-in [:detail :phases] [{:phase :plan :status :running}])
+                (update/update-model [:msg/workflow-detail-loaded
+                                      {:workflow-id other-id
+                                       :detail {:workflow-id other-id
+                                                :phases [{:phase :x :status :done}]}}]))]
+      ;; Active detail should be unchanged
+      (is (= 1 (count (get-in m [:detail :phases]))))
+      (is (= :plan (:phase (first (get-in m [:detail :phases]))))))))
+
+;; ---------------------------------------------------------------------------
+;; PR detail sibling navigation triggers auto-analysis
+;; ---------------------------------------------------------------------------
+
+(deftest pr-detail-right-arrow-triggers-side-effects-test
+  (testing "navigating to next PR in detail triggers policy eval + auto-analysis"
+    (let [pr-1 {:pr/repo "r1" :pr/number 1 :pr/title "PR One"}
+          pr-2 {:pr/repo "r1" :pr/number 2 :pr/title "PR Two"}
+          m (-> (util/fresh-model)
+                (assoc :view :pr-fleet)
+                (assoc :pr-items [pr-1 pr-2])
+                (update/update-model [:input :key/enter])    ;; enter pr-1 detail
+                ;; Clear side-effects from first enter
+                (dissoc :side-effects :side-effect)
+                (update/update-model [:input :key/right]))]   ;; → pr-2
+      (is (util/view-is? m :pr-detail))
+      (is (= "PR Two" (get-in m [:detail :selected-pr :pr/title])))
+      ;; Should fire effects for the new PR
+      (is (some? (:side-effects m)))
+      (is (some #(= :evaluate-policy (:type %)) (:side-effects m))))))

@@ -122,3 +122,9 @@
   "Persist fleet risk triage results to the disk cache."
   [risk-map prs]
   {:type :cache-risk-triage :risk-map risk-map :prs prs})
+
+(defn reload-workflow-detail
+  "Reload workflow detail from the event file on disk.
+   Used when entering detail view to ensure data is fresh."
+  [workflow-id]
+  {:type :reload-workflow-detail :workflow-id workflow-id})
