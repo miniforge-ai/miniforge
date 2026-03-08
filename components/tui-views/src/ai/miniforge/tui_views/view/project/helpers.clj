@@ -405,14 +405,17 @@
 
 (defn extract-pr-signals
   "Extract enriched signals from a PR for recommendation.
-   Returns a flat map of booleans/keywords for predicate use."
+   Returns a flat map of booleans/keywords for predicate use.
+   Merges derived state into enriched readiness (explain-readiness lacks :readiness/state)."
   [pr]
-  (let [readiness   (or (:pr/readiness pr) (derive-readiness pr))
-        risk        (or (:pr/risk pr) (derive-risk pr))
-        policy      (:pr/policy pr)
-        violations  (:evaluation/violations policy)
-        changes     (+ (get-in pr [:change-size :additions] 0)
-                       (get-in pr [:change-size :deletions] 0))]
+  (let [derived    (derive-readiness pr)
+        enriched   (:pr/readiness pr)
+        readiness  (if enriched (merge derived enriched) derived)
+        risk       (or (:pr/risk pr) (derive-risk pr))
+        policy     (:pr/policy pr)
+        violations (:evaluation/violations policy)
+        changes    (+ (get pr :pr/additions 0)
+                      (get pr :pr/deletions 0))]
     {:ready?          (:readiness/ready? readiness)
      :state           (get readiness :readiness/state :unknown)
      :risk-level      (get risk :risk/level :unevaluated)
