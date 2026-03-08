@@ -308,6 +308,46 @@
   (some (fn [[i wf]] (when (= (:id wf) wf-id) i))
         (map-indexed vector workflows)))
 
+(defn- switch-pr-detail
+  "Switch the PR detail view to a different PR.
+   Resets pane state, expanded nodes, and loads the correct chat thread.
+   Triggers auto-analysis if the PR has no existing chat thread."
+  [model pr]
+  (let [pr-id  [(:pr/repo pr) (:pr/number pr)]
+        base   (-> model
+                   (assoc-in [:detail :selected-pr] pr)
+                   (assoc-in [:detail :expanded-nodes] #{0})
+                   (pane/init-pane-state)
+                   (assoc :selected-idx 0))
+        tk     (chat/chat-thread-key base)
+        thread (get-in base [:chat-threads tk])
+        fresh? (or (nil? thread) (empty? (:messages thread)))
+        ;; Load existing thread into active :chat, or set up for auto-analysis
+        base   (if fresh?
+                 (-> base
+                     (assoc-in [:chat :messages]
+                               [{:role :user
+                                 :content "Briefly analyze this PR: risk, readiness, and key concerns. Suggest 2-3 actions."
+                                 :timestamp (java.util.Date.)}])
+                     (assoc-in [:chat :pending?] true)
+                     (assoc-in [:chat :pending-since] (System/currentTimeMillis))
+                     (assoc-in [:chat :context] (chat/pr-detail-context base))
+                     (assoc :chat-active-key tk))
+                 (-> base
+                     (assoc :chat (assoc thread :pending? false))
+                     (assoc :chat-active-key tk)))
+        effects (cond-> []
+                  (nil? (:pr/policy pr))
+                  (conj (effect/evaluate-policy pr-id pr))
+                  fresh?
+                  (conj (let [context (chat/pr-detail-context base)
+                              auto-msg "Briefly analyze this PR: risk, readiness, and key concerns. Suggest 2-3 actions."
+                              user-msg {:role :user :content auto-msg :timestamp (java.util.Date.)}]
+                          (effect/chat-send context auto-msg [user-msg]))))]
+    (cond-> base
+      (seq effects)
+      (assoc :side-effects effects))))
+
 (defn navigate-prev-item
   "Navigate to the previous item's detail view.
    In workflow detail/evidence/artifact-browser: show previous workflow.
@@ -335,10 +375,7 @@
                             (map-indexed vector prs))
           prev-idx (when current-idx (dec current-idx))]
       (if (and prev-idx (>= prev-idx 0))
-        (let [pr (get prs prev-idx)]
-          (-> model
-              (assoc-in [:detail :selected-pr] pr)
-              (assoc :selected-idx 0)))
+        (switch-pr-detail model (get prs prev-idx))
         model))
 
     ;; Non-detail views: no-op
@@ -371,10 +408,7 @@
                             (map-indexed vector prs))
           next-idx (when current-idx (inc current-idx))]
       (if (and next-idx (< next-idx (count prs)))
-        (let [pr (get prs next-idx)]
-          (-> model
-              (assoc-in [:detail :selected-pr] pr)
-              (assoc :selected-idx 0)))
+        (switch-pr-detail model (get prs next-idx))
         model))
 
     ;; Non-detail views: no-op
