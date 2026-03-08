@@ -35,6 +35,7 @@
   (:require
    [clojure.string :as str]
    [ai.miniforge.tui-views.model :as model]
+   [ai.miniforge.tui-views.palette :as palette]
    [ai.miniforge.tui-views.view.project.helpers :as helpers]
    [ai.miniforge.tui-views.view.project.trees :as trees]))
 
@@ -234,17 +235,17 @@
         in-review (filterv #(#{:ci-running :review-pending} (:status %)) all-wfs)
         merging   (filterv #(#{:ready-to-merge :merging} (:status %)) all-wfs)
         done      (filterv #(#{:merged :success :completed :failed :skipped} (:status %)) all-wfs)]
-    [{:title "BLOCKED" :color [220 50 40]
+    [{:title "BLOCKED" :color palette/status-fail
       :cards (mapv (fn [wf] {:label (:name wf) :status :blocked}) blocked)}
-     {:title "READY" :color [200 160 0]
+     {:title "READY" :color palette/status-warning
       :cards (mapv (fn [wf] {:label (:name wf) :status :ready}) ready)}
-     {:title "ACTIVE" :color [0 150 180]
+     {:title "ACTIVE" :color palette/status-info
       :cards (mapv (fn [wf] {:label (:name wf) :status :running}) active)}
      {:title "IN REVIEW" :color :magenta
       :cards (mapv (fn [wf] {:label (:name wf) :status :review}) in-review)}
      {:title "MERGING" :color :blue
       :cards (mapv (fn [wf] {:label (:name wf) :status :merging}) merging)}
-     {:title "DONE" :color [0 180 80]
+     {:title "DONE" :color palette/status-pass
       :cards (mapv (fn [wf] {:label (:name wf) :status (get wf :status :success)}) done)}]))
 
 (defn project-agent-output

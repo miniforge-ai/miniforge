@@ -34,6 +34,7 @@
    [ai.miniforge.tui-views.file-subscription :as file-subscription]
    [ai.miniforge.tui-views.persistence :as persistence]
    [ai.miniforge.tui-views.persistence.pr :as persistence-pr]
+   [ai.miniforge.tui-views.persistence.pr-cache :as pr-cache]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.policy-pack.interface :as policy-pack]
    [ai.miniforge.pr-train.interface :as pr-train]
@@ -44,8 +45,11 @@
 ;; Side-effect handlers — each returns [msg-type payload] or nil
 
 (defn handle-sync-prs [{:keys [state]}]
-  (let [{:keys [prs error]} (persistence-pr/load-pr-items (when state {:state state}))]
-    (msg/prs-synced (or prs []) error)))
+  (let [{:keys [prs error]} (persistence-pr/load-pr-items (when state {:state state}))
+        cache (pr-cache/read-cache)
+        prs-with-cache (pr-cache/apply-cached-policy (or prs []) cache)
+        cached-risk (pr-cache/apply-cached-agent-risk (or prs []) cache)]
+    (msg/prs-synced-with-cache prs-with-cache cached-risk error)))
 
 (defn handle-discover-repos [{:keys [owner]}]
   (msg/repos-discovered (persistence-pr/discover-repos owner)))
@@ -148,23 +152,13 @@
                              {:sub-prs []
                               :message "Decomposition analysis not yet wired"}))
 
-(defn handle-approve-prs [{:keys [prs]}]
-  ;; TODO: Wire to pr-lifecycle/approve-pr (GitHub API)
-  (msg/chat-action-result
-   {:success? false
-    :message (str "Approve " (count prs) " PR(s): not yet wired to GitHub API")}))
+(defn handle-cache-policy-result [{:keys [pr-id result prs]}]
+  (pr-cache/persist-policy-result! pr-id result prs)
+  nil)
 
-(defn handle-merge-prs [{:keys [prs]}]
-  ;; TODO: Wire to pr-lifecycle/merge-pr (GitHub API)
-  (msg/chat-action-result
-   {:success? false
-    :message (str "Merge " (count prs) " PR(s): not yet wired to GitHub API")}))
-
-(defn handle-reject-prs [{:keys [prs]}]
-  ;; TODO: Wire to pr-lifecycle/request-changes (GitHub API)
-  (msg/chat-action-result
-   {:success? false
-    :message (str "Reject " (count prs) " PR(s): not yet wired to GitHub API")}))
+(defn handle-cache-risk-triage [{:keys [risk-map prs]}]
+  (pr-cache/persist-risk-triage! risk-map prs)
+  nil)
 
 (defn handle-control-action [{:keys [action workflow-id]}]
   (let [commands-dir (io/file (System/getProperty "user.home")
@@ -423,11 +417,10 @@
     :create-train      (handle-create-train train-mgr effect)
     :add-to-train      (handle-add-to-train train-mgr effect)
     :merge-next        (handle-merge-next train-mgr effect)
-    :approve-prs       (handle-approve-prs effect)
-    :merge-prs         (handle-merge-prs effect)
     :review-prs        (handle-review-prs effect)
-    :reject-prs        (handle-reject-prs effect)
     :remediate-prs     (handle-remediate-prs effect)
+    :cache-policy-result (handle-cache-policy-result effect)
+    :cache-risk-triage   (handle-cache-risk-triage effect)
     :decompose-pr      (handle-decompose-pr effect)
     :control-action    (handle-control-action effect)
     :archive-workflows (handle-archive-workflows effect)

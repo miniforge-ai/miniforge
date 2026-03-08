@@ -24,6 +24,7 @@
    Layer 1: Composite tree builders that assemble node sequences."
   (:require
    [clojure.string :as str]
+   [ai.miniforge.tui-views.palette :as palette]
    [ai.miniforge.tui-views.view.project.helpers :as helpers]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -36,12 +37,11 @@
   ([label depth expandable?] {:label label :depth depth :expandable? expandable?})
   ([label depth expandable? fg] {:label label :depth depth :expandable? expandable? :fg fg}))
 
-;; Semantic status colors — fixed RGB values with good contrast on both
-;; light and dark terminal backgrounds (ANSI keywords are terminal-dependent)
-(def status-pass    [0 180 80])      ;; medium green
-(def status-fail    [220 50 40])     ;; medium red
-(def status-warning [200 160 0])     ;; darker yellow/gold
-(def status-info    [0 150 180])     ;; teal/darker cyan
+;; Re-export palette colors for backward compatibility (tests reference sut/status-pass etc.)
+(def status-pass    palette/status-pass)
+(def status-fail    palette/status-fail)
+(def status-warning palette/status-warning)
+(def status-info    palette/status-info)
 
 (defn readiness-state-color
   "Map readiness state to fixed status color."

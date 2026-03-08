@@ -390,10 +390,7 @@
                                         #(= :running (:status %)))
       :remove-repos (confirm-remove-repos model ids)
       ;; Batch PR actions
-      :approve   (batch-pr-action model ids "Approving" effect/approve-prs)
-      :merge     (batch-pr-action model ids "Merging" effect/merge-prs)
       :review    (batch-pr-action model ids "Reviewing" effect/review-prs)
-      :reject    (batch-pr-action model ids "Rejecting" effect/reject-prs)
       :remediate (batch-pr-action model ids "Remediating" effect/remediate-prs)
       :decompose (let [pr (first (selected-prs model ids))]
                    (if pr
@@ -474,14 +471,8 @@
    "merge-next"    {:handler cmd-merge-next    :help "Merge next ready PR in active train"}
    "train"         {:handler cmd-train         :help "Switch to train view"}
    ;; Batch actions
-   "approve"       {:handler (fn [m _] (request-confirmation m :approve "Approve"))
-                    :help "Approve selected PRs on GitHub"}
-   "merge"         {:handler (fn [m _] (request-confirmation m :merge "Merge"))
-                    :help "Merge selected PRs on GitHub"}
    "review"        {:handler (fn [m _] (request-confirmation m :review "Review"))
                     :help "Evaluate policy and post review for selected PRs"}
-   "reject"        {:handler (fn [m _] (request-confirmation m :reject "Reject"))
-                    :help "Request changes on selected PRs"}
    "remediate"     {:handler (fn [m _] (request-confirmation m :remediate "Remediate"))
                     :help "Auto-fix policy violations for selected PRs"}
    "decompose"     {:handler (fn [m _]

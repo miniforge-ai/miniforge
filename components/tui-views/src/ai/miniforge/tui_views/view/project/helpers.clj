@@ -23,7 +23,8 @@
 
    Layer 0: Pure functions with no model dependency."
   (:require
-   [clojure.string :as str])
+   [clojure.string :as str]
+   [ai.miniforge.tui-views.palette :as palette])
   (:import
    [java.text SimpleDateFormat]
    [java.time LocalDate ZoneId]
@@ -209,8 +210,10 @@
      :readiness/factors  factors}))
 
 (defn derive-risk
-  "Derive N9 risk assessment from provider signals and change size.
-   Returns {:risk/level kw :risk/score float :risk/factors [{:factor kw :explanation str :value any} ...]}"
+  "Derive mechanical risk assessment from provider signals and change size.
+   Returns {:risk/level kw :risk/score float :risk/factors [{:factor kw :explanation str :value any} ...]}
+   Uses max-of-factors scoring (not averaging) so a single high-risk signal
+   isn't diluted by low-risk ones."
   [pr]
   (let [status    (:pr/status pr)
         ci        (:pr/ci-status pr)
@@ -220,38 +223,40 @@
         deletions (get pr :pr/deletions 0)
         total     (+ additions deletions)
         changed-files (get pr :pr/changed-files-count 0)
-        size-risk (cond (> total 1000) :high (> total 500) :medium (> total 200) :low :else :minimal)
         factors   (cond-> []
                     (pos? total)
                     (conj {:factor :change-size
                            :explanation (str total " lines changed (+" additions "/-" deletions ")")
                            :value {:additions additions :deletions deletions :total total}
-                           :score (cond (> total 1000) 1.0 (> total 500) 0.75 (> total 200) 0.5 :else 0.25)})
+                           :score (cond (> total 1000) 1.0 (> total 500) 0.75 (> total 200) 0.5 :else 0.2)})
                     (pos? changed-files)
                     (conj {:factor :files-changed
                            :explanation (str changed-files " files modified")
                            :value changed-files
-                           :score (cond (> changed-files 50) 1.0 (> changed-files 20) 0.7 (> changed-files 10) 0.4 :else 0.2)})
+                           :score (cond (> changed-files 50) 1.0 (> changed-files 20) 0.75 (> changed-files 10) 0.5 :else 0.2)})
                     ci-fail?
                     (conj {:factor :ci-health
                            :explanation "CI checks are failing"
-                           :score 0.8})
+                           :score 0.9})
                     changes?
                     (conj {:factor :review-concerns
                            :explanation "Reviewer requested changes"
-                           :score 0.6})
+                           :score 0.8})
                     (and (not ci-fail?) (not changes?) (zero? total))
                     (conj {:factor :signal-check
                            :explanation "All available signals nominal"
                            :score 0.0}))
+        ;; Use max-of-factors, not average — one high signal shouldn't be diluted
         score     (if (seq factors)
-                    (/ (reduce + 0.0 (map #(get % :score 0.0) factors)) (count factors))
+                    (reduce max 0.0 (map #(get % :score 0.0) factors))
                     0.0)
         level     (cond
-                    (or ci-fail? changes? (= size-risk :high)) :medium
-                    (> score 0.6) :medium
-                    (> score 0.3) :low
-                    :else :low)]
+                    (and ci-fail? changes?)          :critical
+                    (or ci-fail? changes?)            :high
+                    (>= score 0.9)                    :high
+                    (>= score 0.65)                   :medium
+                    (>= score 0.4)                    :low
+                    :else                             :low)]
     {:risk/level   level
      :risk/score   score
      :risk/factors factors}))
@@ -330,7 +335,7 @@
               header {:_header? true
                       :status-char ""
                       :name (str "── " (get bucket-labels bucket) " (" (count wfs) ") ")
-                      :name-fg [0 150 180]
+                      :name-fg palette/status-info
                       :phase ""
                       :time ""
                       :progress-str ""

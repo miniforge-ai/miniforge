@@ -33,6 +33,7 @@
    [clojure.string :as str]
    [ai.miniforge.tui-engine.interface.layout :as layout]
    [ai.miniforge.tui-engine.interface.widget :as widget]
+   [ai.miniforge.tui-views.palette :as palette]
    [ai.miniforge.tui-views.view.project :as project]
    [ai.miniforge.tui-views.views.tab-bar :as tab-bar]))
 
@@ -137,7 +138,7 @@
           {:columns resolved-cols :data data
            :selected-row (when selectable? selected)
            :offset offset
-           :header-fg (get theme :header [0 150 180])
+           :header-fg (get theme :header palette/status-info)
            :row-fg (get theme :row-fg :default)
            :row-bg (get theme :row-bg :default)
            :selected-fg (get theme :selected-fg :white)
@@ -261,7 +262,7 @@
                          (ctx-fn model))
                        "MINIFORGE")]
             (layout/text [c r] text
-              {:fg (get theme :header [0 150 180]) :bold? true}))
+              {:fg (get theme :header palette/status-info) :bold? true}))
 
           :else
           (tab-bar/render model nil [c r])))

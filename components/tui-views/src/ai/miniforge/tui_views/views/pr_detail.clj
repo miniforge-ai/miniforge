@@ -23,7 +23,8 @@
    and review information."
   (:require
    [clojure.string :as str]
-   [ai.miniforge.tui-engine.interface.layout :as layout]))
+   [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Rendering helpers
@@ -32,7 +33,7 @@
   (layout/text [cols rows]
     (str " MINIFORGE │ "
          (or (:pr/title pr) "PR Detail"))
-    {:fg [0 150 180] :bold? true}))
+    {:fg palette/status-info :bold? true}))
 
 (defn render-info-panel [pr [cols rows]]
   (layout/box [cols rows]

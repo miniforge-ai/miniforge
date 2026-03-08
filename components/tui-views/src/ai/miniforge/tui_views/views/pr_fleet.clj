@@ -23,6 +23,7 @@
    CI status, and repo information."
   (:require
    [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.palette :as palette]
    [ai.miniforge.tui-views.update.navigation :as nav]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -52,7 +53,7 @@
 
 (defn render-title-bar [[cols rows]]
   (layout/text [cols rows] " MINIFORGE │ PR Fleet"
-               {:fg [0 150 180] :bold? true}))
+               {:fg palette/status-info :bold? true}))
 
 (defn auto-scroll-offset
   "Compute scroll offset so selected-idx is always visible within visible-count rows."

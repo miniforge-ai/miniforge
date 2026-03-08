@@ -23,7 +23,8 @@
    Displayed when :help-visible? is true in model."
   (:require
    [clojure.string :as str]
-   [ai.miniforge.tui-engine.interface.layout :as layout]))
+   [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Help content
@@ -83,7 +84,7 @@
         box-h (min (- rows 2) (+ (count lines) 2))]
     (layout/box [box-w box-h]
       {:title "Help — Key Bindings" :border :single
-       :fg [0 150 180]
+       :fg palette/status-info
        :content-fn
        (fn [[ic ir]]
          (layout/text [ic ir]

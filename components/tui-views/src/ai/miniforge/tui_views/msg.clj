@@ -33,6 +33,14 @@
   ([pr-items error] [:msg/prs-synced (cond-> {:pr-items pr-items}
                                        error (assoc :error error))]))
 
+(defn prs-synced-with-cache
+  "Like prs-synced but includes pre-loaded cache data so the reducer
+   doesn't need to perform filesystem IO."
+  [pr-items cached-risk error]
+  [:msg/prs-synced (cond-> {:pr-items pr-items
+                            :cached-risk cached-risk}
+                     error (assoc :error error))])
+
 (defn repos-discovered [result]
   [:msg/repos-discovered result])
 

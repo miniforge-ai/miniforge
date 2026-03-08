@@ -201,6 +201,50 @@
       (is (contains? (:selected-ids m) "acme/api")))))
 
 ;; ---------------------------------------------------------------------------
+;; Shift+Arrow selection (select-down / select-up)
+;; ---------------------------------------------------------------------------
+
+(deftest select-down-test
+  (testing "Shift+Down selects current item and moves cursor down"
+    (let [m (util/apply-updates (three-workflows)
+              [[:input {:key :key/shift-down}]])]
+      (is (util/selection-count-is? m 1))
+      (is (contains? (:selected-ids m) wf-id-1))
+      (is (= 1 (:selected-idx m))))))
+
+(deftest select-up-test
+  (testing "Shift+Up selects current item and moves cursor up"
+    ;; Start at bottom item (idx 2) so we can move up
+    (let [m (util/apply-updates (three-workflows)
+              [[:input {:key :key/j :char \j}]          ;; cursor -> 1
+               [:input {:key :key/j :char \j}]          ;; cursor -> 2
+               [:input {:key :key/shift-up}]])]
+      (is (util/selection-count-is? m 1))
+      (is (contains? (:selected-ids m) wf-id-3))
+      (is (= 1 (:selected-idx m))))))
+
+(deftest select-range-test
+  (testing "Multiple Shift+Down creates a range selection"
+    (let [m (util/apply-updates (three-workflows)
+              [[:input {:key :key/shift-down}]           ;; select wf-1, cursor -> 1
+               [:input {:key :key/shift-down}]])]        ;; select wf-2, cursor -> 2
+      (is (util/selection-count-is? m 2))
+      (is (contains? (:selected-ids m) wf-id-1))
+      (is (contains? (:selected-ids m) wf-id-2))
+      (is (not (contains? (:selected-ids m) wf-id-3)))
+      (is (= 2 (:selected-idx m)))))
+
+  (testing "Shift+Down through entire list selects all items"
+    (let [m (util/apply-updates (three-workflows)
+              [[:input {:key :key/shift-down}]           ;; select wf-1, cursor -> 1
+               [:input {:key :key/shift-down}]           ;; select wf-2, cursor -> 2
+               [:input {:key :key/shift-down}]])]        ;; select wf-3, cursor stays 2
+      (is (util/selection-count-is? m 3))
+      (is (contains? (:selected-ids m) wf-id-1))
+      (is (contains? (:selected-ids m) wf-id-2))
+      (is (contains? (:selected-ids m) wf-id-3)))))
+
+;; ---------------------------------------------------------------------------
 ;; Search + select (filter-aware selection)
 ;; ---------------------------------------------------------------------------
 

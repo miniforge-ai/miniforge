@@ -29,7 +29,8 @@
    assigned agent, and dependency status."
   (:require
    [ai.miniforge.tui-engine.interface.layout :as layout]
-   [ai.miniforge.tui-engine.interface.widget :as widget]))
+   [ai.miniforge.tui-engine.interface.widget :as widget]
+   [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Task grouping
@@ -59,16 +60,16 @@
         pending-cards (mapv (fn [wf] {:label (:name wf) :status :pending}) pending)
         running-cards (mapv (fn [wf] {:label (:name wf) :status :running}) running)]
     [{:title (column-title "BLOCKED" blocked-cards)
-      :color [220 50 40]
+      :color palette/status-fail
       :cards blocked-cards}
      {:title (column-title "PENDING" pending-cards)
-      :color [200 160 0]
+      :color palette/status-warning
       :cards pending-cards}
      {:title (column-title "RUNNING" running-cards)
-      :color [0 150 180]
+      :color palette/status-info
       :cards running-cards}
      {:title (column-title "DONE" done-cards)
-      :color [0 180 80]
+      :color palette/status-pass
       :cards done-cards}]))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -84,7 +85,7 @@
       ;; Title bar
       (fn [[c r]]
         (layout/text [c r] " MINIFORGE │ DAG Kanban"
-                     {:fg [0 150 180] :bold? true}))
+                     {:fg palette/status-info :bold? true}))
       ;; Content + footer
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)

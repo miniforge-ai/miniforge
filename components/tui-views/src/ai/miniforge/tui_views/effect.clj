@@ -89,21 +89,6 @@
   [pr]
   {:type :decompose-pr :pr pr})
 
-(defn approve-prs
-  "Approve a set of PRs (post approval review on GitHub)."
-  [prs]
-  {:type :approve-prs :prs prs})
-
-(defn merge-prs
-  "Merge a set of PRs on GitHub."
-  [prs]
-  {:type :merge-prs :prs prs})
-
-(defn reject-prs
-  "Request changes on a set of PRs (post review with 'changes requested')."
-  [prs]
-  {:type :reject-prs :prs prs})
-
 (defn control-action
   "Create a control action effect to pause/resume/cancel a workflow.
    The effect handler writes a command file to ~/.miniforge/commands/<workflow-id>/."
@@ -127,3 +112,13 @@
   "Persistently archive workflows by moving their event files to archive/."
   [workflow-ids]
   {:type :archive-workflows :workflow-ids workflow-ids})
+
+(defn cache-policy-result
+  "Persist a single PR's policy evaluation result to the disk cache."
+  [pr-id result prs]
+  {:type :cache-policy-result :pr-id pr-id :result result :prs prs})
+
+(defn cache-risk-triage
+  "Persist fleet risk triage results to the disk cache."
+  [risk-map prs]
+  {:type :cache-risk-triage :risk-map risk-map :prs prs})

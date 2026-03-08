@@ -63,7 +63,7 @@
     {:type :node/footer
      :segments
      {:normal "j/k:nav  Enter:detail  O:open  Shift+↑↓:select  p:filter  c:chat  r:sync  /:search  ::cmd  Tab:views  q:quit"
-      :selected "{n} selected │ Shift+↑↓:range  v:visual  a:all  c:chat  Esc:clear  :approve :merge :review :reject :decompose"
+      :selected "{n} selected │ Shift+↑↓:range  v:visual  a:all  c:chat  Esc:clear  :review :remediate :decompose"
       :visual "VISUAL │ j/k:extend  Space:toggle  Esc:exit  a:all"
       :filtered "FILTER [{n}] │ Space:select  a:all  v:visual  Esc:clear filter"}}]}}
 
