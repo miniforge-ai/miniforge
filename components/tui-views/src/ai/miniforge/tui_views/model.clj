@@ -102,11 +102,12 @@
    ;; Browse repos cache (populated by :browse-repos side-effect)
    :browse-repos   []
    :browse-repos-loading? false
-   ;; Chat state
-   :chat {:messages []        ;; [{:role :user/:assistant :content str :timestamp inst}]
-          :input-buf ""       ;; Current input being typed
-          :context {}         ;; PR data, selections, filter context passed to agent
-          :pending? false}})
+   ;; Chat state (active thread — swapped from chat-threads on enter/escape)
+   :chat {:messages [] :input-buf "" :context {} :pending? false :suggested-actions []}
+   :chat-threads {}          ;; {thread-key -> chat-state} keyed by [:pr repo number] etc.
+   :chat-active-key nil
+   ;; Workflow→PR reverse index: {[repo pr-number] → workflow-id}
+   :workflow-pr-index {}})
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Workflow data shape
@@ -143,7 +144,7 @@
   "Visible repository rows for repo-manager based on :repo-manager-source."
   [model]
   (if (= :browse (:repo-manager-source model))
-    (browse-candidate-repos model)
+    (vec (get model :browse-repos []))
     (fleet-repos model)))
 
 ;------------------------------------------------------------------------------ Layer 3

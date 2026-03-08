@@ -77,7 +77,7 @@
                 mode/compute-search-results)]
       (is (= #{0 1} (:filtered-indices m)))))
 
-  (testing "Repo-manager search in browse mode filters browse candidates"
+  (testing "Repo-manager search in browse mode filters all browse repos"
     (let [m (-> (util/fresh-model)
                 (assoc :view :repo-manager
                        :repo-manager-source :browse
@@ -86,8 +86,8 @@
                        :mode :search
                        :command-buf "/new")
                 mode/compute-search-results)]
-      ;; browse candidates excludes acme/api because it's already in fleet
-      (is (= #{0} (:filtered-indices m))))))
+      ;; browse shows all repos; "new" matches acme/new-service at index 1
+      (is (= #{1} (:filtered-indices m))))))
 
 (deftest search-mode-escape-test
   (testing "Escape from search mode clears filtered-indices"

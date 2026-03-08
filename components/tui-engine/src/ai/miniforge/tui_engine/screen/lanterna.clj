@@ -78,6 +78,9 @@
     (.stopScreen screen))
 
   (get-size [_]
+    ;; doResizeIfNecessary picks up SIGWINCH and updates the cached size.
+    ;; Returns non-null only when the terminal was actually resized.
+    (.doResizeIfNecessary screen)
     (let [size (.getTerminalSize screen)]
       [(.getColumns size) (.getRows size)]))
 

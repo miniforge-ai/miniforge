@@ -226,15 +226,18 @@
     (dosync
      (let [new-model (update-fn @model-ref msg)
            fx (:side-effect new-model)
-           clean-model (dissoc new-model :side-effect)]
-       (when fx (reset! pending-effect fx))
+           fxs (:side-effects new-model)
+           all-fx (cond-> [] fx (conj fx) fxs (into fxs))
+           clean-model (dissoc new-model :side-effect :side-effects)]
+       (when (seq all-fx) (reset! pending-effect all-fx))
        (ref-set model-ref clean-model)))
     ;; Side-effects executed outside the transaction
-    (when-let [fx @pending-effect]
+    (when-let [fxs @pending-effect]
       (when-let [handler (:effect-handler @app)]
-        (execute-side-effect! fx handler
-                              (fn [result-msg] (dispatch! app result-msg))
-                              (:effect-threads @app))))))
+        (let [dispatch-fn (fn [result-msg] (dispatch! app result-msg))]
+          (doseq [fx fxs]
+            (execute-side-effect! fx handler dispatch-fn
+                                  (:effect-threads @app))))))))
 
 (defn get-model
   "Get current model snapshot."
@@ -269,9 +272,12 @@
 
 (defn start-resize-thread!
   "Start a daemon thread that checks for terminal size changes and forces
-   a re-render when the size changes. Checks every 250ms."
+   a re-render when the size changes. Also re-renders periodically while
+   the chat agent is thinking (to update the spinner/elapsed timer).
+   Checks every 250ms."
   [app]
   (let [last-size (atom nil)
+        last-tick (atom 0)
         thread (Thread.
                 (fn []
                   (try
@@ -279,11 +285,19 @@
                       (try
                         (Thread/sleep 250)
                         (let [screen (:screen @app)
-                              size (screen/get-size screen)]
-                          (when (and size (not= size @last-size))
-                            (reset! last-size size)
-                            ;; Force re-render by dispatching a no-op tick
-                            (do-render! @app @(:model-ref @app))))
+                              size (screen/get-size screen)
+                              model @(:model-ref @app)
+                              resized? (and size (not= size @last-size))
+                              ;; Re-render every ~1s while chat is pending
+                              pending? (get-in model [:chat :pending?])
+                              now-sec (quot (System/currentTimeMillis) 1000)
+                              tick? (and pending? (not= now-sec @last-tick))]
+                          (when resized?
+                            (reset! last-size size))
+                          (when tick?
+                            (reset! last-tick now-sec))
+                          (when (or resized? tick?)
+                            (do-render! @app model)))
                         (catch InterruptedException e (throw e))
                         (catch Exception _)))
                     (catch InterruptedException _))))]

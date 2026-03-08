@@ -96,7 +96,10 @@
          :filtered-indices nil
          :search-matches []
          :search-match-idx nil
-         :selected-ids #{}
+         ;; In browse mode, pre-select fleet repos so they appear checked
+         :selected-ids (if (= source :browse)
+                         (set (get model :fleet-repos []))
+                         #{})
          :visual-anchor nil))
 
 (defn selected-repos
@@ -119,22 +122,19 @@
 
 (defn repo-manager-add-selected
   [model]
-  (let [repos (selected-repos model)]
-    (if (empty? repos)
-      (assoc model :flash-message "No remote repository selected.")
-      (let [before (set (:fleet-repos model))
-            m (reduce (fn [acc repo]
+  (let [all-selected (selected-repos model)
+        fleet-set (set (:fleet-repos model))
+        new-repos (vec (remove fleet-set all-selected))]
+    (if (empty? new-repos)
+      (assoc model :flash-message "No new repositories selected.")
+      (let [m (reduce (fn [acc repo]
                         (command/execute-command acc (str ":add-repo " repo)))
                       model
-                      repos)
-            after (set (:fleet-repos m))
-            added (count (set/difference after before))]
-        (if (pos? added)
-          (-> (reset-repo-manager-state m :browse)
-              (assoc :side-effect (effect/sync-prs)
-                     :flash-message (str "Added " added " repo(s) to fleet. Syncing PRs...")))
-          (-> (reset-repo-manager-state m :browse)
-              (assoc :flash-message "Selected repos already in fleet.")))))))
+                      new-repos)
+            added (count new-repos)]
+        (-> (reset-repo-manager-state m :browse)
+            (assoc :side-effect (effect/sync-prs)
+                   :flash-message (str "Added " added " repo(s) to fleet. Syncing PRs...")))))))
 
 (defn repo-manager-request-remove
   [model]
@@ -192,6 +192,10 @@
 
 (defn handle-escape-cascade [model]
   (cond
+    ;; In repo-manager browse mode, Esc goes back to fleet mode
+    (and (in-repo-manager? model) (= :browse (repo-manager-source model)))
+    (reset-repo-manager-state model :fleet)
+
     (:visual-anchor model)        (sel/exit-visual-mode model)
     (seq (:selected-ids model))   (sel/clear-selection model)
     (:active-filter model)        (assoc model :filtered-indices nil :selected-idx 0
@@ -255,13 +259,6 @@
                    :flash-message (str "Opening " url "..."))
       (assoc model :flash-message "No URL available for this item"))))
 
-(defn handle-remove-repos [model]
-  (if (in-repo-manager? model)
-    (if (= :fleet (repo-manager-source model))
-      (repo-manager-request-remove model)
-      (assoc model :flash-message "Switch to fleet (f) to remove repositories."))
-    model))
-
 (defn handle-cycle-tab [model]
   (cond
     (nav/in-detail-subview? model)                (nav/cycle-detail-subview model)
@@ -276,9 +273,29 @@
     (some #{(:view model)} model/top-level-views) (nav/cycle-top-level-view-reverse model)
     :else                                         model))
 
-(defn handle-select-all [model]
-  (if (and (selectable-views (:view model)) (sel/has-selection? model))
+(defn handle-add-or-select-all [model]
+  (cond
+    ;; Repo-manager browse: add selected repos to fleet
+    (and (in-repo-manager? model) (= :browse (repo-manager-source model)))
+    (repo-manager-add-selected model)
+
+    ;; Repo-manager fleet: open :add-repo command prompt
+    (in-repo-manager? model)
+    (-> model
+        (assoc :mode :command :command-buf ":add-repo ")
+        (assoc :completing? false :completions [] :completion-idx nil))
+
+    ;; Elsewhere: select-all (only when selection already started)
+    (and (selectable-views (:view model)) (sel/has-selection? model))
     (sel/select-all model)
+
+    :else model))
+
+(defn handle-delete-or-noop [model]
+  (if (in-repo-manager? model)
+    (if (= :fleet (repo-manager-source model))
+      (repo-manager-request-remove model)
+      (assoc model :flash-message "Switch to fleet (f) to remove repositories."))
     model))
 
 (defn handle-enter-visual-mode [model]
@@ -326,10 +343,10 @@
    :action/fleet-view         handle-fleet-view
    :action/open-browse        handle-open-browse
    :action/open-in-browser    handle-open-in-browser
-   :action/remove-repos       handle-remove-repos
    :action/cycle-tab          handle-cycle-tab
    :action/cycle-tab-reverse  handle-cycle-tab-reverse
-   :action/select-all         handle-select-all
+   :action/add-or-select-all  handle-add-or-select-all
+   :action/delete-or-noop     handle-delete-or-noop
    :action/enter-visual-mode  handle-enter-visual-mode})
 
 (defn resolve-action
@@ -354,8 +371,12 @@
         (if-let [handler (resolve-action action)]
           (handler model)
           model)
-        (if (number-key->index k)
-          (switch-numbered-view model k)
+        (if-let [idx (number-key->index k)]
+          ;; In PR detail with pending actions → execute action; otherwise switch view
+          (if (and (= :pr-detail (:view model))
+                   (seq (get-in model [:chat :suggested-actions])))
+            (chat/execute-action model idx)
+            (switch-numbered-view model k))
           model)))))
 
 ;; ── Command mode input ──
@@ -458,9 +479,12 @@
 
 (def chat-action-handlers
   "Action token → handler for chat-mode actions."
-  {:action/chat-escape    chat/escape
-   :action/chat-send      chat/send-message
-   :action/chat-backspace chat/backspace})
+  {:action/chat-escape        chat/escape
+   :action/chat-send          chat/send-message
+   :action/chat-backspace     chat/backspace
+   :action/chat-scroll-up     chat/scroll-up
+   :action/chat-scroll-down   chat/scroll-down
+   :action/chat-scroll-bottom chat/scroll-bottom})
 
 (defn handle-chat-input [model key]
   (let [k (extract-key key)
@@ -473,9 +497,7 @@
       (if-let [action-idx (and (not pending?)
                                (empty? (get-in model [:chat :input-buf] ""))
                                (get number-key->index k))]
-        (if (pos? action-idx) ;; 1-9 map to indices 0-8
-          (chat/execute-action model (dec action-idx))
-          model)
+        (chat/execute-action model action-idx)
         ;; Character input — append to chat buffer
         (if-let [ch (extract-char key)]
           (chat/append model ch)
@@ -591,6 +613,9 @@
       ;; Chat messages
       :msg/chat-response         (events/handle-chat-response model payload)
       :msg/chat-action-result    (events/handle-chat-action-result model payload)
+
+      ;; Fleet risk triage
+      :msg/fleet-risk-triaged    (events/handle-fleet-risk-triaged model payload)
 
       ;; Side-effect error
       :msg/side-effect-error

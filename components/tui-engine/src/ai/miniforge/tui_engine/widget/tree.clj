@@ -33,25 +33,29 @@
    - :nodes    - flat vector of {:label str :depth int :expandable? bool :fg color-kw}
    - :expanded - set of indices that are expanded
    - :selected - index of selected node
+   - :scroll-offset - number of nodes to skip from the top (default 0)
    - :fg, :selected-fg, :selected-bg - colors
    Per-node :fg overrides the widget-level :fg for that node."
-  [[cols rows] & [{:keys [nodes expanded selected fg selected-fg selected-bg]
-                    :or {expanded #{} selected 0 fg :white
+  [[cols rows] & [{:keys [nodes expanded selected scroll-offset
+                           fg selected-fg selected-bg]
+                    :or {expanded #{} selected 0 scroll-offset 0 fg :white
                          selected-fg :white selected-bg :blue}}]]
   (let [buffer (buf/make-buffer [cols rows])
-        visible (take rows (or nodes []))]
-    (reduce (fn [b [idx node]]
-              (let [{:keys [label depth expandable?]} node
+        all-nodes (or nodes [])
+        visible (->> all-nodes (drop scroll-offset) (take rows))]
+    (reduce (fn [b [row-idx node]]
+              (let [node-idx (+ row-idx scroll-offset)
+                    {:keys [label depth expandable?]} node
                     node-fg (or (:fg node) fg)
-                    sel? (= idx selected)
+                    sel? (= node-idx selected)
                     indent (* 2 (or depth 0))
                     icon (cond
-                           (and expandable? (contains? expanded idx)) "▼ "
+                           (and expandable? (contains? expanded node-idx)) "▼ "
                            expandable? "▸ "
                            :else "  ")
                     text (str (apply str (repeat indent \space)) icon (or label ""))
                     text (subs text 0 (min (count text) cols))]
-                (buf/buf-put-string b 0 idx text
+                (buf/buf-put-string b 0 row-idx text
                                        {:fg (if sel? selected-fg node-fg)
                                         :bg (if sel? selected-bg :default)
                                         :bold? sel?})))

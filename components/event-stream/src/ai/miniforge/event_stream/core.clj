@@ -207,7 +207,8 @@
       (assoc :workflow/status status)
       (cond-> duration-ms (assoc :workflow/duration-ms duration-ms)
               (:tokens opts) (assoc :workflow/tokens (:tokens opts))
-              (:cost-usd opts) (assoc :workflow/cost-usd (:cost-usd opts)))))
+              (:cost-usd opts) (assoc :workflow/cost-usd (:cost-usd opts))
+              (:pr-info opts) (assoc :workflow/pr-info (:pr-info opts)))))
 
 (defn workflow-failed [stream workflow-id error]
   (let [;; Handle anomaly maps, Throwables, and plain error maps

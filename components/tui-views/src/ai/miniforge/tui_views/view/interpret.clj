@@ -147,12 +147,23 @@
   "Render a tree widget from spec."
   [model _theme [cols rows] {:keys [data-fn]}]
   (let [project-fn (project/get-projection data-fn)
-        nodes (project-fn model)
-        expanded (or (get-in model [:detail :expanded-nodes]) #{0})]
+        nodes (project-fn (assoc model :_panel-cols cols))
+        expanded (or (get-in model [:detail :expanded-nodes]) #{0})
+        n (count nodes)
+        chat? (= data-fn :project/chat-messages)
+        ;; Chat: user scroll-offset (nil = pinned to bottom), else 0
+        max-scroll (max 0 (- n rows))
+        scroll (if chat?
+                 (let [user-offset (get-in model [:chat :scroll-offset])]
+                   (if (nil? user-offset)
+                     max-scroll   ;; pinned to bottom
+                     (min user-offset max-scroll)))
+                 0)]
     (widget/tree [cols rows]
       {:nodes nodes
        :expanded expanded
-       :selected (:selected-idx model)})))
+       :selected (:selected-idx model)
+       :scroll-offset scroll})))
 
 (defn render-kanban-widget
   "Render a kanban widget from spec."

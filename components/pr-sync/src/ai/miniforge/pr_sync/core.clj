@@ -254,8 +254,56 @@
     :all    "all"
     "opened"))
 
+(defn fetch-gitlab-diff-stats-batch
+  "Fetch diff stats for multiple MRs in a single GraphQL query.
+   Returns {iid {:additions N :deletions N :file-count N}} or empty map on failure."
+  [repo* iids]
+  (when (seq iids)
+    (try
+      (let [;; Build aliased GraphQL query: mr26: mergeRequest(iid: \"26\") { ... }
+            mr-fragments (str/join " "
+                           (map (fn [iid]
+                                  (str "mr" iid ": mergeRequest(iid: \"" iid "\") "
+                                       "{ diffStatsSummary { additions deletions fileCount } }"))
+                                iids))
+            query (str "{ project(fullPath: \"" repo* "\") { " mr-fragments " } }")
+            {:keys [success? out]} (run-glab "api" "graphql" "-f" (str "query=" query))]
+        (if-not success?
+          {}
+          (let [data (json/parse-string out true)
+                project (get-in data [:data :project])]
+            (into {}
+              (keep (fn [iid]
+                      (let [k (keyword (str "mr" iid))
+                            stats (get-in project [k :diffStatsSummary])]
+                        (when stats
+                          [iid {:additions  (:additions stats 0)
+                                :deletions  (:deletions stats 0)
+                                :file-count (:fileCount stats 0)}]))))
+              iids))))
+      (catch Exception _ {}))))
+
+(defn enrich-gitlab-mrs-with-diff-stats
+  "Enrich GitLab MR maps with diff stats via a single batched GraphQL query.
+   Only enriches open/draft MRs (skip closed/merged)."
+  [repo* mrs]
+  (let [open-mrs (filter #(= "opened" (some-> (:state %) str str/lower-case)) mrs)
+        iids (mapv :iid open-mrs)]
+    (if (empty? iids)
+      mrs
+      (let [stats (fetch-gitlab-diff-stats-batch repo* iids)]
+        (mapv (fn [mr]
+                (if-let [s (get stats (:iid mr))]
+                  (assoc mr
+                         :additions (:additions s 0)
+                         :deletions (:deletions s 0)
+                         :changes_count (or (:file-count s) (:changes_count mr)))
+                  mr))
+              mrs)))))
+
 (defn fetch-gitlab-mrs-by-state
-  "Fetch GitLab merge requests by state (:open, :closed, :merged, :all)."
+  "Fetch GitLab merge requests by state (:open, :closed, :merged, :all).
+   Enriches open MRs with diff stats (additions/deletions) via per-MR API calls."
   [repo state]
   (let [repo*    (provider-repo-slug repo)
         gl-state (gitlab-state-param state)
@@ -266,24 +314,36 @@
     (if-not success?
       (result-failure (gh-error-message out err) {:repo repo :provider :gitlab})
       (try
-        (let [rows (json/parse-string out true)]
+        (let [rows (json/parse-string out true)
+              ;; Enrich with diff stats for open MRs
+              enriched (if (#{:open :all} state)
+                         (enrich-gitlab-mrs-with-diff-stats repo* rows)
+                         rows)
+              prs (->> enriched
+                       (map #(status/gitlab-mr->train-pr % repo))
+                       (sort-by :pr/number)
+                       vec)
+              ;; GitLab API sometimes returns MRs outside the requested state.
+              ;; Post-filter to ensure we only return what was asked for.
+              expected-statuses (case state
+                                 :open   #{:open :draft :merge-ready :changes-requested}
+                                 :closed #{:closed}
+                                 :merged #{:merged}
+                                 :all    nil)
+              filtered (if expected-statuses
+                         (filterv #(contains? expected-statuses (:pr/status %)) prs)
+                         prs)]
           (result-success
            {:repo repo
             :provider :gitlab
-            :prs (->> rows
-                      (map #(status/gitlab-mr->train-pr % repo))
-                      (sort-by :pr/number)
-                      vec)}))
+            :prs filtered}))
         (catch Exception e
           (result-failure (str "Failed to parse merge request list for " repo ".")
                           {:repo repo :provider :gitlab :error (.getMessage e)}))))))
 
 (defn fetch-open-gitlab-mrs
   [repo]
-  (let [result (fetch-gitlab-mrs-by-state repo :open)]
-    (if (succeeded? result)
-      (update result :prs (fn [prs] (vec (remove #(#{:closed :merged} (:pr/status %)) prs))))
-      result)))
+  (fetch-gitlab-mrs-by-state repo :open))
 
 (defn fetch-open-prs
   "Fetch open PR/MR items for a single configured repository.

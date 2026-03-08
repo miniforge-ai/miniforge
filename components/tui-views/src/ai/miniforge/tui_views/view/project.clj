@@ -544,12 +544,19 @@
 
 (defn resolve-enrichment
   "Resolve enriched readiness/risk/policy for a PR.
-   Prefers pr-train/policy-pack data, falls back to naive derivation."
+   Prefers pr-train/policy-pack data, falls back to naive derivation.
+   Always ensures :readiness/state is set (explain-readiness doesn't provide it)."
   [pr]
-  {:readiness (or (:pr/readiness pr) (derive-readiness pr))
-   :risk      (or (:pr/risk pr) (derive-risk pr))
-   :policy    (:pr/policy pr)
-   :recommend (derive-recommendation pr)})
+  (let [derived  (derive-readiness pr)
+        enriched (:pr/readiness pr)
+        readiness (if enriched
+                    ;; Merge derived state into enriched (explain-readiness lacks :readiness/state)
+                    (merge derived enriched)
+                    derived)]
+    {:readiness readiness
+     :risk      (or (:pr/risk pr) (derive-risk pr))
+     :policy    (:pr/policy pr)
+     :recommend (derive-recommendation pr)}))
 
 (defn policy-label
   "Policy pass/fail/unknown → display label."
@@ -834,22 +841,28 @@
 
 (defn project-pr-row
   "Project a single PR into a table row map.
-   Includes :<key>-fg entries for per-cell status coloring."
-  [pr]
+   Includes :<key>-fg entries for per-cell status coloring.
+   agent-risk-map is {[repo num] {:level kw :reason str}} from fleet triage."
+  [pr agent-risk-map]
   (let [{:keys [readiness risk policy recommend]} (resolve-enrichment pr)
         r-state   (or (:readiness/state readiness) :unknown)
         risk-lvl  (or (:risk/level risk) :low)
-        pol-pass? (:evaluation/passed? policy)]
-    {:_id [(:pr/repo pr) (:pr/number pr)]
-     :repo (or (:pr/repo pr) "")
+        pol-pass? (:evaluation/passed? policy)
+        pr-id     [(:pr/repo pr) (:pr/number pr)]
+        agent-r   (get agent-risk-map pr-id)
+        ;; Use agent risk when available, fall back to mechanical
+        display-risk (if agent-r (:level agent-r) risk-lvl)]
+    {:_id pr-id
+     :repo (str (or (:pr/repo pr) "")
+                (when (:pr/workflow-id pr) " [mf]"))
      :number (str "#" (:pr/number pr))
      :title (or (:pr/title pr) "")
      :state (pr-state-label (:pr/status pr))
      :status      (readiness-indicator r-state)
      :status-fg   (readiness-state-color r-state)
      :ready       (readiness-bar (or (:readiness/score readiness) 0) 15)
-     :risk        (risk-label risk-lvl)
-     :risk-fg     (risk-level-color risk-lvl)
+     :risk        (risk-label display-risk)
+     :risk-fg     (risk-level-color display-risk)
      :policy      (policy-label policy)
      :policy-fg   (case pol-pass? true status-pass false status-fail nil)
      :recommend   (:label recommend)
@@ -860,10 +873,11 @@
    Respects :filtered-indices from search/filter modes."
   [model]
   (let [prs (:pr-items model [])
+        agent-risk (or (:agent-risk model) {})
         filtered (if-let [fi (:filtered-indices model)]
                    (vec (keep-indexed (fn [i pr] (when (contains? fi i) pr)) prs))
                    prs)]
-    (mapv project-pr-row filtered)))
+    (mapv #(project-pr-row % agent-risk) filtered)))
 
 (defn resolve-detail-enrichment
   "Resolve enrichment data for the detail view's selected PR.
@@ -901,16 +915,30 @@
 
 (defn project-risk-tree
   "Build risk tree nodes for the tree widget.
-   Each factor is expandable with concrete values."
+   Shows agent risk assessment (when available) and mechanical risk factors."
   [model]
   (let [{:keys [risk]} (resolve-detail-enrichment model)
+        pr      (get-in model [:detail :selected-pr])
+        pr-id   (when pr [(:pr/repo pr) (:pr/number pr)])
+        agent-r (when pr-id (get-in model [:agent-risk pr-id]))
+        wf-id   (:pr/workflow-id pr)
         level   (or (:risk/level risk) :unknown)
         score   (:risk/score risk)
         factors (:risk/factors risk [])]
-    (into [(tree-node (str "Risk: " (name level)
-                           (when score (str " (" (format "%.2f" (double score)) ")")))
-                      0 true (risk-level-color level))]
-          (mapcat risk-factor-detail-nodes factors))))
+    (concat
+      ;; Provenance indicator
+      (when wf-id
+        [(tree-node "Miniforge-sourced PR" 0 false :cyan)])
+      ;; Agent risk assessment (if available)
+      (when agent-r
+        [(tree-node (str "Agent risk: " (name (:level agent-r)))
+                    0 true (risk-level-color (:level agent-r)))
+         (tree-node (str "  " (:reason agent-r)) 1)])
+      ;; Mechanical risk with factors
+      [(tree-node (str "Mechanical risk: " (name level)
+                       (when score (str " (" (format "%.2f" (double score)) ")")))
+                  0 true (risk-level-color level))]
+      (mapcat risk-factor-detail-nodes factors))))
 
 (defn project-gate-list
   "Build gate/policy result list for the tree widget."
@@ -930,16 +958,19 @@
         r-state  (or (:readiness/state readiness) :unknown)
         risk-lvl (or (:risk/level risk) :unknown)
         recommend (when pr (derive-recommendation pr))
-        ;; Find linked workflow by matching branch name
+        ;; Find linked workflow: direct lookup via workflow-id, fallback to branch name match
+        wf-id    (:pr/workflow-id pr)
         branch   (:pr/branch pr)
         wfs      (:workflows model [])
-        linked-wf (when branch
-                    (some (fn [wf]
-                            (when (and (:name wf)
-                                       (or (str/includes? (str branch) (str (:name wf)))
-                                           (str/includes? (str (:name wf)) (str branch))))
-                              wf))
-                          wfs))]
+        linked-wf (or (when wf-id
+                        (some #(when (= (:id %) wf-id) %) wfs))
+                      (when branch
+                        (some (fn [wf]
+                                (when (and (:name wf)
+                                           (or (str/includes? (str branch) (str (:name wf)))
+                                               (str/includes? (str (:name wf)) (str branch))))
+                                  wf))
+                              wfs)))]
     (let [additions (get pr :pr/additions 0)
           deletions (get pr :pr/deletions 0)
           total     (+ additions deletions)
@@ -1065,13 +1096,36 @@
                (str "[" (name (get agent :type :agent)) "] " output)
                (if (seq output) output "No agent output"))}]))
 
+(defn- wrap-text
+  "Word-wrap a string to fit within max-width characters.
+   Returns a vector of wrapped lines."
+  [text max-width]
+  (if (<= (count text) max-width)
+    [text]
+    (loop [remaining text
+           lines []]
+      (if (<= (count remaining) max-width)
+        (conj lines remaining)
+        ;; Find last space within max-width
+        (let [break-at (let [idx (str/last-index-of remaining " " max-width)]
+                         (if (and idx (pos? idx)) idx max-width))]
+          (recur (subs remaining (min (count remaining)
+                                      (if (= break-at max-width)
+                                        break-at
+                                        (inc break-at))))
+                 (conj lines (subs remaining 0 break-at))))))))
+
 (defn project-chat-messages
   "Project chat messages as tree nodes for the agent panel.
-   Shows conversation history with role-based styling and numbered actions."
+   Shows conversation history with role-based styling and numbered actions.
+   Uses :_panel-cols (injected by interpreter) for word-wrapping."
   [model]
   (let [messages (get-in model [:chat :messages] [])
         pending? (get-in model [:chat :pending?] false)
-        actions  (get-in model [:chat :suggested-actions] [])]
+        actions  (get-in model [:chat :suggested-actions] [])
+        ;; Panel cols minus tree indent overhead (depth*2 + icon "  " + label prefix "  ")
+        panel-cols (or (:_panel-cols model) 60)
+        wrap-width (max 20 (- panel-cols 6))]
     (if (empty? messages)
       [(tree-node "Press c to start a conversation" 0 false status-info)
        (tree-node "Ask about this PR, request analysis," 1)
@@ -1082,38 +1136,74 @@
                                 fg     (if (= :user role) :cyan :green)
                                 lines  (str/split-lines (or content ""))]
                             (into [(tree-node (str prefix ":") 0 false fg)]
-                                  (mapv #(tree-node (str "  " %) 1) lines))))
+                                  (mapcat (fn [line]
+                                            (mapv #(tree-node (str "  " %) 1)
+                                                  (wrap-text line wrap-width)))
+                                          lines))))
                         messages)
             action-nodes (when (and (seq actions) (not pending?))
                            (into [(tree-node "" 0)
-                                  (tree-node "Actions:" 0 false :yellow)]
-                                 (map-indexed
+                                  (tree-node "Actions (press number to run):" 0 false :yellow)]
+                                 (mapcat
                                    (fn [i {:keys [label description]}]
-                                     (tree-node (str "  " (inc i) ") " label
+                                     (let [text (str (inc i) ") " label
                                                      (when description
-                                                       (str " — " description)))
-                                                1 false :cyan))
-                                   actions)))]
-        (cond-> (vec msg-nodes)
-          (seq action-nodes) (into action-nodes)
-          pending? (conj (tree-node "Agent thinking..." 0 false :yellow)))))))
+                                                       (str " — " description)))]
+                                       (mapv #(tree-node (str "  " %) 1 false :cyan)
+                                             (wrap-text text wrap-width))))
+                                   (range) actions)))]
+        (let [nodes (cond-> (vec msg-nodes)
+                      (seq action-nodes) (into action-nodes))]
+          (if pending?
+            (let [since   (get-in model [:chat :pending-since])
+                  elapsed (if since
+                            (quot (- (System/currentTimeMillis) since) 1000)
+                            0)
+                  spinner (get ["⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏"]
+                               (mod elapsed 10))
+                  label   (str spinner " Agent thinking... (" elapsed "s)")]
+              (conj nodes (tree-node label 0 false :yellow)))
+            nodes))))))
+
+(def ^:private browse-sayings
+  ["Rummaging through repos..."
+   "Consulting the git elders..."
+   "Herding repos into a list..."
+   "Asking GitHub nicely..."
+   "Scanning the multiverse of repos..."
+   "Bribing the API rate limiter..."
+   "Polishing repo metadata..."
+   "Untangling git spaghetti..."
+   "Warming up the repo cannon..."
+   "Teaching repos to sit and stay..."])
+
+(defn- browse-loading-message []
+  (let [idx (mod (quot (System/currentTimeMillis) 2000)
+                 (count browse-sayings))]
+    (nth browse-sayings idx)))
 
 (defn project-repo-list
   "Project repo manager data for the table widget."
   [model]
   (let [source (get model :repo-manager-source :fleet)
-        fleet-repos (set (get model :fleet-repos []))
-        browse-repos (get model :browse-repos [])]
+        fleet-vec (vec (get model :fleet-repos []))
+        fleet-set (set fleet-vec)
+        browse-repos (get model :browse-repos [])
+        loading? (get model :browse-repos-loading? false)]
     (if (= source :browse)
-      ;; Browse mode: show remote repos with fleet membership
-      (mapv (fn [repo]
-              {:_id repo
-               :name repo
-               :source (if (contains? fleet-repos repo) "fleet" "remote")
-               :pr-count ""
-               :status (if (contains? fleet-repos repo) "added" "available")})
-            browse-repos)
-      ;; Fleet mode: show configured repos
+      (if (and loading? (empty? browse-repos))
+        ;; Loading: show spinner row with a fun saying
+        [{:_id :loading :name (str "⏳ " (browse-loading-message))
+          :source "" :pr-count "" :status "loading"}]
+        ;; Browse mode: show remote repos with fleet membership
+        (mapv (fn [repo]
+                {:_id repo
+                 :name repo
+                 :source (if (contains? fleet-set repo) "fleet" "remote")
+                 :pr-count ""
+                 :status (if (contains? fleet-set repo) "added" "available")})
+              browse-repos))
+      ;; Fleet mode: show configured repos (preserve vector order for selection)
       (mapv (fn [repo]
               {:_id repo
                :name repo
@@ -1121,7 +1211,7 @@
                :pr-count (str (count (filter #(= repo (:pr/repo %))
                                              (:pr-items model []))))
                :status "active"})
-            (vec fleet-repos)))))
+            fleet-vec))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Projection registry
@@ -1132,13 +1222,14 @@
    when the model keys they depend on actually change (re-frame style)."
   {:project/workflows      project-workflows ;; already memoized internally
    :project/pr-items       (memoize-by project-pr-items
-                             (fn [m] [(:pr-items m) (:filtered-indices m)]))
+                             (fn [m] [(:pr-items m) (:filtered-indices m) (:agent-risk m)]))
    :project/pr-summary     (memoize-by project-pr-summary
                              (fn [m] [(get-in m [:detail :selected-pr]) (:workflows m)]))
    :project/readiness-tree (memoize-by project-readiness-tree
                              (fn [m] (get-in m [:detail :selected-pr])))
    :project/risk-tree      (memoize-by project-risk-tree
-                             (fn [m] (get-in m [:detail :selected-pr])))
+                             (fn [m] [(get-in m [:detail :selected-pr])
+                                      (:agent-risk m)]))
    :project/gate-list      (memoize-by project-gate-list
                              (fn [m] (get-in m [:detail :selected-pr])))
    :project/train-prs      (memoize-by project-train-prs
@@ -1149,17 +1240,27 @@
                              (fn [m] (get-in m [:detail :artifacts])))
    :project/kanban-columns (memoize-by project-kanban-columns
                              (fn [m] (:workflows m)))
-   :project/repo-list      (memoize-by project-repo-list
-                             (fn [m] [(:repo-manager-source m)
-                                      (:fleet-repos m)
-                                      (:browse-repos m)
-                                      (:pr-items m)]))
+   :project/repo-list      (let [cached (memoize-by project-repo-list
+                                         (fn [m] [(:repo-manager-source m)
+                                                  (:fleet-repos m)
+                                                  (:browse-repos m)
+                                                  (:pr-items m)]))]
+                             (fn [m]
+                               ;; Bypass cache during loading so sayings rotate
+                               (if (:browse-repos-loading? m)
+                                 (project-repo-list m)
+                                 (cached m))))
    :project/phase-tree     (memoize-by project-phase-tree
                              (fn [m] [(:detail m) (:workflows m)]))
    :project/agent-output   (memoize-by project-agent-output
                              (fn [m] (:detail m)))
-   :project/chat-messages  (memoize-by project-chat-messages
-                             (fn [m] [(:chat m) (get-in m [:chat :pending?])]))})
+   :project/chat-messages  (let [cached (memoize-by project-chat-messages
+                                        (fn [m] [(:chat m) (:chat-active-key m) (:_panel-cols m)]))]
+                             (fn [m]
+                               ;; Bypass cache while pending so spinner/elapsed updates
+                               (if (get-in m [:chat :pending?])
+                                 (project-chat-messages m)
+                                 (cached m))))})
 
 (defn get-projection
   "Look up a projection function by keyword. Returns identity fn if not found."

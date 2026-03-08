@@ -30,6 +30,21 @@
    [ai.miniforge.tui-views.transition :as transition]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Thread key derivation
+
+(defn chat-thread-key
+  "Derive a stable thread key from the current view context.
+   Each PR or workflow gets its own conversation thread."
+  [model]
+  (case (:view model)
+    :pr-detail (let [pr (get-in model [:detail :selected-pr])]
+                 [:pr (:pr/repo pr) (:pr/number pr)])
+    :pr-fleet  [:fleet]
+    [:global]))
+
+(def ^:private empty-thread
+  {:messages [] :input-buf "" :context {} :pending? false :suggested-actions []})
+
 ;; Context builders
 
 (def chat-views
@@ -72,20 +87,26 @@
 ;; Mode transitions
 
 (defn enter
-  "Enter chat mode. Builds context from current view."
+  "Enter chat mode. Loads or creates thread for current context."
   [model]
   (if (chat-views (:view model))
-    (-> model
-        (assoc :mode :chat :command-buf "chat> ")
-        (assoc-in [:chat :context] (build-context model))
-        (assoc-in [:chat :input-buf] "")
-        (assoc-in [:chat :pending?] false))
+    (let [tk      (chat-thread-key model)
+          thread  (get-in model [:chat-threads tk] empty-thread)
+          context (build-context model)]
+      (-> model
+          (assoc :mode :chat :command-buf "chat> " :chat-active-key tk)
+          (assoc :chat (-> thread
+                           (assoc :context context)
+                           (assoc :input-buf "")
+                           (assoc :pending? false)))))
     (transition/flash model "Chat available in PR Fleet or PR Detail views")))
 
 (defn escape
-  "Exit chat mode back to normal."
+  "Exit chat mode. Saves thread back to chat-threads."
   [model]
-  (assoc model :mode :normal :command-buf ""))
+  (let [tk (get model :chat-active-key)]
+    (cond-> (assoc model :mode :normal :command-buf "")
+      tk (assoc-in [:chat-threads tk] (:chat model)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Input handling
@@ -126,6 +147,8 @@
             (assoc-in [:chat :messages] messages)
             (assoc-in [:chat :input-buf] "")
             (assoc-in [:chat :pending?] true)
+            (assoc-in [:chat :pending-since] (System/currentTimeMillis))
+            sync-command-buf
             (assoc :side-effect (effect/chat-send context msg messages)))))))
 
 (defn execute-action
@@ -141,3 +164,18 @@
                                :context context})
           (assoc :flash-message (str "Executing: " (:label action))))
       (transition/flash model "No action at that index"))))
+
+(defn scroll-up
+  "Scroll the chat panel up by one line."
+  [model]
+  (update-in model [:chat :scroll-offset] #(max 0 (dec (or % 0)))))
+
+(defn scroll-down
+  "Scroll the chat panel down by one line."
+  [model]
+  (update-in model [:chat :scroll-offset] #(inc (or % 0))))
+
+(defn scroll-bottom
+  "Scroll the chat panel to the bottom (latest messages)."
+  [model]
+  (assoc-in model [:chat :scroll-offset] nil))

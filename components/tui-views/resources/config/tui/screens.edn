@@ -208,6 +208,6 @@
      :selection-col? true}
     {:type :node/footer
      :segments
-     {:normal "j/k:nav  Space:select  a:add  Enter:browse  Tab:toggle  /:search  Esc:back  q:quit"
-      :selected "{n} selected │ Space:toggle  v:visual  a:all  c:clear  :remove-repo"
-      :visual "VISUAL │ j/k:extend  Space:toggle  Esc:exit  a:all"}}]}}}
+     {:normal "j/k:nav  a:add  d:delete  Space:select  b:browse  f:fleet  r:sync  /:search  Tab:views  q:quit"
+      :selected "{n} selected │ d:delete  Space:toggle  v:visual  C:clear"
+      :visual "VISUAL │ j/k:extend  Space:toggle  Esc:exit"}}]}}}

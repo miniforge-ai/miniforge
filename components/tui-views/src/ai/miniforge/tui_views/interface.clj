@@ -204,8 +204,11 @@
           ci-str                                      (if (seq checks)
                                                         (str "CI checks: " (format-check-context checks))
                                                         (str "CI status: " (name ci-status)))
-          total-lines                                 (+ (or additions 0) (or deletions 0))]
+          total-lines                                 (+ (or additions 0) (or deletions 0))
+          provider                                    (if (and repo (str/starts-with? (str repo) "gitlab:"))
+                                                        "GitLab" "GitHub")]
       (str "PR: " repo "#" number " — " title "\n"
+           "Provider: " provider "\n"
            "Branch: " branch "\n"
            "Author: " (or author "unknown") "\n"
            "Status: " (name status) "\n"
@@ -239,9 +242,13 @@
 (defn build-chat-system-prompt
   "Build a context-aware system prompt for the chat LLM."
   [context]
-  (let [ctx-type (get context :type :unknown)]
+  (let [ctx-type (get context :type :unknown)
+        max-line (get context :max-line-width 60)]
     (str "You are the Miniforge orchestrator agent — an AI assistant embedded in a PR fleet management TUI.\n"
          "You help engineers understand, triage, and act on their pull requests.\n\n"
+         "IMPORTANT: Your output is displayed in a narrow TUI panel that is " max-line " characters wide.\n"
+         "Keep ALL lines under " max-line " characters. Do NOT use wide tables. Use short bullet points.\n"
+         "Do NOT use markdown headers (##). Use **bold** sparingly. Prefer plain text.\n\n"
          "Capabilities:\n"
          "- Analyze PR risk, readiness, and merge strategy\n"
          "- Explain CI failures and suggest fixes\n"
@@ -252,7 +259,7 @@
          "[ACTION: type | label | description]\n\n"
          "Available action types:\n"
          "- review — Run policy review on PR(s)\n"
-         "- sync — Refresh PR data from GitHub\n"
+         "- sync — Refresh PR data from source (GitHub/GitLab)\n"
          "- open — Open PR in browser\n"
          "- evaluate — Evaluate policy packs\n"
          "- remediate — Auto-fix policy violations\n"
@@ -322,6 +329,51 @@
     (catch Exception e
       (msg/chat-response (str "Chat error: " (.getMessage e)) []))))
 
+;------------------------------------------------------------------------------ Fleet risk triage
+
+(defn handle-fleet-risk-triage
+  "Send all PR summaries to LLM for fleet-level risk triage.
+   Returns per-PR risk assessments."
+  [{:keys [pr-summaries]}]
+  (try
+    (let [summaries-text (str/join "\n"
+                           (map :summary pr-summaries))
+          ids (mapv :id pr-summaries)
+          system (str "You are a PR fleet risk analyst. You will receive a list of PRs with their mechanical risk data.\n"
+                      "For EACH PR, provide a risk assessment with:\n"
+                      "- level: low, medium, high, or critical\n"
+                      "- reason: one sentence explaining your assessment\n\n"
+                      "Consider: change size, CI status, whether it's behind main, mechanical risk score, "
+                      "and how PRs interact (e.g., large PRs blocking others = higher fleet risk).\n\n"
+                      "Respond ONLY with one line per PR in this exact format:\n"
+                      "RISK: repo#number | level | reason\n\n"
+                      "Example:\n"
+                      "RISK: owner/repo#42 | high | Large change with failing CI blocks 3 dependent PRs\n"
+                      "RISK: owner/repo#43 | low | Small fix with passing CI, no dependencies")
+          result (llm/complete @llm-client {:system system :prompt summaries-text})]
+      (if (llm/success? result)
+        (let [content (llm/get-content result)
+              lines (str/split-lines content)
+              assessments (keep (fn [line]
+                                  (when-let [[_ id-str level reason]
+                                             (re-matches #"RISK:\s*(\S+#\d+)\s*\|\s*(\w+)\s*\|\s*(.*)" line)]
+                                    (let [[repo num-str] (str/split id-str #"#" 2)
+                                          num (try (Integer/parseInt num-str) (catch Exception _ nil))]
+                                      (when num
+                                        {:id [repo num]
+                                         :level (str/lower-case (str/trim level))
+                                         :reason (str/trim reason)}))))
+                                lines)
+              ;; Match back to original IDs (LLM may use slightly different formatting)
+              matched (if (seq assessments)
+                        assessments
+                        ;; Fallback: try to match by PR number position
+                        (mapv (fn [id] {:id id :level "medium" :reason "Unable to assess"}) ids))]
+          (msg/fleet-risk-triaged matched))
+        (msg/fleet-risk-triaged-error "LLM request failed")))
+    (catch Exception e
+      (msg/fleet-risk-triaged-error (.getMessage e)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Effect dispatcher
 
@@ -344,6 +396,7 @@
     :archive-workflows (handle-archive-workflows effect)
     :chat-send         (handle-chat-send effect)
     :chat-execute-action (handle-chat-execute-action effect)
+    :fleet-risk-triage (handle-fleet-risk-triage effect)
     nil))
 
 ;------------------------------------------------------------------------------ Layer 2

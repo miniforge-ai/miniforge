@@ -66,6 +66,12 @@
 (defn chat-action-result [result]
   [:msg/chat-action-result result])
 
+(defn fleet-risk-triaged [assessments]
+  [:msg/fleet-risk-triaged {:assessments assessments}])
+
+(defn fleet-risk-triaged-error [error]
+  [:msg/fleet-risk-triaged {:error error}])
+
 (defn side-effect-error [error-data]
   [:msg/side-effect-error error-data])
 

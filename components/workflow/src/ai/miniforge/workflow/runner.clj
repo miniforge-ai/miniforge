@@ -85,9 +85,11 @@
             duration-ms (:duration-ms metrics)
             tokens (:tokens metrics)
             cost-usd (:cost-usd metrics)
+            pr-info (:workflow/pr-info context)
             metrics-opts (cond-> {}
                            tokens (assoc :tokens tokens)
-                           cost-usd (assoc :cost-usd cost-usd))
+                           cost-usd (assoc :cost-usd cost-usd)
+                           pr-info (assoc :pr-info pr-info))
             workflow-failed (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-failed)
             workflow-completed (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-completed)]
         (if (= status :failed)
