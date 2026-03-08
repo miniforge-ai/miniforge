@@ -598,7 +598,6 @@
         ;; Return workflow maps (index entries are already the right shape)
         (mapv model/make-workflow all-workflows))
       [])))
-
 (defn load-workflows-into-model
   "Load persisted workflows and merge them into the given model.
 

@@ -159,6 +159,7 @@
           :else
           (recur (rest entries) (inc wf-idx) (inc row-idx)))))))
 
+
 (defn render-table [workflows selected active-chain [cols rows]]
   (if (empty? workflows)
     (layout/text [cols rows] "  No active workflows. Waiting for events..."
