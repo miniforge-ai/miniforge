@@ -125,7 +125,7 @@
       ;; New fields
       (is (= 1 (count (:pr/ci-checks result))))
       (is (= "lint" (:name (first (:pr/ci-checks result)))))
-      (is (= "CLEAN" (:pr/merge-state result)))
+      (is (= :CLEAN (:pr/merge-state result)))
       (is (false? (:pr/behind-main? result)))))
 
   (testing "Merged PR retains merged state"
@@ -141,7 +141,7 @@
     (let [result (status/provider-pr->train-pr
                   {:number 1 :title "X" :state "OPEN" :mergeStateStatus "BEHIND"})]
       (is (true? (:pr/behind-main? result)))
-      (is (= "BEHIND" (:pr/merge-state result)))))
+      (is (= :BEHIND (:pr/merge-state result)))))
 
   (testing "Without repo arg, :pr/repo is absent"
     (let [result (status/provider-pr->train-pr {:number 1 :title "X" :state "OPEN"})]

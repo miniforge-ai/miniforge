@@ -27,6 +27,26 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Tree view
 
+(defn- render-tree-node
+  "Render a single tree node into the buffer at the given row."
+  [b [row-idx node] {:keys [cols scroll-offset expanded selected
+                             fg selected-fg selected-bg]}]
+  (let [node-idx (+ row-idx scroll-offset)
+        {:keys [label depth expandable?]} node
+        node-fg (or (:fg node) fg)
+        sel? (= node-idx selected)
+        indent (* 2 (or depth 0))
+        icon (cond
+               (and expandable? (contains? expanded node-idx)) "▼ "
+               expandable? "▸ "
+               :else "  ")
+        text (str (apply str (repeat indent \space)) icon (or label ""))
+        text (subs text 0 (min (count text) cols))]
+    (buf/buf-put-string b 0 row-idx text
+                           {:fg (if sel? selected-fg node-fg)
+                            :bg (if sel? selected-bg :default)
+                            :bold? sel?})))
+
 (defn tree
   "Render a tree with expand/collapse.
    Options:
@@ -42,23 +62,11 @@
                          selected-fg :white selected-bg :blue}}]]
   (let [buffer (buf/make-buffer [cols rows])
         all-nodes (or nodes [])
-        visible (->> all-nodes (drop scroll-offset) (take rows))]
-    (reduce (fn [b [row-idx node]]
-              (let [node-idx (+ row-idx scroll-offset)
-                    {:keys [label depth expandable?]} node
-                    node-fg (or (:fg node) fg)
-                    sel? (= node-idx selected)
-                    indent (* 2 (or depth 0))
-                    icon (cond
-                           (and expandable? (contains? expanded node-idx)) "▼ "
-                           expandable? "▸ "
-                           :else "  ")
-                    text (str (apply str (repeat indent \space)) icon (or label ""))
-                    text (subs text 0 (min (count text) cols))]
-                (buf/buf-put-string b 0 row-idx text
-                                       {:fg (if sel? selected-fg node-fg)
-                                        :bg (if sel? selected-bg :default)
-                                        :bold? sel?})))
+        visible (->> all-nodes (drop scroll-offset) (take rows))
+        opts {:cols cols :scroll-offset scroll-offset :expanded expanded
+              :selected selected :fg fg :selected-fg selected-fg
+              :selected-bg selected-bg}]
+    (reduce (fn [b row-and-node] (render-tree-node b row-and-node opts))
             buffer
             (map-indexed vector visible))))
 

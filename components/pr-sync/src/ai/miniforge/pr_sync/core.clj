@@ -254,6 +254,23 @@
     :all    "all"
     "opened"))
 
+(defn- mr-graphql-fragment
+  "Build a GraphQL fragment for a single MR iid."
+  [iid]
+  (str "mr" iid ": mergeRequest(iid: \"" iid "\") "
+       "{ diffStatsSummary { additions deletions fileCount } }"))
+
+(defn- extract-mr-diff-stats
+  "Extract diff stats for an iid from a parsed GraphQL project map.
+   Returns [iid stats-map] or nil when stats are absent."
+  [project iid]
+  (let [k (keyword (str "mr" iid))
+        stats (get-in project [k :diffStatsSummary])]
+    (when stats
+      [iid {:additions  (:additions stats 0)
+            :deletions  (:deletions stats 0)
+            :file-count (:fileCount stats 0)}])))
+
 (defn fetch-gitlab-diff-stats-batch
   "Fetch diff stats for multiple MRs in a single GraphQL query.
    Returns {iid {:additions N :deletions N :file-count N}} or empty map on failure."
@@ -261,11 +278,7 @@
   (when (seq iids)
     (try
       (let [;; Build aliased GraphQL query: mr26: mergeRequest(iid: \"26\") { ... }
-            mr-fragments (str/join " "
-                           (map (fn [iid]
-                                  (str "mr" iid ": mergeRequest(iid: \"" iid "\") "
-                                       "{ diffStatsSummary { additions deletions fileCount } }"))
-                                iids))
+            mr-fragments (str/join " " (map mr-graphql-fragment iids))
             query (str "{ project(fullPath: \"" repo* "\") { " mr-fragments " } }")
             {:keys [success? out]} (run-glab "api" "graphql" "-f" (str "query=" query))]
         (if-not success?
@@ -273,13 +286,7 @@
           (let [data (json/parse-string out true)
                 project (get-in data [:data :project])]
             (into {}
-              (keep (fn [iid]
-                      (let [k (keyword (str "mr" iid))
-                            stats (get-in project [k :diffStatsSummary])]
-                        (when stats
-                          [iid {:additions  (:additions stats 0)
-                                :deletions  (:deletions stats 0)
-                                :file-count (:fileCount stats 0)}]))))
+              (keep (partial extract-mr-diff-stats project))
               iids))))
       (catch Exception _ {}))))
 

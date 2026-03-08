@@ -92,10 +92,10 @@
       :else :pending)))
 
 (defn merge-state-status->behind?
-  "Map GitHub mergeStateStatus to a boolean indicating if the PR is behind main.
-   Values: BEHIND, CLEAN, DIRTY, BLOCKED, HAS_HOOKS, UNKNOWN, UNSTABLE."
+  "Map mergeStateStatus to a boolean indicating if the PR is behind main.
+   Accepts strings or keywords. Values: BEHIND, CLEAN, DIRTY, BLOCKED, HAS_HOOKS, UNKNOWN, UNSTABLE."
   [merge-state-status]
-  (let [s (some-> merge-state-status str str/upper-case)]
+  (let [s (some-> merge-state-status name str/upper-case)]
     (contains? #{"BEHIND" "DIRTY"} s)))
 
 (defn provider-pr->train-pr
@@ -107,10 +107,10 @@
   ([pr] (provider-pr->train-pr pr nil))
   ([pr repo]
    (let [merge-state (:mergeStateStatus pr)
-         additions   (:additions pr)
-         deletions   (:deletions pr)
-         changed     (:changedFiles pr)
-         author-login (or (get-in pr [:author :login]) "")]
+         additions   (get pr :additions 0)
+         deletions   (get pr :deletions 0)
+         changed     (get pr :changedFiles 0)
+         author-login (get-in pr [:author :login] "")]
      (cond-> {:pr/number             (:number pr)
               :pr/title              (:title pr)
               :pr/url                (:url pr)
@@ -119,11 +119,11 @@
               :pr/merged-at          (:mergedAt pr)
               :pr/ci-status          (check-rollup->ci-status (:statusCheckRollup pr))
               :pr/ci-checks          (check-rollup->ci-checks (:statusCheckRollup pr))
-              :pr/merge-state        (some-> merge-state str str/upper-case)
+              :pr/merge-state        (some-> merge-state str str/upper-case keyword)
               :pr/behind-main?       (merge-state-status->behind? merge-state)
-              :pr/additions          (or additions 0)
-              :pr/deletions          (or deletions 0)
-              :pr/changed-files-count (or changed 0)
+              :pr/additions          additions
+              :pr/deletions          deletions
+              :pr/changed-files-count changed
               :pr/author             author-login}
        repo (assoc :pr/repo repo)))))
 
@@ -164,14 +164,14 @@
       :pending)))
 
 (defn gitlab-merge-state
-  "Map GitLab merge_status to an uppercase merge state string (GitHub parity)."
+  "Map GitLab merge_status to a keyword merge state (GitHub parity)."
   [mr]
   (let [ms (some-> (:merge_status mr) str str/lower-case)]
     (case ms
-      ("can_be_merged" "mergeable") "CLEAN"
-      "cannot_be_merged"            "DIRTY"
-      "unchecked"                   "UNKNOWN"
-      "checking"                    "UNKNOWN"
+      ("can_be_merged" "mergeable") :CLEAN
+      "cannot_be_merged"            :DIRTY
+      "unchecked"                   :UNKNOWN
+      "checking"                    :UNKNOWN
       nil)))
 
 (defn gitlab-behind-main?

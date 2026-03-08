@@ -275,89 +275,99 @@
               :event/type (:event/type event)
               :event/timestamp (:event/timestamp event)}))
 
+(defn- apply-phase-started
+  [detail event]
+  (let [phase (event-phase event)]
+    (-> detail
+        (assoc :current-phase phase)
+        (update :phases update-phase-entry phase :running nil))))
+
+(defn- apply-phase-completed
+  [detail event]
+  (let [phase (event-phase event)
+        outcome (:phase/outcome event)
+        duration-ms (:phase/duration-ms event)
+        artifacts (:phase/artifacts event)
+        tokens (:phase/tokens event)
+        cost-usd (:phase/cost-usd event)]
+    (-> detail
+        (assoc :current-phase phase)
+        (update :phases update-phase-entry phase (phase-status outcome) duration-ms
+                {:tokens tokens :cost-usd cost-usd})
+        (append-artifacts phase artifacts)
+        (cond->
+          tokens (update :tokens + tokens)
+          cost-usd (update :cost-usd + cost-usd)))))
+
+(defn- apply-agent-started
+  [detail event]
+  (let [agent (:agent/id event)
+        entry {:status :started :message (:message event)}]
+    (-> detail
+        (assoc :current-agent (assoc entry :agent agent))
+        (assoc-in [:agents agent] entry))))
+
+(defn- apply-agent-completed
+  [detail event]
+  (let [agent (:agent/id event)
+        entry {:status :completed :message (:message event)}]
+    (-> detail
+        (assoc :current-agent (assoc entry :agent agent))
+        (assoc-in [:agents agent] entry))))
+
+(defn- apply-agent-failed
+  [detail event]
+  (let [agent (:agent/id event)
+        entry {:status :failed :message (:message event)}]
+    (-> detail
+        (assoc :current-agent (assoc entry :agent agent))
+        (assoc :error (or (:agent/error event) (:message event)))
+        (assoc-in [:agents agent] entry))))
+
+(defn- apply-agent-status
+  [detail event]
+  (let [agent (:agent/id event)
+        entry {:status (:status/type event) :message (:message event)}]
+    (-> detail
+        (assoc :current-agent (assoc entry :agent agent))
+        (assoc-in [:agents agent] entry))))
+
+(defn- apply-agent-chunk
+  [detail event]
+  (update detail :agent-output str (or (:chunk/delta event) "")))
+
+(defn- apply-workflow-completed
+  [detail event]
+  (-> detail
+      (assoc :duration-ms (:workflow/duration-ms event))
+      (cond->
+        (:workflow/tokens event) (assoc :tokens (:workflow/tokens event))
+        (:workflow/cost-usd event) (assoc :cost-usd (:workflow/cost-usd event)))
+      (append-artifacts (or (:current-phase detail) :done) (nested-dag-artifacts event))))
+
+(defn- apply-workflow-failed
+  [detail event]
+  (-> detail
+      (assoc :error (or (:workflow/failure-reason event)
+                        (get-in event [:workflow/error-details :message])))
+      (append-artifacts (or (:current-phase detail) :failed) (nested-dag-artifacts event))))
+
 (defn apply-detail-event
   [detail event]
   (case (:event/type event)
-    :workflow/started
-    (ensure-evidence-intent detail event)
-
-    :workflow/phase-started
-    (let [phase (event-phase event)]
-      (-> detail
-          (assoc :current-phase phase)
-          (update :phases update-phase-entry phase :running nil)))
-
-    :workflow/phase-completed
-    (let [phase (event-phase event)
-          outcome (:phase/outcome event)
-          duration-ms (:phase/duration-ms event)
-          artifacts (:phase/artifacts event)
-          tokens (:phase/tokens event)
-          cost-usd (:phase/cost-usd event)]
-      (-> detail
-          (assoc :current-phase phase)
-          (update :phases update-phase-entry phase (phase-status outcome) duration-ms
-                  {:tokens tokens :cost-usd cost-usd})
-          (append-artifacts phase artifacts)
-          (cond->
-            tokens (update :tokens + tokens)
-            cost-usd (update :cost-usd + cost-usd))))
-
-    :agent/started
-    (let [agent (:agent/id event)
-          entry {:status :started :message (:message event)}]
-      (-> detail
-          (assoc :current-agent (assoc entry :agent agent))
-          (assoc-in [:agents agent] entry)))
-
-    :agent/completed
-    (let [agent (:agent/id event)
-          entry {:status :completed :message (:message event)}]
-      (-> detail
-          (assoc :current-agent (assoc entry :agent agent))
-          (assoc-in [:agents agent] entry)))
-
-    :agent/failed
-    (let [agent (:agent/id event)
-          entry {:status :failed :message (:message event)}]
-      (-> detail
-          (assoc :current-agent (assoc entry :agent agent))
-          (assoc :error (or (:agent/error event) (:message event)))
-          (assoc-in [:agents agent] entry)))
-
-    :agent/status
-    (let [agent (:agent/id event)
-          entry {:status (:status/type event) :message (:message event)}]
-      (-> detail
-          (assoc :current-agent (assoc entry :agent agent))
-          (assoc-in [:agents agent] entry)))
-
-    :agent/chunk
-    (update detail :agent-output str (or (:chunk/delta event) ""))
-
-    :gate/started
-    detail
-
-    :gate/passed
-    (append-validation-result detail event true)
-
-    :gate/failed
-    (append-validation-result detail event false)
-
-    :workflow/completed
-    (-> detail
-        (assoc :duration-ms (:workflow/duration-ms event))
-        (cond->
-          (:workflow/tokens event) (assoc :tokens (:workflow/tokens event))
-          (:workflow/cost-usd event) (assoc :cost-usd (:workflow/cost-usd event)))
-        (append-artifacts (or (:current-phase detail) :done) (nested-dag-artifacts event)))
-
-    :workflow/failed
-    (-> detail
-        (assoc :error (or (:workflow/failure-reason event)
-                          (get-in event [:workflow/error-details :message])))
-        (append-artifacts (or (:current-phase detail) :failed) (nested-dag-artifacts event)))
-
+    :workflow/started        (ensure-evidence-intent detail event)
+    :workflow/phase-started  (apply-phase-started detail event)
+    :workflow/phase-completed (apply-phase-completed detail event)
+    :agent/started           (apply-agent-started detail event)
+    :agent/completed         (apply-agent-completed detail event)
+    :agent/failed            (apply-agent-failed detail event)
+    :agent/status            (apply-agent-status detail event)
+    :agent/chunk             (apply-agent-chunk detail event)
+    :gate/started            detail
+    :gate/passed             (append-validation-result detail event true)
+    :gate/failed             (append-validation-result detail event false)
+    :workflow/completed      (apply-workflow-completed detail event)
+    :workflow/failed         (apply-workflow-failed detail event)
     detail))
 
 (defn detail-from-events
@@ -623,6 +633,23 @@
   [& [{:keys [dir]}]]
   (io/file (or dir (events-dir)) "archive"))
 
+(defn- archive-single-workflow
+  "Archive a single workflow by moving its event file and updating the index.
+   Returns updated accumulator map with :archived count and :errors vector."
+  [{:keys [archived errors]} wf-id events-directory arch-dir opts]
+  (let [src (io/file events-directory (str wf-id ".edn"))
+        dst (io/file arch-dir (str wf-id ".edn"))]
+    (if (.exists src)
+      (try
+        (.renameTo src dst)
+        ;; Remove from index
+        (let [idx (read-index opts)]
+          (write-index! (dissoc idx wf-id) opts))
+        {:archived (inc archived) :errors errors}
+        (catch Exception e
+          {:archived archived :errors (conj errors (str wf-id ": " (.getMessage e)))}))
+      {:archived archived :errors errors})))
+
 (defn archive-workflows!
   "Move event files for the given workflow IDs to the archive directory.
    Returns {:archived N :errors [...]}."
@@ -631,19 +658,8 @@
         events-directory (or (:dir opts) (events-dir))]
     (.mkdirs arch-dir)
     (reduce
-     (fn [{:keys [archived errors]} wf-id]
-       (let [src (io/file events-directory (str wf-id ".edn"))
-             dst (io/file arch-dir (str wf-id ".edn"))]
-         (if (.exists src)
-           (try
-             (.renameTo src dst)
-             ;; Remove from index
-             (let [idx (read-index opts)]
-               (write-index! (dissoc idx wf-id) opts))
-             {:archived (inc archived) :errors errors}
-             (catch Exception e
-               {:archived archived :errors (conj errors (str wf-id ": " (.getMessage e)))}))
-           {:archived archived :errors errors})))
+     (fn [acc wf-id]
+       (archive-single-workflow acc wf-id events-directory arch-dir opts))
      {:archived 0 :errors []}
      workflow-ids)))
 

@@ -149,11 +149,15 @@
     (if (empty? entries)
       row-idx
       (let [entry (first entries)]
-        (if (= :header (:type entry))
+        (cond
+          (= :header (:type entry))
           (recur (rest entries) wf-idx (inc row-idx))
-          (if (= wf-idx selected-idx)
-            row-idx
-            (recur (rest entries) (inc wf-idx) (inc row-idx))))))))
+
+          (= wf-idx selected-idx)
+          row-idx
+
+          :else
+          (recur (rest entries) (inc wf-idx) (inc row-idx)))))))
 
 (defn render-table [workflows selected active-chain [cols rows]]
   (if (empty? workflows)
@@ -192,16 +196,21 @@
         active-chain (:active-chain model)
         flash (:flash-message model)
         search-active? (and (:filtered-indices model) (= :search (:mode model)))]
-    (layout/split-v [cols rows] (/ 2.0 rows)
-      (fn [[tc tr]]
-        (layout/text [tc tr]
-          (str " MINIFORGE │ Workflows"
-               (when search-active? (str " [" (count workflows) " matches]")))
-          {:fg :cyan :bold? true}))
-      (fn [[c r]]
-        (layout/split-v [c r] (/ (- r 2.0) r)
-          (fn [size] (render-table workflows selected active-chain size))
-          (fn [size] (render-footer flash size)))))))
+    (let [render-header-bar
+          (fn [[tc tr]]
+            (layout/text [tc tr]
+              (str " MINIFORGE │ Workflows"
+                   (when search-active? (str " [" (count workflows) " matches]")))
+              {:fg :cyan :bold? true}))
+
+          render-content-area
+          (fn [[c r]]
+            (layout/split-v [c r] (/ (- r 2.0) r)
+              (fn [size] (render-table workflows selected active-chain size))
+              (fn [size] (render-footer flash size))))]
+      (layout/split-v [cols rows] (/ 2.0 rows)
+        render-header-bar
+        render-content-area))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

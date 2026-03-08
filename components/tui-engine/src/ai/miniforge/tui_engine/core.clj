@@ -48,6 +48,36 @@
     (screen/put-string! screen start-col row (.toString sb) fg bg bold?)
     (.setLength sb 0)))
 
+(defn- paint-row!
+  "Diff a single row between old and new buffers, writing changed cells to screen.
+   Batches consecutive same-style cells into single put-string! calls."
+  [screen ^StringBuilder sb row new-row old-row max-col resized?]
+  (loop [col 0
+         run-col 0
+         run-fg nil
+         run-bg nil
+         run-bold? false]
+    (if (< col max-col)
+      (let [new-cell (nth new-row col)
+            old-cell (when old-row (nth old-row col nil))
+            changed? (or resized? (not= new-cell old-cell))]
+        (if changed?
+          (let [{:keys [char fg bg bold?]} new-cell
+                same-style? (and (pos? (.length sb))
+                                 (= fg run-fg) (= bg run-bg)
+                                 (= (boolean bold?) run-bold?))]
+            (if same-style?
+              (do (.append sb (or char \space))
+                  (recur (inc col) run-col run-fg run-bg run-bold?))
+              (do (flush-run! screen sb run-col row run-fg run-bg run-bold?)
+                  (.append sb (or char \space))
+                  (recur (inc col) col fg bg (boolean bold?)))))
+          ;; Not changed — flush any pending run
+          (do (flush-run! screen sb run-col row run-fg run-bg run-bold?)
+              (recur (inc col) (inc col) nil nil false))))
+      ;; End of row — flush remaining
+      (flush-run! screen sb run-col row run-fg run-bg run-bold?))))
+
 (defn paint-screen!
   "Impure: diff new-buffer against prev-buffer and write changed cells to screen.
    Must be called under the render lock to prevent concurrent screen writes.
@@ -62,37 +92,12 @@
                      (and (pos? buf-rows) (seq prev-buffer)
                           (not= buf-cols (count (first prev-buffer)))))]
     (when resized? (screen/clear! screen))
-    ;; Batched cell-level diff: group consecutive same-style changed cells
     (let [sb (StringBuilder. 64)]
       (doseq [row (range (min scr-rows buf-rows))]
         (let [new-row (nth new-buffer row)
               old-row (when-not resized? (nth prev-buffer row nil))
               max-col (min scr-cols (count new-row))]
-          (loop [col 0
-                 run-col 0
-                 run-fg nil
-                 run-bg nil
-                 run-bold? false]
-            (if (< col max-col)
-              (let [new-cell (nth new-row col)
-                    old-cell (when old-row (nth old-row col nil))
-                    changed? (or resized? (not= new-cell old-cell))]
-                (if changed?
-                  (let [{:keys [char fg bg bold?]} new-cell
-                        same-style? (and (pos? (.length sb))
-                                         (= fg run-fg) (= bg run-bg)
-                                         (= (boolean bold?) run-bold?))]
-                    (if same-style?
-                      (do (.append sb (or char \space))
-                          (recur (inc col) run-col run-fg run-bg run-bold?))
-                      (do (flush-run! screen sb run-col row run-fg run-bg run-bold?)
-                          (.append sb (or char \space))
-                          (recur (inc col) col fg bg (boolean bold?)))))
-                  ;; Not changed — flush any pending run
-                  (do (flush-run! screen sb run-col row run-fg run-bg run-bold?)
-                      (recur (inc col) (inc col) nil nil false))))
-              ;; End of row — flush remaining
-              (flush-run! screen sb run-col row run-fg run-bg run-bold?))))))
+          (paint-row! screen sb row new-row old-row max-col resized?))))
     (screen/refresh! screen)
     new-buffer))
 
@@ -270,41 +275,43 @@
     (.start thread)
     thread))
 
+(defn- check-resize-and-tick!
+  "Check for terminal size changes or pending-chat ticks and re-render if needed."
+  [app last-size last-tick]
+  (try
+    (let [screen (:screen @app)
+          size (screen/get-size screen)
+          model @(:model-ref @app)
+          resized? (and size (not= size @last-size))
+          pending? (get-in model [:chat :pending?])
+          now-sec (quot (System/currentTimeMillis) 1000)
+          tick? (and pending? (not= now-sec @last-tick))]
+      (when resized?
+        (reset! last-size size))
+      (when tick?
+        (reset! last-tick now-sec))
+      (when (or resized? tick?)
+        (do-render! @app model)))
+    (catch Exception _)))
+
 (defn start-resize-thread!
-  "Start a daemon thread that checks for terminal size changes and forces
+  "Start a scheduled executor that checks for terminal size changes and forces
    a re-render when the size changes. Also re-renders periodically while
    the chat agent is thinking (to update the spinner/elapsed timer).
-   Checks every 250ms."
+   Checks every 250ms using a ScheduledExecutorService."
   [app]
   (let [last-size (atom nil)
         last-tick (atom 0)
-        thread (Thread.
-                (fn []
-                  (try
-                    (while (:running? @app)
-                      (try
-                        (Thread/sleep 250)
-                        (let [screen (:screen @app)
-                              size (screen/get-size screen)
-                              model @(:model-ref @app)
-                              resized? (and size (not= size @last-size))
-                              ;; Re-render every ~1s while chat is pending
-                              pending? (get-in model [:chat :pending?])
-                              now-sec (quot (System/currentTimeMillis) 1000)
-                              tick? (and pending? (not= now-sec @last-tick))]
-                          (when resized?
-                            (reset! last-size size))
-                          (when tick?
-                            (reset! last-tick now-sec))
-                          (when (or resized? tick?)
-                            (do-render! @app model)))
-                        (catch InterruptedException e (throw e))
-                        (catch Exception _)))
-                    (catch InterruptedException _))))]
-    (.setDaemon thread true)
-    (.setName thread "tui-resize-check")
-    (.start thread)
-    thread))
+        ^java.util.concurrent.ScheduledExecutorService
+        executor (java.util.concurrent.Executors/newSingleThreadScheduledExecutor
+                  (reify java.util.concurrent.ThreadFactory
+                    (newThread [_ r]
+                      (doto (Thread. r "tui-resize-check")
+                        (.setDaemon true)))))]
+    (.scheduleAtFixedRate executor
+                         (fn [] (check-resize-and-tick! app last-size last-tick))
+                         250 250 java.util.concurrent.TimeUnit/MILLISECONDS)
+    executor))
 
 ;------------------------------------------------------------------------------ Layer 6
 ;; Application lifecycle
@@ -329,9 +336,9 @@
     ;; Start input thread
     (let [thread (start-input-thread! app)]
       (swap! app assoc :input-thread thread))
-    ;; Start resize detection thread
-    (let [thread (start-resize-thread! app)]
-      (swap! app assoc :resize-thread thread))
+    ;; Start resize detection executor
+    (let [executor (start-resize-thread! app)]
+      (swap! app assoc :resize-executor executor))
     ;; Register subscriptions
     (when-let [sub-fn (:subscriptions @app)]
       (let [unsub (sub-fn (fn [msg] (dispatch! app msg)))]
@@ -364,9 +371,9 @@
     ;; Stop input thread
     (when-let [thread (:input-thread @app)]
       (.interrupt thread))
-    ;; Stop resize thread
-    (when-let [thread (:resize-thread @app)]
-      (.interrupt thread))
+    ;; Stop resize executor
+    (when-let [^java.util.concurrent.ScheduledExecutorService executor (:resize-executor @app)]
+      (.shutdownNow executor))
     ;; Interrupt all in-flight side-effect threads
     (when-let [threads-atom (:effect-threads @app)]
       (doseq [^Thread t @threads-atom]
@@ -376,7 +383,7 @@
     (try
       (screen/stop-screen! (:screen @app))
       (catch Exception _))
-    (swap! app assoc :unsub-fn nil :input-thread nil :resize-thread nil)))
+    (swap! app assoc :unsub-fn nil :input-thread nil :resize-executor nil)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

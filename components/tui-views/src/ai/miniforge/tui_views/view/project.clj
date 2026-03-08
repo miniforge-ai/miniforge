@@ -681,7 +681,7 @@
   "Build the behind-main indicator node."
   [behind? merge-st]
   (tree-node (str "Behind main: " (if behind?
-                                    (str "yes (" (or merge-st "BEHIND") ")")
+                                    (str "yes (" (if merge-st (name merge-st) "BEHIND") ")")
                                     "no"))
              1 false (if behind? status-fail status-pass)))
 
