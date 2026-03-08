@@ -600,16 +600,19 @@
 
 (defn handle-chat-response
   "Handle result of a :chat-send side effect.
-   Appends assistant message to chat history, clears pending state."
+   Appends assistant message to chat history, clears pending state.
+   Stores suggested actions for execution via number keys."
   [model {:keys [content actions workflow-id]}]
-  (let [assistant-msg {:role :assistant
+  (let [actions-vec (or actions [])
+        assistant-msg {:role :assistant
                        :content (or content "No response")
                        :timestamp (java.util.Date.)
-                       :actions (or actions [])
+                       :actions actions-vec
                        :workflow-id workflow-id}]
     (-> model
         (update-in [:chat :messages] conj assistant-msg)
         (assoc-in [:chat :pending?] false)
+        (assoc-in [:chat :suggested-actions] actions-vec)
         with-timestamp)))
 
 (defn handle-chat-action-result

@@ -669,11 +669,14 @@
 
 (defn enrich-pr-in-context
   "Enrich a single PR with readiness and risk, using its repo-level
-   train snapshot as context (so dependency and fanout factors are correct)."
+   train snapshot as context (so dependency and fanout factors are correct).
+   Passes real change-size data from the PR to the risk assessment."
   [train-snapshot pr]
   (try
     (let [readiness (pr-train/explain-readiness train-snapshot pr)
-          risk (pr-train/assess-risk train-snapshot pr {} {} {})]
+          pr-data {:change-size {:additions (get pr :pr/additions 0)
+                                 :deletions (get pr :pr/deletions 0)}}
+          risk (pr-train/assess-risk train-snapshot pr pr-data {} {})]
       (assoc pr
              :pr/readiness readiness
              :pr/risk risk))

@@ -30,6 +30,7 @@
      :columns [{:key :status-char :header "  " :width 2}
                {:key :name :header "Workflow" :width :flex}
                {:key :phase :header "Phase" :width 12}
+               {:key :time :header "Time" :width 12}
                {:key :progress-str :header "Progress" :width 20}
                {:key :agent-msg :header "Agent" :width 16}]
      :selectable? true
@@ -74,20 +75,32 @@
    :ratio :footer
    :children
    [{:type :node/split-h
-     :ratio 0.4
+     :ratio 0.65
      :children
-     [{:type :node/box
-       :title "Readiness"
-       :child {:type :widget/tree :data-fn :project/readiness-tree}}
-      {:type :node/split-v
-       :ratio 0.5
+     [{:type :node/split-v
+       :ratio 0.25
        :children
        [{:type :node/box
-         :title "Risk Assessment"
-         :child {:type :widget/tree :data-fn :project/risk-tree}}
-        {:type :node/box
-         :title "Gates & Policy"
-         :child {:type :widget/tree :data-fn :project/gate-list}}]}]}
+         :title "Summary"
+         :child {:type :widget/tree :data-fn :project/pr-summary}}
+        {:type :node/split-h
+         :ratio 0.5
+         :children
+         [{:type :node/split-v
+           :ratio 0.5
+           :children
+           [{:type :node/box
+             :title "Readiness"
+             :child {:type :widget/tree :data-fn :project/readiness-tree}}
+            {:type :node/box
+             :title "Risk"
+             :child {:type :widget/tree :data-fn :project/risk-tree}}]}
+          {:type :node/box
+           :title "Checks & Policy"
+           :child {:type :widget/tree :data-fn :project/gate-list}}]}]}
+      {:type :node/box
+       :title "Agent"
+       :child {:type :widget/tree :data-fn :project/chat-messages}}]}
     {:type :node/footer
      :segments
      {:normal "Esc:back  O:open  c:chat  ←/→:prev/next  Tab:pane  q:quit"}}]}}

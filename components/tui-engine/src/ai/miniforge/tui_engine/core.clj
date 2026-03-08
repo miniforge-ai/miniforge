@@ -41,9 +41,17 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Rendering primitives
 
+(defn- flush-run!
+  "Write a batched run of same-style characters to screen."
+  [screen ^StringBuilder sb start-col row fg bg bold?]
+  (when (pos? (.length sb))
+    (screen/put-string! screen start-col row (.toString sb) fg bg bold?)
+    (.setLength sb 0)))
+
 (defn paint-screen!
   "Impure: diff new-buffer against prev-buffer and write changed cells to screen.
    Must be called under the render lock to prevent concurrent screen writes.
+   Batches consecutive same-style cells into single put-string! calls.
    Returns new-buffer (to be stored as prev-buffer)."
   [screen prev-buffer new-buffer]
   (let [buf-rows (count new-buffer)
@@ -53,17 +61,38 @@
                      (not= buf-rows (count prev-buffer))
                      (and (pos? buf-rows) (seq prev-buffer)
                           (not= buf-cols (count (first prev-buffer)))))]
-    ;; Only clear on first render or resize — never on normal frames
     (when resized? (screen/clear! screen))
-    ;; Cell-level diff: only write cells that actually changed
-    (doseq [row (range (min scr-rows buf-rows))
-            col (range (min scr-cols (count (nth new-buffer row))))]
-      (let [new-cell (get-in new-buffer [row col])
-            old-cell (when-not resized? (get-in prev-buffer [row col]))]
-        (when (or resized? (not= new-cell old-cell))
-          (let [{:keys [char fg bg bold?]} new-cell]
-            (when char
-              (screen/put-string! screen col row (str char) fg bg (boolean bold?)))))))
+    ;; Batched cell-level diff: group consecutive same-style changed cells
+    (let [sb (StringBuilder. 64)]
+      (doseq [row (range (min scr-rows buf-rows))]
+        (let [new-row (nth new-buffer row)
+              old-row (when-not resized? (nth prev-buffer row nil))
+              max-col (min scr-cols (count new-row))]
+          (loop [col 0
+                 run-col 0
+                 run-fg nil
+                 run-bg nil
+                 run-bold? false]
+            (if (< col max-col)
+              (let [new-cell (nth new-row col)
+                    old-cell (when old-row (nth old-row col nil))
+                    changed? (or resized? (not= new-cell old-cell))]
+                (if changed?
+                  (let [{:keys [char fg bg bold?]} new-cell
+                        same-style? (and (pos? (.length sb))
+                                         (= fg run-fg) (= bg run-bg)
+                                         (= (boolean bold?) run-bold?))]
+                    (if same-style?
+                      (do (.append sb (or char \space))
+                          (recur (inc col) run-col run-fg run-bg run-bold?))
+                      (do (flush-run! screen sb run-col row run-fg run-bg run-bold?)
+                          (.append sb (or char \space))
+                          (recur (inc col) col fg bg (boolean bold?)))))
+                  ;; Not changed — flush any pending run
+                  (do (flush-run! screen sb run-col row run-fg run-bg run-bold?)
+                      (recur (inc col) (inc col) nil nil false))))
+              ;; End of row — flush remaining
+              (flush-run! screen sb run-col row run-fg run-bg run-bold?))))))
     (screen/refresh! screen)
     new-buffer))
 

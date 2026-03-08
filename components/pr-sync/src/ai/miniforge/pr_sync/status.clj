@@ -101,21 +101,30 @@
 (defn provider-pr->train-pr
   "Convert a GitHub provider PR map to a normalized TrainPR map.
    Adds :pr/repo when repo is provided.
-   Includes :pr/ci-checks for individual check results and
-   :pr/merge-state / :pr/behind-main? for branch-behind-main detection."
+   Includes :pr/ci-checks for individual check results,
+   :pr/merge-state / :pr/behind-main? for branch-behind-main detection,
+   and :pr/additions / :pr/deletions / :pr/changed-files-count for risk assessment."
   ([pr] (provider-pr->train-pr pr nil))
   ([pr repo]
-   (let [merge-state (:mergeStateStatus pr)]
-     (cond-> {:pr/number        (:number pr)
-              :pr/title         (:title pr)
-              :pr/url           (:url pr)
-              :pr/branch        (:headRefName pr)
-              :pr/status        (pr-status-from-provider pr)
-              :pr/merged-at     (:mergedAt pr)
-              :pr/ci-status     (check-rollup->ci-status (:statusCheckRollup pr))
-              :pr/ci-checks     (check-rollup->ci-checks (:statusCheckRollup pr))
-              :pr/merge-state   (some-> merge-state str str/upper-case)
-              :pr/behind-main?  (merge-state-status->behind? merge-state)}
+   (let [merge-state (:mergeStateStatus pr)
+         additions   (:additions pr)
+         deletions   (:deletions pr)
+         changed     (:changedFiles pr)
+         author-login (or (get-in pr [:author :login]) "")]
+     (cond-> {:pr/number             (:number pr)
+              :pr/title              (:title pr)
+              :pr/url                (:url pr)
+              :pr/branch             (:headRefName pr)
+              :pr/status             (pr-status-from-provider pr)
+              :pr/merged-at          (:mergedAt pr)
+              :pr/ci-status          (check-rollup->ci-status (:statusCheckRollup pr))
+              :pr/ci-checks          (check-rollup->ci-checks (:statusCheckRollup pr))
+              :pr/merge-state        (some-> merge-state str str/upper-case)
+              :pr/behind-main?       (merge-state-status->behind? merge-state)
+              :pr/additions          (or additions 0)
+              :pr/deletions          (or deletions 0)
+              :pr/changed-files-count (or changed 0)
+              :pr/author             author-login}
        repo (assoc :pr/repo repo)))))
 
 ;------------------------------------------------------------------------------ Layer 2

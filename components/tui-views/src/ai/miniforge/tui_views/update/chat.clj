@@ -127,3 +127,17 @@
             (assoc-in [:chat :input-buf] "")
             (assoc-in [:chat :pending?] true)
             (assoc :side-effect (effect/chat-send context msg messages)))))))
+
+(defn execute-action
+  "Execute a suggested action by index (0-based).
+   Fires a :chat-execute-action side-effect."
+  [model idx]
+  (let [actions (get-in model [:chat :suggested-actions] [])
+        context (get-in model [:chat :context] {})]
+    (if-let [action (get actions idx)]
+      (-> model
+          (assoc :side-effect {:type :chat-execute-action
+                               :action action
+                               :context context})
+          (assoc :flash-message (str "Executing: " (:label action))))
+      (transition/flash model "No action at that index"))))

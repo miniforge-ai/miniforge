@@ -29,7 +29,36 @@
    [clojure.string :as str]
    [ai.miniforge.tui-views.model :as model])
   (:import
-   [java.text SimpleDateFormat]))
+   [java.text SimpleDateFormat]
+   [java.time LocalDate ZoneId]
+   [java.time.temporal ChronoUnit]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Projection memoization (re-frame style subscription caching)
+
+(defn memoize-by
+  "Memoize a projection function by extracting input signals from the model.
+   extract-fn: (model -> inputs) — extracts the subset of model data that
+   the projection depends on. If inputs are identical? to the cached inputs,
+   the cached result is returned without recomputation.
+
+   Uses identical? for fast pointer-equality checks. Model updates via assoc
+   create new map nodes only for changed paths, so unchanged subtrees keep
+   the same identity."
+  [proj-fn extract-fn]
+  (let [cache (volatile! {:inputs ::init :result nil})]
+    (fn [model]
+      (let [inputs (extract-fn model)
+            cached @cache]
+        (if (identical? inputs (:inputs cached))
+          (:result cached)
+          ;; Fallback to value equality for cases where structure is rebuilt
+          (if (= inputs (:inputs cached))
+            (do (vreset! cache (assoc cached :inputs inputs))
+                (:result cached))
+            (let [result (proj-fn model)]
+              (vreset! cache {:inputs inputs :result result})
+              result)))))))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
@@ -70,6 +99,12 @@
   "Classify PR into [state score] from status and CI signals."
   [status ci-ok? ci-fail? behind?]
   (cond
+    (= :merged status)
+    [:merged 1.0]
+
+    (= :closed status)
+    [:closed 0.0]
+
     (and (#{:merge-ready :approved} status) ci-ok? (not behind?))
     [:merge-ready 1.0]
 
@@ -134,11 +169,12 @@
   [status ci-ok? ci-fail? behind?]
   (let [ci-score     (if ci-ok? 1.0 (if ci-fail? 0.0 0.5))
         review-score (case status
-                       (:merge-ready :approved) 1.0
+                       (:merged :merge-ready :approved) 1.0
                        :reviewing 0.5
                        :changes-requested 0.25
                        :open 0.3
                        :draft 0.0
+                       :closed 0.0
                        0.0)
         behind-score (if behind? 0.0 1.0)
         weighted     (+ (* 0.25 1.0)
@@ -177,49 +213,203 @@
      :readiness/factors  factors}))
 
 (defn derive-risk
-  "Derive N9 risk assessment from provider signals.
-   Returns {:risk/level kw :risk/factors [{:factor kw :explanation str} ...]}"
+  "Derive N9 risk assessment from provider signals and change size.
+   Returns {:risk/level kw :risk/score float :risk/factors [{:factor kw :explanation str :value any} ...]}"
   [pr]
-  (let [status (:pr/status pr)
-        ci     (:pr/ci-status pr)
-        ci-fail? (= :failed ci)
-        changes? (= :changes-requested status)
-        [level factors]
-        (cond
-          ci-fail?  [:medium [{:factor :ci-health
-                               :explanation "CI checks are failing"}]]
-          changes?  [:medium [{:factor :review-concerns
-                               :explanation "Reviewer requested changes"}]]
-          :else     [:low    [{:factor :signal-check
-                               :explanation "All available signals nominal"}]])]
+  (let [status    (:pr/status pr)
+        ci        (:pr/ci-status pr)
+        ci-fail?  (= :failed ci)
+        changes?  (= :changes-requested status)
+        additions (get pr :pr/additions 0)
+        deletions (get pr :pr/deletions 0)
+        total     (+ additions deletions)
+        changed-files (get pr :pr/changed-files-count 0)
+        size-risk (cond (> total 1000) :high (> total 500) :medium (> total 200) :low :else :minimal)
+        factors   (cond-> []
+                    (pos? total)
+                    (conj {:factor :change-size
+                           :explanation (str total " lines changed (+" additions "/-" deletions ")")
+                           :value {:additions additions :deletions deletions :total total}
+                           :score (cond (> total 1000) 1.0 (> total 500) 0.75 (> total 200) 0.5 :else 0.25)})
+                    (pos? changed-files)
+                    (conj {:factor :files-changed
+                           :explanation (str changed-files " files modified")
+                           :value changed-files
+                           :score (cond (> changed-files 50) 1.0 (> changed-files 20) 0.7 (> changed-files 10) 0.4 :else 0.2)})
+                    ci-fail?
+                    (conj {:factor :ci-health
+                           :explanation "CI checks are failing"
+                           :score 0.8})
+                    changes?
+                    (conj {:factor :review-concerns
+                           :explanation "Reviewer requested changes"
+                           :score 0.6})
+                    (and (not ci-fail?) (not changes?) (zero? total))
+                    (conj {:factor :signal-check
+                           :explanation "All available signals nominal"
+                           :score 0.0}))
+        score     (if (seq factors)
+                    (/ (reduce + 0.0 (map #(get % :score 0.0) factors)) (count factors))
+                    0.0)
+        level     (cond
+                    (or ci-fail? changes? (= size-risk :high)) :medium
+                    (> score 0.6) :medium
+                    (> score 0.3) :low
+                    :else :low)]
     {:risk/level   level
+     :risk/score   score
      :risk/factors factors}))
+
+;------------------------------------------------------------------------------ Layer 0g
+;; Temporal grouping
+
+(defn- to-local-date
+  "Convert a started-at value to LocalDate. Returns nil on failure."
+  [started]
+  (try
+    (-> (if (instance? java.util.Date started)
+          (.toInstant ^java.util.Date started)
+          (java.time.Instant/parse (str started)))
+        (.atZone (ZoneId/systemDefault))
+        .toLocalDate)
+    (catch Exception _ nil)))
+
+(defn temporal-bucket
+  "Classify a workflow's started-at into a temporal group.
+   Accepts pre-computed `today` to avoid repeated LocalDate/now calls."
+  [wf ^LocalDate today]
+  (if-let [started (:started-at wf)]
+    (if-let [wf-date (to-local-date started)]
+      (let [days-ago (.between ChronoUnit/DAYS wf-date today)]
+        (cond
+          (zero? days-ago)  :today
+          (= 1 days-ago)    :yesterday
+          (<= days-ago 7)   :this-week
+          (<= days-ago 30)  :this-month
+          :else             :older))
+      :unknown)
+    :unknown))
+
+(def ^:private bucket-labels
+  {:today "Today" :yesterday "Yesterday" :this-week "This Week"
+   :this-month "This Month" :older "Older" :unknown "Unknown"})
+
+(def ^:private bucket-order
+  [:today :yesterday :this-week :this-month :older :unknown])
+
+(defn- format-started-time
+  "Format started-at for display. Shows HH:mm for today/yesterday, MM-dd HH:mm otherwise."
+  [started bucket]
+  (when started
+    (try
+      (let [inst (if (instance? java.util.Date started)
+                   (.toInstant ^java.util.Date started)
+                   (java.time.Instant/parse (str started)))
+            zdt (.atZone inst (ZoneId/systemDefault))]
+        (if (#{:today :yesterday} bucket)
+          (format "%02d:%02d" (.getHour zdt) (.getMinute zdt))
+          (format "%02d-%02d %02d:%02d"
+                  (.getMonthValue zdt) (.getDayOfMonth zdt)
+                  (.getHour zdt) (.getMinute zdt))))
+      (catch Exception _ ""))))
+
+(defn group-workflows-with-headers
+  "Group workflows into temporal buckets and interleave section header rows.
+   Returns [flat-rows mapped-selected-idx].
+   flat-rows: vector of maps, header rows marked with :_header? true.
+   mapped-selected-idx: the visual row index corresponding to selected-idx
+   (which counts only non-header rows)."
+  [workflows selected-idx]
+  (let [today (LocalDate/now)
+        grouped (group-by #(temporal-bucket % today) workflows)
+        buckets (filterv #(contains? grouped %) bucket-order)]
+    (loop [bs buckets
+           rows []
+           wf-counter 0
+           mapped nil]
+      (if (empty? bs)
+        [rows (or mapped 0)]
+        (let [bucket (first bs)
+              wfs (get grouped bucket)
+              header {:_header? true
+                      :status-char ""
+                      :name (str "── " (get bucket-labels bucket) " (" (count wfs) ") ")
+                      :name-fg :cyan
+                      :phase ""
+                      :time ""
+                      :progress-str ""
+                      :agent-msg ""}
+              wf-rows (mapv (fn [wf]
+                              {:_id (:id wf)
+                               :status-char (status-char (:status wf))
+                               :name (:name wf)
+                               :phase (some-> (:phase wf) name)
+                               :time (or (format-started-time (:started-at wf) bucket) "")
+                               :progress-str (format-progress-bar (:progress wf 0) 20)
+                               :agent-msg (when-let [agent (first (vals (:agents wf)))]
+                                            (when-let [msg (:message agent)]
+                                              (subs msg 0 (min 16 (count msg)))))})
+                            wfs)
+              new-rows (into (conj rows header) wf-rows)
+              new-mapped (if (and (nil? mapped)
+                                  (some? selected-idx)
+                                  (< selected-idx (+ wf-counter (count wfs))))
+                           (+ (count rows) 1 (- selected-idx wf-counter))
+                           mapped)]
+          (recur (rest bs)
+                 new-rows
+                 (+ wf-counter (count wfs))
+                 new-mapped))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Projection functions: model -> widget data
 
-(defn project-workflows
-  "Project workflow list for the table widget."
+(defn- compute-workflow-rows
+  "Expensive: filter, group, and format workflow data into table rows with headers.
+   Returns the grouped row vector (without selection metadata)."
   [model]
   (let [wfs (vec (remove #(= :archived (:status %)) (:workflows model)))
         filtered (if-let [fi (:filtered-indices model)]
                    (vec (keep-indexed (fn [i wf] (when (contains? fi i) wf)) wfs))
-                   wfs)]
-    (mapv (fn [wf]
-            {:_id (:id wf)
-             :status-char (status-char (:status wf))
-             :name (:name wf)
-             :phase (some-> (:phase wf) name)
-             :progress-str (format-progress-bar (:progress wf 0) 20)
-             :agent-msg (when-let [agent (first (vals (:agents wf)))]
-                          (when-let [msg (:message agent)]
-                            (subs msg 0 (min 16 (count msg)))))})
-          filtered)))
+                   wfs)
+        [rows _] (group-workflows-with-headers filtered nil)]
+    rows))
+
+(def ^:private compute-workflow-rows-memo
+  "Memoized workflow row computation. Only recomputes when workflows or filter changes."
+  (memoize-by compute-workflow-rows
+              (fn [m] [(:workflows m) (:filtered-indices m)])))
+
+(defn- map-selected-to-visual
+  "Cheap: map a logical selected-idx to the visual row index in grouped rows
+   (skipping header rows). O(n) scan but n is small (number of rows on screen)."
+  [rows selected-idx]
+  (let [sel (or selected-idx 0)]
+    (loop [entries rows wf-idx 0 row-idx 0]
+      (if (empty? entries)
+        row-idx
+        (let [entry (first entries)]
+          (if (:_header? entry)
+            (recur (rest entries) wf-idx (inc row-idx))
+            (if (= wf-idx sel)
+              row-idx
+              (recur (rest entries) (inc wf-idx) (inc row-idx)))))))))
+
+(defn project-workflows
+  "Project workflow list for the table widget.
+   Data rows are memoized — only recomputed when workflows/filter change.
+   Selection mapping is cheap and computed fresh."
+  [model]
+  (let [rows (compute-workflow-rows-memo model)
+        mapped (map-selected-to-visual rows (:selected-idx model))]
+    (with-meta rows {:mapped-selected mapped})))
 
 (defn readiness-indicator
   "Readiness state → status string with indicator character."
   [state]
   (case state
+    :merged            "✓ merged"
+    :closed            "─ closed"
     :merge-ready       "✓ merge-ready"
     :ci-failing        "● ci-failing"
     :needs-review      "○ needs-review"
@@ -386,6 +576,8 @@
   "Map readiness state to fixed status color."
   [state]
   (case state
+    :merged       status-pass
+    :closed       nil
     :merge-ready  status-pass
     :ci-failing   status-fail
     :behind-main  status-warning
@@ -674,12 +866,13 @@
     (mapv project-pr-row filtered)))
 
 (defn resolve-detail-enrichment
-  "Resolve enrichment data for the detail view's selected PR."
+  "Resolve enrichment data for the detail view's selected PR.
+   Falls back to naive derivation when enrichment is absent."
   [model]
   (let [pr-data (get-in model [:detail :selected-pr])]
     {:pr        pr-data
-     :readiness (:pr/readiness pr-data)
-     :risk      (:pr/risk pr-data)
+     :readiness (or (:pr/readiness pr-data) (when pr-data (derive-readiness pr-data)))
+     :risk      (or (:pr/risk pr-data) (when pr-data (derive-risk pr-data)))
      :policy    (:pr/policy pr-data)
      :gates     (get pr-data :pr/gate-results [])}))
 
@@ -728,6 +921,54 @@
       (seq gates) (gates-tree gates)
       :else       [(tree-node "Policy not yet evaluated" 0)
                    (tree-node "Use :review to evaluate policy packs" 1)])))
+
+(defn project-pr-summary
+  "Build summary tree nodes for the PR detail top pane.
+   Shows PR metadata, status, and linked workflow at a glance."
+  [model]
+  (let [{:keys [pr readiness risk]} (resolve-detail-enrichment model)
+        r-state  (or (:readiness/state readiness) :unknown)
+        risk-lvl (or (:risk/level risk) :unknown)
+        recommend (when pr (derive-recommendation pr))
+        ;; Find linked workflow by matching branch name
+        branch   (:pr/branch pr)
+        wfs      (:workflows model [])
+        linked-wf (when branch
+                    (some (fn [wf]
+                            (when (and (:name wf)
+                                       (or (str/includes? (str branch) (str (:name wf)))
+                                           (str/includes? (str (:name wf)) (str branch))))
+                              wf))
+                          wfs))]
+    (let [additions (get pr :pr/additions 0)
+          deletions (get pr :pr/deletions 0)
+          total     (+ additions deletions)
+          files     (get pr :pr/changed-files-count 0)]
+      (cond-> [(tree-node (str (:pr/repo pr "") " #" (:pr/number pr "?"))
+                          0 false status-info)
+               (tree-node (str "  " (:pr/title pr "")) 0)
+               (tree-node (str "Branch: " (or branch "?")
+                               (when-let [author (:pr/author pr)]
+                                 (when (seq author) (str " by " author))))
+                          0)
+               (tree-node (str "State: " (pr-state-label (:pr/status pr))
+                               " │ Status: " (readiness-indicator r-state))
+                          0 false (readiness-state-color r-state))
+               (tree-node (str "Risk: " (name risk-lvl)
+                               " │ Score: " (int (* 100 (or (:readiness/score readiness) 0))) "%"
+                               (when (pos? total)
+                                 (str " │ +" additions "/-" deletions
+                                      (when (pos? files) (str " " files " files")))))
+                          0 false (risk-level-color risk-lvl))]
+        recommend
+        (conj (tree-node (str "Action: " (:label recommend) " — " (:reason recommend))
+                         0 false (recommend-action-color (:action recommend))))
+        linked-wf
+        (conj (tree-node (str "Workflow: " (:name linked-wf)
+                              " (" (name (or (:status linked-wf) :unknown)) ")")
+                         0 false status-info))
+        (not linked-wf)
+        (conj (tree-node "Workflow: not linked" 0))))))
 
 (defn project-train-prs
   "Project train PRs for the table widget."
@@ -824,6 +1065,39 @@
                (str "[" (name (get agent :type :agent)) "] " output)
                (if (seq output) output "No agent output"))}]))
 
+(defn project-chat-messages
+  "Project chat messages as tree nodes for the agent panel.
+   Shows conversation history with role-based styling and numbered actions."
+  [model]
+  (let [messages (get-in model [:chat :messages] [])
+        pending? (get-in model [:chat :pending?] false)
+        actions  (get-in model [:chat :suggested-actions] [])]
+    (if (empty? messages)
+      [(tree-node "Press c to start a conversation" 0 false status-info)
+       (tree-node "Ask about this PR, request analysis," 1)
+       (tree-node "or take actions." 1)]
+      (let [msg-nodes (mapcat
+                        (fn [{:keys [role content]}]
+                          (let [prefix (if (= :user role) "You" "Agent")
+                                fg     (if (= :user role) :cyan :green)
+                                lines  (str/split-lines (or content ""))]
+                            (into [(tree-node (str prefix ":") 0 false fg)]
+                                  (mapv #(tree-node (str "  " %) 1) lines))))
+                        messages)
+            action-nodes (when (and (seq actions) (not pending?))
+                           (into [(tree-node "" 0)
+                                  (tree-node "Actions:" 0 false :yellow)]
+                                 (map-indexed
+                                   (fn [i {:keys [label description]}]
+                                     (tree-node (str "  " (inc i) ") " label
+                                                     (when description
+                                                       (str " — " description)))
+                                                1 false :cyan))
+                                   actions)))]
+        (cond-> (vec msg-nodes)
+          (seq action-nodes) (into action-nodes)
+          pending? (conj (tree-node "Agent thinking..." 0 false :yellow)))))))
+
 (defn project-repo-list
   "Project repo manager data for the table widget."
   [model]
@@ -853,19 +1127,39 @@
 ;; Projection registry
 
 (def projections
-  "Registry of data projection functions: keyword -> (model -> data)."
-  {:project/workflows      project-workflows
-   :project/pr-items       project-pr-items
-   :project/readiness-tree project-readiness-tree
-   :project/risk-tree      project-risk-tree
-   :project/gate-list      project-gate-list
-   :project/train-prs      project-train-prs
-   :project/evidence-tree  project-evidence-tree
-   :project/artifacts      project-artifacts
-   :project/kanban-columns project-kanban-columns
-   :project/repo-list      project-repo-list
-   :project/phase-tree     project-phase-tree
-   :project/agent-output   project-agent-output})
+  "Registry of data projection functions: keyword -> (model -> data).
+   Projections are memoized by their input signals — they only recompute
+   when the model keys they depend on actually change (re-frame style)."
+  {:project/workflows      project-workflows ;; already memoized internally
+   :project/pr-items       (memoize-by project-pr-items
+                             (fn [m] [(:pr-items m) (:filtered-indices m)]))
+   :project/pr-summary     (memoize-by project-pr-summary
+                             (fn [m] [(get-in m [:detail :selected-pr]) (:workflows m)]))
+   :project/readiness-tree (memoize-by project-readiness-tree
+                             (fn [m] (get-in m [:detail :selected-pr])))
+   :project/risk-tree      (memoize-by project-risk-tree
+                             (fn [m] (get-in m [:detail :selected-pr])))
+   :project/gate-list      (memoize-by project-gate-list
+                             (fn [m] (get-in m [:detail :selected-pr])))
+   :project/train-prs      (memoize-by project-train-prs
+                             (fn [m] (get-in m [:detail :selected-train])))
+   :project/evidence-tree  (memoize-by project-evidence-tree
+                             (fn [m] (:detail m)))
+   :project/artifacts      (memoize-by project-artifacts
+                             (fn [m] (get-in m [:detail :artifacts])))
+   :project/kanban-columns (memoize-by project-kanban-columns
+                             (fn [m] (:workflows m)))
+   :project/repo-list      (memoize-by project-repo-list
+                             (fn [m] [(:repo-manager-source m)
+                                      (:fleet-repos m)
+                                      (:browse-repos m)
+                                      (:pr-items m)]))
+   :project/phase-tree     (memoize-by project-phase-tree
+                             (fn [m] [(:detail m) (:workflows m)]))
+   :project/agent-output   (memoize-by project-agent-output
+                             (fn [m] (:detail m)))
+   :project/chat-messages  (memoize-by project-chat-messages
+                             (fn [m] [(:chat m) (get-in m [:chat :pending?])]))})
 
 (defn get-projection
   "Look up a projection function by keyword. Returns identity fn if not found."
@@ -940,16 +1234,26 @@
     (str "Repos (" (count repos) ") [" (inc idx) "]")))
 
 (def contexts
-  "Registry of context functions: keyword -> (model -> string)."
-  {:ctx/workflow-count         ctx-workflow-count
-   :ctx/pr-fleet-summary       ctx-pr-fleet-summary
-   :ctx/pr-detail-title        ctx-pr-detail-title
-   :ctx/train-title            ctx-train-title
-   :ctx/evidence-title         ctx-evidence-title
-   :ctx/artifact-title         ctx-artifact-title
-   :ctx/artifact-box-title     ctx-artifact-box-title
-   :ctx/repo-manager-title     ctx-repo-manager-title
-   :ctx/workflow-detail-title  ctx-workflow-detail-title})
+  "Registry of context functions: keyword -> (model -> string).
+   Memoized by input signals — only recompute when relevant data changes."
+  {:ctx/workflow-count         (memoize-by ctx-workflow-count
+                                 (fn [m] [(:workflows m) (:last-updated m)]))
+   :ctx/pr-fleet-summary       (memoize-by ctx-pr-fleet-summary
+                                 (fn [m] [(:pr-items m) (:pr-filter-state m)]))
+   :ctx/pr-detail-title        (memoize-by ctx-pr-detail-title
+                                 (fn [m] (get-in m [:detail :selected-pr])))
+   :ctx/train-title            (memoize-by ctx-train-title
+                                 (fn [m] (get-in m [:detail :selected-train])))
+   :ctx/evidence-title         (memoize-by ctx-evidence-title
+                                 (fn [m] [(:detail m) (:workflows m)]))
+   :ctx/artifact-title         (memoize-by ctx-artifact-title
+                                 (fn [m] [(:detail m) (:workflows m)]))
+   :ctx/artifact-box-title     (memoize-by ctx-artifact-box-title
+                                 (fn [m] (get-in m [:detail :artifacts])))
+   :ctx/repo-manager-title     (memoize-by ctx-repo-manager-title
+                                 (fn [m] (:fleet-repos m)))
+   :ctx/workflow-detail-title  (memoize-by ctx-workflow-detail-title
+                                 (fn [m] [(:detail m) (:workflows m)]))})
 
 (defn get-context
   "Look up a context function by keyword. Returns a constant fn if not found."

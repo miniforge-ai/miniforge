@@ -58,6 +58,15 @@
     :else            TextColor$ANSI/DEFAULT))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
+;; Pre-allocated SGR arrays (avoid reflection + allocation on every character)
+
+(def ^{:tag "[Lcom.googlecode.lanterna.SGR;"} sgr-bold
+  (into-array com.googlecode.lanterna.SGR [com.googlecode.lanterna.SGR/BOLD]))
+
+(def ^{:tag "[Lcom.googlecode.lanterna.SGR;"} sgr-none
+  (into-array com.googlecode.lanterna.SGR []))
+
+;; ─────────────────────────────────────────────────────────────────────────────
 ;; Lanterna implementation
 
 (defrecord LanternaScreen [^TerminalScreen screen]
@@ -74,15 +83,11 @@
 
   (put-string! [_ col row text fg bg bold?]
     (let [fg-color (resolve-lanterna-color fg)
-          bg-color (resolve-lanterna-color bg)]
-      (doseq [i (range (count text))]
-        (let [ch (.charAt text i)
-              tc (if bold?
-                   (TextCharacter. ch fg-color bg-color
-                                   (into-array com.googlecode.lanterna.SGR
-                                               [com.googlecode.lanterna.SGR/BOLD]))
-                   (TextCharacter. ch fg-color bg-color
-                                   (into-array com.googlecode.lanterna.SGR [])))]
+          bg-color (resolve-lanterna-color bg)
+          sgr-arr (if bold? sgr-bold sgr-none)]
+      (dotimes [i (count text)]
+        (let [ch (.charAt ^String text i)
+              tc (TextCharacter. ch fg-color bg-color sgr-arr)]
           (.setCharacter screen (+ col i) row tc)))))
 
   (clear! [_]

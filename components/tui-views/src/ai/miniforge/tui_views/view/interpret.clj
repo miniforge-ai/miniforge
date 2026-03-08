@@ -106,17 +106,21 @@
   [model theme [cols rows] {:keys [data-fn columns selectable? selection-col?]}]
   (let [project-fn (project/get-projection data-fn)
         data-raw (project-fn model)
-        selected (:selected-idx model)
+        ;; Use mapped selection from metadata if available (e.g. temporal grouping)
+        mapped-selected (some-> (meta data-raw) :mapped-selected)
+        selected (or mapped-selected (:selected-idx model))
         selected-ids (get model :selected-ids #{})
         show-sel? (and selection-col? (seq selected-ids))
         sel-w (if show-sel? 3 0)
-        ;; Add selection column to data if needed
+        ;; Add selection column to data if needed (skip header rows)
         data (if show-sel?
                (mapv (fn [row]
-                       (assoc row :sel
-                              (if (contains? selected-ids
-                                             (or (:_id row) (:id row)))
-                                "[x]" "[ ]")))
+                       (if (:_header? row)
+                         row
+                         (assoc row :sel
+                                (if (contains? selected-ids
+                                               (or (:_id row) (:id row)))
+                                  "[x]" "[ ]"))))
                      data-raw)
                data-raw)
         resolved-cols (cond-> []

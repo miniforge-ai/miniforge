@@ -463,15 +463,23 @@
    :action/chat-backspace chat/backspace})
 
 (defn handle-chat-input [model key]
-  (let [k (extract-key key)]
+  (let [k (extract-key key)
+        pending? (get-in model [:chat :pending?] false)]
     (if-let [action (chat-keybindings k)]
       (if-let [handler (chat-action-handlers action)]
         (handler model)
         model)
-      ;; Character input — append to chat buffer
-      (if-let [ch (extract-char key)]
-        (chat/append model ch)
-        model))))
+      ;; Number keys 1-9 → execute suggested action (only when not typing/pending)
+      (if-let [action-idx (and (not pending?)
+                               (empty? (get-in model [:chat :input-buf] ""))
+                               (get number-key->index k))]
+        (if (pos? action-idx) ;; 1-9 map to indices 0-8
+          (chat/execute-action model (dec action-idx))
+          model)
+        ;; Character input — append to chat buffer
+        (if-let [ch (extract-char key)]
+          (chat/append model ch)
+          model)))))
 
 (defn refresh-add-repo-completions-if-active
   "If command-mode add-repo picker is currently open, refresh its options."

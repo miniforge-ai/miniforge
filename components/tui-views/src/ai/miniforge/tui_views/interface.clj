@@ -139,6 +139,47 @@
   (let [result (persistence/archive-workflows! workflow-ids)]
     (msg/workflows-archived result)))
 
+(defn handle-chat-execute-action
+  "Execute a chat-suggested action. Routes to the appropriate handler
+   based on the action type keyword."
+  [{:keys [action context]}]
+  (try
+    (let [action-type (:action action)]
+      (case action-type
+        :review
+        (if-let [pr (:pr context)]
+          (handle-review-prs {:prs [pr]})
+          (msg/chat-action-result {:success? false :message "No PR in context for review"}))
+
+        :evaluate
+        (if-let [pr (:pr context)]
+          (handle-evaluate-policy {:pr pr :pr-id [(:pr/repo pr) (:pr/number pr)]})
+          (msg/chat-action-result {:success? false :message "No PR in context for evaluation"}))
+
+        :sync
+        (handle-sync-prs {})
+
+        :open
+        (if-let [url (get-in context [:pr :pr/url])]
+          (do (handle-open-url {:url url})
+              (msg/chat-action-result {:success? true :message (str "Opened " url)}))
+          (msg/chat-action-result {:success? false :message "No PR URL available"}))
+
+        :remediate
+        (if-let [pr (:pr context)]
+          (handle-remediate-prs {:prs [pr]})
+          (msg/chat-action-result {:success? false :message "No PR in context"}))
+
+        :decompose
+        (if-let [pr (:pr context)]
+          (handle-decompose-pr {:pr pr})
+          (msg/chat-action-result {:success? false :message "No PR in context"}))
+
+        (msg/chat-action-result {:success? false
+                                 :message (str "Unknown action: " (name (or action-type :none)))})))
+    (catch Exception e
+      (msg/chat-action-result {:success? false :message (.getMessage e)}))))
+
 ;; Lazy LLM client — initialized on first chat message
 (def llm-client (delay (llm/create-client)))
 
@@ -148,7 +189,8 @@
 (defn build-pr-context-str
   "Build a text summary of PR data for the LLM system prompt."
   [{:keys [pr/behind-main? pr/branch pr/ci-status pr/number
-           pr/policy pr/readiness pr/repo pr/risk pr/status pr/title]
+           pr/policy pr/readiness pr/repo pr/risk pr/status pr/title
+           pr/additions pr/deletions pr/changed-files-count pr/author]
     :or   {ci-status :unknown status :unknown}
     :as   pr}]
   (when pr
@@ -158,14 +200,22 @@
                   evaluation/packs-applied]}          policy
           risk-level                                  (get risk :risk/level :unknown)
           risk-score                                  (:risk/score risk)
+          risk-factors                                (:risk/factors risk)
           ci-str                                      (if (seq checks)
                                                         (str "CI checks: " (format-check-context checks))
-                                                        (str "CI status: " (name ci-status)))]
+                                                        (str "CI status: " (name ci-status)))
+          total-lines                                 (+ (or additions 0) (or deletions 0))]
       (str "PR: " repo "#" number " — " title "\n"
            "Branch: " branch "\n"
+           "Author: " (or author "unknown") "\n"
            "Status: " (name status) "\n"
            ci-str "\n"
            "Behind main: " (if behind-main? "yes" "no") "\n"
+           (when (pos? total-lines)
+             (str "Change size: +" additions "/-" deletions " (" total-lines " total lines)"
+                  (when (pos? (or changed-files-count 0))
+                    (str ", " changed-files-count " files"))
+                  "\n"))
            (when readiness
              (str "Readiness score: " score
                   (when ready? " (ready)")
@@ -174,6 +224,11 @@
              (str "Risk level: " (name risk-level)
                   (when risk-score
                     (str " (score: " (format "%.2f" (double risk-score)) ")"))
+                  "\n"))
+           (when (seq risk-factors)
+             (str "Risk factors:\n"
+                  (str/join "\n"
+                    (map #(str "  - " (:explanation %)) risk-factors))
                   "\n"))
            (when policy
              (str "Policy: " (if passed? "passed" "FAILED")
@@ -185,9 +240,25 @@
   "Build a context-aware system prompt for the chat LLM."
   [context]
   (let [ctx-type (get context :type :unknown)]
-    (str "You are a PR fleet analyst for Miniforge, an agentic SDLC platform.\n"
-         "Help the user understand and manage their pull requests.\n"
-         "Be concise and actionable. Reference specific data when possible.\n\n"
+    (str "You are the Miniforge orchestrator agent — an AI assistant embedded in a PR fleet management TUI.\n"
+         "You help engineers understand, triage, and act on their pull requests.\n\n"
+         "Capabilities:\n"
+         "- Analyze PR risk, readiness, and merge strategy\n"
+         "- Explain CI failures and suggest fixes\n"
+         "- Recommend review priorities and merge order\n"
+         "- Summarize change impact across the fleet\n\n"
+         "Be concise and actionable. Reference specific data. Use the PR context below.\n\n"
+         "ACTIONS: When appropriate, suggest actions the user can take. Format each as:\n"
+         "[ACTION: type | label | description]\n\n"
+         "Available action types:\n"
+         "- review — Run policy review on PR(s)\n"
+         "- sync — Refresh PR data from GitHub\n"
+         "- open — Open PR in browser\n"
+         "- evaluate — Evaluate policy packs\n"
+         "- remediate — Auto-fix policy violations\n"
+         "- decompose — Analyze PR for splitting\n\n"
+         "Example: [ACTION: review | Review policy | Run policy packs against this PR]\n"
+         "Only suggest actions that are relevant to the conversation.\n\n"
          (case ctx-type
            :pr-detail
            (str "The user is viewing a specific PR:\n"
@@ -209,6 +280,25 @@
 
            "Unknown context."))))
 
+(def action-pattern
+  "Regex to parse [ACTION: type | label | description] from LLM response."
+  #"\[ACTION:\s*(\S+)\s*\|\s*([^|]+?)\s*\|\s*([^\]]+?)\s*\]")
+
+(defn parse-actions
+  "Extract structured actions from LLM response text.
+   Returns [clean-content actions-vec]."
+  [content]
+  (let [matches (re-seq action-pattern content)
+        actions (mapv (fn [[_ action-type label description]]
+                        {:action (keyword action-type)
+                         :label  (str/trim label)
+                         :description (str/trim description)})
+                      matches)
+        clean (-> content
+                  (str/replace action-pattern "")
+                  str/trim)]
+    [clean actions]))
+
 (defn handle-chat-send [{:keys [message context history]}]
   (try
     (let [system-prompt (build-chat-system-prompt context)
@@ -223,7 +313,9 @@
                     (empty? messages) (assoc :prompt message))
           result (llm/complete @llm-client request)]
       (if (llm/success? result)
-        (msg/chat-response (llm/get-content result) [])
+        (let [raw-content (llm/get-content result)
+              [clean-content actions] (parse-actions raw-content)]
+          (msg/chat-response clean-content actions))
         (msg/chat-response
          (str "LLM error: " (get-in (llm/get-error result) [:message] "Unknown error"))
          [])))
@@ -251,8 +343,7 @@
     :control-action    (handle-control-action effect)
     :archive-workflows (handle-archive-workflows effect)
     :chat-send         (handle-chat-send effect)
-    :chat-execute-action (msg/chat-action-result
-                          (response/failure "Chat action execution not yet wired" {}))
+    :chat-execute-action (handle-chat-execute-action effect)
     nil))
 
 ;------------------------------------------------------------------------------ Layer 2
