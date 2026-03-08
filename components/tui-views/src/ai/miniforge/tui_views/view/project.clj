@@ -35,6 +35,7 @@
   (:require
    [clojure.string :as str]
    [ai.miniforge.tui-views.model :as model]
+   [ai.miniforge.tui-views.palette :as palette]
    [ai.miniforge.tui-views.view.project.helpers :as helpers]
    [ai.miniforge.tui-views.view.project.trees :as trees]))
 
@@ -47,6 +48,7 @@
 (def status-char             helpers/status-char)
 (def format-progress-bar     helpers/format-progress-bar)
 (def readiness-bar           helpers/readiness-bar)
+(def readiness-blockers-summary helpers/readiness-blockers-summary)
 (def risk-label              helpers/risk-label)
 (def readiness-state         helpers/readiness-state)
 (def readiness-blockers      helpers/readiness-blockers)
@@ -154,27 +156,46 @@
   [pr agent-risk-map]
   (let [{:keys [readiness risk policy recommend]} (helpers/resolve-enrichment pr)
         r-state   (get readiness :readiness/state :unknown)
-        risk-lvl  (get risk :risk/level :low)
+        risk-lvl  (get risk :risk/level :unevaluated)
         pol-pass? (:evaluation/passed? policy)
         pr-id     [(:pr/repo pr) (:pr/number pr)]
         agent-r   (get agent-risk-map pr-id)
         ;; Use agent risk when available, fall back to mechanical
         display-risk (if agent-r (:level agent-r) risk-lvl)]
-    {:_id pr-id
-     :repo (str (get pr :pr/repo "")
-                (when (:pr/workflow-id pr) " [mf]"))
-     :number (str "#" (:pr/number pr))
-     :title (get pr :pr/title "")
-     :state (helpers/pr-state-label (:pr/status pr))
-     :status      (helpers/readiness-indicator r-state)
-     :status-fg   (trees/readiness-state-color r-state)
-     :ready       (helpers/readiness-bar (get readiness :readiness/score 0) 15)
-     :risk        (helpers/risk-label display-risk)
-     :risk-fg     (trees/risk-level-color display-risk)
-     :policy      (helpers/policy-label policy)
-     :policy-fg   (case pol-pass? true trees/status-pass false trees/status-fail nil)
-     :recommend   (:label recommend)
-     :recommend-fg (trees/recommend-action-color (:action recommend))}))
+    (let [;; Fold GitHub PR state into the readiness indicator when it adds info.
+          ;; The readiness indicator already covers: merged, closed, draft, ci-failing,
+          ;; merge-ready, needs-review, changes-requested, behind-main, conflicts, policy-fail.
+          ;; GitHub states that add new info: :approved, :reviewing.
+          pr-status (:pr/status pr)
+          status-str (str (helpers/readiness-indicator r-state)
+                          (case pr-status
+                            :approved  " ✓"
+                            :reviewing " ⊙"
+                            ""))]
+      {:_id pr-id
+       :repo (str (get pr :pr/repo "")
+                  (when (:pr/workflow-id pr) " [mf]"))
+       :number (str "#" (:pr/number pr))
+       :title (get pr :pr/title "")
+       :status      status-str
+       :status-fg   (trees/readiness-state-color r-state)
+       :ready       (let [adds (get pr :pr/additions 0)
+                          dels (get pr :pr/deletions 0)]
+                      (if (and (zero? adds) (zero? dels))
+                        "—"
+                        (str "+" adds "/-" dels)))
+       :ready-fg    (let [total (+ (get pr :pr/additions 0) (get pr :pr/deletions 0))]
+                      (cond
+                        (> total 1000) palette/status-fail
+                        (> total 500)  palette/status-warning
+                        (> total 200)  nil
+                        :else          palette/status-pass))
+       :risk        (helpers/risk-label display-risk)
+       :risk-fg     (trees/risk-level-color display-risk)
+       :policy      (helpers/policy-label policy)
+       :policy-fg   (case pol-pass? true trees/status-pass false trees/status-fail nil)
+       :recommend   (:label recommend)
+       :recommend-fg (trees/recommend-action-color (:action recommend))})))
 
 (defn project-pr-items
   "Project PR items for the fleet table widget.
@@ -225,17 +246,17 @@
         in-review (filterv #(#{:ci-running :review-pending} (:status %)) all-wfs)
         merging   (filterv #(#{:ready-to-merge :merging} (:status %)) all-wfs)
         done      (filterv #(#{:merged :success :completed :failed :skipped} (:status %)) all-wfs)]
-    [{:title "BLOCKED" :color :red
+    [{:title "BLOCKED" :color palette/status-fail
       :cards (mapv (fn [wf] {:label (:name wf) :status :blocked}) blocked)}
-     {:title "READY" :color :yellow
+     {:title "READY" :color palette/status-warning
       :cards (mapv (fn [wf] {:label (:name wf) :status :ready}) ready)}
-     {:title "ACTIVE" :color :cyan
+     {:title "ACTIVE" :color palette/status-info
       :cards (mapv (fn [wf] {:label (:name wf) :status :running}) active)}
      {:title "IN REVIEW" :color :magenta
       :cards (mapv (fn [wf] {:label (:name wf) :status :review}) in-review)}
      {:title "MERGING" :color :blue
       :cards (mapv (fn [wf] {:label (:name wf) :status :merging}) merging)}
-     {:title "DONE" :color :green
+     {:title "DONE" :color palette/status-pass
       :cards (mapv (fn [wf] {:label (:name wf) :status (get wf :status :success)}) done)}]))
 
 (defn project-agent-output

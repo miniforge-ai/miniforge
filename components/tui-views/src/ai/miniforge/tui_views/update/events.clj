@@ -22,10 +22,12 @@
    Pure functions that handle workflow events from the event stream.
    Layer 2."
   (:require
+   [clojure.string]
    [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.persistence :as persistence]
-   [ai.miniforge.tui-views.update.filter :as filter]))
+   [ai.miniforge.tui-views.update.filter :as filter]
+   [ai.miniforge.tui-views.view.project.helpers :as helpers]))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Event stream message handlers
@@ -409,19 +411,29 @@
 ;; PR event handlers
 
 (defn build-pr-summary-for-triage
-  "Build a compact text summary of a PR for fleet-level risk triage."
+  "Build a compact text summary of a PR for fleet-level risk triage.
+   Always includes the mechanical risk assessment so the triage agent
+   can use it as one input signal."
   [pr]
-  (let [risk (:pr/risk pr)
-        adds (get pr :pr/additions 0)
-        dels (get pr :pr/deletions 0)]
+  (let [risk  (or (:pr/risk pr)
+                  (helpers/derive-risk pr))
+        adds  (get pr :pr/additions 0)
+        dels  (get pr :pr/deletions 0)
+        total (+ adds dels)
+        files (get pr :pr/changed-files-count 0)
+        behind? (:pr/behind-main? pr false)
+        factors (mapv :factor (:risk/factors risk []))]
     (cond-> (str (:pr/repo pr) "#" (:pr/number pr)
                  " \"" (:pr/title pr) "\""
                  " | " (name (get pr :pr/status :unknown))
                  " | ci:" (name (get pr :pr/ci-status :unknown))
-                 " | +" adds "/-" dels
-                 (when risk
-                   (str " | risk:" (name (get risk :risk/level :unknown))
-                        " (" (format "%.0f" (* 100.0 (get risk :risk/score 0))) "%)")))
+                 " | +" adds "/-" dels " (" total " LOC)"
+                 " | " files " files"
+                 (when behind? " | behind-main")
+                 " | mech-risk:" (name (get risk :risk/level :unknown))
+                 " (score " (format "%.2f" (double (get risk :risk/score 0))) ")"
+                 (when (seq factors)
+                   (str " [" (clojure.string/join ", " (map name factors)) "]")))
       (:pr/workflow-id pr) (str " | miniforge-sourced"))))
 
 (defn pr-triage-summary
@@ -433,8 +445,10 @@
 (defn handle-prs-synced
   "Handle result of a :sync-prs side effect.
    Replaces :pr-items with freshly fetched data.
-   Preserves the current selection position, clamping to new bounds."
-  [model {:keys [pr-items error]}]
+   Preserves the current selection position, clamping to new bounds.
+   Cache data (policy and risk) is pre-loaded by the effect handler
+   and passed in via the :cached-risk key in the payload."
+  [model {:keys [pr-items cached-risk error]}]
   (let [wf-pr-idx (get model :workflow-pr-index {})
         prs (mapv (partial annotate-pr-with-workflow wf-pr-idx)
                   (or pr-items []))
@@ -468,14 +482,23 @@
                              :else
                              "No PRs found in fleet repos"))
                     with-timestamp)
+        ;; Apply pre-loaded cached agent-risk if model doesn't have any yet
+        updated (cond-> updated
+                  (and (empty? (:agent-risk model)) (seq cached-risk))
+                  (assoc :agent-risk cached-risk))
         pr-hash (hash (mapv #(select-keys % [:pr/repo :pr/number :pr/additions
                                               :pr/deletions :pr/status :pr/ci-status])
                             prs))]
-    (if (and (seq prs) (not= pr-hash (:agent-risk-hash model)))
-      (-> updated
-          (assoc :agent-risk-hash pr-hash)
-          (assoc :side-effect (effect/fleet-risk-triage (mapv pr-triage-summary prs))))
-      updated)))
+    (let [risk-changed? (and (seq prs) (not= pr-hash (:agent-risk-hash model)))
+          unevaluated-prs (filterv #(nil? (:pr/policy %)) prs)
+          effects (cond-> []
+                    risk-changed?
+                    (conj (effect/fleet-risk-triage (mapv pr-triage-summary prs)))
+                    (seq unevaluated-prs)
+                    (conj (effect/batch-evaluate-policy unevaluated-prs)))]
+      (cond-> updated
+        risk-changed?    (assoc :agent-risk-hash pr-hash)
+        (seq effects)    (assoc :side-effects effects)))))
 
 (defn merge-matching-pr
   "Merge updated fields into the PR matching [repo, number]; pass others through."
@@ -534,6 +557,7 @@
                         (str "FAILED ("
                              (count (:evaluation/violations result))
                              " violation(s))")))))
+        (assoc :side-effect (effect/cache-policy-result pr-id result (:pr-items model)))
         with-timestamp)))
 
 ;------------------------------------------------------------------------------ Layer 3b
@@ -584,6 +608,10 @@
     (-> model
         (assoc :pr-items updated-prs)
         (assoc :flash-message (str "Review complete: " passed " passed, " failed " with violations"))
+        (assoc :side-effects
+               (mapv (fn [{:keys [pr-id result]}]
+                       (effect/cache-policy-result pr-id result updated-prs))
+                     results))
         with-timestamp)))
 
 (defn handle-remediation-completed
@@ -705,6 +733,8 @@
     (-> model
         (assoc :flash-message (str "Risk triage: " error))
         with-timestamp)
-    (-> model
-        (assoc :agent-risk (assessments->risk-map assessments))
-        with-timestamp)))
+    (let [risk-map (assessments->risk-map assessments)]
+      (-> model
+          (assoc :agent-risk risk-map)
+          (assoc :side-effect (effect/cache-risk-triage risk-map (:pr-items model)))
+          with-timestamp))))

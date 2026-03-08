@@ -27,7 +27,8 @@
    - Policy (policy check results)"
   (:require
    [ai.miniforge.tui-engine.interface.layout :as layout]
-   [ai.miniforge.tui-engine.interface.widget :as widget]))
+   [ai.miniforge.tui-engine.interface.widget :as widget]
+   [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Evidence tree construction
@@ -83,7 +84,7 @@
       ;; Title bar
       (fn [[c r]]
         (layout/text [c r] " MINIFORGE │ Evidence Bundle"
-                     {:fg :cyan :bold? true}))
+                     {:fg palette/status-info :bold? true}))
       ;; Content + footer
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)

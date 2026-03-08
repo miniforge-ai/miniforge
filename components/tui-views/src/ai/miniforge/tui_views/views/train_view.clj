@@ -22,7 +22,8 @@
    Displays the train name and a table of PRs in merge order
    with readiness and status."
   (:require
-   [ai.miniforge.tui-engine.interface.layout :as layout]))
+   [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Rendering helpers
@@ -36,7 +37,7 @@
   (layout/text [cols rows]
     (str " MINIFORGE │ Train: "
          (or (:train/name train) "Release Train"))
-    {:fg :cyan :bold? true}))
+    {:fg palette/status-info :bold? true}))
 
 (defn render-table [prs selected [cols rows]]
   (if (empty? prs)

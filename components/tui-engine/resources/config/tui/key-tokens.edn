@@ -34,6 +34,7 @@
   "e"     :key/e
   "f"     :key/f
   "o"     :key/o
+  "O"     :key/O
   "x"     :key/x
   "a"     :key/a
   "v"     :key/v
@@ -56,5 +57,7 @@
   :arrow-left :key/left
   :arrow-right :key/right
   :tab        :key/tab
-  :reverse-tab :key/shift-tab
-  :eof        :key/eof}}
+  :reverse-tab      :key/shift-tab
+  :shift-arrow-up   :key/shift-up
+  :shift-arrow-down :key/shift-down
+  :eof              :key/eof}}

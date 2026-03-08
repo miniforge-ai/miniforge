@@ -23,7 +23,8 @@
    Supports selection for batch add/remove operations."
   (:require
    [ai.miniforge.tui-engine.interface.layout :as layout]
-   [ai.miniforge.tui-views.model :as model]))
+   [ai.miniforge.tui-views.model :as model]
+   [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Rendering helpers
@@ -51,7 +52,7 @@
                    (source-label model) " — "
                    (count items) " repo(s)")]
     (layout/text [cols rows] label
-                 {:fg :cyan :bold? true})))
+                 {:fg palette/status-info :bold? true})))
 
 (defn auto-scroll-offset
   "Compute scroll offset so selected-idx is always visible within visible-count rows."

@@ -34,6 +34,7 @@
    [ai.miniforge.tui-views.file-subscription :as file-subscription]
    [ai.miniforge.tui-views.persistence :as persistence]
    [ai.miniforge.tui-views.persistence.pr :as persistence-pr]
+   [ai.miniforge.tui-views.persistence.pr-cache :as pr-cache]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.policy-pack.interface :as policy-pack]
    [ai.miniforge.pr-train.interface :as pr-train]
@@ -44,8 +45,11 @@
 ;; Side-effect handlers — each returns [msg-type payload] or nil
 
 (defn handle-sync-prs [{:keys [state]}]
-  (let [{:keys [prs error]} (persistence-pr/load-pr-items (when state {:state state}))]
-    (msg/prs-synced (or prs []) error)))
+  (let [{:keys [prs error]} (persistence-pr/load-pr-items (when state {:state state}))
+        cache (pr-cache/read-cache)
+        prs-with-cache (pr-cache/apply-cached-policy (or prs []) cache)
+        cached-risk (pr-cache/apply-cached-agent-risk (or prs []) cache)]
+    (msg/prs-synced-with-cache prs-with-cache cached-risk error)))
 
 (defn handle-discover-repos [{:keys [owner]}]
   (msg/repos-discovered (persistence-pr/discover-repos owner)))
@@ -68,6 +72,25 @@
       (msg/policy-evaluated pr-id
                             {:evaluation/passed? nil
                              :evaluation/error (.getMessage e)}))))
+
+(defn handle-batch-evaluate-policy
+  "Evaluate policy for multiple PRs in batch.
+   Returns a single :msg/review-completed message with all results,
+   reusing the existing review-completed handler to merge policy data."
+  [{:keys [prs]}]
+  (try
+    (let [packs (persistence-pr/load-policy-packs)]
+      (msg/review-completed
+       (mapv (fn [pr]
+               {:pr-id  [(:pr/repo pr) (:pr/number pr)]
+                :result (try
+                          (policy-pack/evaluate-external-pr packs pr)
+                          (catch Exception e
+                            {:evaluation/passed? nil
+                             :evaluation/error (.getMessage e)}))})
+             prs)))
+    (catch Exception e
+      (msg/review-completed []))))
 
 (defn handle-create-train [train-mgr {:keys [name description]
                                        :or {description ""}}]
@@ -128,6 +151,14 @@
   (msg/decomposition-started [(:pr/repo pr) (:pr/number pr)]
                              {:sub-prs []
                               :message "Decomposition analysis not yet wired"}))
+
+(defn handle-cache-policy-result [{:keys [pr-id result prs]}]
+  (pr-cache/persist-policy-result! pr-id result prs)
+  nil)
+
+(defn handle-cache-risk-triage [{:keys [risk-map prs]}]
+  (pr-cache/persist-risk-triage! risk-map prs)
+  nil)
 
 (defn handle-control-action [{:keys [action workflow-id]}]
   (let [commands-dir (io/file (System/getProperty "user.home")
@@ -382,11 +413,14 @@
     :browse-repos      (handle-browse-repos effect)
     :open-url          (handle-open-url effect)
     :evaluate-policy   (handle-evaluate-policy effect)
+    :batch-evaluate-policy (handle-batch-evaluate-policy effect)
     :create-train      (handle-create-train train-mgr effect)
     :add-to-train      (handle-add-to-train train-mgr effect)
     :merge-next        (handle-merge-next train-mgr effect)
     :review-prs        (handle-review-prs effect)
     :remediate-prs     (handle-remediate-prs effect)
+    :cache-policy-result (handle-cache-policy-result effect)
+    :cache-risk-triage   (handle-cache-risk-triage effect)
     :decompose-pr      (handle-decompose-pr effect)
     :control-action    (handle-control-action effect)
     :archive-workflows (handle-archive-workflows effect)

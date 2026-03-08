@@ -28,7 +28,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Risk levels used by both mechanical and agent risk
 
-(def risk-levels [:enum :low :medium :high :critical :unknown])
+(def risk-levels [:enum :low :medium :high :critical :unknown :unevaluated])
 
 ;------------------------------------------------------------------------------ Layer 0a
 ;; Agent risk assessment (from fleet-level LLM triage)

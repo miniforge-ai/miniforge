@@ -26,7 +26,8 @@
   (:require
    [clojure.string :as str]
    [ai.miniforge.tui-engine.interface.layout :as layout]
-   [ai.miniforge.tui-engine.interface.widget :as widget]))
+   [ai.miniforge.tui-engine.interface.widget :as widget]
+   [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
@@ -74,7 +75,7 @@
                       (when-let [phase (:phase wf)]
                         (str " │ " (name phase)))
                       metrics-str)
-                 {:fg :cyan :bold? true})))
+                 {:fg palette/status-info :bold? true})))
 
 (defn render-phase-list [phases [cols rows]]
   (layout/box [cols rows]
@@ -102,7 +103,7 @@
          (widget/scrollable [ic ir]
            {:lines lines
             :offset offset
-            :fg :white})))}))
+            :fg :default})))}))
 
 (defn render-footer [[cols rows]]
   (layout/text [cols rows]

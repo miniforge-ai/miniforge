@@ -23,7 +23,8 @@
 
    Layer 0: Pure functions with no model dependency."
   (:require
-   [clojure.string :as str])
+   [clojure.string :as str]
+   [ai.miniforge.tui-views.palette :as palette])
   (:import
    [java.text SimpleDateFormat]
    [java.time LocalDate ZoneId]
@@ -85,8 +86,25 @@
          (apply str (repeat (- bar-w filled) \u2591))
          (format " %3d%%" pct))))
 
+(defn readiness-blockers-summary
+  "Compact blocker summary for fleet table. Shows what's needed for merge."
+  [readiness]
+  (let [blockers (:readiness/blockers readiness [])
+        types    (set (map :blocker/type blockers))]
+    (if (empty? blockers)
+      "ready"
+      (str/join ", "
+        (cond-> []
+          (:ci types)           (conj "CI")
+          (:review types)       (conj "review")
+          (:behind-main types)  (conj "rebase")
+          (:changes types)      (conj "changes")
+          (:draft types)        (conj "draft")
+          (:conflicts types)    (conj "conflicts")
+          (:policy types)       (conj "policy"))))))
+
 (defn risk-label [level]
-  (case level :critical "CRIT" :high "high" :medium "med" :low "low" "?"))
+  (case level :critical "CRIT" :high "high" :medium "med" :low "low" :unevaluated "?" "?"))
 
 ;------------------------------------------------------------------------------ Layer 0c
 ;; Readiness + risk derivation (pure, from provider signals)
@@ -107,10 +125,10 @@
     (and (#{:merge-ready :approved} status) ci-ok? behind?)
     [:behind-main 0.85]
 
-    (and (= :approved status) ci-fail?)
+    (and (#{:merge-ready :approved} status) ci-fail?)
     [:ci-failing 0.5]
 
-    (and (= :approved status) (not ci-ok?))
+    (and (#{:merge-ready :approved} status) (not ci-ok?))
     [:needs-review 0.7]
 
     (= :changes-requested status)
@@ -209,8 +227,10 @@
      :readiness/factors  factors}))
 
 (defn derive-risk
-  "Derive N9 risk assessment from provider signals and change size.
-   Returns {:risk/level kw :risk/score float :risk/factors [{:factor kw :explanation str :value any} ...]}"
+  "Derive mechanical risk assessment from provider signals and change size.
+   Returns {:risk/level kw :risk/score float :risk/factors [{:factor kw :explanation str :value any} ...]}
+   Uses max-of-factors scoring (not averaging) so a single high-risk signal
+   isn't diluted by low-risk ones."
   [pr]
   (let [status    (:pr/status pr)
         ci        (:pr/ci-status pr)
@@ -220,38 +240,40 @@
         deletions (get pr :pr/deletions 0)
         total     (+ additions deletions)
         changed-files (get pr :pr/changed-files-count 0)
-        size-risk (cond (> total 1000) :high (> total 500) :medium (> total 200) :low :else :minimal)
         factors   (cond-> []
                     (pos? total)
                     (conj {:factor :change-size
                            :explanation (str total " lines changed (+" additions "/-" deletions ")")
                            :value {:additions additions :deletions deletions :total total}
-                           :score (cond (> total 1000) 1.0 (> total 500) 0.75 (> total 200) 0.5 :else 0.25)})
+                           :score (cond (> total 1000) 1.0 (> total 500) 0.75 (> total 200) 0.5 :else 0.2)})
                     (pos? changed-files)
                     (conj {:factor :files-changed
                            :explanation (str changed-files " files modified")
                            :value changed-files
-                           :score (cond (> changed-files 50) 1.0 (> changed-files 20) 0.7 (> changed-files 10) 0.4 :else 0.2)})
+                           :score (cond (> changed-files 50) 1.0 (> changed-files 20) 0.75 (> changed-files 10) 0.5 :else 0.2)})
                     ci-fail?
                     (conj {:factor :ci-health
                            :explanation "CI checks are failing"
-                           :score 0.8})
+                           :score 0.9})
                     changes?
                     (conj {:factor :review-concerns
                            :explanation "Reviewer requested changes"
-                           :score 0.6})
+                           :score 0.8})
                     (and (not ci-fail?) (not changes?) (zero? total))
                     (conj {:factor :signal-check
                            :explanation "All available signals nominal"
                            :score 0.0}))
+        ;; Use max-of-factors, not average — one high signal shouldn't be diluted
         score     (if (seq factors)
-                    (/ (reduce + 0.0 (map #(get % :score 0.0) factors)) (count factors))
+                    (reduce max 0.0 (map #(get % :score 0.0) factors))
                     0.0)
         level     (cond
-                    (or ci-fail? changes? (= size-risk :high)) :medium
-                    (> score 0.6) :medium
-                    (> score 0.3) :low
-                    :else :low)]
+                    (and ci-fail? changes?)          :critical
+                    (or ci-fail? changes?)            :high
+                    (>= score 0.9)                    :high
+                    (>= score 0.65)                   :medium
+                    (>= score 0.4)                    :low
+                    :else                             :low)]
     {:risk/level   level
      :risk/score   score
      :risk/factors factors}))
@@ -330,7 +352,7 @@
               header {:_header? true
                       :status-char ""
                       :name (str "── " (get bucket-labels bucket) " (" (count wfs) ") ")
-                      :name-fg :cyan
+                      :name-fg palette/status-info
                       :phase ""
                       :time ""
                       :progress-str ""
@@ -400,17 +422,20 @@
 
 (defn extract-pr-signals
   "Extract enriched signals from a PR for recommendation.
-   Returns a flat map of booleans/keywords for predicate use."
+   Returns a flat map of booleans/keywords for predicate use.
+   Merges derived state into enriched readiness (explain-readiness lacks :readiness/state)."
   [pr]
-  (let [readiness   (or (:pr/readiness pr) (derive-readiness pr))
-        risk        (or (:pr/risk pr) (derive-risk pr))
-        policy      (:pr/policy pr)
-        violations  (:evaluation/violations policy)
-        changes     (+ (get-in pr [:change-size :additions] 0)
-                       (get-in pr [:change-size :deletions] 0))]
+  (let [derived    (derive-readiness pr)
+        enriched   (:pr/readiness pr)
+        readiness  (if enriched (merge derived enriched) derived)
+        risk       (or (:pr/risk pr) (derive-risk pr))
+        policy     (:pr/policy pr)
+        violations (:evaluation/violations policy)
+        changes    (+ (get pr :pr/additions 0)
+                      (get pr :pr/deletions 0))]
     {:ready?          (:readiness/ready? readiness)
      :state           (get readiness :readiness/state :unknown)
-     :risk-level      (get risk :risk/level :low)
+     :risk-level      (get risk :risk/level :unevaluated)
      :policy-pass?    (:evaluation/passed? policy)
      :policy-unknown? (nil? policy)
      :has-violations? (boolean (seq violations))
@@ -477,6 +502,9 @@
       (recommend-action :review "Awaiting review")
 
       ;; Ready — risk-gated merge
+      (and ready? (= :unevaluated risk-level))
+      (recommend-action :evaluate "Risk not yet assessed")
+
       (and ready? (#{:medium :high :critical} risk-level))
       (recommend-action :approve (str "Ready but " (name risk-level) " risk"))
 
@@ -539,11 +567,15 @@
   "Map normalized PR status keyword to human-readable GitHub-level state."
   [status]
   (case status
-    :closed  "closed"
-    :draft   "draft"
-    :merged  "merged"
-    (:approved :reviewing :changes-requested :open :merge-ready) "open"
-    "open"))
+    :closed             "closed"
+    :draft              "draft"
+    :merged             "merged"
+    :open               "open"
+    :approved           "approved"
+    :reviewing          "in review"
+    :changes-requested  "changes req"
+    :merge-ready        "merge ready"
+    (if (nil? status) "—" "open")))
 
 (defn wrap-text
   "Word-wrap a string to fit within max-width characters.

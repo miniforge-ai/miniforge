@@ -472,7 +472,7 @@
    "train"         {:handler cmd-train         :help "Switch to train view"}
    ;; Batch actions
    "review"        {:handler (fn [m _] (request-confirmation m :review "Review"))
-                    :help "Evaluate policy for selected PRs"}
+                    :help "Evaluate policy and post review for selected PRs"}
    "remediate"     {:handler (fn [m _] (request-confirmation m :remediate "Remediate"))
                     :help "Auto-fix policy violations for selected PRs"}
    "decompose"     {:handler (fn [m _]

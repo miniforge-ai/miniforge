@@ -24,6 +24,7 @@
    Layer 1: Composite tree builders that assemble node sequences."
   (:require
    [clojure.string :as str]
+   [ai.miniforge.tui-views.palette :as palette]
    [ai.miniforge.tui-views.view.project.helpers :as helpers]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -36,11 +37,11 @@
   ([label depth expandable?] {:label label :depth depth :expandable? expandable?})
   ([label depth expandable? fg] {:label label :depth depth :expandable? expandable? :fg fg}))
 
-;; Semantic status colors — fixed across all themes
-(def status-pass    :green)
-(def status-fail    :red)
-(def status-warning :yellow)
-(def status-info    :cyan)
+;; Re-export palette colors for backward compatibility (tests reference sut/status-pass etc.)
+(def status-pass    palette/status-pass)
+(def status-fail    palette/status-fail)
+(def status-warning palette/status-warning)
+(def status-info    palette/status-info)
 
 (defn readiness-state-color
   "Map readiness state to fixed status color."
@@ -66,6 +67,7 @@
     :medium   status-warning
     :high     status-fail
     :critical status-fail
+    :unevaluated nil
     nil))
 
 (defn recommend-action-color
@@ -199,12 +201,29 @@
 (defn severity-color [severity]
   (case severity :critical status-fail :major status-fail :minor status-warning :info status-info nil))
 
+(defn pack-detail-nodes
+  "Build detail child nodes for a pack at depth 3.
+   Packs may be strings (name only) or maps with :name, :version, :description."
+  [pack]
+  (if (map? pack)
+    (cond-> []
+      (:version pack)     (conj (tree-node (str "  Version: " (:version pack)) 3))
+      (:description pack) (conj (tree-node (str "  " (:description pack)) 3)))
+    []))
+
 (defn packs-applied-nodes
-  "Build tree nodes for policy packs applied."
+  "Build tree nodes for policy packs applied.
+   Each pack is expandable if it has version or description detail."
   [packs]
   (when (seq packs)
     (into [(tree-node (str "Packs applied (" (count packs) "):") 1 true)]
-          (mapv #(tree-node (str "  " %) 2) packs))))
+          (mapcat (fn [pack]
+                    (let [pack-name (if (map? pack) (or (:name pack) (str pack)) (str pack))
+                          details   (pack-detail-nodes pack)
+                          expandable? (seq details)]
+                      (into [(tree-node (str "  " pack-name) 2 (boolean expandable?))]
+                            details)))
+                  packs))))
 
 (defn severity-summary-nodes
   "Build a summary node listing violation counts by severity."
@@ -218,17 +237,40 @@
       (when (seq parts)
         [(tree-node (str "Summary: " (str/join ", " parts)) 1)]))))
 
+(defn violation-detail-nodes
+  "Build detail child nodes for a single violation at depth 3."
+  [v]
+  (let [artifact  (:artifact-path v)
+        rule-id   (:rule-id v)
+        det-type  (:detection-type v)
+        matches   (:matches v [])]
+    (cond-> []
+      artifact (conj (tree-node (str "  File: " artifact) 3))
+      rule-id  (conj (tree-node (str "  Rule: " (if (keyword? rule-id) (str rule-id) (str rule-id))) 3))
+      det-type (conj (tree-node (str "  Type: " (name det-type)) 3))
+      (seq matches)
+      (into (mapv (fn [m]
+                    (tree-node (str "  L" (:line m "?") ":" (:column m "?")
+                                    " " (or (:context m) (:text m) ""))
+                               3))
+                  matches)))))
+
 (defn violation-nodes
-  "Build tree nodes for individual policy violations."
+  "Build tree nodes for individual policy violations.
+   Each violation is expandable with detail children showing artifact path,
+   rule ID, detection type, and match locations."
   [violations]
   (when (seq violations)
     (into [(tree-node (str "Violations (" (count violations) "):") 1 true)]
-          (mapv (fn [v]
-                  (tree-node (str (severity-prefix (:severity v))
-                                  (or (:message v) (name (get v :rule-id "")))
-                                  (when (:auto-fixable? v) " [auto-fix]"))
-                             2 false (severity-color (:severity v))))
-                violations))))
+          (mapcat (fn [v]
+                    (let [details (violation-detail-nodes v)
+                          expandable? (seq details)]
+                      (into [(tree-node (str (severity-prefix (:severity v))
+                                             (or (:message v) (name (get v :rule-id "")))
+                                             (when (:auto-fixable? v) " [auto-fix]"))
+                                        2 (boolean expandable?) (severity-color (:severity v)))]
+                            details)))
+                  violations))))
 
 (defn policy-tree [policy]
   (let [summary    (:evaluation/summary policy)
@@ -245,9 +287,20 @@
            (violation-nodes violations)))))
 
 (defn gates-tree [gates]
-  (mapv #(tree-node (str (if (:gate/passed? %) "pass " "FAIL ") (name (:gate/id %)))
-                    0 false (if (:gate/passed? %) status-pass status-fail))
-        gates))
+  (let [passed (count (filter :gate/passed? gates))
+        total  (count gates)
+        all?   (= passed total)]
+    (into [(tree-node (str "Gates (" passed "/" total " passed):")
+                      0 true (if all? status-pass status-warning))]
+          (mapcat (fn [g]
+                    (let [has-msg? (seq (:gate/message g))]
+                      (into [(tree-node (str (if (:gate/passed? g) "\u2713 " "\u2718 ")
+                                             (name (:gate/id g)))
+                                        1 (boolean has-msg?)
+                                        (if (:gate/passed? g) status-pass status-fail))]
+                            (when has-msg?
+                              [(tree-node (str "  " (:gate/message g)) 2)]))))
+                  gates))))
 
 (defn intent-nodes
   "Build intent section nodes for evidence tree."
@@ -335,13 +388,13 @@
         pr-id   (when pr [(:pr/repo pr) (:pr/number pr)])
         agent-r (when pr-id (get-in model [:agent-risk pr-id]))
         wf-id   (:pr/workflow-id pr)
-        level   (get risk :risk/level :unknown)
+        level   (get risk :risk/level :unevaluated)
         score   (:risk/score risk)
         factors (:risk/factors risk [])]
     (concat
       ;; Provenance indicator
       (when wf-id
-        [(tree-node "Miniforge-sourced PR" 0 false :cyan)])
+        [(tree-node "Miniforge-sourced PR" 0 false status-info)])
       ;; Agent risk assessment (if available)
       (when agent-r
         [(tree-node (str "Agent risk: " (name (:level agent-r)))
@@ -369,7 +422,7 @@
   [model]
   (let [{:keys [pr readiness risk]} (resolve-detail-enrichment model)
         r-state  (get readiness :readiness/state :unknown)
-        risk-lvl (get risk :risk/level :unknown)
+        risk-lvl (get risk :risk/level :unevaluated)
         recommend (when pr (helpers/derive-recommendation pr))
         ;; Find linked workflow: direct lookup via workflow-id, fallback to branch name match
         wf-id    (:pr/workflow-id pr)
@@ -458,7 +511,7 @@
       (let [msg-nodes (mapcat
                         (fn [{:keys [role content]}]
                           (let [prefix (if (= :user role) "You" "Agent")
-                                fg     (if (= :user role) :cyan :green)
+                                fg     (if (= :user role) status-info status-pass)
                                 lines  (str/split-lines (or content ""))]
                             (into [(tree-node (str prefix ":") 0 false fg)]
                                   (mapcat (fn [line]
@@ -468,13 +521,13 @@
                         messages)
             action-nodes (when (and (seq actions) (not pending?))
                            (into [(tree-node "" 0)
-                                  (tree-node "Actions (press number to run):" 0 false :yellow)]
+                                  (tree-node "Actions (press number to run):" 0 false status-warning)]
                                  (mapcat
                                    (fn [i {:keys [label description]}]
                                      (let [text (str (inc i) ") " label
                                                      (when description
                                                        (str " — " description)))]
-                                       (mapv #(tree-node (str "  " %) 1 false :cyan)
+                                       (mapv #(tree-node (str "  " %) 1 false status-info)
                                              (helpers/wrap-text text wrap-width))))
                                    (range) actions)))]
         (let [nodes (cond-> (vec msg-nodes)
@@ -487,7 +540,7 @@
                   spinner (get ["⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏"]
                                (mod elapsed 10))
                   label   (str spinner " Agent thinking... (" elapsed "s)")]
-              (conj nodes (tree-node label 0 false :yellow)))
+              (conj nodes (tree-node label 0 false status-warning)))
             nodes))))))
 
 ;------------------------------------------------------------------------------ Rich Comment

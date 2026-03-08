@@ -154,13 +154,13 @@
   (testing "Passed CI produces green header"
     (let [nodes (sut/ci-section-nodes :passed [])]
       (is (= 1 (count nodes)))
-      (is (= :green (:fg (first nodes))))
+      (is (= sut/status-pass (:fg (first nodes))))
       (is (.contains (:label (first nodes)) "passed")))))
 
 (deftest ci-section-nodes-failed
   (testing "Failed CI produces red header"
     (let [nodes (sut/ci-section-nodes :failed [])]
-      (is (= :red (:fg (first nodes)))))))
+      (is (= sut/status-fail (:fg (first nodes)))))))
 
 (deftest ci-section-nodes-with-checks
   (testing "Individual checks are appended as child nodes"
@@ -179,13 +179,13 @@
     (let [node (sut/behind-main-node true "DIRTY")]
       (is (.contains (:label node) "yes"))
       (is (.contains (:label node) "DIRTY"))
-      (is (= :red (:fg node))))))
+      (is (= sut/status-fail (:fg node))))))
 
 (deftest behind-main-node-not-behind
   (testing "Not behind → green node"
     (let [node (sut/behind-main-node false nil)]
       (is (.contains (:label node) "no"))
-      (is (= :green (:fg node))))))
+      (is (= sut/status-pass (:fg node))))))
 
 ;; ============================================================================
 ;; review-node
@@ -195,19 +195,19 @@
   (testing "Approved → green node"
     (let [node (sut/review-node :approved)]
       (is (.contains (:label node) "approved"))
-      (is (= :green (:fg node))))))
+      (is (= sut/status-pass (:fg node))))))
 
 (deftest review-node-changes-requested
   (testing "Changes requested → red node"
     (let [node (sut/review-node :changes-requested)]
       (is (.contains (:label node) "changes requested"))
-      (is (= :red (:fg node))))))
+      (is (= sut/status-fail (:fg node))))))
 
 (deftest review-node-reviewing
   (testing "Reviewing → yellow node"
     (let [node (sut/review-node :reviewing)]
       (is (.contains (:label node) "review required"))
-      (is (= :yellow (:fg node))))))
+      (is (= sut/status-warning (:fg node))))))
 
 (deftest review-node-draft
   (testing "Draft → no color"
@@ -219,7 +219,7 @@
   (testing "Unknown status → pending with yellow"
     (let [node (sut/review-node :unknown)]
       (is (.contains (:label node) "pending"))
-      (is (= :yellow (:fg node))))))
+      (is (= sut/status-warning (:fg node))))))
 
 ;; ============================================================================
 ;; gates-section-nodes
@@ -237,7 +237,7 @@
                  {:gate/id :test :gate/passed? true}]
           nodes (sut/gates-section-nodes gates)]
       (is (= 3 (count nodes)))
-      (is (= :green (:fg (first nodes))))
+      (is (= sut/status-pass (:fg (first nodes))))
       (is (.contains (:label (first nodes)) "2/2 passed")))))
 
 (deftest gates-section-nodes-some-failed
@@ -246,10 +246,10 @@
                  {:gate/id :test :gate/passed? false}]
           nodes (sut/gates-section-nodes gates)]
       (is (= 3 (count nodes)))
-      (is (= :yellow (:fg (first nodes))))
+      (is (= sut/status-warning (:fg (first nodes))))
       (is (.contains (:label (first nodes)) "1/2 passed"))
-      (is (= :green (:fg (second nodes))))
-      (is (= :red (:fg (nth nodes 2)))))))
+      (is (= sut/status-pass (:fg (second nodes))))
+      (is (= sut/status-fail (:fg (nth nodes 2)))))))
 
 ;; ============================================================================
 ;; packs-applied-nodes
@@ -302,7 +302,7 @@
           nodes (sut/violation-nodes violations)]
       (is (= 3 (count nodes)))
       (is (.contains (:label (first nodes)) "2"))
-      (is (= :red (:fg (second nodes))))
+      (is (= sut/status-fail (:fg (second nodes))))
       (is (.contains (:label (nth nodes 2)) "[auto-fix]")))))
 
 ;; ============================================================================
@@ -369,3 +369,179 @@
   (testing "Non-compliant policy → violations label"
     (let [nodes (sut/policy-evidence-nodes {:policy {:compliant? false}})]
       (is (.contains (:label (second nodes)) "violations detected")))))
+
+;; ============================================================================
+;; derive-recommendation — regression: readiness state resolution
+;; ============================================================================
+
+(deftest recommend-not-wait-when-enriched
+  (testing "PR with pr-train enrichment (no :readiness/state) produces actionable recommendation, not :wait"
+    ;; Regression: explain-readiness returns {:readiness/score :readiness/ready? :readiness/factors}
+    ;; but NOT :readiness/state. extract-pr-signals must derive the state from PR status/CI.
+    (let [pr {:pr/status :open :pr/ci-status :passed
+              :pr/additions 100 :pr/deletions 50
+              :pr/readiness {:readiness/score 0.4
+                             :readiness/ready? false
+                             :readiness/factors []}}
+          rec (sut/derive-recommendation pr)]
+      (is (not= :wait (:action rec))
+          "Should not be :wait — :open + ci:passed should derive :needs-review state")
+      (is (= :review (:action rec))))))
+
+(deftest recommend-merge-when-all-green
+  (testing "Approved PR with passing CI, low risk, policy pass → merge"
+    (let [pr {:pr/status :approved :pr/ci-status :passed
+              :pr/additions 50 :pr/deletions 10
+              :pr/policy {:evaluation/passed? true}
+              :pr/readiness {:readiness/score 1.0
+                             :readiness/ready? true
+                             :readiness/factors []}}
+          rec (sut/derive-recommendation pr)]
+      (is (= :merge (:action rec))))))
+
+(deftest recommend-do-not-merge-ci-failing
+  (testing "Open PR with failing CI → do-not-merge"
+    (let [pr {:pr/status :open :pr/ci-status :failed
+              :pr/additions 100 :pr/deletions 50}
+          rec (sut/derive-recommendation pr)]
+      (is (= :do-not-merge (:action rec))))))
+
+(deftest recommend-evaluate-when-ready-no-policy
+  (testing "Ready PR without policy evaluation → evaluate"
+    (let [pr {:pr/status :approved :pr/ci-status :passed
+              :pr/additions 50 :pr/deletions 10
+              :pr/readiness {:readiness/score 1.0
+                             :readiness/ready? true
+                             :readiness/factors []}}
+          rec (sut/derive-recommendation pr)]
+      (is (= :evaluate (:action rec))))))
+
+(deftest recommend-decompose-large-pr
+  (testing "Large open PR with policy evaluated → decompose"
+    (let [pr {:pr/status :open :pr/ci-status :passed
+              :pr/additions 400 :pr/deletions 200
+              :pr/policy {:evaluation/passed? true}}
+          rec (sut/derive-recommendation pr)]
+      (is (= :decompose (:action rec))))))
+
+(deftest recommend-approve-elevated-risk
+  (testing "Ready PR with medium risk → approve (human sign-off)"
+    (let [pr {:pr/status :approved :pr/ci-status :passed
+              :pr/additions 50 :pr/deletions 10
+              :pr/policy {:evaluation/passed? true}
+              :pr/risk {:risk/level :medium :risk/score 0.6}
+              :pr/readiness {:readiness/score 1.0
+                             :readiness/ready? true
+                             :readiness/factors []}}
+          rec (sut/derive-recommendation pr)]
+      (is (= :approve (:action rec))))))
+
+(deftest extract-pr-signals-uses-pr-additions
+  (testing "extract-pr-signals reads :pr/additions not [:change-size :additions]"
+    (let [signals (sut/extract-pr-signals {:pr/status :open :pr/ci-status :passed
+                                           :pr/additions 400 :pr/deletions 200})]
+      (is (true? (:large? signals)) "600 LOC should be large"))))
+
+;; ============================================================================
+;; readiness-state — :merge-ready status (GitLab PRs)
+;; ============================================================================
+
+(deftest readiness-state-merge-ready-ci-passed
+  (testing "merge-ready + CI passed + not behind → merge-ready"
+    (is (= [:merge-ready 1.0]
+           (sut/readiness-state :merge-ready true false false)))))
+
+(deftest readiness-state-merge-ready-behind
+  (testing "merge-ready + CI passed + behind → behind-main"
+    (is (= [:behind-main 0.85]
+           (sut/readiness-state :merge-ready true false true)))))
+
+(deftest readiness-state-merge-ready-ci-failing
+  (testing "merge-ready + CI failing → ci-failing (regression: was :unknown)"
+    (is (= [:ci-failing 0.5]
+           (sut/readiness-state :merge-ready false true false)))))
+
+(deftest readiness-state-merge-ready-ci-pending
+  (testing "merge-ready + CI pending → needs-review (regression: was :unknown)"
+    (is (= [:needs-review 0.7]
+           (sut/readiness-state :merge-ready false false false)))))
+
+;; ============================================================================
+;; readiness-blockers-summary
+;; ============================================================================
+
+(deftest blockers-summary-ready
+  (testing "No blockers → ready"
+    (is (= "ready"
+           (sut/readiness-blockers-summary {:readiness/blockers []})))))
+
+(deftest blockers-summary-nil-blockers
+  (testing "Nil blockers → ready"
+    (is (= "ready"
+           (sut/readiness-blockers-summary {})))))
+
+(deftest blockers-summary-review
+  (testing "Review blocker → review"
+    (is (= "review"
+           (sut/readiness-blockers-summary
+             {:readiness/blockers [{:blocker/type :review :blocker/message "Needs review"}]})))))
+
+(deftest blockers-summary-ci
+  (testing "CI blocker → CI"
+    (is (= "CI"
+           (sut/readiness-blockers-summary
+             {:readiness/blockers [{:blocker/type :ci :blocker/message "CI failing"}]})))))
+
+(deftest blockers-summary-multiple
+  (testing "Multiple blockers joined with comma"
+    (let [summary (sut/readiness-blockers-summary
+                    {:readiness/blockers [{:blocker/type :ci :blocker/message "CI failing"}
+                                          {:blocker/type :review :blocker/message "Needs review"}
+                                          {:blocker/type :behind-main :blocker/message "Behind"}]})]
+      (is (.contains summary "CI"))
+      (is (.contains summary "review"))
+      (is (.contains summary "rebase")))))
+
+(deftest blockers-summary-draft
+  (testing "Draft blocker → draft"
+    (is (= "draft"
+           (sut/readiness-blockers-summary
+             {:readiness/blockers [{:blocker/type :draft :blocker/message "Draft PR"}]})))))
+
+;; ============================================================================
+;; derive-risk — scoring changes
+;; ============================================================================
+
+(deftest derive-risk-ci-fail-is-high
+  (testing "CI failing → high risk"
+    (let [risk (sut/derive-risk {:pr/status :open :pr/ci-status :failed
+                                 :pr/additions 100 :pr/deletions 50})]
+      (is (= :high (:risk/level risk))))))
+
+(deftest derive-risk-ci-fail-plus-changes-requested-is-critical
+  (testing "CI failing + changes requested → critical"
+    (let [risk (sut/derive-risk {:pr/status :changes-requested :pr/ci-status :failed
+                                 :pr/additions 100 :pr/deletions 50})]
+      (is (= :critical (:risk/level risk))))))
+
+(deftest derive-risk-large-pr-is-medium
+  (testing ">500 LOC → medium risk"
+    (let [risk (sut/derive-risk {:pr/status :open :pr/ci-status :passed
+                                 :pr/additions 400 :pr/deletions 200})]
+      (is (= :medium (:risk/level risk))))))
+
+(deftest derive-risk-small-pr-is-low
+  (testing "<200 LOC → low risk"
+    (let [risk (sut/derive-risk {:pr/status :open :pr/ci-status :passed
+                                 :pr/additions 50 :pr/deletions 20})]
+      (is (= :low (:risk/level risk))))))
+
+(deftest derive-risk-uses-max-not-average
+  (testing "Max-of-factors scoring: one high signal isn't diluted"
+    (let [risk (sut/derive-risk {:pr/status :open :pr/ci-status :passed
+                                 :pr/additions 600 :pr/deletions 100
+                                 :pr/changed-files-count 2})]
+      ;; 700 LOC = score 0.75, 2 files = score 0.2
+      ;; Max = 0.75 (not average 0.475), so level = :medium
+      (is (= :medium (:risk/level risk)))
+      (is (>= (:risk/score risk) 0.7)))))

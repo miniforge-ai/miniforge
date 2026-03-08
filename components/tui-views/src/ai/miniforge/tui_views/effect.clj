@@ -54,6 +54,11 @@
   [pr-id pr]
   {:type :evaluate-policy :pr-id pr-id :pr pr})
 
+(defn batch-evaluate-policy
+  "Evaluate policy for multiple PRs that don't have evaluation results."
+  [prs]
+  {:type :batch-evaluate-policy :prs prs})
+
 (defn create-train
   "Create a new merge train with the given name."
   [train-name]
@@ -107,3 +112,13 @@
   "Persistently archive workflows by moving their event files to archive/."
   [workflow-ids]
   {:type :archive-workflows :workflow-ids workflow-ids})
+
+(defn cache-policy-result
+  "Persist a single PR's policy evaluation result to the disk cache."
+  [pr-id result prs]
+  {:type :cache-policy-result :pr-id pr-id :result result :prs prs})
+
+(defn cache-risk-triage
+  "Persist fleet risk triage results to the disk cache."
+  [risk-map prs]
+  {:type :cache-risk-triage :risk-map risk-map :prs prs})

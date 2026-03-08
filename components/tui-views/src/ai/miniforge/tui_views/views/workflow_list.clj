@@ -27,7 +27,8 @@
    - Agent status
    - Temporal grouping (Today, This Week, Older)"
   (:require
-   [ai.miniforge.tui-engine.interface.layout :as layout])
+   [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.palette :as palette])
   (:import
    [java.time LocalDate ZoneId]
    [java.time.temporal ChronoUnit]))
@@ -115,7 +116,7 @@
 
 (defn render-title-bar [[cols rows]]
   (layout/text [cols rows] " MINIFORGE │ Workflows"
-               {:fg :cyan :bold? true}))
+               {:fg palette/status-info :bold? true}))
 
 (defn auto-scroll-offset
   "Compute scroll offset so selected-idx is always visible within visible-count rows."
@@ -132,7 +133,7 @@
     ;; Section header — spans full width with dimmed color
     {:status-char ""
      :name (:label entry)
-     :name-fg :cyan
+     :name-fg palette/status-info
      :phase ""
      :progress-str ""
      :agent-msg ""
@@ -202,7 +203,7 @@
             (layout/text [tc tr]
               (str " MINIFORGE │ Workflows"
                    (when search-active? (str " [" (count workflows) " matches]")))
-              {:fg :cyan :bold? true}))
+              {:fg palette/status-info :bold? true}))
 
           render-content-area
           (fn [[c r]]
