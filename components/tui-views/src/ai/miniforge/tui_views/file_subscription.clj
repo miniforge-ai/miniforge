@@ -128,20 +128,21 @@
 
 (defn poll-loop
   "Polling loop body for the file-subscription daemon thread.
-   Polls tracked files every poll-ms, scans for new files every scan-ms."
+   Polls tracked files every poll-ms, scans for new files every scan-ms.
+   Catches exceptions per-iteration so a single failure doesn't kill the thread."
   [running? tracked dispatch-fn dir poll-ms scan-ms]
-  (try
-    (let [scan-counter (atom 0)]
-      (while @running?
+  (let [scan-counter (atom 0)]
+    (while @running?
+      (try
         (Thread/sleep poll-ms)
         (when @running?
           (poll-tracked-files! tracked dispatch-fn)
           (swap! scan-counter + poll-ms)
           (when (>= @scan-counter scan-ms)
             (reset! scan-counter 0)
-            (scan-for-new-files! dir tracked dispatch-fn)))))
-    (catch InterruptedException _)
-    (catch Exception _)))
+            (scan-for-new-files! dir tracked dispatch-fn)))
+        (catch InterruptedException e (throw e))
+        (catch Exception _)))))
 
 (defn stop-subscription!
   "Stop the file-subscription polling thread."

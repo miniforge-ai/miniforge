@@ -545,3 +545,41 @@
       ;; Max = 0.75 (not average 0.475), so level = :medium
       (is (= :medium (:risk/level risk)))
       (is (>= (:risk/score risk) 0.7)))))
+
+;; ============================================================================
+;; project-pr-row — size column color coding
+;; ============================================================================
+
+(defn- pr-row-with-size
+  "Helper: build a minimal PR with given additions/deletions and call project-pr-row."
+  [adds dels]
+  (sut/project-pr-row {:pr/repo "test/repo" :pr/number 1 :pr/title "t"
+                        :pr/status :open :pr/ci-status :passed
+                        :pr/additions adds :pr/deletions dels}
+                      {}))
+
+(deftest size-color-red-over-1000
+  (testing "Total > red threshold (1000) → status-fail color"
+    (let [row (pr-row-with-size 800 300)]
+      (is (= [220 50 40] (:ready-fg row))))))
+
+(deftest size-color-yellow-over-500
+  (testing "Total > yellow threshold (500) but ≤ red → status-warning color"
+    (let [row (pr-row-with-size 400 200)]
+      (is (= [200 160 0] (:ready-fg row))))))
+
+(deftest size-color-neutral-over-200
+  (testing "Total > green threshold (200) but ≤ yellow → no color (nil)"
+    (let [row (pr-row-with-size 150 100)]
+      (is (nil? (:ready-fg row))))))
+
+(deftest size-color-green-under-200
+  (testing "Total ≤ green threshold (200) → status-pass color"
+    (let [row (pr-row-with-size 50 20)]
+      (is (= [0 180 80] (:ready-fg row))))))
+
+(deftest size-color-zero-shows-dash
+  (testing "Zero additions and deletions → dash display, green color"
+    (let [row (pr-row-with-size 0 0)]
+      (is (= "—" (:ready row)))
+      (is (= [0 180 80] (:ready-fg row))))))

@@ -157,7 +157,10 @@
           (assoc :view :workflow-detail)
           (assoc :detail (workflow-detail-context wf))
           (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil
-                 :scroll-offset nil :search-matches [] :search-match-idx nil))
+                 :scroll-offset nil :search-matches [] :search-match-idx nil)
+          ;; Reload full detail from disk in background to fill in any
+          ;; events missed by the live subscription
+          (assoc :side-effect (effect/reload-workflow-detail (:id wf))))
       model)))
 
 (defn enter-pr-detail [model]

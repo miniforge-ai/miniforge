@@ -602,6 +602,17 @@
       :msg/remediation-completed (events/handle-remediation-completed model payload)
       :msg/decomposition-started (events/handle-decomposition-started model payload)
 
+      ;; Workflow detail loaded from disk
+      :msg/workflow-detail-loaded
+      (let [{:keys [workflow-id detail]} payload
+            idx (events/find-workflow-idx (:workflows model) workflow-id)]
+        (cond-> model
+          ;; Update the row snapshot so future detail views are fresh
+          idx (assoc-in [:workflows idx :detail-snapshot] detail)
+          ;; Update the live detail if this workflow is currently displayed
+          (= workflow-id (get-in model [:detail :workflow-id]))
+          (update :detail merge (dissoc detail :expanded-nodes :focused-pane))))
+
       ;; Archival result
       :msg/workflows-archived
       (let [{:keys [archived errors]} payload]

@@ -401,6 +401,12 @@
     (catch Exception e
       (msg/fleet-risk-triaged-error (.getMessage e)))))
 
+(defn handle-reload-workflow-detail
+  "Reload workflow detail from the persisted event file on disk."
+  [{:keys [workflow-id]}]
+  (when-let [detail (persistence/load-workflow-detail workflow-id)]
+    (msg/workflow-detail-loaded workflow-id detail)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Effect dispatcher
 
@@ -427,6 +433,7 @@
     :chat-send         (handle-chat-send effect)
     :chat-execute-action (handle-chat-execute-action effect)
     :fleet-risk-triage (handle-fleet-risk-triage effect)
+    :reload-workflow-detail (handle-reload-workflow-detail effect)
     nil))
 
 ;------------------------------------------------------------------------------ Layer 2
