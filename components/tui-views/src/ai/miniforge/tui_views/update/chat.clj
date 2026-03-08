@@ -168,12 +168,12 @@
 (defn scroll-up
   "Scroll the chat panel up by one line."
   [model]
-  (update-in model [:chat :scroll-offset] #(max 0 (dec (or % 0)))))
+  (update-in model [:chat :scroll-offset] (fn [v] (max 0 (dec (or v 0))))))
 
 (defn scroll-down
   "Scroll the chat panel down by one line."
   [model]
-  (update-in model [:chat :scroll-offset] #(inc (or % 0))))
+  (update-in model [:chat :scroll-offset] (fn [v] (inc (or v 0)))))
 
 (defn scroll-bottom
   "Scroll the chat panel to the bottom (latest messages)."

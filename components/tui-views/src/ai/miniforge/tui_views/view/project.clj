@@ -459,8 +459,8 @@
         changes     (+ (get-in pr [:change-size :additions] 0)
                        (get-in pr [:change-size :deletions] 0))]
     {:ready?          (:readiness/ready? readiness)
-     :state           (or (:readiness/state readiness) :unknown)
-     :risk-level      (or (:risk/level risk) :low)
+     :state           (get readiness :readiness/state :unknown)
+     :risk-level      (get risk :risk/level :low)
      :policy-pass?    (:evaluation/passed? policy)
      :policy-unknown? (nil? policy)
      :has-violations? (boolean (seq violations))
@@ -564,6 +564,28 @@
   (case (:evaluation/passed? policy) true "pass" false "FAIL" "?"))
 
 ;------------------------------------------------------------------------------ Layer 0f
+;; Workflow-PR linkage helpers
+
+(defn find-workflow-by-id
+  "Find a workflow in the list by its UUID."
+  [workflows wf-id]
+  (some #(when (= (:id %) wf-id) %) workflows))
+
+(defn workflow-matches-branch?
+  "True when a workflow name partially matches a branch name (bidirectional)."
+  [wf branch]
+  (and (:name wf)
+       (or (str/includes? (str branch) (str (:name wf)))
+           (str/includes? (str (:name wf)) (str branch)))))
+
+(defn find-linked-workflow
+  "Find the workflow linked to a PR. Tries direct ID lookup first,
+   then falls back to branch name matching."
+  [workflows wf-id branch]
+  (or (when wf-id (find-workflow-by-id workflows wf-id))
+      (when branch (some #(when (workflow-matches-branch? % branch) %) workflows))))
+
+;------------------------------------------------------------------------------ Layer 0g
 ;; Tree node primitives and pure node builders
 
 (defn tree-node
@@ -845,22 +867,22 @@
    agent-risk-map is {[repo num] {:level kw :reason str}} from fleet triage."
   [pr agent-risk-map]
   (let [{:keys [readiness risk policy recommend]} (resolve-enrichment pr)
-        r-state   (or (:readiness/state readiness) :unknown)
-        risk-lvl  (or (:risk/level risk) :low)
+        r-state   (get readiness :readiness/state :unknown)
+        risk-lvl  (get risk :risk/level :low)
         pol-pass? (:evaluation/passed? policy)
         pr-id     [(:pr/repo pr) (:pr/number pr)]
         agent-r   (get agent-risk-map pr-id)
         ;; Use agent risk when available, fall back to mechanical
         display-risk (if agent-r (:level agent-r) risk-lvl)]
     {:_id pr-id
-     :repo (str (or (:pr/repo pr) "")
+     :repo (str (get pr :pr/repo "")
                 (when (:pr/workflow-id pr) " [mf]"))
      :number (str "#" (:pr/number pr))
-     :title (or (:pr/title pr) "")
+     :title (get pr :pr/title "")
      :state (pr-state-label (:pr/status pr))
      :status      (readiness-indicator r-state)
      :status-fg   (readiness-state-color r-state)
-     :ready       (readiness-bar (or (:readiness/score readiness) 0) 15)
+     :ready       (readiness-bar (get readiness :readiness/score 0) 15)
      :risk        (risk-label display-risk)
      :risk-fg     (risk-level-color display-risk)
      :policy      (policy-label policy)
@@ -895,7 +917,7 @@
    Each factor is expandable with detail nodes at depth 1+."
   [model]
   (let [{:keys [pr readiness]} (resolve-detail-enrichment model)
-        score     (or (:readiness/score readiness) 0)
+        score     (get readiness :readiness/score 0)
         ready?    (:readiness/ready? readiness)
         recommend (when pr (derive-recommendation pr))]
     (into
@@ -922,7 +944,7 @@
         pr-id   (when pr [(:pr/repo pr) (:pr/number pr)])
         agent-r (when pr-id (get-in model [:agent-risk pr-id]))
         wf-id   (:pr/workflow-id pr)
-        level   (or (:risk/level risk) :unknown)
+        level   (get risk :risk/level :unknown)
         score   (:risk/score risk)
         factors (:risk/factors risk [])]
     (concat
@@ -955,22 +977,14 @@
    Shows PR metadata, status, and linked workflow at a glance."
   [model]
   (let [{:keys [pr readiness risk]} (resolve-detail-enrichment model)
-        r-state  (or (:readiness/state readiness) :unknown)
-        risk-lvl (or (:risk/level risk) :unknown)
+        r-state  (get readiness :readiness/state :unknown)
+        risk-lvl (get risk :risk/level :unknown)
         recommend (when pr (derive-recommendation pr))
         ;; Find linked workflow: direct lookup via workflow-id, fallback to branch name match
         wf-id    (:pr/workflow-id pr)
         branch   (:pr/branch pr)
-        wfs      (:workflows model [])
-        linked-wf (or (when wf-id
-                        (some #(when (= (:id %) wf-id) %) wfs))
-                      (when branch
-                        (some (fn [wf]
-                                (when (and (:name wf)
-                                           (or (str/includes? (str branch) (str (:name wf)))
-                                               (str/includes? (str (:name wf)) (str branch))))
-                                  wf))
-                              wfs)))]
+        wfs      (get model :workflows [])
+        linked-wf (find-linked-workflow wfs wf-id branch)]
     (let [additions (get pr :pr/additions 0)
           deletions (get pr :pr/deletions 0)
           total     (+ additions deletions)
@@ -986,7 +1000,7 @@
                                " │ Status: " (readiness-indicator r-state))
                           0 false (readiness-state-color r-state))
                (tree-node (str "Risk: " (name risk-lvl)
-                               " │ Score: " (int (* 100 (or (:readiness/score readiness) 0))) "%"
+                               " │ Score: " (int (* 100 (get readiness :readiness/score 0))) "%"
                                (when (pos? total)
                                  (str " │ +" additions "/-" deletions
                                       (when (pos? files) (str " " files " files")))))
@@ -996,7 +1010,7 @@
                          0 false (recommend-action-color (:action recommend))))
         linked-wf
         (conj (tree-node (str "Workflow: " (:name linked-wf)
-                              " (" (name (or (:status linked-wf) :unknown)) ")")
+                              " (" (name (get linked-wf :status :unknown)) ")")
                          0 false status-info))
         (not linked-wf)
         (conj (tree-node "Workflow: not linked" 0))))))

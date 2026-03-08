@@ -36,7 +36,8 @@
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.policy-pack.interface :as policy-pack]
    [ai.miniforge.pr-train.interface :as pr-train]
-   [ai.miniforge.llm.interface :as llm]))
+   [ai.miniforge.llm.interface :as llm]
+   [ai.miniforge.tui-views.prompts :as prompts]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Side-effect handlers — each returns [msg-type payload] or nil
@@ -186,6 +187,11 @@
 (defn format-check-context [checks]
   (str/join ", " (map #(str (:name %) "=" (-> % (get :conclusion :unknown) name)) checks)))
 
+(defn format-pr-summary-line
+  "Format a PR as a one-line summary for prompt context."
+  [pr]
+  (str "- " (:pr/repo pr) "#" (:pr/number pr) " " (:pr/title pr)))
+
 (defn build-pr-context-str
   "Build a text summary of PR data for the LLM system prompt."
   [{:keys [pr/behind-main? pr/branch pr/ci-status pr/number
@@ -239,80 +245,67 @@
                     (str " (packs: " (str/join ", " packs) ")"))
                   "\n"))))))
 
+(defn- build-context-section
+  "Build the context section for the chat system prompt."
+  [context]
+  (case (get context :type :unknown)
+    :pr-detail
+    (prompts/render :chat/context-pr-detail
+                    {:pr-context (build-pr-context-str (:pr context))})
+
+    :pr-fleet
+    (let [prs (:selected-prs context)
+          n (count prs)]
+      (prompts/render :chat/context-pr-fleet
+                      {:total-prs     (get context :total-prs 0)
+                       :active-filter (name (get context :active-filter :open))
+                       :selected-summary
+                       (if (pos? n)
+                         (str n " PR(s) selected:\n"
+                              (str/join "\n"
+                                (map format-pr-summary-line prs)))
+                         "No PRs currently selected.")}))
+
+    "Unknown context."))
+
 (defn build-chat-system-prompt
   "Build a context-aware system prompt for the chat LLM."
   [context]
-  (let [ctx-type (get context :type :unknown)
-        max-line (get context :max-line-width 60)]
-    (str "You are the Miniforge orchestrator agent — an AI assistant embedded in a PR fleet management TUI.\n"
-         "You help engineers understand, triage, and act on their pull requests.\n\n"
-         "IMPORTANT: Your output is displayed in a narrow TUI panel that is " max-line " characters wide.\n"
-         "Keep ALL lines under " max-line " characters. Do NOT use wide tables. Use short bullet points.\n"
-         "Do NOT use markdown headers (##). Use **bold** sparingly. Prefer plain text.\n\n"
-         "Capabilities:\n"
-         "- Analyze PR risk, readiness, and merge strategy\n"
-         "- Explain CI failures and suggest fixes\n"
-         "- Recommend review priorities and merge order\n"
-         "- Summarize change impact across the fleet\n\n"
-         "Be concise and actionable. Reference specific data. Use the PR context below.\n\n"
-         "ACTIONS: When appropriate, suggest actions the user can take. Format each as:\n"
-         "[ACTION: type | label | description]\n\n"
-         "Available action types:\n"
-         "- review — Run policy review on PR(s)\n"
-         "- sync — Refresh PR data from source (GitHub/GitLab)\n"
-         "- open — Open PR in browser\n"
-         "- evaluate — Evaluate policy packs\n"
-         "- remediate — Auto-fix policy violations\n"
-         "- decompose — Analyze PR for splitting\n\n"
-         "Example: [ACTION: review | Review policy | Run policy packs against this PR]\n"
-         "Only suggest actions that are relevant to the conversation.\n\n"
-         (case ctx-type
-           :pr-detail
-           (str "The user is viewing a specific PR:\n"
-                (build-pr-context-str (:pr context)))
-
-           :pr-fleet
-           (let [prs (:selected-prs context)
-                 n (count prs)]
-             (str "The user is in the PR fleet view.\n"
-                  "Total PRs: " (:total-prs context 0) "\n"
-                  "Active filter: " (name (get context :active-filter :open)) "\n"
-                  (if (pos? n)
-                    (str n " PR(s) selected:\n"
-                         (str/join "\n"
-                           (map #(str "- " (:pr/repo %) "#" (:pr/number %)
-                                      " " (:pr/title %))
-                                prs)))
-                    "No PRs currently selected.")))
-
-           "Unknown context."))))
+  (prompts/render :chat/system
+                  {:max-line-width (get context :max-line-width 60)
+                   :context        (build-context-section context)}))
 
 (def action-pattern
   "Regex to parse [ACTION: type | label | description] from LLM response."
   #"\[ACTION:\s*(\S+)\s*\|\s*([^|]+?)\s*\|\s*([^\]]+?)\s*\]")
+
+(defn action-match->action
+  "Convert a regex match from action-pattern into a ChatAction map."
+  [[_ action-type label description]]
+  {:action      (keyword action-type)
+   :label       (str/trim label)
+   :description (str/trim description)})
 
 (defn parse-actions
   "Extract structured actions from LLM response text.
    Returns [clean-content actions-vec]."
   [content]
   (let [matches (re-seq action-pattern content)
-        actions (mapv (fn [[_ action-type label description]]
-                        {:action (keyword action-type)
-                         :label  (str/trim label)
-                         :description (str/trim description)})
-                      matches)
+        actions (mapv action-match->action matches)
         clean (-> content
                   (str/replace action-pattern "")
                   str/trim)]
     [clean actions]))
 
+(defn chat-msg->llm-msg
+  "Convert an internal chat message to the LLM API format."
+  [m]
+  {:role (name (:role m)) :content (:content m)})
+
 (defn handle-chat-send [{:keys [message context history]}]
   (try
     (let [system-prompt (build-chat-system-prompt context)
-          messages (mapv (fn [m]
-                           {:role (name (:role m))
-                            :content (:content m)})
-                         (or history []))
+          messages (mapv chat-msg->llm-msg (or history []))
           request (cond-> {:system system-prompt}
                     (seq messages) (assoc :messages
                                          (conj messages
@@ -331,44 +324,46 @@
 
 ;------------------------------------------------------------------------------ Fleet risk triage
 
+(def ^:private risk-line-pattern
+  "Regex for parsing a single RISK: line from fleet triage LLM response."
+  #"RISK:\s*(\S+#\d+)\s*\|\s*(\w+)\s*\|\s*(.*)")
+
+(defn parse-risk-line
+  "Parse a single RISK: line into {:id [repo num] :level str :reason str}, or nil."
+  [line]
+  (when-let [[_ id-str level reason] (re-matches risk-line-pattern line)]
+    (let [[repo num-str] (str/split id-str #"#" 2)
+          num (try (Integer/parseInt num-str) (catch Exception _ nil))]
+      (when num
+        {:id     [repo num]
+         :level  (str/lower-case (str/trim level))
+         :reason (str/trim reason)}))))
+
+(defn parse-risk-triage-response
+  "Parse the full LLM triage response into a vector of assessments."
+  [content]
+  (into [] (keep parse-risk-line) (str/split-lines content)))
+
+(defn fleet-triage-system-prompt
+  "Load the fleet triage system prompt from templates."
+  []
+  (prompts/get-template :fleet-triage/system))
+
 (defn handle-fleet-risk-triage
   "Send all PR summaries to LLM for fleet-level risk triage.
    Returns per-PR risk assessments."
   [{:keys [pr-summaries]}]
   (try
-    (let [summaries-text (str/join "\n"
-                           (map :summary pr-summaries))
+    (let [summaries-text (str/join "\n" (map :summary pr-summaries))
           ids (mapv :id pr-summaries)
-          system (str "You are a PR fleet risk analyst. You will receive a list of PRs with their mechanical risk data.\n"
-                      "For EACH PR, provide a risk assessment with:\n"
-                      "- level: low, medium, high, or critical\n"
-                      "- reason: one sentence explaining your assessment\n\n"
-                      "Consider: change size, CI status, whether it's behind main, mechanical risk score, "
-                      "and how PRs interact (e.g., large PRs blocking others = higher fleet risk).\n\n"
-                      "Respond ONLY with one line per PR in this exact format:\n"
-                      "RISK: repo#number | level | reason\n\n"
-                      "Example:\n"
-                      "RISK: owner/repo#42 | high | Large change with failing CI blocks 3 dependent PRs\n"
-                      "RISK: owner/repo#43 | low | Small fix with passing CI, no dependencies")
-          result (llm/complete @llm-client {:system system :prompt summaries-text})]
+          result (llm/complete @llm-client {:system (fleet-triage-system-prompt)
+                                                :prompt summaries-text})]
       (if (llm/success? result)
         (let [content (llm/get-content result)
-              lines (str/split-lines content)
-              assessments (keep (fn [line]
-                                  (when-let [[_ id-str level reason]
-                                             (re-matches #"RISK:\s*(\S+#\d+)\s*\|\s*(\w+)\s*\|\s*(.*)" line)]
-                                    (let [[repo num-str] (str/split id-str #"#" 2)
-                                          num (try (Integer/parseInt num-str) (catch Exception _ nil))]
-                                      (when num
-                                        {:id [repo num]
-                                         :level (str/lower-case (str/trim level))
-                                         :reason (str/trim reason)}))))
-                                lines)
-              ;; Match back to original IDs (LLM may use slightly different formatting)
+              assessments (parse-risk-triage-response content)
               matched (if (seq assessments)
                         assessments
-                        ;; Fallback: try to match by PR number position
-                        (mapv (fn [id] {:id id :level "medium" :reason "Unable to assess"}) ids))]
+                        (mapv #(hash-map :id % :level "medium" :reason "Unable to assess") ids))]
           (msg/fleet-risk-triaged matched))
         (msg/fleet-risk-triaged-error "LLM request failed")))
     (catch Exception e
