@@ -441,3 +441,107 @@
     (let [signals (sut/extract-pr-signals {:pr/status :open :pr/ci-status :passed
                                            :pr/additions 400 :pr/deletions 200})]
       (is (true? (:large? signals)) "600 LOC should be large"))))
+
+;; ============================================================================
+;; readiness-state — :merge-ready status (GitLab PRs)
+;; ============================================================================
+
+(deftest readiness-state-merge-ready-ci-passed
+  (testing "merge-ready + CI passed + not behind → merge-ready"
+    (is (= [:merge-ready 1.0]
+           (sut/readiness-state :merge-ready true false false)))))
+
+(deftest readiness-state-merge-ready-behind
+  (testing "merge-ready + CI passed + behind → behind-main"
+    (is (= [:behind-main 0.85]
+           (sut/readiness-state :merge-ready true false true)))))
+
+(deftest readiness-state-merge-ready-ci-failing
+  (testing "merge-ready + CI failing → ci-failing (regression: was :unknown)"
+    (is (= [:ci-failing 0.5]
+           (sut/readiness-state :merge-ready false true false)))))
+
+(deftest readiness-state-merge-ready-ci-pending
+  (testing "merge-ready + CI pending → needs-review (regression: was :unknown)"
+    (is (= [:needs-review 0.7]
+           (sut/readiness-state :merge-ready false false false)))))
+
+;; ============================================================================
+;; readiness-blockers-summary
+;; ============================================================================
+
+(deftest blockers-summary-ready
+  (testing "No blockers → ready"
+    (is (= "ready"
+           (sut/readiness-blockers-summary {:readiness/blockers []})))))
+
+(deftest blockers-summary-nil-blockers
+  (testing "Nil blockers → ready"
+    (is (= "ready"
+           (sut/readiness-blockers-summary {})))))
+
+(deftest blockers-summary-review
+  (testing "Review blocker → review"
+    (is (= "review"
+           (sut/readiness-blockers-summary
+             {:readiness/blockers [{:blocker/type :review :blocker/message "Needs review"}]})))))
+
+(deftest blockers-summary-ci
+  (testing "CI blocker → CI"
+    (is (= "CI"
+           (sut/readiness-blockers-summary
+             {:readiness/blockers [{:blocker/type :ci :blocker/message "CI failing"}]})))))
+
+(deftest blockers-summary-multiple
+  (testing "Multiple blockers joined with comma"
+    (let [summary (sut/readiness-blockers-summary
+                    {:readiness/blockers [{:blocker/type :ci :blocker/message "CI failing"}
+                                          {:blocker/type :review :blocker/message "Needs review"}
+                                          {:blocker/type :behind-main :blocker/message "Behind"}]})]
+      (is (.contains summary "CI"))
+      (is (.contains summary "review"))
+      (is (.contains summary "rebase")))))
+
+(deftest blockers-summary-draft
+  (testing "Draft blocker → draft"
+    (is (= "draft"
+           (sut/readiness-blockers-summary
+             {:readiness/blockers [{:blocker/type :draft :blocker/message "Draft PR"}]})))))
+
+;; ============================================================================
+;; derive-risk — scoring changes
+;; ============================================================================
+
+(deftest derive-risk-ci-fail-is-high
+  (testing "CI failing → high risk"
+    (let [risk (sut/derive-risk {:pr/status :open :pr/ci-status :failed
+                                 :pr/additions 100 :pr/deletions 50})]
+      (is (= :high (:risk/level risk))))))
+
+(deftest derive-risk-ci-fail-plus-changes-requested-is-critical
+  (testing "CI failing + changes requested → critical"
+    (let [risk (sut/derive-risk {:pr/status :changes-requested :pr/ci-status :failed
+                                 :pr/additions 100 :pr/deletions 50})]
+      (is (= :critical (:risk/level risk))))))
+
+(deftest derive-risk-large-pr-is-medium
+  (testing ">500 LOC → medium risk"
+    (let [risk (sut/derive-risk {:pr/status :open :pr/ci-status :passed
+                                 :pr/additions 400 :pr/deletions 200})]
+      (is (= :medium (:risk/level risk))))))
+
+(deftest derive-risk-small-pr-is-low
+  (testing "<200 LOC → low risk"
+    (let [risk (sut/derive-risk {:pr/status :open :pr/ci-status :passed
+                                 :pr/additions 50 :pr/deletions 20})]
+      (is (= :low (:risk/level risk))))))
+
+(deftest derive-risk-uses-max-not-average
+  (testing "Max-of-factors scoring: one high signal isn't diluted"
+    (let [risk (sut/derive-risk {:pr/status :open :pr/ci-status :passed
+                                 :pr/additions 600 :pr/deletions 100
+                                 :pr/changed-files-count 2})]
+      ;; 700 LOC = score 0.75, 2 files = score 0.2
+      ;; Max = 0.75 (not average 0.475), so level = :medium
+      (is (= :medium (:risk/level risk)))
+      (is (>= (:risk/score risk) 0.7)))))

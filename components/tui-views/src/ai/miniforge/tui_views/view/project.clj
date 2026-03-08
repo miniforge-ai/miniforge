@@ -48,6 +48,7 @@
 (def status-char             helpers/status-char)
 (def format-progress-bar     helpers/format-progress-bar)
 (def readiness-bar           helpers/readiness-bar)
+(def readiness-blockers-summary helpers/readiness-blockers-summary)
 (def risk-label              helpers/risk-label)
 (def readiness-state         helpers/readiness-state)
 (def readiness-blockers      helpers/readiness-blockers)
