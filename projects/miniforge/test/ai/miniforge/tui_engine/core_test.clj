@@ -21,6 +21,7 @@
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.tui-engine.core :as core]
+   [ai.miniforge.tui-engine.runtime :as runtime]
    [ai.miniforge.tui-engine.screen :as screen]
    [ai.miniforge.tui-engine.layout :as layout]))
 
@@ -44,26 +45,26 @@
 (deftest create-app-test
   (testing "App initializes with model from init fn"
     (let [app (test-app)]
-      (is (= 0 (:count (core/get-model app))))
-      (is (= [] (:messages (core/get-model app)))))))
+      (is (= 0 (:count (runtime/get-model app))))
+      (is (= [] (:messages (runtime/get-model app)))))))
 
 (deftest dispatch-test
   (testing "Dispatch calls update and re-renders"
     (let [app (test-app)]
       ;; Need to start screen for rendering to work
       (screen/start-screen! (:screen @app))
-      (core/dispatch! app [:input :key/j])
-      (is (= 1 (:count (core/get-model app))))
-      (is (= [[:input :key/j]] (:messages (core/get-model app))))
+      (runtime/dispatch! app [:input :key/j])
+      (is (= 1 (:count (runtime/get-model app))))
+      (is (= [[:input :key/j]] (:messages (runtime/get-model app))))
       (screen/stop-screen! (:screen @app))))
 
   (testing "Multiple dispatches accumulate"
     (let [app (test-app)]
       (screen/start-screen! (:screen @app))
-      (core/dispatch! app [:input :key/j])
-      (core/dispatch! app [:input :key/j])
-      (core/dispatch! app [:input :key/k])
-      (is (= 1 (:count (core/get-model app))))
+      (runtime/dispatch! app [:input :key/j])
+      (runtime/dispatch! app [:input :key/j])
+      (runtime/dispatch! app [:input :key/k])
+      (is (= 1 (:count (runtime/get-model app))))
       (screen/stop-screen! (:screen @app)))))
 
 (deftest view-renders-to-screen-test
@@ -84,7 +85,7 @@
 (deftest get-model-returns-snapshot-test
   (testing "get-model returns current state"
     (let [app (test-app)]
-      (is (= {:count 0 :messages []} (core/get-model app))))))
+      (is (= {:count 0 :messages []} (runtime/get-model app))))))
 
 (deftest elm-loop-with-mock-input-test
   (testing "Full Elm loop: input -> update -> view"
@@ -101,8 +102,8 @@
                           (layout/text [cols rows] (:value model)))
                 :screen mock})]
       (screen/start-screen! mock)
-      (core/dispatch! app [:input :key/j])
-      (is (= "pressed-j" (:value (core/get-model app))))
+      (runtime/dispatch! app [:input :key/j])
+      (is (= "pressed-j" (:value (runtime/get-model app))))
       (is (= [[:input :key/j]] @updates))
       (let [line (screen/mock-read-line mock 0 40)]
         (is (str/includes? line "pressed-j")))
@@ -144,7 +145,7 @@
       (swap! app core/render!)
       (screen/mock-reset-put-count! mock)
       ;; Change model and re-render
-      (core/dispatch! app {:label "after!"})
+      (runtime/dispatch! app {:label "after!"})
       (let [changed-count (screen/mock-get-put-count mock)]
         ;; Should write fewer cells than a full screen
         (is (pos? changed-count) "Changed model should write some cells")
@@ -171,9 +172,9 @@
                   [:fx-done {:result "from-effect"}])
                 :screen mock})]
       (screen/start-screen! mock)
-      (core/dispatch! app [:trigger nil])
+      (runtime/dispatch! app [:trigger nil])
       ;; Model should NOT contain :side-effect (stripped by runtime)
-      (is (nil? (:side-effect (core/get-model app))))
+      (is (nil? (:side-effect (runtime/get-model app))))
       ;; Wait for effect to complete (effect runs on background thread)
       (let [fx (deref effect-result 2000 :timeout)]
         (is (= {:type :test-fx} fx)))
@@ -181,7 +182,7 @@
       (Thread/sleep 200)
       ;; After the effect completes and dispatches back, the model
       ;; should reflect the final state from the effect handler result
-      (is (= "from-effect" (:value (core/get-model app))))
+      (is (= "from-effect" (:value (runtime/get-model app))))
       (screen/stop-screen! mock)))
 
   (testing "No effect-handler means side-effects are silently ignored"
@@ -195,8 +196,8 @@
                           (layout/text [cols rows] (:value model)))
                 :screen mock})]
       (screen/start-screen! mock)
-      (core/dispatch! app [:any nil])
+      (runtime/dispatch! app [:any nil])
       ;; Side-effect stripped, value updated, no crash
-      (is (nil? (:side-effect (core/get-model app))))
-      (is (= "set" (:value (core/get-model app))))
+      (is (nil? (:side-effect (runtime/get-model app))))
+      (is (= "set" (:value (runtime/get-model app))))
       (screen/stop-screen! mock))))

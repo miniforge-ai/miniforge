@@ -33,6 +33,7 @@
    [ai.miniforge.tui-views.subscription :as subscription]
    [ai.miniforge.tui-views.file-subscription :as file-subscription]
    [ai.miniforge.tui-views.persistence :as persistence]
+   [ai.miniforge.tui-views.persistence.pr :as persistence-pr]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.policy-pack.interface :as policy-pack]
    [ai.miniforge.pr-train.interface :as pr-train]
@@ -43,14 +44,14 @@
 ;; Side-effect handlers — each returns [msg-type payload] or nil
 
 (defn handle-sync-prs [{:keys [state]}]
-  (let [{:keys [prs error]} (persistence/load-pr-items (when state {:state state}))]
+  (let [{:keys [prs error]} (persistence-pr/load-pr-items (when state {:state state}))]
     (msg/prs-synced (or prs []) error)))
 
 (defn handle-discover-repos [{:keys [owner]}]
-  (msg/repos-discovered (persistence/discover-repos owner)))
+  (msg/repos-discovered (persistence-pr/discover-repos owner)))
 
 (defn handle-browse-repos [{:keys [owner provider limit source]}]
-  (let [result (persistence/browse-repos {:owner owner :provider provider :limit limit})]
+  (let [result (persistence-pr/browse-repos {:owner owner :provider provider :limit limit})]
     (msg/repos-browsed (assoc result :source source))))
 
 (defn handle-open-url [{:keys [url]}]
@@ -61,7 +62,7 @@
 (defn handle-evaluate-policy [{:keys [pr pr-id]}]
   (try
     (let [result (policy-pack/evaluate-external-pr
-                  (persistence/load-policy-packs) pr)]
+                  (persistence-pr/load-policy-packs) pr)]
       (msg/policy-evaluated pr-id result))
     (catch Exception e
       (msg/policy-evaluated pr-id
@@ -105,7 +106,7 @@
 
 (defn handle-review-prs [{:keys [prs]}]
   (try
-    (let [packs (persistence/load-policy-packs)]
+    (let [packs (persistence-pr/load-policy-packs)]
       (msg/review-completed
        (mapv (fn [pr]
                {:pr-id  [(:pr/repo pr) (:pr/number pr)]
@@ -418,7 +419,7 @@
   (let [train-mgr (pr-train/create-manager)
         app (tui/create-app
              {:init   (fn []
-                        (persistence/load-all-into-model
+                        (persistence-pr/load-all-into-model
                          (model/init-model)
                          {:limit load-limit}))
               :update update/update-model
@@ -460,7 +461,7 @@
   (let [train-mgr (pr-train/create-manager)
         app (tui/create-app
              {:init   (fn []
-                        (persistence/load-all-into-model
+                        (persistence-pr/load-all-into-model
                          (model/init-model)
                          {:limit (:load-limit opts 100)}))
               :update update/update-model
