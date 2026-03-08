@@ -178,7 +178,7 @@
        :title (get pr :pr/title "")
        :status      status-str
        :status-fg   (trees/readiness-state-color r-state)
-       :ready       (helpers/readiness-bar (get readiness :readiness/score 0) 15)
+       :ready       (helpers/readiness-blockers-summary readiness)
        :risk        (helpers/risk-label display-risk)
        :risk-fg     (trees/risk-level-color display-risk)
        :policy      (helpers/policy-label policy)

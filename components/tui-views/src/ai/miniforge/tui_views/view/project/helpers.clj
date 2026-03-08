@@ -86,6 +86,23 @@
          (apply str (repeat (- bar-w filled) \u2591))
          (format " %3d%%" pct))))
 
+(defn readiness-blockers-summary
+  "Compact blocker summary for fleet table. Shows what's needed for merge."
+  [readiness]
+  (let [blockers (:readiness/blockers readiness [])
+        types    (set (map :blocker/type blockers))]
+    (if (empty? blockers)
+      "ready"
+      (str/join ", "
+        (cond-> []
+          (:ci types)           (conj "CI")
+          (:review types)       (conj "review")
+          (:behind-main types)  (conj "rebase")
+          (:changes types)      (conj "changes")
+          (:draft types)        (conj "draft")
+          (:conflicts types)    (conj "conflicts")
+          (:policy types)       (conj "policy"))))))
+
 (defn risk-label [level]
   (case level :critical "CRIT" :high "high" :medium "med" :low "low" :unevaluated "?" "?"))
 
@@ -108,10 +125,10 @@
     (and (#{:merge-ready :approved} status) ci-ok? behind?)
     [:behind-main 0.85]
 
-    (and (= :approved status) ci-fail?)
+    (and (#{:merge-ready :approved} status) ci-fail?)
     [:ci-failing 0.5]
 
-    (and (= :approved status) (not ci-ok?))
+    (and (#{:merge-ready :approved} status) (not ci-ok?))
     [:needs-review 0.7]
 
     (= :changes-requested status)
