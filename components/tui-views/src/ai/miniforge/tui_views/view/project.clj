@@ -184,6 +184,12 @@
                       (if (and (zero? adds) (zero? dels))
                         "—"
                         (str "+" adds "/-" dels)))
+       :ready-fg    (let [total (+ (get pr :pr/additions 0) (get pr :pr/deletions 0))]
+                      (cond
+                        (> total 1000) palette/status-fail
+                        (> total 500)  palette/status-warning
+                        (> total 200)  nil
+                        :else          palette/status-pass))
        :risk        (helpers/risk-label display-risk)
        :risk-fg     (trees/risk-level-color display-risk)
        :policy      (helpers/policy-label policy)
