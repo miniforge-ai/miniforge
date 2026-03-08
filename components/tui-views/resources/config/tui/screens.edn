@@ -54,7 +54,7 @@
                {:key :number   :header "PR"        :width 6}
                {:key :title    :header "Title"     :width :flex}
                {:key :status   :header "State"     :width 14}
-               {:key :ready    :header "Needs"     :width 15}
+               {:key :ready    :header "Size"      :width 15}
                {:key :risk     :header "Risk"      :width 6}
                {:key :policy   :header "Policy"    :width 6}
                {:key :recommend :header "Recommend" :width 14}]

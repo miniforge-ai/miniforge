@@ -179,7 +179,11 @@
        :title (get pr :pr/title "")
        :status      status-str
        :status-fg   (trees/readiness-state-color r-state)
-       :ready       (helpers/readiness-blockers-summary readiness)
+       :ready       (let [adds (get pr :pr/additions 0)
+                          dels (get pr :pr/deletions 0)]
+                      (if (and (zero? adds) (zero? dels))
+                        "—"
+                        (str "+" adds "/-" dels)))
        :risk        (helpers/risk-label display-risk)
        :risk-fg     (trees/risk-level-color display-risk)
        :policy      (helpers/policy-label policy)
