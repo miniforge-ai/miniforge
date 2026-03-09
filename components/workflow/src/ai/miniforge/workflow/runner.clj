@@ -266,11 +266,18 @@
                                                    ctx/transition-to-completed
                                                    ctx/transition-to-failed)
                           (monitoring/clear-transient-state))
-            event-stream (get-in phase-ctx [:execution/opts :event-stream])
-            switch-result (check-backend-health-at-boundary! event-stream phase-ctx)]
-        (if switch-result
-          (assoc phase-ctx :self-healing/backend-switch switch-result)
-          phase-ctx)))))
+            ;; Exponential backoff when phase is retrying
+            retrying? (= (:execution/phase-index phase-ctx)
+                         (:execution/phase-index context))
+            retry-count (get-in phase-ctx [:phase :iterations] 1)]
+        (when (and retrying? (> retry-count 1))
+          (let [backoff-ms (min 30000 (long (* 1000 (Math/pow 2 (dec retry-count)))))]
+            (Thread/sleep backoff-ms)))
+        (let [event-stream (get-in phase-ctx [:execution/opts :event-stream])
+              switch-result (check-backend-health-at-boundary! event-stream phase-ctx)]
+          (if switch-result
+            (assoc phase-ctx :self-healing/backend-switch switch-result)
+            phase-ctx))))))
 
 ;------------------------------------------------------------------------------ Layer 1.5: Output extraction
 

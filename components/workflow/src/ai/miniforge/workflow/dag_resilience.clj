@@ -51,6 +51,79 @@
 (def rate-limit-patterns
   (delay (load-rate-limit-patterns)))
 
+(defn rate-limit-in-text?
+  "Check if arbitrary text contains rate limit patterns.
+   Useful for scanning agent output, error messages, or phase results."
+  [text]
+  (when (and (string? text) (seq text))
+    (boolean (some #(re-find % text) @rate-limit-patterns))))
+
+(def ^:private reset-time-pattern
+  "Matches 'resets 2pm', 'resets 2:30pm', 'resets 2pm (America/Los_Angeles)'"
+  #"resets\s+(\d{1,2}(?::\d{2})?\s*[ap]m)(?:\s*\(([^)]+)\))?")
+
+(def ^:private reset-duration-pattern
+  "Matches 'resets in 30 minutes', 'resets in 2 hours'"
+  #"resets\s+in\s+(\d+)\s*(minutes?|hours?|seconds?)")
+
+(defn parse-reset-instant
+  "Parse rate limit reset time from message text.
+   Returns java.time.Instant or nil.
+
+   Handles:
+   - 'resets 2pm' — assumes local timezone
+   - 'resets 2pm (America/Los_Angeles)' — uses specified timezone
+   - 'resets in 30 minutes' — relative duration"
+  [text]
+  (when (string? text)
+    (or
+     ;; Absolute time: "resets 2pm (America/Los_Angeles)"
+     (when-let [m (re-find reset-time-pattern text)]
+       (try
+         (let [time-str (nth m 1)
+               tz-str (nth m 2)
+               zone (if tz-str
+                      (java.time.ZoneId/of tz-str)
+                      (java.time.ZoneId/systemDefault))
+               ;; Parse "2pm" or "2:30pm" — case-insensitive for am/pm
+               pattern (if (re-find #":" time-str) "h:mma" "ha")
+               formatter (-> (java.time.format.DateTimeFormatterBuilder.)
+                             (.parseCaseInsensitive)
+                             (.appendPattern pattern)
+                             (.toFormatter))
+               local-time (java.time.LocalTime/parse
+                           (.trim time-str)
+                           formatter)
+               now (java.time.ZonedDateTime/now zone)
+               reset-today (.with now local-time)
+               ;; If reset time is in the past, it means tomorrow
+               reset (if (.isBefore reset-today now)
+                       (.plusDays reset-today 1)
+                       reset-today)]
+           (.toInstant reset))
+         (catch Exception _ nil)))
+
+     ;; Relative time: "resets in 30 minutes"
+     (when-let [m (re-find reset-duration-pattern text)]
+       (try
+         (let [amount (Long/parseLong (nth m 1))
+               unit (nth m 2)
+               duration (cond
+                          (re-find #"second" unit) (java.time.Duration/ofSeconds amount)
+                          (re-find #"minute" unit) (java.time.Duration/ofMinutes amount)
+                          (re-find #"hour" unit) (java.time.Duration/ofHours amount))]
+           (.plus (java.time.Instant/now) duration))
+         (catch Exception _ nil))))))
+
+(def ^:private max-rate-limit-wait-ms
+  "Maximum time to wait for a rate limit reset (30 minutes)."
+  (* 30 60 1000))
+
+(defn millis-until-reset
+  "Calculate milliseconds until a reset instant. Returns 0 if already past."
+  [reset-instant]
+  (max 0 (- (.toEpochMilli reset-instant) (System/currentTimeMillis))))
+
 (defn rate-limit-error?
   "Check if a DAG result indicates a rate limit error."
   [result]
@@ -59,7 +132,7 @@
                   (get-in result [:error :data :message])
                   (str result))
           msg (if (string? raw) raw (str raw))]
-      (boolean (some #(re-find % msg) @rate-limit-patterns)))))
+      (rate-limit-in-text? msg))))
 
 (defn find-healthy-backend
   "Find a healthy backend from the allowed list, excluding the current one.
@@ -159,11 +232,59 @@
           {:completed-ids #{} :rate-limited-ids #{} :other-failed-ids #{}}
           results))
 
-(defn handle-rate-limited-batch
-  "Orchestrate the failover decision for a rate-limited batch.
+(defn extract-rate-limit-messages
+  "Extract error messages from rate-limited DAG results."
+  [results rate-limited-ids]
+  (->> rate-limited-ids
+       (map #(get results %))
+       (keep #(or (get-in % [:error :message])
+                  (get-in % [:error :data :message])))
+       (filter string?)))
 
-   Returns {:action :continue :new-backend X} or {:action :pause :reason \"...\"}."
-  [context rate-limited-ids completed-ids logger]
+(defn find-reset-instant
+  "Scan rate limit error messages for a reset time. Returns Instant or nil."
+  [messages]
+  (some parse-reset-instant messages))
+
+(defn wait-for-reset!
+  "Sleep until rate limit resets, if the wait is within the cap.
+   Returns {:waited? true :wait-ms N} or {:waited? false :reason ...}."
+  [reset-instant logger]
+  (let [wait-ms (millis-until-reset reset-instant)]
+    (cond
+      (<= wait-ms 0)
+      {:waited? true :wait-ms 0}
+
+      (<= wait-ms max-rate-limit-wait-ms)
+      (do (log/info logger :dag-resilience :rate-limit/waiting
+                    {:data {:reset-at (str reset-instant)
+                            :wait-ms wait-ms
+                            :wait-minutes (/ wait-ms 60000.0)}})
+          (Thread/sleep wait-ms)
+          {:waited? true :wait-ms wait-ms})
+
+      :else
+      {:waited? false
+       :reason (str "Reset time too far away: "
+                    (long (/ wait-ms 60000)) " minutes (max "
+                    (long (/ max-rate-limit-wait-ms 60000)) ")")})))
+
+(defn- try-wait-for-reset
+  "Strategy 1: Wait for a known reset time.
+   Returns {:action :continue ...} on success, nil to fall through."
+  [results rate-limited-ids logger]
+  (when results
+    (let [msgs (extract-rate-limit-messages results rate-limited-ids)
+          reset-instant (find-reset-instant msgs)]
+      (when reset-instant
+        (let [{:keys [waited?] :as wait-result} (wait-for-reset! reset-instant logger)]
+          (when waited?
+            {:action :continue :waited-ms (:wait-ms wait-result)}))))))
+
+(defn- try-backend-failover
+  "Strategy 2: Switch to an alternative backend.
+   Returns {:action :continue ...} on success, nil to fall through."
+  [context logger]
   (let [self-healing (or (get-in context [:execution/opts :self-healing])
                          (get-in context [:user-config :self-healing])
                          {})
@@ -173,19 +294,45 @@
         accumulated-cost (get-in context [:execution/metrics :cost-usd] 0.0)
         current-backend (or (get-in context [:llm-backend :backend-type])
                             (get context :current-backend :claude))]
-    (log/info logger :dag-resilience :rate-limit/detected
-              {:data {:rate-limited-count (count rate-limited-ids)
-                      :completed-count (count completed-ids)
-                      :auto-switch? auto-switch?
-                      :allowed-backends allowed}})
-    (if (and auto-switch? (seq allowed))
+    (when (and auto-switch? (seq allowed))
       (let [switch-result (attempt-backend-switch
                            current-backend allowed cost-ceiling accumulated-cost logger)]
-        (if (:switched? switch-result)
-          {:action :continue :new-backend (:new-backend switch-result)}
-          {:action :pause
-           :reason (str "Rate limited. Failover failed: " (name (or (:reason switch-result) :unknown)))}))
-      {:action :pause
-       :reason (if (not auto-switch?)
-                 "Rate limited. Backend auto-switch is disabled."
-                 "Rate limited. No failover backends configured (set :allowed-failover-backends).")})))
+        (when (:switched? switch-result)
+          {:action :continue :new-backend (:new-backend switch-result)})))))
+
+(defn- pause-with-reason
+  "Strategy 3 (terminal): Pause with an explanatory reason."
+  [context]
+  (let [self-healing (or (get-in context [:execution/opts :self-healing])
+                         (get-in context [:user-config :self-healing])
+                         {})
+        auto-switch? (get self-healing :backend-auto-switch true)]
+    {:action :pause
+     :reason (cond
+               (not auto-switch?)
+               "Rate limited. Backend auto-switch is disabled."
+
+               (empty? (get self-healing :allowed-failover-backends []))
+               "Rate limited. No failover backends configured (set :allowed-failover-backends)."
+
+               :else
+               "Rate limited. All recovery strategies exhausted.")}))
+
+(defn handle-rate-limited-batch
+  "Orchestrate the failover decision for a rate-limited batch.
+
+   Runs a strategy chain:
+   1. Wait for known reset time (if within 30 minutes)
+   2. Switch to an alternative backend (if configured)
+   3. Pause with reason
+
+   Returns {:action :continue ...} or {:action :pause :reason \"...\"}."
+  ([context rate-limited-ids completed-ids logger]
+   (handle-rate-limited-batch context rate-limited-ids completed-ids logger nil))
+  ([context rate-limited-ids completed-ids logger results]
+   (log/info logger :dag-resilience :rate-limit/detected
+             {:data {:rate-limited-count (count rate-limited-ids)
+                     :completed-count (count completed-ids)}})
+   (or (try-wait-for-reset results rate-limited-ids logger)
+       (try-backend-failover context logger)
+       (pause-with-reason context))))

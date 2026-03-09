@@ -128,6 +128,20 @@
         (assoc-in [:phase :status] :running)
         (assoc-in [:phase :result] result))))
 
+(def ^:private rate-limit-pattern
+  "Lightweight rate limit detection for the phase level.
+   Avoids a dependency on workflow/dag-resilience."
+  #"(?i)you've hit your limit|rate.?limit|429|quota.?exceeded|resets \d+[ap]m")
+
+(defn- rate-limit-in-result?
+  "Check if an agent result contains rate limit indicators.
+   Scans both error message and output text."
+  [result]
+  (some (fn [text]
+          (and (string? text) (re-find rate-limit-pattern text)))
+        [(get-in result [:error :message])
+         (when (string? (:output result)) (:output result))]))
+
 (defn leave-implement
   "Post-processing for implementation phase.
 
@@ -138,11 +152,14 @@
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
         agent-status (:status result)
+        rate-limited? (and (= :error agent-status) (rate-limit-in-result? result))
         iterations (get-in ctx [:phase :iterations] 1)
         max-iterations (get-in ctx [:phase :budget :iterations]
                                (get-in default-config [:budget :iterations]))
         phase-status (cond
                        (= :already-implemented agent-status) :already-implemented
+                       ;; Rate limit: fail immediately, don't burn retry budget
+                       rate-limited? :failed
                        :else (registry/determine-phase-status
                                agent-status iterations max-iterations))
         metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
@@ -179,8 +196,11 @@
       (assoc-in [:phase :error]
                 {:message (or (not-empty (get-in result [:error :message]))
                               (not-empty (get-in result [:output :error]))
+                              (when (string? (:output result))
+                                (not-empty (:output result)))
                               "Implementation failed after exhausting retry budget")
                  :agent-status agent-status
+                 :rate-limited? (boolean rate-limited?)
                  :iterations iterations})
 
       (= :already-implemented agent-status)

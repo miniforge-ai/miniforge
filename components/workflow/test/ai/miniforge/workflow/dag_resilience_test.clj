@@ -5,7 +5,8 @@
    [ai.miniforge.workflow.dag-resilience :as resilience]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
    [ai.miniforge.dag-executor.interface :as dag]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log])
+  (:import [java.time Instant ZonedDateTime ZoneId]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures
@@ -514,3 +515,102 @@
           sub-wf (dag-orch/task-sub-workflow task-def context)
           phase-names (mapv :phase (:workflow/pipeline sub-wf))]
       (is (= [:implement :done] phase-names)))))
+
+;------------------------------------------------------------------------------ Layer 6
+;; rate-limit-in-text? tests
+
+(deftest test-rate-limit-in-text-detects-patterns
+  (testing "detects rate limit patterns in arbitrary text"
+    (are [text] (resilience/rate-limit-in-text? text)
+      "You've hit your limit · resets 2pm"
+      "Claude CLI rate limited: You've hit your limit · resets 2pm (America/Los_Angeles)"
+      "API rate limit exceeded"
+      "429 Too Many Requests"
+      "Quota exceeded for this billing period"
+      "resets 3pm (US/Pacific)")))
+
+(deftest test-rate-limit-in-text-rejects-normal-text
+  (testing "does not flag normal text"
+    (are [text] (not (resilience/rate-limit-in-text? text))
+      "Syntax error in foo.clj"
+      "Connection refused"
+      nil
+      "")))
+
+;------------------------------------------------------------------------------ Layer 7
+;; parse-reset-instant tests
+
+(deftest test-parse-reset-instant-absolute-time
+  (testing "parses 'resets 2pm' as an instant"
+    (let [text "You've hit your limit · resets 2pm"
+          result (resilience/parse-reset-instant text)]
+      (is (instance? Instant result))
+      (is (.isAfter result (Instant/now)))))
+
+  (testing "parses 'resets 2pm (America/Los_Angeles)' with timezone"
+    (let [text "You've hit your limit · resets 2pm (America/Los_Angeles)"
+          result (resilience/parse-reset-instant text)]
+      (is (instance? Instant result))))
+
+  (testing "parses 'resets 2:30pm' with minutes"
+    (let [text "resets 2:30pm"
+          result (resilience/parse-reset-instant text)]
+      (is (instance? Instant result)))))
+
+(deftest test-parse-reset-instant-relative-time
+  (testing "parses 'resets in 30 minutes' as relative duration"
+    (let [before (Instant/now)
+          result (resilience/parse-reset-instant "resets in 30 minutes")
+          after (Instant/now)]
+      (is (instance? Instant result))
+      ;; Should be approximately 30 minutes from now
+      (is (> (.toEpochMilli result) (+ (.toEpochMilli before) 1790000)))
+      (is (< (.toEpochMilli result) (+ (.toEpochMilli after) 1810000))))))
+
+(deftest test-parse-reset-instant-no-match
+  (testing "returns nil for non-reset text"
+    (is (nil? (resilience/parse-reset-instant "Syntax error")))
+    (is (nil? (resilience/parse-reset-instant nil)))))
+
+;------------------------------------------------------------------------------ Layer 8
+;; handle-rate-limited-batch with reset time waiting
+
+(deftest test-handle-rate-limited-batch-waits-for-reset
+  (testing "waits for reset when reset time is imminent (relative)"
+    (let [[logger _] (log/collecting-logger)
+          rate-limit-msg "You've hit your limit · resets in 1 seconds"
+          results {:b (dag/err :task-execution-failed rate-limit-msg {:task-id :b})}
+          decision (resilience/handle-rate-limited-batch
+                    {} #{:b} #{:a} logger results)]
+      ;; Should have waited and returned :continue
+      (is (= :continue (:action decision)))
+      (is (number? (:waited-ms decision))))))
+
+(deftest test-handle-rate-limited-batch-pauses-without-results
+  (testing "pauses when no results provided (backward compat)"
+    (let [[logger _] (log/collecting-logger)
+          decision (resilience/handle-rate-limited-batch
+                    {} #{:b} #{:a} logger)]
+      (is (= :pause (:action decision))))))
+
+;------------------------------------------------------------------------------ Layer 9
+;; extract-sub-workflow-error tests
+
+(deftest test-extract-sub-workflow-error-from-phase-results
+  (testing "extracts error from phase results when execution errors empty"
+    (let [result {:execution/errors []
+                  :execution/phase-results
+                  {:implement {:error {:message "Claude CLI rate limited: You've hit your limit"}}}}]
+      (is (= "Claude CLI rate limited: You've hit your limit"
+             (dag-orch/extract-sub-workflow-error result)))))
+
+  (testing "prefers execution errors when available"
+    (let [result {:execution/errors [{:message "Exceeded 5 redirects"}]
+                  :execution/phase-results
+                  {:implement {:error {:message "some phase error"}}}}]
+      (is (= "Exceeded 5 redirects"
+             (dag-orch/extract-sub-workflow-error result)))))
+
+  (testing "falls back to default message"
+    (is (= "Sub-workflow failed"
+           (dag-orch/extract-sub-workflow-error {})))))

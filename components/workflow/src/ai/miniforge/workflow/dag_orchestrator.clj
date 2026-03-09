@@ -223,6 +223,19 @@
 
 ;--- Layer 1: Mini-Workflow Execution
 
+(defn extract-sub-workflow-error
+  "Extract the most informative error message from a failed sub-workflow result.
+   Digs into phase results to find rate limit messages and other details
+   that may not appear in the top-level execution errors."
+  [result]
+  (or (-> result :execution/errors first :message)
+      ;; Check phase result error messages (where rate limit text lives)
+      (->> (vals (:execution/phase-results result))
+           (keep #(get-in % [:error :message]))
+           (filter not-empty)
+           first)
+      "Sub-workflow failed"))
+
 (defn run-mini-workflow
   "Execute a full sub-workflow pipeline for a single DAG task.
 
@@ -239,9 +252,7 @@
         metrics (:execution/metrics result)]
     (if (phase/succeeded? result)
       (workflow-success (first artifacts) metrics)
-      (workflow-failure (or (-> result :execution/errors first :message)
-                            "Sub-workflow failed")
-                        metrics))))
+      (workflow-failure (extract-sub-workflow-error result) metrics))))
 
 (defn workflow-result->dag-result [task-id description wf-result]
   (if (:success? wf-result)
@@ -340,11 +351,12 @@
 (defn handle-rate-limit-in-batch
   "Handle rate-limited tasks in a batch. Returns either:
    - {:action :continue :new-backend X} to re-queue tasks
+   - {:action :continue :waited-ms N} to retry after waiting for reset
    - {:action :pause :result <paused-map>} to stop execution"
-  [context rate-limited-ids new-completed failed-ids all-results
+  [context rate-limited-ids new-completed failed-ids all-results batch-results
    event-stream workflow-id logger]
   (let [decision (resilience/handle-rate-limited-batch
-                  context rate-limited-ids new-completed logger)]
+                  context rate-limited-ids new-completed logger batch-results)]
     (if (= :continue (:action decision))
       decision
       (let [{:keys [artifacts]} (aggregate-results all-results)]
@@ -430,7 +442,7 @@
             (if (seq rate-limited-ids)
               (let [decision (handle-rate-limit-in-batch
                               context rate-limited-ids new-completed failed-ids
-                              all-results event-stream workflow-id logger)]
+                              all-results results event-stream workflow-id logger)]
                 (if (= :continue (:action decision))
                   (recur new-completed
                          failed-ids
