@@ -1,0 +1,99 @@
+;; Reliability Nines — RN-02: Workflow Tiers
+;; Tier 1 (Foundation) — no dependencies
+;; Blocks: RN-04, RN-05, RN-06, RN-07, RN-10
+
+{:spec/title "RN-02: Add Workflow Tier Field to Workflow Specs"
+ :version "1.0.0"
+ :type :enhancement
+ :priority :critical
+
+ :spec/description
+ "Add :workflow/tier keyword (:best-effort | :standard | :critical) to workflow
+  spec schema and propagate through dag-executor context. Defaults to :standard.
+  Tiers gate SLO targets — without them, reliability metrics have no meaning.
+
+  Current state: Workflow specs have no tier field.
+  Target state: Every workflow carries a tier, available throughout execution."
+
+ :spec/intent
+ {:type :reliability-foundation
+  :scope ["components/workflow/src/ai/miniforge/workflow"
+          "components/dag-executor/src/ai/miniforge/dag_executor"]}
+
+ :normative-refs
+ {:primary "N1 §5.5.1 — Workflow Tiers"
+  :secondary ["N2 §9.1 — :workflow/tier in spec schema"
+              "N3 §3.17 — tier in SLI events"]}
+
+ :gap-analysis-ref "gap-analysis-reliability-nines.md #3"
+ :dag/id :rn-02
+ :dag/depends-on []
+ :dag/blocks [:rn-04 :rn-05 :rn-06 :rn-07 :rn-10]
+
+ :current-state
+ {:schema "No :workflow/tier in workflow spec Malli schema"
+  :context "dag-executor state has no tier field"
+  :completion "0%"}
+
+ :target-state
+ {:schema ":workflow/tier keyword in workflow spec, defaults to :standard"
+  :context "Tier available in dag-executor context for SLO lookup"
+  :events "Tier included in workflow/started and workflow/completed events"}
+
+ :implementation
+ {:step-1-schema
+  {:title "Add :workflow/tier to workflow spec schema"
+   :files-to-modify
+   ["components/workflow/src/ai/miniforge/workflow/schema.clj"]
+   :changes
+   ["Add :workflow/tier [:enum :best-effort :standard :critical] to spec schema"
+    "Default to :standard when not provided"
+    "Add Malli coercion for string→keyword"]}
+
+  :step-2-context
+  {:title "Propagate tier through dag-executor context"
+   :files-to-modify
+   ["components/dag-executor/src/ai/miniforge/dag_executor/state.clj"
+    "components/workflow/src/ai/miniforge/workflow/context.clj"]
+   :changes
+   ["Extract :workflow/tier from spec during workflow initialization"
+    "Store in execution context"
+    "Make available to SLI computation (future RN-04)"]}
+
+  :step-3-events
+  {:title "Include tier in workflow lifecycle events"
+   :files-to-modify
+   ["components/event-stream/src/ai/miniforge/event_stream/core.clj"]
+   :changes
+   ["Add :workflow/tier to workflow-started event"
+    "Add :workflow/tier to workflow-completed event"
+    "Add :workflow/tier to workflow-failed event"]}}
+
+ :spec/constraints
+ ["Backward compatible: existing specs without tier default to :standard"
+  "Tier MUST be immutable for a workflow run (set at start, never changes)"
+  "Only 3 values permitted: :best-effort, :standard, :critical"
+  "Follow Polylith interface-only deps"]
+
+ :testing-strategy
+ {:unit-tests
+  ["Schema accepts all 3 tier values"
+   "Schema defaults to :standard when tier omitted"
+   "Schema rejects invalid tier values"
+   "Context propagation: tier available in execution context"]
+  :integration-tests
+  ["End-to-end: spec with :critical tier → workflow-started event has tier"
+   "End-to-end: spec without tier → defaults to :standard in events"]}
+
+ :spec/acceptance-criteria
+ [{:criterion ":workflow/tier accepted in workflow specs"
+   :verification "Malli schema validates all 3 values"}
+  {:criterion "Default to :standard when omitted"
+   :verification "Existing specs (no tier) parse successfully"}
+  {:criterion "Tier propagated to execution context"
+   :verification "dag-executor state includes tier"}
+  {:criterion "Tier emitted in lifecycle events"
+   :verification "workflow-started event carries :workflow/tier"}]
+
+ :estimated-effort "1 day"
+ :workflow/type :simple}
