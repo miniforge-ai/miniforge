@@ -17,13 +17,18 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.workflow.dag-orchestrator
-  "Orchestrates parallel task execution via DAG scheduling."
+  "Orchestrates parallel task execution via DAG scheduling.
+
+   Supports resumable execution: pass :pre-completed-ids in the context
+   to skip tasks that completed in a prior run. Emits :dag/task-completed
+   events to the event stream so completed work survives crashes."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.loop.interface :as loop]
-   [ai.miniforge.task.interface :as task]))
+   [ai.miniforge.task.interface :as task]
+   [ai.miniforge.workflow.dag-resilience :as resilience]))
 
 ;--- Layer 0: Result Constructors
 
@@ -51,6 +56,15 @@
    :artifacts []
    :metrics {}
    :error error})
+
+(defn- dag-execution-paused [completed failed artifacts reason]
+  {:success? false
+   :paused? true
+   :tasks-completed completed
+   :tasks-failed failed
+   :artifacts (vec artifacts)
+   :pause-reason reason
+   :metrics {}})
 
 ;--- Layer 0: Level Traversal
 
@@ -193,74 +207,146 @@
 
 ;--- Layer 2: Synchronous DAG Execution
 
-(defn- compute-ready-tasks [tasks-map completed-ids]
+(defn compute-ready-tasks
+  "Find tasks whose deps are all completed and that aren't done or failed."
+  [tasks-map completed-ids failed-ids]
   (->> tasks-map
        (filter (fn [[task-id task]]
                  (and (not (contains? completed-ids task-id))
+                      (not (contains? failed-ids task-id))
                       (every? #(contains? completed-ids %) (:task/deps task #{})))))))
 
-(defn- execute-tasks-batch [tasks execute-fn context]
+(defn execute-tasks-batch [tasks execute-fn context]
   (->> tasks
        (map (fn [[task-id task]] [task-id (future (execute-fn task context))]))
        doall
        (map (fn [[task-id f]] [task-id @f]))
        (into {})))
 
-(defn- notify-batch-start [batch on-task-start]
+(defn notify-batch-start [batch on-task-start]
   (when on-task-start
     (doseq [[task-id _] batch] (on-task-start task-id))))
 
-(defn- notify-batch-complete [results on-task-complete]
+(defn notify-batch-complete [results on-task-complete]
   (when on-task-complete
     (doseq [[task-id result] results] (on-task-complete task-id result))))
 
-(defn- partition-results [results]
+(defn partition-results [results]
   (let [ok-results (->> results (filter #(dag/ok? (second %))) (map first))
         err-results (->> results (filter #(not (dag/ok? (second %)))) (map first))]
     {:completed ok-results :failed err-results}))
 
-(defn- aggregate-results [all-results]
-  (let [artifacts (->> (vals all-results) (mapcat #(get-in % [:data :artifacts] [])))
-        total-tokens (->> (vals all-results) (map #(get-in % [:data :metrics :tokens] 0)) (reduce + 0))]
-    {:artifacts artifacts :total-tokens total-tokens}))
+(defn aggregate-results [all-results]
+  (let [results (vals all-results)
+        artifacts (->> results (mapcat #(get-in % [:data :artifacts] [])))
+        total-tokens (->> results (map #(get-in % [:data :metrics :tokens] 0)) (reduce + 0))
+        total-cost (->> results (map #(get-in % [:data :metrics :cost-usd] 0.0)) (reduce + 0.0))
+        total-duration (->> results (map #(get-in % [:data :metrics :duration-ms] 0)) (reduce + 0))]
+    {:artifacts artifacts :total-tokens total-tokens
+     :total-cost total-cost :total-duration total-duration}))
+
+(defn propagate-failures
+  "Transitively mark tasks whose deps include any failed task."
+  [tasks-map failed-ids]
+  (loop [propagated failed-ids]
+    (let [newly-failed (->> tasks-map
+                            (remove (fn [[tid _]] (contains? propagated tid)))
+                            (filter (fn [[_tid task]]
+                                      (some propagated (get task :task/deps #{}))))
+                            (map first)
+                            set)]
+      (if (empty? newly-failed)
+        propagated
+        (recur (into propagated newly-failed))))))
+
+(defn emit-batch-events!
+  "Emit checkpoint events for a batch of results."
+  [results event-stream workflow-id]
+  (doseq [[task-id result] results]
+    (if (dag/ok? result)
+      (resilience/emit-dag-task-completed! event-stream workflow-id task-id result)
+      (resilience/emit-dag-task-failed! event-stream workflow-id task-id result))))
 
 (defn- execute-dag-loop [tasks-map context logger]
   (let [{:keys [on-task-start on-task-complete]} context
-        max-parallel (or (:max-parallel context) 4)]
-    (loop [completed-ids #{}
+        max-parallel (get context :max-parallel 4)
+        event-stream (:event-stream context)
+        workflow-id (:workflow-id context)
+        pre-completed (get context :pre-completed-ids #{})]
+
+    (when (seq pre-completed)
+      (log/info logger :dag-orchestrator :dag/resuming
+                {:data {:pre-completed-count (count pre-completed)
+                        :pre-completed-ids (vec pre-completed)}}))
+
+    (loop [completed-ids pre-completed
            failed-ids #{}
            all-results {}
+           sub-workflow-ids []
            iteration 0]
-      (let [ready-tasks (compute-ready-tasks tasks-map completed-ids)]
+      (let [all-failed (propagate-failures tasks-map failed-ids)
+            ready-tasks (compute-ready-tasks tasks-map completed-ids all-failed)]
         (cond
+          ;; No more work — finalize
           (empty? ready-tasks)
-          (let [{:keys [artifacts total-tokens]} (aggregate-results all-results)]
+          (let [metrics-agg (aggregate-results all-results)
+                unreached (- (count tasks-map) (count completed-ids) (count all-failed))]
             (log/info logger :dag-orchestrator :dag/completed
                       {:data {:completed (count completed-ids)
-                              :failed (count failed-ids)
+                              :failed (count all-failed)
+                              :unreached unreached
                               :iterations iteration}})
-            (dag-execution-result (count completed-ids) (count failed-ids) artifacts total-tokens))
+            (assoc (dag-execution-result (count completed-ids) (count all-failed)
+                                        (:artifacts metrics-agg) (:total-tokens metrics-agg))
+                   :tasks-unreached unreached
+                   :sub-workflow-ids (vec sub-workflow-ids)))
 
+          ;; Safety valve
           (> iteration 100)
-          (dag-execution-error (count completed-ids) (count failed-ids) "Max iterations exceeded")
+          (dag-execution-error (count completed-ids) (count all-failed) "Max iterations exceeded")
 
+          ;; Execute next batch
           :else
           (let [batch (take max-parallel ready-tasks)
                 _ (notify-batch-start batch on-task-start)
                 results (execute-tasks-batch batch execute-single-task context)
                 _ (notify-batch-complete results on-task-complete)
-                {:keys [completed failed]} (partition-results results)]
-            (recur (into completed-ids completed)
-                   (into failed-ids failed)
-                   (merge all-results results)
-                   (inc iteration))))))))
+                _ (emit-batch-events! results event-stream workflow-id)
+                {:keys [completed failed]} (partition-results results)
+                batch-sub-ids (map (fn [[tid _]] (keyword (str "dag-task-" tid))) batch)
+                ;; Check for quota exhaustion in this batch
+                {:keys [quota-limited-ids]} (resilience/analyze-batch-for-quota results)
+                new-completed (into completed-ids completed)]
+
+            (if (seq quota-limited-ids)
+              ;; Pause gracefully — emit pause event so we can resume later
+              (do
+                (log/warn logger :dag-orchestrator :dag/quota-pause
+                          {:message "Quota/rate limit detected, pausing for resume"
+                           :data {:quota-limited (count quota-limited-ids)
+                                  :completed-so-far (count new-completed)}})
+                (resilience/emit-dag-paused! event-stream workflow-id new-completed
+                                            "Quota/rate limit exhausted")
+                (dag-execution-paused (count new-completed) (count failed)
+                                      (:artifacts (aggregate-results all-results))
+                                      "Quota/rate limit exhausted"))
+
+              ;; Normal continuation
+              (recur new-completed
+                     (into failed-ids failed)
+                     (merge all-results results)
+                     (into sub-workflow-ids batch-sub-ids)
+                     (inc iteration)))))))))
 
 (defn execute-plan-as-dag [plan context]
   (let [logger (or (:logger context) (log/create-logger {:min-level :info}))
         task-defs (plan->dag-tasks plan context)
-        tasks-map (->> task-defs (map (fn [t] [(:task/id t) t])) (into {}))]
+        tasks-map (->> task-defs (map (fn [t] [(:task/id t) t])) (into {}))
+        pre-completed (get context :pre-completed-ids #{})]
     (log/info logger :dag-orchestrator :dag/starting
-              {:data {:plan-id (:plan/id plan) :task-count (count task-defs)}})
+              {:data {:plan-id (:plan/id plan)
+                      :task-count (count task-defs)
+                      :pre-completed (count pre-completed)}})
     (execute-dag-loop tasks-map context logger)))
 
 ;--- Layer 3: Workflow Integration

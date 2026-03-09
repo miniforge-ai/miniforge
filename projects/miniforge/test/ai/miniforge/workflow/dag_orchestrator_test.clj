@@ -278,3 +278,216 @@
                            (make-task :c)])
           _ (dag-orch/maybe-parallelize-plan plan {:logger logger})]
       (is (some #(= :plan/parallelizing (:log/event %)) @entries)))))
+
+;------------------------------------------------------------------------------ Layer 8
+;; Resume from pre-completed-ids tests
+
+(deftest test-execute-plan-with-pre-completed-ids
+  (testing "skips pre-completed tasks and only executes remaining"
+    (let [started (atom [])
+          plan (make-plan [(make-task :a)
+                           (make-task :b)
+                           (make-task :c [:a :b])])
+          ;; Mark :a as already completed from a prior run
+          context {:pre-completed-ids #{:a}
+                   :on-task-start #(swap! started conj %)}
+          result (dag-orch/execute-plan-as-dag plan context)]
+      (is (:success? result))
+      ;; :a was pre-completed, so only :b and :c should have been executed
+      (is (not (some #{:a} @started)) ":a should not have been re-executed")
+      ;; :b and :c should run (total completed = 3 including pre-completed)
+      (is (= 3 (:tasks-completed result))))))
+
+(deftest test-execute-plan-with-all-pre-completed
+  (testing "returns immediately when all tasks are pre-completed"
+    (let [started (atom [])
+          plan (make-plan [(make-task :a) (make-task :b)])
+          context {:pre-completed-ids #{:a :b}
+                   :on-task-start #(swap! started conj %)}
+          result (dag-orch/execute-plan-as-dag plan context)]
+      (is (:success? result))
+      (is (= 2 (:tasks-completed result)))
+      (is (empty? @started) "no tasks should have been executed"))))
+
+(deftest test-execute-plan-pre-completed-logs-resume
+  (testing "logs resume info when pre-completed-ids is non-empty"
+    (let [[logger entries] (log/collecting-logger)
+          plan (make-plan [(make-task :a) (make-task :b)])
+          context {:pre-completed-ids #{:a} :logger logger}
+          _ (dag-orch/execute-plan-as-dag plan context)]
+      (is (some #(= :dag/resuming (:log/event %)) @entries)))))
+
+;------------------------------------------------------------------------------ Layer 9
+;; Failure propagation tests
+
+(deftest test-propagate-failures
+  (testing "transitively skips tasks depending on failed tasks"
+    (let [tasks-map {:a {:task/deps #{}}
+                     :b {:task/deps #{:a}}
+                     :c {:task/deps #{:b}}
+                     :d {:task/deps #{}}}
+          ;; :a failed => :b and :c should be propagated, :d unaffected
+          all-failed (dag-orch/propagate-failures tasks-map #{:a})]
+      (is (contains? all-failed :a))
+      (is (contains? all-failed :b))
+      (is (contains? all-failed :c))
+      (is (not (contains? all-failed :d))))))
+
+(deftest test-compute-ready-tasks-excludes-failed
+  (testing "does not return tasks whose deps have failed"
+    (let [tasks-map {:a {:task/deps #{}}
+                     :b {:task/deps #{:a}}}
+          ;; :a failed, :b depends on :a => :b should not be ready
+          ready (dag-orch/compute-ready-tasks tasks-map #{} #{:a})]
+      (is (empty? ready) ":b should not be ready since :a failed"))))
+
+(deftest test-compute-ready-tasks-returns-roots
+  (testing "returns tasks with no deps when nothing is completed"
+    (let [tasks-map {:a {:task/deps #{}}
+                     :b {:task/deps #{}}
+                     :c {:task/deps #{:a :b}}}
+          ready (dag-orch/compute-ready-tasks tasks-map #{} #{})]
+      (is (= #{:a :b} (set (map first ready)))))))
+
+(deftest test-compute-ready-tasks-unlocks-dependents
+  (testing "completing deps unlocks dependent tasks"
+    (let [tasks-map {:a {:task/deps #{}}
+                     :b {:task/deps #{:a}}
+                     :c {:task/deps #{:a :b}}}
+          ;; :a completed, :b should be ready, :c still blocked on :b
+          ready (dag-orch/compute-ready-tasks tasks-map #{:a} #{})]
+      (is (= [:b] (map first ready))))))
+
+;------------------------------------------------------------------------------ Layer 10
+;; partition-results tests
+
+(deftest test-partition-results-mixed
+  (testing "separates ok and err results"
+    (let [results {:a (dag/ok {:done true})
+                   :b (dag/err :failed "boom" {})
+                   :c (dag/ok {:done true})}
+          {:keys [completed failed]} (dag-orch/partition-results results)]
+      (is (= #{:a :c} (set completed)))
+      (is (= #{:b} (set failed))))))
+
+(deftest test-partition-results-all-ok
+  (testing "all ok yields no failures"
+    (let [results {:a (dag/ok {}) :b (dag/ok {})}
+          {:keys [completed failed]} (dag-orch/partition-results results)]
+      (is (= 2 (count completed)))
+      (is (empty? failed)))))
+
+(deftest test-partition-results-all-failed
+  (testing "all failed yields no completions"
+    (let [results {:a (dag/err :f "e1" {}) :b (dag/err :f "e2" {})}
+          {:keys [completed failed]} (dag-orch/partition-results results)]
+      (is (empty? completed))
+      (is (= 2 (count failed))))))
+
+(deftest test-partition-results-empty
+  (testing "empty results yield empty partitions"
+    (let [{:keys [completed failed]} (dag-orch/partition-results {})]
+      (is (empty? completed))
+      (is (empty? failed)))))
+
+;------------------------------------------------------------------------------ Layer 11
+;; aggregate-results tests
+
+(deftest test-aggregate-results-accumulates-metrics
+  (testing "sums tokens, cost, and duration across results"
+    (let [results {:a (dag/ok {:artifacts [{:id 1}]
+                               :metrics {:tokens 100 :cost-usd 0.5 :duration-ms 1000}})
+                   :b (dag/ok {:artifacts [{:id 2} {:id 3}]
+                               :metrics {:tokens 200 :cost-usd 1.0 :duration-ms 2000}})}
+          agg (dag-orch/aggregate-results results)]
+      (is (= 3 (count (:artifacts agg))))
+      (is (= 300 (:total-tokens agg)))
+      (is (= 1.5 (:total-cost agg)))
+      (is (= 3000 (:total-duration agg))))))
+
+(deftest test-aggregate-results-defaults-missing-metrics
+  (testing "defaults to zero when metrics are absent"
+    (let [results {:a (dag/ok {:artifacts []})
+                   :b (dag/ok {})}
+          agg (dag-orch/aggregate-results results)]
+      (is (= 0 (:total-tokens agg)))
+      (is (= 0.0 (:total-cost agg)))
+      (is (= 0 (:total-duration agg))))))
+
+(deftest test-aggregate-results-empty
+  (testing "empty results yield zero aggregates"
+    (let [agg (dag-orch/aggregate-results {})]
+      (is (= 0 (:total-tokens agg)))
+      (is (empty? (:artifacts agg))))))
+
+;------------------------------------------------------------------------------ Layer 12
+;; Additional propagate-failures scenarios
+
+(deftest test-propagate-failures-diamond
+  (testing "diamond: failure at root cascades to all dependents"
+    (let [tasks-map {:a {:task/deps #{}}
+                     :b {:task/deps #{:a}}
+                     :c {:task/deps #{:a}}
+                     :d {:task/deps #{:b :c}}}
+          all-failed (dag-orch/propagate-failures tasks-map #{:a})]
+      (is (= #{:a :b :c :d} all-failed)))))
+
+(deftest test-propagate-failures-no-deps
+  (testing "independent tasks: failure in one doesn't affect others"
+    (let [tasks-map {:a {:task/deps #{}}
+                     :b {:task/deps #{}}
+                     :c {:task/deps #{}}}
+          all-failed (dag-orch/propagate-failures tasks-map #{:a})]
+      (is (= #{:a} all-failed)))))
+
+(deftest test-propagate-failures-empty
+  (testing "no failures yields empty set"
+    (let [tasks-map {:a {:task/deps #{}} :b {:task/deps #{:a}}}
+          all-failed (dag-orch/propagate-failures tasks-map #{})]
+      (is (empty? all-failed)))))
+
+(deftest test-propagate-failures-partial-deps
+  (testing "task with one failed dep and one ok dep still fails"
+    (let [tasks-map {:a {:task/deps #{}}
+                     :b {:task/deps #{}}
+                     :c {:task/deps #{:a :b}}}
+          ;; :a failed but :b did not — :c still transitively fails
+          all-failed (dag-orch/propagate-failures tasks-map #{:a})]
+      (is (contains? all-failed :c) ":c depends on :a which failed"))))
+
+;------------------------------------------------------------------------------ Layer 13
+;; emit-batch-events! tests
+
+(deftest test-emit-batch-events-nil-stream
+  (testing "does not throw with nil event stream"
+    (is (nil? (dag-orch/emit-batch-events!
+               {:a (dag/ok {}) :b (dag/err :f "err" {})}
+               nil "wf-1")))))
+
+;------------------------------------------------------------------------------ Layer 14
+;; Pre-completed with dependency chains
+
+(deftest test-pre-completed-with-dep-chain
+  (testing "pre-completing middle of chain unlocks downstream"
+    (let [started (atom [])
+          plan (make-plan [(make-task :a)
+                           (make-task :b [:a])
+                           (make-task :c [:b])])
+          ;; :a and :b both pre-completed, only :c should run
+          context {:pre-completed-ids #{:a :b}
+                   :on-task-start #(swap! started conj %)}
+          result (dag-orch/execute-plan-as-dag plan context)]
+      (is (:success? result))
+      (is (= 3 (:tasks-completed result)))
+      (is (= [:c] @started) "only :c should have executed"))))
+
+(deftest test-unreached-tasks-tracked
+  (testing "unreached count is correct when failures block tasks"
+    ;; This test verifies that the :tasks-unreached field is populated.
+    ;; With placeholder execution (no llm-backend), all tasks succeed,
+    ;; so unreached should be 0.
+    (let [plan (make-plan [(make-task :a)
+                           (make-task :b [:a])
+                           (make-task :c [:a])])
+          result (dag-orch/execute-plan-as-dag plan {})]
+      (is (= 0 (:tasks-unreached result))))))

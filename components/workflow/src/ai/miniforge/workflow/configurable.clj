@@ -178,6 +178,11 @@
                                                                      {:phase/id :dag-task
                                                                       :task-id task-id}
                                                                      result)))})
+        ;; Pass pre-completed task IDs for resume support
+        dag-context (cond-> dag-context
+                      (get-in exec-state [:execution/opts :pre-completed-dag-tasks])
+                      (assoc :pre-completed-ids
+                             (get-in exec-state [:execution/opts :pre-completed-dag-tasks])))
         dag-result (dag-orch/execute-plan-as-dag plan dag-context)]
 
     ;; Merge DAG results into execution state

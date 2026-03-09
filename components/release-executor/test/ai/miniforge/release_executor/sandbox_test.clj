@@ -231,8 +231,9 @@
       (is (= 3 (get-in result [:metrics :total-operations])))
       ;; Should have: write, write, delete, stage = 4 commands
       (is (= 4 (count @cmds)))
-      ;; Last command should be git add .
-      (is (= "git add ." (last @cmds))))))
+      ;; Last command should stage the specific files
+      (is (clojure.string/starts-with? (last @cmds) "git add "))
+      (is (clojure.string/includes? (last @cmds) "src/a.clj")))))
 
 (deftest write-and-stage-files-failure-test
   (testing "write-and-stage-files! reports errors from failed operations"

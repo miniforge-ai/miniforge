@@ -3,10 +3,7 @@
    [clojure.string :as str]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [babashka.fs :as fs]
    [cheshire.core :as json]
-   [ai.miniforge.cli.config :as config]
-   [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.cli.workflow-recommender :as recommender]
    [ai.miniforge.cli.workflow-runner.display :as display]
@@ -295,7 +292,8 @@
                                                         :quiet quiet
                                                         :spec-title (:spec/title spec)
                                                         :control-state control-state
-                                                        :skip-lifecycle-events true})
+                                                        :skip-lifecycle-events true
+                                                        :execution-opts (:execution-opts opts)})
           sandbox? (or (:sandbox opts) (:spec/sandbox spec))
           [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)]
       (when-not quiet
@@ -317,6 +315,47 @@
       (when-not quiet
         (println (display/colorize :red (str "\n❌ Workflow execution failed: " (ex-message e)))))
       (throw e))))
+
+;------------------------------------------------------------------------------ Layer 2b
+;; Resume workflow from event file
+
+(defn resume-workflow-from-spec!
+  "Resume a previously failed/paused workflow by replaying its event file
+   to determine which DAG tasks already completed, then re-running the spec
+   with those tasks pre-completed.
+
+   Arguments:
+   - workflow-id: UUID string of the workflow to resume
+   - spec: The original spec map (same spec file used for the initial run)
+   - opts: Same opts as run-workflow-from-spec!"
+  [workflow-id-str spec {:keys [quiet] :or {quiet false} :as opts}]
+  (let [resume-ctx (try
+                     (let [resume-fn (requiring-resolve
+                                      'ai.miniforge.workflow.dag-resilience/resume-context-from-event-file)]
+                       (resume-fn workflow-id-str))
+                     (catch Exception e
+                       (when-not quiet
+                         (println (display/colorize :red
+                                   (str "Failed to read event file: " (ex-message e)))))
+                       nil))]
+    (when-not quiet
+      (println (display/colorize :cyan
+                (str "\n🔄 Resuming workflow " workflow-id-str)))
+      (println (display/colorize :cyan
+                (str "   Previously completed: " (count (:pre-completed-ids resume-ctx)) " tasks")))
+      (when (seq (:pre-completed-artifacts resume-ctx))
+        (println (display/colorize :cyan
+                  (str "   Recovered artifacts: " (count (:pre-completed-artifacts resume-ctx)))))))
+    (if (and resume-ctx (seq (:pre-completed-ids resume-ctx)))
+      ;; Re-run with pre-completed task IDs injected
+      (let [opts-with-resume (assoc-in opts [:execution-opts :pre-completed-dag-tasks]
+                                      (:pre-completed-ids resume-ctx))]
+        (run-workflow-from-spec! spec opts-with-resume))
+      (do
+        (when-not quiet
+          (println (display/colorize :yellow
+                    "   No completed tasks found in event file. Starting fresh run.")))
+        (run-workflow-from-spec! spec opts)))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Chain-driven execution
