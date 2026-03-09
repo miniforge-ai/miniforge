@@ -1,7 +1,7 @@
 # N1 — Core Architecture & Concepts
 
-**Version:** 0.4.0-draft
-**Date:** 2026-03-04
+**Version:** 0.5.0-draft
+**Date:** 2026-03-08
 **Status:** Draft
 **Conformance:** MUST
 
@@ -407,7 +407,8 @@ during pack loading and workflow execution.
 
 #### 2.10.3 Pack Types
 
-miniforge treats structured "packs" as first-class knowledge units and artifacts. Packs are EDN-serialized and schema-validated.
+miniforge treats structured "packs" as first-class knowledge units and artifacts. Packs are EDN-serialized and
+schema-validated.
 
 **Core pack types (OSS):**
 
@@ -482,12 +483,14 @@ Implementations that support pack signing MUST provide:
 
 1. **Key configuration:** Signing keys MUST be explicitly configured, not auto-generated or inferred from environment.
 
-2. **Key storage:** Private keys MUST be stored securely (e.g., system keychain, HSM, or encrypted file with passphrase).
+2. **Key storage:** Private keys MUST be stored securely (e.g., system keychain, HSM, or encrypted file with
+  passphrase).
 
 3. **Key verification:** Public keys for signature verification MUST be distributed through a
    trusted channel (e.g., configuration file, registry manifest).
 
-4. **Key rotation:** Implementations SHOULD support key rotation with backward compatibility for previously signed packs.
+4. **Key rotation:** Implementations SHOULD support key rotation with backward compatibility for previously signed
+  packs.
 
 5. **Revocation:** Implementations SHOULD support key revocation lists (KRLs) or revocation checking.
 
@@ -1051,6 +1054,44 @@ Implementations MUST:
    lists, vector shards, SQLite) MUST live behind `:artifact-ref` pointers.
 7. Support incremental updates: re-indexing MUST process only changed blobs.
 
+#### 2.27.9 Index Quality Metrics
+
+Implementations MUST track index quality to support retrieval governance and degradation
+detection. Quality metrics MUST be computed after each incremental index update.
+
+```clojure
+{:index-quality/repo-id       string   ; REQUIRED: repository identifier
+ :index-quality/commit-sha    string   ; REQUIRED: commit at which quality was measured
+ :index-quality/freshness-lag-ms long  ; REQUIRED: ms since last indexed commit
+ :index-quality/coverage-score double  ; REQUIRED: 0.0-1.0 fraction of files indexed
+ :index-quality/symbol-coverage double ; OPTIONAL: fraction of files with symbol data
+ :index-quality/search-recall  double  ; OPTIONAL: measured via canary queries (§2.27.10)
+ :index-quality/computed-at    inst}   ; REQUIRED
+```
+
+Implementations MUST:
+
+1. Compute `:index-quality/coverage-score` and `:index-quality/freshness-lag-ms` after
+   every incremental update.
+2. Include quality metrics in workflow evidence bundles when repo context is consumed
+   (see N6).
+3. Emit `:repo-index/quality-computed` events (see N3 §3.18).
+
+#### 2.27.10 Canary Protocol
+
+Implementations SHOULD support index canary validation to detect retrieval regressions:
+
+1. **Golden queries** — Maintain a set of labeled queries with known-good result sets per
+   repository. Golden queries are artifacts stored per N6.
+2. **Canary execution** — After each incremental index update, run golden queries against
+   the updated index.
+3. **Recall threshold** — If canary recall drops below configured threshold (default 0.8),
+   emit `:repo-index/canary-failed` event (see N3 §3.18) and mark index as degraded.
+4. **Degraded index handling** — Degraded indexes MUST trigger re-indexing or fallback to
+   full scan. Implementations MUST NOT silently serve degraded results.
+5. **Canary set evolution** — Golden query sets SHOULD be updated when new retrieval
+   failures are identified in production, closing the eval feedback loop (see §3.3.3).
+
 ### 2.28 Context Pack
 
 A **Context Pack** is a bounded, auditable context document assembled by the orchestrator
@@ -1387,6 +1428,58 @@ The Learning Layer MUST:
 - **Heuristic Registry** - Stores and versions prompt heuristics
 - **Knowledge Base** - Zettelkasten-based learning repository
 
+#### 3.3.3 Evaluation Pipeline
+
+The Learning Layer MUST support a closed-loop evaluation pipeline for detecting regressions
+and validating changes to prompts, models, policies, tool schemas, and indexes.
+
+**Evaluation mechanisms:**
+
+1. **Golden Sets** — Curated workflow inputs paired with known-good outcomes. Golden sets
+   are stored as N6 evidence artifacts (`:artifact/type :golden-set`). Implementations
+   MUST support running a golden set against the current system and comparing actual
+   outcomes to expected outcomes.
+
+2. **Replay Mode** — Re-execute a completed workflow from its evidence bundle and event
+   stream to verify deterministic reconstruction. Replay MUST use the same tool versions
+   and context pack contents as the original execution. LLM calls MAY differ (non-deterministic)
+   but structural workflow progression MUST match.
+
+3. **Shadow Mode** — Run a candidate system configuration (new model, prompt, policy, or
+   tool schema version) in parallel with the production configuration. Shadow runs MUST
+   NOT produce side effects. Implementations MUST compare shadow outcomes to production
+   outcomes and record divergence as evaluation evidence.
+
+4. **Canary Deployment** — Route a configurable fraction of new workflows to a candidate
+   system configuration. Canary runs produce real side effects and MUST be monitored
+   against SLIs (see §5.5). If canary SLIs regress beyond configured thresholds,
+   implementations SHOULD automatically roll back to the prior configuration.
+
+```clojure
+;; Golden Set Artifact (stored per N6)
+{:artifact/type :golden-set
+ :artifact/content
+ {:golden-set/id       string       ; REQUIRED: unique identifier
+  :golden-set/entries
+  [{:entry/id           string      ; REQUIRED: entry identifier
+    :entry/workflow-spec map        ; REQUIRED: input workflow spec
+    :entry/expected-outcome map     ; REQUIRED: expected outcome shape
+    :entry/pass-criteria [map]      ; REQUIRED: predicates on outcome
+    :entry/source        keyword    ; OPTIONAL: :manual :incident :production
+    :entry/tags          [string]}] ; OPTIONAL: for filtering
+  :golden-set/version   string      ; REQUIRED: semantic version
+  :golden-set/created-at inst}}     ; REQUIRED
+```
+
+Implementations SHOULD:
+
+1. Populate golden sets from production incidents — every classified failure (§5.3.3)
+   is a candidate golden set entry.
+2. Run golden sets on every change to prompts, models, policies, or tool schema versions.
+3. Gate deployments on golden set pass rate — a regression in pass rate SHOULD block the
+   change.
+4. Track golden set coverage across workflow types and failure classes.
+
 ---
 
 ## 4. Polylith Component Boundaries
@@ -1453,7 +1546,8 @@ Enterprise builds MAY add:
 - SSO/RBAC enforcement and policy-managed trust promotion
 - Advanced compliance controls (retention, audit exports, DLP integrations)
 
-Enterprise extensions MUST NOT weaken the OSS trust model. Instruction authority MUST remain gated by pack trust and policy.
+Enterprise extensions MUST NOT weaken the OSS trust model. Instruction authority MUST remain gated by pack trust and
+policy.
 
 ### 4.2 Component Interface Requirements
 
@@ -1618,6 +1712,40 @@ Implementations SHOULD implement retry budgets:
 - Agent retries: 2-3 attempts
 - LLM timeouts: 60s with exponential backoff
 
+#### 5.3.3 Canonical Failure Taxonomy
+
+All workflow, agent, tool, and system failures MUST be classified into a canonical
+taxonomy. This taxonomy enables structured failure analysis, SLI computation (§5.5),
+and targeted remediation.
+
+```clojure
+{:failure/class keyword   ; REQUIRED on all failure events (see N3)
+ ;; Canonical values:
+ ;;   :failure.class/agent-error       — Agent logic defect, prompt failure, hallucination
+ ;;   :failure.class/task-code         — User code, spec, or test failure
+ ;;   :failure.class/tool-error        — Tool returned an error or unexpected result
+ ;;   :failure.class/external          — Third-party service unavailable or errored
+ ;;   :failure.class/policy            — Policy gate or validation rejected execution
+ ;;   :failure.class/resource          — Budget exhausted (tokens, time, retries, cost)
+ ;;   :failure.class/timeout           — Wall-clock or capability TTL exceeded
+ ;;   :failure.class/concurrency       — Deadlock, resource lock contention, merge conflict
+ ;;   :failure.class/data-integrity    — Content hash mismatch, stale context, schema violation
+ ;;   :failure.class/unknown           — Unclassified failure
+ }
+```
+
+**Classification requirements:**
+
+1. Failure classification MUST be performed by the runtime (orchestrator or agent-runtime
+   component), not by the agent itself — agents are unreliable classifiers of their own
+   failures.
+2. Every failure event emitted per N3 MUST carry `:failure/class` in addition to the
+   existing human-readable `:failure-reason` string.
+3. `:failure.class/unknown` MUST be treated as an SLI incident (see §5.5) and SHOULD
+   trigger investigation to reclassify into a specific class.
+4. Implementations SHOULD track the `:failure.class/unknown` rate as a meta-reliability
+   indicator — a high unknown rate signals insufficient failure instrumentation.
+
 ### 5.4 Concurrency Model
 
 #### 5.4.1 OSS Concurrency
@@ -1645,6 +1773,203 @@ Enterprise implementations MUST support:
 - **Multi-user concurrent workflows**
 - **Conflict detection** across workflows
 - **Resource limits** (max concurrent workflows, LLM rate limits)
+
+### 5.5 Reliability Model
+
+Miniforge defines reliability in terms of measurable Service Level Indicators (SLIs),
+tiered Service Level Objectives (SLOs), and error budgets. These apply to miniforge's
+own execution reliability, not to the target systems it manages (for which see N7 OPSV).
+
+#### 5.5.1 Workflow Tiers
+
+Workflows MUST be classified into tiers that determine SLO targets, required verification
+layers, and degradation behavior.
+
+```clojure
+{:workflow/tier keyword   ; OPTIONAL in workflow spec; defaults to :standard
+ ;; Values:
+ ;;   :best-effort  — No SLO enforcement; metrics collected for advisory use only
+ ;;   :standard     — Default tier; SLOs tracked and reported
+ ;;   :critical     — Stricter SLOs; error budget enforcement; safe-mode triggers
+ }
+```
+
+Tier assignment MAY be explicit in the workflow spec (see N2 §9.1) or derived by policy
+(e.g., workflows touching production environments default to `:critical`).
+
+#### 5.5.2 Service Level Indicators (SLIs)
+
+Implementations MUST compute the following SLIs. SLIs are computed over rolling time
+windows and MAY be filtered by workflow tier, phase, agent, or tool.
+
+| ID | SLI | Definition | Computation |
+|----|-----|-----------|-------------|
+| SLI-1 | Workflow Success Rate | Fraction of workflows completing successfully or with explicit escalation | `count(completed + escalated) / count(terminal)` |
+| SLI-2 | Phase Completion Latency | Wall-clock duration per phase type | p50 / p95 / p99 of `:phase/duration-ms` |
+| SLI-3 | Inner Loop Convergence Rate | Fraction of inner loops that converge within retry budget | `count(converged) / count(entered-inner-loop)` |
+| SLI-4 | Gate Pass Rate | Fraction of gate evaluations that pass on first attempt | `count(first-pass) / count(evaluated)` per gate type |
+| SLI-5 | Tool Invocation Success Rate | Fraction of tool invocations that return success | `count(success) / count(invoked)` per tool |
+| SLI-6 | Failure Class Distribution | Percentage of failures per `:failure/class` | Per window, per tier |
+| SLI-7 | Context Staleness Rate | Fraction of Context Packs that trigger staleness detection | `count(stale-detected) / count(context-packs-issued)` |
+
+SLI values MUST be emitted as `:reliability/sli-computed` events (see N3 §3.17) and
+recorded in workflow outcome evidence (see N6).
+
+#### 5.5.3 Service Level Objectives (SLOs)
+
+SLOs are tier-dependent targets for SLIs. Implementations MUST allow SLO targets to be
+configured via policy packs (see N4). Default targets:
+
+| SLI | :best-effort | :standard | :critical |
+|-----|-------------|-----------|-----------|
+| Workflow Success Rate | Advisory | >= 85% | >= 95% |
+| Inner Loop Convergence | Advisory | >= 90% | >= 95% |
+| Tool Success Rate | Advisory | >= 95% | >= 99% |
+| Unknown Failure Rate | Advisory | < 10% | < 2% |
+
+"Advisory" means the SLI is computed and reported but does not trigger degradation or
+safe-mode. Implementations MUST emit `:reliability/slo-breach` events when a `:standard`
+or `:critical` SLO target is missed (see N3 §3.17).
+
+#### 5.5.4 Error Budgets
+
+For `:standard` and `:critical` tiers, implementations SHOULD compute error budgets over
+rolling windows. The error budget represents the remaining tolerance for failures before
+the SLO is breached.
+
+```clojure
+{:error-budget/tier       keyword   ; REQUIRED: :standard | :critical
+ :error-budget/sli        keyword   ; REQUIRED: SLI identifier (SLI-1 through SLI-7)
+ :error-budget/window     keyword   ; REQUIRED: :1h | :7d | :30d
+ :error-budget/remaining  double    ; REQUIRED: 0.0-1.0 fraction of budget remaining
+ :error-budget/burn-rate  double    ; REQUIRED: current burn rate (1.0 = nominal)
+ :error-budget/computed-at inst}    ; REQUIRED
+```
+
+Error budget state MUST be emitted as `:reliability/error-budget-update` events (see N3
+§3.17).
+
+#### 5.5.5 Degradation Modes
+
+The system operates in one of three degradation modes. Mode transitions MUST be emitted
+as `:reliability/degradation-mode-changed` events (see N3 §3.17).
+
+| Mode | Trigger | Behavior |
+|------|---------|----------|
+| `:nominal` | Default | Full autonomous execution per configured autonomy levels |
+| `:degraded` | Error budget remaining < 25% for any `:critical` SLI | Increase validation (add verification layers), reduce concurrency, emit warnings |
+| `:safe-mode` | Error budget exhausted for `:critical` tier, or `emergency-stop` control action (N8) | Demote autonomy to A0, queue new workflows, pause in-flight — see N8 §3.4 |
+
+Transitions between modes:
+
+- `:nominal` → `:degraded`: automatic on error budget threshold
+- `:degraded` → `:safe-mode`: automatic on budget exhaustion or manual emergency-stop
+- `:safe-mode` → `:nominal`: requires explicit operator action with justification (N8 §3.4.3)
+- `:degraded` → `:nominal`: automatic when error budget recovers above threshold
+
+### 5.6 Unified Autonomy Model
+
+Miniforge defines a unified autonomy level taxonomy that applies across all subsystems.
+Individual specifications (N8, N9, N10) retain their domain-specific vocabulary but MUST
+map to these unified levels for cross-cutting governance.
+
+#### 5.6.1 Autonomy Levels
+
+```clojure
+{:autonomy/level keyword
+ ;; Values (ordered from most restrictive to most permissive):
+ ;;   :A0  — Observe        Read-only; no actions taken
+ ;;   :A1  — Recommend      Suggest actions for human execution; no side effects
+ ;;   :A2  — Advise         Non-blocking annotations and advisory signals
+ ;;   :A3  — Act-with-guard Autonomous within guardrails; approval for escalation
+ ;;   :A4  — Act-autonomous Full autonomy within policy bounds
+ ;;   :A5  — Govern         Modify policies and controls; requires highest trust
+ }
+```
+
+#### 5.6.2 Cross-Spec Mapping
+
+Each spec retains its own terminology but MUST map to the unified level:
+
+| Unified | N10 Trust Level | N9 Automation Tier | N8 Capability Level |
+|---------|----------------|-------------------|---------------------|
+| A0 | L0 (Observation) | Tier 0 (Observe) | OBSERVE |
+| A1 | L1 (Recommendation) | — | OBSERVE |
+| A2 | — | Tier 1 (Advise) | ADVISE |
+| A3 | L2 (Bounded Execution) | Tier 2 (Converse) | ADVISE (scoped) |
+| A4 | L3/L4 (Controlled/Domain Autonomy) | — | CONTROL |
+| A5 | — | Tier 3 (Govern) | CONTROL |
+
+#### 5.6.3 Autonomy Configuration
+
+Autonomy levels MUST be configurable per:
+
+- **Workflow tier** — `:critical` workflows MAY default to a lower autonomy ceiling
+- **Environment** — production environments SHOULD default to lower autonomy than staging
+- **Degradation mode** — safe-mode MUST demote all subsystems to A0 (§5.5.5)
+
+Implementations MUST support per-workflow autonomy ceilings:
+
+```clojure
+{:autonomy/ceiling keyword          ; REQUIRED: maximum allowed autonomy level
+ :autonomy/scope   keyword          ; REQUIRED: :workflow | :environment | :system
+ :autonomy/reason  string}          ; OPTIONAL: why this ceiling was set
+```
+
+Cross-cutting autonomy demotion (e.g., during safe-mode) MUST override per-workflow
+settings. The effective autonomy level is `min(system-ceiling, environment-ceiling,
+workflow-ceiling, configured-level)`.
+
+### 5.7 Trust Boundary Validation
+
+All data crossing a trust boundary MUST be validated and normalized before consumption.
+This is an architectural invariant — violations MUST be treated as system defects, not
+application errors.
+
+#### 5.7.1 Trust Boundaries
+
+Miniforge defines five trust boundaries:
+
+| ID | Boundary | From | To | Primary Risk |
+|----|----------|------|----|-------------|
+| TB-1 | LLM Output | Model response | Orchestrator/Agent context | Malformed structure, hallucinated identifiers |
+| TB-2 | Tool Output | External tool result | Agent context | Schema drift, injection, stale data |
+| TB-3 | Ingestion | Repository content | Knowledge base / pack store | Prompt injection, trust elevation |
+| TB-4 | Pack | Pack content | Execution pipeline | Malicious instructions, dependency confusion |
+| TB-5 | Provider | External platform (GitHub, GitLab) | Miniforge state | Data integrity, replay attacks |
+
+#### 5.7.2 Validation Invariants
+
+Implementations MUST enforce:
+
+1. **TB-INV-1:** Model output used as structured data MUST be parsed and schema-validated
+   before consumption. Free-form text MAY bypass schema validation but MUST be sanitized
+   for injection patterns before use as instruction authority.
+2. **TB-INV-2:** Tool results MUST be validated against the tool's declared output schema
+   (see N10 §7.4) before injection into agent context. Results failing validation MUST
+   NOT propagate to agents.
+3. **TB-INV-3:** Ingested repository content MUST be classified by trust level (§2.10.2)
+   before routing to instruction or data authority channels.
+4. **TB-INV-4:** All timestamps crossing any trust boundary MUST be normalized to UTC
+   `inst` values at ingestion. Implementations MUST reject timestamps that cannot be
+   parsed to valid instants.
+5. **TB-INV-5:** All entity identifiers crossing any trust boundary MUST be normalized to
+   their canonical form (UUID for internal entities; provider-specific canonical form for
+   external entities) at ingestion.
+
+#### 5.7.3 Boundary Crossing Record
+
+Implementations SHOULD record trust boundary crossings for audit:
+
+```clojure
+{:boundary/id        keyword   ; REQUIRED: :llm-output | :tool-output | :ingestion | :pack | :provider
+ :boundary/status    keyword   ; REQUIRED: :accepted | :rejected | :sanitized
+ :boundary/findings  [map]     ; OPTIONAL: validation issues found and handled
+ :boundary/timestamp inst}     ; REQUIRED
+```
+
+Boundary crossing records MUST be linkable to N6 evidence bundles for the enclosing
+workflow.
 
 ---
 
@@ -1906,6 +2231,9 @@ conformance checklist.
 | N1.RI.5 | MUST | Range normalization: UTF-8, 1-based inclusive lines, LF-normalized content, blob-sha over normalized content (§2.27.2). |
 | N1.RI.6 | SHOULD | Ingest SCIP (preferred) or LSIF outputs for precise def/refs/impls navigation beyond Tree-sitter approximations. |
 | N1.RI.7 | SHOULD | Build repo map slices under a token budget using dependency-graph-aware ranking. |
+| N1.RI.8 | MUST | Compute index quality metrics (§2.27.9) after each incremental update. |
+| N1.RI.9 | SHOULD | Run canary queries against updated indexes and emit degradation events on recall drop (§2.27.10). |
+| N1.RI.10 | MUST | Include index quality metrics in workflow evidence bundles when repo context is consumed. |
 
 ### 11.2 Context Pack Requirements
 
@@ -1934,6 +2262,28 @@ conformance checklist.
 | N1.SI.2 | MUST | On staleness: invalidate-and-rebuild (default), merge (when no overlap), or fail (when rebuild budget exhausted). |
 | N1.SI.3 | SHOULD | Prefer invalidate-and-rebuild in v1; add merge support in later versions. |
 
+### 11.5 Reliability Requirements
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N1.RL.1 | MUST | Classify all failures into the canonical taxonomy (§5.3.3). Classification MUST be performed by the runtime, not by agents. |
+| N1.RL.2 | MUST | Compute SLIs (§5.5.2) over rolling time windows and emit `:reliability/sli-computed` events. |
+| N1.RL.3 | MUST | Emit `:reliability/slo-breach` events when `:standard` or `:critical` SLO targets are missed. |
+| N1.RL.4 | SHOULD | Compute error budgets (§5.5.4) for `:standard` and `:critical` tiers. |
+| N1.RL.5 | MUST | Support degradation mode transitions (§5.5.5) and emit mode-change events. |
+| N1.RL.6 | MUST | Enforce unified autonomy level ceilings (§5.6.3). Effective level is `min(system, environment, workflow, configured)`. |
+| N1.RL.7 | MUST | Validate all data crossing trust boundaries per §5.7.2 invariants (TB-INV-1 through TB-INV-5). |
+| N1.RL.8 | MUST | Normalize timestamps to UTC inst and identifiers to canonical form at trust boundaries (§5.7.2). |
+
+### 11.6 Evaluation Pipeline Requirements
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N1.EV.1 | MUST | Support golden set execution — running curated workflow inputs and comparing outcomes (§3.3.3). |
+| N1.EV.2 | SHOULD | Support replay mode for deterministic workflow reconstruction from evidence bundles. |
+| N1.EV.3 | SHOULD | Populate golden sets from production incidents — every classified failure is a candidate entry. |
+| N1.EV.4 | SHOULD | Gate deployments of prompt, model, policy, or tool schema changes on golden set pass rate regression. |
+
 ---
 
 ## 12. References
@@ -1941,7 +2291,8 @@ conformance checklist.
 - RFC 2119: Key words for use in RFCs to Indicate Requirement Levels
 - Polylith Architecture: https://polylith.gitbook.io/
 - SCIP (Source Code Intelligence Protocol): https://sourcegraph.com/docs/code-intelligence/scip
-- LSIF (Language Server Index Format): https://microsoft.github.io/language-server-protocol/specifications/lsif/0.4.0/specification/
+- LSIF (Language Server Index Format):
+  https://microsoft.github.io/language-server-protocol/specifications/lsif/0.4.0/specification/
 - N2 (Workflow Execution): Defines phase graph and transitions
 - N3 (Event Stream): Defines observability events
 - N4 (Policy Packs): Defines gate validation rules
@@ -1959,13 +2310,22 @@ conformance checklist.
 - **Advisory Annotation** - Non-blocking message attached to a workflow or event by a Listener (N8)
 - **Agent** - Autonomous software entity that executes workflow phases
 - **Artifact** - Work product created during workflow execution
+- **Autonomy Level** - Unified governance tier (A0-A5) controlling permitted actions across all subsystems; maps to N8
+  capability levels, N9 automation tiers, and N10 trust levels (§5.6)
 - **Capability** - Connector-scoped permission unit required by a Workflow Pack; deny-by-default for writes
 - **Capability Level** - Listener permission tier: OBSERVE, ADVISE, or CONTROL (N8)
 - **Control Action** - Command that modifies workflow execution state, subject to RBAC and gates (N8)
+- **Degradation Mode** - System operational posture: `:nominal`, `:degraded`, or `:safe-mode`, driven by error budget
+  state (§5.5.5)
+- **Error Budget** - Remaining tolerance for failures before an SLO is breached; computed per tier and SLI over rolling
+  windows (§5.5.4)
 - **Evidence Bundle** - Immutable audit trail from intent to outcome
 - **Experiment Pack** - Declarative artifact defining workload models, guardrails, and convergence for OPSV (N7)
 - **External PR** - Pull request whose diff was created outside Miniforge's authoring workflow (N9)
+- **Failure Class** - Canonical taxonomy category for workflow/agent/tool failures; one of 10 enumerated values (§5.3.3)
 - **Gate** - Validation checkpoint for artifacts
+- **Golden Set** - Curated set of workflow inputs paired with known-good outcomes, used for regression testing in the
+  evaluation pipeline (§3.3.3)
 - **Inner Loop** - Validate → Repair cycle within a phase
 - **Listener** - External actor that subscribes to workflow events with OBSERVE/ADVISE/CONTROL capability (N8)
 - **Operational Policy** - Versioned runtime configuration artifacts controlling service behavior under load (N7)
@@ -1982,19 +2342,35 @@ conformance checklist.
 - **Range** - Content-addressed code reference: path + blob-sha + 1-based inclusive line numbers (§2.27.2)
 - **Readiness** - Deterministic merge-readiness assessment from provider signals and policy results (N9)
 - **Repo Index** - Content-addressed, incrementally buildable index of a repository at a specific commit (§2.27)
+- **Replay Mode** - Re-execution of a completed workflow from its evidence bundle to verify deterministic reconstruction
+  (§3.3.3)
 - **Repo Map** - Token-budgeted summary of repository structure for agent global prior (§2.27.6)
 - **Risk Assessment** - Explainable evaluation of change risk for a PR, produced as N6 evidence artifact (N9)
+- **Service Level Indicator (SLI)** - Measurable metric describing miniforge's own execution reliability (§5.5.2)
+- **Service Level Objective (SLO)** - Tier-dependent target for an SLI; breach triggers degradation or safe-mode
+  (§5.5.3)
+- **Shadow Mode** - Running a candidate system configuration in parallel with production to compare outcomes without
+  side effects (§3.3.3)
 - **Subagent** - Specialized agent spawned by parent agent
 - **Symbol Key** - Cross-commit logical identity for a symbol; best-effort continuity across renames/refactors (§2.27.3)
 - **Tool** - External capability invoked by agent
-- **Verification** - Executing an Experiment Pack against a candidate Operational Policy to produce pass/fail evidence (N7)
+- **Trust Boundary** - Interface where data crosses from an untrusted source into miniforge's execution context;
+  requires validation and normalization (§5.7)
+- **Verification** - Executing an Experiment Pack against a candidate Operational Policy to produce pass/fail evidence
+  (N7)
 - **Workflow** - Top-level unit of autonomous execution
 - **Workflow Pack** - Versioned bundle containing workflows, schemas, templates, and metadata
+- **Workflow Tier** - Impact classification (`:best-effort`, `:standard`, `:critical`) that determines SLO targets and
+  required verification layers (§5.5.1)
 
 ---
 
 **Version History:**
 
+- 0.5.0-draft (2026-03-08): Reliability Nines amendments — Failure Taxonomy (§5.3.3),
+  Reliability Model with SLIs/SLOs/Error Budgets (§5.5), Unified Autonomy Model (§5.6),
+  Trust Boundary Validation (§5.7), Index Quality Metrics and Canary Protocol (§2.27.9–2.27.10),
+  Evaluation Pipeline (§3.3.3), Reliability and Evaluation conformance (§11.5–§11.6)
 - 0.4.0-draft (2026-03-04): Added Repository Intelligence and Context Assembly
   (§2.27–§2.30 domain entities, §11 conformance requirements, §13 glossary additions)
 - 0.3.0-draft (2026-02-16): Added Workflow Pack, Capability, Pack Run concepts

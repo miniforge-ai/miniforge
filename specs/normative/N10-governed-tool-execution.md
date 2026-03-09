@@ -1,7 +1,7 @@
 # N10 — Governed Tool Execution
 
-**Version:** 0.1.0-draft
-**Date:** 2026-03-06
+**Version:** 0.2.0-draft
+**Date:** 2026-03-08
 **Status:** Draft
 **Conformance:** MUST
 
@@ -160,6 +160,83 @@ When an OIR contains multiple actions:
 2. If any action is Class E, the entire OIR is Class E (prohibited).
 3. If any action is Class D, the entire OIR requires human approval regardless of
    other actions.
+
+### 3.4 Operational Semantics
+
+The tool registry schema MUST be extended with distributed-systems operational properties.
+These properties govern how the runtime handles tool invocations as unreliable
+distributed calls.
+
+```clojure
+;; Extension to ToolConfig schema (alongside :tool/action-class from §3.2)
+{:tool/operational
+ {:op/timeout-ms        long      ; REQUIRED: max execution time (default 30000)
+
+  :op/retry-policy                ; OPTIONAL: retry configuration
+  {:retry/max-attempts  int       ; REQUIRED: max retries (default 0 = no retry)
+   :retry/backoff       keyword   ; REQUIRED: :none | :linear | :exponential
+   :retry/base-delay-ms long      ; REQUIRED when backoff != :none (default 1000)
+   :retry/max-delay-ms  long      ; OPTIONAL: cap on backoff delay (default 30000)
+   :retry/jitter?       boolean   ; OPTIONAL: add randomized jitter (default true)
+   :retry/retryable-classes       ; OPTIONAL: failure classes that trigger retry
+   [keyword]}                     ;   default: [:failure.class/external :failure.class/timeout]
+
+  :op/circuit-breaker             ; OPTIONAL: circuit breaker configuration
+  {:cb/failure-threshold int      ; REQUIRED: consecutive failures before open (default 5)
+   :cb/reset-timeout-ms  long    ; REQUIRED: time before half-open (default 60000)
+   :cb/half-open-permits  int}   ; OPTIONAL: requests allowed in half-open (default 1)
+
+  :op/concurrency                 ; OPTIONAL: concurrency limits
+  {:conc/max-parallel   int      ; OPTIONAL: max concurrent invocations of this tool
+   :conc/semaphore-key  string}  ; OPTIONAL: shared semaphore name across tools
+
+  :op/fallback                    ; OPTIONAL: fallback on failure
+  {:fallback/tool-id    keyword  ; OPTIONAL: alternative tool to invoke on failure
+   :fallback/conditions [keyword]}}} ; OPTIONAL: failure classes triggering fallback
+                                     ;   default: all non-retryable failures
+```
+
+**Operational semantics requirements:**
+
+1. Every tool MUST declare `:op/timeout-ms`. Tools without an explicit timeout MUST
+   default to 30000ms.
+2. Tools with `:tool/type :external` or `:mcp` SHOULD declare a retry policy.
+3. Retries MUST only be attempted for failure classes listed in `:retry/retryable-classes`.
+   By default, only `:failure.class/external` and `:failure.class/timeout` are retryable.
+4. Retries MUST NOT be attempted for Class D/E actions (safety-critical; retry could cause
+   duplicate side effects).
+5. When `:retry/jitter?` is true, implementations MUST add randomized jitter (up to 25%
+   of the delay) to prevent thundering herd on shared tools.
+
+### 3.5 Tool Health Tracking
+
+Implementations SHOULD maintain per-tool health state to enable circuit-breaker behavior
+and operational visibility.
+
+```clojure
+{:health/tool-id        keyword   ; REQUIRED: tool identifier
+ :health/status         keyword   ; REQUIRED: :healthy | :degraded | :circuit-open | :unavailable
+ :health/success-count  long      ; REQUIRED: successes in current window
+ :health/failure-count  long      ; REQUIRED: failures in current window
+ :health/last-success   inst      ; OPTIONAL: timestamp of last successful invocation
+ :health/last-failure   inst      ; OPTIONAL: timestamp of last failure
+ :health/circuit-state  keyword   ; OPTIONAL: :closed | :open | :half-open
+ :health/computed-at    inst}     ; REQUIRED
+```
+
+**Health tracking requirements:**
+
+1. Health state transitions MUST emit `:tool/health-changed` events to the event stream
+   (N3).
+2. When a tool's circuit breaker is open:
+   - Class A (observational) invocations SHOULD attempt the fallback tool if configured,
+     or return a cached/stale result if available.
+   - Class B+ invocations MUST fail immediately with `:failure/class :failure.class/external`
+     and `:failure-reason "circuit breaker open"`.
+3. Circuit breaker transitions from `:closed` → `:open` SHOULD be logged as warnings
+   in the operator console (N5).
+4. When safe-mode is active (N8 §3.4), all circuit breakers for Class B+ tools MUST be
+   forced to `:open`.
 
 ---
 
@@ -503,6 +580,27 @@ Implementations MAY use any isolation mechanism that satisfies §7.2:
 The choice of isolation mechanism is an implementation detail, not a normative
 requirement, as long as the isolation properties in §7.2 are satisfied.
 
+### 7.4 Tool Response Validation
+
+All tool results crossing the capsule boundary MUST undergo trust boundary validation
+per N1 §5.7 before entering agent context.
+
+**Validation requirements:**
+
+1. If the tool declares an output schema in the tool registry, the response MUST be
+   validated against that schema. Schema validation failures MUST emit a
+   `:tool/response-validation-failed` event and MUST NOT propagate the invalid response
+   to the agent.
+2. All tool responses MUST be sanitized for injection patterns (e.g., prompt injection
+   embedded in tool output) before injection into agent context. Sanitization SHOULD
+   use the same detection mechanisms as the ingestion boundary (N1 §5.7.2, TB-INV-3).
+3. Tool responses containing timestamps MUST be normalized to UTC `inst` values per
+   N1 §5.7.2, TB-INV-4.
+4. Failed validations MUST record a boundary crossing record (N1 §5.7.3) with
+   `:boundary/status :rejected` and include the validation findings.
+5. The agent MUST receive an explicit error signal when a tool response is rejected,
+   enabling the inner loop to attempt repair or retry.
+
 ---
 
 ## 8. Crown Jewel Protection
@@ -807,6 +905,25 @@ Governed execution produces a sub-bundle within the workflow's evidence bundle:
 | N10.AU.1 | MUST | All events in §12.1 MUST be emitted to the event stream |
 | N10.AU.2 | MUST | Governed execution evidence MUST link to N6 evidence bundles |
 
+### 13.8 Operational Semantics
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N10.OP.1 | MUST | Every tool MUST declare `:op/timeout-ms` (default 30000ms). |
+| N10.OP.2 | SHOULD | Tools with `:tool/type :external` or `:mcp` SHOULD declare a retry policy. |
+| N10.OP.3 | SHOULD | Implementations SHOULD track per-tool health state and open circuit breakers after threshold failures. |
+| N10.OP.4 | MUST | Circuit-breaker state changes MUST emit events to the event stream (N3). |
+| N10.OP.5 | SHOULD | Tools SHOULD declare fallback alternatives for graceful degradation. |
+| N10.OP.6 | MUST NOT | Class D/E actions MUST NOT be retried automatically. |
+
+### 13.9 Tool Response Validation
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N10.TV.1 | MUST | Tool responses MUST be validated against declared output schema before agent consumption. |
+| N10.TV.2 | MUST | Responses failing validation MUST NOT be injected into agent context. |
+| N10.TV.3 | MUST | Response validation failures MUST emit events and record boundary crossing records (N1 §5.7.3). |
+
 ---
 
 ## 14. Trust Level Progression
@@ -821,6 +938,10 @@ execution permissions. Trust levels are per-workflow, per-environment.
 | L2 | Bounded Execution | Class A/B autonomous; Class C with approval | 25+ successful B actions, 0 rollbacks in last 10 |
 | L3 | Controlled Autonomy | Class A/B/C autonomous with postconditions | 50+ successful C actions, <2% rollback rate |
 | L4 | Domain Autonomy | Full Class A/B/C; Class D with approval | Organization-specific criteria |
+
+Trust levels map to the unified autonomy model (N1 §5.6): L0→A0, L1→A1, L2→A3,
+L3/L4→A4. During safe-mode (N8 §3.4), all trust levels MUST be effectively demoted
+to L0 (A0).
 
 Trust levels are informational in OSS. Fleet/Enterprise deployments (future N12)
 enforce them via centralized trust registries.
@@ -906,6 +1027,10 @@ Audit Ledger (N3 events + N6 evidence bundles)
 
 **Version History:**
 
+- 0.2.0-draft (2026-03-08): Reliability Nines amendments — Operational Semantics with
+  timeout/retry/circuit-breaker/concurrency/fallback (§3.4), Tool Health Tracking (§3.5),
+  Tool Response Validation (§7.4), unified autonomy model back-reference (§14),
+  conformance (§13.8, §13.9)
 - 0.1.0-draft (2026-03-06): Initial specification consolidating governed execution,
   capability model, execution capsules, validation, crown jewel protection, and
   external system integration

@@ -1,7 +1,7 @@
 # N4 — Policy Packs & Gates Standard
 
-**Version:** 0.4.0-draft
-**Date:** 2026-02-16
+**Version:** 0.5.0-draft
+**Date:** 2026-03-08
 **Status:** Draft
 **Conformance:** MUST
 
@@ -18,7 +18,8 @@ autonomous software factory. It establishes:
 - **Violation schema** - Severity levels, remediation, enforcement actions
 - **Remediation UX contract** - Human and machine-readable repair guidance
 
-Policy packs enable **policy-as-code** enforcement at workflow gates, preventing intent violations and dangerous changes.
+Policy packs enable **policy-as-code** enforcement at workflow gates, preventing intent violations and dangerous
+changes.
 
 ### 1.1 Design Principles
 
@@ -378,6 +379,43 @@ Repair functions SHOULD:
  :violation/context {...}          ; OPTIONAL: Additional context for debugging
  :violation/documentation-url string} ; OPTIONAL: Link to docs
 ```
+
+### 3.4 Validation Layer Taxonomy
+
+Validation in miniforge occurs at multiple layers with distinct responsibilities.
+This taxonomy defines the canonical ordering and ensures that failures are classified
+and debugged at the correct layer.
+
+| Layer | Name | When | What it Checks | Failure Behavior |
+|-------|------|------|----------------|-----------------|
+| L0 | **Syntax** | Ingestion / parsing | Schema conformance, encoding, data types, required fields | Reject input with parse error |
+| L1 | **Semantic** | Pre-execution | Type correctness, referential integrity, constraint satisfaction, identifier validity | Block with structured violation and remediation |
+| L2 | **Policy** | Gate evaluation | Organizational rules, security constraints, compliance requirements, semantic intent | Per-severity enforcement (N4 violation schema) |
+| L3 | **Operational** | Runtime | Resource availability, tool health, circuit-breaker state, error budget, timeout budgets | Retry, degrade, or fail with `:failure.class/resource` or `:failure.class/timeout` |
+| L4 | **Authorization** | Pre-capability | RBAC, trust level, autonomy level (N1 §5.6), capability scope (N10 §6) | Deny or escalate to human approval |
+
+#### 3.4.1 Layer Ordering Invariant
+
+Validation MUST be applied in layer order (L0 before L1, L1 before L2, etc.). A failure
+at a lower layer MUST NOT be masked by a pass at a higher layer. This ensures:
+
+- Syntax errors are caught before semantic analysis wastes resources
+- Semantic issues are resolved before policy evaluation
+- Policy violations are identified before operational checks
+- Authorization is verified only after all other checks pass
+
+#### 3.4.2 Layer-to-Spec Mapping
+
+| Layer | Primary Spec | Implementation |
+|-------|-------------|----------------|
+| L0 | N1 (schema definitions), N10 §7.4 (tool response) | Implicit parsing and schema validation |
+| L1 | N4 §4 (semantic intent), N6 (provenance integrity) | Check functions with `:semantic-intent` type |
+| L2 | N4 §5 (policy rules) | Check functions with `:policy-validation` type |
+| L3 | N10 §3.4 (tool operational semantics), N1 §5.5 (SLIs) | Runtime health and budget checks |
+| L4 | N8 §2 (RBAC), N10 §6 (capability broker), N1 §5.6 (autonomy) | Capability and authorization checks |
+
+Policy pack rules (§5) operate primarily at L1 and L2. Standard packs SHOULD document
+which validation layer each rule targets.
 
 ---
 
@@ -1178,6 +1216,8 @@ Research directions:
 
 **Version History:**
 
+- 0.5.0-draft (2026-03-08): Reliability Nines amendments — Validation Layer Taxonomy
+  (§3.4) with 5-layer model and ordering invariant
 - 0.4.0-draft (2026-02-16): Added Pack Trust Gate (§5.1.8), Capability Grant Gate
   (§5.1.9), High-Risk Pack Action Gate (§5.1.10)
 - 0.3.0-draft (2026-02-07): Added extension spec gates from N7, N8, N9

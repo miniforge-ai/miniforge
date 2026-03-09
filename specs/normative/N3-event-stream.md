@@ -1,7 +1,7 @@
 # N3 — Event Stream & Observability Contract
 
-**Version:** 0.5.0-draft
-**Date:** 2026-02-16
+**Version:** 0.6.0-draft
+**Date:** 2026-03-08
 **Status:** Draft
 **Conformance:** MUST
 
@@ -153,7 +153,8 @@ Implementations MUST emit these event types:
  :workflow/id uuid
 
  :workflow/failure-phase :implement
- :workflow/failure-reason string
+ :workflow/failure-reason string       ; REQUIRED: human-readable description
+ :failure/class keyword               ; REQUIRED: canonical class (see N1 §5.3.3)
  :workflow/error-details {...}
 
  :message "Workflow failed: {reason}"}
@@ -199,7 +200,8 @@ Implementations MUST emit these event types:
  :agent/instance-id uuid
  :workflow/id uuid
 
- :agent/failure-reason string
+ :agent/failure-reason string         ; REQUIRED: human-readable description
+ :failure/class keyword               ; REQUIRED: canonical class (see N1 §5.3.3)
  :agent/error-details {...}
  :agent/retry-count long
 
@@ -718,7 +720,8 @@ ETL workflows MUST emit this event after all pack generation and promotion activ
 
  :workflow/id uuid
  :etl/failure-stage keyword           ; :classification | :scanning | :extraction | :validation
- :etl/failure-reason string
+ :etl/failure-reason string           ; REQUIRED: human-readable description
+ :failure/class keyword               ; REQUIRED: canonical class (see N1 §5.3.3)
  :etl/error-details {...}             ; OPTIONAL: structured error information
 
  :message "ETL workflow failed: {reason}"}
@@ -842,7 +845,8 @@ pack lifecycle events and Pack Run events.
  :pack-run/id uuid
  :pack/id string
  :pack/version string
- :pack-run/failure-reason string
+ :pack-run/failure-reason string       ; REQUIRED: human-readable description
+ :failure/class keyword               ; REQUIRED: canonical class (see N1 §5.3.3)
  :pack-run/duration-ms long
 
  :message "Pack run failed: {pack.id}@{pack.version} — {failure-reason}"}
@@ -915,7 +919,8 @@ pack lifecycle events and Pack Run events.
  :edge/id uuid
  :edge/from-workflow-id uuid
  :edge/to-workflow-id uuid
- :edge/failure-reason string
+ :edge/failure-reason string          ; REQUIRED: human-readable description
+ :failure/class keyword               ; REQUIRED: canonical class (see N1 §5.3.3)
 
  :message "Chain edge failed: {from-workflow} → {to-workflow} — {failure-reason}"}
 ```
@@ -1298,6 +1303,135 @@ Emitted when PR readiness state changes (derived-state-change event).
 - All events MUST conform to §2.2 ordering guarantees where a workflow scope exists.
   For external PRs (no workflow), events MUST be ordered per PR Work Item (§2.3).
 
+### 3.17 Reliability Metric Events
+
+Implementations MUST emit reliability events to power SLO monitoring, error budget
+tracking, and degradation mode transitions (see N1 §5.5).
+
+#### reliability/sli-computed
+
+Emitted periodically when SLI values are computed over a rolling window.
+
+```clojure
+{:event/type :reliability/sli-computed
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :sli/name keyword                   ; REQUIRED: SLI identifier (SLI-1 through SLI-7, see N1 §5.5.2)
+ :sli/value double                   ; REQUIRED: computed value
+ :sli/window keyword                 ; REQUIRED: :1h | :7d | :30d
+ :sli/tier keyword                   ; OPTIONAL: workflow tier filter
+ :sli/dimensions map                 ; OPTIONAL: breakdown by phase, agent, tool, etc.
+
+ :message "SLI computed: {name} = {value} over {window}"}
+```
+
+#### reliability/slo-breach
+
+Emitted when an SLO target is missed for `:standard` or `:critical` tiers.
+
+```clojure
+{:event/type :reliability/slo-breach
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :slo/sli-name keyword               ; REQUIRED: which SLI breached
+ :slo/target double                  ; REQUIRED: target value
+ :slo/actual double                  ; REQUIRED: measured value
+ :slo/tier keyword                   ; REQUIRED: workflow tier
+ :slo/window keyword                 ; REQUIRED: measurement window
+
+ :message "SLO breach: {sli-name} target={target} actual={actual} tier={tier}"}
+```
+
+#### reliability/error-budget-update
+
+Emitted when error budget state is recomputed.
+
+```clojure
+{:event/type :reliability/error-budget-update
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :budget/tier keyword                ; REQUIRED: :standard | :critical
+ :budget/sli keyword                 ; REQUIRED: SLI identifier
+ :budget/remaining double            ; REQUIRED: 0.0-1.0 fraction remaining
+ :budget/burn-rate double            ; REQUIRED: current burn rate (1.0 = nominal)
+ :budget/window keyword              ; REQUIRED: :1h | :7d | :30d
+
+ :message "Error budget: tier={tier} sli={sli} remaining={remaining} burn-rate={burn-rate}"}
+```
+
+#### reliability/degradation-mode-changed
+
+Emitted when the system transitions between degradation modes (see N1 §5.5.5).
+
+```clojure
+{:event/type :reliability/degradation-mode-changed
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :degradation/from keyword           ; REQUIRED: :nominal | :degraded | :safe-mode
+ :degradation/to keyword             ; REQUIRED: :nominal | :degraded | :safe-mode
+ :degradation/trigger string         ; REQUIRED: what caused the transition
+
+ :message "Degradation mode: {from} → {to} ({trigger})"}
+```
+
+### 3.18 Repository Intelligence Events
+
+Implementations MUST emit events for index quality tracking and canary validation
+(see N1 §2.27.9–2.27.10).
+
+#### repo-index/quality-computed
+
+Emitted after each incremental index update with quality metrics.
+
+```clojure
+{:event/type :repo-index/quality-computed
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :repo/id string                     ; REQUIRED: repository identifier
+ :revision/commit-sha string         ; REQUIRED: commit at which quality was measured
+ :quality/freshness-lag-ms long      ; REQUIRED: ms since last indexed commit
+ :quality/coverage-score double      ; REQUIRED: 0.0-1.0
+ :quality/symbol-coverage double     ; OPTIONAL
+ :quality/search-recall double       ; OPTIONAL: from canary queries
+
+ :message "Index quality: repo={repo/id} coverage={coverage-score}"}
+```
+
+#### repo-index/canary-failed
+
+Emitted when index canary queries detect a recall regression.
+
+```clojure
+{:event/type :repo-index/canary-failed
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :repo/id string                     ; REQUIRED
+ :revision/commit-sha string         ; REQUIRED
+ :canary/expected-recall double      ; REQUIRED: threshold
+ :canary/actual-recall double        ; REQUIRED: measured recall
+ :canary/failed-queries [string]     ; OPTIONAL: query IDs that regressed
+
+ :message "Index canary failed: repo={repo/id} recall={actual-recall} < {expected-recall}"}
+```
+
 ---
 
 ## 4. Event Emission Requirements
@@ -1318,6 +1452,8 @@ Implementations MUST emit events at these points:
 10. **OPSV lifecycle** - experiment plans, load steps, guardrail aborts, policy proposals, verification results (N7)
 11. **Listener lifecycle** - attach, detach, control actions, annotations (N8)
 12. **External PR lifecycle** - provider events, readiness/risk/policy changes, train changes (N9)
+13. **Reliability metrics** - SLI computations, SLO breaches, error budget updates, degradation mode changes
+14. **Repository intelligence** - index quality metrics, canary validation results
 
 ### 4.2 Throttling
 
@@ -1580,6 +1716,8 @@ Event stream will extend to:
 
 **Version History:**
 
+- 0.6.0-draft (2026-03-08): Reliability Nines amendments — `:failure/class` enum on all
+  failure events, reliability metric events (§3.17), repository intelligence events (§3.18)
 - 0.5.0-draft (2026-02-16): Added pack lifecycle, Pack Run, capability denial, and chain
   edge events (§3.12); renumbered §3.13–§3.16
 - 0.4.0-draft (2026-02-07): Added extension spec events from N7, N8, N9
