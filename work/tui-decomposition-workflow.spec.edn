@@ -1,0 +1,112 @@
+;; TUI PR Decomposition Workflow
+
+{:spec/title "PR Decomposition Workflow — TUI-Driven Sub-PR Generation"
+ :version "1.0.0"
+ :type :feature
+ :priority :medium
+
+ :spec/description
+ "Wire the TUI decompose command to generate a decomposition spec and hand it
+  to miniforge for execution. When a user selects a large PR and runs :decompose,
+  the system should analyze the PR's diff, propose a decomposition plan with
+  logical sub-PRs, and optionally execute the plan to create the sub-PRs.
+
+  This replaces the current stub that returns 'Decomposition analysis not yet wired'
+  with a real workflow that mirrors the Autodev decomposition pattern."
+
+ :spec/intent
+ {:type :workflow-integration
+  :scope ["PR decomposition analysis via miniforge workflow"
+          "Spec generation from PR metadata + diff"
+          "Sub-PR creation proposals"
+          "MCP integration for decomposition commands"]
+
+  :context
+  {:current-state
+   ["TUI has :decompose command with confirmation dialog"
+    "effect/decompose-pr effect constructor exists"
+    "handle-decompose-pr in interface.clj is a stub returning empty sub-prs"
+    "Recommendation engine already suggests :decompose for PRs > 500 lines"
+    "Autodev has a working decomposition pattern"]
+
+   :desired-state
+   ["User selects large PR → :decompose → confirmation dialog"
+    "System generates decomposition spec from PR metadata + diff"
+    "Spec handed to miniforge workflow for analysis"
+    "Workflow returns proposed sub-PRs with titles, file groupings, dependency order"
+    "User reviews proposals, optionally creates the sub-PRs"
+    "Results cached in PR analysis cache for future reference"]}}
+
+ :requirements
+ [{:id "R1"
+   :requirement "Generate decomposition spec from PR"
+   :details "Create a .spec.edn with PR metadata, file list, diff summary, and
+             decomposition constraints (max sub-PR size, logical grouping rules)"
+   :inputs ["PR repo/number" "PR diff (additions/deletions by file)"
+            "PR description/intent" "File dependency graph"]
+   :output "EDN spec suitable for miniforge run"}
+
+  {:id "R2"
+   :requirement "Execute decomposition workflow"
+   :details "Hand the generated spec to miniforge for analysis. The workflow
+             should analyze the diff, identify logical boundaries, and propose
+             sub-PRs with titles, file groupings, and merge order."
+   :options ["Direct miniforge invocation (shell subprocess)"
+             "MCP command (miniforge as MCP server)"
+             "In-process workflow execution"]}
+
+  {:id "R3"
+   :requirement "Present decomposition results in TUI"
+   :details "Show proposed sub-PRs in a review pane: title, files, size estimate,
+             dependency order. User can accept/reject/modify before creation."
+   :ui-elements ["Sub-PR list with file groupings"
+                  "Size estimates per sub-PR"
+                  "Dependency arrows between sub-PRs"
+                  "Accept/Reject/Modify actions"]}
+
+  {:id "R4"
+   :requirement "Cache decomposition results"
+   :details "Store decomposition proposals in PR analysis cache so they persist
+             across sessions. Invalidate when PR diff changes."
+   :cache-key "[repo, number]"
+   :invalidation "PR fingerprint change (additions/deletions/head-sha)"}
+
+  {:id "R5"
+   :requirement "Create sub-PRs from accepted proposal"
+   :details "When user accepts, create actual sub-PRs on GitHub via cherry-pick
+             or branch-per-file-group strategy. Each sub-PR references the parent."
+   :stretch? true}]
+
+ :implementation
+ {:approach "spec-generation"
+  :description "Generate a decomposition .spec.edn and invoke miniforge"
+
+  :new-files
+  [{:path "components/tui-views/src/ai/miniforge/tui_views/decompose.clj"
+    :purpose "Spec generation from PR metadata, result parsing"
+    :functions
+    [{:name "generate-decompose-spec"
+      :signature "(generate-decompose-spec pr diff-data)"
+      :returns "EDN spec map"}
+     {:name "parse-decompose-result"
+      :signature "(parse-decompose-result workflow-output)"
+      :returns "{:sub-prs [{:title :files :size :depends-on}]}"}]}]
+
+  :modified-files
+  [{:path "components/tui-views/src/ai/miniforge/tui_views/interface.clj"
+    :change "Replace handle-decompose-pr stub with real implementation"
+    :handler "Generate spec → invoke miniforge → parse result → return msg"}
+   {:path "components/tui-views/src/ai/miniforge/tui_views/update/events.clj"
+    :change "Enhance handle-decomposition-started to display sub-PR proposals"}
+   {:path "components/tui-views/resources/config/tui/screens.edn"
+    :change "Add decomposition review pane or modal"}]}
+
+ :spec/acceptance-criteria
+ [{:criterion "Decompose command produces sub-PR proposals for large PRs"
+   :verification "Select a 500+ line PR, run :decompose, see proposed sub-PRs"}
+  {:criterion "Proposals include file groupings and size estimates"
+   :verification "Each sub-PR shows which files it contains and line count"}
+  {:criterion "Results persist across sessions via cache"
+   :verification "Run :decompose, exit TUI, re-enter, proposals still visible"}
+  {:criterion "Stub replaced with real workflow invocation"
+   :verification "handle-decompose-pr no longer returns 'not yet wired'"}]}
