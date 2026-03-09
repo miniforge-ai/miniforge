@@ -306,12 +306,8 @@
                                (when (seq existing-files)
                                  (str "\n\n## Existing Files in Scope\n\n"
                                       "Review these files before planning. If the spec is already "
-                                      "fully satisfied by existing code, respond with an evidence bundle:\n"
-                                      "```clojure\n{:plan/status :already-satisfied\n"
-                                      " :plan/summary \"Brief explanation\"\n"
-                                      " :plan/evidence [{:requirement \"what spec requires\"\n"
-                                      "                  :satisfied-by \"path/to/file.clj\"\n"
-                                      "                  :proof \"specific function/test that satisfies it\"}]}\n```\n"
+                                      "fully satisfied by existing code, respond with an already-satisfied "
+                                      "evidence bundle as described in your system prompt.\n\n"
                                       (format-existing-files existing-files)))
                                "\n\nOutput your plan as a Clojure map following the format in your system prompt. "
                                "Use (random-uuid) for all IDs - just write #uuid \"<any-uuid>\" placeholders that I'll fill in.")]

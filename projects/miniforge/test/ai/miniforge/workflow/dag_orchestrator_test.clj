@@ -3,6 +3,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
+   [ai.miniforge.workflow.dag-task-runner :as task-runner]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]))
 
@@ -173,7 +174,7 @@
   (testing "returns placeholder result without LLM backend"
     (let [task-def {:task/id :test-task
                     :task/description "Test task"}
-          result (dag-orch/execute-single-task task-def {})]
+          result (task-runner/execute-single-task task-def {})]
       (is (dag/ok? result))
       (let [data (dag/unwrap result)]
         (is (= :test-task (:task-id data)))
@@ -185,7 +186,7 @@
 (deftest test-execute-single-task-default-description
   (testing "uses default description when missing"
     (let [task-def {:task/id :no-desc}
-          result (dag-orch/execute-single-task task-def {})]
+          result (task-runner/execute-single-task task-def {})]
       (is (dag/ok? result))
       (is (= "Implement task" (:description (dag/unwrap result)))))))
 
@@ -199,7 +200,7 @@
           context {}
           opts {:on-task-start #(swap! started conj %)
                 :on-task-complete #(swap! completed conj [%1 %2])}
-          executor (dag-orch/create-task-executor-fn context opts)
+          executor (task-runner/create-task-executor-fn context opts)
           dag-context {:run-state {:run/tasks {:task-1 {:task/id :task-1
                                                          :task/description "Test"}}}}
           result (executor :task-1 dag-context)]
@@ -210,7 +211,7 @@
 
 (deftest test-create-executor-fn-no-callbacks
   (testing "executor fn works without callbacks"
-    (let [executor (dag-orch/create-task-executor-fn {} {})
+    (let [executor (task-runner/create-task-executor-fn {} {})
           dag-context {:run-state {:run/tasks {:task-1 {:task/id :task-1}}}}
           result (executor :task-1 dag-context)]
       (is (dag/ok? result)))))
@@ -316,6 +317,21 @@
           context {:pre-completed-ids #{:a} :logger logger}
           _ (dag-orch/execute-plan-as-dag plan context)]
       (is (some #(= :dag/resuming (:log/event %)) @entries)))))
+
+(deftest test-resume-preserves-artifacts-from-new-tasks
+  (testing "resumed execution includes artifacts from newly executed tasks"
+    (let [plan (make-plan [(make-task :a)
+                           (make-task :b)
+                           (make-task :c [:a :b])])
+          ;; :a pre-completed; :b and :c will execute and produce placeholder artifacts
+          context {:pre-completed-ids #{:a}}
+          result (dag-orch/execute-plan-as-dag plan context)]
+      (is (:success? result))
+      (is (= 3 (:tasks-completed result)))
+      ;; Placeholder results produce empty artifact vectors per task,
+      ;; but the aggregate should still be a vector (not nil)
+      (is (vector? (:artifacts result))
+          "artifacts should be collected as a vector"))))
 
 ;------------------------------------------------------------------------------ Layer 9
 ;; Failure propagation tests

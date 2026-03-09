@@ -158,20 +158,26 @@
        (mapcat #(get-in % [:dag/result :data :artifacts] []))
        vec))
 
+(def default-events-dir
+  "Default directory for workflow event files."
+  (delay (str (System/getProperty "user.home") "/.miniforge/events")))
+
 (defn resume-context-from-event-file
   "Build resume context from a workflow's event file.
 
    Arguments:
    - workflow-id: UUID of the workflow to resume
+   - opts: Optional map with :events-dir to override default path
 
    Returns a map suitable for merging into the DAG execution context:
    {:pre-completed-ids #{task-id-1 task-id-2 ...}
     :pre-completed-artifacts [artifact-1 ...]
     :resumed? true}"
-  [workflow-id]
-  (let [events-dir (str (System/getProperty "user.home") "/.miniforge/events")
-        file-path (str events-dir "/" workflow-id ".edn")
-        events (read-event-file file-path)]
+  ([workflow-id] (resume-context-from-event-file workflow-id {}))
+  ([workflow-id opts]
+   (let [events-dir (or (:events-dir opts) @default-events-dir)
+         file-path (str events-dir "/" workflow-id ".edn")
+         events (read-event-file file-path)]
     (if (seq events)
       (let [completed-ids (extract-completed-task-ids events)
             artifacts (extract-completed-artifacts events)]
@@ -181,4 +187,4 @@
          :resume-source file-path})
       {:pre-completed-ids #{}
        :pre-completed-artifacts []
-       :resumed? false})))
+       :resumed? false}))))

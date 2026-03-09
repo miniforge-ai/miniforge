@@ -25,22 +25,10 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.agent.interface :as agent]
-   [ai.miniforge.loop.interface :as loop]
-   [ai.miniforge.task.interface :as task]
-   [ai.miniforge.workflow.dag-resilience :as resilience]))
+   [ai.miniforge.workflow.dag-resilience :as resilience]
+   [ai.miniforge.workflow.dag-task-runner :as task-runner]))
 
 ;--- Layer 0: Result Constructors
-
-(defn- workflow-success [artifact metrics]
-  {:success? true
-   :artifact artifact
-   :metrics (or metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0})})
-
-(defn- workflow-failure [error metrics]
-  {:success? false
-   :error error
-   :metrics (or metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0})})
 
 (defn- dag-execution-result [completed failed artifacts total-tokens]
   {:success? (zero? failed)
@@ -125,85 +113,6 @@
                 :task/context (merge {:parent-plan-id (:plan/id plan)
                                       :parent-workflow-id (:workflow-id context)}
                                      (select-keys context [:llm-backend :artifact-store]))}))))
-
-;--- Layer 1: Mini-Workflow Execution
-
-(defn- create-inner-task [task-def]
-  (task/create-task
-   {:task/id (random-uuid)
-    :task/type :implement
-    :task/title (:task/description task-def "Implement task")
-    :task/description (:task/description task-def "Implement task")
-    :task/status :pending
-    :task/metadata {:dag-task-id (:task/id task-def)
-                    :parent-plan-id (get-in task-def [:task/context :parent-plan-id])}}))
-
-(defn- create-generate-fn [impl-agent context]
-  (fn [t _ctx]
-    (let [result (agent/invoke impl-agent t context)]
-      {:artifact (:artifact result)
-       :tokens (or (get-in result [:metrics :tokens]) 0)})))
-
-(defn- create-repair-fn [impl-agent context]
-  (fn [old-artifact errors _ctx]
-    (let [result (agent/repair impl-agent old-artifact errors context)]
-      {:success? (:success result)
-       :artifact (:repaired result old-artifact)
-       :tokens-used (or (get-in result [:metrics :tokens]) 0)})))
-
-(defn- run-mini-workflow [task-def context]
-  (let [impl-agent (agent/create-implementer {:llm-backend (:llm-backend context)})
-        inner-task (create-inner-task task-def)
-        generate-fn (create-generate-fn impl-agent context)
-        loop-context (assoc context
-                            :max-iterations 3
-                            :repair-fn (create-repair-fn impl-agent context))
-        loop-result (loop/run-simple inner-task generate-fn loop-context)]
-    (if (:success loop-result)
-      (workflow-success (:artifact loop-result) (:metrics loop-result))
-      (workflow-failure (or (:error loop-result)
-                            (get-in loop-result [:termination :message])
-                            "Inner loop failed")
-                        (:metrics loop-result)))))
-
-(defn- workflow-result->dag-result [task-id description wf-result]
-  (if (:success? wf-result)
-    (dag/ok {:task-id task-id
-             :description description
-             :status :implemented
-             :artifacts [(:artifact wf-result)]
-             :metrics (:metrics wf-result)})
-    (dag/err :task-execution-failed
-             (:error wf-result)
-             {:task-id task-id :metrics (:metrics wf-result)})))
-
-(defn- placeholder-result [task-id description]
-  (dag/ok {:task-id task-id
-           :description description
-           :status :implemented
-           :artifacts []
-           :metrics {:tokens 0 :cost-usd 0.0}}))
-
-(defn execute-single-task [task-def context]
-  (let [task-id (:task/id task-def)
-        description (:task/description task-def "Implement task")]
-    (try
-      (if (:llm-backend context)
-        (workflow-result->dag-result task-id description (run-mini-workflow task-def context))
-        (placeholder-result task-id description))
-      (catch Exception e
-        (dag/err :task-execution-failed
-                 (str "Task failed: " (.getMessage e))
-                 {:task-id task-id})))))
-
-(defn create-task-executor-fn [context opts]
-  (let [{:keys [on-task-start on-task-complete]} opts]
-    (fn [task-id dag-context]
-      (when on-task-start (on-task-start task-id))
-      (let [task-def (get-in dag-context [:run-state :run/tasks task-id])
-            result (execute-single-task task-def context)]
-        (when on-task-complete (on-task-complete task-id result))
-        result))))
 
 ;--- Layer 2: Synchronous DAG Execution
 
@@ -309,7 +218,7 @@
           :else
           (let [batch (take max-parallel ready-tasks)
                 _ (notify-batch-start batch on-task-start)
-                results (execute-tasks-batch batch execute-single-task context)
+                results (execute-tasks-batch batch task-runner/execute-single-task context)
                 _ (notify-batch-complete results on-task-complete)
                 _ (emit-batch-events! results event-stream workflow-id)
                 {:keys [completed failed]} (partition-results results)
