@@ -15,7 +15,7 @@
   with a real workflow that mirrors the Autodev decomposition pattern."
 
  :spec/intent
- {:type :workflow-integration
+ {:type :feature
   :scope ["PR decomposition analysis via miniforge workflow"
           "Spec generation from PR metadata + diff"
           "Sub-PR creation proposals"

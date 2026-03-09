@@ -200,9 +200,9 @@
        :confidence 0.5
        :reasoning (str "Fallback: Selected based on task type " task-type)
        :source :fallback}
-      {:workflow :simple-test-v1
+      {:workflow :standard-sdlc
        :confidence 0.3
-       :reasoning "Fallback: Default to simple workflow"
+       :reasoning "Fallback: Default to standard SDLC workflow"
        :source :fallback})))
 
 (defn recommend-workflow-with-fallback
