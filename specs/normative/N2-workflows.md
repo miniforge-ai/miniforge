@@ -1,7 +1,7 @@
 # N2 — Workflow Execution Model
 
-**Version:** 0.4.0-draft
-**Date:** 2026-02-16
+**Version:** 0.5.0-draft
+**Date:** 2026-03-08
 **Status:** Draft
 **Conformance:** MUST
 
@@ -926,6 +926,8 @@ Implementations MUST NOT resume if:
 
 ```clojure
 {:workflow/type keyword            ; REQUIRED: :infrastructure-change, :feature, :refactor, :etl
+ :workflow/tier keyword            ; OPTIONAL: :best-effort | :standard | :critical
+                                   ;           default: :standard (see N1 §5.5.1)
 
  :workflow/intent
  {:intent/type keyword             ; REQUIRED: :import, :create, :update, :destroy, :refactor, :migrate
@@ -944,7 +946,8 @@ Implementations MUST NOT resume if:
  :workflow/validation
  {:policy-packs [string ...]       ; REQUIRED: Policy packs to enforce
   :require-evidence? boolean       ; REQUIRED: Generate evidence bundle?
-  :semantic-intent-check? boolean} ; REQUIRED: Validate semantic intent?
+  :semantic-intent-check? boolean  ; REQUIRED: Validate semantic intent?
+  :slo-overrides map}              ; OPTIONAL: Per-workflow SLO target overrides (see N1 §5.5.3)
 
  :workflow/phases
  {:skip-design? boolean            ; OPTIONAL: Skip design phase if true
@@ -1268,6 +1271,10 @@ instance dispatched to execute the task.
   :cap/archetype keyword            ; Agent archetype (e.g., :implementer, :tester, :reviewer)
   :cap/timeout-ms long              ; Max wall-clock time for task execution
   :cap/resource-locks [keyword ...] ; Resource locks required (from §13.4)
+  :cap/idempotency-key string       ; OPTIONAL: stable key for safe retry/deduplication
+  :cap/max-retries long             ; OPTIONAL: override default retry budget for this task
+  :cap/success-predicate map        ; OPTIONAL: declarative predicate on task output (§13.6.5)
+  :cap/compensation-fn keyword      ; OPTIONAL: compensation action if downstream fails (§13.6.4)
   }}
 ```
 
@@ -1295,6 +1302,65 @@ For tasks that share common requirements, implementations MAY support:
 - **Archetype defaults** — agent profile packs define baseline capabilities per archetype
 
 Merge order: archetype defaults → DAG defaults → task overrides.
+
+#### 13.6.4 Compensation Protocol
+
+When a task declares `:cap/compensation-fn`, the DAG executor MUST support compensating
+actions for coordinated rollback across dependent tasks.
+
+**Compensation requirements:**
+
+1. The compensation action reference MUST be recorded at task completion (in evidence).
+2. If a downstream dependent task fails AND the failure propagation policy requires
+   rollback, the executor MUST invoke the compensation function for all upstream
+   completed tasks in reverse dependency order.
+3. Compensation invocations MUST be recorded in evidence bundles (see N6).
+4. Compensation functions MUST be idempotent — invoking compensation twice MUST produce
+   the same result as invoking it once.
+5. Compensation failure MUST NOT mask the original failure — both MUST be recorded.
+
+```clojure
+;; Compensation invocation record (in evidence)
+{:compensation/task-id uuid          ; Task being compensated
+ :compensation/fn keyword            ; Compensation function invoked
+ :compensation/trigger-task-id uuid  ; Downstream task whose failure triggered compensation
+ :compensation/status keyword        ; :succeeded | :failed
+ :compensation/timestamp inst}
+```
+
+Implementations MAY support configurable compensation policies at DAG level:
+
+- `:compensate-all` — compensate all completed upstream tasks on any failure (default)
+- `:compensate-none` — no automatic compensation; manual intervention required
+- `:compensate-direct` — compensate only direct dependencies of the failed task
+
+#### 13.6.5 Success Predicates
+
+When a task declares `:cap/success-predicate`, the executor MUST evaluate the predicate
+against the task output before transitioning to `:completed`. If the predicate fails, the
+task transitions to `:failed` even if the tool execution itself returned success.
+
+```clojure
+;; Success Predicate Schema
+{:predicate/type keyword          ; REQUIRED: :output-contains | :exit-code | :artifact-exists
+                                  ;           :file-changed | :test-passed | :custom-fn
+ :predicate/args map              ; REQUIRED: type-specific arguments
+ :predicate/description string}   ; REQUIRED: human-readable explanation
+```
+
+**Predicate types:**
+
+| Type | Args | Passes When |
+|------|------|-------------|
+| `:output-contains` | `{:key path :value any}` | Task output contains expected value at path |
+| `:exit-code` | `{:expected int}` | Tool exited with expected code |
+| `:artifact-exists` | `{:artifact-type keyword}` | Task produced an artifact of the specified type |
+| `:file-changed` | `{:paths [string]}` | At least one of the specified files was modified |
+| `:test-passed` | `{:suite keyword}` | Specified test suite passed |
+| `:custom-fn` | `{:fn-ref keyword}` | Custom predicate function returns truthy |
+
+Success predicate evaluation MUST be recorded in task evidence, including the predicate
+definition, the actual values evaluated, and the pass/fail result.
 
 ---
 
@@ -1408,6 +1474,9 @@ PR train orchestration will enable:
 
 **Version History:**
 
+- 0.5.0-draft (2026-03-08): Reliability Nines amendments — Workflow tier field in spec
+  schema (§9.1), Capability contract extensions: idempotency key, success predicates,
+  compensation protocol, max-retries (§13.6.1, §13.6.4, §13.6.5)
 - 0.4.0-draft (2026-02-16): Added workflow chaining (§14) — typed outputs, input binding,
   cross-boundary provenance, chain execution
 - 0.3.0-draft (2026-02-04): Added node capability contracts (§13.6) and frontier semantics (§13.4.1)
