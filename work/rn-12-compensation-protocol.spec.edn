@@ -1,0 +1,91 @@
+;; Reliability Nines — RN-12: Compensation Protocol
+;; Tier 4 (Execution Contracts) — depends on RN-01, RN-02
+;; No downstream blocks
+
+{:spec/title "RN-12: DAG Node Compensation Protocol"
+ :version "1.0.0"
+ :type :feature
+ :priority :medium
+
+ :spec/description
+ "Add compensation protocol to dag-executor per N2 §13.6.4. When a node fails
+  after predecessors have completed side-effecting work, compensate in reverse
+  dependency order. Support 3 policies: :compensate-all, :compensate-effects,
+  :skip. Compensation functions must be idempotent.
+
+  Current state: DAG executor has no compensation logic.
+  Target state: Configurable per-node compensation with reverse-order execution."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/dag-executor/src/ai/miniforge/dag_executor"]}
+
+ :normative-refs
+ {:primary "N2 §13.6.4 — Compensation Protocol"
+  :secondary ["N2 §13.6.1 — Capability Contract"]}
+
+ :gap-analysis-ref "gap-analysis-reliability-nines.md #8"
+ :dag/id :rn-12
+ :dag/depends-on [:rn-01 :rn-02]
+ :dag/blocks []
+
+ :implementation
+ {:step-1-schema
+  {:title "Add compensation fields to node capability contract"
+   :files-to-modify
+   ["components/dag-executor/src/ai/miniforge/dag_executor/state.clj"]
+   :changes
+   ["Add :cap/compensation-fn to task state (optional function)"
+    "Add :cap/idempotency-key to task state (optional string)"
+    "Add :cap/compensation-policy to workflow spec (:compensate-all :compensate-effects :skip)"]}
+
+  :step-2-engine
+  {:title "Implement compensation execution engine"
+   :files-to-create
+   ["components/dag-executor/src/ai/miniforge/dag_executor/compensation.clj"]
+   :changes
+   ["compensate! function: run compensation fns in reverse dependency order"
+    "filter-completed-predecessors: find nodes that completed before failure"
+    "execute-compensation-fn: call with idempotency-key, handle failures"
+    "Compensation failure: log and continue (don't halt)"]}
+
+  :step-3-wire
+  {:title "Wire into failure handling path"
+   :files-to-modify
+   ["components/dag-executor/src/ai/miniforge/dag_executor/core.clj"]
+   :changes
+   ["On node failure: check compensation policy"
+    "If :compensate-all or :compensate-effects: run compensate!"
+    "Emit compensation events"
+    "Record compensation results in evidence"]}}
+
+ :spec/constraints
+ ["Compensation functions MUST be idempotent"
+  "Compensation runs in reverse dependency order"
+  "Compensation failure MUST NOT halt remaining compensations"
+  "Default policy is :skip (backward compatible)"
+  "Follow Polylith interface-only deps"]
+
+ :testing-strategy
+ {:unit-tests
+  ["Reverse dependency order calculation"
+   "Compensation with :compensate-all policy"
+   "Compensation with :compensate-effects policy (only side-effecting nodes)"
+   "Compensation failure doesn't halt remaining"
+   "Default :skip policy does nothing"
+   "Idempotency key passed to compensation function"]
+  :integration-tests
+  ["3-node DAG: A→B→C, C fails, B and A compensated in B→A order"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "Reverse dependency order compensation"
+   :verification "B compensated before A when C fails in A→B→C"}
+  {:criterion "3 configurable policies"
+   :verification "Each policy has distinct behavior tested"}
+  {:criterion "Idempotent compensation"
+   :verification "Calling compensation twice produces same result"}
+  {:criterion "Backward compatible"
+   :verification "Existing DAGs without compensation work unchanged"}]
+
+ :estimated-effort "3-5 days"
+ :workflow/type :simple}

@@ -1,0 +1,194 @@
+;; Reliability Nines — DAG Manifest
+;;
+;; This file defines the dependency DAG for all reliability nines work specs.
+;; Each node references a .spec.edn file in this directory.
+;;
+;; Execution order is determined by :depends-on — specs within the same tier
+;; can run in parallel if their dependencies are met.
+;;
+;; Tier 1 (Foundations):     RN-01, RN-02, RN-03  — all independent
+;; Tier 2 (Core Reliability): RN-04, RN-05, RN-06  — depend on Tier 1
+;; Tier 3 (Governance):      RN-07..RN-11          — depend on Tier 1-2
+;; Tier 4 (Execution):       RN-12..RN-14          — depend on Tier 1-3
+;; Tier 5 (Eval/Intel):      RN-15, RN-16          — depend on Tier 1-4
+;;
+;; Total: 16 specs, ~12 weeks, 5 new components, 12 components modified
+;;
+;; Visual DAG:
+;;
+;;   RN-01 ──┬── RN-04 ──┬── RN-05 ──┬── RN-07 ── RN-08
+;;            │           │           │
+;;   RN-02 ──┤           │           ├── RN-10
+;;            │           │           │
+;;   RN-03 ──┘           ├── RN-06 ──┴── RN-13
+;;                        │
+;;                        ├── RN-15 ── RN-16(index)
+;;                        │
+;;   RN-01 ────────────── RN-09 (trust boundaries)
+;;                        │
+;;   RN-01 ────────────── RN-11 ── RN-14 (tool ops)
+;;                        │
+;;   RN-01, RN-02 ─────── RN-12 (compensation)
+;;
+
+{:dag/id :reliability-nines
+ :dag/title "Reliability Nines Implementation"
+ :dag/description "Close 20 reliability gaps to operationalize the path from 3→5 nines"
+ :dag/version "1.0.0"
+ :dag/created "2026-03-08"
+
+ :dag/gap-analysis "specs/gap-analysis-reliability-nines.md"
+ :dag/normative-specs
+ ["specs/normative/N1-architecture.md (§3.3.3, §5.3.3, §5.5, §5.6, §5.7, §2.27.9-10)"
+  "specs/normative/N2-workflows.md (§9.1, §13.6.4-5)"
+  "specs/normative/N3-event-stream.md (§3.17, §3.18)"
+  "specs/normative/N4-policy-packs.md (§3.4)"
+  "specs/normative/N6-evidence-provenance.md (§2.6, §3.1.1)"
+  "specs/normative/N8-observability-control-interface.md (§3.4)"
+  "specs/normative/N10-governed-tool-execution.md (§3.4-3.5, §7.4)"]
+
+ :dag/nodes
+ [;; ── Tier 1: Foundations ──────────────────────────────
+  {:id :rn-01
+   :spec "work/rn-01-failure-taxonomy.spec.edn"
+   :title "Canonical Failure Taxonomy (10-class)"
+   :tier 1
+   :depends-on []
+   :effort :S
+   :components {:extend [:agent-runtime :event-stream]}}
+
+  {:id :rn-02
+   :spec "work/rn-02-workflow-tiers.spec.edn"
+   :title "Workflow Tiers (:best-effort :standard :critical)"
+   :tier 1
+   :depends-on []
+   :effort :S
+   :components {:extend [:workflow :dag-executor :event-stream]}}
+
+  {:id :rn-03
+   :spec "work/rn-03-reliability-events.spec.edn"
+   :title "Reliability & Repo Intelligence Event Schemas"
+   :tier 1
+   :depends-on []
+   :effort :S
+   :components {:extend [:event-stream]}}
+
+  ;; ── Tier 2: Core Reliability ─────────────────────────
+  {:id :rn-04
+   :spec "work/rn-04-sli-slo-engine.spec.edn"
+   :title "SLI/SLO/Error Budget Engine"
+   :tier 2
+   :depends-on [:rn-01 :rn-02 :rn-03]
+   :effort :L
+   :components {:new [:reliability-metrics] :extend [:observer]}}
+
+  {:id :rn-05
+   :spec "work/rn-05-degradation-modes.spec.edn"
+   :title "Degradation Mode State Machine"
+   :tier 2
+   :depends-on [:rn-01 :rn-02 :rn-03 :rn-04]
+   :effort :M
+   :components {:extend [:workflow :reliability-metrics]}}
+
+  {:id :rn-06
+   :spec "work/rn-06-outcome-evidence.spec.edn"
+   :title "Outcome Evidence Reliability Extensions"
+   :tier 2
+   :depends-on [:rn-01 :rn-02]
+   :effort :S
+   :components {:extend [:evidence-bundle]}}
+
+  ;; ── Tier 3: Governance ───────────────────────────────
+  {:id :rn-07
+   :spec "work/rn-07-autonomy-model.spec.edn"
+   :title "Unified Autonomy Model (A0-A5)"
+   :tier 3
+   :depends-on [:rn-02 :rn-03 :rn-04 :rn-05]
+   :effort :M
+   :components {:new [:autonomy] :extend [:event-stream :workflow]}}
+
+  {:id :rn-08
+   :spec "work/rn-08-safe-mode.spec.edn"
+   :title "Safe-Mode Posture"
+   :tier 3
+   :depends-on [:rn-04 :rn-05 :rn-07]
+   :effort :M
+   :components {:extend [:event-stream :reliability-metrics :autonomy]}}
+
+  {:id :rn-09
+   :spec "work/rn-09-trust-boundaries.spec.edn"
+   :title "Trust Boundary Validation (TB-1 through TB-5)"
+   :tier 3
+   :depends-on [:rn-01]
+   :effort :M
+   :components {:extend [:policy-pack :gate :tool]}}
+
+  {:id :rn-10
+   :spec "work/rn-10-validation-layers.spec.edn"
+   :title "5-Layer Validation Taxonomy (L0-L4)"
+   :tier 3
+   :depends-on [:rn-01 :rn-02 :rn-04]
+   :effort :M
+   :components {:extend [:gate :policy-pack]}}
+
+  {:id :rn-11
+   :spec "work/rn-11-tool-operational-semantics.spec.edn"
+   :title "Tool Operational Semantics & Health Tracking"
+   :tier 3
+   :depends-on [:rn-01]
+   :effort :L
+   :components {:extend [:tool-registry :tool :self-healing]}}
+
+  ;; ── Tier 4: Execution Contracts ──────────────────────
+  {:id :rn-12
+   :spec "work/rn-12-compensation-protocol.spec.edn"
+   :title "DAG Node Compensation Protocol"
+   :tier 4
+   :depends-on [:rn-01 :rn-02]
+   :effort :M
+   :components {:extend [:dag-executor]}}
+
+  {:id :rn-13
+   :spec "work/rn-13-success-predicates.spec.edn"
+   :title "Configurable Success Predicates"
+   :tier 4
+   :depends-on [:rn-01 :rn-06]
+   :effort :M
+   :components {:extend [:dag-executor]}}
+
+  {:id :rn-14
+   :spec "work/rn-14-tool-response-validation.spec.edn"
+   :title "Tool Response Validation & Injection Sanitization"
+   :tier 4
+   :depends-on [:rn-11]
+   :effort :M
+   :components {:extend [:tool :tool-registry]}}
+
+  ;; ── Tier 5: Evaluation & Intelligence ────────────────
+  {:id :rn-15
+   :spec "work/rn-15-evaluation-pipeline.spec.edn"
+   :title "Evaluation Pipeline (Golden Sets, Replay, Shadow, Canary)"
+   :tier 5
+   :depends-on [:rn-04 :rn-06]
+   :effort :L
+   :components {:new [:evaluation] :extend [:workflow :evidence-bundle :artifact]}}
+
+  {:id :rn-16
+   :spec "work/rn-16-index-quality.spec.edn"
+   :title "Index Quality Metrics & Canary Protocol"
+   :tier 5
+   :depends-on [:rn-03]
+   :effort :M
+   :components {:new [:index-quality :canary] :extend [:event-stream]}}]
+
+ :dag/summary
+ {:total-specs 16
+  :new-components [:reliability-metrics :autonomy :evaluation :index-quality :canary]
+  :effort-breakdown {:S 4 :M 8 :L 4}
+  :estimated-weeks 12
+  :tiers
+  [{:tier 1 :name "Foundations" :specs 3 :effort "~1 week" :parallel? true}
+   {:tier 2 :name "Core Reliability" :specs 3 :effort "~2 weeks"}
+   {:tier 3 :name "Governance" :specs 5 :effort "~4 weeks" :note "RN-09, RN-11 can start early"}
+   {:tier 4 :name "Execution Contracts" :specs 3 :effort "~2 weeks"}
+   {:tier 5 :name "Eval & Intelligence" :specs 2 :effort "~3 weeks"}]}}

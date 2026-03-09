@@ -1,0 +1,92 @@
+;; Reliability Nines — RN-13: Success Predicates
+;; Tier 4 (Execution Contracts) — depends on RN-01, RN-06
+;; No downstream blocks
+
+{:spec/title "RN-13: Configurable Success Predicates for DAG Nodes"
+ :version "1.0.0"
+ :type :feature
+ :priority :medium
+
+ :spec/description
+ "Add configurable success predicates to DAG nodes per N2 §13.6.5. Currently
+  nodes succeed/fail based on exception or result/ok? only. Add 6 predicate
+  types: :exit-code, :output-contains, :schema-valid, :metric-threshold,
+  :custom-fn, :composite.
+
+  Current state: Binary success/failure based on exception.
+  Target state: Configurable success criteria per node."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/dag-executor/src/ai/miniforge/dag_executor"]}
+
+ :normative-refs
+ {:primary "N2 §13.6.5 — Success Predicates"
+  :secondary ["N2 §13.6.1 — Capability Contract"]}
+
+ :gap-analysis-ref "gap-analysis-reliability-nines.md #9"
+ :dag/id :rn-13
+ :dag/depends-on [:rn-01 :rn-06]
+ :dag/blocks []
+
+ :implementation
+ {:step-1-schema
+  {:title "Define success predicate schema"
+   :files-to-create
+   ["components/dag-executor/src/ai/miniforge/dag_executor/predicates.clj"]
+   :changes
+   ["SuccessPredicate Malli schema: {:predicate/type keyword :predicate/config map}"
+    "6 predicate types with config schemas"
+    "evaluate-predicate multimethod dispatching on :predicate/type"]}
+
+  :step-2-predicates
+  {:title "Implement 6 predicate types"
+   :changes
+   [":exit-code — check return code against expected value"
+    ":output-contains — regex/string match against output"
+    ":schema-valid — Malli schema validation of result"
+    ":metric-threshold — numeric comparison (latency, size, etc.)"
+    ":custom-fn — user-provided predicate function"
+    ":composite — AND/OR combination of other predicates"]}
+
+  :step-3-wire
+  {:title "Wire into node completion evaluation"
+   :files-to-modify
+   ["components/dag-executor/src/ai/miniforge/dag_executor/state.clj"
+    "components/dag-executor/src/ai/miniforge/dag_executor/core.clj"]
+   :changes
+   ["Add :cap/success-predicate to task state"
+    "After node execution: evaluate predicate if present"
+    "Predicate failure → node failure (not exception-based)"
+    "Record predicate result in evidence"]}}
+
+ :spec/constraints
+ ["No predicate = existing behavior (exception-based success)"
+  ":custom-fn predicates MUST be sandboxed (no side effects)"
+  ":composite predicates MUST support AND and OR"
+  "Predicate evaluation MUST be synchronous"
+  "Follow Polylith interface-only deps"]
+
+ :testing-strategy
+ {:unit-tests
+  ["Each of 6 predicate types with pass/fail cases"
+   "Composite AND: all must pass"
+   "Composite OR: any can pass"
+   "Missing predicate: fall back to exception-based"
+   "Predicate failure produces structured violation"]
+  :integration-tests
+  ["Node with :schema-valid predicate → validates output"
+   "Node with :metric-threshold → fails on slow execution"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "6 predicate types implemented"
+   :verification "Each type tested with pass and fail cases"}
+  {:criterion "Backward compatible"
+   :verification "Nodes without predicates behave as before"}
+  {:criterion "Composite predicates"
+   :verification "AND/OR composition works correctly"}
+  {:criterion "Structured failure on predicate violation"
+   :verification "Failure includes predicate type and details"}]
+
+ :estimated-effort "3-5 days"
+ :workflow/type :simple}
