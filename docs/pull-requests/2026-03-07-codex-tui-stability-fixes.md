@@ -24,7 +24,8 @@ Fixes a cluster of TUI regressions around:
 
 2. **Workflow startup persistence only used first/last events**
    - That was enough for a row summary, but not enough for detail panes.
-   - Phase-only files were also treated as top-level workflows, which let DAG child traces leak into the flat workflow list.
+   - Phase-only files were also treated as top-level workflows, which let DAG child traces leak into the flat workflow
+     list.
 
 3. **PR sync replaced list data without refreshing dependent UI state**
    - `:detail.selected-pr` stayed stale after sync.
@@ -50,7 +51,8 @@ Fixes a cluster of TUI regressions around:
   - gate validation results,
   - artifacts,
   - duration and error state.
-- Excluded phase-only event files from the top-level workflow list so DAG child traces do not appear as standalone workflows.
+- Excluded phase-only event files from the top-level workflow list so DAG child traces do not appear as standalone
+  workflows.
 - Added `load-workflow-detail` helper for direct persisted detail reconstruction.
 
 ### Workflow row and detail state

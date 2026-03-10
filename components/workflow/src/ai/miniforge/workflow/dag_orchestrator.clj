@@ -19,6 +19,10 @@
 (ns ai.miniforge.workflow.dag-orchestrator
   "Orchestrates parallel task execution via DAG scheduling.
 
+   Supports resumable execution: pass :pre-completed-ids in the context
+   to skip tasks that completed in a prior run. Emits :dag/task-completed
+   events to the event stream so completed work survives crashes.
+
    Each DAG task receives a full sub-workflow pipeline (explore → plan → implement
    → verify → ...) rather than just an implementer agent. The sub-workflow is
    derived from the parent workflow config, with the plan phase skipped (the plan
@@ -408,8 +412,15 @@
         max-parallel (get context :max-parallel 4)
         event-stream (or (:event-stream context)
                          (get-in context [:execution/opts :event-stream]))
-        workflow-id (:workflow-id context)]
-    (loop [completed-ids (get context :pre-completed-ids #{})
+        workflow-id (:workflow-id context)
+        pre-completed (get context :pre-completed-ids #{})]
+
+    (when (seq pre-completed)
+      (log/info logger :dag-orchestrator :dag/resuming
+                {:data {:pre-completed-count (count pre-completed)
+                        :pre-completed-ids (vec pre-completed)}}))
+
+    (loop [completed-ids pre-completed
            failed-ids #{}
            all-results {}
            sub-workflow-ids []
@@ -418,13 +429,16 @@
       (let [all-failed (propagate-failures tasks-map failed-ids)
             ready-tasks (compute-ready-tasks tasks-map completed-ids all-failed)]
         (cond
+          ;; No more work — finalize
           (empty? ready-tasks)
           (finalize-dag tasks-map completed-ids all-failed all-results
                         sub-workflow-ids iteration logger)
 
+          ;; Safety valve
           (> iteration 100)
           (dag-execution-error (count completed-ids) (count all-failed) "Max iterations exceeded")
 
+          ;; Execute next batch
           :else
           (let [batch (take max-parallel ready-tasks)
                 _ (notify-batch-start batch on-task-start)
@@ -451,7 +465,6 @@
                          (:new-backend decision)
                          (inc iteration))
                   (:result decision)))
-
               (recur new-completed
                      (into failed-ids failed)
                      (merge all-results results)

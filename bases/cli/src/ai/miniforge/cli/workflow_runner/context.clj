@@ -2,6 +2,7 @@
   "Workflow input resolution and runtime context creation."
   (:require
    [clojure.edn :as edn]
+   [clojure.string :as str]
    [babashka.fs :as fs]
    [babashka.process :as p]
    [cheshire.core :as json]
@@ -47,8 +48,8 @@
                                  "git" "rev-parse" "--short" "HEAD")]
       (when (and (zero? (:exit branch-result))
                  (zero? (:exit commit-result)))
-        {:git-branch (clojure.string/trim (:out branch-result))
-         :git-commit (clojure.string/trim (:out commit-result))}))
+        {:git-branch (str/trim (:out branch-result))
+         :git-commit (str/trim (:out commit-result))}))
     (catch Exception _ nil)))
 
 (defn get-files-in-scope
@@ -131,7 +132,8 @@
 
 (defn create-workflow-context [{:keys [callbacks artifact-store event-stream workflow-id
                                        workflow-type workflow-version llm-client quiet
-                                       spec-title control-state skip-lifecycle-events]}]
+                                       spec-title control-state skip-lifecycle-events
+                                       execution-opts]}]
   (let [on-chunk (es/create-streaming-callback event-stream workflow-id :agent
                                                 {:print? (not quiet) :quiet? quiet})]
     (es/publish! event-stream
@@ -145,4 +147,5 @@
       event-stream (assoc :event-stream event-stream)
       control-state (assoc :control-state control-state)
       skip-lifecycle-events (assoc :skip-lifecycle-events true)
+      execution-opts (assoc :execution/opts execution-opts)
       true (assoc :worktree-path (System/getProperty "user.dir")))))

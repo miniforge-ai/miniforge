@@ -178,13 +178,16 @@
                                                                      {:phase/id :dag-task
                                                                       :task-id task-id}
                                                                      result)))})
+        pre-completed-artifacts (get-in exec-state [:execution/opts :pre-completed-artifacts] [])
         dag-context (assoc dag-context :pre-completed-ids
-                          (get-in context [:pre-completed-dag-tasks] #{}))
+                          (or (get-in exec-state [:execution/opts :pre-completed-dag-tasks])
+                              (get-in context [:pre-completed-dag-tasks] #{})))
         dag-result (dag-orch/execute-plan-as-dag plan dag-context)]
 
-    ;; Merge DAG results into execution state
+    ;; Merge DAG results + recovered artifacts into execution state
     (-> exec-state
-        (update :execution/artifacts into (:artifacts dag-result []))
+        (update :execution/artifacts into (concat pre-completed-artifacts
+                                                  (:artifacts dag-result [])))
         (update :execution/metrics
                 (fn [m]
                   (merge-with + m (:metrics dag-result {:tokens 0 :cost-usd 0.0}))))
