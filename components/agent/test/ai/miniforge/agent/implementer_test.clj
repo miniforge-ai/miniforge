@@ -34,7 +34,9 @@
     (let [agent (implementer/create-implementer)]
       (is (some? agent))
       (is (= :implementer (:role agent)))
-      (is (string? (:system-prompt agent)))))
+      (is (string? (:system-prompt agent)))
+      (is (= {:tokens 50000 :cost-usd 2.5}
+             (get-in agent [:config :budget])))))
 
   (testing "creates implementer with custom config"
     (let [agent (implementer/create-implementer {:config {:temperature 0.1}})]

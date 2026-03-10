@@ -43,7 +43,9 @@
     (let [agent (releaser/create-releaser)]
       (is (some? agent))
       (is (= :releaser (:role agent)))
-      (is (string? (:system-prompt agent)))))
+      (is (string? (:system-prompt agent)))
+      (is (= {:tokens 20000 :cost-usd 1.0}
+             (get-in agent [:config :budget])))))
 
   (testing "creates releaser with custom config"
     (let [agent (releaser/create-releaser {:config {:temperature 0.1}})]

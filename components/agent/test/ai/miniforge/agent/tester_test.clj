@@ -40,7 +40,9 @@
     (let [agent (tester/create-tester)]
       (is (some? agent))
       (is (= :tester (:role agent)))
-      (is (string? (:system-prompt agent)))))
+      (is (string? (:system-prompt agent)))
+      (is (= {:tokens 40000 :cost-usd 2.0}
+             (get-in agent [:config :budget])))))
 
   (testing "creates tester with custom config"
     (let [agent (tester/create-tester {:config {:temperature 0.1}})]
