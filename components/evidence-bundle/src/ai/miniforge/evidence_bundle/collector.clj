@@ -13,13 +13,14 @@
   "Extract intent from workflow specification.
    Returns intent evidence map."
   [workflow-spec]
-  {:intent/type (or (:intent/type workflow-spec) :update)
-   :intent/description (or (:description workflow-spec) (:title workflow-spec) "")
-   :intent/business-reason (or (:business-reason workflow-spec)
-                               "No business reason provided")
-   :intent/constraints (or (:constraints workflow-spec) [])
+  {:intent/type (get workflow-spec :intent/type :update)
+   :intent/description (or (:description workflow-spec)
+                            (get workflow-spec :title ""))
+   :intent/business-reason (get workflow-spec :business-reason
+                                "No business reason provided")
+   :intent/constraints (get workflow-spec :constraints [])
    :intent/declared-at (java.time.Instant/now)
-   :intent/author (or (:author workflow-spec) "system")})
+   :intent/author (get workflow-spec :author "system")})
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Phase Evidence Collection
@@ -28,19 +29,21 @@
   "Build phase evidence from phase execution context.
    Returns phase evidence map per N6 spec."
   [phase-name agent-id phase-result]
-  {:phase/name phase-name
-   :phase/agent agent-id
-   :phase/agent-instance-id (or (:agent-instance-id phase-result) (random-uuid))
-   :phase/started-at (or (:started-at phase-result) (java.time.Instant/now))
-   :phase/completed-at (or (:completed-at phase-result) (java.time.Instant/now))
-   :phase/duration-ms (or (:duration-ms phase-result)
-                          (- (.toEpochMilli (:completed-at phase-result))
-                             (.toEpochMilli (:started-at phase-result))))
-   :phase/output (or (:output phase-result) {})
-   :phase/artifacts (vec (or (:artifacts phase-result) []))
-   :phase/inner-loop-iterations (or (:inner-loop-iterations phase-result) 0)
-   :phase/event-stream-range (or (:event-stream-range phase-result)
-                                 {:start-seq 0 :end-seq 0})})
+  (let [started-at (get phase-result :started-at (java.time.Instant/now))
+        completed-at (get phase-result :completed-at (java.time.Instant/now))]
+    {:phase/name phase-name
+     :phase/agent agent-id
+     :phase/agent-instance-id (get phase-result :agent-instance-id (random-uuid))
+     :phase/started-at started-at
+     :phase/completed-at completed-at
+     :phase/duration-ms (get phase-result :duration-ms
+                             (- (.toEpochMilli completed-at)
+                                (.toEpochMilli started-at)))
+     :phase/output (get phase-result :output {})
+     :phase/artifacts (vec (get phase-result :artifacts []))
+     :phase/inner-loop-iterations (get phase-result :inner-loop-iterations 0)
+     :phase/event-stream-range (get phase-result :event-stream-range
+                                    {:start-seq 0 :end-seq 0})}))
 
 (defn collect-phase-evidence
   "Collect evidence for a single phase from workflow state.
@@ -77,13 +80,13 @@
   "Build policy check evidence from gate result.
    Returns policy check evidence per N6 spec."
   [gate-result]
-  {:policy-check/pack-id (or (:pack-id gate-result) "unknown")
-   :policy-check/pack-version (or (:pack-version gate-result) "1.0.0")
-   :policy-check/phase (or (:phase gate-result) :unknown)
-   :policy-check/checked-at (or (:checked-at gate-result) (java.time.Instant/now))
-   :policy-check/violations (vec (or (:violations gate-result) []))
-   :policy-check/passed? (or (:passed? gate-result) true)
-   :policy-check/duration-ms (or (:duration-ms gate-result) 0)})
+  {:policy-check/pack-id (get gate-result :pack-id "unknown")
+   :policy-check/pack-version (get gate-result :pack-version "1.0.0")
+   :policy-check/phase (get gate-result :phase :unknown)
+   :policy-check/checked-at (get gate-result :checked-at (java.time.Instant/now))
+   :policy-check/violations (vec (get gate-result :violations []))
+   :policy-check/passed? (get gate-result :passed? true)
+   :policy-check/duration-ms (get gate-result :duration-ms 0)})
 
 (defn collect-policy-checks
   "Collect all policy check evidence from workflow state.
@@ -106,17 +109,17 @@
   (if (contains? promotion-record :pack/id)
     promotion-record
     ;; Otherwise, build from legacy format
-    {:pack/id (or (:pack-id promotion-record) "unknown")
-     :pack/type (or (:pack-type promotion-record) :knowledge)
-     :from-trust (or (:from-trust promotion-record) :untrusted)
-     :to-trust (or (:to-trust promotion-record) :trusted)
-     :promoted-by (or (:promoted-by promotion-record) "system")
-     :promoted-at (or (:promoted-at promotion-record) (java.time.Instant/now))
-     :promotion-policy (or (:promotion-policy promotion-record) "knowledge-safety")
-     :promotion-justification (or (:promotion-justification promotion-record)
-                                  "No justification provided")
-     :pack-hash (or (:pack-hash promotion-record) "")
-     :pack-signature (or (:pack-signature promotion-record) "")}))
+    {:pack/id (get promotion-record :pack-id "unknown")
+     :pack/type (get promotion-record :pack-type :knowledge)
+     :from-trust (get promotion-record :from-trust :untrusted)
+     :to-trust (get promotion-record :to-trust :trusted)
+     :promoted-by (get promotion-record :promoted-by "system")
+     :promoted-at (get promotion-record :promoted-at (java.time.Instant/now))
+     :promotion-policy (get promotion-record :promotion-policy "knowledge-safety")
+     :promotion-justification (get promotion-record :promotion-justification
+                                   "No justification provided")
+     :pack-hash (get promotion-record :pack-hash "")
+     :pack-signature (get promotion-record :pack-signature "")}))
 
 (defn collect-pack-promotions
   "Collect all pack promotion evidence from workflow state.
@@ -124,6 +127,87 @@
   [workflow-state]
   (let [promotions (get workflow-state :workflow/pack-promotions [])]
     (mapv build-pack-promotion-evidence promotions)))
+
+;------------------------------------------------------------------------------ Layer 3.5
+;; Supervision Decision Evidence (N6)
+
+(defn collect-supervision-decisions
+  "Collect supervision decision events from the event stream.
+
+   Filters for :supervision/tool-use-evaluated events and transforms
+   them into evidence records.
+
+   Arguments:
+   - event-stream: Event stream atom
+   - workflow-id: UUID of the workflow
+
+   Returns vector of supervision decision evidence maps."
+  [event-stream workflow-id]
+  (try
+    (when event-stream
+      (let [get-events-fn (requiring-resolve 'ai.miniforge.event-stream.core/get-events)
+            events (get-events-fn event-stream
+                                  {:workflow-id workflow-id
+                                   :event-type :supervision/tool-use-evaluated})]
+        (mapv (fn [event]
+                (cond-> {:supervision/tool-name (get event :tool/name "unknown")
+                         :supervision/decision (get event :supervision/decision "allow")
+                         :supervision/timestamp (get event :event/timestamp
+                                                     (java.util.Date.))}
+                  (:supervision/reasoning event)
+                  (assoc :supervision/reasoning (:supervision/reasoning event))
+
+                  (:supervision/meta-eval? event)
+                  (assoc :supervision/meta-eval? true)
+
+                  (:supervision/confidence event)
+                  (assoc :supervision/confidence (:supervision/confidence event))
+
+                  (:workflow/phase event)
+                  (assoc :supervision/phase (:workflow/phase event))))
+              events)))
+    (catch Exception _e
+      ;; event-stream dependency might not be loaded
+      [])))
+
+(defn collect-control-actions
+  "Collect control action events from the event stream.
+
+   Pairs :control-action/requested with :control-action/executed events.
+
+   Arguments:
+   - event-stream: Event stream atom
+   - workflow-id: UUID of the workflow
+
+   Returns vector of control action evidence maps."
+  [event-stream workflow-id]
+  (try
+    (when event-stream
+      (let [get-events-fn (requiring-resolve 'ai.miniforge.event-stream.core/get-events)
+            requested (get-events-fn event-stream
+                                     {:workflow-id workflow-id
+                                      :event-type :control-action/requested})
+            executed (get-events-fn event-stream
+                                    {:workflow-id workflow-id
+                                     :event-type :control-action/executed})
+            executed-by-id (into {} (map (fn [e] [(:action/id e) e]) executed))]
+        (mapv (fn [req-event]
+                (let [action-id (:action/id req-event)
+                      exec-event (get executed-by-id action-id)]
+                  (cond-> {:control-action/id action-id
+                           :control-action/type (:action/type req-event)
+                           :control-action/requester (get req-event :action/requester {})
+                           :control-action/timestamp (get req-event :event/timestamp
+                                                         (java.util.Date.))
+                           :control-action/result (if exec-event :executed :pending)}
+                    (:action/justification req-event)
+                    (assoc :control-action/justification (:action/justification req-event))
+
+                    (:action/target req-event)
+                    (assoc :control-action/target (:action/target req-event)))))
+              requested)))
+    (catch Exception _e
+      [])))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Outcome Evidence
@@ -163,14 +247,17 @@
 (defn assemble-evidence-bundle
   "Assemble complete evidence bundle from workflow state and context.
    Returns evidence bundle ready for storage."
-  [workflow-id workflow-state artifact-store]
+  [workflow-id workflow-state artifact-store & [opts]]
   (let [workflow-spec (:workflow/spec workflow-state)
+        event-stream (:event-stream opts)
         intent (extract-intent workflow-spec)
         phase-evidence (collect-all-phases workflow-state)
         policy-checks (collect-policy-checks workflow-state)
         pack-promotions (collect-pack-promotions workflow-state)
         outcome (build-outcome-evidence workflow-state)
         tool-invocations (collect-tool-invocations workflow-state)
+        supervision-decisions (collect-supervision-decisions event-stream workflow-id)
+        control-actions (collect-control-actions event-stream workflow-id)
 
         ;; Get artifacts for semantic validation
         artifacts (when artifact-store
@@ -185,24 +272,42 @@
         semantic-validation (when (seq impl-artifacts)
                               (let [validator (requiring-resolve
                                                'ai.miniforge.evidence-bundle.protocols.impl.semantic-validator/validate-intent-impl)]
-                                (validator intent impl-artifacts)))]
+                                (validator intent impl-artifacts)))
 
-    (let [bundle (merge
-                  (schema/create-evidence-bundle-template)
-                  {:evidence-bundle/id (random-uuid)
-                   :evidence-bundle/workflow-id workflow-id
-                   :evidence-bundle/created-at (java.time.Instant/now)
-                   :evidence/intent intent
-                   :evidence/policy-checks policy-checks
-                   :evidence/outcome outcome}
-                  phase-evidence
-                  (when (seq tool-invocations)
-                    {:evidence/tool-invocations tool-invocations})
-                  (when (seq pack-promotions)
-                    {:evidence/pack-promotions pack-promotions})
-                  (when semantic-validation
-                    {:evidence/semantic-validation semantic-validation}))]
-      (assoc bundle :evidence/content-hash (hash/content-hash bundle)))))
+        base-bundle (merge
+                     (schema/create-evidence-bundle-template)
+                     {:evidence-bundle/id (random-uuid)
+                      :evidence-bundle/workflow-id workflow-id
+                      :evidence-bundle/created-at (java.time.Instant/now)
+                      :evidence/intent intent
+                      :evidence/policy-checks policy-checks
+                      :evidence/outcome outcome}
+                     phase-evidence)
+        bundle (cond-> base-bundle
+                 (seq tool-invocations)
+                 (assoc :evidence/tool-invocations tool-invocations)
+                 (seq pack-promotions)
+                 (assoc :evidence/pack-promotions pack-promotions)
+                 (seq supervision-decisions)
+                 (assoc :evidence/supervision-decisions supervision-decisions)
+                 (seq control-actions)
+                 (assoc :evidence/control-actions control-actions)
+                 semantic-validation
+                 (assoc :evidence/semantic-validation semantic-validation))
+
+        ;; Run sensitive data scanner before hashing
+        scan-result (try
+                      (let [scan-fn (requiring-resolve
+                                      'ai.miniforge.evidence-bundle.scanner/scan-artifact)
+                            compliance-fn (requiring-resolve
+                                            'ai.miniforge.evidence-bundle.scanner/compliance-metadata)]
+                        (compliance-fn (scan-fn bundle)))
+                      (catch Exception _e nil))
+
+        ;; Merge compliance metadata
+        bundle (cond-> bundle
+                 scan-result (merge scan-result))]
+    (assoc bundle :evidence/content-hash (hash/content-hash bundle))))
 
 ;------------------------------------------------------------------------------ Layer 6
 ;; Workflow Integration Helpers

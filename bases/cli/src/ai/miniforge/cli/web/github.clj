@@ -6,10 +6,10 @@
    [cheshire.core :as json]
    [ai.miniforge.cli.web.risk :as risk]))
 
-(defn- sh-success? [result]
+(defn sh-success? [result]
   (zero? (:exit result)))
 
-(defn- sh-error-msg [result default]
+(defn sh-error-msg [result default]
   (str/trim (or (:err result) (:out result) default)))
 
 (defn check-auth []

@@ -6,8 +6,7 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]
-   ;; :done is registered by release.clj
-   [ai.miniforge.phase.release]))
+   [ai.miniforge.phase.interface]))
 
 ;; ============================================================================
 ;; Context creation tests
@@ -200,7 +199,7 @@
                     :execution/current-phase :done
                     :execution/status :completed}
           ;; Call extract-output via its var (private fn)
-          result (#'ai.miniforge.workflow.runner/extract-output fake-ctx)
+          result (ai.miniforge.workflow.runner/extract-output fake-ctx)
           output (:execution/output result)]
       (is (some? output) ":execution/output should be present")
       (is (= [{:type :file :path "out.txt"}] (:artifacts output)))

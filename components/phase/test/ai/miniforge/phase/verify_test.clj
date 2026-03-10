@@ -28,12 +28,12 @@
    :test/assertions-count 10
    :test/cases-count 5})
 
-(defn- mock-tester-agent
+(defn mock-tester-agent
   "Create a mock tester agent map (does NOT call create-tester to avoid recursion)."
   []
   {:type :mock-tester})
 
-(defn- create-base-context
+(defn create-base-context
   "Create base context for testing."
   []
   {:execution/input {:description "Test task"
@@ -41,7 +41,7 @@
                      :intent "testing"}
    :execution/metrics {:tokens 0 :duration-ms 0}})
 
-(defn- with-mocked-test-runner
+(defn with-mocked-test-runner
   "Run body-fn with run-tests! and write-test-files! mocked to prevent subprocess spawning."
   [body-fn]
   (let [write-var (resolve 'ai.miniforge.phase.verify/write-test-files!)
@@ -85,7 +85,7 @@
                                   {:result {:status :success
                                             :output mock-code-artifact}}))
                 ctx-with-config (assoc ctx :phase-config {:phase :verify})
-                result (#'verify/enter-verify ctx-with-config)]
+                result (verify/enter-verify ctx-with-config)]
 
             (testing "phase metadata is set"
               (is (= :verify (get-in result [:phase :name])))
@@ -122,7 +122,7 @@
                                   {:result {:status :success
                                             :output mock-code-artifact}})
                         (assoc :phase-config {:phase :verify}))
-                result (#'verify/enter-verify ctx)
+                result (verify/enter-verify ctx)
                 output (get-in result [:phase :result :output])]
             (is (= (:test/id mock-test-artifact) (:test/id output)))))))))
 
@@ -139,7 +139,7 @@
           (let [ctx (-> (create-base-context)
                         (assoc-in [:execution/input :task/code-artifact] mock-code-artifact)
                         (assoc :phase-config {:phase :verify}))
-                result (#'verify/enter-verify ctx)
+                result (verify/enter-verify ctx)
                 output (get-in result [:phase :result :output])]
             (is (= (:test/id mock-test-artifact) (:test/id output)))))))))
 
@@ -152,7 +152,7 @@
       (let [ctx (-> (create-base-context)
                     (assoc-in [:execution/input :code-artifact] mock-code-artifact)
                     (assoc :phase-config {:phase :verify}))
-            result (#'verify/enter-verify ctx)]
+            result (verify/enter-verify ctx)]
         (is (= false (get-in result [:phase :result :success])))
         (is (= "Test generation failed" (get-in result [:phase :result :error :message])))
         (is (= 0 (get-in result [:phase :result :metrics :tokens])))))))

@@ -22,7 +22,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Workflow fragments
 
-(defn- format-time
+(defn format-time
   [ts]
   (let [date (cond
                (instance? java.util.Date ts) ts
@@ -43,7 +43,7 @@
      [:div.empty-state [:p "No events yet"]]
      [:div.event-list
       (for [evt (take 50 events)]
-        (let [evt-type (or (:event/type evt) "unknown")
+        (let [evt-type (get evt :event/type "unknown")
               evt-ts (:event/timestamp evt)
               evt-phase (or (:workflow/phase evt) (:phase evt))
               type-name (if (keyword? evt-type) (name evt-type) (str evt-type))]
@@ -55,7 +55,7 @@
            (when-let [msg (or (:message evt) (:event/message evt))]
              [:span.event-message msg])]))])))
 
-(defn- status-label
+(defn status-label
   "Human-readable status label."
   [status]
   (case status
@@ -79,7 +79,7 @@
      [:div.workflow-card-list
       (for [wf workflows]
         (let [wf-id (str (:id wf))
-              status (or (:status wf) :unknown)]
+              status (get wf :status :unknown)]
           [:details.workflow-card
            {:id (str "wf-" wf-id)
             :hx-get (str "/api/workflow/" wf-id "/panel")
@@ -95,7 +95,7 @@
             [:div.wf-progress-inline
              [:div.wf-progress-track
               [:div.wf-progress-fill
-               {:style (str "width:" (or (:progress wf) 0) "%")}]]]
+               {:style (str "width:" (get wf :progress 0) "%")}]]]
             [:span.wf-time (format-time (:started-at wf))]
             [:span.wf-expand-icon "▸"]]
            [:div.workflow-card-body {:id (str "wf-panel-" wf-id)}]]))])))
@@ -107,15 +107,15 @@
    [:div.workflow-panel
     ;; Meta row
     [:div.workflow-panel-meta
-     [:span (c/badge (name (or (:status workflow) :unknown))
+     [:span (c/badge (name (get workflow :status :unknown))
                      {:variant (case (:status workflow)
                                  :completed :success
                                  :running :info
                                  :failed :error
                                  :stale :warning
                                  :neutral)})]
-     [:span.workflow-phase (str "Phase: " (or (:phase workflow) "—"))]
-     [:span.workflow-progress (str "Progress: " (or (:progress workflow) 0) "%")]
+     [:span.workflow-phase (str "Phase: " (get workflow :phase "—"))]
+     [:span.workflow-progress (str "Progress: " (get workflow :progress 0) "%")]
      (when (:started-at workflow)
        [:span.workflow-started (str "Started: " (format-time (:started-at workflow)))])]
 

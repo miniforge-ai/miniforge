@@ -38,7 +38,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Version parsing and comparison
 
-(defn- parse-version
+(defn parse-version
   "Parse a DateVer version string (YYYY.MM.DD or YYYY.MM.DD.N).
    Returns {:year int :month int :day int :patch int} or nil if invalid."
   [version-str]
@@ -50,7 +50,7 @@
          :day (Integer/parseInt day)
          :patch (if patch (Integer/parseInt patch) 0)}))))
 
-(defn- compare-versions
+(defn compare-versions
   "Compare two version strings.
    Returns negative if v1 < v2, positive if v1 > v2, 0 if equal."
   [v1 v2]
@@ -69,7 +69,7 @@
                   (compare (:patch p1) (:patch p2))))))))
       (compare v1 v2))))
 
-(defn- parse-version-constraint
+(defn parse-version-constraint
   "Parse a version constraint string.
    Supports:
    - Exact: '2026.01.25' or '=2026.01.25'
@@ -120,7 +120,7 @@
                (subs constraint-str 1)
                constraint-str)}))
 
-(defn- satisfies-constraint?
+(defn satisfies-constraint?
   "Check if a version satisfies a constraint.
    Returns true if version satisfies the constraint."
   [version constraint]
@@ -140,13 +140,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Dependency graph construction
 
-(defn- get-pack-dependencies
+(defn get-pack-dependencies
   "Extract dependencies from a pack manifest.
    Returns vector of {:pack-id string :version-constraint string}."
   [pack]
   (or (:pack/extends pack) []))
 
-(defn- build-dependency-graph
+(defn build-dependency-graph
   "Build a dependency graph from a collection of packs.
 
    Arguments:
@@ -173,7 +173,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Validation rules
 
-(defn- detect-circular-dependencies
+(defn detect-circular-dependencies
   "Detect circular dependencies in the graph.
    Returns vector of violation maps:
    [{:type :circular-dependency
@@ -202,7 +202,7 @@
                               (str/join " → " cycle))}))
          vec)))
 
-(defn- detect-missing-dependencies
+(defn detect-missing-dependencies
   "Detect missing dependencies in the graph.
    Returns vector of violation maps:
    [{:type :missing-dependency
@@ -223,7 +223,7 @@
                           missing))))
          vec)))
 
-(defn- detect-version-conflicts
+(defn detect-version-conflicts
   "Detect version conflicts in the dependency tree.
    Returns vector of violation maps:
    [{:type :version-conflict
@@ -267,7 +267,7 @@
                                                               conflicting)))}))))
          vec)))
 
-(defn- detect-trust-violations
+(defn detect-trust-violations
   "Detect trust level constraint violations.
    Per N4 §2.4.2: untrusted packs cannot require trusted dependencies.
 
@@ -290,7 +290,7 @@
   ;; For now, return empty vector
   [])
 
-(defn ^:private calculate-pack-depths
+(defn calculate-pack-depths
   "Calculate maximum depth for each pack using bottom-up traversal.
    Returns map of pack-id -> {:depth int :chain [pack-ids]}."
   [graph]
@@ -333,7 +333,7 @@
         (let [[depths' _] (calc-depth (first remaining-packs) #{} depths)]
           (recur (rest remaining-packs) depths'))))))
 
-(defn- detect-depth-violations
+(defn detect-depth-violations
   "Detect dependency chains that exceed the depth limit.
    Returns vector of violation maps:
    [{:type :depth-limit

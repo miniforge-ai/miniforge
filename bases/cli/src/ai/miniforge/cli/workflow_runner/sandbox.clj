@@ -9,13 +9,13 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Sandbox helpers
 
-(defn- sandbox-release-fn [executor environment-id]
+(defn sandbox-release-fn [executor environment-id]
   (fn []
     (try
       (dag/release-environment! executor environment-id)
       (catch Exception _ nil))))
 
-(defn- infer-repo-url [spec enriched-spec]
+(defn infer-repo-url [spec enriched-spec]
   (or (:spec/repo-url spec)
       (get-in enriched-spec [:spec/context :repo-url])
       (try
@@ -23,7 +23,7 @@
                                  "git" "remote" "get-url" "origin")))
         (catch Exception _ nil))))
 
-(defn- infer-branch [spec enriched-spec]
+(defn infer-branch [spec enriched-spec]
   (or (:spec/branch spec)
       (get-in enriched-spec [:spec/context :git-branch])
       "main"))
@@ -31,7 +31,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Sandbox preparation
 
-(defn- prepare-sandbox [spec enriched-spec]
+(defn prepare-sandbox [spec enriched-spec]
   (let [prep-result (dag/prepare-docker-executor! {:image-type :clojure})]
     (if-not (dag/ok? prep-result)
       prep-result

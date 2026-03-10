@@ -73,7 +73,7 @@
 ;------------------------------------------------------------------------------ Layer 5
 ;; Sparkline
 
-(def ^:private braille-chars
+(def braille-chars
   "Braille characters for sparkline (8 vertical levels)."
   [\⠀ \⡀ \⡄ \⡆ \⡇ \⣇ \⣧ \⣷ \⣿])
 

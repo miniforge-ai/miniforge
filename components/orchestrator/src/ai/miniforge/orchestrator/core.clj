@@ -18,6 +18,22 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration
 
+(defn build-repair-learning
+  "Build a learning capture map from a repair history entry."
+  [agent-role task repair-history]
+  (let [last-repair (last repair-history)]
+    {:agent agent-role
+     :task-id (:task/id task)
+     :title (str "Repair pattern: " (name (:error-type last-repair)))
+     :content (str "## Repair Context\n\n"
+                   "Task: " (:task/title task) "\n"
+                   "Agent: " (name agent-role) "\n"
+                   "Repair iterations: " (count repair-history) "\n\n"
+                   "## Pattern\n\n"
+                   (:fix-description last-repair))
+     :tags [:repair :inner-loop (keyword (name agent-role))]
+     :confidence 0.7}))
+
 (def default-config
   "Default control plane configuration."
   {:default-budget {:max-tokens 100000
@@ -68,9 +84,9 @@
     (swap! usage update workflow-id
            (fn [current]
              (let [curr (or current {:tokens 0 :cost-usd 0.0 :duration-ms 0})]
-               {:tokens (+ (:tokens curr) (or (:tokens new-usage) 0))
-                :cost-usd (+ (:cost-usd curr) (or (:cost-usd new-usage) 0.0))
-                :duration-ms (+ (:duration-ms curr) (or (:duration-ms new-usage) 0))}))))
+               {:tokens (+ (:tokens curr) (get new-usage :tokens 0))
+                :cost-usd (+ (:cost-usd curr) (get new-usage :cost-usd 0.0))
+                :duration-ms (+ (:duration-ms curr) (get new-usage :duration-ms 0))}))))
 
   (check-budget [_this workflow-id]
     (let [budget (get @budgets workflow-id (:default-budget default-config))
@@ -95,7 +111,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Knowledge Coordinator implementation
 
-(defn- format-zettel-for-context
+(defn format-zettel-for-context
   "Format a zettel for inclusion in agent context."
   [zettel]
   (str "### " (:zettel/title zettel)
@@ -105,7 +121,7 @@
        (:zettel/content zettel)
        "\n"))
 
-(defn- format-knowledge-block
+(defn format-knowledge-block
   "Format injected knowledge as a context block."
   [zettels agent-role]
   (when (seq zettels)
@@ -120,31 +136,30 @@
   (inject-for-agent [_this agent-role task context]
     (when (:knowledge-injection? config)
       (let [task-tags (or (:task/tags task) [])
-            context-tags (or (:tags context) [])
+            context-tags (get context :tags [])
             query-context {:tags (distinct (concat task-tags context-tags))}
             zettels (knowledge/inject-knowledge knowledge-store agent-role query-context)]
         {:formatted (format-knowledge-block zettels agent-role)
          :zettels zettels
          :count (count zettels)})))
 
-  (capture-execution-learning [_this execution-result]
+  (capture-execution-learning [this execution-result]
     (when (and (:learning-capture? config)
                (:repaired? execution-result))
       (let [{:keys [agent-role task repair-history]} execution-result]
         (when (seq repair-history)
-          (knowledge/capture-inner-loop-learning
-           knowledge-store
-           {:agent agent-role
-            :task-id (:task/id task)
-            :title (str "Repair pattern: " (-> repair-history last :error-type name))
-            :content (str "## Repair Context\n\n"
-                          "Task: " (:task/title task) "\n"
-                          "Agent: " (name agent-role) "\n"
-                          "Repair iterations: " (count repair-history) "\n\n"
-                          "## Pattern\n\n"
-                          (-> repair-history last :fix-description))
-            :tags [:repair :inner-loop (keyword (name agent-role))]
-            :confidence 0.7})))))
+          (let [learning (knowledge/capture-inner-loop-learning
+                          knowledge-store
+                          (build-repair-learning agent-role task repair-history))]
+            ;; Check if learning should be promoted to a rule
+            (when learning
+              (let [learning-id (or (:zettel/id learning) (:id learning))
+                    promotion-check (proto/should-promote-learning? this learning)]
+                (when (and (:promote? promotion-check) learning-id)
+                  (try
+                    (knowledge/promote-learning knowledge-store learning-id {})
+                    (catch Exception _e nil)))))
+            learning)))))
 
   (should-promote-learning? [_this learning]
     (let [confidence (get-in learning [:zettel/source :source/confidence] 0)

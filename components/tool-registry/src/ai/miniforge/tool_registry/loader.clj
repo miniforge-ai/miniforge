@@ -38,18 +38,18 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; File discovery and path utilities
 
-(defn- user-tools-dir
+(defn user-tools-dir
   "Get the user tools directory (~/.miniforge/tools)."
   []
   (io/file (System/getProperty "user.home") ".miniforge" "tools"))
 
-(defn- project-tools-dir
+(defn project-tools-dir
   "Get the project tools directory (.miniforge/tools)."
   [project-dir]
   (when project-dir
     (io/file project-dir ".miniforge" "tools")))
 
-(defn- builtin-tools-dirs
+(defn builtin-tools-dirs
   "Get built-in tools directories from classpath resources."
   []
   ;; Look for tools directory in resources
@@ -57,14 +57,14 @@
     (when (= "file" (.getProtocol url))
       [(io/file (.toURI url))])))
 
-(defn- tool-file?
+(defn tool-file?
   "Check if a file is a tool configuration file (.edn)."
   [file]
   (and (.isFile file)
        (str/ends-with? (.getName file) ".edn")
        (not (str/starts-with? (.getName file) "."))))
 
-(defn- find-tool-files
+(defn find-tool-files
   "Find all .edn files in a directory, recursively."
   [dir]
   (when (and dir (.exists dir) (.isDirectory dir))
@@ -72,7 +72,7 @@
          (filter tool-file?)
          (vec))))
 
-(defn- infer-tool-type
+(defn infer-tool-type
   "Infer tool type from file path.
 
    Path patterns:
@@ -93,7 +93,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; EDN parsing and validation
 
-(defn- safe-read-edn
+(defn safe-read-edn
   "Safely read EDN from a file.
    Returns {:success? bool :data any :error string}."
   [file]
@@ -104,7 +104,7 @@
     (catch Exception e
       (schema/failure :data (.getMessage e)))))
 
-(defn- validate-and-normalize
+(defn validate-and-normalize
   "Validate and normalize a tool configuration."
   [tool file-path]
   (let [normalized (schema/normalize-tool tool)
@@ -214,14 +214,14 @@
         results (for [{:keys [path]} discovered]
                   (let [result (load-tool-file registry path)]
                     (when logger
-                      (if (:success? result)
+                      (if (schema/succeeded? result)
                         (log/debug logger :system :tool-registry/loaded
                                    {:data {:tool-id (:tool-id result) :path path}})
                         (log/warn logger :system :tool-registry/load-failed
                                   {:data {:path path :error (:error result)}})))
                     (assoc result :path path)))
-        loaded (vec (keep :tool-id (filter :success? results)))
-        failed (vec (for [r (remove :success? results)]
+        loaded (vec (keep :tool-id (filter schema/succeeded? results)))
+        failed (vec (for [r (remove schema/succeeded? results)]
                       {:path (:path r) :error (or (:error r) (:errors r))}))]
     {:loaded loaded
      :failed failed}))

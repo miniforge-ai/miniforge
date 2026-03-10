@@ -8,14 +8,14 @@
 
 ;------------------------------------------------------------------------------ Test fixtures
 
-(defn- passing-gate
+(defn passing-gate
   "Create a gate that always passes."
   [gate-id]
   (loop/custom-gate gate-id :test
                     (fn [_artifact _context]
                       (loop/pass-result gate-id :test))))
 
-(defn- failing-gate
+(defn failing-gate
   "Create a gate that always fails with non-blocking errors."
   [gate-id error-message]
   (loop/custom-gate gate-id :test
@@ -24,7 +24,7 @@
                                         [(assoc (loop/make-error :test-error error-message)
                                                 :severity :non-blocking)]))))
 
-(defn- warning-gate
+(defn warning-gate
   "Create a gate that passes but emits warnings."
   [gate-id warning-message]
   (loop/custom-gate gate-id :test

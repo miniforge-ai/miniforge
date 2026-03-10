@@ -46,7 +46,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; File discovery and path utilities
 
-(defn- find-rule-files
+(defn find-rule-files
   "Find all rule .edn files in a rules/ directory, recursive."
   [rules-dir]
   (when (.exists (io/file rules-dir))
@@ -54,7 +54,7 @@
          (filter #(.isFile %))
          (filter #(str/ends-with? (.getName %) ".edn")))))
 
-(defn- pack-file?
+(defn pack-file?
   "Check if a file is a pack file (pack.edn or *.pack.edn)."
   [file]
   (let [name (.getName file)]
@@ -64,7 +64,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; EDN parsing and validation
 
-(defn- safe-read-edn
+(defn safe-read-edn
   "Safely read EDN from a file.
    Returns {:success? bool :data any :error string}."
   [file]
@@ -75,7 +75,7 @@
     (catch Exception e
       (schema/failure :data (.getMessage e)))))
 
-(defn- ensure-instant
+(defn ensure-instant
   "Convert various timestamp representations to Instant."
   [value]
   (cond
@@ -86,7 +86,7 @@
                         (java.time.Instant/now)))
     :else (java.time.Instant/now)))
 
-(defn- normalize-rule
+(defn normalize-rule
   "Normalize a rule, ensuring required fields and types."
   [rule]
   (cond-> rule
@@ -102,7 +102,7 @@
     (get-in rule [:rule/applies-to :phases])
     (update-in [:rule/applies-to :phases] #(if (set? %) % (set %)))))
 
-(defn- normalize-pack
+(defn normalize-pack
   "Normalize a pack, ensuring required fields and types."
   [pack]
   (-> pack
@@ -147,7 +147,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Directory structure loader
 
-(defn- load-rule-file
+(defn load-rule-file
   "Load a single rule from an EDN file."
   [file]
   (let [{:keys [success? data error]} (safe-read-edn file)]
@@ -201,9 +201,9 @@
           (let [rule-files (when (.exists rules-dir)
                              (find-rule-files rules-dir))
                 rule-results (mapv load-rule-file rule-files)
-                successful-rules (keep :rule (filter :success? rule-results))
+                successful-rules (keep :rule (filter schema/succeeded? rule-results))
                 rule-errors (keep (fn [r]
-                                    (when-not (:success? r)
+                                    (when-not (schema/succeeded? r)
                                       {:error (:error r)}))
                                   rule-results)
 
@@ -315,9 +315,9 @@
          results (map (fn [{:keys [path]}]
                         (assoc (load-pack path) :path path))
                       discovered)
-         loaded-packs (vec (keep :pack (filter :success? results)))
+         loaded-packs (vec (keep :pack (filter schema/succeeded? results)))
          failed (vec (map #(select-keys % [:path :errors])
-                         (remove :success? results)))
+                         (remove schema/succeeded? results)))
 
          ;; Run dependency validation if requested
          dep-validation-result (when (and validate-deps? (seq loaded-packs))
@@ -392,7 +392,7 @@
 ;------------------------------------------------------------------------------ Layer 4
 ;; Trust validation (N1 §2.10.2)
 
-(defn- pack->trust-ref
+(defn pack->trust-ref
   "Convert a pack manifest to a trust reference for validation."
   [pack]
   (knowledge/make-pack-ref
@@ -470,7 +470,7 @@
   (let [load-result (load-pack path)
         skip-trust? (:skip-trust-validation? options false)]
 
-    (if-not (:success? load-result)
+    (if-not (schema/succeeded? load-result)
       load-result  ; Return load errors immediately
 
       ;; Apply overrides if provided

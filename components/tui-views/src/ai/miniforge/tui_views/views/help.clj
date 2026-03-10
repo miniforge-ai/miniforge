@@ -23,12 +23,13 @@
    Displayed when :help-visible? is true in model."
   (:require
    [clojure.string :as str]
-   [ai.miniforge.tui-engine.interface.layout :as layout]))
+   [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Help content
 
-(def ^:private help-sections
+(def help-sections
   "Keybinding help content organized by section."
   [["Navigation"
     [["j / k / ↓ / ↑" "Move cursor down / up"]
@@ -57,7 +58,7 @@
      ["?"      "Toggle this help"]
      ["q"      "Quit"]]]])
 
-(defn- format-help-lines
+(defn format-help-lines
   "Build flat lines from help sections."
   []
   (into []
@@ -83,9 +84,9 @@
         box-h (min (- rows 2) (+ (count lines) 2))]
     (layout/box [box-w box-h]
       {:title "Help — Key Bindings" :border :single
-       :fg :cyan
+       :fg palette/status-info
        :content-fn
        (fn [[ic ir]]
          (layout/text [ic ir]
            (str/join "\n" (take ir lines))
-           {:fg :white}))})))
+           {:fg :default}))})))

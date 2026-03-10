@@ -31,30 +31,6 @@
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Event stream helpers (optional dependency)
-
-(defn- emit-phase-started!
-  "Emit phase-started event if event-stream is available in context."
-  [ctx phase]
-  (when-let [event-stream (:event-stream ctx)]
-    (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-      (when-let [phase-started (requiring-resolve 'ai.miniforge.event-stream.interface/phase-started)]
-        (let [workflow-id (:execution/id ctx)]
-          (publish! event-stream (phase-started event-stream workflow-id phase)))))))
-
-(defn- emit-phase-completed!
-  "Emit phase-completed event if event-stream is available in context."
-  [ctx phase _result]
-  (when-let [event-stream (:event-stream ctx)]
-    (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-      (when-let [phase-completed (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
-        (let [workflow-id (:execution/id ctx)
-              outcome (if (= :completed (get-in ctx [:phase :status])) :success :failure)
-              duration-ms (get-in ctx [:phase :duration-ms])]
-          (publish! event-stream (phase-completed event-stream workflow-id phase
-                                                   {:outcome outcome :duration-ms duration-ms})))))))
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
 
 (def default-config
@@ -72,7 +48,7 @@
 ;------------------------------------------------------------------------------ Layer 0.5
 ;; Test execution helpers
 
-(defn- write-test-files!
+(defn write-test-files!
   "Write test files from tester agent output to disk.
    Returns vector of written file paths."
   [worktree-path test-files]
@@ -83,7 +59,7 @@
             path))
         test-files))
 
-(defn- parse-test-output
+(defn parse-test-output
   "Parse clojure.test summary output.
    Looks for: 'Ran N tests containing M assertions. F failures, E errors.'
    Returns map with test result counts.
@@ -113,7 +89,7 @@
        :parse-error? true
        :output output})))
 
-(defn- run-tests!
+(defn run-tests!
   "Run tests in the worktree via bb test.
    Returns parsed test results map."
   [worktree-path]
@@ -132,14 +108,12 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
-(defn- enter-verify
+(defn enter-verify
   "Execute verification phase.
 
    Generates tests for code artifacts, runs them,
    checks coverage thresholds."
   [ctx]
-  ;; Emit phase started event
-  (emit-phase-started! ctx :verify)
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
@@ -203,10 +177,12 @@
         (assoc-in [:phase :status] :running)
         (assoc-in [:phase :result] result))))
 
-(defn- leave-verify
+(defn leave-verify
   "Post-processing for verification phase.
 
-   Records test metrics: count, pass rate, coverage."
+   Records test metrics: count, pass rate, coverage.
+   When verification fails and :on-fail is configured, sets :redirect-to
+   so the execution engine jumps to the target phase (typically :implement)."
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
@@ -218,8 +194,10 @@
                        gate-failed?                :failed
                        (= :error agent-status)     :failed
                        :else                       :completed)
-        metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
+        metrics (-> (get result :metrics {:tokens 0 :duration-ms duration-ms})
+                    (assoc :duration-ms duration-ms))
         iterations (get-in ctx [:phase :iterations] 1)
+        on-fail (get-in ctx [:phase-config :on-fail])
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
@@ -231,11 +209,20 @@
                         ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
-    ;; Emit phase completed event
-    (emit-phase-completed! updated-ctx :verify result)
-    updated-ctx))
+    ;; When verify failed and on-fail is configured, redirect to target phase
+    ;; and attach verify failure details for the implement agent to use
+    (if (and (= :failed phase-status) on-fail)
+      (-> updated-ctx
+          (assoc-in [:phase :redirect-to] on-fail)
+          (assoc-in [:phase :error]
+                    {:message (or (not-empty (get-in result [:error :message]))
+                                  (when gate-failed? "Gate validation failed")
+                                  "Verification failed")
+                     :agent-status agent-status
+                     :gate-failed? gate-failed?}))
+      updated-ctx)))
 
-(defn- error-verify
+(defn error-verify
   "Handle verification phase errors.
 
    On test failure, can redirect to :implement if on-fail specified."

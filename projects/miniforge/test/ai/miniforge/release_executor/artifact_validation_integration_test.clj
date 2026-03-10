@@ -31,13 +31,13 @@
 
 ;------------------------------------------------------------------------------ Helpers
 
-(defn- make-workflow-state [artifacts]
+(defn make-workflow-state [artifacts]
   {:workflow/id (random-uuid)
    :workflow/phase :release
    :workflow/spec {:spec/description "test"}
    :workflow/artifacts artifacts})
 
-(defn- make-context []
+(defn make-context []
   {:worktree-path *temp-dir*
    :create-pr? false
    :logger (log/create-logger {:min-level :warn})})

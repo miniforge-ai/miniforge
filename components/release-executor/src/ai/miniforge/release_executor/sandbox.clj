@@ -12,7 +12,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
 
-(defn- exec!
+(defn exec!
   "Execute a command in the sandbox environment.
    Returns {:success? bool :output string :error string}."
   [executor env-id command]
@@ -31,11 +31,11 @@
   "Check if gh CLI is available and authenticated inside the container."
   [executor env-id]
   (let [r (exec! executor env-id "gh auth status")]
-    (if (:success? r)
+    (if (result/succeeded? r)
       {:available? true :authenticated? true :user "container-token"}
       {:available? true :authenticated? false :error (:error r)})))
 
-(defn- detect-default-branch
+(defn detect-default-branch
   "Detect the default branch from the remote."
   [executor env-id]
   (let [r (exec! executor env-id
@@ -44,17 +44,17 @@
         str/trim
         (str/replace #"refs/remotes/origin/" ""))))
 
-(defn- try-checkout-branch
+(defn try-checkout-branch
   "Try to checkout a branch, retrying with timestamp suffix if it already exists."
   [executor env-id branch-name base-branch]
   (let [checkout-r (exec! executor env-id
                           (str "git checkout -b " branch-name " origin/" base-branch))]
-    (if (:success? checkout-r)
+    (if (result/succeeded? checkout-r)
       (result/shell-success {:branch branch-name :base-branch base-branch})
       (let [ts-name (str branch-name "-" (System/currentTimeMillis))
             retry-r (exec! executor env-id
                            (str "git checkout -b " ts-name " origin/" base-branch))]
-        (if (:success? retry-r)
+        (if (result/succeeded? retry-r)
           (result/shell-success {:branch ts-name :base-branch base-branch})
           (result/shell-failure (str "Failed to create branch: " (:error retry-r))
                                {:branch nil}))))))
@@ -65,7 +65,7 @@
   [executor env-id branch-name]
   (let [default-branch (detect-default-branch executor env-id)
         fetch-r (exec! executor env-id (str "git fetch origin " default-branch))]
-    (if-not (:success? fetch-r)
+    (if-not (result/succeeded? fetch-r)
       (result/shell-failure (str "Failed to fetch: " (:error fetch-r)) {:branch nil})
       (try-checkout-branch executor env-id branch-name default-branch))))
 
@@ -99,7 +99,7 @@
   [executor env-id commit-message]
   (let [escaped-msg (str/replace commit-message "'" "'\\''")
         commit-r (exec! executor env-id (str "git commit -m '" escaped-msg "'"))]
-    (if (:success? commit-r)
+    (if (result/succeeded? commit-r)
       (let [sha-r (exec! executor env-id "git rev-parse HEAD")]
         (result/shell-success {:commit-sha (:output sha-r "")
                                :output (:output commit-r)}))
@@ -122,7 +122,7 @@
                  " --body '" escaped-body "'"
                  " --base " base)
         r (exec! executor env-id cmd)]
-    (if (:success? r)
+    (if (result/succeeded? r)
       (let [pr-url (str/trim (:output r ""))
             pr-num (when-let [match (re-find #"/pull/(\d+)" pr-url)]
                      (parse-long (second match)))]
@@ -132,7 +132,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; File batch operations (mirrors files.clj write-and-stage-files!)
 
-(defn- apply-file-operation!
+(defn apply-file-operation!
   "Apply a single file operation (create, modify, delete) in the sandbox."
   [executor env-id {:keys [action path content]}]
   (case action
@@ -141,10 +141,10 @@
     :delete (delete-file! executor env-id path)
     (result/shell-failure (str "Unknown action: " action))))
 
-(defn- track-operation
+(defn track-operation
   "Update metrics for a completed file operation."
   [metrics {:keys [action path]} op-result]
-  (if (:success? op-result)
+  (if (result/succeeded? op-result)
     (case action
       :create (update metrics :created inc)
       :modify (update metrics :modified inc)
@@ -156,7 +156,7 @@
             :file path
             :action action})))
 
-(defn- metrics->result
+(defn metrics->result
   "Convert operation metrics to a final result, staging files if no errors."
   [executor env-id written-paths {:keys [created modified deleted errors]}]
   (let [file-metrics {:files-written created
@@ -165,7 +165,7 @@
     (if (seq errors)
       {:success? false :errors errors :metrics file-metrics}
       (let [stage-r (stage-files! executor env-id written-paths)]
-        (if (:success? stage-r)
+        (if (result/succeeded? stage-r)
           {:success? true
            :metrics (assoc file-metrics :total-operations (+ created modified deleted))}
           {:success? false

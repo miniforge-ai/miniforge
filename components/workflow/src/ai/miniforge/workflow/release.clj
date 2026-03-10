@@ -18,6 +18,13 @@
    [babashka.process :as process]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Result predicates
+
+(defn succeeded?
+  "Check if a result map indicates success."
+  [result]
+  (boolean (:success? result)))
+
 ;; File operation helpers
 
 (defn ensure-parent-dir!
@@ -227,7 +234,7 @@
               ;; Process each file
               (doseq [file-spec all-files]
                 (let [result (process-file-action worktree-path file-spec logger)]
-                  (if (:success? result)
+                  (if (succeeded? result)
                     (case (:action result)
                       :create (swap! results update :created inc)
                       :modify (swap! results update :modified inc)
@@ -245,7 +252,7 @@
                 ;; Stage files with git if no errors
                 (if (empty? errors)
                   (let [stage-result (stage-files! worktree-path :all)]
-                    (if (:success? stage-result)
+                    (if (succeeded? stage-result)
                       (do
                         (when logger
                           (log/info logger :workflow :release/git-staged

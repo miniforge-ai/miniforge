@@ -29,7 +29,7 @@
    :signal/data data
    :signal/timestamp (System/currentTimeMillis)})
 
-(defn- prune-old-signals
+(defn prune-old-signals
   "Remove signals older than retention period."
   [signals retention-ms]
   (let [cutoff (- (System/currentTimeMillis) retention-ms)]
@@ -38,7 +38,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Pattern detection
 
-(defn- detect-repeated-failures
+(defn detect-repeated-failures
   "Detect repeated failure patterns."
   [signals min-occurrences]
   (let [failures (->> signals
@@ -53,7 +53,7 @@
                  :pattern/confidence (min 1.0 (/ (count sigs) 10.0))
                  :pattern/signals (map :signal/id sigs)})))))
 
-(defn- detect-rollback-patterns
+(defn detect-rollback-patterns
   "Detect rollback patterns."
   [signals min-occurrences]
   (let [rollbacks (->> signals
@@ -69,7 +69,7 @@
                  :pattern/confidence (min 1.0 (/ (count sigs) 5.0))
                  :pattern/signals (map :signal/id sigs)})))))
 
-(defn- detect-repair-patterns
+(defn detect-repair-patterns
   "Detect repair patterns from inner loop."
   [signals min-occurrences]
   (let [repairs (->> signals
@@ -105,7 +105,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Improvement generation
 
-(defn- generate-for-repeated-failure
+(defn generate-for-repeated-failure
   "Generate improvement for repeated phase failures."
   [pattern]
   {:improvement/id (random-uuid)
@@ -122,7 +122,7 @@
    :improvement/status :proposed
    :improvement/created-at (System/currentTimeMillis)})
 
-(defn- generate-for-frequent-rollback
+(defn generate-for-frequent-rollback
   "Generate improvement for frequent rollbacks."
   [pattern]
   {:improvement/id (random-uuid)
@@ -138,7 +138,7 @@
    :improvement/status :proposed
    :improvement/created-at (System/currentTimeMillis)})
 
-(defn- generate-for-recurring-repair
+(defn generate-for-recurring-repair
   "Generate improvement for recurring repair patterns."
   [pattern]
   {:improvement/id (random-uuid)
@@ -394,23 +394,55 @@
                                   :to-phase to-phase
                                   :reason reason}})))
 
+(defn create-llm-pattern-detector*
+  "Create an LLM-powered pattern detector via requiring-resolve.
+   Returns nil if the namespace cannot be loaded."
+  [llm-backend]
+  (try
+    (let [create-fn (requiring-resolve
+                     'ai.miniforge.operator.llm-pattern-detector/create-llm-pattern-detector)]
+      (create-fn {:llm-client llm-backend}))
+    (catch Exception _e nil)))
+
+(defn create-llm-improvement-generator*
+  "Create an LLM-powered improvement generator via requiring-resolve.
+   Returns nil if the namespace cannot be loaded."
+  [llm-backend]
+  (try
+    (let [create-fn (requiring-resolve
+                     'ai.miniforge.operator.llm-improvement-generator/create-llm-improvement-generator)]
+      (create-fn {:llm-client llm-backend}))
+    (catch Exception _e nil)))
+
 (defn create-operator
   "Create an operator (meta-agent).
 
    Options:
    - :knowledge-store - Knowledge store for rule storage
-   - :config - Override default configuration"
+   - :config          - Override default configuration
+   - :llm-backend     - LLM client (implements LLMClient protocol).
+                        When provided, uses LLMPatternDetector and
+                        LLMImprovementGenerator instead of the simple
+                        rule-based implementations. Falls back to simple
+                        implementations if the LLM namespaces cannot be loaded."
   ([] (create-operator {}))
-  ([{:keys [knowledge-store config]}]
-   (->SimpleOperator
-    (merge default-config config)
-    (atom [])
-    (atom {})
-    (create-pattern-detector (merge default-config config))
-    (create-improvement-generator)
-    (create-governance (merge default-config config))
-    knowledge-store
-    (log/create-logger {:min-level :info}))))
+  ([{:keys [knowledge-store config llm-backend]}]
+   (let [merged-config (merge default-config config)
+         pattern-detector    (or (when llm-backend
+                                   (create-llm-pattern-detector* llm-backend))
+                                 (create-pattern-detector merged-config))
+         improvement-generator (or (when llm-backend
+                                     (create-llm-improvement-generator* llm-backend))
+                                   (create-improvement-generator))]
+     (->SimpleOperator
+      merged-config
+      (atom [])
+      (atom {})
+      pattern-detector
+      improvement-generator
+      (create-governance merged-config)
+      knowledge-store
+      (log/create-logger {:min-level :info})))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

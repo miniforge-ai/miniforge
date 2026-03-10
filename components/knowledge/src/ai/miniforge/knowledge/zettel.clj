@@ -143,7 +143,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Serialization (Markdown with YAML frontmatter)
 
-(defn- format-frontmatter
+(defn format-frontmatter
   "Convert zettel metadata to YAML frontmatter."
   [zettel]
   (let [meta (cond-> {:id (str (:zettel/id zettel))
@@ -171,7 +171,7 @@
        "# " (:zettel/title zettel) "\n\n"
        (:zettel/content zettel)))
 
-(defn- parse-frontmatter
+(defn parse-frontmatter
   "Parse YAML frontmatter from a string."
   [frontmatter-str]
   (try
@@ -179,20 +179,20 @@
     (catch Exception _e
       nil)))
 
-(defn- extract-title-from-content
+(defn extract-title-from-content
   "Extract title from first H1 heading in content."
   [content]
   (when-let [match (re-find #"^#\s+(.+)$" (first (str/split-lines content)))]
     (second match)))
 
-(defn- str->uuid
+(defn str->uuid
   "Parse a string as UUID, or return nil."
   [s]
   (try
     (java.util.UUID/fromString s)
     (catch Exception _e nil)))
 
-(defn- parse-inst
+(defn parse-inst
   "Parse a string as inst, or return nil."
   [s]
   (try

@@ -50,7 +50,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Message I/O
 
-(defn- read-headers
+(defn read-headers
   "Read LSP headers from the reader until blank line."
   [^BufferedReader reader]
   (loop [headers {}]
@@ -66,7 +66,7 @@
         (let [[_ key value] (re-matches #"([^:]+):\s*(.+)" line)]
           (recur (assoc headers (str/lower-case (or key "")) value)))))))
 
-(defn- read-message
+(defn read-message
   "Read a single LSP message from the reader.
    Returns the parsed message or nil on EOF/error."
   [^BufferedReader reader]
@@ -81,14 +81,14 @@
       (println "LSP read error:" (.getMessage e))
       nil)))
 
-(defn- write-message
+(defn write-message
   "Write an LSP message to the writer."
   [^BufferedWriter writer msg]
   (let [encoded (proto/encode-message msg)]
     (.write writer encoded)
     (.flush writer)))
 
-(defn- start-reader-loop
+(defn start-reader-loop
   "Start a background loop reading messages from the server."
   [client]
   (let [{:keys [reader pending-requests notification-handler]} client]

@@ -8,7 +8,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure helpers
 
-(defn- normalize-ts
+(defn normalize-ts
   "Normalize timestamp to java.util.Date for comparison."
   [ts]
   (cond
@@ -18,19 +18,19 @@
                       (catch Exception _ nil))
     :else nil))
 
-(defn- ts->epoch-ms
+(defn ts->epoch-ms
   "Timestamp → epoch millis, or 0 if unparseable."
   [ts]
   (if-let [d (normalize-ts ts)] (.getTime d) 0))
 
-(defn- exclude-live-ids
+(defn exclude-live-ids
   "Remove any archived workflows whose IDs also appear in the live list.
    Arg order supports ->> threading: live-workflows first, archived-vals last."
   [live-workflows archived-vals]
   (let [live-ids (->> live-workflows (map (comp str :id)) set)]
     (remove #(contains? live-ids (str (:id %))) archived-vals)))
 
-(defn- newest-first
+(defn newest-first
   "Sort workflows by :started-at descending."
   [workflows]
   (sort-by #(- (ts->epoch-ms (:started-at %))) workflows))

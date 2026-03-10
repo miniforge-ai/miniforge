@@ -35,7 +35,7 @@
     ;; Information only
     "fyi" "for your information" "just noting" "reminder"})
 
-(defn- score-indicators
+(defn score-indicators
   "Score text against a set of indicators.
    Returns count of matching indicators."
   [text indicators]

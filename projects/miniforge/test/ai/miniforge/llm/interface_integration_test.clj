@@ -104,7 +104,7 @@
       ;; Create a client with a non-existent command that will hang/fail
       (let [chunks (atom [])
             ;; Use a command that doesn't exist to trigger timeout behavior
-            client (#'ai.miniforge.llm.protocols.records.llm-client/create-client
+            client (ai.miniforge.llm.protocols.records.llm-client/create-client
                     {:backend :claude
                      :exec-fn (fn [_cmd]
                                 ;; Simulate a command that never completes

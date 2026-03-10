@@ -6,15 +6,15 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.cli.web.response :as response]))
 
-(def ^:private streams (atom {}))
+(def streams (atom {}))
 
-(defn- get-or-create-stream [workflow-id]
+(defn get-or-create-stream [workflow-id]
   (or (get @streams workflow-id)
       (let [stream (es/create-event-stream)]
         (swap! streams assoc workflow-id stream)
         stream)))
 
-(defn- on-open [workflow-id channel]
+(defn on-open [workflow-id channel]
   (let [event-stream (get-or-create-stream workflow-id)
         sub-id (random-uuid)]
     (swap! streams assoc-in [workflow-id :subscribers channel] sub-id)
@@ -26,7 +26,7 @@
                                       "data: " (json/generate-string event) "\n\n")
                                  false)))))
 
-(defn- on-close [workflow-id channel]
+(defn on-close [workflow-id channel]
   (when-let [sub-id (get-in @streams [workflow-id :subscribers channel])]
     (when-let [event-stream (get @streams workflow-id)]
       (es/unsubscribe! event-stream sub-id))

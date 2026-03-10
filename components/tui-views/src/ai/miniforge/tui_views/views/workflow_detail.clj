@@ -26,36 +26,58 @@
   (:require
    [clojure.string :as str]
    [ai.miniforge.tui-engine.interface.layout :as layout]
-   [ai.miniforge.tui-engine.interface.widget :as widget]))
+   [ai.miniforge.tui-engine.interface.widget :as widget]
+   [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
 
-(defn- find-workflow [model]
+(defn find-workflow [model]
   (let [wf-id (get-in model [:detail :workflow-id])]
     (some #(when (= (:id %) wf-id) %) (:workflows model))))
 
-(defn- status-suffix [status]
+(defn status-suffix [status]
   (case status
     :running  " ●"
     :success  " ✓"
     :failed   " ✗"
     ""))
 
-(defn- format-phase-node [{:keys [phase status]}]
-  {:label (str (name phase) (status-suffix status))
-   :depth 0
-   :expandable? false})
+(defn format-cost [cost-usd]
+  (when (and cost-usd (pos? cost-usd))
+    (format "$%.4f" (double cost-usd))))
 
-(defn- render-title-bar [wf [cols rows]]
-  (layout/text [cols rows]
-               (str " MINIFORGE │ "
-                    (or (:name wf) "Workflow Detail")
-                    (when-let [phase (:phase wf)]
-                      (str " │ " (name phase))))
-               {:fg :cyan :bold? true}))
+(defn format-tokens [tokens]
+  (when (and tokens (pos? tokens))
+    (if (>= tokens 1000)
+      (format "%.1fk" (/ (double tokens) 1000.0))
+      (str tokens))))
 
-(defn- render-phase-list [phases [cols rows]]
+(defn format-phase-node [{:keys [phase status tokens cost-usd]}]
+  (let [suffix (status-suffix status)
+        metrics (str/join " " (keep identity
+                                     [(format-tokens tokens)
+                                      (format-cost cost-usd)]))]
+    {:label (str (name phase) suffix
+                 (when (seq metrics) (str "  " metrics)))
+     :depth 0
+     :expandable? false}))
+
+(defn render-title-bar [wf detail [cols rows]]
+  (let [metrics-parts (keep identity
+                             [(format-tokens (:tokens detail))
+                              (format-cost (:cost-usd detail))])
+        metrics-str (when (seq metrics-parts)
+                      (str " │ " (str/join " " metrics-parts)))]
+    (layout/text [cols rows]
+                 (str " MINIFORGE │ "
+                      (get wf :name "Workflow Detail")
+                      (when-let [phase (:phase wf)]
+                        (str " │ " (name phase)))
+                      metrics-str)
+                 {:fg palette/status-info :bold? true})))
+
+(defn render-phase-list [phases [cols rows]]
   (layout/box [cols rows]
     {:title "Phases" :border :single :fg :default
      :content-fn
@@ -66,7 +88,7 @@
            {:nodes (mapv format-phase-node phases)
             :selected 0})))}))
 
-(defn- render-agent-output [agent output [cols rows]]
+(defn render-agent-output [agent output [cols rows]]
   (layout/box [cols rows]
     {:title (if agent
               (str (name (:agent agent)) " - " (name (:status agent :idle)))
@@ -81,9 +103,9 @@
          (widget/scrollable [ic ir]
            {:lines lines
             :offset offset
-            :fg :white})))}))
+            :fg :default})))}))
 
-(defn- render-footer [[cols rows]]
+(defn render-footer [[cols rows]]
   (layout/text [cols rows]
     " Esc:back  3:evidence  4:artifacts  5:dag  j/k:scroll  q:quit"
     {:fg :default}))
@@ -99,7 +121,7 @@
         agent (:current-agent detail)
         output (:agent-output detail)]
     (layout/split-v [cols rows] (/ 2.0 rows)
-      (fn [size] (render-title-bar wf size))
+      (fn [size] (render-title-bar wf detail size))
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)
           (fn [[mc mr]]

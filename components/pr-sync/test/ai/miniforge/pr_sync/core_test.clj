@@ -25,7 +25,7 @@
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Test helpers
 
-(defn- temp-config-path []
+(defn temp-config-path []
   (let [f (java.io.File/createTempFile "miniforge-test-config" ".edn")]
     (.deleteOnExit f)
     (.getAbsolutePath f)))
@@ -128,6 +128,32 @@
       (let [result (core/remove-repo! "not/here" path)]
         (is (:success? result))
         (is (not (:removed? result)))))))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; GitLab state parameter mapping
+
+(deftest gitlab-state-param-test
+  (testing "Maps canonical state keywords to GitLab API parameters"
+    (is (= "opened" (core/gitlab-state-param :open)))
+    (is (= "closed" (core/gitlab-state-param :closed)))
+    (is (= "merged" (core/gitlab-state-param :merged)))
+    (is (= "all"    (core/gitlab-state-param :all)))
+    (is (= "opened" (core/gitlab-state-param :unknown)))))
+
+(deftest fetch-prs-by-state-routes-gitlab-test
+  (testing "GitLab repos use state-aware fetch instead of hardcoded opened"
+    (with-redefs [clojure.java.shell/sh
+                  (fn [& args]
+                    (if (and (= "glab" (first args))
+                             (some #(and (string? %) (.contains ^String % "state=merged")) args))
+                      {:exit 0
+                       :out "[{\"iid\":5,\"title\":\"Merged MR\",\"web_url\":\"https://gl.com/g/p/-/merge_requests/5\",\"source_branch\":\"done\",\"state\":\"merged\",\"draft\":false}]"
+                       :err ""}
+                      {:exit 1 :out "" :err "unexpected call"}))]
+      (let [result (core/fetch-prs-by-state "gitlab:g/p" :merged)]
+        (is (:success? result))
+        (is (= 1 (count (:prs result))))
+        (is (= :merged (:pr/status (first (:prs result)))))))))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Integration tests (PR fetching with mocked shell)

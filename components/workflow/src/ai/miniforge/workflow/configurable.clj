@@ -101,7 +101,7 @@
   [phase exec-state context]
   (let [phase-agent (:phase/agent phase)
         inner-loop (:phase/inner-loop phase {})
-        max-iterations (or (:max-iterations inner-loop) 5)]
+        max-iterations (get inner-loop :max-iterations 5)]
 
     (cond
       ;; Skip :none agent
@@ -146,13 +146,13 @@
            :artifacts []
            :errors [{:type :phase-failed
                      :phase (:phase/id phase)
-                     :message (or (:error result) "Phase execution failed")}]
+                     :message (get result :error "Phase execution failed")}]
            :metrics (:metrics result {})})))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Workflow execution
 
-(defn- extract-plan-from-result
+(defn extract-plan-from-result
   "Extract plan artifact from phase result if present."
   [phase-result]
   (when-let [artifacts (:artifacts phase-result)]
@@ -160,7 +160,7 @@
                         (= :plan (:artifact/type %)))
                    artifacts))))
 
-(defn- execute-dag-for-plan
+(defn execute-dag-for-plan
   "Execute plan tasks via DAG orchestrator.
    Returns updated exec-state with DAG results merged."
   [exec-state plan context callbacks]
@@ -178,12 +178,10 @@
                                                                      {:phase/id :dag-task
                                                                       :task-id task-id}
                                                                      result)))})
-        ;; Pass pre-completed task IDs and artifacts for resume support
         pre-completed-artifacts (get-in exec-state [:execution/opts :pre-completed-artifacts] [])
-        dag-context (cond-> dag-context
-                      (get-in exec-state [:execution/opts :pre-completed-dag-tasks])
-                      (assoc :pre-completed-ids
-                             (get-in exec-state [:execution/opts :pre-completed-dag-tasks])))
+        dag-context (assoc dag-context :pre-completed-ids
+                          (or (get-in exec-state [:execution/opts :pre-completed-dag-tasks])
+                              (get-in context [:pre-completed-dag-tasks] #{})))
         dag-result (dag-orch/execute-plan-as-dag plan dag-context)]
 
     ;; Merge DAG results + recovered artifacts into execution state
@@ -196,7 +194,7 @@
         (assoc-in [:execution/phase-results :dag-execution] dag-result)
         (assoc :execution/dag-result dag-result))))
 
-(defn- execute-phase-step
+(defn execute-phase-step
   "Execute a single phase step in the workflow.
    Returns updated execution state or [:continue new-state] to continue loop.
 
@@ -288,7 +286,7 @@
       e. Transition to next phase
    3. Mark as completed or failed"
   [workflow input context]
-  (let [max-phases (or (:max-phases context) 50)
+  (let [max-phases (get context :max-phases 50)
         callbacks {:on-phase-start (:on-phase-start context)
                    :on-phase-complete (:on-phase-complete context)}]
 

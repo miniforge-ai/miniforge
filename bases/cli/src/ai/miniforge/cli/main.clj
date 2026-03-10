@@ -78,14 +78,14 @@
    :logging {:level :info
              :output :human}})
 
-(defn- get-opts
+(defn get-opts
   "Extract opts from dispatch result."
   [m]
   (if (contains? m :opts)
     (:opts m)
     m))
 
-(defn- check-command
+(defn check-command
   "Check if a command is available."
   [cmd]
   (let [{:keys [exit]} (process/sh "which" cmd)]
@@ -209,6 +209,24 @@
 (defn pr-respond-cmd [m] (cmd-pr/pr-respond-cmd (get-opts m)))
 (defn pr-merge-cmd [m] (cmd-pr/pr-merge-cmd (get-opts m)))
 
+(defn mcp-serve-cmd
+  "Run the MCP artifact server (stdin/stdout JSON-RPC)."
+  [m]
+  (let [{:keys [artifact-dir]} (get-opts m)]
+    (when-not artifact-dir
+      (display/print-error "--artifact-dir is required")
+      (System/exit 1))
+    (let [run-server (requiring-resolve 'ai.miniforge.mcp-artifact-server.interface/start-server)]
+      (run-server artifact-dir))))
+
+(defn hook-eval-cmd
+  "Evaluate a tool-use request from a Claude PreToolUse hook.
+
+   Reads JSON from stdin, evaluates against policy, writes decision to stdout."
+  [_m]
+  (let [hook-eval! (requiring-resolve 'ai.miniforge.agent.tool-supervisor/hook-eval-stdin!)]
+    (System/exit (hook-eval!))))
+
 (defn help-cmd
   [_m]
   (println "
@@ -217,9 +235,10 @@ miniforge - AI-powered software development workflows
 Usage: miniforge <command> [options]
 
 Commands:
-  run <spec-file>     Execute a workflow from a spec file
+  run <file>          Execute a workflow (spec, DAG, or plan file)
     --interactive     Interactive mode (chat-based)
     --worktree <path> Custom worktree path
+    --resume <id>     Resume a workflow from its last checkpoint
 
   status [id]         Show workflow status
 
@@ -302,12 +321,23 @@ Examples:
    {:cmds ["help"]    :fn help-cmd}
    {:cmds []          :fn help-cmd}  ; default
 
+   ;; MCP artifact server
+   {:cmds ["mcp-serve"]
+    :fn mcp-serve-cmd
+    :spec {:artifact-dir {:alias :d}}}
+
+   ;; Tool-use supervision hook (Claude PreToolUse)
+   {:cmds ["hook-eval"]
+    :fn hook-eval-cmd}
+
    ;; Run command
    {:cmds ["run"]
     :fn run-cmd
     :args->opts [:spec]
     :spec {:interactive {:coerce :boolean :alias :i}
-           :worktree    {:alias :w}}}
+           :worktree    {:alias :w}
+           :resume      {:alias :r}
+           :backend     {:coerce :keyword :alias :b}}}
 
    ;; Status command
    {:cmds ["status"]

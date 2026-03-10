@@ -57,9 +57,9 @@
 ;; --------------------------------------------------------------------------- Server process management
 
 (defn start-server [artifact-dir]
-  (let [script-path (str (fs/absolutize "scripts/mcp-artifact-server.bb"))
-        proc (p/process {:in :pipe :out :pipe :err :pipe}
-                        "bb" script-path "--artifact-dir" artifact-dir)]
+  (let [proc (p/process {:in :pipe :out :pipe :err :pipe}
+                        "bb" "miniforge" "mcp-serve"
+                        "--artifact-dir" artifact-dir)]
     ;; Give server a moment to start
     (Thread/sleep 200)
     proc))

@@ -4,11 +4,10 @@
    Uses a mock executor to verify correct command generation
    without requiring Docker."
   (:require
-   [ai.miniforge.dag-executor.protocols.executor]
+   [ai.miniforge.dag-executor.interface :as dag]
    [clojure.string]
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.release-executor.sandbox :as sandbox]
-   [ai.miniforge.dag-executor.result :as dag-result]))
+   [ai.miniforge.release-executor.sandbox :as sandbox]))
 
 ;; ============================================================================
 ;; Mock executor
@@ -27,10 +26,10 @@
            default-response {:exit-code 0 :stdout "" :stderr ""}}}]
   (let [commands (atom [])]
     [(reify
-       ai.miniforge.dag-executor.protocols.executor/TaskExecutor
+       dag/TaskExecutor
        (executor-type [_] :mock)
-       (available? [_] (dag-result/ok {:available? true}))
-       (acquire-environment! [_ _ _] (dag-result/ok {:environment-id "mock-env"}))
+       (available? [_] (dag/ok {:available? true}))
+       (acquire-environment! [_ _ _] (dag/ok {:environment-id "mock-env"}))
        (execute! [_ _env-id command _opts]
          (swap! commands conj command)
          (let [response (or (some (fn [[substr resp]]
@@ -38,11 +37,11 @@
                                       resp))
                                   responses)
                             default-response)]
-           (dag-result/ok response)))
-       (copy-to! [_ _ _ _] (dag-result/ok {}))
-       (copy-from! [_ _ _ _] (dag-result/ok {}))
-       (release-environment! [_ _] (dag-result/ok {:released? true}))
-       (environment-status [_ _] (dag-result/ok {:status :running})))
+           (dag/ok response)))
+       (copy-to! [_ _ _ _] (dag/ok {}))
+       (copy-from! [_ _ _ _] (dag/ok {}))
+       (release-environment! [_ _] (dag/ok {:released? true}))
+       (environment-status [_ _] (dag/ok {:status :running})))
      commands]))
 
 ;; ============================================================================
@@ -231,9 +230,8 @@
       (is (= 3 (get-in result [:metrics :total-operations])))
       ;; Should have: write, write, delete, stage = 4 commands
       (is (= 4 (count @cmds)))
-      ;; Last command should stage the specific files
-      (is (clojure.string/starts-with? (last @cmds) "git add "))
-      (is (clojure.string/includes? (last @cmds) "src/a.clj")))))
+      ;; Last command should be path-specific git add
+      (is (= "git add 'src/a.clj' 'src/b.clj' 'src/old.clj'" (last @cmds))))))
 
 (deftest write-and-stage-files-failure-test
   (testing "write-and-stage-files! reports errors from failed operations"
@@ -243,3 +241,4 @@
           result (sandbox/write-and-stage-files! exec "env-1" code-artifacts)]
       (is (not (:success? result)))
       (is (seq (:errors result))))))
+

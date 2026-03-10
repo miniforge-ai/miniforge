@@ -20,11 +20,14 @@
   "Navigation helpers and view transitions.
 
    Pure functions for list navigation and view switching.
-   Layers 0-1."
+   Pane focus/selection logic lives in `update.pane`.
+   Layers 0-2."
   (:require
    [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.model :as model]
-   [ai.miniforge.tui-views.transition :as transition]))
+   [ai.miniforge.tui-views.transition :as transition]
+   [ai.miniforge.tui-views.update.chat :as chat]
+   [ai.miniforge.tui-views.update.pane :as pane]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Navigation helpers
@@ -43,7 +46,7 @@
       (count fi)
       raw-count)))
 
-(defn- raw-workflow-index
+(defn raw-workflow-index
   "Map a cursor index to a raw workflow vector index via filtered-indices.
    Returns cursor index directly when no filter is active."
   [model idx]
@@ -51,34 +54,50 @@
     (nth (vec (sort fi)) idx nil)
     idx))
 
-(defn- scrollable-view?
+(defn scrollable-view?
   "Views where j/k scroll content rather than moving a list cursor."
   [view]
   (= :workflow-detail view))
 
 (defn navigate-up [model]
-  (if (scrollable-view? (:view model))
+  (cond
+    (scrollable-view? (:view model))
     (update model :scroll-offset #(max 0 (dec (or % 0))))
+
+    (pane/pane-detail-view? (:view model))
+    (pane/pane-navigate-up model)
+
+    :else
     (update model :selected-idx #(max 0 (dec %)))))
 
 (defn navigate-down [model]
-  (if (scrollable-view? (:view model))
+  (cond
+    (scrollable-view? (:view model))
     ;; scroll-offset upper bound is clamped at render time
     (update model :scroll-offset #(inc (or % 0)))
+
+    (pane/pane-detail-view? (:view model))
+    (pane/pane-navigate-down model)
+
+    :else
     (let [max-idx (max 0 (dec (list-count model)))]
       (update model :selected-idx #(min max-idx (inc %))))))
 
 (defn navigate-top [model]
-  (assoc model :selected-idx 0 :scroll-offset 0))
+  (if (pane/pane-detail-view? (:view model))
+    (pane/pane-navigate-top model)
+    (assoc model :selected-idx 0 :scroll-offset 0)))
 
 (defn navigate-bottom [model]
-  (let [max-idx (max 0 (dec (list-count model)))]
-    (assoc model :selected-idx max-idx)))
+  (if (pane/pane-detail-view? (:view model))
+    (pane/pane-navigate-bottom model)
+    (let [max-idx (max 0 (dec (list-count model)))]
+      (assoc model :selected-idx max-idx))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; View navigation
 
-(defn- visible-prs
+(defn visible-prs
   "Return the visible PR list, respecting any active filter."
   [model]
   (let [prs (:pr-items model)]
@@ -86,33 +105,109 @@
       (into [] (keep-indexed #(when (contains? fi %1) %2)) prs)
       prs)))
 
-(defn- enter-workflow-detail [model]
+(defn empty-workflow-detail
+  [workflow-id]
+  {:workflow-id workflow-id
+   :phases []
+   :current-phase nil
+   :current-agent nil
+   :agent-output ""
+   :evidence nil
+   :artifacts []
+   :expanded-nodes #{}
+   :focused-pane 0
+   :selected-pr nil
+   :pr-readiness nil
+   :pr-risk nil
+   :selected-train nil
+   :duration-ms nil
+   :error nil})
+
+(defn workflow-row->detail
+  [wf]
+  (merge (empty-workflow-detail (:id wf))
+         {:current-phase (:phase wf)
+          :phases (if-let [phase (:phase wf)]
+                    [{:phase phase
+                      :status (case (:status wf)
+                                :failed :failed
+                                :success :success
+                                :completed :success
+                                :running)}]
+                    [])
+          :current-agent (when-let [[agent entry] (first (:agents wf))]
+                           (assoc entry :agent agent))
+          :evidence (when (seq (:gate-results wf))
+                      {:validation {:results (:gate-results wf)}})
+          :duration-ms (:duration-ms wf)
+          :error (:error wf)}))
+
+(defn workflow-detail-context
+  "Build detail context from the workflow row and any snapshot data already
+   stored on the row."
+  [wf]
+  (merge (workflow-row->detail wf)
+         (or (:detail-snapshot wf) {})
+         {:workflow-id (:id wf)}))
+
+(defn enter-workflow-detail [model]
   (let [raw-idx (raw-workflow-index model (:selected-idx model))]
     (if-let [wf (when raw-idx (get (:workflows model) raw-idx))]
       (-> model
           (assoc :view :workflow-detail)
-          (assoc-in [:detail :workflow-id] (:id wf))
+          (assoc :detail (workflow-detail-context wf))
           (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil
-                 :scroll-offset nil :search-matches [] :search-match-idx nil))
+                 :scroll-offset nil :search-matches [] :search-match-idx nil)
+          ;; Reload full detail from disk in background to fill in any
+          ;; events missed by the live subscription
+          (assoc :side-effect (effect/reload-workflow-detail (:id wf))))
       model)))
 
-(defn- enter-pr-detail [model]
+(defn enter-pr-detail [model]
   (if-let [pr (get (visible-prs model) (:selected-idx model))]
-    (let [pr-id [(:pr/repo pr) (:pr/number pr)]]
-      (cond-> (-> model
-                  (assoc :view :pr-detail)
-                  (assoc-in [:detail :selected-pr] pr)
-                  (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
-        (nil? (:pr/policy pr))
-        (assoc :side-effect (effect/evaluate-policy pr-id pr))))
+    (let [pr-id  [(:pr/repo pr) (:pr/number pr)]
+          detail (-> model
+                     (assoc :view :pr-detail)
+                     (assoc-in [:detail :selected-pr] pr)
+                     (assoc-in [:detail :expanded-nodes] #{0})
+                     (pane/init-pane-state)
+                     (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
+          ;; Check if this PR already has a chat thread
+          tk      (chat/chat-thread-key detail)
+          thread  (get-in detail [:chat-threads tk])
+          fresh?  (or (nil? thread) (empty? (:messages thread)))
+          ;; Build side-effects: policy eval (if needed) + auto-analysis (if fresh)
+          effects (cond-> []
+                    (nil? (:pr/policy pr))
+                    (conj (effect/evaluate-policy pr-id pr))
+                    fresh?
+                    (conj (let [context (chat/pr-detail-context detail)
+                                auto-msg "Briefly analyze this PR: risk, readiness, and key concerns. Suggest 2-3 actions."
+                                user-msg {:role :user :content auto-msg :timestamp (java.util.Date.)}]
+                            (effect/chat-send context auto-msg [user-msg]))))]
+      (cond-> detail
+        ;; Set up chat state for auto-analysis
+        fresh?
+        (-> (assoc-in [:chat :messages]
+                      [{:role :user :content "Briefly analyze this PR: risk, readiness, and key concerns. Suggest 2-3 actions."
+                        :timestamp (java.util.Date.)}])
+            (assoc-in [:chat :pending?] true)
+            (assoc-in [:chat :pending-since] (System/currentTimeMillis))
+            (assoc-in [:chat :context] (chat/pr-detail-context detail))
+            (assoc :chat-active-key tk))
+        ;; Fire side-effects
+        (seq effects)
+        (assoc :side-effects effects)))
     model))
 
-(defn- enter-train-detail [model]
+(defn enter-train-detail [model]
   (let [prs (get-in model [:detail :selected-train :train/prs])]
     (if-let [pr (get (vec prs) (:selected-idx model))]
       (-> model
           (assoc :view :pr-detail)
           (assoc-in [:detail :selected-pr] pr)
+          (assoc-in [:detail :expanded-nodes] #{0})
+          (pane/init-pane-state)
           (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
       model)))
 
@@ -172,27 +267,17 @@
                      (conj nodes idx)))))))
 
 (defn cycle-pane
-  "Cycle Tab focus between panes in multi-pane views.
-   Views with multiple columns/panes define their pane count;
-   single-pane views are a no-op."
+  "Cycle Tab focus between panes in multi-pane views. Delegates to pane ns."
   [model]
-  (let [pane-count (case (:view model)
-                     :workflow-detail 2   ;; phases | agent output
-                     :pr-detail       3   ;; readiness | risk | gates
-                     :dag-kanban      6   ;; 6 kanban columns
-                     1)
-        current (get-in model [:detail :focused-pane] 0)]
-    (assoc-in model [:detail :focused-pane]
-              (mod (inc current) pane-count))))
+  (pane/cycle-pane model))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Detail screen navigation — sibling items + sub-view cycling
 
-(def ^:private workflow-subviews
+(def workflow-subviews
   "Sub-views for a workflow item, cycled with Tab."
   [:workflow-detail :evidence :artifact-browser])
 
-(def ^:private workflow-subview-set
+(def workflow-subview-set
   (set workflow-subviews))
 
 (defn in-detail-subview?
@@ -220,11 +305,51 @@
     :else
     model/top-level-views))
 
-(defn- find-workflow-idx
+(defn find-workflow-idx
   "Find the index of a workflow-id in the workflows vector."
   [workflows wf-id]
   (some (fn [[i wf]] (when (= (:id wf) wf-id) i))
         (map-indexed vector workflows)))
+
+(defn- switch-pr-detail
+  "Switch the PR detail view to a different PR.
+   Resets pane state, expanded nodes, and loads the correct chat thread.
+   Triggers auto-analysis if the PR has no existing chat thread."
+  [model pr]
+  (let [pr-id  [(:pr/repo pr) (:pr/number pr)]
+        base   (-> model
+                   (assoc-in [:detail :selected-pr] pr)
+                   (assoc-in [:detail :expanded-nodes] #{0})
+                   (pane/init-pane-state)
+                   (assoc :selected-idx 0))
+        tk     (chat/chat-thread-key base)
+        thread (get-in base [:chat-threads tk])
+        fresh? (or (nil? thread) (empty? (:messages thread)))
+        ;; Load existing thread into active :chat, or set up for auto-analysis
+        base   (if fresh?
+                 (-> base
+                     (assoc-in [:chat :messages]
+                               [{:role :user
+                                 :content "Briefly analyze this PR: risk, readiness, and key concerns. Suggest 2-3 actions."
+                                 :timestamp (java.util.Date.)}])
+                     (assoc-in [:chat :pending?] true)
+                     (assoc-in [:chat :pending-since] (System/currentTimeMillis))
+                     (assoc-in [:chat :context] (chat/pr-detail-context base))
+                     (assoc :chat-active-key tk))
+                 (-> base
+                     (assoc :chat (assoc thread :pending? false))
+                     (assoc :chat-active-key tk)))
+        effects (cond-> []
+                  (nil? (:pr/policy pr))
+                  (conj (effect/evaluate-policy pr-id pr))
+                  fresh?
+                  (conj (let [context (chat/pr-detail-context base)
+                              auto-msg "Briefly analyze this PR: risk, readiness, and key concerns. Suggest 2-3 actions."
+                              user-msg {:role :user :content auto-msg :timestamp (java.util.Date.)}]
+                          (effect/chat-send context auto-msg [user-msg]))))]
+    (cond-> base
+      (seq effects)
+      (assoc :side-effects effects))))
 
 (defn navigate-prev-item
   "Navigate to the previous item's detail view.
@@ -241,7 +366,7 @@
       (if (and prev-idx (>= prev-idx 0))
         (let [wf (get workflows prev-idx)]
           (-> model
-              (assoc-in [:detail :workflow-id] (:id wf))
+              (assoc :detail (workflow-detail-context wf))
               (assoc :selected-idx 0)
               (assoc-in [:detail :expanded-nodes] #{})))
         model))
@@ -253,10 +378,7 @@
                             (map-indexed vector prs))
           prev-idx (when current-idx (dec current-idx))]
       (if (and prev-idx (>= prev-idx 0))
-        (let [pr (get prs prev-idx)]
-          (-> model
-              (assoc-in [:detail :selected-pr] pr)
-              (assoc :selected-idx 0)))
+        (switch-pr-detail model (get prs prev-idx))
         model))
 
     ;; Non-detail views: no-op
@@ -277,7 +399,7 @@
       (if (and next-idx (< next-idx (count workflows)))
         (let [wf (get workflows next-idx)]
           (-> model
-              (assoc-in [:detail :workflow-id] (:id wf))
+              (assoc :detail (workflow-detail-context wf))
               (assoc :selected-idx 0)
               (assoc-in [:detail :expanded-nodes] #{})))
         model))
@@ -289,16 +411,12 @@
                             (map-indexed vector prs))
           next-idx (when current-idx (inc current-idx))]
       (if (and next-idx (< next-idx (count prs)))
-        (let [pr (get prs next-idx)]
-          (-> model
-              (assoc-in [:detail :selected-pr] pr)
-              (assoc :selected-idx 0)))
+        (switch-pr-detail model (get prs next-idx))
         model))
 
     ;; Non-detail views: no-op
     model))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Search match navigation
 
 (defn next-search-match
@@ -393,13 +511,6 @@
     (transition/switch-view model prev-view)))
 
 (defn cycle-pane-reverse
-  "Cycle Shift+Tab focus between panes in reverse."
+  "Cycle Shift+Tab focus between panes in reverse. Delegates to pane ns."
   [model]
-  (let [pane-count (case (:view model)
-                     :workflow-detail 2
-                     :pr-detail       3
-                     :dag-kanban      6
-                     1)
-        current (get-in model [:detail :focused-pane] 0)]
-    (assoc-in model [:detail :focused-pane]
-              (mod (+ current (dec pane-count)) pane-count))))
+  (pane/cycle-pane-reverse model))

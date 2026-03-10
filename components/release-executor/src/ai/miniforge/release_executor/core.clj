@@ -19,12 +19,12 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pipeline helpers
 
-(defn- failed?
+(defn failed?
   "Check if pipeline has failed."
   [state]
   (contains? state :failure))
 
-(defn- fail
+(defn fail
   "Mark pipeline as failed with error info."
   [state error-type error-msg & {:keys [hint]}]
   (let [logger (:logger state)]
@@ -34,7 +34,7 @@
            (cond-> {:type error-type :message error-msg}
              hint (assoc :hint hint)))))
 
-(defn- extract-code-artifacts
+(defn extract-code-artifacts
   "Extract code artifacts from workflow artifacts."
   [workflow-artifacts]
   (->> workflow-artifacts
@@ -48,7 +48,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pipeline steps
 
-(defn- step-validate-inputs [state]
+(defn step-validate-inputs [state]
   (cond
     (failed? state) state
     ;; In sandbox mode, worktree-path is not required (container has its own workspace)
@@ -64,7 +64,7 @@
     (fail state :no-code-files "Code artifacts contain no files")
     :else state))
 
-(defn- step-check-gh-auth [state]
+(defn step-check-gh-auth [state]
   (cond
     (failed? state) state
     (not (:create-pr? state)) state
@@ -79,15 +79,20 @@
                       "Run: gh auth login"
                       "Install: brew install gh"))))))
 
-(defn- step-generate-metadata [state]
+(defn step-generate-metadata [state]
   (if (failed? state)
     state
-    (let [{:keys [releaser code-artifacts task-description context logger]} state
-          release-meta (metadata/generate-release-metadata
-                        releaser code-artifacts task-description context logger)]
-      (assoc state :release-meta release-meta))))
+    (if (:release-meta state)
+      state ;; Already provided (e.g. by caller or test)
+      (let [{:keys [releaser code-artifacts task-description context logger]} state
+            release-meta (metadata/generate-release-metadata
+                          releaser code-artifacts task-description context logger)]
+        (if release-meta
+          (assoc state :release-meta release-meta)
+          (fail state :metadata-generation-failed
+                "Releaser agent failed to generate release metadata"))))))
 
-(defn- step-create-branch [state]
+(defn step-create-branch [state]
   (if (failed? state)
     state
     (let [{:keys [worktree-path release-meta sandbox? executor environment-id]} state
@@ -95,13 +100,13 @@
           result (if sandbox?
                    (sandbox/create-branch! executor environment-id branch-name)
                    (git/create-branch! worktree-path branch-name))]
-      (if (:success? result)
+      (if (result/succeeded? result)
         (assoc state
                :branch (:branch result)
                :base-branch (:base-branch result))
         (fail state :branch-create-failed (:error result))))))
 
-(defn- step-write-and-stage [state]
+(defn step-write-and-stage [state]
   (if (failed? state)
     state
     (let [{:keys [worktree-path code-artifacts logger sandbox? executor environment-id]} state
@@ -111,7 +116,7 @@
         (let [result (if sandbox?
                        (sandbox/write-and-stage-files! executor environment-id code-artifacts)
                        (files/write-and-stage-files! worktree-path code-artifacts logger))]
-          (if (:success? result)
+          (if (result/succeeded? result)
             (let [total-ops (get-in result [:metrics :total-operations] 0)]
               (if (zero? total-ops)
                 (fail state :no-files-written "Expected files but wrote 0")
@@ -124,18 +129,18 @@
                      :failure {:type :write-stage-failed :errors (:errors result)}
                      :write-metrics (:metrics result)))))))))
 
-(defn- step-commit [state]
+(defn step-commit [state]
   (if (failed? state)
     state
     (let [{:keys [worktree-path release-meta sandbox? executor environment-id]} state
           result (if sandbox?
                    (sandbox/commit-changes! executor environment-id (:release/commit-message release-meta))
                    (git/commit-changes! worktree-path (:release/commit-message release-meta)))]
-      (if (:success? result)
+      (if (result/succeeded? result)
         (assoc state :commit-sha (:commit-sha result))
         (fail state :commit-failed (:error result))))))
 
-(defn- step-push [state]
+(defn step-push [state]
   (cond
     (failed? state) state
     (not (:create-pr? state)) state
@@ -144,11 +149,11 @@
           result (if sandbox?
                    (sandbox/push-branch! executor environment-id branch)
                    (git/push-branch! worktree-path branch))]
-      (if (:success? result)
+      (if (result/succeeded? result)
         state
         (fail state :push-failed (:error result))))))
 
-(defn- step-create-pr [state]
+(defn step-create-pr [state]
   (cond
     (failed? state) state
     (not (:create-pr? state)) state
@@ -163,13 +168,13 @@
                                    {:title (:release/pr-title release-meta)
                                     :body (:release/pr-description release-meta)
                                     :base-branch base-branch}))]
-      (if (:success? result)
+      (if (result/succeeded? result)
         (assoc state
                :pr-number (:pr-number result)
                :pr-url (:pr-url result))
         (fail state :pr-create-failed (:error result))))))
 
-(defn- step-build-artifact [state]
+(defn step-build-artifact [state]
   (if (failed? state)
     state
     (let [{:keys [worktree-path branch base-branch commit-sha create-pr?
@@ -193,7 +198,7 @@
                                         :code-artifacts-count (count code-artifacts)}})]
       (assoc state :release-artifact release-artifact))))
 
-(defn- step-save-artifact [state]
+(defn step-save-artifact [state]
   (if (failed? state)
     state
     (do
@@ -203,7 +208,7 @@
           (catch Exception _e nil)))
       state)))
 
-(defn- pipeline->result
+(defn pipeline->result
   "Convert pipeline state to phase result."
   [state]
   (let [{:keys [logger failure release-artifact write-metrics
@@ -248,17 +253,18 @@
         executor (:executor context)
         environment-id (:environment-id context)
         sandbox? (boolean (and executor environment-id))
-        initial-state {:logger logger
-                       :worktree-path (:worktree-path context)
-                       :artifact-store (:artifact-store context)
-                       :context context
-                       :create-pr? (get context :create-pr? true)
-                       :releaser (:releaser opts)
-                       :task-description (get-in workflow-state [:workflow/spec :spec/description])
-                       :code-artifacts (extract-code-artifacts (:workflow/artifacts workflow-state))
-                       :executor executor
-                       :environment-id environment-id
-                       :sandbox? sandbox?}]
+        initial-state (cond-> {:logger logger
+                               :worktree-path (:worktree-path context)
+                               :artifact-store (:artifact-store context)
+                               :context context
+                               :create-pr? (get context :create-pr? true)
+                               :releaser (:releaser opts)
+                               :task-description (get-in workflow-state [:workflow/spec :spec/description])
+                               :code-artifacts (extract-code-artifacts (:workflow/artifacts workflow-state))
+                               :executor executor
+                               :environment-id environment-id
+                               :sandbox? sandbox?}
+                       (:release-meta opts) (assoc :release-meta (:release-meta opts)))]
 
     (when logger
       (log/info logger :release-executor :phase-started

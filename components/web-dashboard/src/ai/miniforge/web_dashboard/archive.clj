@@ -12,11 +12,11 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure summary derivation — data in, data out
 
-(defn- extract-wf-id
+(defn extract-wf-id
   [event]
   (or (:workflow/id event) (:workflow-id event)))
 
-(defn- extract-wf-name
+(defn extract-wf-name
   [event wf-id]
   (or (get-in event [:workflow/spec :spec/title])
       (get-in event [:workflow/spec :title])
@@ -27,16 +27,16 @@
       (get-in event [:spec :name])
       (str "Workflow " (subs (str wf-id) 0 (min 8 (count (str wf-id)))))))
 
-(defn- extract-timestamp
+(defn extract-timestamp
   [event]
   (or (:event/timestamp event) (:timestamp event)))
 
-(defn- find-by-type
+(defn find-by-type
   "First event from coll whose :event/type is in type-set."
   [type-set events]
   (first (filter #(contains? type-set (:event/type %)) events)))
 
-(defn- derive-status
+(defn derive-status
   [terminal-event tail-line-count]
   (cond
     (= :workflow/failed (:event/type terminal-event))
@@ -52,7 +52,7 @@
 
     :else :stale))
 
-(defn- derive-summary
+(defn derive-summary
   "Pure: first-event + tail-events + file metadata → summary map or nil."
   [first-event tail-events file-path file-size]
   (let [wf-id (extract-wf-id first-event)]
@@ -73,12 +73,12 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; I/O: read first+last lines from event file
 
-(defn- read-first-event
+(defn read-first-event
   "Read and parse the first line of a RandomAccessFile."
   [^RandomAccessFile raf]
   (-> (.readLine raf) watcher/parse-edn-line))
 
-(defn- read-tail-events
+(defn read-tail-events
   "Seek near EOF, read last ~2KB of lines, parse and return most-recent-first."
   [^RandomAccessFile raf ^long length]
   (let [seek-pos (max 0 (- length 2048))]
@@ -110,7 +110,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Archive scan orchestration
 
-(defn- list-edn-files
+(defn list-edn-files
   [events-dir]
   (let [dir (io/file events-dir)]
     (when (and (.exists dir) (.isDirectory dir))

@@ -40,12 +40,12 @@
 ;; Helper Functions
 ;; ============================================================================
 
-(defn- kubectl-cmd
+(defn kubectl-cmd
   "Build kubectl command with optional custom path."
   [kubectl-path & args]
   (apply vector (or kubectl-path "kubectl") args))
 
-(defn- run-kubectl
+(defn run-kubectl
   "Execute a kubectl command and return the result."
   [kubectl-path & args]
   (try
@@ -53,12 +53,12 @@
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out ""})))
 
-(defn- build-env-vars
+(defn build-env-vars
   "Build K8s env var specs from a map."
   [env-map]
   (mapv (fn [[k v]] {:name (name k) :value (str v)}) env-map))
 
-(defn- build-resource-spec
+(defn build-resource-spec
   "Build K8s resource limits/requests spec.
    Merges provided resources with defaults."
   [resources]
@@ -274,7 +274,7 @@
 
   (acquire-environment! [_this task-id env-config]
     (let [job-name (str "miniforge-task-" (subs (str task-id) 0 8))
-          workdir (or (:workdir env-config) "/workspace")
+          workdir (get env-config :workdir "/workspace")
           job-spec (build-job-spec job-name namespace image workdir
                                    (:env env-config)
                                    (:resources env-config)

@@ -25,7 +25,8 @@
    Layer 0: Pure rendering, depends only on layout and model data."
   (:require
    [ai.miniforge.tui-engine.interface.layout :as layout]
-   [ai.miniforge.tui-views.model :as model]))
+   [ai.miniforge.tui-views.model :as model]
+   [ai.miniforge.tui-views.palette :as palette]))
 
 (defn render
   "Render the tab bar header.
@@ -37,4 +38,4 @@
         label (get model/view-labels active-view "MINIFORGE")
         text (str " MINIFORGE │ " label
                   (when (seq context) (str " │ " context)))]
-    (layout/text [cols rows] text {:fg :cyan :bold? true})))
+    (layout/text [cols rows] text {:fg palette/status-info :bold? true})))

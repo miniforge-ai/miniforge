@@ -90,7 +90,7 @@
         (update :description
                 #(str % "\n\n" (str/trim body)))))))
 
-(def ^:private format-parsers
+(def format-parsers
   "Registry of format -> parser-fn. Extend this to add new formats."
   {:yaml     parse-yaml
    :edn      parse-edn

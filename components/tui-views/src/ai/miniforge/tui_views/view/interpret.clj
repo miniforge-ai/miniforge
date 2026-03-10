@@ -33,13 +33,14 @@
    [clojure.string :as str]
    [ai.miniforge.tui-engine.interface.layout :as layout]
    [ai.miniforge.tui-engine.interface.widget :as widget]
+   [ai.miniforge.tui-views.palette :as palette]
    [ai.miniforge.tui-views.view.project :as project]
    [ai.miniforge.tui-views.views.tab-bar :as tab-bar]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Screen spec loading
 
-(def ^:private screen-specs
+(def screen-specs
   "Load screen specs from EDN at namespace init time."
   (-> (io/resource "config/tui/screens.edn") slurp edn/read-string))
 
@@ -56,7 +57,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Footer rendering
 
-(defn- resolve-footer-segment
+(defn resolve-footer-segment
   "Pick the right footer segment based on model state."
   [model segments]
   (let [sel-count (count (:selected-ids model))
@@ -74,9 +75,9 @@
                    (str (count filtered?)))
 
       :else
-      (or (:normal segments) ""))))
+      (get segments :normal ""))))
 
-(defn- render-footer
+(defn render-footer
   "Render a footer node. Appends flash message if present."
   [model theme [cols rows] segments]
   (let [base (resolve-footer-segment model segments)
@@ -87,7 +88,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Widget rendering
 
-(defn- resolve-columns
+(defn resolve-columns
   "Resolve :flex width columns to fill remaining space.
    Accounts for 1-char inter-column gaps matching the table renderer."
   [columns cols sel-w]
@@ -101,22 +102,26 @@
                  0)]
     (mapv (fn [c] (if (= :flex (:width c)) (assoc c :width flex-w) c)) columns)))
 
-(defn- render-table-widget
+(defn render-table-widget
   "Render a table widget from spec."
   [model theme [cols rows] {:keys [data-fn columns selectable? selection-col?]}]
   (let [project-fn (project/get-projection data-fn)
         data-raw (project-fn model)
-        selected (:selected-idx model)
-        selected-ids (or (:selected-ids model) #{})
+        ;; Use mapped selection from metadata if available (e.g. temporal grouping)
+        mapped-selected (some-> (meta data-raw) :mapped-selected)
+        selected (or mapped-selected (:selected-idx model))
+        selected-ids (get model :selected-ids #{})
         show-sel? (and selection-col? (seq selected-ids))
         sel-w (if show-sel? 3 0)
-        ;; Add selection column to data if needed
+        ;; Add selection column to data if needed (skip header rows)
         data (if show-sel?
                (mapv (fn [row]
-                       (assoc row :sel
-                              (if (contains? selected-ids
-                                             (or (:_id row) (:id row)))
-                                "[x]" "[ ]")))
+                       (if (:_header? row)
+                         row
+                         (assoc row :sel
+                                (if (contains? selected-ids
+                                               (or (:_id row) (:id row)))
+                                  "[x]" "[ ]"))))
                      data-raw)
                data-raw)
         resolved-cols (cond-> []
@@ -125,27 +130,53 @@
     (if (empty? data)
       (layout/text [cols rows] "  No data available."
                    {:fg (get theme :fg :default)})
-      (layout/table [cols rows]
-        {:columns resolved-cols :data data
-         :selected-row (when selectable? selected)
-         :header-fg (get theme :header :cyan)
-         :row-fg (get theme :row-fg :default)
-         :row-bg (get theme :row-bg :default)
-         :selected-fg (get theme :selected-fg :white)
-         :selected-bg (get theme :selected-bg :blue)}))))
+      (let [visible-count (max 0 (- rows 2))
+            sel (or selected 0)
+            offset (if (<= (inc sel) visible-count) 0
+                       (inc (- sel visible-count)))]
+        (layout/table [cols rows]
+          {:columns resolved-cols :data data
+           :selected-row (when selectable? selected)
+           :offset offset
+           :header-fg (get theme :header palette/status-info)
+           :row-fg (get theme :row-fg :default)
+           :row-bg (get theme :row-bg :default)
+           :selected-fg (get theme :selected-fg :white)
+           :selected-bg (get theme :selected-bg :blue)})))))
 
-(defn- render-tree-widget
-  "Render a tree widget from spec."
-  [model _theme [cols rows] {:keys [data-fn]}]
+(defn render-tree-widget
+  "Render a tree widget from spec.
+   When a :pane-id is present in the widget config, selection highlight is
+   shown only when this pane is the focused pane (per-pane selection)."
+  [model _theme [cols rows] {:keys [data-fn pane-id]}]
   (let [project-fn (project/get-projection data-fn)
-        nodes (project-fn model)
-        expanded (or (get-in model [:detail :expanded-nodes]) #{0})]
+        nodes (project-fn (assoc model :_panel-cols cols))
+        expanded (or (get-in model [:detail :expanded-nodes]) #{0})
+        n (count nodes)
+        chat? (= data-fn :project/chat-messages)
+        ;; Chat: user scroll-offset (nil = pinned to bottom), else 0
+        max-scroll (max 0 (- n rows))
+        scroll (if chat?
+                 (let [user-offset (get-in model [:chat :scroll-offset])]
+                   (if (nil? user-offset)
+                     max-scroll   ;; pinned to bottom
+                     (min user-offset max-scroll)))
+                 0)
+        ;; Per-pane selection: only show highlight on the focused pane
+        focused-pane (get-in model [:detail :focused-pane] 0)
+        focused? (or (nil? pane-id) (= pane-id focused-pane))
+        pane-sel (when pane-id
+                   (get-in model [:detail :pane-selections pane-id] 0))
+        selected (if focused?
+                   (or pane-sel (:selected-idx model))
+                   -1)]
     (widget/tree [cols rows]
       {:nodes nodes
        :expanded expanded
-       :selected (:selected-idx model)})))
+       :selected selected
+       :scroll-offset scroll})))
 
-(defn- render-kanban-widget
+(defn render-kanban-widget
   "Render a kanban widget from spec."
   [model _theme [cols rows] {:keys [data-fn]}]
   (let [project-fn (project/get-projection data-fn)
@@ -157,7 +188,7 @@
 
 (declare interpret-node)
 
-(defn- interpret-split-v
+(defn interpret-split-v
   "Interpret a vertical split node."
   [model theme [cols rows] {:keys [ratio children]}]
   (let [r (if (= :footer ratio)
@@ -167,14 +198,14 @@
       (fn [size] (interpret-node model theme size (first children)))
       (fn [size] (interpret-node model theme size (second children))))))
 
-(defn- interpret-split-h
+(defn interpret-split-h
   "Interpret a horizontal split node."
   [model theme [cols rows] {:keys [ratio children]}]
   (layout/split-h [cols rows] ratio
     (fn [size] (interpret-node model theme size (first children)))
     (fn [size] (interpret-node model theme size (second children)))))
 
-(defn- interpret-box
+(defn interpret-box
   "Interpret a box node."
   [model theme [cols rows] {:keys [title title-fn child]}]
   (let [resolved-title (if title-fn
@@ -185,7 +216,7 @@
       {:title resolved-title :border :single :fg (get theme :border :default)
        :content-fn (fn [size] (interpret-node model theme size child))})))
 
-(defn- interpret-text
+(defn interpret-text
   "Interpret a text node."
   [_model theme [cols rows] {:keys [content style]}]
   (layout/text [cols rows] content
@@ -231,7 +262,7 @@
                          (ctx-fn model))
                        "MINIFORGE")]
             (layout/text [c r] text
-              {:fg (get theme :header :cyan) :bold? true}))
+              {:fg (get theme :header palette/status-info) :bold? true}))
 
           :else
           (tab-bar/render model nil [c r])))

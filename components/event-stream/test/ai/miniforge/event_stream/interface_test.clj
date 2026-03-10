@@ -138,6 +138,23 @@
       (is (= :success (:workflow/status event)))
       (is (= 120000 (:workflow/duration-ms event)))))
 
+  (testing "phase-completed includes tokens and cost"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          event (es/phase-completed stream wf-id :implement
+                                     {:outcome :success :duration-ms 8000
+                                      :tokens 2500 :cost-usd 0.08})]
+      (is (= 2500 (:phase/tokens event)))
+      (is (= 0.08 (:phase/cost-usd event)))))
+
+  (testing "workflow-completed includes tokens and cost via opts"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          event (es/workflow-completed stream wf-id :success 120000
+                                        {:tokens 5000 :cost-usd 0.25})]
+      (is (= 5000 (:workflow/tokens event)))
+      (is (= 0.25 (:workflow/cost-usd event)))))
+
   (testing "workflow-failed captures error details"
     (let [stream (es/create-event-stream)
           wf-id (random-uuid)

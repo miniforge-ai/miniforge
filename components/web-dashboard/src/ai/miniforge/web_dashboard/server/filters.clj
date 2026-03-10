@@ -43,7 +43,7 @@
                     (keyword cleaned)))
     :else nil))
 
-(defn- parse-bool
+(defn parse-bool
   "Parse boolean-like string values."
   [v]
   (cond
@@ -54,7 +54,7 @@
                   v)
     :else v))
 
-(defn- decode-url-part
+(defn decode-url-part
   "Decode a URL query-string key/value."
   [s]
   (java.net.URLDecoder/decode (str s) "UTF-8"))
@@ -76,7 +76,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Operator and value normalization
 
-(defn- normalize-op
+(defn normalize-op
   "Normalize operation token to keyword."
   [op]
   (let [token (str/lower-case (str/trim (str op)))]
@@ -103,7 +103,7 @@
       "between" :between
       :=)))
 
-(defn- normalize-ast-op
+(defn normalize-ast-op
   "Normalize AST boolean operator."
   [op]
   (let [token (str/lower-case (str/trim (str op)))]
@@ -116,7 +116,7 @@
       "not" :not
       :and)))
 
-(defn- normalize-filter-value
+(defn normalize-filter-value
   "Coerce clause value based on filter spec type/value configuration."
   [spec value]
   (let [filter-type (:filter/type spec)
@@ -139,7 +139,7 @@
 
       :else value)))
 
-(defn- normalize-filter-clause
+(defn normalize-filter-clause
   "Normalize a single JSON clause to evaluator-friendly shape."
   [clause]
   (let [filter-id (->keyword (or (:filter/id clause)
@@ -156,10 +156,10 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; AST parsing
 
-(defn- normalize-filter-ast
+(defn normalize-filter-ast
   "Normalize JSON AST from browser before evaluation."
   [ast]
-  (let [clauses (or (:clauses ast) (get ast "clauses") [])]
+  (let [clauses (get ast :clauses (get ast "clauses" []))]
     {:op (normalize-ast-op (or (:op ast) (get ast "op")))
      :clauses (->> clauses
                    (map normalize-filter-clause)

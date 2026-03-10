@@ -295,11 +295,13 @@
    - workflow-id: UUID of the workflow
    - status: Keyword status (:success, :failure, :cancelled)
    - duration-ms: Optional total workflow duration in milliseconds
+   - opts: Optional map with :tokens and :cost-usd
 
    Example:
-     (workflow-completed stream wf-id :success 120000)"
-  [stream workflow-id status & [duration-ms]]
-  (core/workflow-completed stream workflow-id status duration-ms))
+     (workflow-completed stream wf-id :success 120000)
+     (workflow-completed stream wf-id :success 120000 {:tokens 5000 :cost-usd 0.15})"
+  [stream workflow-id status & [duration-ms opts]]
+  (core/workflow-completed stream workflow-id status duration-ms opts))
 
 (defn workflow-failed
   "Create a workflow/failed event.
@@ -627,14 +629,28 @@
      (agent/invoke planner task (assoc ctx :on-chunk on-chunk))"
   [stream workflow-id agent-id & [opts]]
   (let [{:keys [print? quiet?]} opts]
-    (fn [{:keys [delta done?]}]
-      ;; Print to console if requested
-      (when (and print? (not quiet?) delta (not (empty? delta)))
-        (print delta)
-        (flush))
-      ;; Always publish to event stream
-      (when stream
-        (publish! stream (agent-chunk stream workflow-id agent-id (or delta "") done?))))))
+    (fn [{:keys [delta done? tool-use heartbeat]}]
+      (cond
+        ;; Tool-use events — publish an agent-status event (no console print)
+        tool-use
+        (when stream
+          (publish! stream (agent-status stream workflow-id agent-id
+                                         :tool-calling "Agent calling tool")))
+
+        ;; Heartbeat events — no-op but counts as activity (keeps stream alive)
+        heartbeat
+        nil
+
+        ;; Normal text deltas
+        :else
+        (do
+          ;; Print to console if requested
+          (when (and print? (not quiet?) delta (not (empty? delta)))
+            (print delta)
+            (flush))
+          ;; Always publish to event stream
+          (when stream
+            (publish! stream (agent-chunk stream workflow-id agent-id (or delta "") done?))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

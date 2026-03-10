@@ -79,7 +79,7 @@
           {:valid? true :errors nil})))))
 
 ;; NOTE: Helper function for commented-out generate-plan function
-#_(defn- make-task
+#_(defn make-task
   "Helper to create a task with generated ID."
   [{:keys [description type dependencies acceptance-criteria estimated-effort]
     :or {dependencies []
@@ -92,7 +92,7 @@
     (seq acceptance-criteria) (assoc :task/acceptance-criteria acceptance-criteria)
     estimated-effort (assoc :task/estimated-effort estimated-effort)))
 
-(defn- format-existing-files
+(defn format-existing-files
   "Format existing file contents for inclusion in the user prompt.
 
    Arguments:
@@ -109,7 +109,7 @@
                      "\n```\n" content "\n```")))
          (str/join "\n"))))
 
-(defn- spec->text
+(defn spec->text
   "Convert a spec to text for the LLM."
   [spec]
   (if (map? spec)
@@ -119,7 +119,7 @@
         (pr-str spec))
     (str spec)))
 
-(defn- parse-plan-response
+(defn parse-plan-response
   "Parse the LLM response to extract a plan.
    Handles both EDN in code blocks and plain EDN.
    Returns nil if the parsed result is not a map."
@@ -136,25 +136,12 @@
       ;; Return nil if parsing fails
       nil)))
 
-(defn- make-fallback-plan
-  "Create a fallback plan when LLM response cannot be parsed."
-  [spec-text]
-  (let [plan-id (random-uuid)
-        task-id (random-uuid)]
-    {:plan/id plan-id
-     :plan/name (str "plan-" (subs (str plan-id) 0 8))
-     :plan/tasks [{:task/id task-id
-                   :task/description (str "Implement: " (subs spec-text 0 (min 100 (count spec-text))))
-                   :task/type :implement
-                   :task/estimated-effort :medium}]
-     :plan/estimated-complexity :medium
-     :plan/risks ["LLM response could not be parsed"]
-     :plan/assumptions ["Spec is complete"]
-     :plan/created-at (java.util.Date.)}))
+;; make-fallback-plan removed — silent fallback masks real failures.
+;; Plan generation now throws with evidence on failure (see invoke-fn below).
 
 ;; NOTE: This function is currently unused but kept as reference for future implementation
 ;; where plan generation may be delegated to a separate function rather than done inline.
-#_(defn- generate-plan
+#_(defn generate-plan
   "Generate a plan from analyzed specification.
    In a real implementation, this would use an LLM with the system prompt."
   [analysis context]
@@ -210,7 +197,7 @@
                         "Dependencies are available"]
      :plan/created-at (java.util.Date.)}))
 
-(defn- repair-plan
+(defn repair-plan
   "Attempt to repair a plan based on validation errors."
   [plan errors _context]
   ;; Simple repair strategies based on common errors
@@ -256,12 +243,12 @@
      :repairs-made (when (not= plan @repaired)
                      {:original-errors errors})}))
 
-(defn- ensure-task-ids
+(defn ensure-task-ids
   "Ensure all tasks in a plan have proper UUIDs."
   [tasks]
   (mapv (fn [t] (update t :task/id #(or % (random-uuid)))) tasks))
 
-(defn- finalize-plan
+(defn finalize-plan
   "Ensure a plan has proper ID, task IDs, and timestamp."
   [plan]
   (-> plan
@@ -306,8 +293,12 @@
                                (when (seq existing-files)
                                  (str "\n\n## Existing Files in Scope\n\n"
                                       "Review these files before planning. If the spec is already "
-                                      "fully satisfied by existing code, respond with an already-satisfied "
-                                      "evidence bundle as described in your system prompt.\n\n"
+                                      "fully satisfied by existing code, respond with an evidence bundle:\n"
+                                      "```clojure\n{:plan/status :already-satisfied\n"
+                                      " :plan/summary \"Brief explanation\"\n"
+                                      " :plan/evidence [{:requirement \"what spec requires\"\n"
+                                      "                  :satisfied-by \"path/to/file.clj\"\n"
+                                      "                  :proof \"specific function/test that satisfies it\"}]}\n```\n"
                                       (format-existing-files existing-files)))
                                "\n\nOutput your plan as a Clojure map following the format in your system prompt. "
                                "Use (random-uuid) for all IDs - just write #uuid \"<any-uuid>\" placeholders that I'll fill in.")]
@@ -315,14 +306,16 @@
             ;; Use the real LLM with artifact session for MCP tool support
             (let [{:keys [llm-result artifact]}
                   (artifact-session/with-artifact-session [session]
-                    (let [mcp-opts {:mcp-config (:mcp-config-path session)}]
+                    (let [mcp-opts {:mcp-config (:mcp-config-path session)
+                                    :mcp-allowed-tools (:mcp-allowed-tools session)
+                                    :supervision (:supervision session)}]
                       (if on-chunk
                         (llm/chat-stream llm-client user-prompt on-chunk
                                          (merge {:system @planner-system-prompt} mcp-opts))
                         (llm/chat llm-client user-prompt
                                   (merge {:system @planner-system-prompt} mcp-opts)))))
                   llm-response llm-result
-                  tokens (or (:tokens llm-response) 0)]
+                  tokens (get llm-response :tokens 0)]
               (log/info logger :planner :planner/llm-called
                         {:data {:success (llm/success? llm-response)
                                 :tokens tokens
@@ -332,7 +325,12 @@
                 (let [content (llm/get-content llm-response)
                       plan (or artifact
                                (parse-plan-response content)
-                               (make-fallback-plan spec-text))
+                               (throw (ex-info "Plan generation failed: neither MCP artifact nor EDN parse succeeded"
+                                               {:phase :plan
+                                                :mcp-artifact nil
+                                                :parse-result nil
+                                                :llm-content-length (count content)
+                                                :llm-content-preview (subs content 0 (min 500 (count content)))})))
                       plan-final (finalize-plan plan)]
                   (when artifact
                     (log/info logger :planner :planner/mcp-artifact-received
@@ -351,19 +349,13 @@
                                        :metrics {:tasks-created (count (:plan/tasks plan-final))
                                                  :complexity (:plan/estimated-complexity plan-final)
                                                  :tokens tokens}})))
-                ;; LLM call failed
-                (let [fallback (make-fallback-plan spec-text)
-                      error-msg (or (:message (llm/get-error llm-response))
+                ;; LLM call failed — no silent fallback
+                (let [error-msg (or (:message (llm/get-error llm-response))
                                     "LLM call failed")]
-                  (response/error error-msg {:output fallback}))))
-            ;; No LLM client - use fallback (for testing)
-            (do
-              (log/warn logger :planner :planner/no-llm-backend
-                        {:message "No LLM backend provided, using fallback plan"})
-              (let [plan (make-fallback-plan spec-text)]
-                (response/success plan
-                                  {:metrics {:tasks-created (count (:plan/tasks plan))
-                                             :complexity (:plan/estimated-complexity plan)}}))))))
+                  (response/error error-msg))))
+               ;; No LLM client — hard failure
+            (throw (ex-info "No LLM backend provided for planner agent"
+                            {:phase :plan})))))
 
       :validate-fn validate-plan
 

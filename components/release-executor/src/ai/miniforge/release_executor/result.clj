@@ -3,6 +3,13 @@
    Provides consistent result structures across all operations.")
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Result predicates
+
+(defn succeeded?
+  "Check if a result map indicates success."
+  [result]
+  (boolean (:success? result)))
+
 ;; Shell operation results
 
 (defn shell-success

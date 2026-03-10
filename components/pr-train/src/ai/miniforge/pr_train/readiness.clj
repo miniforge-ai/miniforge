@@ -80,7 +80,7 @@
    :gates-passed      score-gates-factor
    :behind-main       score-behind-main-factor})
 
-(defn- score-factor
+(defn score-factor
   "Score a single factor, returning its contribution map."
   [train pr cfg [factor weight]]
   (let [score-fn (get factor-fns factor)

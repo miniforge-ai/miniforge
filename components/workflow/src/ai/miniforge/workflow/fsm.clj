@@ -61,7 +61,7 @@
     :failed    {:type :final}
     :cancelled {:type :final}}})
 
-(def ^:private workflow-machine
+(def workflow-machine
   "Compiled workflow state machine."
   (fsm/define-machine workflow-machine-config))
 
@@ -111,6 +111,11 @@
    Returns: boolean"
   [state]
   (contains? terminal-states state))
+
+(defn succeeded?
+  "Check if a transition result indicates success."
+  [result]
+  (boolean (:success? result)))
 
 (defn next-state
   "Get next state for a transition.

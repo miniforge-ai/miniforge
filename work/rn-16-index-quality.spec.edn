@@ -1,0 +1,95 @@
+;; Reliability Nines — RN-16: Index Quality Metrics & Canary Protocol
+;; Tier 5 (Eval & Intelligence) — depends on RN-03
+;; No downstream blocks
+
+{:spec/title "RN-16: Repository Index Quality Metrics and Canary Protocol"
+ :version "1.0.0"
+ :type :feature
+ :priority :low
+
+ :spec/description
+ "Create index-quality and canary Polylith components implementing N1 §2.27.9
+  (Index Quality Metrics) and N1 §2.27.10 (Canary Protocol). Measure repo index
+  freshness, coverage, and search recall. Run golden queries against the index
+  to detect degradation.
+
+  Current state: repo-index component exists but has no quality measurement.
+  Target state: Quality scoring with canary-based degradation detection."
+
+ :spec/intent
+ {:type :new-component
+  :scope ["components/index-quality (NEW)"
+          "components/canary (NEW)"
+          "components/event-stream (extend with repo-index events)"]}
+
+ :normative-refs
+ {:primary "N1 §2.27.9 — Index Quality Metrics"
+  :secondary ["N1 §2.27.10 — Canary Protocol"
+              "N3 §3.18 — Repository Intelligence Events"]}
+
+ :gap-analysis-ref "gap-analysis-reliability-nines.md #19, #20"
+ :dag/id :rn-16
+ :dag/depends-on [:rn-03]
+ :dag/blocks []
+
+ :implementation
+ {:step-1-index-quality
+  {:title "Create index-quality component"
+   :files-to-create
+   ["components/index-quality/src/ai/miniforge/index_quality/interface.clj"
+    "components/index-quality/src/ai/miniforge/index_quality/core.clj"
+    "components/index-quality/src/ai/miniforge/index_quality/schema.clj"]
+   :changes
+   ["compute-quality function: repo-id → quality metrics"
+    "Metrics: freshness-lag-ms, coverage-score, symbol-coverage, search-recall"
+    "Emit repo-index/quality-computed event (RN-03 schema)"]}
+
+  :step-2-canary
+  {:title "Create canary component"
+   :files-to-create
+   ["components/canary/src/ai/miniforge/canary/interface.clj"
+    "components/canary/src/ai/miniforge/canary/core.clj"
+    "components/canary/src/ai/miniforge/canary/schema.clj"]
+   :changes
+   ["Define golden query set: queries with known-good results"
+    "run-canary function: execute golden queries, compute recall"
+    "Recall threshold: default 0.8, configurable"
+    "Below threshold → emit repo-index/canary-failed event"
+    "Mark index as degraded on canary failure"]}
+
+  :step-3-scheduling
+  {:title "Schedule periodic quality checks"
+   :changes
+   ["Run index quality computation after each index update"
+    "Run canary queries on configurable interval (default: every index rebuild)"
+    "Store quality history for trend analysis"]}}
+
+ :spec/constraints
+ ["Quality computation MUST NOT block index operations"
+  "Canary golden queries MUST be curated (not auto-generated)"
+  "Recall threshold MUST be configurable per repo"
+  "Canary failure MUST mark index as degraded, not delete it"
+  "Follow Polylith interface-only deps"]
+
+ :testing-strategy
+ {:unit-tests
+  ["Quality metric computation with known index state"
+   "Canary recall computation with known query results"
+   "Threshold comparison: pass at 0.8, fail at 0.7"
+   "Event emission on quality computation and canary failure"]
+  :integration-tests
+  ["Index rebuild → quality computed → event emitted"
+   "Canary failure → index marked degraded"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "Quality metrics computed"
+   :verification "Freshness, coverage, recall scores produced"}
+  {:criterion "Canary protocol functional"
+   :verification "Golden queries run, recall compared to threshold"}
+  {:criterion "Degradation on canary failure"
+   :verification "Index marked degraded when recall below threshold"}
+  {:criterion "Events emitted"
+   :verification "repo-index/quality-computed and canary-failed events produced"}]
+
+ :estimated-effort "3-5 days"
+ :workflow/type :simple}

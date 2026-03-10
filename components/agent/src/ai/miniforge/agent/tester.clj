@@ -5,6 +5,7 @@
    [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
@@ -77,7 +78,7 @@
           :else
           {:valid? true :errors nil})))))
 
-(defn- extract-test-framework
+(defn extract-test-framework
   "Extract the testing framework from file content or context."
   [files context]
   (let [content (str/join "\n" (map :content files))]
@@ -92,7 +93,7 @@
           (re-find #"describe\(" content) "mocha"
           :else "clojure.test"))))
 
-(defn- count-assertions
+(defn count-assertions
   "Count assertions in test content."
   [content]
   (+ (count (re-seq #"\(is\s" content))
@@ -101,7 +102,7 @@
      (count (re-seq #"assert" content))
      (count (re-seq #"expect\(" content))))
 
-(defn- count-test-cases
+(defn count-test-cases
   "Count test cases in test content."
   [content]
   (+ (count (re-seq #"\(deftest\s" content))
@@ -110,7 +111,7 @@
      (count (re-seq #"it\(" content))
      (count (re-seq #"test\(" content))))
 
-(defn- code->text
+(defn code->text
   "Convert code artifact to text for the LLM."
   [code-artifact]
   (if (map? code-artifact)
@@ -121,7 +122,7 @@
       (str/join "\n\n" file-texts))
     (str code-artifact)))
 
-(defn- parse-test-response
+(defn parse-test-response
   "Parse the LLM response to extract test artifact.
    Handles both EDN in code blocks and plain EDN."
   [response-content]
@@ -134,7 +135,7 @@
     (catch Exception _
       nil)))
 
-(defn- extract-test-code-blocks
+(defn extract-test-code-blocks
   "Extract test code blocks from markdown response."
   [response-content]
   (let [blocks (re-seq #"```(?:clojure)?\s*\n(\(ns [^`]+)\n?```" response-content)]
@@ -148,45 +149,10 @@
                              :content (str/trim content)})))
            vec))))
 
-(defn- make-fallback-tests
-  "Create a fallback test artifact when LLM response cannot be parsed."
-  [code-artifact spec]
-  (let [code-files (or (:code/files code-artifact) [])
-        source-file (first (filter #(= :create (:action %)) code-files))
-        source-path (or (:path source-file) "src/unknown.clj")
-        test-path (-> source-path
-                      (str/replace #"^src/" "test/")
-                      (str/replace #"\.clj$" "_test.clj"))
-        source-ns (-> source-path
-                      (str/replace #"^src/" "")
-                      (str/replace #"\.clj$" "")
-                      (str/replace "/" ".")
-                      (str/replace "_" "-"))
-        test-ns (str source-ns "-test")
-        acceptance-criteria (or (:task/acceptance-criteria spec)
-                                (:acceptance-criteria spec)
-                                ["Functionality works as expected"])]
-    {:test/id (random-uuid)
-     :test/files [{:path test-path
-                   :content (str "(ns " test-ns "\n"
-                                 "  \"Tests for " source-ns ".\"\n"
-                                 "  (:require\n"
-                                 "   [clojure.test :as test :refer [deftest testing is]]\n"
-                                 "   [" source-ns " :as sut]))\n\n"
-                                 ";; Acceptance criteria:\n"
-                                 (str/join "\n" (map #(str ";; - " %) acceptance-criteria))
-                                 "\n\n"
-                                 "(deftest basic-test\n"
-                                 "  (testing \"placeholder test - LLM response could not be parsed\"\n"
-                                 "    (is true)))\n")}]
-     :test/type :unit
-     :test/framework "clojure.test"
-     :test/assertions-count 1
-     :test/cases-count 1
-     :test/summary "Fallback test placeholder"
-     :test/created-at (java.util.Date.)}))
+;; make-fallback-tests removed — silent fallback masks real failures,
+;; prevents retry/repair from working, and short-circuits checkpoint resume.
 
-(defn- repair-test-artifact
+(defn repair-test-artifact
   "Attempt to repair a test artifact based on validation errors."
   [artifact errors _context]
   (let [repaired (atom artifact)]
@@ -282,7 +248,7 @@
               on-chunk (:on-chunk context)
               ;; Input can be a code artifact or a map with :code and :spec
               code-artifact (or (:code input) input)
-              spec (or (:spec input) {})
+              spec (get input :spec {})
               code-text (code->text code-artifact)
               acceptance-criteria (or (:task/acceptance-criteria spec)
                                       (:acceptance-criteria spec)
@@ -298,14 +264,17 @@
             ;; Use the real LLM with artifact session for MCP tool support
             (let [{:keys [llm-result artifact]}
                   (artifact-session/with-artifact-session [session]
-                    (let [mcp-opts {:mcp-config (:mcp-config-path session)}]
+                    (let [mcp-opts {:mcp-config (:mcp-config-path session)
+                                    :mcp-allowed-tools (:mcp-allowed-tools session)
+                                    :supervision (:supervision session)}]
                       (if on-chunk
                         (llm/chat-stream llm-client user-prompt on-chunk
                                          (merge {:system @tester-system-prompt} mcp-opts))
                         (llm/chat llm-client user-prompt
                                   (merge {:system @tester-system-prompt} mcp-opts)))))
                   response llm-result
-                  tokens (or (:tokens response) 0)]
+                  tokens (get response :tokens 0)
+                  cost-usd (get response :cost-usd)]
               (log/info logger :tester :tester/llm-called
                         {:data {:success (llm/success? response)
                                 :tokens tokens
@@ -318,17 +287,16 @@
                       _ (when artifact
                           (log/info logger :tester :tester/mcp-artifact-received
                                     {:data {:file-count (count (:test/files artifact))}}))
-                      ;; Try multiple parsing strategies
+                      ;; Try multiple parsing strategies (no fallback — fail explicitly)
                       tests (or parsed
                                 (when-let [files (extract-test-code-blocks content)]
                                   {:test/id (random-uuid)
                                    :test/files files
                                    :test/type :unit
                                    :test/summary "Tests from code blocks"
-                                   :test/created-at (java.util.Date.)})
-                                (make-fallback-tests code-artifact spec))
-                      ;; Ensure proper ID and calculate metrics
-                      tests-with-meta (-> tests
+                                   :test/created-at (java.util.Date.)}))]
+                  (if tests
+                    (let [tests-with-meta (-> tests
                                           (update :test/id #(or % (random-uuid)))
                                           (assoc :test/framework (extract-test-framework (:test/files tests) context))
                                           (assoc :test/assertions-count
@@ -344,35 +312,22 @@
                                                           (map count-test-cases)
                                                           (reduce +))))
                                           (assoc :test/created-at (java.util.Date.)))]
-                  {:status :success
-                   :output tests-with-meta
-                   :artifact tests-with-meta
-                   :tokens tokens
-                   :metrics {:test-files (count (:test/files tests-with-meta))
-                             :test-type (:test/type tests-with-meta)
-                             :assertions (:test/assertions-count tests-with-meta)
-                             :cases (:test/cases-count tests-with-meta)
-                             :tokens tokens}})
-                ;; LLM call failed
-                (let [fallback (make-fallback-tests code-artifact spec)]
-                  {:status :error
-                   :error (llm/get-error response)
-                   :output fallback
-                   :artifact fallback
-                   :metrics {:tokens 0}})))
-            ;; No LLM client - use fallback (for testing)
-            (do
-              (log/warn logger :tester :tester/no-llm-backend
-                        {:message "No LLM backend provided, using fallback tests"})
-              (let [tests (make-fallback-tests code-artifact spec)
-                    framework (extract-test-framework (:test/files tests) context)]
-                {:status :success
-                 :output (assoc tests :test/framework framework)
-                 :artifact (assoc tests :test/framework framework)
-                 :metrics {:test-files (count (:test/files tests))
-                           :test-type (:test/type tests)
-                           :assertions 1
-                           :cases 1}})))))
+                  (response/success tests-with-meta
+                                    {:tokens tokens
+                                     :metrics {:test-files (count (:test/files tests-with-meta))
+                                               :test-type (:test/type tests-with-meta)
+                                               :assertions (:test/assertions-count tests-with-meta)
+                                               :cases (:test/cases-count tests-with-meta)
+                                               :tokens tokens
+                                               :cost-usd cost-usd}}))
+                    ;; LLM returned content but no parseable tests — fail explicitly
+                    (response/error "LLM response could not be parsed as test artifact"
+                                    {:tokens tokens})))
+                ;; LLM call failed — propagate error, no fallback
+                (response/error (or (:message (llm/get-error response))
+                                    "LLM call failed"))))
+            ;; No LLM client — fail explicitly
+            (response/error "No LLM backend provided"))))
 
       :validate-fn validate-test-artifact
 

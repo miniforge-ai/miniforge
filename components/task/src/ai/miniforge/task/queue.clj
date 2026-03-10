@@ -11,13 +11,13 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Priority calculation (pure functions)
 
-(def ^:private priority-weights
+(def priority-weights
   "Weights for priority calculation components."
   {:workflow-priority 100  ; Base weight for workflow priority (0-10)
    :age-factor 0.001       ; Priority points per millisecond of age
    :ready-bonus 500})      ; Bonus for tasks with no unsatisfied dependencies
 
-(defn- task-age-ms
+(defn task-age-ms
   "Calculate the age of a task in milliseconds.
    Uses :task/created-at if present, otherwise returns 0."
   [task now]

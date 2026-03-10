@@ -24,7 +24,7 @@
 ;; Helper Functions
 ;; ============================================================================
 
-(defn- run-git
+(defn run-git
   "Execute a git command and return the result."
   [& args]
   (try
@@ -32,7 +32,7 @@
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out ""})))
 
-(defn- run-shell
+(defn run-shell
   "Execute a shell command and return the result."
   [& args]
   (try
@@ -40,7 +40,7 @@
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out ""})))
 
-(defn- ensure-directory
+(defn ensure-directory
   "Ensure a directory exists."
   [path]
   (.mkdirs (File. ^String path)))
@@ -158,6 +158,38 @@
       (result/err :copy-failed (.getMessage e)))))
 
 ;; ============================================================================
+;; Public Utility Functions
+;; ============================================================================
+
+(defn create-worktree!
+  "Create a git worktree at <base-path>/task-<task-id> from <branch>.
+
+   Takes a map with keys:
+   - :base-path  - Base directory under which the worktree directory is created
+   - :repo-path  - Path to the git repository (used as -C arg)
+   - :branch     - Branch/ref to check out in the worktree
+   - :task-id    - Identifier for the task; the directory will be task-<task-id>
+
+   Returns {:worktree-path string :branch string :task-id string} on success,
+   or a result/err map on failure."
+  [{:keys [base-path repo-path branch task-id]}]
+  (let [worktree-name (str "task-" task-id)
+        result (create-worktree base-path repo-path worktree-name branch)]
+    (if (result/ok? result)
+      (result/ok {:worktree-path (:worktree-path (:data result))
+                  :branch branch
+                  :task-id (str task-id)})
+      result)))
+
+(defn remove-worktree!
+  "Remove a git worktree created by create-worktree!.
+
+   Takes a map with keys:
+   - :worktree-path - Absolute path to the worktree directory to remove"
+  [{:keys [worktree-path]}]
+  (remove-worktree worktree-path))
+
+;; ============================================================================
 ;; WorktreeExecutor Record
 ;; ============================================================================
 
@@ -174,8 +206,8 @@
 
   (acquire-environment! [_this task-id env-config]
     (let [worktree-name (str "task-" (subs (str task-id) 0 8))
-          repo-path (or (:repo-path env-config) ".")
-          branch (or (:branch env-config) "main")
+          repo-path (get env-config :repo-path ".")
+          branch (get env-config :branch "main")
           create-result (create-worktree base-path repo-path worktree-name branch)]
       (if (result/ok? create-result)
         (let [worktree-path (:worktree-path (:data create-result))]

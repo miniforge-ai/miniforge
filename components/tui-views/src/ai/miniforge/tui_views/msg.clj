@@ -28,8 +28,18 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Side-effect result messages (returned by effect handlers)
 
-(defn prs-synced [pr-items]
-  [:msg/prs-synced {:pr-items pr-items}])
+(defn prs-synced
+  ([pr-items] [:msg/prs-synced {:pr-items pr-items}])
+  ([pr-items error] [:msg/prs-synced (cond-> {:pr-items pr-items}
+                                       error (assoc :error error))]))
+
+(defn prs-synced-with-cache
+  "Like prs-synced but includes pre-loaded cache data so the reducer
+   doesn't need to perform filesystem IO."
+  [pr-items cached-risk error]
+  [:msg/prs-synced (cond-> {:pr-items pr-items
+                            :cached-risk cached-risk}
+                     error (assoc :error error))])
 
 (defn repos-discovered [result]
   [:msg/repos-discovered result])
@@ -64,8 +74,20 @@
 (defn chat-action-result [result]
   [:msg/chat-action-result result])
 
+(defn fleet-risk-triaged [assessments]
+  [:msg/fleet-risk-triaged {:assessments assessments}])
+
+(defn fleet-risk-triaged-error [error]
+  [:msg/fleet-risk-triaged {:error error}])
+
 (defn side-effect-error [error-data]
   [:msg/side-effect-error error-data])
+
+(defn workflows-archived [result]
+  [:msg/workflows-archived result])
+
+(defn workflow-detail-loaded [workflow-id detail]
+  [:msg/workflow-detail-loaded {:workflow-id workflow-id :detail detail}])
 
 ;------------------------------------------------------------------------------ Layer 0b
 ;; Event stream translation messages (from subscription.clj)
@@ -76,8 +98,8 @@
 (defn phase-changed [wf-id phase]
   [:msg/phase-changed {:workflow-id wf-id :phase phase}])
 
-(defn phase-done [wf-id phase outcome]
-  [:msg/phase-done {:workflow-id wf-id :phase phase :outcome outcome}])
+(defn phase-done [wf-id phase outcome & [extras]]
+  [:msg/phase-done (merge {:workflow-id wf-id :phase phase :outcome outcome} extras)])
 
 (defn agent-status [wf-id agent-id status-type message]
   [:msg/agent-status {:workflow-id wf-id :agent agent-id
@@ -87,14 +109,32 @@
   [:msg/agent-output {:workflow-id wf-id :agent agent-id
                       :delta delta :done? done?}])
 
-(defn workflow-done [wf-id status]
-  [:msg/workflow-done {:workflow-id wf-id :status status}])
+(defn agent-started [wf-id agent-id context]
+  [:msg/agent-started {:workflow-id wf-id :agent agent-id :context context}])
+
+(defn agent-completed [wf-id agent-id result]
+  [:msg/agent-completed {:workflow-id wf-id :agent agent-id :result result}])
+
+(defn agent-failed [wf-id agent-id error]
+  [:msg/agent-failed {:workflow-id wf-id :agent agent-id :error error}])
+
+(defn workflow-done [wf-id status & [extras]]
+  [:msg/workflow-done (merge {:workflow-id wf-id :status status} extras)])
 
 (defn workflow-failed [wf-id error]
   [:msg/workflow-failed {:workflow-id wf-id :error error}])
 
 (defn gate-result [wf-id gate passed?]
   [:msg/gate-result {:workflow-id wf-id :gate gate :passed? passed?}])
+
+(defn gate-started [wf-id gate]
+  [:msg/gate-started {:workflow-id wf-id :gate gate}])
+
+(defn tool-invoked [wf-id agent-id tool-id]
+  [:msg/tool-invoked {:workflow-id wf-id :agent agent-id :tool tool-id}])
+
+(defn tool-completed [wf-id agent-id tool-id]
+  [:msg/tool-completed {:workflow-id wf-id :agent agent-id :tool tool-id}])
 
 ;------------------------------------------------------------------------------ Layer 0c
 ;; Chain event messages (from subscription.clj)

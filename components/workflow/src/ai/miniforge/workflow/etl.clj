@@ -31,7 +31,7 @@
 ;------------------------------------------------------------------------------ Layer 1
  ;; ETL stages
 
- (defn- classify-sources
+ (defn classify-sources
    "Stage 1: Classify sources by type.
    Returns {:success? bool :classified [source...] :error (optional)}"
    [logger sources]
@@ -50,7 +50,7 @@
                        :data {:error-type (type e)}})
        (schema/exception-failure :classified e {:stage :classification}))))
 
- (defn- scan-sources
+ (defn scan-sources
    "Stage 2: Run security and policy scanners.
    Returns {:success? bool :scanned [source...] :findings [...] :error (optional)}"
    [logger classified-sources]
@@ -71,7 +71,7 @@
                        :data {:error-type (type e)}})
        (schema/exception-failure :scanned e {:stage :scanning}))))
 
- (defn- extract-knowledge
+ (defn extract-knowledge
    "Stage 3: Extract structured knowledge from sources.
    Returns {:success? bool :packs [...] :error (optional)}"
    [logger scanned-sources]
@@ -90,7 +90,7 @@
                        :data {:error-type (type e)}})
        (schema/exception-failure :packs e {:stage :extraction}))))
 
- (defn- validate-packs
+ (defn validate-packs
    "Stage 4: Validate pack integrity and schemas.
    Returns {:success? bool :validated [...] :error (optional)}"
    [logger packs]

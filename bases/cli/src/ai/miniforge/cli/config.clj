@@ -31,25 +31,25 @@
    :dashboard {:port 7878
                :auto-open false}})
 
-(defn- style
+(defn style
   "Apply terminal styling using ANSI escape codes."
   [text color]
   (let [colors {:red "31" :green "32" :yellow "33" :cyan "36"}]
     (str "\033[" (get colors color "37") "m" text "\033[0m")))
 
-(defn- print-success [msg]
+(defn print-success [msg]
   (println (style msg :green)))
 
-(defn- print-error [msg]
+(defn print-error [msg]
   (println (style (str "Error: " msg) :red)))
 
-(defn- print-info [msg]
+(defn print-info [msg]
   (println (style msg :cyan)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Config file operations
 
-(defn- read-config-file
+(defn read-config-file
   "Read config file, returns nil if doesn't exist."
   [path]
   (when (fs/exists? path)
@@ -59,13 +59,13 @@
         (println (style (str "Warning: Failed to read config file: " (.getMessage e)) :yellow))
         nil))))
 
-(defn- write-config-file
+(defn write-config-file
   "Write config to file with pretty printing."
   [path config]
   (fs/create-dirs (fs/parent path))
   (spit path (with-out-str (pprint/pprint config))))
 
-(defn- load-merged-config
+(defn load-merged-config
   "Load config with env var overrides."
   [path]
   (let [file-config (or (read-config-file path) {})
@@ -86,7 +86,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Config display and manipulation
 
-(defn- format-config-value
+(defn format-config-value
   "Format a config value for display."
   [v]
   (cond
@@ -94,13 +94,13 @@
     (string? v) v
     :else (pr-str v)))
 
-(defn- parse-config-key
+(defn parse-config-key
   "Parse config key path (e.g., 'llm.backend' -> [:llm :backend])."
   [key-str]
   (when key-str
     (mapv keyword (str/split key-str #"\."))))
 
-(defn- parse-config-value
+(defn parse-config-value
   "Parse config value from string."
   [value-str]
   (try

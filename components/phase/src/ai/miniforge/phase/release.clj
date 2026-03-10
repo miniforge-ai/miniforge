@@ -27,30 +27,6 @@
             [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Event stream helpers (optional dependency)
-
-(defn- emit-phase-started!
-  "Emit phase-started event if event-stream is available in context."
-  [ctx phase]
-  (when-let [event-stream (:event-stream ctx)]
-    (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-      (when-let [phase-started (requiring-resolve 'ai.miniforge.event-stream.interface/phase-started)]
-        (let [workflow-id (:execution/id ctx)]
-          (publish! event-stream (phase-started event-stream workflow-id phase)))))))
-
-(defn- emit-phase-completed!
-  "Emit phase-completed event if event-stream is available in context."
-  [ctx phase _result]
-  (when-let [event-stream (:event-stream ctx)]
-    (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-      (when-let [phase-completed (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
-        (let [workflow-id (:execution/id ctx)
-              outcome (if (= :completed (get-in ctx [:phase :status])) :success :failure)
-              duration-ms (get-in ctx [:phase :duration-ms])]
-          (publish! event-stream (phase-completed event-stream workflow-id phase
-                                                   {:outcome outcome :duration-ms duration-ms})))))))
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
 
 (def default-config
@@ -72,7 +48,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
-(defn- build-workflow-state
+(defn build-workflow-state
   "Build workflow state from phase context for the release executor."
   [ctx]
   ;; Read implement result from execution phase results (not :phases)
@@ -102,7 +78,7 @@
                                            "implement changes")}
      :workflow/artifacts code-artifacts}))
 
-(defn- build-executor-context
+(defn build-executor-context
   "Build context for the release executor from phase context."
   [ctx config]
   {:worktree-path (or (get-in ctx [:execution/worktree-path])
@@ -114,7 +90,7 @@
    ;; Allow disabling PR creation via config
    :create-pr? (get config :create-pr? true)})
 
-(defn- enter-release
+(defn enter-release
   "Execute release phase.
 
    Uses the workflow release executor to:
@@ -124,8 +100,6 @@
    - Commit changes
    - Push branch and create PR (if enabled)"
   [ctx]
-  ;; Emit phase started event
-  (emit-phase-started! ctx :release)
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
@@ -176,7 +150,7 @@
         (cond-> (= :success (:status result))
           (assoc-in [:workflow/pr-info] (get-in (:output result) [:workflow/pr-info]))))))
 
-(defn- leave-release
+(defn leave-release
   "Post-processing for release phase.
 
    Records release metrics and PR info."
@@ -188,12 +162,17 @@
         release-data (when (= :success (:status result)) (:output result))
         release-metrics (or (:release/metrics release-data) {})
         metrics (merge {:tokens 0 :duration-ms duration-ms} release-metrics)
+        agent-status (:status result)
         iterations (get-in ctx [:phase :iterations] 1)
+        max-iterations (get-in ctx [:phase :budget :iterations]
+                               (get-in default-config [:budget :iterations]))
+        phase-status (registry/determine-phase-status
+                       agent-status iterations max-iterations)
         pr-info (get-in ctx [:workflow/pr-info])
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
-                        (assoc-in [:phase :status] :completed)
+                        (assoc-in [:phase :status] phase-status)
                         (assoc-in [:phase :metrics] metrics)
                         (assoc-in [:metrics :release :duration-ms] duration-ms)
                         (assoc-in [:metrics :release :repair-cycles] (dec iterations))
@@ -204,11 +183,15 @@
                         ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
-    ;; Emit phase completed event
-    (emit-phase-completed! updated-ctx :release result)
-    updated-ctx))
+    ;; Handle retrying: increment iteration counter
+    (cond-> updated-ctx
+      (registry/retrying? (:phase updated-ctx))
+      (-> (update-in [:phase :iterations] (fnil inc 1))
+          (assoc-in [:phase :last-error]
+                    (or (get-in result [:error :message])
+                        "Release phase failed"))))))
 
-(defn- error-release
+(defn error-release
   "Handle release phase errors."
   [ctx ex]
   (let [iterations (get-in ctx [:phase :iterations] 0)

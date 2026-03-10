@@ -12,10 +12,52 @@
    [java.io ByteArrayInputStream]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; LLM response builders
+;;
+;; All LLM responses follow the contract:
+;;   Success: {:success true :content string :usage map}
+;;   Failure: {:success false :error {:type string :message string} :anomaly anomaly-map}
+;;
+;; These builders ensure consistent construction across all backends
+;; (CLI, HTTP/OpenAI, HTTP/Ollama, streaming, non-streaming).
+
+(defn llm-success
+  "Build a successful LLM response."
+  ([content]
+   (llm-success content nil))
+  ([content {:keys [usage exit-code]}]
+   (let [usage (or usage {:input-tokens nil :output-tokens nil})]
+     (cond-> {:success true
+              :content content
+              :usage usage
+              :tokens (+ (or (:input-tokens usage) 0) (or (:output-tokens usage) 0))}
+       (some? exit-code) (assoc :exit-code exit-code)))))
+
+(defn llm-error
+  "Build a failed LLM response with anomaly."
+  ([category error-type message]
+   (llm-error category error-type message nil))
+  ([category error-type message {:keys [exit-code stderr stdout timeout]}]
+   (cond-> {:success false
+            :error (cond-> {:type error-type :message message}
+                     stderr  (assoc :stderr stderr)
+                     stdout  (assoc :stdout stdout)
+                     timeout (assoc :timeout timeout))
+            :anomaly (response/make-anomaly
+                      category message
+                      {:anomaly/operation :llm-complete})}
+     (some? exit-code) (assoc :exit-code exit-code))))
+
+;------------------------------------------------------------------------------ Layer 0
 ;; Stream parser functions
 
-(defn- parse-claude-stream-line
+(defn parse-claude-stream-line
   "Parse a line from Claude CLI streaming output.
+
+   Claude CLI stream-json emits:
+   - {\"type\":\"system\"} — init event (ignored)
+   - {\"type\":\"assistant\",\"message\":{\"content\":[{\"text\":\"...\"}]}} — content
+   - {\"type\":\"result\"} — final result with usage (ignored)
 
    Arguments:
      line - String line from stream
@@ -25,36 +67,92 @@
   (try
     (when-not (str/blank? line)
       (let [data (json/parse-string line true)]
-        (when (= "stream_event" (:type data))
+        (case (:type data)
+          "assistant"
+          (let [content-blocks (get-in data [:message :content])
+                text-blocks (keep (fn [block]
+                                    (when (= "text" (:type block))
+                                      (:text block)))
+                                  content-blocks)
+                text (str/join text-blocks)]
+            (when-not (str/blank? text)
+              {:delta text :done? false}))
+
+          ;; Legacy format support
+          "stream_event"
           (when-let [delta-text (get-in data [:event :delta :text])]
-            {:delta delta-text :done? false}))))
+            {:delta delta-text :done? false})
+
+          "result"
+          (let [usage (or (:usage data) (get-in data [:result :usage]))]
+            {:delta "" :done? true
+             :usage {:input-tokens (:input_tokens usage)
+                     :output-tokens (:output_tokens usage)}
+             :cost-usd (:total_cost_usd data)})
+
+          ;; Tool use events — signal activity without text content
+          "tool_use"
+          {:delta "" :done? false :tool-use true}
+
+          ;; System and rate_limit_event are known no-ops
+          ("system" "rate_limit_event")
+          nil
+
+          ;; Any other unrecognised event type — emit a heartbeat so the
+          ;; stream stays alive during tool-heavy phases
+          {:delta "" :done? false :heartbeat true})))
     (catch Exception _e
       nil)))
 
-(defn- parse-codex-stream-line
+(defn parse-codex-stream-line
   "Parse a line from Codex CLI streaming output.
+
+   Codex emits JSONL events:
+   - thread.started: session began
+   - turn.started: turn began
+   - item.completed: reasoning, agent_message, mcp_tool_call, etc.
+   - turn.completed: carries usage data
+   - turn.failed / error: failure events
 
    Arguments:
      line - String line from stream
 
-   Returns: {:delta string :done? boolean} or nil"
+   Returns: {:delta string :done? boolean :usage map} or nil"
   [line]
   (try
     (when-not (str/blank? line)
       (let [data (json/parse-string line true)]
-        (cond
-          ;; Extract content from content_block_delta events
-          (= "content_block_delta" (:type data))
-          (when-let [delta-text (get-in data [:delta :text])]
-            {:delta delta-text :done? false})
+        (case (:type data)
+          ;; Agent message — the actual text output
+          "item.completed"
+          (let [item (:item data)
+                item-type (:type item)]
+            (case item-type
+              "agent_message"
+              {:delta (str (:text item) "\n") :done? false}
 
-          ;; Handle message_delta for streaming text
-          (and (= "message_delta" (:type data))
-               (get-in data [:delta :text]))
-          {:delta (get-in data [:delta :text]) :done? false}
+              "mcp_tool_call"
+              {:delta "" :done? false}
 
-          ;; Ignore other event types
-          :else nil)))
+              ;; reasoning, tool_call, etc. — ignore content
+              nil))
+
+          ;; Turn completed carries usage
+          "turn.completed"
+          (let [usage (:usage data)]
+            {:delta "" :done? true
+             :usage {:input-tokens (:input_tokens usage)
+                     :output-tokens (:output_tokens usage)}})
+
+          ;; Turn failed
+          "turn.failed"
+          {:delta (str "\nError: " (get-in data [:error :message] "unknown")) :done? true}
+
+          "error"
+          {:delta (str "\nError: " (:message data "unknown")) :done? true}
+
+          ;; thread.started, turn.started, item.started — ignore
+          nil)))
     (catch Exception _e
       nil)))
 
@@ -68,15 +166,16 @@
             :requires-cli? true
             :api-key-var "ANTHROPIC_API_KEY"
             :stream-parser parse-claude-stream-line
-            :args-fn (fn [{:keys [prompt system max-tokens streaming? mcp-config]}]
+            :args-fn (fn [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools supervision]}]
                        (cond-> ["-p"]
-                         streaming? (conj "--output-format" "stream-json")
-                         streaming? (conj "--include-partial-messages")
-                         streaming? (conj "--verbose")
-                         mcp-config (into ["--mcp-config" mcp-config])
-                         system (into ["--system-prompt" system])
-                         max-tokens (into ["--max-budget-usd" "0.10"])
-                         true (conj prompt)))}
+                         streaming?                   (conj "--output-format" "stream-json")
+                         streaming?                   (conj "--verbose")
+                         mcp-config                   (into ["--mcp-config" mcp-config])
+                         (seq mcp-allowed-tools)      (into ["--allowedTools" (str/join "," mcp-allowed-tools)])
+                         (:settings-path supervision) (into ["--settings" (:settings-path supervision)])
+                         system                       (into ["--system-prompt" system])
+                         max-tokens                   (into ["--max-budget-usd" "0.10"])
+                         true                         (conj prompt)))}
 
    :codex {:cmd "codex"
            :streaming? true
@@ -85,13 +184,14 @@
            :requires-cli? true
            :api-key-var nil
            :stream-parser parse-codex-stream-line
-           :args-fn (fn [{:keys [prompt model]}]
+           :args-fn (fn [{:keys [prompt model system]}]
                       (cond-> ["exec"
                                "--json"
                                "--full-auto"
                                "--skip-git-repo-check"]
-                        model (into ["-m" model])
-                        true (conj prompt)))}
+                        model  (into ["-m" model])
+                        system (into ["-c" (str "system_prompt=" (json/generate-string system))])
+                        true   (conj prompt)))}
 
    :openai {:cmd "http"
             :streaming? true
@@ -113,14 +213,16 @@
             :default-model "codellama"
             :models ["codellama" "llama2" "mistral"]}
 
-   :cursor {:cmd "cursor-cli"
+   :cursor {:cmd "agent"
             :streaming? false
             :description "Cursor AI via CLI"
             :provider "Cursor"
             :requires-cli? true
             :api-key-var nil
-            :args-fn (fn [{:keys [prompt]}]
-                       ["--prompt" prompt])}
+            :args-fn (fn [{:keys [prompt mcp-allowed-tools]}]
+                       (cond-> ["-p"]
+                         (seq mcp-allowed-tools) (conj "--approve-mcps")
+                         true (conj prompt)))}
 
    :echo {:cmd "echo"
           :streaming? false
@@ -143,7 +245,7 @@
 
 ;------------------------------------------------------------------------------ HTTP Backend Support
 
-(defn- openai-request-body
+(defn openai-request-body
   "Build OpenAI API request body."
   [{:keys [prompt messages model max-tokens streaming?]}]
   (let [model (or model "gpt-4-turbo")
@@ -154,7 +256,7 @@
      :stream (boolean streaming?)
      :max_tokens (or max-tokens 4000)}))
 
-(defn- ollama-request-body
+(defn ollama-request-body
   "Build Ollama API request body."
   [{:keys [prompt messages model streaming?]}]
   (let [model (or model "codellama")
@@ -164,7 +266,7 @@
      :messages [{:role "user" :content msg-content}]
      :stream (boolean streaming?)}))
 
-(defn- http-post-request
+(defn http-post-request
   "Make HTTP POST request to LLM API.
 
    Returns HTTP response map or anomaly map on exception."
@@ -180,78 +282,47 @@
        {:anomaly/operation :http-request
         :anomaly.llm/url url}))))
 
-(defn- parse-openai-response
+(defn parse-openai-response
   "Parse OpenAI API response.
 
    Handles anomaly maps from http-post-request or HTTP response maps."
   [response]
   ;; If response is already an anomaly map, pass it through
   (if (response/anomaly-map? response)
-    {:success false
-     :anomaly response
-     :error {:type "http_error"
-             :message (:anomaly/message response)}}
+    (llm-error (:anomaly/category response) "http_error" (:anomaly/message response))
     (try
       (let [body (json/parse-string (:body response) true)]
         (if (= 200 (:status response))
-          {:success true
-           :content (get-in body [:choices 0 :message :content] "")
-           :usage {:input-tokens (get-in body [:usage :prompt_tokens])
-                   :output-tokens (get-in body [:usage :completion_tokens])}}
-          {:success false
-           :anomaly (response/make-anomaly
-                     :anomalies/unavailable
-                     (or (get-in body [:error :message]) "Unknown API error")
-                     {:anomaly/operation :llm-api-call
-                      :anomaly.llm/status (:status response)})
-           :error {:type "api_error"
-                   :message (or (get-in body [:error :message])
-                                "Unknown API error")}}))
+          (llm-success (get-in body [:choices 0 :message :content] "")
+                       {:usage {:input-tokens (get-in body [:usage :prompt_tokens])
+                                :output-tokens (get-in body [:usage :completion_tokens])}})
+          (llm-error :anomalies/unavailable "api_error"
+                     (get-in body [:error :message] "Unknown API error"))))
       (catch Exception e
-        {:success false
-         :anomaly (response/make-anomaly
-                   :anomalies/fault
-                   (str "Failed to parse response: " (.getMessage e))
-                   {:anomaly/operation :llm-response-parse})
-         :error {:type "parse_error"
-                 :message (str "Failed to parse response: " (.getMessage e))}}))))
+        (llm-error :anomalies/fault "parse_error"
+                   (str "Failed to parse response: " (.getMessage e)))))))
 
-(defn- parse-ollama-response
+(defn parse-ollama-response
   "Parse Ollama API response.
 
    Handles anomaly maps from http-post-request or HTTP response maps."
   [response]
   ;; If response is already an anomaly map, pass it through
   (if (response/anomaly-map? response)
-    {:success false
-     :anomaly response
-     :error {:type "http_error"
-             :message (:anomaly/message response)}}
+    (llm-error (:anomaly/category response) "http_error" (:anomaly/message response))
     (try
       (let [body (json/parse-string (:body response) true)]
         (if (= 200 (:status response))
-          {:success true
-           :content (get-in body [:message :content] "")
-           :usage {:input-tokens nil
-                   :output-tokens nil}}
-          {:success false
-           :anomaly (response/make-anomaly
-                     :anomalies/unavailable
-                     (or (:error body) "Unknown API error")
-                     {:anomaly/operation :llm-api-call
-                      :anomaly.llm/status (:status response)})
-           :error {:type "api_error"
-                   :message (or (:error body) "Unknown API error")}}))
+          (llm-success (get-in body [:message :content] "")
+                       {:usage {:input-tokens (:prompt_eval_count body)
+                                :output-tokens (:eval_count body)}})
+          (llm-error :anomalies/unavailable "api_error"
+                     (get body :error "Unknown API error"))))
       (catch Exception e
-        {:success false
-         :anomaly (response/make-anomaly
-                   :anomalies/fault
-                   (str "Failed to parse response: " (.getMessage e))
-                   {:anomaly/operation :llm-response-parse})
-         :error {:type "parse_error"
-                 :message (str "Failed to parse response: " (.getMessage e))}}))))
+        (llm-error :anomalies/fault "parse_error"
+                   (str "Failed to parse response: " (.getMessage e)))))))
 
-(defn- http-complete
+(defn http-complete
   "Complete request using HTTP API backend."
   [backend-config request api-key]
   (let [{:keys [api-endpoint provider]} backend-config
@@ -273,11 +344,10 @@
     (case provider
       "OpenAI" (parse-openai-response response)
       "Ollama" (parse-ollama-response response)
-      {:success false
-       :error {:type "unsupported_backend"
-               :message (str "HTTP backend not implemented for: " provider)}})))
+      (llm-error :anomalies/unsupported "unsupported_backend"
+                 (str "HTTP backend not implemented for: " provider)))))
 
-(defn- http-stream-complete
+(defn http-stream-complete
   "Complete request using HTTP API with streaming.
 
    Note: Currently falls back to non-streaming as babashka.http-client
@@ -294,32 +364,28 @@
             (on-chunk {:delta content :done? true :content content})))
         result)
       (catch Exception e
-        {:success false
-         :anomaly (response/make-anomaly
-                   :anomalies/fault
-                   (str "Streaming failed: " (.getMessage e))
-                   {:anomaly/operation :llm-stream})
-         :error {:type "stream_error"
-                 :message (str "Streaming failed: " (.getMessage e))}}))))
+        (llm-error :anomalies/fault "stream_error"
+                   (str "Streaming failed: " (.getMessage e)))))))
 
-(defn- success-response [output exit-code]
-  {:success true
-   :content (str/trim output)
-   :usage {:input-tokens nil :output-tokens nil}
-   :exit-code exit-code})
+(defn rate-limited?
+  "Detect Claude CLI rate limit messages in content.
+   Claude CLI returns exit 0 but emits a rate limit message as content."
+  [content]
+  (and (string? content)
+       (re-find #"(?i)you've hit your limit|rate limit|resets \d+[ap]m" content)))
 
-(defn- error-response [output exit-code stderr]
+(defn success-response [output exit-code]
+  (let [trimmed (str/trim output)]
+    (if (rate-limited? trimmed)
+      (llm-error :anomalies.agent/rate-limited "rate_limit"
+                 (str "Claude CLI rate limited: " trimmed)
+                 {:exit-code exit-code :stdout output})
+      (llm-success trimmed {:exit-code exit-code}))))
+
+(defn error-response [output exit-code stderr]
   (let [error-message (if (and stderr (str/blank? output)) stderr output)]
-    {:success false
-     :error {:type "cli_error"
-             :message (str/trim error-message)
-             :stderr stderr
-             :stdout output}
-     :anomaly (response/make-anomaly
-               :anomalies.agent/llm-error
-               (str/trim error-message)
-               {:anomaly/operation :llm-complete})
-     :exit-code exit-code}))
+    (llm-error :anomalies.agent/llm-error "cli_error" (str/trim error-message)
+               {:exit-code exit-code :stderr stderr :stdout output})))
 
 (defn parse-cli-output
   ([output exit-code]
@@ -329,37 +395,37 @@
      (success-response output exit-code)
      (error-response output exit-code stderr))))
 
-(defn- default-progress-monitor []
+(defn default-progress-monitor []
   (pm/create-progress-monitor
    {:stagnation-threshold-ms 120000
     :max-total-ms 600000
     :min-activity-interval-ms 5000}))
 
-(defn- format-timeout-error [{:keys [message type elapsed-ms]}]
+(defn format-timeout-error [{:keys [message type elapsed-ms]}]
   (format "Adaptive timeout: %s (type: %s, elapsed: %dms)"
           message (name type) elapsed-ms))
 
-(defn- timeout-result [out-lines timeout-reason]
+(defn timeout-result [out-lines timeout-reason]
   {:out (str/join "\n" out-lines)
    :err (format-timeout-error timeout-reason)
    :exit -1
    :timeout timeout-reason})
 
-(defn- success-result [out-lines process-result]
+(defn success-result [out-lines process-result]
   {:out (str/join "\n" out-lines)
    :err (:err process-result)
    :exit (:exit process-result)})
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- read-line-with-timeout [reader timeout-ms]
+(defn read-line-with-timeout [reader timeout-ms]
   (let [read-future (future (.readLine reader))]
     (try
       (deref read-future timeout-ms nil)
       (catch java.util.concurrent.TimeoutException _
         nil))))
 
-(defn- process-stream-lines [out-reader monitor on-line]
+(defn process-stream-lines [out-reader monitor on-line]
   (let [out-lines (atom [])
         timeout-reason (atom nil)
         line-timeout-ms 60000]
@@ -374,7 +440,7 @@
     {:lines @out-lines
      :timeout @timeout-reason}))
 
-(defn- clean-env
+(defn clean-env
   "Build environment map without CLAUDECODE to allow nested Claude CLI sessions.
    Returns nil if CLAUDECODE is not set (use default env)."
   []
@@ -399,17 +465,17 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn- build-request-prompt [request]
+(defn build-request-prompt [request]
   (or (:prompt request)
       (build-messages-prompt (:messages request))))
 
-(defn- log-prompt-sent [logger backend prompt]
+(defn log-prompt-sent [logger backend prompt]
   (when logger
     (log/debug logger :system :agent/prompt-sent
                {:data {:backend backend
                        :prompt-length (count prompt)}})))
 
-(defn- log-response [logger response]
+(defn log-response [logger response]
   (when logger
     (if (:success response)
       (log/debug logger :system :agent/response-received
@@ -429,9 +495,8 @@
     (if (= cmd "http")
       (let [api-key (when api-key-var (System/getenv api-key-var))]
         (if (and api-key-var (not api-key))
-          {:success false
-           :error {:type "missing_api_key"
-                   :message (str "Missing API key: " api-key-var " not set")}}
+          (llm-error :anomalies/incorrect "missing_api_key"
+                     (str "Missing API key: " api-key-var " not set"))
           (let [response (http-complete backend-config request api-key)]
             (log-response logger response)
             response)))
@@ -445,7 +510,7 @@
         (log-response logger response)
         response))))
 
-(defn- handle-non-streaming-fallback [client request on-chunk]
+(defn handle-non-streaming-fallback [client request on-chunk]
   (let [result (complete-impl client request)]
     (when (:success result)
       (on-chunk {:delta (:content result)
@@ -453,14 +518,22 @@
                  :content (:content result)}))
     result))
 
-(defn- stream-with-parser [stream-parser on-chunk accumulated-content]
+(defn stream-with-parser [stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost]
   (fn [line]
     (when-let [parsed (stream-parser line)]
-      (when-let [delta (:delta parsed)]
-        (swap! accumulated-content str delta)
-        (on-chunk (assoc parsed :content @accumulated-content))))))
+      (when-let [usage (:usage parsed)]
+        (swap! accumulated-usage (fn [prev] (merge prev usage))))
+      (when-let [cost (:cost-usd parsed)]
+        (reset! accumulated-cost cost))
+      (if (or (:tool-use parsed) (:heartbeat parsed))
+        ;; Tool-use and heartbeat events: fire on-chunk without accumulating text
+        (on-chunk (assoc parsed :content @accumulated-content))
+        ;; Normal text deltas
+        (when-let [delta (:delta parsed)]
+          (swap! accumulated-content str delta)
+          (on-chunk (assoc parsed :content @accumulated-content)))))))
 
-(defn- log-streaming-result [logger timeout-info content-length]
+(defn log-streaming-result [logger timeout-info content-length]
   (when logger
     (if timeout-info
       (log/warn logger :system :agent/streaming-timeout
@@ -471,44 +544,40 @@
       (log/debug logger :system :agent/streaming-complete
                  {:data {:response-length content-length}}))))
 
-(defn- streaming-success-response [content exit-code]
-  {:success true
-   :content content
-   :usage {:input-tokens nil :output-tokens nil}
-   :exit-code exit-code})
+(defn streaming-success-response [content exit-code usage cost-usd]
+  (if (rate-limited? content)
+    (llm-error :anomalies.agent/rate-limited "rate_limit"
+               (str "Claude CLI rate limited: " (str/trim content))
+               {:exit-code exit-code :stdout content})
+    (cond-> (llm-success content {:exit-code exit-code :usage usage})
+      cost-usd (assoc :cost-usd cost-usd))))
 
-(defn- streaming-error-response [content exit-code err-result timeout-info]
+(defn streaming-error-response [content exit-code err-result timeout-info]
   (let [error-message (or err-result
                           (when (str/blank? content) "Process failed with no output")
                           "Process failed")
-        category (if timeout-info :anomalies/timeout :anomalies.agent/llm-error)]
-    {:success false
-     :error {:type (if timeout-info "adaptive_timeout" "cli_error")
-             :message (str/trim error-message)
-             :stderr err-result
-             :stdout content
-             :timeout timeout-info}
-     :anomaly (response/make-anomaly
-               category
-               (str/trim error-message)
-               {:anomaly/operation :llm-stream})
-     :exit-code exit-code}))
+        category (if timeout-info :anomalies/timeout :anomalies.agent/llm-error)
+        error-type (if timeout-info "adaptive_timeout" "cli_error")]
+    (llm-error category error-type (str/trim error-message)
+               {:exit-code exit-code :stderr err-result :stdout content :timeout timeout-info})))
 
-(defn- handle-streaming [client request on-chunk backend-config progress-monitor]
+(defn handle-streaming [client request on-chunk backend-config progress-monitor]
   (let [{:keys [logger config]} client
         {:keys [backend]} config
         {:keys [cmd args-fn stream-parser]} backend-config
         prompt (build-request-prompt request)
         args (args-fn (assoc request :prompt prompt :streaming? true))
         full-cmd (into [cmd] args)
-        accumulated-content (atom "")]
+        accumulated-content (atom "")
+        accumulated-usage (atom nil)
+        accumulated-cost (atom nil)]
     (when logger
       (log/debug logger :system :agent/streaming-prompt-sent
                  {:data {:backend backend
                          :prompt-length (count prompt)}}))
     (let [result (stream-exec-fn
                   full-cmd
-                  (stream-with-parser stream-parser on-chunk accumulated-content)
+                  (stream-with-parser stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost)
                   {:progress-monitor progress-monitor})
           exit-code (:exit result)
           timeout-info (:timeout result)
@@ -519,7 +588,7 @@
                  :timeout timeout-info})
       (log-streaming-result logger timeout-info (count final-content))
       (if (zero? exit-code)
-        (streaming-success-response final-content exit-code)
+        (streaming-success-response final-content exit-code @accumulated-usage @accumulated-cost)
         (streaming-error-response final-content exit-code (:err result) timeout-info)))))
 
 (defn complete-stream-impl [client request on-chunk]
@@ -536,9 +605,8 @@
     (if (= cmd "http")
       (let [api-key (when api-key-var (System/getenv api-key-var))]
         (if (and api-key-var (not api-key))
-          {:success false
-           :error {:type "missing_api_key"
-                   :message (str "Missing API key: " api-key-var " not set")}}
+          (llm-error :anomalies/incorrect "missing_api_key"
+                     (str "Missing API key: " api-key-var " not set"))
           (http-stream-complete backend-config request api-key on-chunk)))
 
       ;; CLI backends

@@ -4,7 +4,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Invocation records
 
-(defn- instant-from-ms
+(defn instant-from-ms
   "Create an Instant from epoch millis."
   [millis]
   (java.time.Instant/ofEpochMilli millis))

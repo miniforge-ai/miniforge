@@ -38,52 +38,57 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants
 
-(def ^:private default-fleet-config-path
+(def default-fleet-config-path
   (str (System/getProperty "user.home") "/.miniforge/config.edn"))
 
-(def ^:private github-repo-slug-pattern
+(def github-repo-slug-pattern
   #"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
-(def ^:private gitlab-repo-slug-pattern
+(def gitlab-repo-slug-pattern
   #"^gitlab:[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+$")
 
 ;------------------------------------------------------------------------------ Layer 0b
 ;; Pure helpers
 
-(defn- normalize-repo-slug
+(defn normalize-repo-slug
   [repo]
   (-> (str repo)
       str/trim
       str/lower-case))
 
-(defn- valid-repo-slug?
+(defn valid-repo-slug?
   [repo]
   (boolean
    (or (re-matches github-repo-slug-pattern repo)
        (re-matches gitlab-repo-slug-pattern repo))))
 
-(defn- repo-provider
+(defn repo-provider
   [repo]
   (if (str/starts-with? (or repo "") "gitlab:")
     :gitlab
     :github))
 
-(defn- provider-repo-slug
+(defn provider-repo-slug
   "Strip provider prefix for downstream CLI calls."
   [repo]
   (if (= :gitlab (repo-provider repo))
     (subs repo (count "gitlab:"))
     repo))
 
-(defn- url-encode
+(defn url-encode
   [s]
   (java.net.URLEncoder/encode (str s) "UTF-8"))
 
-(defn- result-success
+(defn succeeded?
+  "Check if a result map indicates success."
+  [result]
+  (boolean (:success? result)))
+
+(defn result-success
   [data]
   (merge {:success? true} data))
 
-(defn- result-failure
+(defn result-failure
   ([message]
    (result-failure message nil))
   ([message data]
@@ -91,23 +96,23 @@
                                       "Operation failed with no additional error details.")}
           data)))
 
-(defn- gh-error-message
+(defn gh-error-message
   [out err]
   (let [msg (str/trim (or (if (str/blank? err) out err) ""))]
     (when-not (str/blank? msg) msg)))
 
-(defn- ex-msg
+(defn ex-msg
   [^Exception e]
   (or (.getMessage e)
       (some-> e class .getName)
       "unknown exception"))
 
-(defn- normalized-limit
+(defn normalized-limit
   [limit default]
   (let [n (if (integer? limit) limit default)]
     (if (pos? n) n default)))
 
-(defn- normalized-repos
+(defn normalized-repos
   "Extract, normalize, and validate repo slugs from a fleet config map."
   [cfg]
   (->> (get-in cfg [:fleet :repos] [])
@@ -192,7 +197,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Provider CLI interaction (I/O)
 
-(defn- run-gh
+(defn run-gh
   "Execute a `gh` CLI command. Returns {:success? bool :out str :err str}."
   [& args]
   (try
@@ -207,7 +212,7 @@
 
 (declare run-glab)
 
-(defn- fetch-github-prs
+(defn fetch-github-prs
   "Fetch GitHub PRs by state (:open, :closed, :merged, :all)."
   [repo state]
   (let [repo*  (provider-repo-slug repo)
@@ -216,7 +221,7 @@
         {:keys [success? out err]} (run-gh "pr" "list"
                                            "--repo" repo*
                                            "--state" gh-state
-                                           "--json" "number,title,url,state,headRefName,isDraft,reviewDecision,statusCheckRollup,mergeStateStatus")]
+                                           "--json" "number,title,url,state,mergedAt,headRefName,isDraft,reviewDecision,statusCheckRollup,mergeStateStatus,additions,deletions,changedFiles,author")]
     (if-not success?
       (result-failure (gh-error-message out err) {:repo repo :provider :github})
       (try
@@ -232,34 +237,120 @@
           (result-failure (str "Failed to parse PR list for " repo ".")
                           {:repo repo :provider :github :error (.getMessage e)}))))))
 
-(defn- fetch-open-github-prs
+(defn fetch-open-github-prs
   [repo]
   (let [result (fetch-github-prs repo :open)]
-    (if (:success? result)
-      (update result :prs (fn [prs] (vec (remove #(= :closed (:pr/status %)) prs))))
+    (if (succeeded? result)
+      (update result :prs (fn [prs] (vec (remove #(#{:closed :merged} (:pr/status %)) prs))))
       result)))
 
-(defn- fetch-open-gitlab-mrs
-  [repo]
-  (let [repo* (provider-repo-slug repo)
+(defn gitlab-state-param
+  "Map canonical state keyword to GitLab API state parameter."
+  [state]
+  (case state
+    :open   "opened"
+    :closed "closed"
+    :merged "merged"
+    :all    "all"
+    "opened"))
+
+(defn- mr-graphql-fragment
+  "Build a GraphQL fragment for a single MR iid."
+  [iid]
+  (str "mr" iid ": mergeRequest(iid: \"" iid "\") "
+       "{ diffStatsSummary { additions deletions fileCount } }"))
+
+(defn- extract-mr-diff-stats
+  "Extract diff stats for an iid from a parsed GraphQL project map.
+   Returns [iid stats-map] or nil when stats are absent."
+  [project iid]
+  (let [k (keyword (str "mr" iid))
+        stats (get-in project [k :diffStatsSummary])]
+    (when stats
+      [iid {:additions  (:additions stats 0)
+            :deletions  (:deletions stats 0)
+            :file-count (:fileCount stats 0)}])))
+
+(defn fetch-gitlab-diff-stats-batch
+  "Fetch diff stats for multiple MRs in a single GraphQL query.
+   Returns {iid {:additions N :deletions N :file-count N}} or empty map on failure."
+  [repo* iids]
+  (when (seq iids)
+    (try
+      (let [;; Build aliased GraphQL query: mr26: mergeRequest(iid: \"26\") { ... }
+            mr-fragments (str/join " " (map mr-graphql-fragment iids))
+            query (str "{ project(fullPath: \"" repo* "\") { " mr-fragments " } }")
+            {:keys [success? out]} (run-glab "api" "graphql" "-f" (str "query=" query))]
+        (if-not success?
+          {}
+          (let [data (json/parse-string out true)
+                project (get-in data [:data :project])]
+            (into {}
+              (keep (partial extract-mr-diff-stats project))
+              iids))))
+      (catch Exception _ {}))))
+
+(defn enrich-gitlab-mrs-with-diff-stats
+  "Enrich GitLab MR maps with diff stats via a single batched GraphQL query.
+   Only enriches open/draft MRs (skip closed/merged)."
+  [repo* mrs]
+  (let [open-mrs (filter #(= "opened" (some-> (:state %) str str/lower-case)) mrs)
+        iids (mapv :iid open-mrs)]
+    (if (empty? iids)
+      mrs
+      (let [stats (fetch-gitlab-diff-stats-batch repo* iids)]
+        (mapv (fn [mr]
+                (if-let [s (get stats (:iid mr))]
+                  (assoc mr
+                         :additions (:additions s 0)
+                         :deletions (:deletions s 0)
+                         :changes_count (or (:file-count s) (:changes_count mr)))
+                  mr))
+              mrs)))))
+
+(defn fetch-gitlab-mrs-by-state
+  "Fetch GitLab merge requests by state (:open, :closed, :merged, :all).
+   Enriches open MRs with diff stats (additions/deletions) via per-MR API calls."
+  [repo state]
+  (let [repo*    (provider-repo-slug repo)
+        gl-state (gitlab-state-param state)
         endpoint (str "projects/" (url-encode repo*)
-                      "/merge_requests?state=opened&per_page=100&with_merge_status_recheck=true")
+                      "/merge_requests?state=" gl-state
+                      "&per_page=100&with_merge_status_recheck=true")
         {:keys [success? out err]} (run-glab "api" endpoint)]
     (if-not success?
       (result-failure (gh-error-message out err) {:repo repo :provider :gitlab})
       (try
-        (let [rows (json/parse-string out true)]
+        (let [rows (json/parse-string out true)
+              ;; Enrich with diff stats for open MRs
+              enriched (if (#{:open :all} state)
+                         (enrich-gitlab-mrs-with-diff-stats repo* rows)
+                         rows)
+              prs (->> enriched
+                       (map #(status/gitlab-mr->train-pr % repo))
+                       (sort-by :pr/number)
+                       vec)
+              ;; GitLab API sometimes returns MRs outside the requested state.
+              ;; Post-filter to ensure we only return what was asked for.
+              expected-statuses (case state
+                                 :open   #{:open :draft :merge-ready :changes-requested}
+                                 :closed #{:closed}
+                                 :merged #{:merged}
+                                 :all    nil)
+              filtered (if expected-statuses
+                         (filterv #(contains? expected-statuses (:pr/status %)) prs)
+                         prs)]
           (result-success
            {:repo repo
             :provider :gitlab
-            :prs (->> rows
-                      (map #(status/gitlab-mr->train-pr % repo))
-                      (remove #(= :closed (:pr/status %)))
-                      (sort-by :pr/number)
-                      vec)}))
+            :prs filtered}))
         (catch Exception e
           (result-failure (str "Failed to parse merge request list for " repo ".")
                           {:repo repo :provider :gitlab :error (.getMessage e)}))))))
+
+(defn fetch-open-gitlab-mrs
+  [repo]
+  (fetch-gitlab-mrs-by-state repo :open))
 
 (defn fetch-open-prs
   "Fetch open PR/MR items for a single configured repository.
@@ -275,7 +366,7 @@
    Returns {:success? bool :repo str :prs [TrainPR ...]}."
   [repo state]
   (case (repo-provider repo)
-    :gitlab (fetch-open-gitlab-mrs repo) ;; GitLab API only supports opened for now
+    :gitlab (fetch-gitlab-mrs-by-state repo state)
     (fetch-github-prs repo state)))
 
 (defn fetch-all-fleet-prs
@@ -292,7 +383,7 @@
       []
       (->> repos
            (pmap fetch-fn)
-           (filter :success?)
+           (filter succeeded?)
            (mapcat :prs)
            vec))))
 
@@ -312,7 +403,7 @@
                    (str "orgs/" owner* "/repos?per_page=100")
                    "user/repos?per_page=100")
         result (run-gh "api" endpoint)]
-    (if-not (:success? result)
+    (if-not (succeeded? result)
       (result-failure (gh-error-message (:out result) (:err result)))
       (try
         (let [repos (->> (json/parse-string (:out result) true)
@@ -337,7 +428,7 @@
           (result-failure "Failed to parse repository list."
                           {:error (ex-msg e)}))))))
 
-(def ^:private viewer-repos-graphql-query
+(def viewer-repos-graphql-query
   "query($perPage:Int!,$after:String){
      viewer {
        repositories(
@@ -352,7 +443,7 @@
      }
    }")
 
-(defn- run-glab
+(defn run-glab
   "Execute a `glab` CLI command. Returns {:success? bool :out str :err str}."
   [& args]
   (try
@@ -365,7 +456,7 @@
        :out ""
        :err (.getMessage e)})))
 
-(defn- parse-gh-full-name-repos
+(defn parse-gh-full-name-repos
   [out limit]
   (->> (json/parse-string out true)
        (keep :full_name)
@@ -375,7 +466,7 @@
        (take limit)
        vec))
 
-(defn- viewer-repos-gh-args
+(defn viewer-repos-gh-args
   "Build `gh api graphql` arguments for a page of viewer repositories."
   [limit acc after]
   (let [remaining (- limit (count acc))
@@ -385,7 +476,7 @@
              "-F" (str "perPage=" per-page)]
       after (conj "-F" (str "after=" after)))))
 
-(defn- parse-viewer-repos-page
+(defn parse-viewer-repos-page
   "Extract normalized repo slugs and pagination info from a GraphQL viewer response."
   [parsed]
   (let [nodes (or (get-in parsed [:data :viewer :repositories :nodes] []) [])
@@ -400,14 +491,14 @@
      :has-next? (boolean (:hasNextPage page-info))
      :cursor (:endCursor page-info)}))
 
-(defn- list-viewer-repos
+(defn list-viewer-repos
   "List repos visible to the authenticated user across affiliations."
   [limit]
   (try
     (loop [after nil
            acc []]
       (let [result (apply run-gh (viewer-repos-gh-args limit acc after))]
-        (if-not (:success? result)
+        (if-not (succeeded? result)
           (result-failure (gh-error-message (:out result) (:err result)))
           (let [parsed-result (try
                                 {:ok (json/parse-string (:out result) true)}
@@ -425,16 +516,16 @@
       (result-failure "Failed to list accessible repositories."
                       {:error (ex-msg e)}))))
 
-(defn- list-github-owner-repos
+(defn list-github-owner-repos
   [owner limit]
   (let [owner* (some-> owner str str/trim not-empty)
         org-endpoint (str "orgs/" owner* "/repos?per_page=100&type=all&sort=updated")
         org-result (run-gh "api" org-endpoint)
         user-endpoint (str "users/" owner* "/repos?per_page=100&type=owner&sort=updated")
-        result (if (:success? org-result)
+        result (if (succeeded? org-result)
                  org-result
                  (run-gh "api" user-endpoint))]
-    (if-not (:success? result)
+    (if-not (succeeded? result)
       (result-failure (or (gh-error-message (:out result) (:err result))
                           (gh-error-message (:out org-result) (:err org-result)))
                       {:owner owner* :provider :github})
@@ -446,10 +537,10 @@
           (result-failure "Failed to parse repository list."
                           {:owner owner* :provider :github :error (ex-msg e)}))))))
 
-(defn- list-github-viewer-orgs
+(defn list-github-viewer-orgs
   []
   (let [result (run-gh "api" "user/orgs?per_page=100")]
-    (if-not (:success? result)
+    (if-not (succeeded? result)
       (result-failure (gh-error-message (:out result) (:err result))
                       {:provider :github :error-source :orgs})
       (try
@@ -463,10 +554,10 @@
           (result-failure "Failed to parse organization list."
                           {:provider :github :error-source :orgs :error (ex-msg e)}))))))
 
-(defn- list-github-user-repos-fallback
+(defn list-github-user-repos-fallback
   [limit]
   (let [result (run-gh "api" "user/repos?per_page=100&sort=updated")]
-    (if-not (:success? result)
+    (if-not (succeeded? result)
       (result-failure (gh-error-message (:out result) (:err result))
                       {:provider :github :error-source :rest})
       (try
@@ -477,24 +568,24 @@
           (result-failure "Failed to parse repository list."
                           {:owner nil :provider :github :error-source :rest :error (ex-msg e)}))))))
 
-(defn- list-github-accessible-repos
+(defn list-github-accessible-repos
   [limit]
   (let [viewer (list-viewer-repos limit)
         orgs-result (list-github-viewer-orgs)
-        org-results (if (:success? orgs-result)
+        org-results (if (succeeded? orgs-result)
                       (->> (:orgs orgs-result)
                            (map #(list-github-owner-repos % limit))
                            doall)
                       [])
         repos (->> (concat (or (:repos viewer) [])
-                           (mapcat #(or (:repos %) []) (filter :success? org-results)))
+                           (mapcat #(or (:repos %) []) (filter succeeded? org-results)))
                    distinct
                    (take limit)
                    vec)
         warnings (vec (concat
-                       (when-not (:success? viewer)
+                       (when-not (succeeded? viewer)
                          [(or (:error viewer) "GraphQL browse failed.")])
-                       (when-not (:success? orgs-result)
+                       (when-not (succeeded? orgs-result)
                          [(or (:error orgs-result) "Organization browse failed.")])
                        (for [{:keys [success? owner error]} org-results
                              :when (not success?)]
@@ -507,7 +598,7 @@
       ;; GraphQL failed and org listing failed/empty: try REST fallback
       :else
       (let [fallback (list-github-user-repos-fallback limit)]
-        (if (:success? fallback)
+        (if (succeeded? fallback)
           (cond-> fallback
             (seq warnings) (assoc :warnings warnings))
           (result-failure (or (:error fallback)
@@ -516,7 +607,7 @@
                               "Failed to list accessible repositories.")
                           {:owner nil :provider :github :error-source :rest}))))))
 
-(defn- parse-glab-project-repos
+(defn parse-glab-project-repos
   [out limit]
   (->> (json/parse-string out true)
        (keep :path_with_namespace)
@@ -527,7 +618,7 @@
        (take limit)
        vec))
 
-(defn- list-gitlab-repos
+(defn list-gitlab-repos
   [{:keys [owner limit]}]
   (let [owner* (some-> owner str str/trim not-empty)
         endpoint (if owner*
@@ -535,7 +626,7 @@
                         "/projects?include_subgroups=true&archived=false&per_page=100&simple=true&order_by=last_activity_at&sort=desc")
                    "projects?membership=true&archived=false&per_page=100&simple=true&order_by=last_activity_at&sort=desc")
         result (run-glab "api" endpoint)]
-    (if-not (:success? result)
+    (if-not (succeeded? result)
       (result-failure (gh-error-message (:out result) (:err result))
                       {:owner owner* :provider :gitlab})
       (try
@@ -579,9 +670,9 @@
                        (take limit*)
                        vec)
             warnings (vec (concat
-                           (when-not (:success? gh-result)
+                           (when-not (succeeded? gh-result)
                              [(str "GitHub: " (or (:error gh-result) "browse failed"))])
-                           (when-not (:success? gl-result)
+                           (when-not (succeeded? gl-result)
                              [(str "GitLab: " (or (:error gl-result) "browse failed"))])
                            (or (:warnings gh-result) [])))]
         (if (seq repos)

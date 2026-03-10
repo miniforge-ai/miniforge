@@ -58,27 +58,11 @@
 ;; Invoke tests
 
 (deftest releaser-invoke-test
-  (testing "generates release metadata from code artifact"
+  (testing "fails explicitly without LLM backend (no silent fallback)"
     (let [agent (releaser/create-releaser)
           result (core/invoke agent {} code-artifact-input)]
-      (is (= :success (:status result)))
-      (is (uuid? (get-in result [:output :release/id])))
-      (is (string? (get-in result [:output :release/branch-name])))
-      (is (string? (get-in result [:output :release/commit-message])))
-      (is (string? (get-in result [:output :release/pr-title])))
-      (is (string? (get-in result [:output :release/pr-description])))))
-
-  (testing "generates branch name with proper prefix"
-    (let [agent (releaser/create-releaser)
-          result (core/invoke agent {} code-artifact-input)
-          branch-name (get-in result [:output :release/branch-name])]
-      (is (re-matches #"(feature|fix|refactor|docs|chore)/.*" branch-name))))
-
-  (testing "handles minimal input"
-    (let [agent (releaser/create-releaser)
-          result (core/invoke agent {} {:task-description "simple change"})]
-      (is (= :success (:status result)))
-      (is (string? (get-in result [:output :release/branch-name]))))))
+      (is (= :error (:status result)))
+      (is (some? (:error result))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation tests
@@ -153,12 +137,10 @@
 ;; Full cycle tests
 
 (deftest releaser-cycle-test
-  (testing "full invoke-validate cycle succeeds"
+  (testing "full invoke-validate cycle fails without LLM (no silent fallback)"
     (let [agent (releaser/create-releaser)
           result (core/cycle-agent agent {} code-artifact-input)]
-      (is (= :success (:status result)))
-      (is (uuid? (get-in result [:output :release/id])))
-      (is (string? (get-in result [:output :release/branch-name]))))))
+      (is (= :error (:status result))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

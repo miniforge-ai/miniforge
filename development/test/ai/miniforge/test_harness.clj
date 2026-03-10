@@ -34,7 +34,7 @@
 ;; ============================================================================
 
 ;; Global test state for cleanup tracking
-(defonce ^:private test-state
+(defonce test-state
   (atom {:stores []
          :temp-dirs #{}}))
 
@@ -49,12 +49,12 @@
       (fs/delete-tree dir)))
   (reset! test-state {:stores [] :temp-dirs #{}}))
 
-(defn- register-store!
+(defn register-store!
   "Register store for cleanup."
   [k-store a-store]
   (swap! test-state update :stores conj {:k-store k-store :a-store a-store}))
 
-(defn- register-temp-dir!
+(defn register-temp-dir!
   "Register temp directory for cleanup."
   [dir]
   (swap! test-state update :temp-dirs conj dir))

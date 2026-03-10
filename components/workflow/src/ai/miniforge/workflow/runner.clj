@@ -34,7 +34,7 @@
 
 ;------------------------------------------------------------------------------ Layer -1: Event publishing
 
-(defn- publish-event!
+(defn publish-event!
   "Publish event to event stream or dashboard WebSocket."
   [event-stream event]
   (when event-stream
@@ -60,72 +60,96 @@
       (catch Exception e
         (println "Warning: Failed to publish event:" (ex-message e))))))
 
-(defn- publish-workflow-started!
+(defn publish-workflow-started!
   "Publish workflow started event using N3-compliant constructor."
   [event-stream context]
   (when event-stream
     (try
-      (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-started)]
+      (let [workflow-started (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-started)]
         (publish-event! event-stream
-                        (constructor event-stream
-                                     (:execution/id context)
-                                     (select-keys (:execution/workflow context)
-                                                  [:workflow/id :workflow/version]))))
-      (catch Exception _
-        ;; Fallback to ad-hoc event if constructor not available
-        (publish-event! event-stream
-                        {:event/type :workflow/started
-                         :workflow-id (:execution/id context)
-                         :workflow-spec (select-keys (:execution/workflow context)
-                                                     [:workflow/id :workflow/version])
-                         :timestamp (java.time.Instant/now)})))))
+                        (workflow-started event-stream
+                                         (:execution/id context)
+                                         (select-keys (:execution/workflow context)
+                                                      [:workflow/id :workflow/version]))))
+      (catch Exception e
+        (println "Warning: Failed to publish workflow-started event:" (ex-message e))))))
 
-(defn- publish-workflow-completed!
+(defn publish-workflow-completed!
   "Publish workflow completed/failed event using N3-compliant constructor."
   [event-stream context]
   (when event-stream
     (try
       (let [status (:execution/status context)
             wf-id (:execution/id context)
-            duration-ms (get-in context [:execution/metrics :duration-ms])]
+            metrics (:execution/metrics context)
+            duration-ms (:duration-ms metrics)
+            tokens (:tokens metrics)
+            cost-usd (:cost-usd metrics)
+            pr-info (:workflow/pr-info context)
+            metrics-opts (cond-> {}
+                           tokens (assoc :tokens tokens)
+                           cost-usd (assoc :cost-usd cost-usd)
+                           pr-info (assoc :pr-info pr-info))
+            workflow-failed (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-failed)
+            workflow-completed (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-completed)]
         (if (= status :failed)
-          (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-failed)]
-            (publish-event! event-stream
-                            (constructor event-stream wf-id
-                                         {:message "Workflow failed"
-                                          :errors (:execution/errors context)})))
-          (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-completed)]
-            (publish-event! event-stream
-                            (constructor event-stream wf-id status duration-ms)))))
-      (catch Exception _
-        ;; Fallback to ad-hoc event
-        (publish-event! event-stream
-                        {:event/type :workflow/completed
-                         :workflow-id (:execution/id context)
-                         :status (:execution/status context)
-                         :metrics (:execution/metrics context)
-                         :timestamp (java.time.Instant/now)})))))
+          (publish-event! event-stream
+                          (workflow-failed event-stream wf-id
+                                          {:message "Workflow failed"
+                                           :errors (:execution/errors context)}))
+          (publish-event! event-stream
+                          (workflow-completed event-stream wf-id status duration-ms
+                                              (when (seq metrics-opts) metrics-opts)))))
+      (catch Exception e
+        (println "Warning: Failed to publish workflow-completed event:" (ex-message e))))))
 
-(defn- publish-phase-started!
+(defn publish-phase-started!
   "Publish phase started event."
   [event-stream context phase-name]
-  (publish-event! event-stream
-                  {:event/type :workflow/phase-started
-                   :workflow-id (:execution/id context)
-                   :phase phase-name
-                   :timestamp (java.time.Instant/now)}))
+  (when event-stream
+    (try
+      (let [phase-started (requiring-resolve 'ai.miniforge.event-stream.interface/phase-started)]
+        (publish-event! event-stream
+                        (phase-started event-stream (:execution/id context) phase-name
+                                       {:phase/index (:execution/phase-index context)})))
+      (catch Exception e
+        (println "Warning: Failed to publish phase-started event:" (ex-message e))))))
 
-(defn- publish-phase-completed!
+(defn publish-phase-completed!
   "Publish phase completed event."
   [event-stream context phase-name result]
-  (publish-event! event-stream
-                  {:event/type :workflow/phase-completed
-                   :workflow-id (:execution/id context)
-                   :phase phase-name
-                   :success? (:success? result)
-                   :timestamp (java.time.Instant/now)}))
+  (when event-stream
+    (let [succeeded? (or (:success? result)
+                         (phase/succeeded-or-done? result))
+          outcome (if succeeded? :success :failure)
+          duration-ms (or (:duration-ms result)
+                          (get-in result [:phase/metrics :duration-ms])
+                          (get-in result [:metrics :duration-ms]))
+          error-info (when-not succeeded?
+                       (or (:error result)
+                           (when-let [msg (get-in result [:phase/gate-errors])]
+                             {:message "Gate validation failed" :details msg})
+                           (when-let [msg (:message result)]
+                             {:message msg})))
+          redirect-to (:redirect-to result)
+          tokens (or (get-in result [:metrics :tokens])
+                     (get-in result [:phase/metrics :tokens]))
+          cost-usd (or (get-in result [:metrics :cost-usd])
+                       (get-in result [:phase/metrics :cost-usd]))
+          event-data (cond-> {:outcome outcome :duration-ms duration-ms}
+                       error-info (assoc :error error-info)
+                       redirect-to (assoc :redirect-to redirect-to)
+                       tokens (assoc :tokens tokens)
+                       cost-usd (assoc :cost-usd cost-usd))]
+      (try
+        (let [phase-completed (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
+          (publish-event! event-stream
+                          (phase-completed event-stream (:execution/id context) phase-name
+                                           event-data)))
+        (catch Exception e
+          (println "Warning: Failed to publish phase-completed event:" (ex-message e)))))))
 
-(defn- check-backend-health-at-boundary!
+(defn check-backend-health-at-boundary!
   "Check backend health at phase boundary. Returns switch-result or nil."
   [event-stream context]
   (try
@@ -176,7 +200,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1: Orchestration helpers
 
-(defn- handle-empty-pipeline
+(defn handle-empty-pipeline
   "Handle error case of empty pipeline."
   [context]
   (-> context
@@ -189,7 +213,7 @@
               {:error "Workflow has no phases"})
       (ctx/transition-to-failed)))
 
-(defn- handle-max-phases-exceeded
+(defn handle-max-phases-exceeded
   "Handle error case of max phases exceeded."
   [context max-phases]
   (-> context
@@ -203,12 +227,12 @@
                :max-phases max-phases})
       (ctx/transition-to-failed)))
 
-(defn- terminal-state?
+(defn terminal-state?
   "Check if workflow is in terminal state."
   [context]
-  (#{:completed :failed} (:execution/status context)))
+  (boolean (#{:completed :failed} (:execution/status context))))
 
-(defn- execute-single-iteration
+(defn execute-single-iteration
   "Execute single pipeline iteration: health check -> phase execution -> cleanup.
 
    Returns updated context."
@@ -242,15 +266,22 @@
                                                    ctx/transition-to-completed
                                                    ctx/transition-to-failed)
                           (monitoring/clear-transient-state))
-            event-stream (get-in phase-ctx [:execution/opts :event-stream])
-            switch-result (check-backend-health-at-boundary! event-stream phase-ctx)]
-        (if switch-result
-          (assoc phase-ctx :self-healing/backend-switch switch-result)
-          phase-ctx)))))
+            ;; Exponential backoff when phase is retrying
+            retrying? (= (:execution/phase-index phase-ctx)
+                         (:execution/phase-index context))
+            retry-count (get-in phase-ctx [:phase :iterations] 1)]
+        (when (and retrying? (> retry-count 1))
+          (let [backoff-ms (min 30000 (long (* 1000 (Math/pow 2 (dec retry-count)))))]
+            (Thread/sleep backoff-ms)))
+        (let [event-stream (get-in phase-ctx [:execution/opts :event-stream])
+              switch-result (check-backend-health-at-boundary! event-stream phase-ctx)]
+          (if switch-result
+            (assoc phase-ctx :self-healing/backend-switch switch-result)
+            phase-ctx))))))
 
 ;------------------------------------------------------------------------------ Layer 1.5: Output extraction
 
-(defn- extract-output
+(defn extract-output
   "Synthesize :execution/output from completed pipeline context.
    Provides a stable interface for chaining: downstream consumers
    read :execution/output instead of reaching into phase-results."
@@ -282,7 +313,7 @@
    (run-pipeline workflow input {}))
   ([workflow input opts]
    (let [pipeline (build-pipeline workflow)
-         max-phases (or (:max-phases opts) 50)
+         max-phases (get opts :max-phases 50)
          ;; Control state for dashboard commands — caller can provide their own
          control-state (or (:control-state opts)
                            (atom {:paused false :stopped false :adjustments {}}))
@@ -290,12 +321,14 @@
 
          ;; Wrap callbacks to publish events
          callbacks {:on-phase-start (fn [ctx interceptor]
-                                      (when-let [phase-name (:phase interceptor)]
+                                      (when-let [phase-name (or (:phase interceptor)
+                                                                (get-in interceptor [:config :phase]))]
                                         (publish-phase-started! event-stream ctx phase-name))
                                       (when-let [cb (:on-phase-start opts)]
                                         (cb ctx interceptor)))
                     :on-phase-complete (fn [ctx interceptor result]
-                                         (when-let [phase-name (:phase interceptor)]
+                                         (when-let [phase-name (or (:phase interceptor)
+                                                                   (get-in interceptor [:config :phase]))]
                                            (publish-phase-completed! event-stream ctx phase-name result))
                                          (when-let [cb (:on-phase-complete opts)]
                                            (cb ctx interceptor result)))}
@@ -308,41 +341,65 @@
        (publish-workflow-started! event-stream initial-ctx))
 
      (let [final-ctx
-           (if (empty? pipeline)
-             (handle-empty-pipeline initial-ctx)
+           (try
+             (if (empty? pipeline)
+               (handle-empty-pipeline initial-ctx)
 
-             ;; Execute pipeline loop
-             (loop [context initial-ctx
-                    iteration 0]
-               (cond
-                 ;; Terminal state reached
-                 (terminal-state? context)
-                 context
+               ;; Execute pipeline loop
+               (loop [context initial-ctx
+                      iteration 0]
+                 (cond
+                   ;; Terminal state reached
+                   (terminal-state? context)
+                   context
 
-                 ;; Max iterations exceeded
-                 (>= iteration max-phases)
-                 (handle-max-phases-exceeded context max-phases)
+                   ;; Max iterations exceeded
+                   (>= iteration max-phases)
+                   (handle-max-phases-exceeded context max-phases)
 
-                 ;; Execute next iteration: health check -> phase -> cleanup
-                 :else
-                 (recur (execute-single-iteration pipeline context callbacks iteration control-state)
-                        (inc iteration)))))]
+                   ;; Execute next iteration: health check -> phase -> cleanup
+                   :else
+                   (recur (execute-single-iteration pipeline context callbacks iteration control-state)
+                          (inc iteration)))))
+             (catch Exception e
+               (-> initial-ctx
+                   (update :execution/errors conj
+                           {:type :pipeline-exception
+                            :message (ex-message e)
+                            :data (ex-data e)})
+                   (assoc :execution/status :failed))))
 
-       ;; Validate completed workflows produced results
-       (let [final-ctx (if (and (= :completed (:execution/status final-ctx))
-                                (empty? (:execution/artifacts final-ctx))
-                                (empty? (:execution/phase-results final-ctx)))
-                         (-> final-ctx
-                             (update :execution/errors conj
-                                     {:type :empty-completion
-                                      :message "Workflow completed but produced no artifacts or phase results"})
-                             (assoc :execution/status :completed-with-warnings))
-                         final-ctx)
-             ;; Extract output and publish workflow completed event
-             output-ctx (extract-output final-ctx)]
-         (when-not skip-lifecycle?
-           (publish-workflow-completed! event-stream output-ctx))
-         output-ctx)))))
+           ;; Validate completed workflows produced results
+           final-ctx (if (and (phase/succeeded? final-ctx)
+                              (empty? (:execution/artifacts final-ctx))
+                              (empty? (:execution/phase-results final-ctx)))
+                       (-> final-ctx
+                           (update :execution/errors conj
+                                   {:type :empty-completion
+                                    :message "Workflow completed but produced no artifacts or phase results"})
+                           (assoc :execution/status :completed-with-warnings))
+                       final-ctx)
+           ;; Extract output and publish workflow completed event
+           output-ctx (extract-output final-ctx)]
+       (when-not skip-lifecycle?
+         (publish-workflow-completed! event-stream output-ctx))
+
+       ;; Post-workflow: feed signals to operator for pattern analysis
+       (try
+         (when-let [operator (:operator opts)]
+           (let [observe-fn (requiring-resolve 'ai.miniforge.operator.interface/observe-signal)
+                 signal-type (if (phase/succeeded? output-ctx)
+                               :workflow-complete
+                               :workflow-failed)]
+             (observe-fn operator
+                         {:signal/type signal-type
+                          :workflow-id (:execution/id output-ctx)
+                          :phase-results (:execution/phase-results output-ctx)
+                          :metrics (:execution/metrics output-ctx)
+                          :timestamp (java.time.Instant/now)})))
+         (catch Exception _e nil))
+
+       output-ctx))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

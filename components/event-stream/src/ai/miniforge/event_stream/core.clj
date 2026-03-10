@@ -176,14 +176,18 @@
       (cond-> context (assoc :phase/context context))))
 
 (defn phase-completed [stream workflow-id phase & [result]]
-  (let [outcome (or (:outcome result) :success)]
+  (let [outcome (get result :outcome :success)]
     (-> (create-envelope stream :workflow/phase-completed workflow-id
                          (str (name phase) " phase " (name outcome)))
         (assoc :workflow/phase phase
                :phase/outcome outcome)
         (cond->
           (:duration-ms result) (assoc :phase/duration-ms (:duration-ms result))
-          (:artifacts result) (assoc :phase/artifacts (:artifacts result))))))
+          (:artifacts result) (assoc :phase/artifacts (:artifacts result))
+          (:error result) (assoc :phase/error (:error result))
+          (:redirect-to result) (assoc :phase/redirect-to (:redirect-to result))
+          (:tokens result) (assoc :phase/tokens (:tokens result))
+          (:cost-usd result) (assoc :phase/cost-usd (:cost-usd result))))))
 
 (defn agent-chunk [stream workflow-id agent-id delta & [done?]]
   (-> (create-envelope stream :agent/chunk workflow-id
@@ -197,11 +201,14 @@
       (assoc :agent/id agent-id
              :status/type status-type)))
 
-(defn workflow-completed [stream workflow-id status & [duration-ms]]
+(defn workflow-completed [stream workflow-id status & [duration-ms opts]]
   (-> (create-envelope stream :workflow/completed workflow-id
                        (str "Workflow " (name status)))
       (assoc :workflow/status status)
-      (cond-> duration-ms (assoc :workflow/duration-ms duration-ms))))
+      (cond-> duration-ms (assoc :workflow/duration-ms duration-ms)
+              (:tokens opts) (assoc :workflow/tokens (:tokens opts))
+              (:cost-usd opts) (assoc :workflow/cost-usd (:cost-usd opts))
+              (:pr-info opts) (assoc :workflow/pr-info (:pr-info opts)))))
 
 (defn workflow-failed [stream workflow-id error]
   (let [;; Handle anomaly maps, Throwables, and plain error maps
@@ -220,7 +227,7 @@
         event-data (response/anomaly->event-data
                     (or anomaly-map
                         (response/make-anomaly :anomalies/fault
-                                               (or (:message error-map) "unknown error"))))]
+                                               (get error-map :message "unknown error"))))]
     (-> (create-envelope stream :workflow/failed workflow-id
                          (str "Workflow failed: " (:message error-map "unknown error")))
         (assoc :workflow/failure-reason (:message error-map (:message event-data))
@@ -391,7 +398,7 @@
 ;; Chains are not workflow-scoped, so workflow-id is nil.
 ;; Message is derived from the event-type keyword.
 
-(defn- chain-envelope
+(defn chain-envelope
   "Create an envelope for chain events. Chains are not workflow-scoped,
    so workflow-id is nil. Message is derived from the event-type keyword."
   [stream event-type]
@@ -449,6 +456,42 @@
                        (str "Control action " action-id " executed"))
       (assoc :action/id action-id)
       (cond-> result (assoc :action/result result))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; OCI container events (N8)
+
+(defn container-started [stream workflow-id container-id & [opts]]
+  (-> (create-envelope stream :oci/container-started workflow-id
+                       (str "Container " container-id " started"))
+      (assoc :oci/container-id container-id)
+      (cond->
+        (:image-digest opts) (assoc :oci/image-digest (:image-digest opts))
+        (:trust-level opts)  (assoc :oci/trust-level (:trust-level opts)))))
+
+(defn container-completed [stream workflow-id container-id exit-code & [duration-ms]]
+  (-> (create-envelope stream :oci/container-completed workflow-id
+                       (str "Container " container-id " completed (exit " exit-code ")"))
+      (assoc :oci/container-id container-id
+             :oci/exit-code exit-code)
+      (cond-> duration-ms (assoc :oci/duration-ms duration-ms))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Tool supervision events (N6/N8)
+
+(defn tool-use-evaluated
+  "Emit when a tool-use request is evaluated by the supervisor.
+
+   Captures both regex and meta-eval decisions for evidence trail."
+  [stream workflow-id tool-name decision & [opts]]
+  (-> (create-envelope stream :supervision/tool-use-evaluated workflow-id
+                       (str "Tool " tool-name " evaluated: " (name (keyword decision))))
+      (assoc :tool/name tool-name
+             :supervision/decision decision)
+      (cond->
+        (:reasoning opts)  (assoc :supervision/reasoning (:reasoning opts))
+        (:meta-eval? opts) (assoc :supervision/meta-eval? true)
+        (:confidence opts) (assoc :supervision/confidence (:confidence opts))
+        (:phase opts)      (assoc :workflow/phase (:phase opts)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

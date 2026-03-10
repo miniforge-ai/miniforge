@@ -1,0 +1,142 @@
+;; Reliability Nines — RN-04: SLI/SLO/Error Budget Engine
+;; Tier 2 (Core Reliability) — depends on RN-01, RN-02, RN-03
+;; Blocks: RN-05, RN-07, RN-08, RN-10
+
+{:spec/title "RN-04: SLI Computation, SLO Evaluation, and Error Budget Tracking"
+ :version "1.0.0"
+ :type :feature
+ :priority :critical
+
+ :spec/description
+ "Create a new reliability-metrics Polylith component that computes 7 mandatory
+  SLIs from the event stream, evaluates them against tier-dependent SLO targets,
+  and tracks rolling error budgets. Emits reliability/* events (RN-03 schemas).
+
+  This is the core measurement engine — it turns raw events into actionable
+  reliability signals that drive degradation mode transitions (RN-05) and
+  safe-mode posture (RN-08).
+
+  Current state: observer/core.clj has ad-hoc slow-phase detection, not structured.
+  Target state: New component computing 7 SLIs with per-tier SLO evaluation."
+
+ :spec/intent
+ {:type :new-component
+  :scope ["components/reliability-metrics (NEW)"
+          "components/observer (extend)"]}
+
+ :normative-refs
+ {:primary "N1 §5.5.2 — SLI Definitions"
+  :secondary ["N1 §5.5.3 — SLO Targets"
+              "N1 §5.5.4 — Error Budgets"
+              "N3 §3.17 — Reliability Metric Events"]}
+
+ :gap-analysis-ref "gap-analysis-reliability-nines.md #2"
+ :dag/id :rn-04
+ :dag/depends-on [:rn-01 :rn-02 :rn-03]
+ :dag/blocks [:rn-05 :rn-07 :rn-08 :rn-10]
+
+ :current-state
+ {:observer "observer/core.clj — ad-hoc generate-recommendations"
+  :sli "No structured SLI computation"
+  :slo "No SLO targets or evaluation"
+  :budget "No error budget tracking"
+  :completion "0%"}
+
+ :target-state
+ {:slis
+  [{:id :SLI-1 :name "Workflow Success Rate"
+    :formula "succeeded / (succeeded + failed) per window per tier"}
+   {:id :SLI-2 :name "Phase Latency p95"
+    :formula "95th percentile of phase durations per window"}
+   {:id :SLI-3 :name "Phase Latency p99"
+    :formula "99th percentile of phase durations per window"}
+   {:id :SLI-4 :name "Gate Pass Rate"
+    :formula "passed / (passed + failed) per window"}
+   {:id :SLI-5 :name "Repair Success Rate"
+    :formula "repaired / (repaired + repair-failed) per window"}
+   {:id :SLI-6 :name "Failure Class Distribution"
+    :formula "count per :failure/class per window per tier"}
+   {:id :SLI-7 :name "Event Delivery Lag"
+    :formula "p99 of (event-received - event-timestamp) per window"}]
+
+  :slo-targets
+  {:best-effort  {:SLI-1 0.90 :SLI-2 "30s" :SLI-3 "60s"}
+   :standard     {:SLI-1 0.95 :SLI-2 "15s" :SLI-3 "30s"}
+   :critical     {:SLI-1 0.999 :SLI-2 "5s" :SLI-3 "10s"}}
+
+  :error-budgets "Rolling 7-day window, per-tier remaining percentage"}
+
+ :implementation
+ {:step-1-new-component
+  {:title "Create reliability-metrics Polylith component"
+   :files-to-create
+   ["components/reliability-metrics/src/ai/miniforge/reliability_metrics/interface.clj"
+    "components/reliability-metrics/src/ai/miniforge/reliability_metrics/core.clj"
+    "components/reliability-metrics/src/ai/miniforge/reliability_metrics/sli.clj"
+    "components/reliability-metrics/src/ai/miniforge/reliability_metrics/slo.clj"
+    "components/reliability-metrics/src/ai/miniforge/reliability_metrics/budget.clj"
+    "components/reliability-metrics/src/ai/miniforge/reliability_metrics/schema.clj"]
+   :changes
+   ["sli.clj: compute-sli multimethod for 7 SLIs"
+    "slo.clj: evaluate-slo with tier-dependent targets"
+    "budget.clj: rolling error budget with window tracking"
+    "core.clj: orchestrate SLI→SLO→budget pipeline"
+    "interface.clj: public API"
+    "schema.clj: Malli schemas for SLI/SLO/budget records"]}
+
+  :step-2-event-consumption
+  {:title "Subscribe to event stream for SLI computation"
+   :changes
+   ["Listen to workflow/completed, workflow/failed for SLI-1"
+    "Listen to phase events for SLI-2, SLI-3"
+    "Listen to gate events for SLI-4"
+    "Listen to repair events for SLI-5"
+    "Aggregate :failure/class for SLI-6 (depends on RN-01)"
+    "Measure event delivery lag for SLI-7"]}
+
+  :step-3-event-emission
+  {:title "Emit reliability/* events"
+   :changes
+   ["Emit reliability/sli-computed after each SLI calculation"
+    "Emit reliability/slo-breach when target missed for :standard/:critical"
+    "Emit reliability/error-budget-update on budget change"
+    "Use RN-03 event constructors"]}
+
+  :step-4-deps
+  {:title "Wire into deps.edn"
+   :changes
+   ["Add reliability-metrics to project deps"
+    "Add event-stream as dependency"]}}
+
+ :spec/constraints
+ ["Pure functions for SLI computation (testable without event stream)"
+  "Event consumption via event-stream subscription (not polling)"
+  "SLI computation MUST be idempotent (safe to recompute)"
+  "Error budget window MUST be configurable (default 7 days)"
+  "Follow Polylith interface-only deps"
+  "Babashka compatible (no Java interop beyond what bb supports)"]
+
+ :testing-strategy
+ {:unit-tests
+  ["Each SLI computation with known event data"
+   "SLO evaluation against tier targets"
+   "Error budget calculation: consumption, remaining, exhaustion"
+   "Edge cases: empty window, zero workflows, all failures"]
+  :integration-tests
+  ["Event stream → SLI computation → SLO evaluation → event emission"
+   "Budget tracking across multiple computation cycles"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "7 SLIs computed from event stream"
+   :verification "Unit tests with synthetic events produce correct SLI values"}
+  {:criterion "Tier-dependent SLO targets"
+   :verification ":critical tier has stricter targets than :best-effort"}
+  {:criterion "Error budget tracking"
+   :verification "Budget decreases on SLO breach, resets on window roll"}
+  {:criterion "Reliability events emitted"
+   :verification "SLI computation emits reliability/sli-computed events"}
+  {:criterion "SLO breach detection"
+   :verification "reliability/slo-breach emitted when target missed"}]
+
+ :estimated-effort "1-2 weeks"
+ :workflow/type :simple}

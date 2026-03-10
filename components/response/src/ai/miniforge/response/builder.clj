@@ -2,7 +2,8 @@
   "Canonical builders for common response patterns.
 
    Eliminates scattered inline map constructions by providing
-   standard builders for success/error responses with metrics.")
+   standard builders for success/error responses with metrics."
+  (:require [clojure.string]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Success responses
@@ -54,9 +55,16 @@
   ([message]
    (error-details message nil))
   ([message data]
-   (let [msg (if (instance? Exception message)
-              (.getMessage ^Exception message)
-              (str message))
+   (let [raw-msg (if (instance? Exception message)
+                   (.getMessage ^Exception message)
+                   (str message))
+         ;; Ensure message is never nil or empty — downstream (or msg fallback)
+         ;; treats "" as truthy, masking useful defaults
+         msg (if (or (nil? raw-msg) (clojure.string/blank? raw-msg))
+               (if (instance? Exception message)
+                 (str (class message))
+                 "Unknown error")
+               raw-msg)
          err-data (if (instance? Exception message)
                    (or data (ex-data message) {})
                    (or data {}))]

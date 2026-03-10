@@ -34,7 +34,7 @@
 ;;------------------------------------------------------------------------------ Layer 0
 ;; Git history analysis
 
-(defn- exec-git
+(defn exec-git
   "Execute a git command and return output.
   
    Arguments:
@@ -50,7 +50,7 @@
        :out ""
        :err (ex-message ex)})))
 
-(defn- get-recent-commits
+(defn get-recent-commits
   "Get recent commits with full messages.
   
    Arguments:
@@ -76,7 +76,7 @@
            vec)
       [])))
 
-(defn- check-no-verify-in-history?
+(defn check-no-verify-in-history?
   "Check if a commit was likely made with --no-verify.
 
    Since --no-verify doesn't leave direct traces in git history, we use heuristics:
@@ -100,7 +100,7 @@
       (re-find #"skip.*hooks?" msg-lower)
       (re-find #"bypass.*pre-?commit" msg-lower)))))
 
-(defn- parse-bypass-reason
+(defn parse-bypass-reason
   "Extract bypass reason from commit message.
   
    Arguments:
@@ -112,7 +112,7 @@
   (when-let [match (re-find #"\[BYPASS-HOOKS:\s*([^\]]+)\]" message)]
     (str/trim (second match))))
 
-(defn- check-manual-validation
+(defn check-manual-validation
   "Check if commit message documents manual validation steps.
   
    Arguments:
@@ -130,7 +130,7 @@
     {:documented? (boolean (seq validation-lines))
      :steps (or validation-lines [])}))
 
-(defn- validate-bypass-commit
+(defn validate-bypass-commit
   "Validate a commit that bypassed pre-commit hooks.
   
    According to 715-pre-commit-discipline.mdc, bypassed commits must:
@@ -187,7 +187,7 @@
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Gate implementation
 
-(defn- check-precommit-discipline
+(defn check-precommit-discipline
   "Check pre-commit discipline across recent git history.
   
    Arguments:
@@ -202,7 +202,7 @@
    Returns:
      {:passed? bool :errors [...] :warnings [...]}"
   [_artifact ctx]
-  (let [config (or (:config ctx) {})
+  (let [config (get ctx :config {})
         commits-to-check (get config :commits-to-check 50)
         branch (get config :branch "HEAD")
         fail-on-warning? (get config :fail-on-warning false)
@@ -250,7 +250,7 @@
       (assoc :metadata {:bypassed-commits-found (count bypassed-commits)
                         :total-commits-checked (count commits)}))))
 
-(defn- repair-precommit-discipline
+(defn repair-precommit-discipline
   "Attempt to repair pre-commit discipline violations.
   
    Pre-commit discipline violations cannot be automatically repaired because:

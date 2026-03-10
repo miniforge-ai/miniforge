@@ -1,7 +1,7 @@
 # N6 — Evidence & Provenance Standard
 
-**Version:** 0.4.0-draft
-**Date:** 2026-02-16
+**Version:** 0.5.0-draft
+**Date:** 2026-03-08
 **Status:** Draft
 **Conformance:** MUST
 
@@ -12,7 +12,8 @@
 This specification defines the **evidence bundle** and **artifact provenance**
 contracts that make autonomous workflows credible to platform and security teams.
 
-**Evidence bundles** provide a complete audit trail from **intent** → **plan** → **implementation** → **validation** → **outcome**.
+**Evidence bundles** provide a complete audit trail from **intent** → **plan** → **implementation** → **validation** →
+  **outcome**.
 
 **Artifact provenance** enables tracing any artifact back to its source inputs, tool executions, and semantic intent.
 
@@ -198,7 +199,17 @@ Implementations MUST validate:
 
  :outcome/error-message string     ; OPTIONAL: If failed
  :outcome/error-phase keyword      ; OPTIONAL: Which phase failed
- :outcome/error-details {...}}     ; OPTIONAL
+ :outcome/error-details {...}      ; OPTIONAL
+ :outcome/failure-class keyword    ; OPTIONAL: canonical class from N1 §5.3.3
+
+ ;; Reliability measurements (see N1 §5.5)
+ :outcome/tier keyword             ; REQUIRED: workflow tier (:best-effort :standard :critical)
+ :outcome/degradation-mode keyword ; OPTIONAL: system mode at completion (:nominal :degraded :safe-mode)
+ :outcome/sli-measurements         ; OPTIONAL: per-SLI values for this workflow
+ [{:sli/name keyword               ; REQUIRED: SLI identifier (N1 §5.5.2)
+   :sli/value double               ; REQUIRED: measured value for this workflow
+   :sli/target double              ; OPTIONAL: SLO target if applicable
+   :sli/met? boolean}]}            ; OPTIONAL: did this workflow meet the SLO?
 ```
 
 ### 2.7 DAG Orchestration Evidence
@@ -521,6 +532,28 @@ Implementations MUST support:
 - `:risk-assessment` - Risk evaluation for a PR with explainable factors (see N9 §5.1)
 - `:pr-policy-result` - Policy evaluation result for an external PR
 - `:pr-readiness-snapshot` - Point-in-time readiness assessment for a PR
+
+**Evaluation artifact types (N1 §3.3.3):**
+
+- `:golden-set` - Curated workflow inputs paired with known-good outcomes for regression testing
+- `:eval-run-result` - Results from golden set evaluation, replay, shadow, or canary execution
+
+```clojure
+;; Eval Run Result Artifact
+{:artifact/type :eval-run-result
+ :artifact/content
+ {:eval/mode keyword               ; REQUIRED: :golden-set | :replay | :shadow | :canary
+  :eval/golden-set-id string       ; OPTIONAL: if mode is :golden-set
+  :eval/source-workflow-id uuid    ; OPTIONAL: if mode is :replay
+  :eval/entries
+  [{:entry/id string               ; REQUIRED
+    :entry/expected map             ; REQUIRED: expected outcome
+    :entry/actual map               ; REQUIRED: actual outcome
+    :entry/pass? boolean            ; REQUIRED
+    :entry/diff map}]              ; OPTIONAL: structured diff
+  :eval/pass-rate double           ; REQUIRED: 0.0-1.0
+  :eval/evaluated-at inst}}        ; REQUIRED
+```
 
 **Pack Run artifact types:**
 
@@ -934,7 +967,8 @@ Evidence bundles make autonomous workflows **credible** because:
 
 ### 11.2 Why Semantic Intent Validation
 
-Traditional CI/CD validates "does it work?" (tests, lints). miniforge validates **"does it do what you said it would do?"**
+Traditional CI/CD validates "does it work?" (tests, lints). miniforge validates **"does it do what you said it would
+do?"**
 
 Example:
 
@@ -993,6 +1027,9 @@ Fleet-wide evidence will enable:
 
 **Version History:**
 
+- 0.5.0-draft (2026-03-08): Reliability Nines amendments — Outcome evidence extended with
+  SLI measurements, failure class, workflow tier, degradation mode (§2.6); golden-set
+  and eval-run-result artifact types (§3.1.1)
 - 0.4.0-draft (2026-02-16): Added Pack Run Evidence (§2.11), Metrics Snapshot (§2.11.2),
   Report Artifact (§2.11.3); added pack-run-evidence, metrics-snapshot, report-artifact
   to artifact types (§3.1.1)

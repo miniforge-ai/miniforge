@@ -26,7 +26,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Trigger matching
 
-(defn- matches-trigger?
+(defn matches-trigger?
   "Check if an event matches a trigger rule."
   [trigger event]
   (boolean
@@ -37,7 +37,7 @@
              (re-matches (re-pattern (:branch-pattern trigger))
                          (or (:pr/branch event) ""))))))
 
-(defn- extract-input
+(defn extract-input
   "Extract input from event using trigger's :input-from-event mapping."
   [trigger event]
   (when-let [mapping (get-in trigger [:run :input-from-event])]
@@ -59,7 +59,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Trigger execution
 
-(defn- fire-workflow
+(defn fire-workflow
   "Load and run a workflow from a trigger's run-spec. Returns the future."
   [run-spec input opts load-wf run-pipeline]
   (let [{:keys [workflow-id version] :or {version :latest}} run-spec
@@ -67,7 +67,7 @@
         workflow  (:workflow wf-result)]
     (run-pipeline workflow input opts)))
 
-(defn- handle-trigger-event
+(defn handle-trigger-event
   "Process a single event against all trigger rules, firing matching workflows."
   [triggers opts futures-atom load-wf run-pipeline event]
   (doseq [trigger triggers]
@@ -77,7 +77,7 @@
             f        (future (fire-workflow run-spec input opts load-wf run-pipeline))]
         (swap! futures-atom conj f)))))
 
-(defn- cancel-futures!
+(defn cancel-futures!
   "Cancel all pending futures and clear the atom."
   [futures-atom]
   (doseq [f @futures-atom]

@@ -169,7 +169,7 @@
    Returns {:executor DockerExecutor :image-result Result} or error Result."
   [config]
   (let [docker-path (:docker-path config)
-        image-type (or (:image-type config) :minimal)
+        image-type (get config :image-type :minimal)
         ensure? (get config :ensure-image? true)
         default-image (get-in task-runner-images [image-type :image])
         image (or (:image config) default-image)]
@@ -208,6 +208,73 @@
           (f env)
           (finally
             (release-environment! executor (:environment-id env))))))))
+
+(defn capture-provenance
+  "Build a provenance record from a task execution result.
+
+   Arguments:
+   - task-id: String task identifier
+   - executor: TaskExecutor instance (used to derive executor-type and image-digest)
+   - exec-result: Map with execution outcome keys:
+       :commands-executed  - vector of command strings that were run
+       :started-at         - java.time.Instant when execution began
+       :completed-at       - java.time.Instant when execution finished
+       :exit-code          - integer exit code from the last command
+       :stdout             - full stdout string (will be truncated to 500 chars)
+       :stderr             - full stderr string (will be truncated to 500 chars)
+       :image-digest       - (optional) OCI image digest string
+       :environment-id     - (optional) environment identifier string
+
+   Returns a provenance map conforming to the DAG-executor provenance record shape."
+  [task-id executor exec-result]
+  (let [{:keys [commands-executed started-at completed-at
+                exit-code stdout stderr
+                image-digest environment-id]} exec-result
+        start-ms  (when started-at
+                    (.toEpochMilli ^java.time.Instant started-at))
+        end-ms    (when completed-at
+                    (.toEpochMilli ^java.time.Instant completed-at))
+        duration  (if (and start-ms end-ms) (- end-ms start-ms) 0)]
+    {:provenance/task-id          (str task-id)
+     :provenance/executor-type    (executor-type executor)
+     :provenance/image-digest     image-digest
+     :provenance/commands-executed (vec (or commands-executed []))
+     :provenance/started-at       started-at
+     :provenance/completed-at     completed-at
+     :provenance/duration-ms      duration
+     :provenance/exit-code        (or exit-code -1)
+     :provenance/stdout-summary   (subs (or stdout "") 0 (min 500 (count (or stdout ""))))
+     :provenance/stderr-summary   (subs (or stderr "") 0 (min 500 (count (or stderr ""))))
+     :provenance/environment-id   (str (or environment-id ""))}))
+
+(defn with-provenance
+  "Wraps `with-environment`, capturing a provenance record after task execution.
+
+   Behaves identically to `with-environment` but records timing, exit code, and
+   stdout/stderr from the final execute! call made inside f.
+
+   f receives [env-record prov-atom] where prov-atom is an atom the caller may
+   populate with the raw execute! result data.  After f returns, provenance is
+   captured from @prov-atom and attached to the return value.
+
+   Arguments:
+   - executor: TaskExecutor instance
+   - task-id: Task UUID (also used as the provenance task-id)
+   - config: Environment config (same as with-environment)
+   - f: Function (fn [env prov-atom] ...) to execute
+        The function should reset! prov-atom with a map containing at minimum:
+          :commands-executed, :started-at, :completed-at, :exit-code,
+          :stdout, :stderr  (all optional; missing keys default gracefully)
+
+   Returns {:result <value returned by f> :provenance <provenance-record>}
+   or an error result if environment acquisition fails."
+  [executor task-id config f]
+  (let [prov-atom (atom {})
+        inner-result (with-environment executor task-id config
+                       (fn [env] (f env prov-atom)))]
+    {:result     inner-result
+     :provenance (capture-provenance task-id executor @prov-atom)}))
+
 
 (defn clone-and-checkout!
   "Clone a repository and checkout a branch in the environment.
@@ -299,6 +366,38 @@
       (execute! executor (:environment-id env)
                 "ls -la"
                 {:capture-output? true})))
+
+  ;; -------------------------------------------------------------------------
+  ;; Provenance capture
+  ;; -------------------------------------------------------------------------
+
+  ;; Build a provenance record from raw execution data
+  (capture-provenance "task-abc" executor
+                      {:commands-executed ["git clone ..." "ls -la"]
+                       :started-at        (java.time.Instant/now)
+                       :completed-at      (java.time.Instant/now)
+                       :exit-code         0
+                       :stdout            "total 8\n..."
+                       :stderr            ""
+                       :image-digest      "sha256:abc123"
+                       :environment-id    "env-42"})
+
+  ;; Run a task with automatic provenance capture
+  (def prov-result
+    (with-provenance executor (random-uuid)
+      {:repo-url "https://github.com/example/repo" :branch "main"}
+      (fn [env prov-atom]
+        (let [started (java.time.Instant/now)
+              r       (execute! executor (:environment-id env) "ls -la" {})]
+          (reset! prov-atom {:commands-executed ["ls -la"]
+                             :started-at        started
+                             :completed-at      (java.time.Instant/now)
+                             :exit-code         (:exit-code (:data r))
+                             :stdout            (:stdout (:data r))
+                             :stderr            (:stderr (:data r))
+                             :environment-id    (:environment-id env)})
+          r))))
+  ;; => {:result {:ok? true :data {...}} :provenance {:provenance/task-id "..." ...}}
 
   ;; Manual lifecycle
   (def env-result (acquire-environment! executor (random-uuid)

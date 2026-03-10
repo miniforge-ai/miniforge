@@ -30,14 +30,15 @@
      :columns [{:key :status-char :header "  " :width 2}
                {:key :name :header "Workflow" :width :flex}
                {:key :phase :header "Phase" :width 12}
+               {:key :time :header "Time" :width 12}
                {:key :progress-str :header "Progress" :width 20}
                {:key :agent-msg :header "Agent" :width 16}]
      :selectable? true
      :selection-col? true}
     {:type :node/footer
      :segments
-     {:normal "j/k:nav  Enter:detail  Space:select  v:visual  1-0:views  /:search  ::cmd  q:quit"
-      :selected "{n} selected │ Space:toggle  v:visual  a:all  c:clear  :archive :delete :cancel"
+     {:normal "j/k:nav  Enter:detail  Space:select  Shift+↑↓:range  1-0:views  /:search  ::cmd  q:quit"
+      :selected "{n} selected │ Space:toggle  Shift+↑↓:range  v:visual  a:all  Esc:clear  :archive :delete :cancel"
       :visual "VISUAL │ j/k:extend  Space:toggle  Esc:exit  a:all"
       :filtered "FILTER [{n}] │ Space:select  a:all  v:visual  Esc:clear filter"}}]}}
 
@@ -52,9 +53,8 @@
      :columns [{:key :repo      :header "Repo"      :width 30}
                {:key :number   :header "PR"        :width 6}
                {:key :title    :header "Title"     :width :flex}
-               {:key :state    :header "State"     :width 7}
-               {:key :status   :header "Status"    :width 12}
-               {:key :ready    :header "Readiness" :width 15}
+               {:key :status   :header "State"     :width 14}
+               {:key :ready    :header "Size"      :width 15}
                {:key :risk     :header "Risk"      :width 6}
                {:key :policy   :header "Policy"    :width 6}
                {:key :recommend :header "Recommend" :width 14}]
@@ -62,8 +62,8 @@
      :selection-col? true}
     {:type :node/footer
      :segments
-     {:normal "j/k:nav  Enter:detail  O:open  Space:select  p:filter  c:chat  r:sync  /:search  ::cmd  Tab:views  q:quit"
-      :selected "{n} selected │ Space:toggle  v:visual  a:all  c:chat  C:clear  :review :remediate :decompose"
+     {:normal "j/k:nav  Enter:detail  O:open  Shift+↑↓:select  p:filter  c:chat  r:sync  /:search  ::cmd  Tab:views  q:quit"
+      :selected "{n} selected │ Shift+↑↓:range  v:visual  a:all  c:chat  Esc:clear  :review :remediate :decompose"
       :visual "VISUAL │ j/k:extend  Space:toggle  Esc:exit  a:all"
       :filtered "FILTER [{n}] │ Space:select  a:all  v:visual  Esc:clear filter"}}]}}
 
@@ -74,20 +74,32 @@
    :ratio :footer
    :children
    [{:type :node/split-h
-     :ratio 0.4
+     :ratio 0.65
      :children
-     [{:type :node/box
-       :title "Readiness"
-       :child {:type :widget/tree :data-fn :project/readiness-tree}}
-      {:type :node/split-v
-       :ratio 0.5
+     [{:type :node/split-v
+       :ratio 0.25
        :children
        [{:type :node/box
-         :title "Risk Assessment"
-         :child {:type :widget/tree :data-fn :project/risk-tree}}
-        {:type :node/box
-         :title "Gates & Policy"
-         :child {:type :widget/tree :data-fn :project/gate-list}}]}]}
+         :title "Summary"
+         :child {:type :widget/tree :data-fn :project/pr-summary :pane-id 0}}
+        {:type :node/split-h
+         :ratio 0.5
+         :children
+         [{:type :node/split-v
+           :ratio 0.5
+           :children
+           [{:type :node/box
+             :title "Readiness"
+             :child {:type :widget/tree :data-fn :project/readiness-tree :pane-id 1}}
+            {:type :node/box
+             :title "Risk"
+             :child {:type :widget/tree :data-fn :project/risk-tree :pane-id 2}}]}
+          {:type :node/box
+           :title "Checks & Policy"
+           :child {:type :widget/tree :data-fn :project/gate-list :pane-id 3}}]}]}
+      {:type :node/box
+       :title "Agent"
+       :child {:type :widget/tree :data-fn :project/chat-messages :pane-id 4}}]}
     {:type :node/footer
      :segments
      {:normal "Esc:back  O:open  c:chat  ←/→:prev/next  Tab:pane  q:quit"}}]}}
@@ -143,8 +155,8 @@
              :selection-col? true}}
     {:type :node/footer
      :segments
-     {:normal "j/k:navigate  Space:select  /:search  Tab:cycle  Esc:back  q:quit"
-      :selected "{n} selected │ Space:toggle  v:visual  a:all  c:clear"
+     {:normal "j/k:navigate  Space:select  Shift+↑↓:range  /:search  Tab:cycle  Esc:back  q:quit"
+      :selected "{n} selected │ Shift+↑↓:range  v:visual  a:all  Esc:clear"
       :visual "VISUAL │ j/k:extend  Space:toggle  Esc:exit  a:all"}}]}}
 
  :dag-kanban
@@ -195,6 +207,6 @@
      :selection-col? true}
     {:type :node/footer
      :segments
-     {:normal "j/k:nav  Space:select  a:add  Enter:browse  Tab:toggle  /:search  Esc:back  q:quit"
-      :selected "{n} selected │ Space:toggle  v:visual  a:all  c:clear  :remove-repo"
-      :visual "VISUAL │ j/k:extend  Space:toggle  Esc:exit  a:all"}}]}}}
+     {:normal "j/k:nav  a:add  d:delete  Space:select  Shift+↑↓:range  b:browse  f:fleet  r:sync  /:search  Tab:views  q:quit"
+      :selected "{n} selected │ d:delete  Shift+↑↓:range  v:visual  Esc:clear"
+      :visual "VISUAL │ j/k:extend  Space:toggle  Esc:exit"}}]}}}

@@ -65,7 +65,7 @@
         :else
         {:valid? true :errors nil}))))
 
-(defn- summarize-files
+(defn summarize-files
   "Create a summary of file operations."
   [files]
   (let [by-action (group-by :action files)
@@ -80,7 +80,7 @@
       (str/join ", " parts)
       "no file changes")))
 
-(defn- input->text
+(defn input->text
   "Convert input to text for the LLM."
   [input context]
   (let [code-artifact (:code-artifact input)
@@ -101,7 +101,7 @@
          (when-let [repo (:repository context)]
            (str "## Repository\n" repo "\n\n")))))
 
-(defn- parse-release-response
+(defn parse-release-response
   "Parse the LLM response to extract release artifact.
    Handles both EDN in code blocks and plain EDN.
    Returns nil if the parsed result is not a map."
@@ -116,7 +116,7 @@
     (catch Exception _
       nil)))
 
-(defn- slugify
+(defn slugify
   "Convert a string to a URL-safe slug.
    Handles basic ASCII transliteration and normalizes spacing."
   [s]
@@ -139,31 +139,10 @@
                  (str/replace #"^-|-$" ""))]
     (subs slug 0 (min 40 (count slug)))))
 
-(defn- make-fallback-artifact
-  "Create a fallback release artifact when LLM response cannot be parsed."
-  [input]
-  (let [code-artifact (:code-artifact input)
-        task-description (or (:task-description input) "implement changes")
-        files (:code/files code-artifact)
-        slug (slugify task-description)
-        file-summary (when files (summarize-files files))]
-    {:release/id (random-uuid)
-     :release/branch-name (str "feature/" slug)
-     :release/commit-message (str "feat: " task-description "\n\n"
-                                  (when file-summary (str file-summary "\n")))
-     :release/pr-title (str "feat: " (subs task-description 0 (min 60 (count task-description))))
-     :release/pr-description (str "## Summary\n"
-                                  task-description "\n\n"
-                                  "## Changes\n"
-                                  (if files
-                                    (str/join "\n" (map #(str "- " (name (:action %)) " `" (:path %) "`") files))
-                                    "- See commits for details")
-                                  "\n\n## Testing\n"
-                                  "- [ ] Manual verification")
-     :release/files-summary (or file-summary "no file changes")
-     :release/created-at (java.util.Date.)}))
+;; make-fallback-artifact removed — silent fallback masks real failures,
+;; prevents retry/repair from working, and short-circuits checkpoint resume.
 
-(defn- repair-release-artifact
+(defn repair-release-artifact
   "Attempt to repair a release artifact based on validation errors."
   [artifact errors _context]
   (let [repaired (atom artifact)]
@@ -229,14 +208,16 @@
             ;; Use the real LLM with artifact session for MCP tool support
             (let [{:keys [llm-result artifact]}
                   (artifact-session/with-artifact-session [session]
-                    (let [mcp-opts {:mcp-config (:mcp-config-path session)}]
+                    (let [mcp-opts {:mcp-config (:mcp-config-path session)
+                                    :mcp-allowed-tools (:mcp-allowed-tools session)
+                                    :supervision (:supervision session)}]
                       (if on-chunk
                         (llm/chat-stream llm-client user-prompt on-chunk
                                          (merge {:system @releaser-system-prompt} mcp-opts))
                         (llm/chat llm-client user-prompt
                                   (merge {:system @releaser-system-prompt} mcp-opts)))))
                   llm-response llm-result
-                  tokens (or (:tokens llm-response) 0)]
+                  tokens (get llm-response :tokens 0)]
               (log/info logger :releaser :releaser/llm-called
                         {:data {:success (llm/success? llm-response)
                                 :tokens tokens
@@ -247,23 +228,21 @@
                       parsed (or artifact (parse-release-response content))
                       _ (when artifact
                           (log/info logger :releaser :releaser/mcp-artifact-received
-                                    {:data {:branch (:release/branch-name artifact)}}))
-                      release (or parsed (make-fallback-artifact input))
-                      ;; Ensure proper ID and timestamp
-                      release-with-meta (-> release
-                                            (update :release/id #(or % (random-uuid)))
-                                            (assoc :release/created-at (java.util.Date.)))]
-                  (response/success release-with-meta {:tokens tokens}))
-                ;; LLM call failed
-                (let [fallback (make-fallback-artifact input)
-                      error-msg (or (:message (llm/get-error llm-response))
+                                    {:data {:branch (:release/branch-name artifact)}}))]
+                  (if parsed
+                    (let [release-with-meta (-> parsed
+                                                (update :release/id #(or % (random-uuid)))
+                                                (assoc :release/created-at (java.util.Date.)))]
+                      (response/success release-with-meta {:tokens tokens}))
+                    ;; LLM returned content but no parseable release artifact — fail explicitly
+                    (response/error "LLM response could not be parsed as release artifact"
+                                    {:tokens tokens})))
+                ;; LLM call failed — propagate error, no fallback
+                (let [error-msg (or (:message (llm/get-error llm-response))
                                     "LLM call failed")]
-                  (response/error error-msg {:output fallback}))))
-            ;; No LLM client - use fallback (for testing)
-            (do
-              (log/warn logger :releaser :releaser/no-llm-backend
-                        {:message "No LLM backend provided, using fallback release metadata"})
-              (response/success (make-fallback-artifact input))))))
+                  (response/error error-msg))))
+            ;; No LLM client — fail explicitly
+            (response/error "No LLM backend provided"))))
 
       :validate-fn validate-release-artifact
 

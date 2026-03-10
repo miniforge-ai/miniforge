@@ -89,7 +89,7 @@
     (catch Exception _
       [])))
 
-(defn- load-user-pack-rules
+(defn load-user-pack-rules
   "Load rules from user packs in ~/.miniforge/packs/ via requiring-resolve.
 
    Uses the same soft-dependency pattern as event-stream to avoid

@@ -71,7 +71,7 @@
 
 ;; --- Helper ---
 
-(defn- render-view
+(defn render-view
   "Render a view through the interpreter (the production path)."
   [model size]
   (let [theme (engine/get-theme (:theme model))

@@ -5,6 +5,7 @@
    collects metrics, and generates performance reports."
   (:require
    [ai.miniforge.observer.protocol :as proto]
+   [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.workflow.interface :as wf]
    [clojure.string :as str]))
 
@@ -184,14 +185,14 @@
 ;; Analysis Functions
 ;; ============================================================================
 
-(defn- calculate-percentile
+(defn calculate-percentile
   "Calculate percentile from sorted values."
   [sorted-values percentile]
   (when (seq sorted-values)
     (let [idx (int (* (/ percentile 100.0) (count sorted-values)))]
       (nth sorted-values (min idx (dec (count sorted-values)))))))
 
-(defn- calculate-stats
+(defn calculate-stats
   "Calculate statistics for a sequence of numeric values."
   [values]
   (when (seq values)
@@ -213,7 +214,7 @@
        :p95 p95
        :p99 p99})))
 
-(defn- analyze-duration-stats
+(defn analyze-duration-stats
   "Analyze workflow duration statistics."
   [observer opts]
   (let [limit (get opts :limit 100)
@@ -234,7 +235,7 @@
                          (double (:p95 stats))
                          (double (:p99 stats))))})))
 
-(defn- analyze-cost-stats
+(defn analyze-cost-stats
   "Analyze workflow cost statistics."
   [observer opts]
   (let [limit (get opts :limit 100)
@@ -255,7 +256,7 @@
                          (:p95 stats)
                          (:sum stats)))})))
 
-(defn- analyze-token-stats
+(defn analyze-token-stats
   "Analyze workflow token usage statistics."
   [observer opts]
   (let [limit (get opts :limit 100)
@@ -276,7 +277,7 @@
                          (:p95 stats)
                          (:sum stats)))})))
 
-(defn- analyze-phase-stats
+(defn analyze-phase-stats
   "Analyze per-phase performance statistics."
   [observer opts]
   (let [limit (get opts :limit 100)
@@ -316,12 +317,12 @@
                        (count phase-stats)
                        (count metrics))})))
 
-(defn- analyze-failure-patterns
+(defn analyze-failure-patterns
   "Analyze workflow failure patterns."
   [observer opts]
   (let [limit (get opts :limit 100)
         metrics (proto/get-all-metrics observer {:limit limit})
-        failed (filter #(= :failed (:status %)) metrics)
+        failed (filter phase/failed? metrics)
 
         ;; Analyze which phases fail most often
         failed-phases (reduce
@@ -355,7 +356,7 @@
         [(str "Most problematic phases: "
               (str/join ", " (map first (take 3 (sort-by val > failed-phases)))))])})))
 
-(defn- analyze-trends
+(defn analyze-trends
   "Analyze metrics trends over time."
   [observer opts]
   (let [limit (get opts :limit 100)
@@ -408,7 +409,7 @@
 ;; Report Generation
 ;; ============================================================================
 
-(defn- generate-summary-report
+(defn generate-summary-report
   "Generate a summary performance report."
   [observer opts]
   (let [format (get opts :format :markdown)
@@ -445,7 +446,7 @@
 
       report-data)))
 
-(defn- generate-detailed-report
+(defn generate-detailed-report
   "Generate a detailed metrics breakdown report."
   [observer opts]
   (let [format (get opts :format :edn)
@@ -475,7 +476,7 @@
                                          (take 10 all-metrics))))
       report-data)))
 
-(defn- generate-recommendations-report
+(defn generate-recommendations-report
   "Generate recommendations for workflow improvements."
   [observer opts]
   (let [format (get opts :format :markdown)

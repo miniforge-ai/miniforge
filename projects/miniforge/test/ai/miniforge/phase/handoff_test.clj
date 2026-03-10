@@ -7,22 +7,13 @@
   Mocks all agent invocations to focus purely on the handoff plumbing."
   (:require
    [clojure.test :refer [deftest testing is]]
-   ;; Required for defmethod side effects (register phase handlers)
-   #_{:clj-kondo/ignore [:unused-namespace]}
-   [ai.miniforge.phase.plan]
-   #_{:clj-kondo/ignore [:unused-namespace]}
-   [ai.miniforge.phase.implement]
-   #_{:clj-kondo/ignore [:unused-namespace]}
-   [ai.miniforge.phase.verify]
-   #_{:clj-kondo/ignore [:unused-namespace]}
-   [ai.miniforge.phase.release]
-   [ai.miniforge.phase.registry :as registry]
+   [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.release-executor.interface :as release-executor]
    [babashka.process :as process]))
 
-(defn- with-mocked-test-runner
+(defn with-mocked-test-runner
   "Run body-fn with run-tests! and write-test-files! mocked to prevent subprocess spawning."
   [body-fn]
   (let [write-var (resolve 'ai.miniforge.phase.verify/write-test-files!)
@@ -123,7 +114,7 @@
 
   Simulates the workflow runner's phase execution."
   [phase-name ctx]
-  (let [interceptor (registry/get-phase-interceptor {:phase phase-name})
+  (let [interceptor (phase/get-phase-interceptor {:phase phase-name})
         enter-fn (:enter interceptor)]
     (enter-fn ctx)))
 
@@ -132,7 +123,7 @@
 
   Simulates the workflow runner's phase completion and result storage."
   [phase-name ctx]
-  (let [interceptor (registry/get-phase-interceptor {:phase phase-name})
+  (let [interceptor (phase/get-phase-interceptor {:phase phase-name})
         leave-fn (:leave interceptor)
         updated-ctx (leave-fn ctx)]
     ;; Store entire phase map in execution context (mimics workflow runner)

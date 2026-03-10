@@ -9,7 +9,7 @@
 ;;------------------------------------------------------------------------------ Layer 0
 ;; Completed work formatting
 
-(defn- format-completed-work-section
+(defn format-completed-work-section
   "Format completed work items for display.
 
    Arguments:

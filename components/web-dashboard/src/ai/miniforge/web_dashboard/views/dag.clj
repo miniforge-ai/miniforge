@@ -20,25 +20,25 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Filter modal (shared across panes)
 
-(defn- js-escape
+(defn js-escape
   [s]
   (-> (str s)
       (str/replace "\\" "\\\\")
       (str/replace "'" "\\\\'")))
 
-(defn- option-raw-value
+(defn option-raw-value
   [value]
   (if (keyword? value)
     (str value)
     (str value)))
 
-(defn- option-display-value
+(defn option-display-value
   [value]
   (if (keyword? value)
     (name value)
     (str value)))
 
-(defn- enum-option
+(defn enum-option
   [filter-id scope value count cloud?]
   (let [raw-value (option-raw-value value)
         display-value (option-display-value value)]
@@ -54,7 +54,7 @@
                          (name filter-id) "', '" (js-escape raw-value) "', '" scope "', this.checked);")}]
    [:span (str display-value (when count (str " (" count ")")))]]))
 
-(defn- cloud-option
+(defn cloud-option
   [filter-id scope value count]
   (let [raw-value (option-raw-value value)
         display-value (option-display-value value)]
@@ -69,7 +69,7 @@
      (when count
        [:span.filter-option-cloud-count count])]))
 
-(defn- dynamic-enum-options
+(defn dynamic-enum-options
   [filter-id scope filter-label facet-counts cloud?]
   (if (seq facet-counts)
     (for [[value count] facet-counts]
@@ -88,7 +88,7 @@
         :onchange (str "window.miniforge.filters.setTextFilter('"
                      (name filter-id) "', '" scope "', this.value, ':=');")}]])))
 
-(defn- static-enum-options
+(defn static-enum-options
   [filter-id scope values facet-counts cloud?]
   (for [value values]
     (let [option-value (if (keyword? value) (name value) (str value))]
@@ -96,7 +96,7 @@
         (cloud-option filter-id scope value (get facet-counts value))
         (enum-option filter-id scope option-value (get facet-counts value) cloud?)))))
 
-(defn- bool-filter-options
+(defn bool-filter-options
   [filter-id scope]
   [:div.filter-option
    [:label
@@ -109,7 +109,7 @@
                           (name filter-id) "', true, '" scope "', this.checked);")}]
     [:span "Yes"]]])
 
-(defn- text-filter-input
+(defn text-filter-input
   [filter-id filter-label scope filter-spec]
   (let [text-op (if (= :multi-path (get-in filter-spec [:filter/value :kind]))
                   ":text-search"
@@ -123,7 +123,7 @@
       :onchange (str "window.miniforge.filters.setTextFilter('"
                    (name filter-id) "', '" scope "', this.value, '" text-op "');")}]))
 
-(defn- filter-options-fragment
+(defn filter-options-fragment
   [filter-spec scope facet-counts cloud?]
   (let [filter-id (:filter/id filter-spec)
         filter-label (:filter/label filter-spec)
@@ -142,7 +142,7 @@
 
       [:span "Unsupported filter type: " (name filter-type)])))
 
-(defn- filter-section-fragment
+(defn filter-section-fragment
   [filter-spec facets scope]
   (let [filter-id (:filter/id filter-spec)
         filter-label (:filter/label filter-spec)
@@ -158,7 +158,7 @@
      [:div {:class (str "filter-options" (when cloud? " filter-options-cloud"))}
       (filter-options-fragment filter-spec scope facet-counts cloud?)]]))
 
-(defn- filter-modal-body-fragment
+(defn filter-modal-body-fragment
   [filters facets scope]
   (if (empty? filters)
     [:p.empty-message (if (= scope "global")

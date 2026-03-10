@@ -2,12 +2,16 @@
   "Unit tests for the PR lifecycle controller state machine.
 
    Tests controller creation, state initialization, configuration,
-   fix iteration enforcement, and history tracking.
-   Does NOT test functions that call external services."
+   fix iteration enforcement, history tracking, and the extracted
+   PR creation step functions."
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.pr-lifecycle.controller :as controller]
-   [ai.miniforge.pr-lifecycle.merge :as merge]))
+   [ai.miniforge.pr-lifecycle.merge :as merge]
+   [ai.miniforge.pr-lifecycle.events :as events]
+   [ai.miniforge.pr-lifecycle.fix-loop :as fix]
+   [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.release-executor.interface :as release]))
 
 ;------------------------------------------------------------------------------ Test Data
 
@@ -231,3 +235,174 @@
                  :worktree-path "/tmp")]
       (is (nil? (:ci-monitor @ctrl)))
       (is (nil? (:review-monitor @ctrl))))))
+
+;------------------------------------------------------------------------------ Extracted PR creation steps
+
+(defn make-controller
+  "Create a test controller with minimal config."
+  ([] (make-controller {}))
+  ([overrides]
+   (let [ctrl (controller/create-controller
+                "dag-1" "run-1" "task-00000001" test-task
+                :worktree-path "/tmp/repo")]
+     (when (seq overrides)
+       (swap! ctrl merge overrides))
+     ctrl)))
+
+;; fail-controller!
+
+(deftest fail-controller-sets-status-and-returns-err
+  (testing "fail-controller! sets :failed status and returns a DAG error"
+    (let [ctrl (make-controller)]
+      (is (= :pending (:status @ctrl)))
+      (let [result (controller/fail-controller! ctrl :some-error "boom")]
+        (is (= :failed (:status @ctrl)))
+        (is (dag/err? result))
+        (is (= :some-error (get-in result [:error :code])))))))
+
+;; create-and-checkout-branch!
+
+(deftest create-and-checkout-branch-success
+  (testing "Returns branch result on success"
+    (let [ctrl (make-controller)]
+      (with-redefs [release/create-branch! (fn [_path _name]
+                                              {:success? true :base-branch "main"})]
+        (let [result (controller/create-and-checkout-branch! ctrl "/tmp" "feat/x")]
+          (is (:success? result))
+          (is (= "main" (:base-branch result))))))))
+
+(deftest create-and-checkout-branch-failure
+  (testing "Returns DAG error on failure and adds history"
+    (let [ctrl (make-controller)]
+      (with-redefs [release/create-branch! (fn [_path _name]
+                                              {:success? false :error "git error"})]
+        (let [result (controller/create-and-checkout-branch! ctrl "/tmp" "feat/x")]
+          (is (dag/err? result))
+          (is (= :failed (:status @ctrl)))
+          (is (some #(= :pr-creation-failed (:type %)) (:history @ctrl))))))))
+
+;; apply-code-to-files!
+
+(deftest apply-code-to-files-success
+  (testing "Returns apply result on success"
+    (let [ctrl (make-controller)]
+      (with-redefs [fix/apply-fix-to-worktree (fn [_path _artifact _logger]
+                                                 {:applied true})]
+        (let [result (controller/apply-code-to-files! ctrl "/tmp" {:code/files []} nil)]
+          (is (= {:applied true} result)))))))
+
+(deftest apply-code-to-files-failure
+  (testing "Returns DAG error when fix/apply returns error"
+    (let [ctrl (make-controller)]
+      (with-redefs [fix/apply-fix-to-worktree (fn [_path _artifact _logger]
+                                                 (dag/err :apply-failed "bad artifact"))]
+        (let [result (controller/apply-code-to-files! ctrl "/tmp" {:code/files []} nil)]
+          (is (dag/err? result))
+          (is (= :failed (:status @ctrl))))))))
+
+;; commit-changes!
+
+(deftest commit-changes-success
+  (testing "Returns commit result on success"
+    (let [ctrl (make-controller)
+          task-id "task-00000001"]
+      (with-redefs [release/commit-changes! (fn [_path _msg]
+                                               {:success? true :commit-sha "abc123"})]
+        (let [result (controller/commit-changes! ctrl "/tmp" test-task task-id)]
+          (is (:success? result))
+          (is (= "abc123" (:commit-sha result))))))))
+
+(deftest commit-changes-failure
+  (testing "Returns DAG error on commit failure"
+    (let [ctrl (make-controller)]
+      (with-redefs [release/commit-changes! (fn [_path _msg]
+                                               {:success? false :error "nothing to commit"})]
+        (let [result (controller/commit-changes! ctrl "/tmp" test-task "t-1")]
+          (is (dag/err? result))
+          (is (= :failed (:status @ctrl))))))))
+
+(deftest commit-changes-uses-task-title-in-message
+  (testing "Commit message includes task title"
+    (let [ctrl (make-controller)
+          captured-msg (atom nil)]
+      (with-redefs [release/commit-changes! (fn [_path msg]
+                                               (reset! captured-msg msg)
+                                               {:success? true :commit-sha "x"})]
+        (controller/commit-changes! ctrl "/tmp" test-task "t-1")
+        (is (.contains @captured-msg "Implement feature X"))))))
+
+;; push-and-create-pr!
+
+(deftest push-and-create-pr-success
+  (testing "Returns PR info map on success"
+    (let [ctrl (make-controller)]
+      (with-redefs [release/push-branch! (fn [_path _branch]
+                                            {:success? true})
+                    release/create-pr! (fn [_path opts]
+                                         {:success? true
+                                          :pr-number 42
+                                          :pr-url "https://github.com/org/repo/pull/42"})]
+        (let [commit {:commit-sha "abc123"}
+              result (controller/push-and-create-pr! ctrl "/tmp" "feat/x" "main"
+                                                      test-task "t-1" commit)]
+          (is (map? result))
+          (is (not (dag/err? result)))
+          (is (= 42 (:pr/id result)))
+          (is (= "feat/x" (:pr/branch result)))
+          (is (= "abc123" (:pr/head-sha result))))))))
+
+(deftest push-and-create-pr-push-failure
+  (testing "Returns DAG error when push fails"
+    (let [ctrl (make-controller)]
+      (with-redefs [release/push-branch! (fn [_path _branch]
+                                            {:success? false :error "remote rejected"})]
+        (let [result (controller/push-and-create-pr! ctrl "/tmp" "feat/x" "main"
+                                                      test-task "t-1" {:commit-sha "x"})]
+          (is (dag/err? result))
+          (is (= :failed (:status @ctrl))))))))
+
+(deftest push-and-create-pr-pr-creation-failure
+  (testing "Returns DAG error when PR creation fails"
+    (let [ctrl (make-controller)]
+      (with-redefs [release/push-branch! (fn [_path _branch]
+                                            {:success? true})
+                    release/create-pr! (fn [_path _opts]
+                                         {:success? false :error "repo not found"})]
+        (let [result (controller/push-and-create-pr! ctrl "/tmp" "feat/x" "main"
+                                                      test-task "t-1" {:commit-sha "x"})]
+          (is (dag/err? result)))))))
+
+(deftest push-and-create-pr-includes-acceptance-criteria
+  (testing "PR body includes acceptance criteria from task"
+    (let [ctrl (make-controller)
+          captured-opts (atom nil)]
+      (with-redefs [release/push-branch! (fn [_path _branch] {:success? true})
+                    release/create-pr! (fn [_path opts]
+                                         (reset! captured-opts opts)
+                                         {:success? true :pr-number 1 :pr-url "url"})]
+        (controller/push-and-create-pr! ctrl "/tmp" "feat/x" "main"
+                                         test-task "t-1" {:commit-sha "x"})
+        (is (.contains (:body @captured-opts) "Tests pass"))
+        (is (.contains (:body @captured-opts) "No lint errors"))))))
+
+;; finalize-pr-creation!
+
+(deftest finalize-pr-creation-records-pr-and-returns-ok
+  (testing "Stores PR on controller, adds history, returns dag/ok"
+    (let [ctrl (make-controller)
+          pr-info {:pr/id 42 :pr/url "url" :pr/branch "feat/x" :pr/head-sha "abc"}
+          result (controller/finalize-pr-creation! ctrl pr-info "dag" "run" "task" nil nil)]
+      (is (dag/ok? result))
+      (is (= 42 (get-in @ctrl [:pr :pr/id])))
+      (is (some #(= :pr-created (:type %)) (:history @ctrl))))))
+
+(deftest finalize-pr-creation-publishes-event
+  (testing "Publishes pr-opened event when event-bus is present"
+    (let [ctrl (make-controller)
+          published (atom [])
+          mock-bus (reify Object)
+          pr-info {:pr/id 42 :pr/url "url" :pr/branch "feat/x" :pr/head-sha "abc"}]
+      (with-redefs [events/publish! (fn [_bus event _logger]
+                                       (swap! published conj event))]
+        (controller/finalize-pr-creation! ctrl pr-info "dag" "run" "task" mock-bus nil)
+        (is (= 1 (count @published)))))))

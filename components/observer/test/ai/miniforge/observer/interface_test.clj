@@ -9,7 +9,7 @@
 ;; Test Fixtures
 ;; ============================================================================
 
-(defn- sample-workflow-state
+(defn sample-workflow-state
   "Create a sample workflow state for testing."
   [workflow-id status & {:keys [tokens cost duration]
                          :or {tokens 1000 cost 0.10 duration 5000}}]
@@ -24,7 +24,7 @@
    :workflow/errors (when (= status :failed)
                      [{:phase :test :error "Test failed"}])})
 
-(defn- sample-phase-result
+(defn sample-phase-result
   "Create a sample phase result for testing."
   [success? & {:keys [tokens cost duration errors]
               :or {tokens 500 cost 0.05 duration 2000 errors []}}]

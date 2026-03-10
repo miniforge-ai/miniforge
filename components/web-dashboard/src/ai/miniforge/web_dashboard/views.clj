@@ -29,7 +29,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Layout and shared utilities
 
-(defn- title->pane
+(defn title->pane
   "Convert page title to pane keyword for filter context."
   [title]
   (case title
@@ -40,7 +40,7 @@
     "Dashboard" :dashboard
     :task-status))
 
-(defn- layout
+(defn layout
   "Main page layout with htmx and WebSocket."
   [title & body]
   (let [current-pane (title->pane title)]

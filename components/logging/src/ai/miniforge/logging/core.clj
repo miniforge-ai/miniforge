@@ -97,7 +97,7 @@
     [(fn [entry] (swap! entries conj entry))
      entries]))
 
-(defn- log-file-path
+(defn log-file-path
   "Get path to log file for a workflow.
 
    Arguments:
@@ -111,7 +111,7 @@
     (.mkdirs logs-dir)
     (.getPath (io/file logs-dir log-file))))
 
-(defn- file-size-mb
+(defn file-size-mb
   "Get file size in megabytes.
 
    Arguments:
@@ -124,7 +124,7 @@
       (/ (.length file) 1024.0 1024.0)
       0.0)))
 
-(defn- rotate-log-if-needed
+(defn rotate-log-if-needed
   "Rotate log file if it exceeds size threshold.
 
    Arguments:

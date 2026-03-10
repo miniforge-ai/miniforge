@@ -9,12 +9,13 @@
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.sandbox :as sandbox]
-   [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]))
+   [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
+   [ai.miniforge.phase.interface :as phase]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Workflow interface resolution and pipeline helpers
 
-(defn- resolve-workflow-interface []
+(defn resolve-workflow-interface []
   (let [load-workflow (try
                         (requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)
                         (catch Exception e
@@ -43,18 +44,12 @@
     {:load-workflow load-workflow
      :run-pipeline run-pipeline}))
 
-(defn- create-phase-callbacks [quiet]
-  {:on-phase-start
-   (fn [_ctx interceptor]
-     (when-let [phase-name (get-in interceptor [:config :phase])]
-       (display/print-phase-start phase-name quiet)))
+(defn create-phase-callbacks [_quiet]
+  ;; Phase progress is handled by the event-stream subscription
+  ;; (display/start-progress!). Callbacks retained as extension point.
+  {})
 
-   :on-phase-complete
-   (fn [_ctx interceptor result]
-     (when-let [phase-name (get-in interceptor [:config :phase])]
-       (display/print-phase-complete phase-name result quiet)))})
-
-(defn- load-and-validate-workflow [load-workflow workflow-id version]
+(defn load-and-validate-workflow [load-workflow workflow-id version]
   (let [{:keys [workflow validation]} (load-workflow workflow-id version {})]
     (when-not workflow
       (throw (ex-info (str "Workflow '" workflow-id "' not found. Use 'workflow list' to see available workflows.")
@@ -64,7 +59,7 @@
                       {:workflow-id workflow-id :validation validation})))
     workflow))
 
-(defn- create-artifact-store [quiet]
+(defn create-artifact-store [quiet]
   (try
     (when-let [create-transit-store (requiring-resolve 'ai.miniforge.artifact.interface/create-transit-store)]
       (create-transit-store))
@@ -73,14 +68,14 @@
         (println (display/colorize :yellow "Warning: Could not create artifact store, running without persistence")))
       nil)))
 
-(defn- close-artifact-store [artifact-store]
+(defn close-artifact-store [artifact-store]
   (when artifact-store
     (try
       (when-let [close-store (requiring-resolve 'ai.miniforge.artifact.interface/close-store)]
         (close-store artifact-store))
       (catch Exception _))))
 
-(defn- select-workflow-type
+(defn select-workflow-type
   "Select workflow type using LLM recommendation if not explicitly specified."
   [spec llm-client quiet]
   (if-let [explicit-type (:spec/workflow-type spec)]
@@ -97,7 +92,7 @@
         (println (display/colorize :yellow "   Override with :spec/workflow-type in your spec\n")))
       (:workflow recommendation))))
 
-(defn- load-or-create-workflow [load-workflow workflow-type workflow-version]
+(defn load-or-create-workflow [load-workflow workflow-type workflow-version]
   (try
     (load-and-validate-workflow load-workflow workflow-type workflow-version)
     (catch Exception e
@@ -109,14 +104,14 @@
          :workflow/config {:max-tokens 20000 :max-iterations 10}}
         (throw e)))))
 
-(defn- execute-workflow-pipeline [run-pipeline workflow input callbacks artifact-store event-stream]
+(defn execute-workflow-pipeline [run-pipeline workflow input callbacks artifact-store event-stream]
   (-> callbacks
       (cond-> artifact-store (assoc :artifact-store artifact-store))
       (cond-> event-stream (assoc :event-stream event-stream))
       (->> (run-pipeline workflow input))))
 
-(defn- publish-completion-event [event-stream workflow-id result]
-  (let [status (if (= :completed (:execution/status result)) :success :failure)
+(defn publish-completion-event [event-stream workflow-id result]
+  (let [status (if (phase/succeeded? result) :success :failure)
         duration-ms (get-in result [:execution/metrics :duration-ms])]
     (es/publish! event-stream
                  (if (= status :success)
@@ -128,7 +123,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Execution orchestration
 
-(defn- execute-with-events [{:keys [run-pipeline workflow workflow-input context artifact-store
+(defn execute-with-events [{:keys [run-pipeline workflow workflow-input context artifact-store
                                      event-stream workflow-id sandbox-cleanup opts]}]
   (let [completed? (atom false)]
     (try
@@ -192,10 +187,14 @@
             ;; Pass dashboard-url in callbacks if provided
             callbacks-with-url (cond-> callbacks
                                  dashboard-url (assoc :dashboard-url dashboard-url))
-            result (execute-workflow-pipeline run-pipeline workflow workflow-input callbacks-with-url artifact-store es)]
-        (close-artifact-store artifact-store)
-        (display/print-result result opts)
-        result))
+            progress-cleanup (display/start-progress! es quiet)]
+        (try
+          (let [result (execute-workflow-pipeline run-pipeline workflow workflow-input callbacks-with-url artifact-store es)]
+            (close-artifact-store artifact-store)
+            (display/print-result result opts)
+            result)
+          (finally
+            (progress-cleanup)))))
     (catch Exception e
       (when-not quiet
         (println (display/colorize :red (str "\n✗ Error: " (ex-message e)))))
@@ -207,11 +206,11 @@
                   {:pretty true})))
       (throw e))))
 
-(defn- parse-workflow-filename [filename]
+(defn parse-workflow-filename [filename]
   (when-let [[_ id version] (re-matches #"(.+)-v(\d+(?:\.\d+\.\d+)?).edn" filename)]
     [(keyword id) version]))
 
-(defn- load-workflow-metadata [filename]
+(defn load-workflow-metadata [filename]
   (try
     (when-let [[id version] (parse-workflow-filename filename)]
       (when-let [resource (io/resource (str "workflows/" filename))]
@@ -225,7 +224,7 @@
       (println (display/colorize :yellow (str "Warning: Failed to read " filename ": " (ex-message e))))
       nil)))
 
-(defn- format-workflow-listing [workflows]
+(defn format-workflow-listing [workflows]
   (if (empty? workflows)
     (println "No workflows found.")
     (do
@@ -239,7 +238,7 @@
         (println))
       (println (display/colorize :cyan (apply str (repeat 60 "─")))))))
 
-(defn- list-workflows-from-resources []
+(defn list-workflows-from-resources []
   (try
     (->> ["simple-v2.0.0.edn"
           "simple-test-v1.0.0.edn"
@@ -267,7 +266,8 @@
   (try
     (let [{:keys [load-workflow run-pipeline]} (resolve-workflow-interface)
           ;; Create initial LLM client for workflow selection
-          selection-llm-client (context/create-llm-client nil spec quiet)
+          backend-override (:backend opts)
+          selection-llm-client (context/create-llm-client nil spec quiet backend-override)
           workflow-type (select-workflow-type spec selection-llm-client quiet)
           workflow-version (or (:spec/workflow-version spec) "latest")
           workflow (load-or-create-workflow load-workflow workflow-type workflow-version)
@@ -280,7 +280,7 @@
           control-state (es/create-control-state)
           command-poller-cleanup (dashboard/start-command-poller! workflow-id control-state)
           ;; Create workflow-specific LLM client for execution
-          llm-client (context/create-llm-client workflow spec quiet)
+          llm-client (context/create-llm-client workflow spec quiet backend-override)
           callbacks (create-phase-callbacks quiet)
           base-context (context/create-workflow-context {:callbacks callbacks
                                                         :artifact-store artifact-store
@@ -295,7 +295,8 @@
                                                         :skip-lifecycle-events true
                                                         :execution-opts (:execution-opts opts)})
           sandbox? (or (:sandbox opts) (:spec/sandbox spec))
-          [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)]
+          [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)
+          progress-cleanup (display/start-progress! event-stream quiet)]
       (when-not quiet
         (display/print-workflow-header (keyword (str "adhoc-" (hash spec))) "adhoc" quiet))
       (dashboard/print-dashboard-status! quiet)
@@ -310,6 +311,7 @@
                               :sandbox-cleanup sandbox-cleanup
                               :opts opts})
         (finally
+          (progress-cleanup)
           (when command-poller-cleanup (command-poller-cleanup)))))
     (catch Exception e
       (when-not quiet
@@ -360,7 +362,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Chain-driven execution
 
-(defn- resolve-chain-input
+(defn resolve-chain-input
   "Resolve chain input from a spec file path or inline JSON."
   [opts]
   (let [spec-path (:spec opts)
@@ -372,7 +374,7 @@
                   (context/spec->workflow-input enriched))
       :else {})))
 
-(defn- print-chain-header
+(defn print-chain-header
   "Print chain execution banner."
   [chain-id chain-def quiet]
   (when-not quiet
@@ -382,20 +384,19 @@
     (println (display/colorize :cyan (str "   Steps: " (count (:chain/steps chain-def)))))
     (println (display/colorize :cyan (apply str (repeat 60 "─"))))))
 
-(defn- print-chain-result
+(defn print-chain-result
   "Print chain execution result summary."
   [result quiet]
   (when-not quiet
-    (let [status (:chain/status result)
-          steps (:chain/step-results result)
+    (let [steps (:chain/step-results result)
           duration (:chain/duration-ms result)]
       (println)
       (println (display/colorize :cyan (apply str (repeat 60 "─"))))
-      (if (= :completed status)
+      (if (phase/succeeded? result)
         (println (display/colorize :green (str "✓ Chain completed — "
                                                 (count steps) " steps in "
                                                 duration "ms")))
-        (let [failed-step (some #(when (= :failed (:step/status %)) (:step/id %)) steps)]
+        (let [failed-step (some #(when (phase/failed? %) (:step/id %)) steps)]
           (println (display/colorize :red (str "✗ Chain failed at step: "
                                                 (when failed-step (name failed-step))))))))))
 
@@ -425,12 +426,16 @@
                                                       :workflow-type chain-id
                                                       :workflow-version version
                                                       :spec-title (str "Chain: " (name chain-id))
-                                                      :control-state (es/create-control-state)})]
+                                                      :control-state (es/create-control-state)})
+            progress-cleanup (display/start-progress! event-stream quiet)]
         (print-chain-header chain-id chain-def quiet)
         (dashboard/print-dashboard-status! quiet)
-        (let [result (run-chain-fn chain-def chain-input context)]
-          (print-chain-result result quiet)
-          result))
+        (try
+          (let [result (run-chain-fn chain-def chain-input context)]
+            (print-chain-result result quiet)
+            result)
+          (finally
+            (progress-cleanup))))
       (catch Exception e
         (when-not quiet
           (println (display/colorize :red (str "\n❌ Chain execution failed: " (ex-message e)))))

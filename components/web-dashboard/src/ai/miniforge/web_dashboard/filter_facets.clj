@@ -6,7 +6,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Value extraction (duplicated from filter_eval for now, could be shared)
 
-(defn- extract-value
+(defn extract-value
   "Extract value from item using filter spec."
   [item {:keys [filter/value]}]
   (case (:kind value)

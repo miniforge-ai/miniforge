@@ -2,7 +2,8 @@
   "Chain-level evidence aggregation.
 
    Aggregates per-step evidence bundles into a chain-level bundle,
-   including chain definition, step results, total timing, and metrics.")
+   including chain definition, step results, total timing, and metrics."
+  (:require [ai.miniforge.phase.interface :as phase]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Step Summarization
@@ -43,8 +44,8 @@
    - :steps-with-output"
   [step-results]
   (let [total (count step-results)
-        completed (count (filter #(= :completed (:step/status %)) step-results))
-        failed (count (filter #(= :failed (:step/status %)) step-results))
+        completed (count (filter phase/succeeded? step-results))
+        failed (count (filter phase/failed? step-results))
         with-output (count (filter #(some? (:step/output %)) step-results))]
     {:total-steps total
      :completed-steps completed
@@ -54,14 +55,14 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Chain Evidence Creation
 
-(defn- derive-chain-status
+(defn derive-chain-status
   "Derive chain evidence status from the chain result."
   [chain-result]
-  (if (= :completed (:chain/status chain-result))
+  (if (phase/succeeded? chain-result)
     :completed
     :failed))
 
-(defn- build-step-summaries
+(defn build-step-summaries
   "Build step summaries from chain step results."
   [step-results]
   (vec (map-indexed (fn [idx sr] (summarize-step sr idx)) step-results)))

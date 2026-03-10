@@ -5,11 +5,10 @@
    operations when :executor and :environment-id are present in context,
    and falls back to git operations when they are absent."
   (:require
-   [ai.miniforge.dag-executor.protocols.executor]
+   [ai.miniforge.dag-executor.interface :as dag]
    [clojure.string]
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.release-executor.core :as core]
-   [ai.miniforge.dag-executor.result :as dag-result]))
+   [ai.miniforge.release-executor.core :as core]))
 
 ;; ============================================================================
 ;; Mock executor (same pattern as sandbox_test.clj)
@@ -22,10 +21,10 @@
            default-response {:exit-code 0 :stdout "" :stderr ""}}}]
   (let [commands (atom [])]
     [(reify
-       ai.miniforge.dag-executor.protocols.executor/TaskExecutor
+       dag/TaskExecutor
        (executor-type [_] :mock)
-       (available? [_] (dag-result/ok {:available? true}))
-       (acquire-environment! [_ _ _] (dag-result/ok {:environment-id "mock-env"}))
+       (available? [_] (dag/ok {:available? true}))
+       (acquire-environment! [_ _ _] (dag/ok {:environment-id "mock-env"}))
        (execute! [_ _env-id command _opts]
          (swap! commands conj command)
          (let [response (or (some (fn [[substr resp]]
@@ -33,11 +32,11 @@
                                       resp))
                                   responses)
                             default-response)]
-           (dag-result/ok response)))
-       (copy-to! [_ _ _ _] (dag-result/ok {}))
-       (copy-from! [_ _ _ _] (dag-result/ok {}))
-       (release-environment! [_ _] (dag-result/ok {:released? true}))
-       (environment-status [_ _] (dag-result/ok {:status :running})))
+           (dag/ok response)))
+       (copy-to! [_ _ _ _] (dag/ok {}))
+       (copy-from! [_ _ _ _] (dag/ok {}))
+       (release-environment! [_ _] (dag/ok {:released? true}))
+       (environment-status [_ _] (dag/ok {:status :running})))
      commands]))
 
 ;; ============================================================================
@@ -51,6 +50,15 @@
                          :artifact/content {:code/id (random-uuid)
                                            :code/files files}}]
    :workflow/spec {:spec/description "test task"}})
+
+(def test-release-meta
+  "Pre-built release metadata so tests don't need an LLM backend."
+  {:release/id (random-uuid)
+   :release/branch-name "feature/test-change"
+   :release/commit-message "feat: test change"
+   :release/pr-title "feat: test change"
+   :release/pr-description "## Summary\nTest change"
+   :release/created-at (java.util.Date.)})
 
 ;; ============================================================================
 ;; Sandbox mode detection tests
@@ -72,14 +80,15 @@
           context {:executor exec
                    :environment-id "mock-env"
                    :create-pr? false}  ;; skip PR creation for simplicity
-          result (core/execute-release-phase workflow-state context {})]
+          result (core/execute-release-phase workflow-state context
+                                             {:release-meta test-release-meta})]
       ;; Should succeed via sandbox path
       (is (:success? result))
       ;; Commands should have been sent to the mock executor
       (is (pos? (count @cmds)))
       ;; Should contain sandbox operations (base64 write, git add)
       (is (some #(clojure.string/includes? % "base64 -d") @cmds))
-      (is (some #(clojure.string/starts-with? % "git add ") @cmds)))))
+      (is (some #(clojure.string/includes? % "git add") @cmds)))))
 
 (deftest host-mode-when-no-executor
   (testing "sandbox? is false when :executor is nil"
@@ -108,7 +117,8 @@
           context {:executor exec
                    :environment-id "mock-env"
                    :create-pr? false}
-          result (core/execute-release-phase workflow-state context {})]
+          result (core/execute-release-phase workflow-state context
+                                             {:release-meta test-release-meta})]
       (is (:success? result)))))
 
 (deftest sandbox-no-code-artifacts-still-fails

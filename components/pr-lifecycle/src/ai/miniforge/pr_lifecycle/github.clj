@@ -13,7 +13,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; GitHub CLI helpers
 
-(defn- run-gh-command
+(defn run-gh-command
   "Run a gh CLI command and return result.
 
    Arguments:
@@ -38,7 +38,7 @@
     (catch Exception e
       (dag/err :gh-exception (.getMessage e)))))
 
-(defn- graphql-query
+(defn graphql-query
   "Execute a GraphQL query via gh CLI.
 
    Arguments:
@@ -68,7 +68,7 @@
           (dag/err :json-parse-error (.getMessage e))))
       result)))
 
-(defn- graphql-mutation
+(defn graphql-mutation
   "Execute a GraphQL mutation via gh CLI.
 
    Arguments:

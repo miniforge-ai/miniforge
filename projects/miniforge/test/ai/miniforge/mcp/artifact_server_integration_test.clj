@@ -11,7 +11,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
 
-(defn- send-rpc!
+(defn send-rpc!
   "Send a JSON-RPC request and read the response.
    Returns parsed JSON map or nil on timeout."
   [^BufferedWriter writer ^BufferedReader reader id method params]
@@ -24,7 +24,7 @@
       (when-not (or (= line ::timeout) (nil? line))
         (json/parse-string line true)))))
 
-(defn- start-mcp-server
+(defn start-mcp-server
   "Start the MCP artifact server subprocess using the session's MCP config.
    Returns {:proc process :writer writer :reader reader}."
   [session]
@@ -40,7 +40,7 @@
     (Thread/sleep 300)
     {:proc proc :writer writer :reader reader}))
 
-(defn- stop-mcp-server
+(defn stop-mcp-server
   "Close stdin and wait for process exit."
   [{:keys [^Process proc ^BufferedWriter writer]}]
   (.close writer)

@@ -3,7 +3,7 @@
    Tests the full flow: task -> classification -> model selection -> execution."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.agent.task-classifier :as classifier]
+   [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.llm.model-registry :as registry]
    [ai.miniforge.llm.model-selector :as selector]))
 
@@ -16,7 +16,7 @@
                 :title "Architecture Design"}
 
           ;; Step 2: Classify task
-          classification (classifier/classify-task task)
+          classification (agent/classify-task task)
 
           ;; Step 3: Select model
           selection (selector/select-model classification)]
@@ -43,7 +43,7 @@
                 :description "Implement user authentication service"
                 :title "Implement Auth"}
 
-          classification (classifier/classify-task task)
+          classification (agent/classify-task task)
           selection (selector/select-model classification)]
 
       ;; Verify classification
@@ -63,7 +63,7 @@
                 :description "Validate syntax and formatting"
                 :title "Quick Validation"}
 
-          classification (classifier/classify-task task)
+          classification (agent/classify-task task)
           selection (selector/select-model classification)]
 
       ;; Verify classification
@@ -83,7 +83,7 @@
                 :privacy-required true
                 :description "Implement banking feature"}
 
-          classification (classifier/classify-task task)
+          classification (agent/classify-task task)
           selection (selector/select-model classification
                                            {}
                                            {:require-local true})]
@@ -102,7 +102,7 @@
                 :context-tokens 500000
                 :description "Refactor entire codebase"}
 
-          classification (classifier/classify-task task)
+          classification (agent/classify-task task)
           selection (selector/select-model classification
                                            {}
                                            {:context-size 500000})]
@@ -122,7 +122,7 @@
                 :agent-type :implementer-agent
                 :description "Standard implementation task"}
 
-          classification (classifier/classify-task task)
+          classification (agent/classify-task task)
 
           ;; Default automatic selection
           selection-auto (selector/select-model classification
@@ -145,7 +145,7 @@
     (let [task {:phase :plan
                 :description "Architecture planning"}
 
-          classification (classifier/classify-task task)
+          classification (agent/classify-task task)
           selection (selector/select-model classification)
           explanation (selector/explain-selection selection)]
 
@@ -171,7 +171,7 @@
 
           ;; Classify and select for each
           selections (map (fn [task]
-                            (let [classification (classifier/classify-task task)]
+                            (let [classification (agent/classify-task task)]
                               {:task task
                                :classification classification
                                :selection (selector/select-model classification)}))
@@ -203,7 +203,7 @@
     (let [;; Minimal task with no clear signals
           task {:description "Generic task"}
 
-          classification (classifier/classify-task task)
+          classification (agent/classify-task task)
           selection (selector/select-model classification)]
 
       ;; Should default to execution-focused
@@ -222,7 +222,7 @@
                  {:phase :implement :privacy-required true :title "Private code"}]
 
           selections (map (fn [task]
-                            (let [classification (classifier/classify-task task)
+                            (let [classification (agent/classify-task task)
                                   selection (selector/select-model
                                              classification
                                              {}
@@ -250,7 +250,7 @@
     ;; In actual agent creation, passing :model explicitly
     ;; should skip automatic selection
     (let [task {:phase :validate :title "Validation"}
-          classification (classifier/classify-task task)
+          classification (agent/classify-task task)
 
           ;; Normal selection would pick Haiku
           auto-selection (selector/select-model classification)]
@@ -273,8 +273,8 @@
           ;; Low-confidence task (ambiguous)
           low-conf-task {:description "Do something"}
 
-          high-classification (classifier/classify-task high-conf-task)
-          low-classification (classifier/classify-task low-conf-task)
+          high-classification (agent/classify-task high-conf-task)
+          low-classification (agent/classify-task low-conf-task)
 
           high-selection (selector/select-model high-classification)
           low-selection (selector/select-model low-classification)]
@@ -311,7 +311,7 @@
                 :description "Code implementation"
                 :context-tokens 50000}
 
-          classification (classifier/classify-task task)
+          classification (agent/classify-task task)
           selection (selector/select-model classification
                                            {:strategy :automatic}
                                            {:context-size 50000})]

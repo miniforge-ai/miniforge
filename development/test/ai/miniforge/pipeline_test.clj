@@ -13,9 +13,9 @@
 ;; ============================================================================
 
 ;; Track stores for cleanup
-(def ^:private test-stores (atom []))
+(def test-stores (atom []))
 
-(defn- cleanup-stores
+(defn cleanup-stores
   "Fixture to close all stores after each test."
   [f]
   (try

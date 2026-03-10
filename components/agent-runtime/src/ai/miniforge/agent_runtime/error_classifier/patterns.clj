@@ -14,7 +14,7 @@
 ;;------------------------------------------------------------------------------ Layer 0
 ;; Pattern loading from configuration
 
-(defn- load-pattern-config
+(defn load-pattern-config
   "Load error pattern configuration from resource file.
 
    Arguments:
@@ -28,7 +28,7 @@
       (catch Exception _e
         nil))))
 
-(defn- compile-pattern
+(defn compile-pattern
   "Compile a pattern map with regex string to regex object.
 
    Arguments:
@@ -42,7 +42,7 @@
       (assoc :type type :vendor vendor)
       (update :regex re-pattern)))
 
-(defn- load-patterns
+(defn load-patterns
   "Load and compile patterns from a config file.
 
    Arguments:

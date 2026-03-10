@@ -59,7 +59,7 @@
    [:error {:optional true} fn?]])
 
 ;; Defaults registry (atom for extensibility)
-(defonce ^:private defaults-registry (atom {}))
+(defonce defaults-registry (atom {}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Multimethod registry
@@ -135,6 +135,73 @@
   "Check if interceptor is valid against schema."
   [interceptor]
   (m/validate Interceptor interceptor))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Phase status predicates
+;;
+;; Accept either a bare keyword (:completed, :failed, etc.) or a map with
+;; a status key (:status, :execution/status, :step/status, :chain/status).
+
+(def already-done-statuses
+  "Statuses indicating work is already complete — neutral outcome."
+  #{:already-satisfied :already-implemented})
+
+(def status-keys
+  "Keys to try when extracting status from a map, in priority order."
+  [:status :execution/status :step/status :chain/status])
+
+(defn extract-status
+  "Extract a status keyword from a map by trying known status keys."
+  [m]
+  (when m (some m status-keys)))
+
+(defn succeeded?
+  "Check if a result map indicates success.
+   Looks for :status, :execution/status, :step/status, or :chain/status."
+  [m]
+  (= :completed (extract-status m)))
+
+(defn already-done?
+  "Check if a result map indicates work was already complete.
+   This is a neutral outcome — not a failure."
+  [m]
+  (contains? already-done-statuses (extract-status m)))
+
+(defn succeeded-or-done?
+  "Check if a result map indicates success or already-done (neutral).
+   Use this for event emission and outcome reporting."
+  [m]
+  (let [s (extract-status m)]
+    (or (= :completed s)
+        (contains? already-done-statuses s))))
+
+(defn failed?
+  "Check if a result map indicates failure."
+  [m]
+  (= :failed (extract-status m)))
+
+(defn retrying?
+  "Check if a result map indicates retry."
+  [m]
+  (= :retrying (extract-status m)))
+
+(defn determine-phase-status
+  "Determine phase status from agent result status, iteration count, and budget.
+
+   Arguments:
+   - agent-status: The :status from the agent result (:success, :error, etc.)
+   - iterations: Current iteration count
+   - max-iterations: Maximum allowed iterations
+
+   Returns: :completed, :retrying, or :failed"
+  [agent-status iterations max-iterations]
+  (cond
+    (= :success agent-status) :completed
+    (and (= :error agent-status)
+         (< iterations max-iterations)) :retrying
+    (= :error agent-status) :failed
+    (not= :success agent-status) :failed
+    :else :completed))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -22,19 +22,22 @@
    Displays a table of PRs with title, readiness score, risk level,
    CI status, and repo information."
   (:require
-   [ai.miniforge.tui-engine.interface.layout :as layout]))
+   [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.palette :as palette]
+   [ai.miniforge.tui-views.update.navigation :as nav]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Rendering helpers
 
-(defn- risk-indicator [risk]
+(defn risk-indicator [risk]
   (case risk
     :low    "LOW"
     :medium "MED"
-    :high   "HIGH"
+    :high        "HIGH"
+    :unevaluated "?"
     "---"))
 
-(defn- readiness-bar [readiness cols]
+(defn readiness-bar [readiness cols]
   (let [pct (int (* (or readiness 0) 100))
         bar-width (max 1 (- cols 5))
         filled (int (* bar-width (or readiness 0)))]
@@ -42,30 +45,41 @@
          (apply str (repeat (- bar-width filled) "░"))
          " " pct "%")))
 
-(defn- format-pr-row [pr cols]
+(defn format-pr-row [pr cols]
   {:title (or (:pr/title pr) "Untitled")
    :repo  (or (:pr/repo pr) "")
    :readiness (readiness-bar (:pr/readiness pr) (min 15 (max 8 (quot cols 6))))
    :risk (risk-indicator (:pr/risk pr))})
 
-(defn- render-title-bar [[cols rows]]
+(defn render-title-bar [[cols rows]]
   (layout/text [cols rows] " MINIFORGE │ PR Fleet"
-               {:fg :cyan :bold? true}))
+               {:fg palette/status-info :bold? true}))
 
-(defn- render-table [pr-items selected [cols rows]]
+(defn auto-scroll-offset
+  "Compute scroll offset so selected-idx is always visible within visible-count rows."
+  [selected-idx visible-count]
+  (let [sel (or selected-idx 0)]
+    (if (<= (inc sel) visible-count)
+      0
+      (inc (- sel visible-count)))))
+
+(defn render-table [pr-items selected [cols rows]]
   (if (empty? pr-items)
     (layout/text [cols rows] "  No PRs tracked. Use :add-repo to add repositories."
                  {:fg :default})
-    (let [title-width (max 10 (- cols 60))]
+    (let [title-width (max 10 (- cols 60))
+          visible-count (max 0 (- rows 2))
+          offset (auto-scroll-offset selected visible-count)]
       (layout/table [cols rows]
         {:columns [{:key :title :header "PR Title" :width title-width}
                    {:key :repo :header "Repository" :width 25}
                    {:key :readiness :header "Readiness" :width 18}
                    {:key :risk :header "Risk" :width 6}]
          :data (mapv #(format-pr-row % cols) pr-items)
-         :selected-row selected}))))
+         :selected-row selected
+         :offset offset}))))
 
-(defn- render-footer [flash-message [cols rows]]
+(defn render-footer [flash-message [cols rows]]
   (layout/text [cols rows]
     (str " j/k:navigate  Enter:detail  r:sync  b:kanban  ::cmd  q:quit"
          (when flash-message (str "  │ " flash-message)))
@@ -76,7 +90,7 @@
    model: full app model
    [cols rows]: available screen area"
   [model [cols rows]]
-  (let [pr-items (:pr-items model)
+  (let [pr-items (nav/visible-prs model)
         selected (:selected-idx model)
         flash (:flash-message model)]
     (layout/split-v [cols rows] (/ 2.0 rows)

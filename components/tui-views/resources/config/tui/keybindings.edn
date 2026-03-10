@@ -40,10 +40,12 @@
 
   ;; Selection
   :key/space     :action/toggle-or-expand
+  :key/shift-up  :action/select-up
+  :key/shift-down :action/select-down
   :key/v         :action/enter-visual-mode
-  :key/a         :action/select-all
-  :key/c         :action/chat-or-clear
-  :key/C         :action/clear-selection
+  :key/a         :action/add-or-select-all
+  :key/d         :action/delete-or-noop
+  :key/c         :action/chat
 
   ;; Filter + Train
   :key/p         :action/enter-filter-mode
@@ -57,7 +59,6 @@
   :key/f         :action/fleet-view
   :key/o         :action/open-browse
   :key/O         :action/open-in-browser
-  :key/x         :action/remove-repos
   :key/question  :action/toggle-help
   :key/q         :action/quit
 
@@ -88,7 +89,10 @@
  :chat
  {:key/escape    :action/chat-escape
   :key/enter     :action/chat-send
-  :key/backspace :action/chat-backspace}
+  :key/backspace :action/chat-backspace
+  :key/up        :action/chat-scroll-up
+  :key/down      :action/chat-scroll-down
+  :key/G         :action/chat-scroll-bottom}
 
  ;; Number keys → view switching (shared across modes)
  :number-keys

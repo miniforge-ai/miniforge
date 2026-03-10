@@ -31,7 +31,7 @@
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Color mapping
 
-(def ^:private color-map
+(def color-map
   "Map from keyword colors to Lanterna TextColor.ANSI constants."
   {:black   TextColor$ANSI/BLACK
    :red     TextColor$ANSI/RED
@@ -43,7 +43,7 @@
    :white   TextColor$ANSI/WHITE
    :default TextColor$ANSI/DEFAULT})
 
-(defn- resolve-lanterna-color
+(defn resolve-lanterna-color
   "Resolve a color value to a Lanterna TextColor.
    Accepts:
    - keyword  (:cyan, :red, etc.)  → TextColor.ANSI
@@ -58,6 +58,15 @@
     :else            TextColor$ANSI/DEFAULT))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
+;; Pre-allocated SGR arrays (avoid reflection + allocation on every character)
+
+(def ^{:tag "[Lcom.googlecode.lanterna.SGR;"} sgr-bold
+  (into-array com.googlecode.lanterna.SGR [com.googlecode.lanterna.SGR/BOLD]))
+
+(def ^{:tag "[Lcom.googlecode.lanterna.SGR;"} sgr-none
+  (into-array com.googlecode.lanterna.SGR []))
+
+;; ─────────────────────────────────────────────────────────────────────────────
 ;; Lanterna implementation
 
 (defrecord LanternaScreen [^TerminalScreen screen]
@@ -69,20 +78,19 @@
     (.stopScreen screen))
 
   (get-size [_]
+    ;; doResizeIfNecessary picks up SIGWINCH and updates the cached size.
+    ;; Returns non-null only when the terminal was actually resized.
+    (.doResizeIfNecessary screen)
     (let [size (.getTerminalSize screen)]
       [(.getColumns size) (.getRows size)]))
 
   (put-string! [_ col row text fg bg bold?]
     (let [fg-color (resolve-lanterna-color fg)
-          bg-color (resolve-lanterna-color bg)]
-      (doseq [i (range (count text))]
-        (let [ch (.charAt text i)
-              tc (if bold?
-                   (TextCharacter. ch fg-color bg-color
-                                   (into-array com.googlecode.lanterna.SGR
-                                               [com.googlecode.lanterna.SGR/BOLD]))
-                   (TextCharacter. ch fg-color bg-color
-                                   (into-array com.googlecode.lanterna.SGR [])))]
+          bg-color (resolve-lanterna-color bg)
+          sgr-arr (if bold? sgr-bold sgr-none)]
+      (dotimes [i (count text)]
+        (let [ch (.charAt ^String text i)
+              tc (TextCharacter. ch fg-color bg-color sgr-arr)]
           (.setCharacter screen (+ col i) row tc)))))
 
   (clear! [_]
@@ -93,7 +101,8 @@
 
   (poll-input [_]
     (when-let [key (.pollInput screen)]
-      (let [kind (.getKeyType key)]
+      (let [kind (.getKeyType key)
+            shift? (.isShiftDown key)]
         (cond
           (= kind com.googlecode.lanterna.input.KeyType/Character)
           {:type :character :char (.getCharacter key)}
@@ -108,10 +117,10 @@
           {:type :backspace}
 
           (= kind com.googlecode.lanterna.input.KeyType/ArrowUp)
-          {:type :arrow-up}
+          {:type (if shift? :shift-arrow-up :arrow-up)}
 
           (= kind com.googlecode.lanterna.input.KeyType/ArrowDown)
-          {:type :arrow-down}
+          {:type (if shift? :shift-arrow-down :arrow-down)}
 
           (= kind com.googlecode.lanterna.input.KeyType/ArrowLeft)
           {:type :arrow-left}

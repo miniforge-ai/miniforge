@@ -23,40 +23,74 @@
   (:require [ai.miniforge.gate.registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Content extraction helpers
+
+(defn extract-content-str
+  "Extract content string from an artifact."
+  [artifact]
+  (let [content (or (:content artifact)
+                    (get-in artifact [:artifact/content])
+                    "")]
+    (if (string? content) content (pr-str content))))
+
 ;; Lint checking (simplified - real impl would call clj-kondo)
 
-(defn- check-unused-vars
+(defn check-unused-vars
   "Check for obvious unused variable patterns."
   [code-str]
   (let [_bindings (re-seq #"\[([a-z_][a-z0-9_-]*)\s+" code-str)]
     ;; Simplified: just check if binding is used after definition
     []))
 
-(defn- check-lint
+(defn run-policy-pack-check
+  "Delegate lint checking to policy-pack if available.
+   Returns nil if policy-pack is not loaded."
+  [artifact ctx]
+  (try
+    (let [check-fn (requiring-resolve 'ai.miniforge.policy-pack.core/check-artifact)
+          packs (:policy-packs ctx)]
+      (when (seq packs)
+        (let [result (check-fn packs artifact
+                               {:task-type :implement
+                                :phase :implement})]
+          {:passed? (empty? (:blocking result))
+           :errors (mapv (fn [v]
+                           {:type :policy-violation
+                            :message (:violation/message v)
+                            :severity (:violation/severity v)
+                            :rule-id (:violation/rule-id v)})
+                         (:blocking result))
+           :warnings (mapv (fn [v]
+                             {:type :policy-warning
+                              :message (:violation/message v)
+                              :severity (:violation/severity v)})
+                           (:warnings result))})))
+    (catch Exception _e nil)))
+
+(defn check-lint
   "Check lint rules on artifact content.
+
+   Delegates to policy-pack when available, falls back to basic checks.
 
    Arguments:
      artifact - Artifact with :content
-     ctx      - Execution context (may contain :lint-config)
+     ctx      - Execution context (may contain :lint-config, :policy-packs)
 
    Returns:
      {:passed? bool :errors [] :warnings []}"
-  [artifact _ctx]
-  (let [content (or (:content artifact)
-                    (get-in artifact [:artifact/content])
-                    "")
-        content-str (if (string? content) content (pr-str content))
-        ;; In real impl, this would invoke clj-kondo
-        errors []
-        warnings (check-unused-vars content-str)]
-    (if (empty? errors)
-      {:passed? true
-       :warnings warnings}
-      {:passed? false
-       :errors errors
-       :warnings warnings})))
+  [artifact ctx]
+  (or (run-policy-pack-check artifact ctx)
+      (let [content-str (extract-content-str artifact)
+            errors []
+            warnings (check-unused-vars content-str)]
+        (if (empty? errors)
+          {:passed? true
+           :warnings warnings}
+          {:passed? false
+           :errors errors
+           :warnings warnings}))))
 
-(defn- repair-lint
+(defn repair-lint
   "Attempt to repair lint errors.
 
    Currently returns failure - lint repair requires LLM."

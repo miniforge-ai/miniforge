@@ -24,7 +24,7 @@
 
 ;------------------------------------------------------------------------------ Helper
 
-(defn- build-class
+(defn build-class
   "Build CSS class string from opts and modifiers."
   [{:keys [class]} base-class & modifiers]
   (str/join " " (filter some? (concat [base-class] modifiers [class]))))

@@ -1,0 +1,113 @@
+;; Reliability Nines — RN-03: Reliability Metric Events
+;; Tier 1 (Foundation) — no dependencies
+;; Blocks: RN-04, RN-05, RN-07
+
+{:spec/title "RN-03: Define Reliability Metric Event Schemas"
+ :version "1.0.0"
+ :type :enhancement
+ :priority :critical
+
+ :spec/description
+ "Add 4 reliability metric event schemas and 2 repository intelligence event
+  schemas to the event-stream component. These events are emitted by the SLI
+  computation engine (RN-04) and index quality tracker (RN-19/20).
+
+  This spec only defines schemas and constructors — emission logic comes in
+  RN-04 (SLIs) and RN-19/20 (repo intelligence).
+
+  Current state: event-stream has no reliability or repo-index event types.
+  Target state: 6 new event types with Malli schemas and constructors."
+
+ :spec/intent
+ {:type :reliability-foundation
+  :scope ["components/event-stream/src/ai/miniforge/event_stream/schema.clj"
+          "components/event-stream/src/ai/miniforge/event_stream/core.clj"]}
+
+ :normative-refs
+ {:primary "N3 §3.17 — Reliability Metric Events"
+  :secondary ["N3 §3.18 — Repository Intelligence Events"]}
+
+ :gap-analysis-ref "gap-analysis-reliability-nines.md #11, #12"
+ :dag/id :rn-03
+ :dag/depends-on []
+ :dag/blocks [:rn-04 :rn-05 :rn-07]
+
+ :current-state
+ {:events "No reliability/* or repo-index/* event types"
+  :completion "0%"}
+
+ :target-state
+ {:reliability-events
+  [{:type "reliability/sli-computed"
+    :fields [:sli/name :sli/value :sli/window-ms :sli/tier :sli/computed-at]}
+   {:type "reliability/slo-breach"
+    :fields [:slo/sli-name :slo/target :slo/actual :slo/tier :slo/window-ms]}
+   {:type "reliability/error-budget-update"
+    :fields [:budget/tier :budget/remaining-pct :budget/window-start :budget/consumed]}
+   {:type "reliability/degradation-mode-changed"
+    :fields [:degradation/previous :degradation/current :degradation/trigger :degradation/changed-at]}]
+  :repo-index-events
+  [{:type "repo-index/quality-computed"
+    :fields [:index-quality/repo-id :index-quality/freshness-lag-ms
+             :index-quality/coverage-score :index-quality/search-recall]}
+   {:type "repo-index/canary-failed"
+    :fields [:canary/repo-id :canary/recall-score :canary/threshold
+             :canary/failed-queries]}]}
+
+ :implementation
+ {:step-1-schemas
+  {:title "Define Malli schemas for 6 new event types"
+   :files-to-modify
+   ["components/event-stream/src/ai/miniforge/event_stream/schema.clj"]
+   :changes
+   ["Add SliComputed schema"
+    "Add SloBreach schema"
+    "Add ErrorBudgetUpdate schema"
+    "Add DegradationModeChanged schema"
+    "Add RepoIndexQualityComputed schema"
+    "Add RepoIndexCanaryFailed schema"
+    "Register all 6 in event-type dispatch"]}
+
+  :step-2-constructors
+  {:title "Add event constructor functions"
+   :files-to-modify
+   ["components/event-stream/src/ai/miniforge/event_stream/core.clj"]
+   :changes
+   ["Add sli-computed constructor"
+    "Add slo-breach constructor"
+    "Add error-budget-update constructor"
+    "Add degradation-mode-changed constructor"
+    "Add repo-index-quality-computed constructor"
+    "Add repo-index-canary-failed constructor"]}
+
+  :step-3-emission-requirements
+  {:title "Update emission requirements list"
+   :files-to-modify
+   ["components/event-stream/src/ai/miniforge/event_stream/core.clj"]
+   :changes
+   ["Document emission requirements in namespace docstring"
+    "Note: actual emission wired in RN-04, RN-19, RN-20"]}}
+
+ :spec/constraints
+ ["Follow existing event schema patterns (Malli + constructor functions)"
+  "All events MUST include standard envelope fields (event/id, event/type, etc.)"
+  "Constructor functions MUST validate against Malli schema"
+  "No emission logic in this spec — schemas and constructors only"]
+
+ :testing-strategy
+ {:unit-tests
+  ["Schema validation: valid events pass, invalid events rejected"
+   "Constructor functions produce schema-conforming events"
+   "All 6 event types registered in event-type dispatch"
+   "Required fields enforced, optional fields accepted"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "6 event schemas defined with Malli"
+   :verification "Malli validation passes for well-formed events"}
+  {:criterion "6 constructor functions available"
+   :verification "Each constructor produces schema-valid event"}
+  {:criterion "Standard envelope fields present"
+   :verification "event/id, event/type, event/timestamp on all events"}]
+
+ :estimated-effort "1 day"
+ :workflow/type :simple}

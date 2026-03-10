@@ -26,7 +26,7 @@
 ;;------------------------------------------------------------------------------ Layer 0
 ;; File paths and utilities
 
-(defn- backend-health-path
+(defn backend-health-path
   "Get path to backend health tracking file.
 
    Returns: String path to ~/.miniforge/backend_health.edn"
@@ -35,7 +35,7 @@
         miniforge-dir (io/file home ".miniforge")]
     (.getPath (io/file miniforge-dir "backend_health.edn"))))
 
-(defn- ensure-directory-exists
+(defn ensure-directory-exists
   "Ensure parent directory exists for a file path.
 
    Arguments:
@@ -47,7 +47,7 @@
     (when-not (.exists parent-dir)
       (.mkdirs parent-dir))))
 
-(defn- safe-read-edn
+(defn safe-read-edn
   "Safely read EDN from file, returning default on error.
 
    Arguments:
@@ -62,7 +62,7 @@
     (catch Exception _
       default)))
 
-(defn- atomic-write-edn
+(defn atomic-write-edn
   "Atomically write EDN to file using temp file + rename.
 
    Arguments:
@@ -79,7 +79,7 @@
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Default health data structure
 
-(defn- default-health-data
+(defn default-health-data
   "Create default health data structure.
 
    Returns: Map with default backends, cooldowns, and fallback order"
@@ -92,13 +92,50 @@
 ;;------------------------------------------------------------------------------ Layer 2
 ;; Backend health operations
 
+(def ^:private decay-threshold-ms
+  "Maximum age of health data before counters are reset (24 hours)."
+  86400000)
+
+(defn- maybe-decay-health
+  "Reset backend counters if all recorded last-failure timestamps are older than
+   24 hours. Prevents accumulation of stale metrics over weeks of use.
+
+   Backends with no last-failure (nil) are healthy and never trigger decay.
+   Decay only fires when at least one backend has a last-failure, and ALL
+   last-failure timestamps are older than the threshold.
+
+   Arguments:
+     health-data - Map with :backends etc.
+
+   Returns: health-data unchanged, or with backends reset if stale"
+  [health-data]
+  (let [backends (:backends health-data)
+        now (java.time.Instant/now)
+        failure-timestamps (->> backends
+                                vals
+                                (keep :last-failure))
+        has-failures? (seq failure-timestamps)
+        all-failures-stale? (and has-failures?
+                                 (every?
+                                  (fn [lf]
+                                    (let [age-ms (.until (java.time.Instant/parse lf)
+                                                         now
+                                                         java.time.temporal.ChronoUnit/MILLIS)]
+                                      (> age-ms decay-threshold-ms)))
+                                  failure-timestamps))]
+    (if all-failures-stale?
+      (assoc health-data :backends {})
+      health-data)))
+
 (defn load-health
   "Load backend health data from persistent storage.
+   Applies decay: if all backend metrics are older than 24 hours, resets counters.
 
    Returns: Map with :backends, :switch-cooldowns, :default-backend, :fallback-order"
   []
-  (or (safe-read-edn (backend-health-path) nil)
-      (default-health-data)))
+  (let [raw (or (safe-read-edn (backend-health-path) nil)
+                (default-health-data))]
+    (maybe-decay-health raw)))
 
 (defn save-health!
   "Save backend health data to persistent storage.
@@ -109,6 +146,16 @@
    Returns: nil"
   [health-data]
   (atomic-write-edn (backend-health-path) health-data))
+
+(defn reset-backend-health!
+  "Reset all backend health data to defaults.
+   Useful for clearing stale accumulated metrics.
+
+   Returns: Default health data map"
+  []
+  (let [defaults (default-health-data)]
+    (save-health! defaults)
+    defaults))
 
 (defn record-backend-call!
   "Record a backend API call and its result.
@@ -156,8 +203,30 @@
         stats (get-in health [:backends backend-key])]
     (:success-rate stats)))
 
+(defn- recent-failure?
+  "Check if the last failure for a backend is within the recency window.
+
+   Arguments:
+     backend - Keyword backend name
+     recency-ms - Recency window in milliseconds (default 300000 = 5 min)
+
+   Returns: Boolean true if last failure is recent (or nil if no failure recorded)"
+  ([backend]
+   (recent-failure? backend 300000))
+  ([backend recency-ms]
+   (let [health (load-health)
+         backend-key (keyword backend)
+         last-failure (get-in health [:backends backend-key :last-failure])]
+     (when last-failure
+       (let [failure-instant (java.time.Instant/parse last-failure)
+             now (java.time.Instant/now)
+             age-ms (.until failure-instant now java.time.temporal.ChronoUnit/MILLIS)]
+         (< age-ms recency-ms))))))
+
 (defn should-switch-backend?
   "Check if backend should be switched due to low success rate.
+   Only triggers if the last failure is recent (within 5 minutes),
+   preventing false positives from stale accumulated health data.
 
    Arguments:
      backend - Keyword backend name
@@ -168,7 +237,8 @@
    (should-switch-backend? backend 0.90))
   ([backend threshold]
    (if-let [success-rate (get-backend-success-rate backend)]
-     (< success-rate threshold)
+     (and (recent-failure? backend)
+          (< success-rate threshold))
      false)))
 
 (defn in-cooldown?

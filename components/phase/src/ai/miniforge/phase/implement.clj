@@ -29,37 +29,13 @@
             [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Event stream helpers (optional dependency)
-
-(defn- emit-phase-started!
-  "Emit phase-started event if event-stream is available in context."
-  [ctx phase]
-  (when-let [event-stream (:event-stream ctx)]
-    (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-      (when-let [phase-started (requiring-resolve 'ai.miniforge.event-stream.interface/phase-started)]
-        (let [workflow-id (:execution/id ctx)]
-          (publish! event-stream (phase-started event-stream workflow-id phase)))))))
-
-(defn- emit-phase-completed!
-  "Emit phase-completed event if event-stream is available in context."
-  [ctx phase _result]
-  (when-let [event-stream (:event-stream ctx)]
-    (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-      (when-let [phase-completed (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
-        (let [workflow-id (:execution/id ctx)
-              outcome (if (= :completed (get-in ctx [:phase :status])) :success :failure)
-              duration-ms (get-in ctx [:phase :duration-ms])]
-          (publish! event-stream (phase-completed event-stream workflow-id phase
-                                                   {:outcome outcome :duration-ms duration-ms})))))))
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
 
 (def default-config
   {:agent :implementer
    :gates [:syntax :lint]
    :budget {:tokens 30000
-            :iterations 5
+            :iterations 8
             :time-seconds 600}
    ;; Implementation is code-heavy - hint at Sonnet
    :model-hint :sonnet-4.5})
@@ -70,69 +46,79 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
-(defn- enter-implement
+(defn build-implement-task
+  "Build the task map for the implementer agent from execution context."
+  [ctx]
+  (let [input (get-in ctx [:execution/input])
+        plan-result (get-in ctx [:execution/phase-results :plan :result :output])
+        verify-failure (get-in ctx [:execution/phase-results :verify])
+        worktree-path (or (:worktree-path ctx) (System/getProperty "user.dir"))
+        files-in-scope (or (get-in input [:context :files-in-scope])
+                           (get-in input [:intent :scope]))
+        existing-files (file-ctx/load-files-in-scope worktree-path files-in-scope)
+        behavior-addendum (agent-beh/load-and-filter-behaviors
+                            :implement {:task {:task/intent (:intent input)}})
+        ;; Read review feedback from phase results (survives :phase clearing between phases)
+        review-feedback (or (get-in ctx [:execution/phase-results :review :result :output :review/feedback])
+                            (get-in ctx [:execution/phase-results :review :result :output :review/issues]))
+        base-task {:task/id (random-uuid)
+                   :task/type :implement
+                   :task/description (:description input)
+                   :task/title (:title input)
+                   :task/intent (:intent input)
+                   :task/constraints (:constraints input)
+                   :task/plan plan-result
+                   :task/existing-files existing-files
+                   :task/behavior-addendum behavior-addendum}]
+    (cond-> base-task
+      verify-failure
+      (assoc :task/verify-failures
+             {:test-results (get-in verify-failure [:result :output :metadata :test-results])
+              :test-output (get-in verify-failure [:result :output :metadata :test-results :output])})
+      review-feedback
+      (assoc :task/review-feedback review-feedback))))
+
+(defn create-streaming-callback
+  "Create a streaming callback for agent output if event-stream is available."
+  [ctx]
+  (when-let [es (:event-stream ctx)]
+    (when-let [create-cb (requiring-resolve
+                           'ai.miniforge.event-stream.interface/create-streaming-callback)]
+      (create-cb es (:execution/id ctx) :implement
+                 {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)}))))
+
+(defn collect-peer-advice
+  "Collect peer messages for the implementer agent if a message router is available."
+  [ctx]
+  (when-let [msg-router (:message-router ctx)]
+    (try
+      (let [get-msgs (requiring-resolve
+                       'ai.miniforge.agent.interface.protocols.messaging/get-messages-for-agent)
+            msgs (get-msgs msg-router :implementer (:execution/id ctx))]
+        (when (seq msgs)
+          {:peer-messages (vec msgs)}))
+      (catch Exception _e nil))))
+
+(defn enter-implement
   "Execute implementation phase.
 
    Reads plan from context, invokes implementer agent,
    runs through inner loop with syntax/lint gates."
   [ctx]
-  ;; Emit phase started event
-  (emit-phase-started! ctx :implement)
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
-
-        ;; Create implementer agent (specialized implementation uses llm/chat directly)
         implementer-agent (agent/create-implementer {})
-
-        ;; Build task from workflow input and plan result
-        input (get-in ctx [:execution/input])
-        ;; Read from execution phase results where plan phase stored its output
-        ;; Phase results contain the full phase map, so extract :result :output
-        plan-result (get-in ctx [:execution/phase-results :plan :result :output])
-
-        ;; Check for verify failure (repair loop re-entry)
-        verify-failure (get-in ctx [:execution/phase-results :verify])
-
-        ;; Load existing file contents for agent visibility
-        worktree-path (or (:worktree-path ctx) (System/getProperty "user.dir"))
-        files-in-scope (or (get-in input [:context :files-in-scope])
-                           (get-in input [:intent :scope]))
-        existing-files (file-ctx/load-files-in-scope worktree-path files-in-scope)
-
-        ;; Load agent-behavior addendum from policy rules
-        behavior-addendum (agent-beh/load-and-filter-behaviors
-                            :implement {:task {:task/intent (:intent input)}})
-
-        task (cond-> {:task/id (random-uuid)
-                      :task/type :implement
-                      :task/description (:description input)
-                      :task/title (:title input)
-                      :task/intent (:intent input)
-                      :task/constraints (:constraints input)
-                      :task/plan plan-result
-                      :task/existing-files existing-files
-                      :task/behavior-addendum behavior-addendum}
-                     ;; When re-entering from verify failure, attach test failure context
-                     verify-failure
-                     (assoc :task/verify-failures
-                            {:test-results (get-in verify-failure [:result :output :metadata :test-results])
-                             :test-output (get-in verify-failure [:result :output :metadata :test-results :output])}))
-
-        ;; Create streaming callback for agent output
-        on-chunk (when-let [es (:event-stream ctx)]
-                   (when-let [create-cb (requiring-resolve
-                                         'ai.miniforge.event-stream.interface/create-streaming-callback)]
-                     (create-cb es (:execution/id ctx) :implement
-                                {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)})))
+        task (build-implement-task ctx)
+        on-chunk (create-streaming-callback ctx)
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
-
-        ;; Invoke agent
+        peer-advice (collect-peer-advice ctx)
+        task (cond-> task
+               peer-advice (assoc :task/peer-advice peer-advice))
         result (try
                  (agent/invoke implementer-agent task agent-ctx)
                  (catch Exception e
                    (response/failure e)))]
-
     (-> ctx
         (assoc-in [:phase :name] :implement)
         (assoc-in [:phase :agent] :implementer)
@@ -142,7 +128,21 @@
         (assoc-in [:phase :status] :running)
         (assoc-in [:phase :result] result))))
 
-(defn- leave-implement
+(def ^:private rate-limit-pattern
+  "Lightweight rate limit detection for the phase level.
+   Avoids a dependency on workflow/dag-resilience."
+  #"(?i)you've hit your limit|rate.?limit|429|quota.?exceeded|resets \d+[ap]m")
+
+(defn- rate-limit-in-result?
+  "Check if an agent result contains rate limit indicators.
+   Scans both error message and output text."
+  [result]
+  (some (fn [text]
+          (and (string? text) (re-find rate-limit-pattern text)))
+        [(get-in result [:error :message])
+         (when (string? (:output result)) (:output result))]))
+
+(defn leave-implement
   "Post-processing for implementation phase.
 
    Records metrics, captures code artifacts."
@@ -152,12 +152,21 @@
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
         agent-status (:status result)
-        phase-status (cond
-                       (= :error agent-status) :failed
-                       (= :already-implemented agent-status) :already-implemented
-                       :else :completed)
-        metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
+        rate-limited? (and (= :error agent-status) (rate-limit-in-result? result))
         iterations (get-in ctx [:phase :iterations] 1)
+        max-iterations (get-in ctx [:phase :budget :iterations]
+                               (get-in default-config [:budget :iterations]))
+        phase-status (cond
+                       (= :already-implemented agent-status) :already-implemented
+                       ;; Rate limit: fail immediately, don't burn retry budget
+                       rate-limited? :failed
+                       :else (registry/determine-phase-status
+                               agent-status iterations max-iterations))
+        metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
+        cost-usd (or (:cost-usd result)
+                     (:cost-usd metrics)
+                     (* (:tokens metrics 0) 0.000015))
+        metrics (assoc metrics :cost-usd cost-usd :duration-ms duration-ms)
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
@@ -168,19 +177,36 @@
                         (update-in [:execution :phases-completed] (fnil conj []) :implement)
                         ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
+                        (update-in [:execution/metrics :cost-usd] (fnil + 0.0) cost-usd)
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
     ;; Warn if result has no output and isn't already-implemented
     (when (and (not= :already-implemented agent-status)
                (nil? (:output result)))
       (println "WARNING: implement phase result has no :output — artifact may be nil"))
-    ;; Emit phase completed event
-    (emit-phase-completed! updated-ctx :implement result)
-    ;; Add skip metadata when work was already implemented
+    ;; Handle retrying, failure, or already-implemented outcomes
     (cond-> updated-ctx
+      (registry/retrying? (:phase updated-ctx))
+      (-> (update-in [:phase :iterations] (fnil inc 1))
+          (assoc-in [:phase :last-error]
+                    (or (not-empty (get-in result [:error :message]))
+                        (not-empty (get-in result [:output :error]))
+                        "Agent returned error status")))
+
+      (= :failed phase-status)
+      (assoc-in [:phase :error]
+                {:message (or (not-empty (get-in result [:error :message]))
+                              (not-empty (get-in result [:output :error]))
+                              (when (string? (:output result))
+                                (not-empty (:output result)))
+                              "Implementation failed after exhausting retry budget")
+                 :agent-status agent-status
+                 :rate-limited? (boolean rate-limited?)
+                 :iterations iterations})
+
       (= :already-implemented agent-status)
       (assoc-in [:phase :skipped-reason] :already-implemented))))
 
-(defn- error-implement
+(defn error-implement
   "Handle implementation phase errors.
 
    Attempts repair via inner loop if within budget."

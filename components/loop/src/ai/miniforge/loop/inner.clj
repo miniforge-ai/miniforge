@@ -62,14 +62,13 @@
    - :max-iterations - Maximum generate/repair cycles (default 5)
    - :budget - Budget constraints map"
   [task context]
-  (let [max-iterations (or (:max-iterations context) 5)
+  (let [max-iterations (get context :max-iterations 5)
         budget (:budget context)]
     {:loop/id (random-uuid)
      :loop/type :inner
      :loop/state :pending
      :loop/iteration 0
-     :loop/task {:task/id (:task/id task)
-                 :task/type (:task/type task)}
+     :loop/task task
      :loop/config (cond-> {:max-iterations max-iterations}
                     budget (assoc :budget budget))
      :loop/gate-results []
@@ -239,7 +238,7 @@
 
     (let [results (gates/run-gates gates artifact context)
           loop-state (add-gate-results loop-state (:results results))]
-      (if (:passed? results)
+      (if (gates/passed? results)
         ;; All gates passed
         (do
           (when logger
@@ -306,7 +305,7 @@
                                             :repair-calls 1}))]
         (cond
           ;; Repair succeeded
-          (:success? result)
+          (repair/succeeded? result)
           (do
             (when logger
               (log/info logger :loop :inner/repair-attempted
@@ -345,7 +344,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Loop runner helpers
 
-(defn- handle-terminal-state
+(defn handle-terminal-state
   "Handle terminal states (complete, failed, escalated).
    Returns the final result map."
   [state logger]
@@ -367,7 +366,7 @@
      :termination (:loop/termination state)
      :final-state state}))
 
-(defn- handle-pre-termination
+(defn handle-pre-termination
   "Handle pre-termination conditions (budget exhausted, max iterations).
    Returns updated state transitioned to appropriate terminal state."
   [state termination-result]
@@ -378,7 +377,7 @@
                       :complete
                       :escalated)))))
 
-(defn- resume-after-escalation
+(defn resume-after-escalation
   "Resume the loop after human escalation with provided hints."
   [state hints]
   (let [current-iter (:loop/iteration state)
@@ -395,31 +394,31 @@
         (assoc-in [:loop/config :max-iterations] target-max)
         (assoc :loop/updated-at (java.util.Date.)))))
 
-(defn- handle-pending-state
+(defn handle-pending-state
   "Handle pending state - initiate generation.
    Returns updated state."
   [state generate-fn context]
   (generate-step state generate-fn context))
 
-(defn- handle-generating-state
+(defn handle-generating-state
   "Handle generating state - continue generation.
    Returns updated state."
   [state generate-fn context]
   (generate-step state generate-fn context))
 
-(defn- handle-validating-state
+(defn handle-validating-state
   "Handle validating state - run validation.
    Returns updated state."
   [state gates context]
   (validate-step state gates context))
 
-(defn- handle-repairing-state
+(defn handle-repairing-state
   "Handle repairing state - attempt repair.
    Returns updated state."
   [state strategies context]
   (repair-step state strategies context))
 
-(defn- handle-escalated-state
+(defn handle-escalated-state
   "Handle escalated state - prompt user or terminate.
    Returns {:next-state state :next-ctx ctx} or {:terminal result}."
   [state ctx logger]
@@ -442,7 +441,7 @@
              :next-ctx next-ctx})
           {:terminal (handle-terminal-state state logger)})))))
 
-(defn- compute-termination-check
+(defn compute-termination-check
   "Compute the termination result, allowing validation to complete once."
   [state current-state override-termination?]
   (when-not override-termination?

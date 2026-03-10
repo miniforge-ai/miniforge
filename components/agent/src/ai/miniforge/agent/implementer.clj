@@ -5,6 +5,7 @@
    [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
@@ -72,7 +73,7 @@
           :else
           {:valid? true :errors nil})))))
 
-(defn- extract-language
+(defn extract-language
   "Extract the programming language from file paths or context."
   [files context]
   (let [extensions (->> files
@@ -95,7 +96,7 @@
           "rs" "rust"
           most-common))))
 
-(defn- format-existing-files
+(defn format-existing-files
   "Format existing file contents for inclusion in the user prompt.
 
    Arguments:
@@ -114,7 +115,7 @@
                           "\n```\n" content "\n```")))
               (str/join "\n")))))
 
-(defn- task->text
+(defn task->text
   "Convert a task to text for the LLM.
    Includes plan and intent when available for richer context."
   [task]
@@ -125,33 +126,55 @@
                                (:content task))
                       plan (:task/plan task)
                       intent (:task/intent task)
+                      review-feedback (:task/review-feedback task)
                       parts (cond-> []
                               desc (conj desc)
                               plan (conj (str "\n\n## Plan\n\n" (if (string? plan) plan (pr-str plan))))
                               (and intent (map? intent))
-                              (conj (str "\n\n## Intent\n\n" (pr-str intent))))]
+                              (conj (str "\n\n## Intent\n\n" (pr-str intent)))
+                              review-feedback
+                              (conj (str "\n\n## Review Feedback (MUST FIX)\n\n"
+                                         "The previous implementation was reviewed and changes were requested. "
+                                         "You MUST address ALL of the following issues:\n\n"
+                                         (if (string? review-feedback) review-feedback (pr-str review-feedback)))))
+                      verify-failures (:task/verify-failures task)
+                      parts (cond-> parts
+                              verify-failures
+                              (conj (str "\n\n## Test Failures (MUST FIX)\n\n"
+                                         "The previous implementation failed verification. "
+                                         "You MUST fix these failing tests:\n\n"
+                                         (if-let [test-results (:test-results verify-failures)]
+                                           (str "Test results:\n" (pr-str test-results))
+                                           (str "Verify failure details:\n" (pr-str verify-failures)))
+                                         (when-let [test-output (:test-output verify-failures)]
+                                           (str "\n\nTest output:\n" test-output)))))]
                   (if (seq parts)
                     (str/join "" parts)
                     (pr-str task)))
     :else (str task)))
 
-(defn- parse-code-response
+(defn parse-code-response
   "Parse the LLM response to extract code artifact.
-   Handles both EDN in code blocks and plain EDN.
-   Returns nil if the parsed result is not a map."
+   Handles EDN in code blocks, plain EDN, and inline EDN maps
+   embedded in reasoning text (e.g. {:status :already-implemented ...}).
+   Returns nil if no parseable map is found."
   [response-content]
   (try
     (let [parsed (if-let [match (re-find #"```(?:clojure|edn)?\s*\n([\s\S]*?)\n```" response-content)]
                    (edn/read-string (second match))
                    ;; Try to parse the whole response as EDN
-                   (edn/read-string response-content))]
-      ;; Validate that the parsed result is a map (code artifact should be a map)
+                   (or (try (let [r (edn/read-string response-content)]
+                              (when (map? r) r))
+                            (catch Exception _ nil))
+                       ;; Scan for inline EDN map (e.g. {:status :already-implemented ...})
+                       (when-let [match (re-find #"\{:status\s+:already-implemented[^}]*\}" response-content)]
+                         (edn/read-string match))))]
       (when (map? parsed)
         parsed))
     (catch Exception _
       nil)))
 
-(defn- extract-code-blocks
+(defn extract-code-blocks
   "Extract code blocks from markdown response and convert to file list."
   [response-content]
   (let [blocks (re-seq #"```(?:(\w+)\n)?([^`]+)```" response-content)]
@@ -170,23 +193,10 @@
                            :action :create}))
            vec))))
 
-(defn- make-fallback-code
-  "Create a fallback code artifact when LLM response cannot be parsed."
-  [task-text]
-  {:code/id (random-uuid)
-   :code/files [{:path "generated/impl.clj"
-                 :content (str "(ns generated.impl\n"
-                               "  \"Generated implementation — fallback stub.\")\n\n"
-                               ";; Task: " (subs task-text 0 (min 60 (count task-text))) "\n\n"
-                               "(defn execute [input]\n"
-                               "  {:status :not-implemented :input input})\n")
-                 :action :create}]
-   :code/tests-needed? true
-   :code/language "clojure"
-   :code/summary "Fallback stub implementation"
-   :code/created-at (java.util.Date.)})
+;; make-fallback-code removed — silent fallback masks real failures,
+;; prevents retry/repair from working, and short-circuits checkpoint resume.
 
-(defn- repair-code-artifact
+(defn repair-code-artifact
   "Attempt to repair a code artifact based on validation errors."
   [artifact errors _context]
   (let [repaired (atom artifact)]
@@ -272,7 +282,7 @@
               task-text (task->text input)
               ;; Append behavior addendum to system prompt if present
               effective-system-prompt (str @implementer-system-prompt
-                                          (or (:task/behavior-addendum input) ""))
+                                          (get input :task/behavior-addendum ""))
               ;; Include existing files and already-implemented escape hatch
               user-prompt (str "Implement the following task:\n\n"
                                task-text
@@ -286,14 +296,17 @@
             ;; Use the real LLM with artifact session for MCP tool support
             (let [{:keys [llm-result artifact]}
                   (artifact-session/with-artifact-session [session]
-                    (let [mcp-opts {:mcp-config (:mcp-config-path session)}]
+                    (let [mcp-opts {:mcp-config (:mcp-config-path session)
+                                    :mcp-allowed-tools (:mcp-allowed-tools session)
+                                    :supervision (:supervision session)}]
                       (if on-chunk
                         (llm/chat-stream llm-client user-prompt on-chunk
                                          (merge {:system effective-system-prompt} mcp-opts))
                         (llm/chat llm-client user-prompt
                                   (merge {:system effective-system-prompt} mcp-opts)))))
                   response llm-result
-                  tokens (or (:tokens response) 0)]
+                  tokens (get response :tokens 0)
+                  cost-usd (get response :cost-usd)]
               (log/info logger :implementer :implementer/llm-called
                         {:data {:success (llm/success? response)
                                 :tokens tokens
@@ -317,50 +330,38 @@
                               :code/created-at (java.util.Date.)}
                      :summary (:summary parsed)
                      :metrics {:tokens tokens
+                               :cost-usd cost-usd
                                :files-created 0
                                :skipped-reason :already-implemented}}
                     ;; Normal code artifact parsing
-                    (let [code (or parsed
-                                   (when-let [files (extract-code-blocks content)]
-                                     {:code/id (random-uuid)
-                                      :code/files files
-                                      :code/tests-needed? true
-                                      :code/summary "Implementation from code blocks"
-                                      :code/created-at (java.util.Date.)})
-                                   (make-fallback-code task-text))
-                          ;; Ensure proper ID and language
-                          code-with-meta (-> code
-                                             (update :code/id #(or % (random-uuid)))
-                                             (assoc :code/language (extract-language (:code/files code) context))
-                                             (assoc :code/created-at (java.util.Date.)))
-                          lang (:code/language code-with-meta)]
-                      {:status :success
-                       :output code-with-meta
-                       :artifact code-with-meta
-                       :tokens tokens
-                       :metrics {:files-created (count (filter #(= :create (:action %)) (:code/files code-with-meta)))
-                                 :files-modified (count (filter #(= :modify (:action %)) (:code/files code-with-meta)))
-                                 :files-deleted (count (filter #(= :delete (:action %)) (:code/files code-with-meta)))
-                                 :language lang
-                                 :tokens tokens}})))
-                ;; LLM call failed
-                (let [fallback (make-fallback-code task-text)]
-                  {:status :error
-                   :error (llm/get-error response)
-                   :output fallback
-                   :artifact fallback
-                   :metrics {:tokens 0}})))
-            ;; No LLM client - use fallback (for testing)
-            (do
-              (log/warn logger :implementer :implementer/no-llm-backend
-                        {:message "No LLM backend provided, using fallback code"})
-              (let [code (make-fallback-code task-text)
-                    lang (extract-language (:code/files code) context)]
-                {:status :success
-                 :output (assoc code :code/language lang)
-                 :artifact (assoc code :code/language lang)
-                 :metrics {:files-created 1
-                           :language lang}})))))
+                    (if-let [code (or parsed
+                                      (when-let [files (extract-code-blocks content)]
+                                        {:code/id (random-uuid)
+                                         :code/files files
+                                         :code/tests-needed? true
+                                         :code/summary "Implementation from code blocks"
+                                         :code/created-at (java.util.Date.)}))]
+                      (let [code-with-meta (-> code
+                                               (update :code/id #(or % (random-uuid)))
+                                               (assoc :code/language (extract-language (:code/files code) context))
+                                               (assoc :code/created-at (java.util.Date.)))
+                            lang (:code/language code-with-meta)]
+                        (response/success code-with-meta
+                                          {:tokens tokens
+                                           :metrics {:files-created (count (filter #(= :create (:action %)) (:code/files code-with-meta)))
+                                                     :files-modified (count (filter #(= :modify (:action %)) (:code/files code-with-meta)))
+                                                     :files-deleted (count (filter #(= :delete (:action %)) (:code/files code-with-meta)))
+                                                     :language lang
+                                                     :tokens tokens
+                                                     :cost-usd cost-usd}}))
+                      ;; LLM returned content but no parseable code — fail explicitly
+                      (response/error "LLM response could not be parsed as code artifact"
+                                      {:tokens tokens}))))
+                ;; LLM call failed — propagate error, no fallback
+                (response/error (or (:message (llm/get-error response))
+                                    "LLM call failed"))))
+            ;; No LLM client — fail explicitly
+            (response/error "No LLM backend provided"))))
 
       :validate-fn validate-code-artifact
 

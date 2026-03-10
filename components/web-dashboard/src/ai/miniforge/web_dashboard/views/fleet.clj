@@ -17,12 +17,27 @@
   (:require
    [hiccup2.core :refer [html]]
    [clojure.string :as str]
-   [ai.miniforge.web-dashboard.components :as c]))
+   [ai.miniforge.web-dashboard.components :as c])
+  (:import
+   [java.text SimpleDateFormat]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Fleet fragments
 
-(defn- fleet-action-onclick
+(defn readiness-state-label
+  "Maps readiness state keywords to human-readable labels."
+  [state]
+  (case state
+    :merge-ready "Ready"
+    :ci-failing "CI Failing"
+    :changes-requested "Changes Requested"
+    :merge-conflicts "Merge Conflicts"
+    :policy-failing "Policy Failing"
+    :dep-blocked "Dep Blocked"
+    :needs-review "Needs Review"
+    (if state (name state) "Unknown")))
+
+(defn fleet-action-onclick
   [action]
   (case action
     :add-repo "window.miniforge.fleet.addRepo()"
@@ -30,6 +45,45 @@
     :sync-prs "window.miniforge.fleet.syncPrs()"
     :discover-sync "window.miniforge.fleet.discoverAndSync()"
     ""))
+
+(defn format-sync-time
+  [ts]
+  (when ts
+    (try
+      (.format (SimpleDateFormat. "yyyy-MM-dd HH:mm:ss") ts)
+      (catch Exception _ nil))))
+
+(defn sync-status-fragment
+  [last-sync]
+  (if-not last-sync
+    [:div.fleet-sync-status
+     [:span.sync-label "Last Sync"]
+     [:span.sync-message "No sync run yet."]]
+    (let [status (:status last-sync)
+          variant (case status
+                    :success :success
+                    :partial :warning
+                    :failed :error
+                    :neutral)
+          synced (:synced last-sync 0)
+          failed (:failed last-sync 0)
+          ts (format-sync-time (:timestamp last-sync))]
+      [:div.fleet-sync-status
+       [:div.sync-topline
+        [:span.sync-label "Last Sync"]
+        (c/badge (name status) {:variant variant})
+        (when ts
+          [:span.sync-time ts])
+        [:span.sync-counts (str "synced " synced ", failed " failed)]]
+       (when-let [message (:message last-sync)]
+         [:div.sync-message message])
+       (when (seq (:failures last-sync))
+         [:div.sync-failures
+          (for [{:keys [repo error action]} (:failures last-sync)]
+            [:div.sync-failure
+             [:span.sync-repo repo]
+             [:span.sync-error error]
+             [:span.sync-action action]])])])))
 
 (defn train-list-fragment
   "Train list fragment for htmx updates."
@@ -57,23 +111,34 @@
          [:th "Progress"]]]
        [:tbody
         (for [train trains]
-          [:tr.train-row {:onclick (str "location.href='/train/" (:train/id train) "'")}
-           [:td.train-name (:train/name train)]
-           [:td (c/badge (name (:train/status train))
-                        {:variant (case (:train/status train)
-                                   :merged :success
-                                   :merging :info
-                                   :failed :error
-                                   :reviewing :warning
-                                   :neutral)})]
-           [:td.train-stat (count (:train/prs train))]
-           [:td.train-stat (count (:train/ready-to-merge train))]
-           [:td.train-stat (count (:train/blocking-prs train))]
-           [:td.train-progress
-            (c/progress-bar
-             (int (* 100 (/ (count (filter #(= :merged (:pr/status %)) (:train/prs train)))
-                           (max 1 (count (:train/prs train))))))
-             {:variant (if (seq (:train/blocking-prs train)) :error :success)})]])]]])))
+          (let [readiness-summary (:train/readiness-summary train)
+                blocked-details (:train/blocking-details train)]
+            [:tr.train-row {:onclick (str "location.href='/train/" (:train/id train) "'")}
+             [:td.train-name (:train/name train)]
+             [:td (c/badge (name (:train/status train))
+                           {:variant (case (:train/status train)
+                                       :merged :success
+                                       :merging :info
+                                       :failed :error
+                                       :reviewing :warning
+                                       :neutral)})]
+             [:td.train-stat (count (:train/prs train))]
+             [:td.train-stat
+              [:div (count (:train/ready-to-merge train))]
+              [:div.train-substat
+               (str (get readiness-summary :merge-ready 0) " merge-ready")]]
+             [:td.train-stat
+              [:div (count (:train/blocking-prs train))]
+              (when (seq blocked-details)
+                [:div.train-substat
+                 (for [{:keys [pr/number blocking/reasons]} (take 2 blocked-details)]
+                   [:div.blocking-line
+                    (str "#" number ": " (or (first reasons) "Blocked"))])])]
+             [:td.train-progress
+              (c/progress-bar
+               (int (* 100 (/ (count (filter #(= :merged (:pr/status %)) (:train/prs train)))
+                             (max 1 (count (:train/prs train))))))
+               {:variant (if (seq (:train/blocking-prs train)) :error :success)})]]))]]])))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Fleet list view
@@ -109,6 +174,7 @@
        (c/button "Review All PRs" {:variant :ghost
                                     :onclick "alert('PR review: Kick off review workflows for all outstanding PRs')"
                                     :title "Run automated PR review workflows"})]]
+     (sync-status-fragment (:last-sync fleet-state))
      [:div.pane-filter-toolbar
       [:div#filter-chips.filter-chips]
       [:div.filter-actions
@@ -163,8 +229,18 @@
             [:div.pr-title (:pr/title pr)]
             [:div.pr-details
              [:span.pr-ci (str "CI: " (name (:pr/ci-status pr)))]
+             (when-let [readiness (:pr/readiness pr)]
+               [:span.pr-readiness
+                (str "Readiness: "
+                     (readiness-state-label (:readiness/state readiness))
+                     " ("
+                     (format "%.2f" (double (:readiness/score readiness)))
+                     ")")])
              (when (seq (:pr/depends-on pr))
-               [:span.pr-deps (str "Depends: " (str/join ", " (:pr/depends-on pr)))])]])]]
+               [:span.pr-deps (str "Depends: " (str/join ", " (:pr/depends-on pr)))])
+             (when (seq (:pr/blocking-reasons pr))
+               [:span.pr-blockers
+                (str "Blockers: " (str/join " | " (:pr/blocking-reasons pr)))])]])]]
 
        ;; Merge graph
        [:section.graph-section

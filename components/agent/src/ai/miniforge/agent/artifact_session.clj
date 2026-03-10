@@ -39,19 +39,41 @@
     {:valid? false
      :errors (m/explain Session session)}))
 
-(defn- resolve-server-script
-  "Find the MCP artifact server script path.
-   Looks relative to the project root (cwd) first, then checks
-   for an absolute path via MINIFORGE_HOME env var."
+(defn command-on-path?
+  "Check if a command exists on PATH."
+  [cmd]
+  (try
+    (let [proc (.exec (Runtime/getRuntime) (into-array String ["which" cmd]))]
+      (zero? (.waitFor proc)))
+    (catch Exception _ false)))
+
+(defn resolve-miniforge-command
+  "Resolve the miniforge command to use for spawning subprocesses.
+
+   Resolution order:
+   1. MINIFORGE_CMD env var (explicit override, e.g. \"/usr/local/bin/mf\")
+   2. \"miniforge\" on PATH (installed binary)
+   3. [\"bb\" \"miniforge\"] (dev mode — bb.edn task, requires CWD at project root)"
   []
-  (let [candidates [(io/file "scripts/mcp-artifact-server.bb")
-                    (when-let [home (System/getenv "MINIFORGE_HOME")]
-                      (io/file home "scripts/mcp-artifact-server.bb"))]]
-    (or (some #(when (and % (.exists ^java.io.File %))
-                 (.getAbsolutePath ^java.io.File %))
-              candidates)
-        ;; Fallback: assume it's on PATH or relative
-        "scripts/mcp-artifact-server.bb")))
+  (cond
+    ;; 1. Explicit override
+    (System/getenv "MINIFORGE_CMD")
+    [(System/getenv "MINIFORGE_CMD")]
+
+    ;; 2. Installed binary on PATH
+    (command-on-path? "miniforge")
+    ["miniforge"]
+
+    ;; 3. Dev mode fallback (bb.edn task)
+    :else
+    ["bb" "miniforge"]))
+
+(defn server-command
+  "Build the MCP config command map for starting the artifact server."
+  [artifact-dir]
+  (let [[cmd & args] (resolve-miniforge-command)]
+    {:command cmd
+     :args (vec (concat args ["mcp-serve" "--artifact-dir" artifact-dir]))}))
 
 (defn create-session!
   "Create a new artifact session with a temporary directory.
@@ -71,44 +93,145 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; MCP config generation
 
+(def mcp-server-name
+  "Name used in MCP config for the artifact server.
+   Must match the key in mcpServers — Claude CLI derives tool names as
+   mcp__<server-name>__<tool-name>."
+  "artifact")
+
+(def mcp-tool-names
+  "MCP tool names exposed by the artifact server."
+  ["submit_code_artifact"
+   "submit_plan"
+   "submit_test_artifact"
+   "submit_release_artifact"])
+
+(defn write-codex-mcp-config!
+  "Write or update .codex/config.toml with [mcp_servers.artifact] block.
+
+   If the file exists and already has an [mcp_servers.artifact] block,
+   replaces it. Otherwise appends the block. Creates .codex/ dir if needed.
+
+   Returns the path to the config file."
+  [server-cmd]
+  (let [{:keys [command args]} server-cmd
+        dir (io/file ".codex")
+        config-file (io/file dir "config.toml")
+        block-header "[mcp_servers.artifact]"
+        block (str block-header "\n"
+                   "command = " (json/generate-string command) "\n"
+                   "args = " (json/generate-string args) "\n")]
+    (.mkdirs dir)
+    (if (.exists config-file)
+      (let [content (slurp config-file)]
+        (if (str/includes? content block-header)
+          ;; Replace existing block (up to next section or EOF)
+          (let [replaced (str/replace content
+                                      #"(?s)\[mcp_servers\.artifact\]\n(?:(?!\n\[).)*"
+                                      block)]
+            (spit config-file replaced))
+          ;; Append
+          (spit config-file (str content "\n" block) :append false)))
+      (spit config-file block))
+    (str config-file)))
+
+(defn write-cursor-mcp-config!
+  "Write or update .cursor/mcp.json with mcpServers.artifact entry.
+
+   If the file exists, merges into existing JSON. Creates .cursor/ dir if needed.
+
+   Returns the path to the config file."
+  [server-cmd]
+  (let [{:keys [command args]} server-cmd
+        dir (io/file ".cursor")
+        config-file (io/file dir "mcp.json")
+        entry {"command" command "args" args}
+        existing (when (.exists config-file)
+                   (try (json/parse-string (slurp config-file))
+                        (catch Exception _ {})))
+        config (assoc-in (or existing {}) ["mcpServers" "artifact"] entry)]
+    (.mkdirs dir)
+    (spit config-file (json/generate-string config {:pretty true}))
+    (str config-file)))
+
+(defn write-claude-settings!
+  "Write Claude CLI settings JSON with PreToolUse hook for supervision.
+
+   The hook invokes `bb miniforge hook-eval` which reads the tool request
+   from stdin and returns allow/deny on stdout.
+
+   Returns the path to the settings file."
+  [session-dir]
+  (let [[cmd & args] (resolve-miniforge-command)
+        hook-command (str/join " " (concat [cmd] args ["hook-eval"]))
+        settings {"hooks"
+                  {"PreToolUse"
+                   [{"type" "command"
+                     "command" hook-command}]}}
+        path (str session-dir "/claude-settings.json")]
+    (spit path (json/generate-string settings {:pretty true}))
+    path))
+
 (defn write-mcp-config!
-  "Write the MCP server configuration JSON to the session directory.
+  "Write MCP server configs for all supported CLI backends.
+
+   Writes config files:
+   - <session-dir>/mcp-config.json — Claude CLI (passed via --mcp-config flag)
+   - <session-dir>/claude-settings.json — Claude CLI hooks (passed via --settings)
+   - .codex/config.toml — Codex CLI (reads from CWD automatically)
+   - .cursor/mcp.json — Cursor agent (reads from CWD automatically)
+
+   Also populates :mcp-allowed-tools and :supervision on the session.
 
    Arguments:
    - session - Session map from create-session!
 
    Returns: session (for threading)"
   [session]
-  (let [script-path (resolve-server-script)
+  (let [srv-cmd (server-command (:dir session))
+        {:keys [command args]} srv-cmd
         config {"mcpServers"
-                {"artifact"
-                 {"command" "bb"
-                  "args" [script-path "--artifact-dir" (:dir session)]}}}]
+                {mcp-server-name
+                 {"command" command
+                  "args" args}}}
+        allowed-tools (mapv #(str "mcp__" mcp-server-name "__" %) mcp-tool-names)
+        codex-path (write-codex-mcp-config! srv-cmd)
+        cursor-path (write-cursor-mcp-config! srv-cmd)
+        settings-path (write-claude-settings! (:dir session))
+        [hook-cmd & hook-args] (resolve-miniforge-command)
+        hook-eval-cmd (str/join " " (concat [hook-cmd] hook-args ["hook-eval"]))]
     (spit (:mcp-config-path session) (json/generate-string config))
-    session))
+    (assoc session
+           :mcp-allowed-tools allowed-tools
+           :mcp-cleanup-files [codex-path cursor-path]
+           :supervision {:hook-eval-cmd hook-eval-cmd
+                         :settings-path settings-path
+                         :policy :workspace-write
+                         :task-context (:task-context session)
+                         :phase (:phase session)})))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Artifact reading
 
-(defn- uuid-str?
+(defn uuid-str?
   "Check if a value is a UUID-shaped string."
   [v]
   (and (string? v)
        (re-matches #"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}" v)))
 
-(defn- instant-str?
+(defn instant-str?
   "Check if a value looks like an ISO instant string."
   [v]
   (and (string? v)
        (re-matches #"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.*" v)))
 
-(defn- key-ends-with?
+(defn key-ends-with?
   "Check if a namespaced keyword ends with the given suffix."
   [k suffix]
   (and (keyword? k)
        (str/ends-with? (name k) suffix)))
 
-(defn- parse-uuid-strings
+(defn parse-uuid-strings
   "Convert string UUIDs and ISO instant strings in an artifact map.
    The MCP server writes UUIDs and instants as strings since it runs in babashka.
 
@@ -149,26 +272,76 @@
    - session - Session map from create-session!
 
    Returns:
-   - Parsed artifact map with proper UUID types, or nil if not found"
+   - Parsed artifact map with proper UUID types, or nil if not found.
+     Logs warnings on missing file or parse failure instead of silently returning nil."
   [session]
   (let [f (io/file (:artifact-path session))]
-    (when (.exists f)
+    (if-not (.exists f)
+      (do
+        (binding [*out* *err*]
+          (println "ERROR: artifact file not found at" (:artifact-path session)
+                   "— MCP tool was likely not called by the LLM"))
+        nil)
       (try
         (-> (slurp f)
             edn/read-string
             parse-uuid-strings)
-        (catch Exception _
+        (catch Exception e
+          (binding [*out* *err*]
+            (println "WARN: failed to parse artifact at" (:artifact-path session)
+                     "—" (ex-message e)))
           nil)))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; High-level session helpers
 
+(defn cleanup-codex-mcp-config!
+  "Remove [mcp_servers.artifact] block from .codex/config.toml.
+   Deletes the file if it becomes empty."
+  [path]
+  (let [f (io/file path)]
+    (when (.exists f)
+      (let [content (slurp f)
+            cleaned (str/replace content
+                                 #"(?s)\n?\[mcp_servers\.artifact\]\n(?:(?!\n\[).)*"
+                                 "")]
+        (if (str/blank? (str/trim cleaned))
+          (.delete f)
+          (spit f cleaned))))))
+
+(defn cleanup-cursor-mcp-config!
+  "Remove artifact key from .cursor/mcp.json.
+   Deletes the file if mcpServers becomes empty."
+  [path]
+  (let [f (io/file path)]
+    (when (.exists f)
+      (try
+        (let [config (json/parse-string (slurp f))
+              servers (dissoc (get config "mcpServers" {}) "artifact")
+              config' (if (empty? servers)
+                        (dissoc config "mcpServers")
+                        (assoc config "mcpServers" servers))]
+          (if (empty? config')
+            (.delete f)
+            (spit f (json/generate-string config' {:pretty true}))))
+        (catch Exception _ nil)))))
+
 (defn cleanup-session!
-  "Delete the temporary session directory and its contents.
+  "Delete the temporary session directory and clean up injected MCP configs.
+
+   Removes the [mcp_servers.artifact] block from .codex/config.toml
+   and the artifact entry from .cursor/mcp.json, preserving any other
+   config in those files.
 
    Arguments:
    - session - Session map from create-session!"
   [session]
+  ;; Clean up injected MCP entries from project-scoped config files
+  (doseq [path (:mcp-cleanup-files session)]
+    (cond
+      (str/ends-with? path "config.toml") (cleanup-codex-mcp-config! path)
+      (str/ends-with? path "mcp.json") (cleanup-cursor-mcp-config! path)))
+  ;; Delete temp session directory
   (try
     (let [dir (io/file (:dir session))]
       (doseq [f (reverse (file-seq dir))]

@@ -15,7 +15,7 @@
    [ai.miniforge.logging.interface :as log]))
 
 ;; Module-level logger for agent operations
-(def ^:private default-logger
+(def default-logger
   "Default logger for agent module-level operations."
   (log/create-logger {:min-level :info :output :edn}))
 
@@ -162,7 +162,7 @@ Output execution logs and status reports."})
    :iterations 0
    :llm-calls 0})
 
-(defn- execution-failure
+(defn execution-failure
   "Build a canonical execution failure response from an exception.
    Uses response/failure as the base and merges domain-specific agent keys."
   [^Throwable e & [extra]]
@@ -424,7 +424,7 @@ Output execution logs and status reports."})
       :agent/memory (:memory-id agent)
       :agent/config (:config agent)})))
 
-(defn- record-backend-health!
+(defn record-backend-health!
   "Record backend call success/failure via self-healing (optional dep)."
   [context success?]
   (try
@@ -433,7 +433,7 @@ Output execution logs and status reports."})
         (record-fn backend success?)))
     (catch Exception _ nil)))
 
-(defn- try-self-healing-on-failure
+(defn try-self-healing-on-failure
   "Attempt workaround when agent execution fails. Returns {:retry? bool} or nil."
   [exception]
   (try

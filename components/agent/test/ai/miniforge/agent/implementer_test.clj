@@ -2,6 +2,7 @@
   "Tests for the Implementer agent."
   (:require
    [clojure.test :as test :refer [deftest testing is]]
+   [clojure.string :as str]
    [ai.miniforge.agent.core :as core]
    [ai.miniforge.agent.implementer :as implementer]
    [ai.miniforge.logging.interface :as log]))
@@ -48,30 +49,14 @@
 ;; Invoke tests
 
 (deftest implementer-invoke-test
-  (testing "generates code from task"
+  (testing "fails explicitly without LLM backend (no silent fallback)"
     (let [agent (implementer/create-implementer)
           result (core/invoke agent
                               {:suggested-path "src/auth/login.clj"}
                               {:task/description "Implement user login"
                                :task/type :implement})]
-      (is (= :success (:status result)))
-      (is (uuid? (get-in result [:output :code/id])))
-      (is (vector? (get-in result [:output :code/files])))
-      (is (= :create (get-in result [:output :code/files 0 :action])))))
-
-  (testing "includes metrics in result"
-    (let [agent (implementer/create-implementer)
-          result (core/invoke agent {} {:description "Simple task"})]
-      (is (number? (get-in result [:metrics :files-created])))
-      (is (string? (get-in result [:metrics :language])))))
-
-  (testing "detects language from file extension"
-    (let [agent (implementer/create-implementer)
-          result (core/invoke agent
-                              {:suggested-path "src/app.py"}
-                              {:description "Python task"})]
-      ;; Note: actual language detection happens during generation
-      (is (= :success (:status result))))))
+      (is (= :error (:status result)))
+      (is (some? (:error result))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation tests
@@ -153,6 +138,83 @@
       (is (= 2 lines)))))
 
 ;------------------------------------------------------------------------------ Layer 5
+;; task->text tests
+
+(deftest task->text-basic-test
+  (testing "string task passes through"
+    (is (= "hello" (implementer/task->text "hello"))))
+
+  (testing "map task uses :task/description"
+    (is (= "Implement login"
+           (implementer/task->text {:task/description "Implement login"}))))
+
+  (testing "includes plan when present"
+    (let [text (implementer/task->text {:task/description "Do thing"
+                                        :task/plan "Step 1: foo\nStep 2: bar"})]
+      (is (str/includes? text "Do thing"))
+      (is (str/includes? text "## Plan"))
+      (is (str/includes? text "Step 1: foo"))))
+
+  (testing "includes intent when present"
+    (let [text (implementer/task->text {:task/description "Do thing"
+                                        :task/intent {:scope ["src/core.clj"]}})]
+      (is (str/includes? text "## Intent"))
+      (is (str/includes? text "src/core.clj")))))
+
+(deftest task->text-review-feedback-test
+  (testing "includes review feedback as string"
+    (let [text (implementer/task->text {:task/description "Fix it"
+                                        :task/review-feedback "Missing error handling in login"})]
+      (is (str/includes? text "## Review Feedback (MUST FIX)"))
+      (is (str/includes? text "Missing error handling in login"))))
+
+  (testing "includes review feedback as map"
+    (let [text (implementer/task->text {:task/description "Fix it"
+                                        :task/review-feedback {:issues ["no validation" "no tests"]}})]
+      (is (str/includes? text "## Review Feedback (MUST FIX)"))
+      (is (str/includes? text "no validation")))))
+
+(deftest task->text-verify-failures-test
+  (testing "includes verify failures with test-results"
+    (let [text (implementer/task->text
+                 {:task/description "Fix failing tests"
+                  :task/verify-failures
+                  {:test-results {:all-passed? false
+                                  :test-count 5
+                                  :fail-count 2
+                                  :error-count 0}
+                   :test-output "FAIL in (login-test)\nexpected: 200\n  actual: 401"}})]
+      (is (str/includes? text "## Test Failures (MUST FIX)"))
+      (is (str/includes? text "Test results:"))
+      (is (str/includes? text ":fail-count 2"))
+      (is (str/includes? text "FAIL in (login-test)"))
+      (is (str/includes? text "expected: 200"))))
+
+  (testing "includes verify failures without test-results"
+    (let [text (implementer/task->text
+                 {:task/description "Fix it"
+                  :task/verify-failures
+                  {:error "Verification timed out"}})]
+      (is (str/includes? text "## Test Failures (MUST FIX)"))
+      (is (str/includes? text "Verify failure details:"))
+      (is (str/includes? text "Verification timed out"))))
+
+  (testing "includes both review feedback and verify failures"
+    (let [text (implementer/task->text
+                 {:task/description "Fix everything"
+                  :task/review-feedback "Add input validation"
+                  :task/verify-failures
+                  {:test-results {:all-passed? false :fail-count 1}}})]
+      (is (str/includes? text "## Review Feedback (MUST FIX)"))
+      (is (str/includes? text "Add input validation"))
+      (is (str/includes? text "## Test Failures (MUST FIX)"))
+      (is (str/includes? text ":fail-count 1"))))
+
+  (testing "no verify section when verify-failures is nil"
+    (let [text (implementer/task->text {:task/description "Normal task"})]
+      (is (not (str/includes? text "Test Failures"))))))
+
+;------------------------------------------------------------------------------ Layer 6
 ;; Repair tests
 
 (deftest implementer-repair-test
@@ -179,12 +241,11 @@
 ;; Full cycle tests
 
 (deftest implementer-cycle-test
-  (testing "full invoke-validate cycle succeeds"
+  (testing "full invoke-validate cycle fails without LLM (no silent fallback)"
     (let [agent (implementer/create-implementer)
           result (core/cycle-agent agent {} {:task/description "Create a helper function"
                                               :task/type :implement})]
-      (is (= :success (:status result)))
-      (is (uuid? (get-in result [:output :code/id]))))))
+      (is (= :error (:status result))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -262,3 +262,43 @@
           backend-stats (get-in health-data [:backends :anthropic])]
       (is (some? (:last-failure backend-stats)))
       (is (string? (:last-failure backend-stats))))))
+
+(deftest test-should-not-switch-stale-failure
+  (testing "Should not switch when last failure is stale (older than 5 minutes)"
+    ;; Manually write health data with an old last-failure timestamp
+    (let [old-instant (.minus (java.time.Instant/now) 10 java.time.temporal.ChronoUnit/MINUTES)
+          stale-data {:backends {:anthropic {:total-calls 100
+                                              :successful-calls 75
+                                              :success-rate 0.75
+                                              :last-failure (str old-instant)}}
+                      :switch-cooldowns {}
+                      :default-backend :anthropic
+                      :fallback-order [:anthropic :openai :codex :ollama :google]}]
+      (health/save-health! stale-data)
+      ;; 75% success rate is below 90% threshold, but failure is stale
+      (is (not (health/should-switch-backend? :anthropic 0.90))))))
+
+(deftest test-should-switch-recent-failure
+  (testing "Should switch when last failure is recent and rate is below threshold"
+    ;; Record calls so last failure is "now"
+    (dotimes [_ 85]
+      (health/record-backend-call! :anthropic true))
+    (dotimes [_ 15]
+      (health/record-backend-call! :anthropic false))
+    ;; Last failure is very recent, rate is 85% < 90%
+    (is (health/should-switch-backend? :anthropic 0.90))))
+
+(deftest test-reset-backend-health
+  (testing "Reset clears all health data"
+    ;; Record some data
+    (dotimes [_ 10]
+      (health/record-backend-call! :anthropic true))
+    (health/record-backend-call! :anthropic false)
+    (is (some? (health/get-backend-success-rate :anthropic)))
+
+    ;; Reset
+    (health/reset-backend-health!)
+    (is (nil? (health/get-backend-success-rate :anthropic)))
+    (let [health-data (health/load-health)]
+      (is (= {} (:backends health-data)))
+      (is (= :anthropic (:default-backend health-data))))))

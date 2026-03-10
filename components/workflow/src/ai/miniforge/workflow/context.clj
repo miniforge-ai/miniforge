@@ -46,6 +46,7 @@
         coordinator (agent/create-meta-coordinator meta-agents)]
     (merge
      {:execution/id (random-uuid)
+      :execution/workflow workflow
       :execution/workflow-id (:workflow/id workflow)
       :execution/workflow-version (:workflow/version workflow)
       :execution/status (fsm/current-state fsm-state)
@@ -72,9 +73,11 @@
                        :on-chunk :event-stream :worktree-path]))))
 
 (defn merge-metrics
-  "Merge phase metrics into execution metrics."
+  "Merge phase metrics into execution metrics.
+   Nil-safe: treats nil values as 0 to prevent NPE from merge-with +."
   [exec-metrics phase-metrics]
-  (merge-with + exec-metrics
+  (merge-with (fn [a b] (+ (or a 0) (or b 0)))
+              exec-metrics
               (select-keys phase-metrics [:tokens :cost-usd :duration-ms])))
 
 (defn transition-to-completed

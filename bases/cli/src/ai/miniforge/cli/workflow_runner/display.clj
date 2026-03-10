@@ -2,7 +2,8 @@
   "Terminal output formatting for workflow execution."
   (:require
    [clojure.pprint]
-   [cheshire.core :as json]))
+   [cheshire.core :as json]
+   [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; ANSI color primitives
@@ -35,23 +36,60 @@
     (println (str "  Version:  " (colorize :cyan version)))
     (println (colorize :cyan (str (apply str (repeat 65 "━")) "\n")))))
 
-(defn print-phase-start [phase-name quiet?]
-  (when-not quiet?
-    (println (str (colorize :yellow "📋") " Phase: " (colorize :bold phase-name) " starting..."))))
+(defn format-event-line
+  "Format a concise progress line for a lifecycle event. Returns nil for unknown events."
+  [event]
+  (let [evt (:event/type event)
+        phase (or (:workflow/phase event) (:phase event))
+        gate (or (:gate/id event) (:gate event))
+        agent (or (:agent/id event) (:agent event))
+        tool-id (:tool/id event)]
+    (case evt
+      :workflow/started (str (colorize :cyan "▶") " Workflow started")
+      :workflow/completed (str (colorize :green "✓") " Workflow completed"
+                               (when-let [d (:workflow/duration-ms event)]
+                                 (str " (" (format-duration d) ")")))
+      :workflow/failed (str (colorize :red "✗") " Workflow failed"
+                            (when-let [r (:workflow/failure-reason event)]
+                              (str ": " r)))
+      :workflow/phase-started (str (colorize :yellow "→") " Phase " phase " started")
+      :workflow/phase-completed (str (colorize :green "✓") " Phase " phase " "
+                                     (name (or (:phase/outcome event) :completed))
+                                     (when-let [d (:phase/duration-ms event)]
+                                       (str " (" (format-duration d) ")")))
+      :workflow/milestone-reached (str (colorize :green "★") " Milestone: "
+                                       (:message event))
+      :agent/started (str "  " (colorize :cyan "•") " Agent " agent " started")
+      :agent/completed (str "  " (colorize :green "•") " Agent " agent " completed")
+      :agent/failed (str "  " (colorize :red "•") " Agent " agent " failed")
+      :agent/status (str "  " (colorize :cyan "•") " Agent " agent ": "
+                         (or (:message event) (:status/type event) "working"))
+      :tool/invoked (str "  " (colorize :yellow "•") " Tool " tool-id " invoked")
+      :tool/completed (str "  " (colorize :green "•") " Tool " tool-id " completed")
+      :gate/started (str "  " (colorize :yellow "•") " Gate " gate " running")
+      :gate/passed (str "  " (colorize :green "•") " Gate " gate " passed")
+      :gate/failed (str "  " (colorize :red "•") " Gate " gate " failed")
+      nil)))
 
-(defn print-phase-complete [phase-name result quiet?]
-  (when-not quiet?
-    (let [status (or (:phase/status result) (:status result) :completed)
-          duration (or (get-in result [:phase/metrics :duration-ms])
-                       (get-in result [:metrics :duration-ms]))
-          success? (= status :completed)]
-      (println (str "  "
-                    (if success? (colorize :green "✓") (colorize :red "✗"))
-                    " " phase-name " "
-                    (if success? "completed" "failed")
-                    (when duration (str " (" (format-duration duration) ")")))))))
+(defn start-progress!
+  "Subscribe to lifecycle events and print concise progress lines.
+   Returns a cleanup function."
+  [event-stream quiet?]
+  (if (or quiet? (nil? event-stream))
+    (fn [] nil)
+    (let [sub-id (keyword (str "progress-" (random-uuid)))
+          last-line (atom nil)]
+      (es/subscribe! event-stream sub-id
+                     (fn [event]
+                       (when-let [line (format-event-line event)]
+                         ;; Deduplicate back-to-back duplicates from layered emitters.
+                         (when-not (= line @last-line)
+                           (reset! last-line line)
+                           (println line)))))
+      (fn []
+        (es/unsubscribe! event-stream sub-id)))))
 
-(defn- print-workflow-summary [result]
+(defn print-workflow-summary [result]
   (let [{:execution/keys [status metrics errors]} result
         success? (= status :completed)]
     (println (if success?
@@ -66,7 +104,7 @@
       (doseq [err errors]
         (println (str "  • " err))))))
 
-(defn- print-pretty-result [result]
+(defn print-pretty-result [result]
   (println (colorize :cyan (str "\n" (apply str (repeat 65 "━")))))
   (print-workflow-summary result)
   (println (colorize :cyan (str (apply str (repeat 65 "━")) "\n")))

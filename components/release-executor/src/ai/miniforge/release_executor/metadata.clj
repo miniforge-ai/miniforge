@@ -8,7 +8,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; String utilities
 
-(defn- slugify
+(defn slugify
   "Convert a string to a URL-safe slug.
    Handles basic ASCII transliteration and normalizes spacing."
   [s]
@@ -66,28 +66,11 @@
           nil))
       nil)))
 
-(defn make-fallback-release-metadata
-  "Generate fallback release metadata when releaser agent is unavailable."
-  [code-artifacts task-description]
-  (let [first-artifact (first code-artifacts)
-        files (:code/files first-artifact)
-        summary (or (:code/summary first-artifact) "code changes")
-        task-desc (or task-description summary)
-        slug (slugify task-desc)]
-    {:release/id (random-uuid)
-     :release/branch-name (str "feature/" slug)
-     :release/commit-message (str "feat: " task-desc)
-     :release/pr-title (str "feat: " (subs task-desc 0 (min 60 (count task-desc))))
-     :release/pr-description (str "## Summary\n" task-desc "\n\n"
-                                  "## Changes\n"
-                                  (if files
-                                    (str/join "\n" (map #(str "- " (name (:action %)) " `" (:path %) "`") files))
-                                    "See commits for details"))
-     :release/created-at (java.util.Date.)}))
+;; make-fallback-release-metadata removed — silent fallback masks real failures,
+;; prevents retry/repair from working, and short-circuits checkpoint resume.
 
 (defn generate-release-metadata
-  "Generate release metadata using releaser agent or fallback.
-   Returns release metadata map."
+  "Generate release metadata using releaser agent.
+   Returns release metadata map, or nil if releaser fails (caller must handle)."
   [releaser code-artifacts task-description context logger]
-  (or (invoke-releaser releaser code-artifacts task-description context logger)
-      (make-fallback-release-metadata code-artifacts task-description)))
+  (invoke-releaser releaser code-artifacts task-description context logger))

@@ -1,7 +1,7 @@
 # N8 — Observability Control Interface
 
-**Version:** 0.1.0-draft
-**Date:** 2026-02-01
+**Version:** 0.2.0-draft
+**Date:** 2026-03-08
 **Status:** Draft
 **Conformance:** MUST
 
@@ -282,6 +282,91 @@ Control actions with risk level High or Critical MAY require multi-party approva
  [{:action-type keyword               ; Which actions require approval
    :risk-level keyword                ; Minimum risk level
    :require-different-principal? boolean}]}  ; Requester cannot approve
+```
+
+### 3.4 Safe-Mode Posture
+
+Safe-mode is a system-wide autonomy demotion designed to prevent cascading failures
+during reliability incidents. It is the operational response mechanism for degradation
+mode `:safe-mode` (N1 §5.5.5).
+
+#### 3.4.1 Safe-Mode Triggers
+
+Safe-mode MUST be triggerable by:
+
+1. **Error budget exhaustion** — Any `:critical` tier SLI error budget reaching 0.0
+   (see N1 §5.5.4). Implementations SHOULD trigger safe-mode automatically.
+2. **Emergency stop** — The `emergency-stop` control action (§3.1). This is always
+   a manual trigger.
+3. **Consecutive unknown failures** — Configurable threshold (default: 3) of consecutive
+   failures classified as `:failure.class/unknown` (N1 §5.3.3). Indicates insufficient
+   failure instrumentation and warrants caution.
+4. **Manual operator request** — Via CLI: `mf fleet safe-mode enter --reason "..."`
+
+#### 3.4.2 Safe-Mode Behavior
+
+When safe-mode is active, implementations MUST:
+
+1. **Demote autonomy** — All subsystem autonomy levels MUST be demoted to A0 (Observe)
+   per N1 §5.6. No autonomous write actions are permitted.
+2. **Queue new workflows** — New workflow submissions MUST be queued, not executed.
+   Queued workflows MUST be persisted and released when safe-mode exits.
+3. **Pause in-flight workflows** — In-flight workflows MUST be paused at the next phase
+   boundary. Paused workflows MUST be resumable when safe-mode exits.
+4. **Open circuit breakers** — All circuit breakers for Class B+ tools (N10 §3.5)
+   MUST be forced to `:open`.
+5. **Emit event** — A `:safe-mode/entered` event MUST be emitted (see §3.4.4).
+6. **Display indicator** — The TUI/CLI MUST display a prominent safe-mode indicator
+   (see N5 extensions).
+
+#### 3.4.3 Safe-Mode Exit
+
+Exiting safe-mode MUST require:
+
+1. **Explicit operator action** — `mf fleet safe-mode exit --reason "..."` or equivalent
+   API call. Safe-mode MUST NOT exit automatically.
+2. **Justification** — A human-readable justification string is REQUIRED.
+3. **Event emission** — A `:safe-mode/exited` event MUST be emitted with justification,
+   duration, and exit principal.
+4. **Autonomy restoration** — Autonomy levels MUST be restored to their pre-safe-mode
+   values. If pre-safe-mode state is unavailable, autonomy MUST default to A1 (Recommend).
+5. **Queue release** — Queued workflows MUST be released for execution.
+6. **Circuit breaker reset** — Forced-open circuit breakers MUST be reset to `:half-open`
+   to re-probe tool health.
+
+#### 3.4.4 Safe-Mode State and Events
+
+```clojure
+;; Safe-Mode State
+{:safe-mode/active?              boolean  ; REQUIRED
+ :safe-mode/entered-at           inst     ; REQUIRED when active
+ :safe-mode/trigger              keyword  ; REQUIRED: :error-budget | :emergency-stop
+                                          ;           :unknown-failures | :manual
+ :safe-mode/trigger-details      string   ; OPTIONAL: additional context
+ :safe-mode/pre-autonomy-levels  map      ; REQUIRED: {subsystem-key -> previous-level}
+ :safe-mode/queued-workflow-ids  [uuid]}  ; OPTIONAL: workflows queued during safe-mode
+```
+
+```clojure
+;; safe-mode/entered event (emitted to N3)
+{:event/type :safe-mode/entered
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :safe-mode/trigger keyword
+ :safe-mode/trigger-details string
+ :message "Safe-mode entered: {trigger}"}
+
+;; safe-mode/exited event (emitted to N3)
+{:event/type :safe-mode/exited
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :safe-mode/exited-by string             ; Principal who exited safe-mode
+ :safe-mode/justification string         ; REQUIRED: why safe-mode was exited
+ :safe-mode/duration-ms long             ; How long safe-mode was active
+ :safe-mode/workflows-queued long        ; Number of workflows that were queued
+ :message "Safe-mode exited after {duration}: {justification}"}
 ```
 
 ---
@@ -754,4 +839,6 @@ A minimal compliant implementation MAY defer:
 
 **Version History:**
 
+- 0.2.0-draft (2026-03-08): Safe-mode posture (§3.4) — triggers, behavior, exit protocol,
+  state/events; unified autonomy model back-reference (N1 §5.6)
 - 0.1.0-draft (2026-02-01): Initial observability control interface specification

@@ -22,6 +22,7 @@
    Uses a formal FSM (see fsm.clj) for state transitions.
    Tracks runtime state separately from workflow configuration."
   (:require
+   [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.workflow.fsm :as fsm]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -67,7 +68,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; FSM-based state transitions
 
-(defn- record-fsm-transition
+(defn record-fsm-transition
   "Record an FSM state transition in history."
   [state from-status to-status event]
   (let [transition {:from-status from-status
@@ -78,7 +79,7 @@
         (update :execution/history conj transition)
         (assoc :execution/updated-at (System/currentTimeMillis)))))
 
-(defn- record-phase-transition
+(defn record-phase-transition
   "Record a phase transition in history."
   [state from-phase to-phase reason]
   (let [transition {:from-phase from-phase
@@ -102,7 +103,7 @@
   [state event]
   (let [current-status (:execution/status state)
         result (fsm/transition current-status event)]
-    (if (:success? result)
+    (if (fsm/succeeded? result)
       (-> state
           (assoc :execution/status (:state result))
           (record-fsm-transition current-status (:state result) event))
@@ -208,12 +209,12 @@
 (defn completed?
   "Check if execution is completed."
   [state]
-  (= :completed (:execution/status state)))
+  (phase/succeeded? state))
 
 (defn failed?
   "Check if execution has failed."
   [state]
-  (= :failed (:execution/status state)))
+  (phase/failed? state))
 
 (defn running?
   "Check if execution is running."

@@ -1,7 +1,7 @@
 # miniforge Specification Index
 
-**Version:** 0.4.0-draft
-**Date:** 2026-02-16
+**Version:** 0.6.0-draft
+**Date:** 2026-03-08
 **Status:** Living specification during OSS development
 
 ---
@@ -44,10 +44,17 @@ Defines:
 
 - Core nouns: workflow, phase, agent, subagent, tool, gate, policy pack, evidence bundle,
   artifact, provenance, workflow pack, capability, pack run
+- **Repository Intelligence:** Repo Index, Context Pack, Range, Symbol, Edge, Coverage (§2.27–§2.30)
+- **Context Assembly:** tool contract (repo.map/search/symbol/open, nav.def/refs/impls/calls),
+  staleness detection, policy envelopes, budget enforcement (§11)
 - Three-layer architecture: Control Plane, Agent Layer, Learning Layer
 - Polylith component boundaries (OSS component catalog)
 - Operational model: local-first execution, reproducibility, failure semantics
 - Agent protocols: communication patterns, context handoff, inter-agent messaging
+- **Reliability Model:** Canonical failure taxonomy, SLIs/SLOs, error budgets, degradation modes (§5.3.3, §5.5)
+- **Unified Autonomy Model:** A0-A5 levels with cross-spec mapping (§5.6)
+- **Trust Boundary Validation:** 5 named boundaries with architectural invariants (§5.7)
+- **Evaluation Pipeline:** Golden sets, replay mode, shadow mode, canary deployment (§3.3.3)
 
 ### N2 — Workflow Execution Model ✅
 
@@ -64,6 +71,8 @@ Defines:
 - Gate contract: check/repair function signatures, violation schema, enforcement rules
 - Context handoff: protocol for passing context between phases
 - Workflow chaining: typed outputs, input binding, cross-boundary provenance
+- **Workflow tier:** `:best-effort` / `:standard` / `:critical` with tier-dependent SLO targets (§9.1)
+- **Node capability extensions:** Idempotency keys, success predicates, compensation protocol (§13.6)
 
 ### N3 — Event Stream & Observability Contract ✅
 
@@ -79,6 +88,9 @@ Defines:
 - Streaming API (SSE/WebSocket) with subscription protocol
 - Throttling and performance requirements
 - Minimal fields needed to render "live" progress and drill-down
+- **Reliability metric events:** SLI computation, SLO breach, error budget, degradation mode (§3.17)
+- **Repository intelligence events:** Index quality, canary failure (§3.18)
+- **Failure class enum** on all failure events (`:failure/class`, see N1 §5.3.3)
 
 ### N4 — Policy Packs & Gates Standard ✅
 
@@ -94,6 +106,7 @@ Defines:
 - Violation schema: severity levels, remediation templates, auto-fix capabilities
 - Terraform/Kubernetes-specific validation rules
 - Pack trust, capability grant, and high-risk action gates for Workflow Packs
+- **Validation Layer Taxonomy:** L0 Syntax → L1 Semantic → L2 Policy → L3 Operational → L4 Authorization (§3.4)
 
 ### N5 — Interface Standard: CLI/TUI/API ✅
 
@@ -123,6 +136,8 @@ Defines:
 - Queryable provenance API: trace artifact chains, find intent mismatches
 - Pack Run evidence: pack identity, capabilities, connector actions, metrics snapshots, report artifacts
 - Compliance metadata: sensitive data handling, audit requirements (SOCII/FedRAMP)
+- **Reliability evidence:** SLI measurements, failure class, workflow tier, degradation mode in outcome (§2.6)
+- **Evaluation artifacts:** Golden set and eval-run-result artifact types (§3.1.1)
 
 ### N7 — Operational Policy Synthesis With Verification ✅
 
@@ -155,6 +170,7 @@ Defines:
 - Cost and volume controls: sampling rules, aggregation boundaries
 - Fleet and enterprise extensions: multi-tenancy, pattern detection
 - CLI/TUI extensions: listener commands, control palette, approval queue
+- **Safe-mode posture:** Triggers, behavior, exit protocol for system-wide autonomy demotion (§3.4)
 
 ### N9 — External PR Integration 🆕
 
@@ -174,6 +190,29 @@ Defines:
 - Multi-repo configuration: per-repo opt-in with org-level defaults
 - Fleet Mode disambiguation: N9 (SDLC governance) vs N7 (runtime policy synthesis)
 - CLI/TUI/API extensions: `fleet prs`, `fleet trains` commands and views
+
+### N10 — Governed Tool Execution 🆕
+
+**File:** [normative/N10-governed-tool-execution.md](normative/N10-governed-tool-execution.md)
+**Status:** Draft
+**Purpose:** Safe, bounded, auditable execution of tool actions against external systems
+
+Defines:
+
+- Operational intent model: agents express intent, not commands; compiled to Operational IR
+- Action classification (A-E): tool-declared risk levels from observational to irreversible
+- Verification pipeline: target resolution, policy evaluation (N4), rollback verification
+- Validation requirements: static analysis (all), provider dry-run (Class C+), adapter hooks
+- Capability model: ephemeral, scoped, TTL-bounded, revocable authority grants
+- Execution capsules: sandboxed runtime with filesystem, network, and time isolation
+- Crown jewel protection: separation of authority, no autonomous mutation
+- Postcondition monitoring: expected outcome verification with auto-rollback
+- Safety invariants: ten mechanically-enforced rules preventing catastrophic operations
+- External system integration: MCP servers and SaaS platforms as tool-registry entries
+- Trust level progression (L0-L4): progressive autonomy gated by demonstrated safety
+- Audit integration: full event stream (N3) and evidence bundle (N6) linkage
+- **Tool operational semantics:** Timeout, retry, circuit-breaker, concurrency, fallback (§3.4–§3.5)
+- **Tool response validation:** Schema validation and injection sanitization at capsule boundary (§7.4)
 
 ---
 
@@ -211,9 +250,17 @@ These documents provide guidance, examples, and context but do NOT define contra
 
 ### Architecture & Internals
 
-- [informative/I-ANOMALY-SYSTEM.md](informative/I-ANOMALY-SYSTEM.md) - Canonical error representation and boundary translators
+- [informative/I-ANOMALY-SYSTEM.md](informative/I-ANOMALY-SYSTEM.md) - Canonical error representation and boundary
+  translators
 - [informative/I-DAG-ORCHESTRATION.md](informative/I-DAG-ORCHESTRATION.md) - DAG executor with PR lifecycle
 - [informative/I-TASK-EXECUTOR.md](informative/I-TASK-EXECUTOR.md) - DAG-to-PR lifecycle integration
+
+### Operational Workflows (N10 Extensions)
+
+- [informative/I-VALIDATION-STRATEGIES.md](informative/I-VALIDATION-STRATEGIES.md) -
+  Extended validation: formal verification, Shipyard, Tonic, canary execution
+- [informative/I-INCIDENT-DIAGNOSTICS.md](informative/I-INCIDENT-DIAGNOSTICS.md) -
+  Autonomous incident diagnostics and response workflow patterns
 
 ### Roadmaps (Experimental/Future)
 
@@ -260,7 +307,7 @@ Documents superseded by normative specs. Retained for reference during migration
 
 ### Language Rules
 
-**Normative specs (N1-N9):**
+**Normative specs (N1-N10):**
 
 - MUST use RFC 2119 keywords: MUST, SHALL, SHOULD, MAY, MUST NOT, SHALL NOT
 - MUST define versioning and compatibility expectations
@@ -333,6 +380,12 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.6.0-draft** (2026-03-08) - Reliability nines amendments: canonical failure taxonomy, SLIs/SLOs/error
+  budgets, unified autonomy model (A0-A5), trust boundary validation, retrieval governance, evaluation
+  pipeline in N1; workflow tier + compensation/success predicates in N2; failure class enum +
+  reliability metric + repo intelligence events in N3; validation layer taxonomy in N4; SLI evidence +
+  eval artifacts in N6; safe-mode posture in N8; tool operational semantics + response validation in N10
+- **0.5.0-draft** (2026-03-04) - TUI fidelity amendments
 - **0.4.0-draft** (2026-02-16) - OSS pack runtime amendments: Workflow Pack, Capability, Pack Run
   concepts in N1; workflow chaining in N2; pack lifecycle/run events in N3; pack trust/capability
   gates in N4; pack CLI + browser/launcher TUI in N5; Pack Run evidence in N6

@@ -92,18 +92,18 @@
       [:div.workflow-summary-list
        (for [wf (take 5 workflows)]
          [:div.workflow-summary-item
-          {:class (str "wf-status-" (name (or (:status wf) :unknown)))}
+          {:class (str "wf-status-" (name (get wf :status :unknown)))}
           [:div.wf-summary-header
            [:a.wf-summary-name {:href (str "/workflow/" (:id wf))}
-            (or (:name wf) "Unnamed")]
+            (get wf :name "Unnamed")]
            [:span.wf-summary-badge
-            {:class (str "badge-" (name (or (:status wf) :unknown)))}
-            (name (or (:status wf) :unknown))]]
+            {:class (str "badge-" (name (get wf :status :unknown)))}
+            (name (get wf :status :unknown))]]
           [:div.wf-summary-detail
-           [:span.wf-phase (str "Phase: " (or (:phase wf) "—"))]
+           [:span.wf-phase (str "Phase: " (get wf :phase "—"))]
            [:div.wf-progress-bar
             [:div.wf-progress-fill
-             {:style (str "width:" (or (:progress wf) 0) "%")}]]]])])]))
+             {:style (str "width:" (get wf :progress 0) "%")}]]]])])]))
 
 (defn fleet-grid-fragment
   "Fleet status grid fragment for htmx updates."

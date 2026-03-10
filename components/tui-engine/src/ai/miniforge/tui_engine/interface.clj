@@ -30,6 +30,7 @@
    agents, or events. Those are wired in via the tui-views component."
   (:require
    [ai.miniforge.tui-engine.core :as core]
+   [ai.miniforge.tui-engine.runtime :as runtime]
    [ai.miniforge.tui-engine.screen :as screen]
    [ai.miniforge.tui-engine.input :as input]
    [ai.miniforge.tui-engine.style :as style]))
@@ -62,25 +63,25 @@
    Enters alternate screen, starts input polling, renders initial view.
    Returns the app atom."
   [app]
-  (core/start! app))
+  (runtime/start! app))
 
 (defn stop!
   "Stop the TUI application.
    Unregisters subscriptions, stops input polling, exits alternate screen.
    Safe to call multiple times."
   [app]
-  (core/stop! app))
+  (runtime/stop! app))
 
 (defn dispatch!
   "Dispatch a message to the application's update function.
    The message flows through: update -> view -> render."
   [app msg]
-  (core/dispatch! app msg))
+  (runtime/dispatch! app msg))
 
 (defn get-model
   "Get the current application model (read-only snapshot)."
   [app]
-  (core/get-model app))
+  (runtime/get-model app))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Re-exports for convenience

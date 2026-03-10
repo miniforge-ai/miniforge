@@ -48,26 +48,16 @@
 ;; Invoke tests
 
 (deftest planner-invoke-test
-  (testing "generates plan from specification"
-    (let [agent (planner/create-planner)
-          result (core/invoke agent {} "Build a user login system")]
-      (is (= :success (:status result)))
-      (is (uuid? (get-in result [:output :plan/id])))
-      (is (string? (get-in result [:output :plan/name])))
-      (is (vector? (get-in result [:output :plan/tasks])))))
+  (testing "throws when no LLM backend provided"
+    (let [agent (planner/create-planner)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"No LLM backend"
+            (core/invoke agent {} "Build a user login system")))))
 
-  (testing "includes metrics in result"
-    (let [agent (planner/create-planner)
-          result (core/invoke agent {} "Simple task")]
-      (is (number? (get-in result [:metrics :tasks-created])))
-      (is (keyword? (get-in result [:metrics :complexity])))))
-
-  (testing "handles context with codebase info"
-    (let [agent (planner/create-planner)
-          result (core/invoke agent
-                              {:codebase {:has-tests? true}}
-                              "Add feature to existing codebase")]
-      (is (= :success (:status result))))))
+  (testing "throws with context but no LLM backend"
+    (let [agent (planner/create-planner)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"No LLM backend"
+            (core/invoke agent {:codebase {:has-tests? true}}
+                         "Add feature to existing codebase"))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation tests
@@ -159,11 +149,10 @@
 ;; Full cycle tests
 
 (deftest planner-cycle-test
-  (testing "full invoke-validate cycle succeeds"
-    (let [agent (planner/create-planner)
-          result (core/cycle-agent agent {} "Create a REST API endpoint")]
-      (is (= :success (:status result)))
-      (is (uuid? (get-in result [:output :plan/id]))))))
+  (testing "full invoke-validate cycle throws without LLM"
+    (let [agent (planner/create-planner)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"No LLM backend"
+            (core/cycle-agent agent {} "Create a REST API endpoint"))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

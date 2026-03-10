@@ -5,9 +5,9 @@
   integration tests that validate files are actually written to disk.
 
   These tests validate:
-  - record-phase-artifacts extracts from nested [:result :output]
-  - track-phase-files extracts :code/files paths from output
-  - extract-output returns non-empty artifacts
+  - execution/record-phase-artifacts extracts from nested [:result :output]
+  - execution/track-phase-files extracts :code/files paths from output
+  - runner/extract-output returns non-empty artifacts
   - Files are written to filesystem
   - Zero-file writes are detected and fail
   - Empty artifacts cause failures
@@ -20,7 +20,7 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [babashka.fs :as fs]
-   [ai.miniforge.phase.registry :as registry]
+   [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.release-executor.interface :as release-executor]
@@ -31,7 +31,7 @@
 
 (def ^:dynamic *test-worktree-path* nil)
 
-(defn- create-test-worktree
+(defn create-test-worktree
   "Create a temporary worktree directory for testing."
   []
   (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")
@@ -44,7 +44,7 @@
       (spit (io/file temp-dir "README.md") "# Test Repository"))
     (.getPath temp-dir)))
 
-(defn- cleanup-test-worktree
+(defn cleanup-test-worktree
   "Delete test worktree directory and all contents."
   [dir-path]
   (when dir-path
@@ -94,13 +94,13 @@
 
 ;------------------------------------------------------------------------------ Test Helpers
 
-(defn- file-exists-in-worktree?
+(defn file-exists-in-worktree?
   "Check if a file exists in the test worktree."
   [relative-path]
   (when *test-worktree-path*
     (.exists (io/file *test-worktree-path* relative-path))))
 
-(defn- read-worktree-file
+(defn read-worktree-file
   "Read content of a file from the test worktree."
   [relative-path]
   (when *test-worktree-path*
@@ -108,7 +108,7 @@
       (when (.exists file)
         (slurp file)))))
 
-(defn- count-files-in-worktree
+(defn count-files-in-worktree
   "Count files in test worktree (excluding .git)."
   []
   (when *test-worktree-path*
@@ -117,7 +117,7 @@
          (remove #(str/includes? (.getPath %) ".git"))
          count)))
 
-(defn- execute-phase-pipeline
+(defn execute-phase-pipeline
   "Execute a phase pipeline: plan -> implement -> verify -> release."
   [opts]
   (let [{:keys [implement-agent-fn verify-agent-fn release-opts]} opts
@@ -130,7 +130,7 @@
                   :execution/metrics {:tokens 0 :duration-ms 0}
                   :execution/phase-results {}}
         
-        plan-interceptor (registry/get-phase-interceptor {:phase :plan})
+        plan-interceptor (phase/get-phase-interceptor {:phase :plan})
         plan-result-ctx (-> plan-ctx
                            (assoc :phase-config {:phase :plan})
                            ((:enter plan-interceptor))
@@ -143,7 +143,7 @@
         
         ;; Execute implement phase
         impl-ctx (assoc plan-result-ctx :phase-config {:phase :implement})
-        impl-interceptor (registry/get-phase-interceptor {:phase :implement})
+        impl-interceptor (phase/get-phase-interceptor {:phase :implement})
         impl-result-ctx (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                                       agent/invoke (or implement-agent-fn
                                                       (fn [_ _ _]
@@ -161,7 +161,7 @@
         ;; Execute verify phase (optional)
         verify-result-ctx (when verify-agent-fn
                            (let [verify-ctx (assoc impl-result-ctx :phase-config {:phase :verify})
-                                 verify-interceptor (registry/get-phase-interceptor {:phase :verify})]
+                                 verify-interceptor (phase/get-phase-interceptor {:phase :verify})]
                              (with-redefs [agent/create-tester (fn [_] {:type :mock-tester})
                                           agent/invoke verify-agent-fn]
                                (-> verify-ctx
@@ -173,7 +173,7 @@
         release-ctx (assoc release-ctx 
                           :phase-config {:phase :release}
                           :worktree-path *test-worktree-path*)
-        release-interceptor (registry/get-phase-interceptor {:phase :release})]
+        release-interceptor (phase/get-phase-interceptor {:phase :release})]
     
     (if release-opts
       ;; Custom release executor for testing
@@ -286,7 +286,7 @@
                :execution/phase-results {}
                :phase-config {:phase :verify}}
 
-          verify-interceptor (registry/get-phase-interceptor {:phase :verify})]
+          verify-interceptor (phase/get-phase-interceptor {:phase :verify})]
 
       (with-redefs [agent/create-tester (fn [_] {:type :mock-tester})
                     agent/invoke (fn [_agent _task _ctx]
@@ -349,9 +349,6 @@
 
 ;------------------------------------------------------------------------------ Unit Tests: Artifact Extraction
 
-(def ^:private record-phase-artifacts #'execution/record-phase-artifacts)
-(def ^:private track-phase-files #'execution/track-phase-files)
-(def ^:private extract-output #'runner/extract-output)
 
 (deftest test-record-phase-artifacts-extracts-nested-output
   (testing "record-phase-artifacts extracts artifact from [:result :output]"
@@ -363,7 +360,7 @@
                         :result {:status :ok
                                  :output code-output}}
           ctx {:execution/artifacts []}
-          updated (record-phase-artifacts ctx phase-result)]
+          updated (execution/record-phase-artifacts ctx phase-result)]
       (is (= 1 (count (:execution/artifacts updated)))
           "Should extract one artifact from nested output")
       (is (= code-output (first (:execution/artifacts updated)))
@@ -375,7 +372,7 @@
                         :status :completed
                         :result {:status :ok :output "plain string"}}
           ctx {:execution/artifacts []}
-          updated (record-phase-artifacts ctx phase-result)]
+          updated (execution/record-phase-artifacts ctx phase-result)]
       (is (empty? (:execution/artifacts updated))
           "Should not extract artifact from non-map output"))))
 
@@ -387,7 +384,7 @@
                                  :output {:code/files [{:path "src/a.clj" :content "a"}
                                                        {:path "src/b.clj" :content "b"}]}}}
           ctx {:execution/files-written []}
-          updated (track-phase-files ctx phase-result)]
+          updated (execution/track-phase-files ctx phase-result)]
       (is (= ["src/a.clj" "src/b.clj"] (:execution/files-written updated))
           "Should extract file paths from :code/files"))))
 
@@ -400,7 +397,7 @@
                                                      :result {:status :ok :output code-output}}}
                :execution/current-phase :implement
                :execution/status :completed}
-          result (extract-output ctx)]
+          result (runner/extract-output ctx)]
       (is (= 1 (count (get-in result [:execution/output :artifacts])))
           "Output should contain the artifact")
       (is (= :completed (get-in result [:execution/output :status]))

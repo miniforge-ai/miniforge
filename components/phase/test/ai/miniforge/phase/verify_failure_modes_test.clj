@@ -28,7 +28,7 @@
    :test/passed? true
    :test/coverage {:lines 85.0}})
 
-(defn- create-base-context
+(defn create-base-context
   "Create base context for testing."
   []
   {:execution/id (random-uuid)

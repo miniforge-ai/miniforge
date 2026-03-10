@@ -27,7 +27,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Status indicators
 
-(def ^:private status-chars
+(def status-chars
   {:running  \●
    :success  \✓
    :failed   \✗
@@ -36,7 +36,7 @@
    :skipped  \─
    :spinning \⟳})
 
-(def ^:private status-colors
+(def status-colors
   {:running  :cyan
    :success  :green
    :failed   :red
@@ -69,11 +69,11 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Progress bar
 
-(def ^:private bar-chars
+(def bar-chars
   "Sub-cell progress bar characters (eighths)."
   [\space \▏ \▎ \▍ \▌ \▋ \▊ \▉ \█])
 
-(defn- render-filled-cells
+(defn render-filled-cells
   "Render complete filled cells."
   [buffer full-cells bar-width fill-fg]
   (reduce (fn [b i]
@@ -82,7 +82,7 @@
           buffer
           (range (min full-cells bar-width))))
 
-(defn- render-fractional-cell
+(defn render-fractional-cell
   "Render partial fill for fractional progress."
   [buffer full-cells bar-width frac-idx fill-fg]
   (if (and (< full-cells bar-width) (pos? frac-idx))
@@ -91,7 +91,7 @@
                        :fg fill-fg :bg :default :bold? false})
     buffer))
 
-(defn- render-empty-cells
+(defn render-empty-cells
   "Render remaining empty cells."
   [buffer full-cells frac-idx bar-width empty-fg]
   (reduce (fn [b i]
@@ -100,7 +100,7 @@
           buffer
           (range (if (pos? frac-idx) (inc full-cells) full-cells) bar-width)))
 
-(defn- add-percentage-label
+(defn add-percentage-label
   "Add percentage text label at end of bar."
   [buffer bar-width label]
   (if label

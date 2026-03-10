@@ -73,7 +73,7 @@
         generate-fn (fn [_task _ctx]
                       (let [result (agent/invoke agent-instance invoke-args tracking-context)]
                         {:artifact (:artifact result)
-                         :tokens (or (:tokens result) 0)}))
+                         :tokens (get result :tokens 0)}))
         result (loop/run-simple task
                                 generate-fn
                                 (merge tracking-context
@@ -112,7 +112,7 @@
       {:success? false
        :artifacts []
        :errors [{:type :plan-failed
-                 :message (or (:error result) "Planning failed")}]
+                 :message (get result :error "Planning failed")}]
        :metrics (:metrics result)})))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -136,7 +136,7 @@
       {:artifact (:artifact result)
        :metrics (:metrics result)}
       {:error {:type :implement-failed
-               :message (or (:error result) "Implementation failed")}
+               :message (get result :error "Implementation failed")}
        :metrics (:metrics result)})))
 
 (defn code-artifact->standard-artifact
@@ -198,7 +198,7 @@
        :parent-id artifact-id
        :metrics (:metrics result)}
       {:error {:type :verify-failed
-               :message (or (:error result) "Verification failed")}
+               :message (get result :error "Verification failed")}
        :metrics (:metrics result)})))
 
 (defn execute-verify-phase

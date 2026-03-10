@@ -8,7 +8,8 @@
    Layer 1: Loop state management
    Layer 2: Phase execution (stub)"
   (:require
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Phase definitions
@@ -119,7 +120,7 @@
    :loop/history [{:phase :spec
                    :timestamp (java.util.Date.)
                    :outcome :entered}]
-   :loop/config (or (:config context) {})
+   :loop/config (get context :config {})
    :loop/created-at (java.util.Date.)
    :loop/updated-at (java.util.Date.)})
 
@@ -155,6 +156,28 @@
   [loop-state artifact-type artifact-id]
   (assoc-in loop-state [:loop/artifacts artifact-type] artifact-id))
 
+;------------------------------------------------------------------------------ Layer 1.5
+;; Result helpers
+
+(defn phase-succeeded?
+  "Check if a phase result indicates success (supports both :success? and :status patterns)."
+  [result]
+  (or (:success? result)
+      (= :success (:status result))))
+
+;; Logging helpers
+
+(defn log-phase
+  "Log a phase event at the specified level, only when logger is available."
+  [logger level event-kw phase message & [extra-data]]
+  (when logger
+    (let [data (cond-> {:phase phase} extra-data (merge extra-data))
+          entry {:message message :data data}]
+      (case level
+        :info (log/info logger :loop event-kw entry)
+        :warn (log/warn logger :loop event-kw entry)
+        :error (log/error logger :loop event-kw entry)))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Phase execution (stubs)
 
@@ -167,25 +190,17 @@
   (let [logger (:logger context)
         current (:loop/phase loop-state)
         next (next-phase current)]
-    (when logger
-      (log/info logger :loop :outer/phase-completed
-                {:message "Phase completed"
-                 :data {:phase current}}))
+    (log-phase logger :info :outer/phase-completed current "Phase completed")
     (if (and next (can-advance? loop-state))
       (do
-        (when logger
-          (log/info logger :loop :outer/phase-entered
-                    {:message "Entering phase"
-                     :data {:phase next}}))
+        (log-phase logger :info :outer/phase-entered next "Entering phase")
         (-> loop-state
             (add-history-entry current :completed)
             (set-phase next)
             (add-history-entry next :entered)))
       ;; Cannot advance or at end
-      (when logger
-        (log/warn logger :loop :outer/phase-failed
-                  {:message "Cannot advance phase"
-                   :data {:current current :next next}})))))
+      (log-phase logger :warn :outer/phase-failed current "Cannot advance phase"
+                 {:next next}))))
 
 (defn rollback-phase
   "Rollback to a previous phase.
@@ -197,10 +212,8 @@
         current (:loop/phase loop-state)]
     (if (can-rollback? loop-state target-phase)
       (do
-        (when logger
-          (log/warn logger :loop :outer/phase-failed
-                    {:message "Rolling back"
-                     :data {:from current :to target-phase}}))
+        (log-phase logger :warn :outer/phase-failed current "Rolling back"
+                   {:to target-phase})
         (-> loop-state
             (add-history-entry current :rolled-back
                                :data {:target target-phase})
@@ -208,15 +221,19 @@
             (add-history-entry target-phase :entered
                                :message "Entered via rollback")))
       (do
-        (when logger
-          (log/error logger :loop :outer/phase-failed
-                     {:message "Invalid rollback target"
-                      :data {:current current :target target-phase}}))
+        (log-phase logger :error :outer/phase-failed current "Invalid rollback target"
+                   {:target target-phase})
         nil))))
 
 (defn run-phase
   "Run the current phase using the appropriate agent.
-   Stub implementation - returns mock success.
+
+   Delegates to the phase interceptor registry for real execution.
+   Falls back to mock success if no phase executor is available.
+
+   Arguments:
+   - loop-state: Current outer loop state
+   - context: Execution context map with :logger, :phase-executor, :event-stream, etc.
 
    Returns:
    {:success? boolean
@@ -226,16 +243,28 @@
   (let [logger (:logger context)
         phase (:loop/phase loop-state)
         definition (get-phase-definition phase)]
-    (when logger
-      (log/info logger :loop :outer/phase-entered
-                {:message "Running phase"
-                 :data {:phase phase
-                        :agent (:phase/agent definition)}}))
-    ;; Stub: return mock success
-    {:success? true
-     :artifacts (mapv (fn [type] {:type type :id (random-uuid)})
-                      (:phase/artifacts definition))
-     :phase phase}))
+    (log-phase logger :info :outer/phase-entered phase "Running phase"
+               {:agent (:phase/agent definition)})
+    (if-let [phase-executor (:phase-executor context)]
+      ;; Real execution: delegate to the phase executor
+      (try
+        (let [result (phase-executor phase loop-state context)]
+          (if (phase-succeeded? result)
+            (do
+              (log-phase logger :info :outer/phase-completed phase "Phase completed successfully")
+              result)
+            (do
+              (log-phase logger :warn :outer/phase-failed phase "Phase failed"
+                         {:error (:error result)})
+              result)))
+        (catch Exception e
+          (log-phase logger :error :outer/phase-failed phase "Phase execution error"
+                     {:error (ex-message e)})
+          (response/failure (ex-message e) {:data {:phase phase}})))
+      ;; No executor: mock success (development/testing)
+      (response/success {:artifacts (mapv (fn [type] {:type type :id (random-uuid)})
+                                          (:phase/artifacts definition))
+                         :phase phase}))))
 
 (defn is-complete?
   "Check if the outer loop has completed all phases."
@@ -253,46 +282,40 @@
     :history [...]}"
   [loop-state context]
   (let [logger (:logger context)]
-    (when logger
-      (log/info logger :loop :outer/phase-entered
-                {:message "Starting outer loop"
-                 :data {:spec-id (get-in loop-state [:loop/spec :spec/id])}}))
+    (log-phase logger :info :outer/phase-entered :outer-loop "Starting outer loop"
+               {:spec-id (get-in loop-state [:loop/spec :spec/id])})
     (loop [state loop-state]
       (if (is-complete? state)
         ;; Complete
         (do
-          (when logger
-            (log/info logger :loop :outer/workflow-completed
-                      {:message "Outer loop completed"
-                       :data {:artifacts (keys (:loop/artifacts state))}}))
-          {:success? true
-           :phase (:loop/phase state)
-           :artifacts (:loop/artifacts state)
-           :history (:loop/history state)
-           :final-state state})
+          (log-phase logger :info :outer/workflow-completed :outer-loop "Outer loop completed"
+                     {:artifacts (keys (:loop/artifacts state))})
+          (response/success {:phase (:loop/phase state)
+                            :artifacts (:loop/artifacts state)
+                            :history (:loop/history state)
+                            :final-state state}))
         ;; Run current phase and advance
-        (let [result (run-phase state context)]
-          (if (:success? result)
+        (let [result (run-phase state context)
+              result-data (or (:output result) result)]
+          (if (phase-succeeded? result)
             ;; Record artifacts and advance
             (let [updated (reduce (fn [s {:keys [type id]}]
                                     (add-artifact s type id))
                                   state
-                                  (:artifacts result))
+                                  (:artifacts result-data))
                   advanced (advance-phase updated context)]
               (if advanced
                 (recur advanced)
                 ;; Couldn't advance
-                {:success? false
-                 :phase (:loop/phase state)
-                 :artifacts (:loop/artifacts state)
-                 :history (:loop/history state)
-                 :error "Failed to advance phase"}))
+                (response/failure "Failed to advance phase"
+                                  {:data {:phase (:loop/phase state)
+                                          :artifacts (:loop/artifacts state)
+                                          :history (:loop/history state)}})))
             ;; Phase failed
-            {:success? false
-             :phase (:loop/phase state)
-             :artifacts (:loop/artifacts state)
-             :history (:loop/history state)
-             :error (or (:error result) "Phase execution failed")}))))))
+            (response/failure (or (:error result-data) "Phase execution failed")
+                              {:data {:phase (:loop/phase state)
+                                      :artifacts (:loop/artifacts state)
+                                      :history (:loop/history state)}})))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

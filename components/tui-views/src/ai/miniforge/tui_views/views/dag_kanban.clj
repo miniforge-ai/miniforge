@@ -29,34 +29,48 @@
    assigned agent, and dependency status."
   (:require
    [ai.miniforge.tui-engine.interface.layout :as layout]
-   [ai.miniforge.tui-engine.interface.widget :as widget]))
+   [ai.miniforge.tui-engine.interface.widget :as widget]
+   [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Task grouping
 
-(defn- group-tasks-by-status
+(defn column-title
+  "Column title with item count."
+  [label cards]
+  (if (seq cards)
+    (str label " (" (count cards) ")")
+    label))
+
+(defn group-tasks-by-status
   "Group workflow tasks into kanban columns."
   [workflows]
   (let [all-wfs (or workflows [])
         blocked (filterv #(= :blocked (:status %)) all-wfs)
         pending (filterv #(= :pending (:status %)) all-wfs)
         running (filterv #(= :running (:status %)) all-wfs)
-        done (filterv #(#{:success :completed} (:status %)) all-wfs)
-        failed (filterv #(= :failed (:status %)) all-wfs)]
-    [{:title "BLOCKED"
-      :color :red
-      :cards (mapv (fn [wf] {:label (:name wf) :status :blocked}) blocked)}
-     {:title "PENDING"
-      :color :yellow
-      :cards (mapv (fn [wf] {:label (:name wf) :status :pending}) pending)}
-     {:title "RUNNING"
-      :color :cyan
-      :cards (mapv (fn [wf] {:label (:name wf) :status :running}) running)}
-     {:title "DONE"
-      :color :green
-      :cards (concat
-              (mapv (fn [wf] {:label (:name wf) :status :success}) done)
-              (mapv (fn [wf] {:label (:name wf) :status :failed}) failed))}]))
+        stale   (filterv #(= :stale (:status %)) all-wfs)
+        done    (filterv #(#{:success :completed} (:status %)) all-wfs)
+        failed  (filterv #(= :failed (:status %)) all-wfs)
+        done-cards (vec (concat
+                         (mapv (fn [wf] {:label (:name wf) :status :success}) done)
+                         (mapv (fn [wf] {:label (:name wf) :status :failed}) failed)
+                         (mapv (fn [wf] {:label (:name wf) :status :stale}) stale)))
+        blocked-cards (mapv (fn [wf] {:label (:name wf) :status :blocked}) blocked)
+        pending-cards (mapv (fn [wf] {:label (:name wf) :status :pending}) pending)
+        running-cards (mapv (fn [wf] {:label (:name wf) :status :running}) running)]
+    [{:title (column-title "BLOCKED" blocked-cards)
+      :color palette/status-fail
+      :cards blocked-cards}
+     {:title (column-title "PENDING" pending-cards)
+      :color palette/status-warning
+      :cards pending-cards}
+     {:title (column-title "RUNNING" running-cards)
+      :color palette/status-info
+      :cards running-cards}
+     {:title (column-title "DONE" done-cards)
+      :color palette/status-pass
+      :cards done-cards}]))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Rendering
@@ -71,7 +85,7 @@
       ;; Title bar
       (fn [[c r]]
         (layout/text [c r] " MINIFORGE │ DAG Kanban"
-                     {:fg :cyan :bold? true}))
+                     {:fg palette/status-info :bold? true}))
       ;; Content + footer
       (fn [[c r]]
         (layout/split-v [c r] (/ (- r 2.0) r)

@@ -29,7 +29,7 @@
 (def wf-id-2 (random-uuid))
 (def wf-id-3 (random-uuid))
 
-(defn- three-workflows []
+(defn three-workflows []
   (-> (util/fresh-model)
       (util/with-workflows
         [{:workflow-id wf-id-1 :name "deploy-api"}
@@ -77,7 +77,7 @@
                 mode/compute-search-results)]
       (is (= #{0 1} (:filtered-indices m)))))
 
-  (testing "Repo-manager search in browse mode filters browse candidates"
+  (testing "Repo-manager search in browse mode filters all browse repos"
     (let [m (-> (util/fresh-model)
                 (assoc :view :repo-manager
                        :repo-manager-source :browse
@@ -86,8 +86,8 @@
                        :mode :search
                        :command-buf "/new")
                 mode/compute-search-results)]
-      ;; browse candidates excludes acme/api because it's already in fleet
-      (is (= #{0} (:filtered-indices m))))))
+      ;; browse shows all repos; "new" matches acme/new-service at index 1
+      (is (= #{1} (:filtered-indices m))))))
 
 (deftest search-mode-escape-test
   (testing "Escape from search mode clears filtered-indices"
@@ -141,7 +141,7 @@
 ;; Detail view search — find-in-page
 ;; ---------------------------------------------------------------------------
 
-(defn- detail-model-with-output
+(defn detail-model-with-output
   "Create a model in workflow-detail with agent output text."
   [output-text]
   (let [wf-id (random-uuid)]

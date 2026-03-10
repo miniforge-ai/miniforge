@@ -16,8 +16,8 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-{:title "Finish YC MVP Demo Readiness"
- :description
+{:spec/title "Finish YC MVP Demo Readiness"
+ :spec/description
  "Finish the Miniforge MVP for a YC-quality demo as quickly as possible using
   governed autonomous execution. The target outcome is a deterministic 8-10 min
   demo that proves Miniforge can: ingest external PR work, run live workflow
@@ -28,7 +28,7 @@
   acceptance baseline. Prioritize reliability and determinism over broad
   refactors."
 
- :intent
+ :spec/intent
  {:type :feature
   :scope ["specs/informative/yc-mvp-demo-script.md"
           "bases/cli/src/ai/miniforge/cli"
@@ -42,7 +42,7 @@
           "tests/integration"
           "work"]}
 
- :constraints
+ :spec/constraints
  ["Optimize for fastest path to a stable MVP demo"
   "Favor additive, low-risk changes over large rewrites"
   "Keep existing command/API compatibility where possible"

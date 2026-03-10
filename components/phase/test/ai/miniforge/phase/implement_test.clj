@@ -30,7 +30,7 @@
    :code/language "clojure"
    :code/summary "No code generated"})
 
-(defn- create-base-context
+(defn create-base-context
   "Create minimal execution context for testing."
   []
   {:execution/id (random-uuid)
@@ -49,7 +49,7 @@
     (is (= [:syntax :lint] (:gates implement/default-config)))
     (is (map? (:budget implement/default-config)))
     (is (= 30000 (get-in implement/default-config [:budget :tokens])))
-    (is (= 5 (get-in implement/default-config [:budget :iterations])))
+    (is (= 8 (get-in implement/default-config [:budget :iterations])))
     (is (= 600 (get-in implement/default-config [:budget :time-seconds])))))
 
 (deftest phase-defaults-registration-test
@@ -198,7 +198,13 @@
         
         (is (= 1500 (get-in final-result [:phase :metrics :tokens]))
             "Token metrics should be recorded")
-        
+
+        (is (= (* 1500 0.000015) (get-in final-result [:phase :metrics :cost-usd]))
+            "Cost-usd should be estimated from token count")
+
+        (is (= (* 1500 0.000015) (get-in final-result [:execution/metrics :cost-usd]))
+            "Cost-usd should be merged into execution metrics")
+
         (is (= :implement (first (get-in final-result [:execution :phases-completed])))
             "Implement should be added to phases-completed")))))
 

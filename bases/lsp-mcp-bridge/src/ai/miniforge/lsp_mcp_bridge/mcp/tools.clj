@@ -115,14 +115,14 @@
      :properties {}
      :required []}}])
 
-(def ^:private diagnostics-wait-ms
+(def diagnostics-wait-ms
   "Time to wait for diagnostics to arrive via notification."
   2000)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Tool handlers
 
-(defn- format-result
+(defn format-result
   "Format an LSP result as MCP response. Checks for anomaly maps."
   [result]
   (if (response/anomaly-map? result)
@@ -130,7 +130,7 @@
     (mcp-proto/tool-call-result
      (json/generate-string (:result result) {:pretty true}))))
 
-(defn- ensure-and-call
+(defn ensure-and-call
   "Resolve LSP client for file, ensure document is open, and call the LSP method.
 
    Arguments:

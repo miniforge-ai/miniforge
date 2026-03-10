@@ -1,0 +1,147 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+{:spec/title "Wire Self-Repair Chain Into Workflow Execution"
+ :spec/description
+ "Connect the existing self-repair components (inner loop, agent repair,
+  workaround detector, error handlers) into the workflow phase execution
+  pipeline. Currently these components are implemented but disconnected:
+
+  1. Phase interceptors define :error handlers (error-implement, error-release,
+     etc.) with retry/redirect logic, but execution.clj never invokes them
+     on phase failure.
+  2. The workaround detector (self-healing/workaround_detector.clj) is loaded
+     but never triggered when phases fail — it should match error patterns
+     to known workarounds before propagating failure.
+  3. DAG sub-workflows (dag_orchestrator.clj task-sub-opts) don't forward
+     repair context, so sub-task failures can't self-repair.
+  4. The inner loop state machine (loop/inner.clj) runs within agents but
+     the outer generate→validate→repair cycle isn't connected to the
+     phase-level execution in workflow/execution.clj.
+
+  The goal is a connected chain:
+    phase fails → error handler retries (if budget allows) →
+    workaround detector matches known patterns →
+    self-healing applies fix → retry →
+    if exhausted, escalate cleanly with context"
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/workflow/src/ai/miniforge/workflow/execution.clj"
+          "components/workflow/src/ai/miniforge/workflow/runner.clj"
+          "components/workflow/src/ai/miniforge/workflow/dag_orchestrator.clj"
+          "components/self-healing/src/ai/miniforge/self_healing"
+          "components/loop/src/ai/miniforge/loop"
+          "components/phase/src/ai/miniforge/phase"]}
+
+ :spec/constraints
+ ["Do not change phase interceptor signatures — :enter/:leave/:error contract is stable"
+  "Preserve existing agent-level repair (specialized.clj cycle-agent-impl) unchanged"
+  "Keep backward compatibility — workflows without repair config must still work"
+  "Self-repair budget must be bounded (max retries per phase, max total across workflow)"
+  "DAG sub-workflow repair must not cause cascading retries across tasks"
+  "Add tests for each connection point — no silent regressions"
+  "Prefer additive changes over rewrites of existing components"]
+
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :plan/tasks
+ [{:task/id :invoke-phase-error-handlers
+   :task/description
+   "Wire phase interceptor :error handlers into workflow/execution.clj.
+
+    Currently execute-enter catches exceptions and records errors but never
+    calls the interceptor's :error function. The :error handler has retry
+    logic (e.g. error-implement sets :status :retrying when within budget).
+
+    Changes needed in execution.clj:
+    - In execute-enter's catch block, call (:error interceptor) before
+      falling through to the default error recording
+    - In execute-leave's catch block, same pattern
+    - Respect the :retrying status returned by error handlers — if the
+      phase wants to retry, determine-next-index already handles it
+      (returns current-index for :retrying status)
+
+    Add tests verifying:
+    - Phase error handler is called on exception
+    - Retry budget is respected (retries N times then fails)
+    - on-fail redirect works when budget exhausted"
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :trigger-workaround-detector-on-phase-failure
+   :task/description
+   "Call the workaround detector when a phase fails, before propagating
+    the failure up the chain.
+
+    The workaround detector (self_healing/workaround_detector.clj) has
+    pattern matching for known error types. It should be called:
+    - After a phase's :error handler has been invoked
+    - Before the workflow records the phase as :failed
+    - Only if the error handler didn't already resolve the issue
+
+    Integration point: workflow/runner.clj between-phase boundary or
+    execution.clj phase-result processing.
+
+    Add tests verifying:
+    - Known error pattern triggers workaround
+    - Unknown error pattern passes through unchanged
+    - Workaround application is logged/evented"
+   :task/type :implement
+   :task/dependencies [:invoke-phase-error-handlers]}
+
+  {:task/id :forward-repair-context-to-dag-sub-workflows
+   :task/description
+   "Update dag_orchestrator.clj task-sub-opts to forward repair-relevant
+    context to sub-workflows so they can self-repair.
+
+    Currently task-sub-opts forwards: llm-backend, event-stream, executor,
+    environment-id, sandbox-workdir, worktree-path. Missing: any repair
+    config, workaround registry, error budget.
+
+    Add to forwarded context:
+    - :repair-budget (subset of parent budget for sub-tasks)
+    - :workaround-registry (if present in parent context)
+    - :self-healing-enabled? flag
+
+    Add tests verifying:
+    - Repair context is forwarded when present
+    - Missing repair context doesn't break sub-workflow execution
+    - Sub-task repair budget is bounded independently of parent"
+   :task/type :implement
+   :task/dependencies [:invoke-phase-error-handlers]}
+
+  {:task/id :add-self-repair-chain-integration-tests
+   :task/description
+   "Add end-to-end tests for the full self-repair chain:
+    phase fails → error handler → workaround detector → retry → succeed
+    or exhaust budget → clean failure with context.
+
+    Test scenarios:
+    - Transient error: phase fails once, error handler retries, succeeds
+    - Known workaround: phase fails, detector matches, applies fix, retries
+    - Budget exhausted: phase fails N times, each retry fails, clean failure
+    - DAG sub-task: sub-workflow phase fails, repairs within sub-budget
+    - No repair config: workflow runs without repair, fails normally (backward compat)
+
+    These should use with-redefs to mock agent/phase behavior, not real
+    LLM calls."
+   :task/type :test
+   :task/dependencies [:trigger-workaround-detector-on-phase-failure
+                       :forward-repair-context-to-dag-sub-workflows]}]}

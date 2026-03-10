@@ -25,20 +25,28 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Syntax checking
 
-(defn- parse-clojure
-  "Attempt to parse Clojure code.
+(defn parse-clojure
+  "Parse Clojure code using read-string for AST validation.
+
+   Reads all top-level forms (not just the first one).
 
    Returns:
-     {:valid? bool :error string?}"
+     {:valid? bool :error string? :form-count int?}"
   [code-str]
   (try
-    (let [_ (read-string code-str)]
-      {:valid? true})
+    (let [rdr (java.io.PushbackReader. (java.io.StringReader. code-str))
+          eof (Object.)
+          forms (loop [forms []]
+                  (let [form (read {:eof eof} rdr)]
+                    (if (identical? form eof)
+                      forms
+                      (recur (conj forms form)))))]
+      {:valid? true :form-count (count forms)})
     (catch Exception ex
       {:valid? false
        :error (ex-message ex)})))
 
-(defn- check-syntax
+(defn check-syntax
   "Check syntax of artifact content.
 
    Arguments:
@@ -60,7 +68,7 @@
                  :message (:error result)
                  :location nil}]})))
 
-(defn- repair-syntax
+(defn repair-syntax
   "Attempt to repair syntax errors.
 
    Currently returns failure - syntax repair requires LLM."

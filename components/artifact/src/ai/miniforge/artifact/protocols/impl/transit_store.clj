@@ -111,7 +111,7 @@
 ;------------------------------------------------------------------------------ Layer 4
 ;; Protocol implementations
 
-(defn- log-artifact-saved
+(defn log-artifact-saved
   "Log artifact save operation."
   [logger artifact-id artifact]
   (when logger
@@ -120,7 +120,7 @@
                        :artifact-type (:artifact/type artifact)
                        :storage :transit}})))
 
-(defn- log-artifact-save-failed
+(defn log-artifact-save-failed
   "Log artifact save failure."
   [logger artifact-id e]
   (when logger
@@ -164,7 +164,7 @@
                              :source :disk}}))
         artifact)))
 
-(defn- filter-by-criteria
+(defn filter-by-criteria
   "Filter artifacts by criteria."
   [index criteria]
   (keep (fn [[id metadata]]
@@ -186,7 +186,7 @@
           artifacts (keep #(p/load-artifact record %) matching-ids)]
       (vec artifacts))))
 
-(defn- update-cache-links
+(defn update-cache-links
   "Update cached artifacts with new links."
   [cache parent-id child-id]
   (when-let [parent (get @cache parent-id)]
@@ -194,7 +194,7 @@
   (when-let [child (get @cache child-id)]
     (swap! cache assoc child-id (core/add-parent child parent-id))))
 
-(defn- persist-linked-artifacts
+(defn persist-linked-artifacts
   "Persist both linked artifacts to disk."
   [record artifacts-dir parent-id child-id]
   (future

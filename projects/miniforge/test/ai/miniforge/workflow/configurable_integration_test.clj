@@ -25,7 +25,7 @@
    [ai.miniforge.workflow.state :as state]
    [ai.miniforge.agent.interface :as agent]))
 
-(defn- with-mocked-test-runner
+(defn with-mocked-test-runner
   "Run body-fn with run-tests! and write-test-files! mocked to prevent recursive bb test."
   [body-fn]
   (let [write-var (resolve 'ai.miniforge.phase.verify/write-test-files!)

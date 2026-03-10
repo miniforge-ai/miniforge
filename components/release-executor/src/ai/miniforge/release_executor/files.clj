@@ -3,13 +3,14 @@
    Handles writing, deleting, and staging code artifact files."
   (:require
    [ai.miniforge.release-executor.git :as git]
+   [ai.miniforge.release-executor.result :as result]
    [ai.miniforge.logging.interface :as log]
    [babashka.fs :as fs]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; File operation helpers
 
-(defn- ensure-parent-dir!
+(defn ensure-parent-dir!
   "Create parent directories for a file path if they don't exist."
   [file-path]
   (let [parent (fs/parent file-path)]
@@ -17,14 +18,14 @@
       (fs/create-dirs parent))
     parent))
 
-(defn- write-file!
+(defn write-file!
   "Write content to a file, creating parent directories as needed."
   [file-path content]
   (ensure-parent-dir! file-path)
   (spit (str file-path) content)
   file-path)
 
-(defn- delete-file!
+(defn delete-file!
   "Delete a file if it exists. Returns true if deleted, false if file didn't exist."
   [file-path]
   (if (fs/exists? file-path)
@@ -99,7 +100,7 @@
 
     (doseq [file-spec all-files]
       (let [result (process-file-action worktree-path file-spec logger)]
-        (if (:success? result)
+        (if (result/succeeded? result)
           (case (:action result)
             :create (swap! results update :created inc)
             :modify (swap! results update :modified inc)
@@ -119,7 +120,7 @@
          :metrics {:files-written created :files-modified modified :files-deleted deleted}}
         (let [written-paths (map :path all-files)
               stage-result (git/stage-files! worktree-path written-paths)]
-          (if (:success? stage-result)
+          (if (result/succeeded? stage-result)
             {:success? true
              :metrics {:files-written created :files-modified modified :files-deleted deleted
                        :total-operations total-operations}}

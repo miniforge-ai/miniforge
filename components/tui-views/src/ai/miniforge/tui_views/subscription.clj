@@ -29,43 +29,110 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event -> TUI message translation
 
+(defn workflow-id
+  [event]
+  (or (:workflow/id event) (:workflow-id event)))
+
+(defn workflow-phase
+  [event]
+  (or (:workflow/phase event) (:phase event)))
+
+(defn agent-id
+  [event]
+  (or (:agent/id event) (:agent event)))
+
+(defn status-type
+  [event]
+  (or (:status/type event) (:status-type event)))
+
+(defn chunk-delta
+  [event]
+  (or (:chunk/delta event) (:delta event)))
+
+(defn chunk-done?
+  [event]
+  (boolean (or (:chunk/done? event) (:done? event))))
+
+(defn gate-id
+  [event]
+  (or (:gate/id event) (:gate event)))
+
 (defn translate-event
   "Translate a single event-stream event to a TUI message vector.
    Returns nil for events that should be ignored."
   [event]
   (case (:event/type event)
     :workflow/started
-    (msg/workflow-added (:workflow/id event)
-                        (get-in event [:workflow/spec :name])
-                        (:workflow/spec event))
+    (msg/workflow-added (workflow-id event)
+                        (or (get-in event [:workflow/spec :name])
+                            (get-in event [:workflow-spec :name]))
+                        (or (:workflow/spec event) (:workflow-spec event)))
 
     :workflow/phase-started
-    (msg/phase-changed (:workflow/id event) (:workflow/phase event))
+    (msg/phase-changed (workflow-id event) (workflow-phase event))
 
     :workflow/phase-completed
-    (msg/phase-done (:workflow/id event)
-                    (:workflow/phase event)
-                    (get-in event [:result :outcome]))
+    (msg/phase-done (workflow-id event)
+                    (workflow-phase event)
+                    (or (:phase/outcome event)
+                        (get-in event [:result :outcome]))
+                    (cond-> {}
+                      (:phase/artifacts event) (assoc :artifacts (:phase/artifacts event))
+                      (:phase/duration-ms event) (assoc :duration-ms (:phase/duration-ms event))
+                      (:phase/error event) (assoc :error (:phase/error event))
+                      (:phase/tokens event) (assoc :tokens (:phase/tokens event))
+                      (:phase/cost-usd event) (assoc :cost-usd (:phase/cost-usd event))))
+
+    :agent/started
+    (msg/agent-started (workflow-id event) (agent-id event)
+                       (:agent/context event))
+
+    :agent/completed
+    (msg/agent-completed (workflow-id event) (agent-id event)
+                         (:agent/result event))
+
+    :agent/failed
+    (msg/agent-failed (workflow-id event) (agent-id event)
+                      (:agent/error event))
 
     :agent/status
-    (msg/agent-status (:workflow/id event) (:agent/id event)
-                      (:status-type event) (:message event))
+    (msg/agent-status (workflow-id event) (agent-id event)
+                      (status-type event) (:message event))
 
     :agent/chunk
-    (msg/agent-output (:workflow/id event) (:agent/id event)
-                      (:delta event) (:done? event))
+    (msg/agent-output (workflow-id event) (agent-id event)
+                      (chunk-delta event) (chunk-done? event))
 
     :workflow/completed
-    (msg/workflow-done (:workflow/id event) (:workflow/status event))
+    (msg/workflow-done (workflow-id event)
+                       (or (:workflow/status event) (:status event))
+                       (cond-> {}
+                         (:workflow/duration-ms event) (assoc :duration-ms (:workflow/duration-ms event))
+                         (:workflow/evidence-bundle-id event) (assoc :evidence-bundle-id (:workflow/evidence-bundle-id event))
+                         (:workflow/tokens event) (assoc :tokens (:workflow/tokens event))
+                         (:workflow/cost-usd event) (assoc :cost-usd (:workflow/cost-usd event))
+                         (:workflow/pr-info event) (assoc :pr-info (:workflow/pr-info event))))
 
     :workflow/failed
-    (msg/workflow-failed (:workflow/id event) (:error event))
+    (msg/workflow-failed (workflow-id event)
+                         (or (:workflow/error-details event)
+                             (:workflow/failure-reason event)
+                             (:error event)))
+
+    :gate/started
+    (msg/gate-started (workflow-id event) (gate-id event))
 
     :gate/passed
-    (msg/gate-result (:workflow/id event) (:gate event) true)
+    (msg/gate-result (workflow-id event) (gate-id event) true)
 
     :gate/failed
-    (msg/gate-result (:workflow/id event) (:gate event) false)
+    (msg/gate-result (workflow-id event) (gate-id event) false)
+
+    :tool/invoked
+    (msg/tool-invoked (workflow-id event) (agent-id event) (:tool/id event))
+
+    :tool/completed
+    (msg/tool-completed (workflow-id event) (agent-id event) (:tool/id event))
 
     ;; Chain lifecycle events
     :chain/started
@@ -97,7 +164,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Throttled subscription
 
-(defn- create-chunk-aggregator
+(defn create-chunk-aggregator
   "Create a throttled aggregator for agent/chunk events.
    Accumulates deltas and flushes at configurable intervals."
   [dispatch-fn flush-interval-ms]
@@ -125,13 +192,13 @@
               (reset! running? false)
               (.interrupt thread))}))
 
-(defn- buffer-chunk!
+(defn buffer-chunk!
   "Buffer an agent chunk for throttled delivery."
   [aggregator workflow-id agent-id delta]
   (swap! (:buffer aggregator)
          update workflow-id
          (fn [existing]
-           {:delta (str (:delta existing) delta)
+           {:delta (str (:delta existing) (or delta ""))
             :agent agent-id})))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -154,9 +221,9 @@
                      (if (= :agent/chunk (:event/type event))
                        ;; Throttle chunk events
                        (buffer-chunk! aggregator
-                                      (:workflow/id event)
-                                      (:agent/id event)
-                                      (:delta event))
+                                      (workflow-id event)
+                                      (agent-id event)
+                                      (chunk-delta event))
                        ;; All other events dispatch immediately
                        (when-let [msg (translate-event event)]
                          (dispatch-fn msg)))))

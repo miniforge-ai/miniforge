@@ -27,37 +27,13 @@
             [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Event stream helpers (optional dependency)
-
-(defn- emit-phase-started!
-  "Emit phase-started event if event-stream is available in context."
-  [ctx phase]
-  (when-let [event-stream (:event-stream ctx)]
-    (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-      (when-let [phase-started (requiring-resolve 'ai.miniforge.event-stream.interface/phase-started)]
-        (let [workflow-id (:execution/id ctx)]
-          (publish! event-stream (phase-started event-stream workflow-id phase)))))))
-
-(defn- emit-phase-completed!
-  "Emit phase-completed event if event-stream is available in context."
-  [ctx phase _result]
-  (when-let [event-stream (:event-stream ctx)]
-    (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-      (when-let [phase-completed (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
-        (let [workflow-id (:execution/id ctx)
-              outcome (if (= :completed (get-in ctx [:phase :status])) :success :failure)
-              duration-ms (get-in ctx [:phase :duration-ms])]
-          (publish! event-stream (phase-completed event-stream workflow-id phase
-                                                   {:outcome outcome :duration-ms duration-ms})))))))
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
 
 (def default-config
   {:agent :reviewer
    :gates [:review-approved :quality-check]
    :budget {:tokens 20000
-            :iterations 2
+            :iterations 4
             :time-seconds 180}
    ;; Code review needs balanced capabilities - hint at Sonnet
    :model-hint :sonnet-4.5})
@@ -68,13 +44,11 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
-(defn- enter-review
+(defn enter-review
   "Execute review phase.
 
    Runs code review, quality checks, and policy validation."
   [ctx]
-  ;; Emit phase started event
-  (emit-phase-started! ctx :review)
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
@@ -122,21 +96,35 @@
         (assoc-in [:phase :status] :running)
         (assoc-in [:phase :result] result))))
 
-(defn- leave-review
+(defn leave-review
   "Post-processing for review phase.
 
-   Records review metrics: issues found, approval status."
+   Records review metrics: issues found, approval status.
+   When review decision is :changes-requested and within iteration budget,
+   sets status to :failed with :redirect-to :implement so the execution engine
+   jumps back to implement with the review feedback attached."
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
-        metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
+        review-decision (get-in result [:output :review/decision])
+        metrics (-> (get result :metrics {:tokens 0 :duration-ms duration-ms})
+                    (assoc :duration-ms duration-ms))
         iterations (get-in ctx [:phase :iterations] 1)
+        max-iterations (get-in ctx [:phase :budget :iterations]
+                               (get-in default-config [:budget :iterations]))
+        ;; changes-requested always sets :failed — the redirect-to :implement
+        ;; tells the execution engine to jump back (not stay at review).
+        ;; Within budget: redirect to implement for repair.
+        ;; Over budget: fail without redirect (terminal failure).
+        phase-status (if (= :changes-requested review-decision)
+                       :failed
+                       :completed)
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
-                        (assoc-in [:phase :status] :completed)
+                        (assoc-in [:phase :status] phase-status)
                         (assoc-in [:phase :metrics] metrics)
                         (assoc-in [:metrics :review :duration-ms] duration-ms)
                         (assoc-in [:metrics :review :repair-cycles] (dec iterations))
@@ -144,11 +132,18 @@
                         ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
-    ;; Emit phase completed event
-    (emit-phase-completed! updated-ctx :review result)
-    updated-ctx))
+    ;; Handle changes-requested: redirect to implement with review feedback
+    (if (and (= :changes-requested review-decision)
+             (< iterations max-iterations))
+      (-> updated-ctx
+          (update-in [:phase :iterations] (fnil inc 1))
+          (assoc-in [:phase :review-feedback]
+                    (or (get-in result [:output :review/feedback])
+                        (get-in result [:output :review/issues])))
+          (assoc-in [:phase :redirect-to] :implement))
+      updated-ctx)))
 
-(defn- error-review
+(defn error-review
   "Handle review phase errors.
 
    On rejection, can redirect to :implement if on-fail specified."

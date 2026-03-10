@@ -36,12 +36,12 @@
 ;; Helper Functions
 ;; ============================================================================
 
-(defn- docker-cmd
+(defn docker-cmd
   "Build docker command with optional custom path."
   [docker-path & args]
   (apply vector (or docker-path "docker") args))
 
-(defn- run-docker
+(defn run-docker
   "Execute a docker command and return the result."
   [docker-path & args]
   (try
@@ -49,12 +49,48 @@
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out ""})))
 
-(defn- build-env-args
+(defn build-env-args
   "Build -e arguments for environment variables."
   [env-map]
   (mapcat (fn [[k v]] ["-e" (str (name k) "=" v)]) env-map))
 
-(defn- build-resource-args
+(def secret-pattern
+  "Regex matching env var names that carry sensitive values."
+  #"(?i)(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)")
+
+(defn filter-env-by-trust
+  "Return env-map with sensitive entries removed for :untrusted trust level.
+
+   For :trusted and :privileged trust levels the map is returned unchanged.
+   A var is considered sensitive when its name contains any of:
+   KEY, SECRET, TOKEN, PASSWORD, CREDENTIAL (case-insensitive)."
+  [env-map trust-level]
+  (if (= trust-level :untrusted)
+    (into {} (remove (fn [[k _]] (re-find secret-pattern (name k))) env-map))
+    env-map))
+
+(defn build-mount-args
+  "Build -v mount arguments from an execution plan map.
+
+   Trust-level semantics:
+   - :untrusted  — all mounts are forced read-only regardless of :read-only?
+   - :trusted    — mounts respect the :read-only? flag on each entry
+   - :privileged — same as :trusted (additional host paths are already listed
+                   in the plan's :mounts vector by the caller)
+
+   Each mount entry must satisfy ai.miniforge.dag-executor.execution-plan/MountSchema:
+   {:host-path string :container-path string :read-only? boolean}"
+  [execution-plan]
+  (let [trust-level (get execution-plan :trust-level :untrusted)
+        mounts      (get execution-plan :mounts [])]
+    (mapcat (fn [{:keys [host-path container-path read-only?]}]
+              (let [ro? (or (= trust-level :untrusted) read-only?)
+                    mount-str (str host-path ":" container-path
+                                   (when ro? ":ro"))]
+                ["-v" mount-str]))
+            mounts)))
+
+(defn build-resource-args
   "Build resource limit arguments.
    Merges provided resources with defaults."
   [resources]
@@ -65,6 +101,36 @@
 
       (:cpu merged)
       (into ["--cpus" (str (:cpu merged))]))))
+
+(defn build-security-args
+  "Build security-hardening docker args from an optional execution plan map.
+
+   Applies a fixed set of hardening flags to every container plus
+   network restrictions and memory limits derived from the plan:
+
+   - :memory-limit-mb  RSS ceiling in mebibytes  (overrides default-resources)
+   - :time-limit-ms    Not enforced at docker level (handled by executor logic)
+   - :network-profile  :none/:restricted -> --network=none
+                       :standard/:full   -> no extra network arg
+   - :trust-level      Not used here; enforced at scheduling layer
+
+   Always added:
+   - --security-opt=no-new-privileges
+   - --cap-drop=ALL
+   - --read-only
+   - --user 1000:1000"
+  [execution-plan]
+  (let [{:keys [memory-limit-mb network-profile]} execution-plan
+        base ["--security-opt=no-new-privileges"
+              "--cap-drop=ALL"
+              "--read-only"
+              "--user" "1000:1000"]]
+    (cond-> base
+      (some? memory-limit-mb)
+      (into ["--memory" (str memory-limit-mb "m")])
+
+      (#{:none :restricted} network-profile)
+      (into ["--network=none"]))))
 
 ;; ============================================================================
 ;; Docker Operations
@@ -83,18 +149,36 @@
 (defn create-container
   "Create and start a Docker container.
 
+   execution-plan (optional) is a map conforming to
+   ai.miniforge.dag-executor.execution-plan/ExecutionPlanSchema.  When
+   provided its :memory-limit-mb and :network-profile values take
+   precedence over the legacy `network` argument for those concerns.
+   All containers receive the standard security-hardening flags via
+   `build-security-args`.
+
    Returns {:container-id string :container-name string} on success."
-  [docker-path container-name image workdir env-map resources network]
-  (let [env-args (build-env-args env-map)
+  [docker-path container-name image workdir env-map resources network
+   & {:keys [execution-plan]}]
+  (let [env-args      (build-env-args env-map)
         resource-args (build-resource-args resources)
-        cmd-args (concat ["run" "-d"
-                          "--name" container-name
-                          "-w" workdir]
-                         (when network ["--network" network])
-                         env-args
-                         resource-args
-                         [image "sleep" "infinity"])
-        result (apply run-docker docker-path cmd-args)]
+        security-args (build-security-args execution-plan)
+        mount-args    (when (some? execution-plan)
+                        (build-mount-args execution-plan))
+        ;; When an execution plan is present its network-profile drives the
+        ;; network arg; fall back to the plain `network` string otherwise.
+        network-args  (if (some? execution-plan)
+                        [] ; network handled inside build-security-args
+                        (when network ["--network" network]))
+        cmd-args      (concat ["run" "-d"
+                               "--name" container-name
+                               "-w" workdir]
+                              network-args
+                              security-args
+                              mount-args
+                              env-args
+                              resource-args
+                              [image "sleep" "infinity"])
+        result        (apply run-docker docker-path cmd-args)]
     (if (zero? (:exit result))
       (result/ok {:container-id (str/trim (:out result))
                   :container-name container-name})
@@ -182,7 +266,7 @@
   (let [result (run-docker docker-path "image" "inspect" image)]
     (zero? (:exit result))))
 
-(defn- find-dockerfile-path
+(defn find-dockerfile-path
   "Find the Dockerfile resource on the classpath or filesystem.
    Returns absolute path to the Dockerfile."
   [resource-path]

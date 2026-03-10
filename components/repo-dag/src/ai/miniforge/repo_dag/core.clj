@@ -13,7 +13,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure functions for DAG operations
 
-(defn- validate-schema
+(defn validate-schema
   "Validate a value against a schema, returning the value or throwing."
   [schema-def value]
   (if (m/validate schema-def value)
@@ -58,12 +58,12 @@
               description (assoc :dag/description description))]
     (validate-schema schema/RepoDag dag)))
 
-(defn- find-repo-by-name
+(defn find-repo-by-name
   "Find a repo node by name in the DAG."
   [dag repo-name]
   (some #(when (= repo-name (:repo/name %)) %) (:dag/repos dag)))
 
-(defn- find-edge
+(defn find-edge
   "Find an edge by from/to pair."
   [dag from-repo to-repo]
   (some #(when (and (= from-repo (:edge/from %))
@@ -71,7 +71,7 @@
            %)
         (:dag/edges dag)))
 
-(defn- repo-names
+(defn repo-names
   "Get set of all repo names in the DAG."
   [dag]
   (set (map :repo/name (:dag/repos dag))))
@@ -131,7 +131,7 @@
 ;------------------------------------------------------------------------------ Layer 0.6
 ;; Graph traversal functions
 
-(defn- build-adjacency
+(defn build-adjacency
   "Build adjacency list from DAG edges."
   [dag]
   (reduce (fn [acc edge]
@@ -139,7 +139,7 @@
           {}
           (:dag/edges dag)))
 
-(defn- build-reverse-adjacency
+(defn build-reverse-adjacency
   "Build reverse adjacency list (for finding upstream repos)."
   [dag]
   (reduce (fn [acc edge]
