@@ -4,6 +4,7 @@
   (:require
    [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.budget :as budget]
+   [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.response.interface :as response]
@@ -263,16 +264,15 @@
 
    Example:
      (create-implementer)
-     (create-implementer {:config {:model \"claude-sonnet-4\" :temperature 0.2}})"
+     (create-implementer {:config {:model \"claude-sonnet-4-6\" :temperature 0.2}})"
   [& [opts]]
   (let [logger (or (:logger opts)
                    (log/create-logger {:min-level :info :output (fn [_])}))
-        config (budget/apply-default-budget
-                :implementer
-                (merge {:model "claude-sonnet-4"
-                        :temperature 0.2
-                        :max-tokens 8000}
-                       (:config opts)))]
+        config (->> (merge {:temperature 0.2
+                            :max-tokens 8000}
+                           (:config opts))
+                    (model/apply-default-model :implementer)
+                    (budget/apply-default-budget :implementer))]
     (specialized/create-base-agent
      {:role :implementer
       :system-prompt @implementer-system-prompt

@@ -10,8 +10,8 @@
       (is (= :anthropic (:provider opus)))
       (is (= :exceptional (get-in opus [:capabilities :reasoning]))))
 
-    (let [sonnet (registry/get-model :sonnet-4.5)]
-      (is (= "claude-sonnet-4-5-20250929" (:model-id sonnet)))
+    (let [sonnet (registry/get-model :sonnet-4.6)]
+      (is (= "claude-sonnet-4-6" (:model-id sonnet)))
       (is (= :exceptional (get-in sonnet [:capabilities :code-generation]))))
 
     (let [haiku (registry/get-model :haiku-4.5)]
@@ -28,13 +28,13 @@
     (let [excellent (registry/get-models-by-capability :reasoning :excellent)]
       (is (seq excellent))
       (is (some #{:opus-4.6} excellent))
-      (is (some #{:sonnet-4.5} excellent))
+      (is (some #{:sonnet-4.6} excellent))
       (is (some #{:llama-3.3-70b} excellent))))
 
   (testing "Query by code-generation capability"
     (let [exceptional (registry/get-models-by-capability :code-generation :exceptional)]
       (is (seq exceptional))
-      (is (some #{:sonnet-4.5} exceptional))
+      (is (some #{:sonnet-4.6} exceptional))
       (is (some #{:gpt-5.3-codex} exceptional))))
 
   (testing "Query by speed capability"
@@ -50,7 +50,7 @@
   (testing "Query by code-implementation use-case"
     (let [models (registry/get-models-by-use-case :code-implementation)]
       (is (seq models))
-      (is (some #{:sonnet-4.5} models))
+      (is (some #{:sonnet-4.6} models))
       (is (some #{:gpt-5.2-codex} models))))
 
   (testing "Query by workflow-planning use-case"
@@ -68,7 +68,7 @@
     (let [models (registry/get-models-by-provider :anthropic)]
       (is (seq models))
       (is (some #{:opus-4.6} models))
-      (is (some #{:sonnet-4.5} models))
+      (is (some #{:sonnet-4.6} models))
       (is (some #{:haiku-4.5} models))))
 
   (testing "Get Google models"
@@ -93,12 +93,12 @@
       (is (some #{:codellama-34b} models))
       ;; Should not include cloud models
       (is (not (some #{:opus-4.6} models)))
-      (is (not (some #{:sonnet-4.5} models))))))
+      (is (not (some #{:sonnet-4.6} models))))))
 
 (deftest test-supports-large-context
   (testing "Check large context support"
     (is (registry/supports-large-context? :opus-4.6))
-    (is (registry/supports-large-context? :sonnet-4.5))
+    (is (registry/supports-large-context? :sonnet-4.6))
     (is (registry/supports-large-context? :gemini-pro-2.0))
     (is (registry/supports-large-context? :gemini-2.0-flash))
     ;; llama-3.3-70b has 128k context, below the 200k default threshold
@@ -119,7 +119,7 @@
   (testing "Recommend models for execution-focused tasks"
     (let [rec (registry/recommend-models-for-task-type :execution-focused)]
       (is (seq (:tier-1 rec)))
-      (is (some #{:sonnet-4.5} (:tier-1 rec)))
+      (is (some #{:sonnet-4.6} (:tier-1 rec)))
       (is (:rationale rec))))
 
   (testing "Recommend models for simple-validation tasks"
@@ -137,13 +137,13 @@
 (deftest test-get-primary-recommendation
   (testing "Get primary recommendation"
     (is (= :opus-4.6 (registry/get-primary-recommendation :thinking-heavy)))
-    (is (= :sonnet-4.5 (registry/get-primary-recommendation :execution-focused)))
+    (is (= :sonnet-4.6 (registry/get-primary-recommendation :execution-focused)))
     (is (= :haiku-4.5 (registry/get-primary-recommendation :simple-validation)))
     (is (= :gemini-pro-2.0 (registry/get-primary-recommendation :large-context)))))
 
 (deftest test-model-registry-completeness
-  (testing "All 15 models are present"
-    (is (= 15 (count registry/model-registry))))
+  (testing "All 16 models are present"
+    (is (= 16 (count registry/model-registry))))
 
   (testing "All models have required fields"
     (doseq [[model-key model-data] registry/model-registry]

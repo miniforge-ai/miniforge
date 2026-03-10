@@ -50,11 +50,11 @@
 
 (deftest apply-default-budget-test
   (testing "adds the canonical role budget when config does not provide one"
-    (is (= {:model "claude-sonnet-4"
+    (is (= {:model "claude-sonnet-4-6"
             :budget {:tokens 40000 :cost-usd 2.0}}
            (budget/apply-default-budget
             :tester
-            {:model "claude-sonnet-4"}))))
+            {:model "claude-sonnet-4-6"}))))
 
   (testing "preserves explicit config budget"
     (is (= {:budget {:tokens 10 :cost-usd 0.1}}

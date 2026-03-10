@@ -48,6 +48,35 @@
       :research-synthesis
       :strategic-decisions}}
 
+   :sonnet-4.6
+   {:model-id "claude-sonnet-4-6"
+    :provider :anthropic
+    :backend :claude
+    :family :claude
+    :tier :workhorse
+    :capabilities
+    {:reasoning :excellent
+     :code-generation :exceptional
+     :speed :balanced
+     :cost :moderate
+     :context-window 200000
+     :output-tokens 16000
+     :streaming true}
+    :best-for
+    ["Code implementation"
+     "File editing and refactoring"
+     "Test writing"
+     "PR review and comments"
+     "Standard development tasks"
+     "Documentation generation"]
+    :use-cases
+    #{:code-implementation
+      :file-editing
+      :test-generation
+      :code-review
+      :documentation
+      :standard-tasks}}
+
    :sonnet-4.5
    {:model-id "claude-sonnet-4-5-20250929"
     :provider :anthropic
@@ -424,7 +453,7 @@
 (defn get-models-by-capability
   "Get models meeting or exceeding a capability level.
    Example: (get-models-by-capability :reasoning :excellent)
-   Returns: [:opus-4.6 :sonnet-4.5 :gpt-5.3-codex ...]"
+   Returns: [:opus-4.6 :sonnet-4.6 :gpt-5.3-codex ...]"
   [capability min-level]
   (let [level-idx (.indexOf capability-levels min-level)]
     (when (>= level-idx 0)
@@ -456,7 +485,7 @@
 (defn get-models-by-use-case
   "Get models that support a specific use-case.
    Example: (get-models-by-use-case :code-implementation)
-   Returns: [:sonnet-4.5 :gpt-5.2-codex ...]"
+   Returns: [:sonnet-4.6 :gpt-5.2-codex ...]"
   [use-case]
   (->> model-registry
        (filter (fn [[_k v]]
@@ -494,25 +523,25 @@
   "Recommended models for each task type, organized by tier."
   {:thinking-heavy
    {:tier-1 [:opus-4.6 :gpt-5.3-codex :gemini-2.0-flash-thinking-exp]
-    :tier-2 [:sonnet-4.5 :gpt-5.2-codex :gemini-pro-2.0]
+    :tier-2 [:sonnet-4.6 :gpt-5.2-codex :gemini-pro-2.0]
     :tier-3-local [:llama-3.3-70b :glm-4-plus]
     :rationale "Exceptional reasoning needed for architecture decisions"}
 
    :execution-focused
-   {:tier-1 [:sonnet-4.5 :gpt-5.2-codex :gpt-5.3-codex]
+   {:tier-1 [:sonnet-4.6 :gpt-5.2-codex :gpt-5.3-codex]
     :tier-2 [:gpt-5.1-codex-max :gemini-2.0-flash :gemini-pro-2.0]
     :tier-3-local [:qwen-2.5-coder-32b :deepseek-coder-33b :codellama-34b]
     :rationale "Balance of code capability and cost"}
 
    :simple-validation
    {:tier-1 [:haiku-4.5 :gemini-2.0-flash :gpt-5.1-codex-max]
-    :tier-2 [:sonnet-4.5 :gpt-5.2]
+    :tier-2 [:sonnet-4.6 :gpt-5.2]
     :tier-3-local [:codellama-34b :qwen-2.5-coder-32b]
     :rationale "Speed and cost efficiency for simple tasks"}
 
    :large-context
    {:tier-1 [:gemini-pro-2.0 :gemini-2.0-flash :opus-4.6]
-    :tier-2 [:sonnet-4.5 :gpt-5.3-codex :llama-3.3-70b]
+    :tier-2 [:sonnet-4.6 :gpt-5.3-codex :llama-3.3-70b]
     :rationale "Need 1M+ token context windows"}
 
    :privacy-sensitive
@@ -523,7 +552,7 @@
    :cost-optimized
    {:tier-1-free [:codellama-34b :qwen-2.5-coder-32b :deepseek-coder-33b]
     :tier-2-cheap [:haiku-4.5 :gemini-2.0-flash]
-    :tier-3-moderate [:sonnet-4.5 :gpt-5.2]
+    :tier-3-moderate [:sonnet-4.6 :gpt-5.2]
     :rationale "Minimize cost while maintaining quality"}})
 
 (defn recommend-models-for-task-type

@@ -6,6 +6,7 @@
 
    Agents are pure functions: (context, task) -> (artifacts, decisions, signals)"
   (:require
+   [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.protocol :as protocol]
    [ai.miniforge.agent.memory :as memory]
    [ai.miniforge.agent.task-classifier :as classifier]
@@ -26,52 +27,52 @@
   "Default configurations for each agent role.
    Temperature ranges: 0.0 (deterministic) to 1.0 (creative)
    Tokens: appropriate context window for task type."
-  {:planner     {:model "claude-sonnet-4"
+  {:planner     {:model (model/default-model-for-role :planner)
                  :temperature 0.7
                  :max-tokens 16000
                  :budget {:tokens 100000 :cost-usd 5.0}}
 
-   :architect   {:model "claude-sonnet-4"
+   :architect   {:model (model/default-model-for-role :architect)
                  :temperature 0.5
                  :max-tokens 16000
                  :budget {:tokens 80000 :cost-usd 4.0}}
 
-   :implementer {:model "claude-sonnet-4"
+   :implementer {:model (model/default-model-for-role :implementer)
                  :temperature 0.3
                  :max-tokens 8000
                  :budget {:tokens 50000 :cost-usd 2.5}}
 
-   :tester      {:model "claude-sonnet-4"
+   :tester      {:model (model/default-model-for-role :tester)
                  :temperature 0.2
                  :max-tokens 8000
                  :budget {:tokens 40000 :cost-usd 2.0}}
 
-   :reviewer    {:model "claude-sonnet-4"
+   :reviewer    {:model (model/default-model-for-role :reviewer)
                  :temperature 0.4
                  :max-tokens 12000
                  :budget {:tokens 60000 :cost-usd 3.0}}
 
-   :sre         {:model "claude-sonnet-4"
+   :sre         {:model (model/default-model-for-role :sre)
                  :temperature 0.2
                  :max-tokens 8000
                  :budget {:tokens 40000 :cost-usd 2.0}}
 
-   :security    {:model "claude-sonnet-4"
+   :security    {:model (model/default-model-for-role :security)
                  :temperature 0.1
                  :max-tokens 8000
                  :budget {:tokens 40000 :cost-usd 2.0}}
 
-   :release     {:model "claude-sonnet-4"
+   :release     {:model (model/default-model-for-role :release)
                  :temperature 0.1
                  :max-tokens 4000
                  :budget {:tokens 20000 :cost-usd 1.0}}
 
-   :historian   {:model "claude-sonnet-4"
+   :historian   {:model (model/default-model-for-role :historian)
                  :temperature 0.3
                  :max-tokens 8000
                  :budget {:tokens 30000 :cost-usd 1.5}}
 
-   :operator    {:model "claude-sonnet-4"
+   :operator    {:model (model/default-model-for-role :operator)
                  :temperature 0.1
                  :max-tokens 4000
                  :budget {:tokens 20000 :cost-usd 1.0}}})
@@ -192,7 +193,9 @@ Output execution logs and status reports."})
   [input-tokens output-tokens model]
   (let [;; Prices per 1M tokens (approximate)
         prices {"claude-sonnet-4" {:input 3.0 :output 15.0}
+                "claude-sonnet-4-6" {:input 3.0 :output 15.0}
                 "claude-opus-4" {:input 15.0 :output 75.0}
+                "claude-opus-4-6" {:input 5.0 :output 25.0}
                 "claude-haiku" {:input 0.25 :output 1.25}}
         {:keys [input output]} (get prices model {:input 3.0 :output 15.0})]
     (+ (* input-tokens (/ input 1000000))
@@ -381,7 +384,7 @@ Output execution logs and status reports."})
    - :cost-limit   - Maximum cost per task
 
    Example:
-     (create-agent :implementer {:model \"claude-opus-4\" :max-tokens 16000})
+     (create-agent :implementer {:model \"claude-opus-4-6\" :max-tokens 16000})
      (create-agent :planner {:phase :plan}) ; Auto-selects Opus for planning"
   ([role] (create-agent role {}))
   ([role opts]
@@ -620,7 +623,7 @@ Output execution logs and status reports."})
   ;; => #ai.miniforge.agent.core.BaseAgent{:id #uuid "...", :role :implementer, ...}
 
   ;; Create agent as map
-  (create-agent-map :planner {:model "claude-opus-4"})
+  (create-agent-map :planner {:model "claude-opus-4-6"})
   ;; => {:agent/id #uuid "...", :agent/role :planner, ...}
 
   ;; Initialize agent
@@ -650,7 +653,7 @@ Output execution logs and status reports."})
   (get role-system-prompts :reviewer)
 
   ;; Cost estimation
-  (estimate-cost 1000 500 "claude-sonnet-4")
+  (estimate-cost 1000 500 "claude-sonnet-4-6")
   ;; => 0.0105 USD
 
   :leave-this-here)

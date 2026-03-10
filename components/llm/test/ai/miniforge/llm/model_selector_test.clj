@@ -8,7 +8,7 @@
   (testing "Model availability check"
     ;; For now, all models are considered available
     (is (selector/model-available? :opus-4.6))
-    (is (selector/model-available? :sonnet-4.5))
+    (is (selector/model-available? :sonnet-4.6))
     (is (selector/model-available? :haiku-4.5))))
 
 (deftest test-meets-context-requirement
@@ -20,7 +20,7 @@
 (deftest test-meets-cost-constraint
   (testing "Cost constraint checks"
     (is (selector/meets-cost-constraint? :haiku-4.5 0.01))
-    (is (selector/meets-cost-constraint? :sonnet-4.5 0.05))
+    (is (selector/meets-cost-constraint? :sonnet-4.6 0.05))
     (is (selector/meets-cost-constraint? :opus-4.6 0.10))
     (is (selector/meets-cost-constraint? :codellama-34b 0.01))))
 
@@ -31,7 +31,7 @@
 
   (testing "Automatic selection for execution-focused"
     (let [selected (selector/select-by-automatic :execution-focused {})]
-      (is (some #{selected} [:sonnet-4.5 :gpt-5.2-codex :gpt-5.3-codex]))))
+      (is (some #{selected} [:sonnet-4.6 :gpt-5.2-codex :gpt-5.3-codex]))))
 
   (testing "Automatic selection for simple-validation"
     (let [selected (selector/select-by-automatic :simple-validation {})]

@@ -3,6 +3,7 @@
    Performs LLM-backed semantic code review plus deterministic gate validation.
    Falls back to gate-only review when no LLM backend is available."
   (:require
+   [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
@@ -453,14 +454,15 @@
                        (loop/lint-gate)
                        (loop/policy-gate :security {:policies [:no-secrets]})]
         gates (or (:gates opts) default-gates)
+        review-config (->> (merge {:temperature 0.1
+                                   :max-tokens 4000}
+                                  (:config opts))
+                           (model/apply-default-model :reviewer))
         config {:strict (get opts :strict false)}]
     (specialized/create-base-agent
      {:role :reviewer
       :system-prompt @reviewer-system-prompt
-      :config (merge {:model "claude-sonnet-4"
-                      :temperature 0.1
-                      :max-tokens 4000}
-                     (:config opts))
+      :config review-config
       :logger logger
 
       :invoke-fn

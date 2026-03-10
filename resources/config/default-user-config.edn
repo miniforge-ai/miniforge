@@ -1,7 +1,7 @@
 {:description "Default user configuration for Miniforge"
  :config
  {:llm {:backend :claude
-        :model "claude-sonnet-4-20250514"
+        :model "claude-sonnet-4-6"
         :timeout-ms 300000
         :line-timeout-ms 60000
         :max-tokens 4000}
@@ -9,9 +9,11 @@
              :max-tokens 150000
              :failure-strategy :retry}
   :artifacts {:dir "~/.miniforge/artifacts"}
-  :meta-loop {:enabled true
+ :meta-loop {:enabled true
               :max-convergence-iterations 10
               :convergence-threshold 0.95}
+  :agents {:default-models {:thinking "claude-opus-4-6"
+                            :execution "claude-sonnet-4-6"}}
   :model-selection {:enabled true
                     :strategy :automatic
                     :cost-limit-per-task 0.10

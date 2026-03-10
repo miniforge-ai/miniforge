@@ -37,8 +37,8 @@
    :budget {:tokens 30000
             :iterations 8
             :time-seconds 600}
-   ;; Implementation is code-heavy - hint at Sonnet
-   :model-hint :sonnet-4.5})
+   ;; Implementation is code-heavy - hint at current Sonnet
+   :model-hint :sonnet-4.6})
 
 ;; Register defaults on load
 (registry/register-phase-defaults! :implement default-config)

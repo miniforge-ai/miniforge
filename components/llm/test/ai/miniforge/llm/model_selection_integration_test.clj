@@ -50,7 +50,7 @@
       (is (= :execution-focused (:type classification)))
 
       ;; Should select a workhorse model for implementation
-      (is (some #{(:model selection)} [:sonnet-4.5 :gpt-5.2-codex :gpt-5.3-codex]))
+      (is (some #{(:model selection)} [:sonnet-4.6 :gpt-5.2-codex :gpt-5.3-codex]))
 
       ;; Verify model has good code generation
       (let [model (registry/get-model (:model selection))]
@@ -289,13 +289,13 @@
       (is (:model high-selection))
       (is (:model low-selection)))))
 
-(deftest test-all-15-models-accessible
-  (testing "All 15 models in registry can be selected"
+(deftest test-all-16-models-accessible
+  (testing "All 16 models in registry can be selected"
     (let [;; Get all model keys
           all-models (keys registry/model-registry)]
 
-      ;; Should have exactly 15 models
-      (is (= 15 (count all-models)))
+      ;; Should have exactly 16 models
+      (is (= 16 (count all-models)))
 
       ;; All should be queryable
       (doseq [model-key all-models]

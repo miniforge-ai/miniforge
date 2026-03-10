@@ -4,6 +4,7 @@
   (:require
    [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.budget :as budget]
+   [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
@@ -270,16 +271,15 @@
 
    Example:
      (create-planner)
-     (create-planner {:config {:model \"claude-sonnet-4\"}})"
+     (create-planner {:config {:model \"claude-opus-4-6\"}})"
   [& [opts]]
   (let [logger (or (:logger opts)
                    (log/create-logger {:min-level :info :output (fn [_])}))
-        config (budget/apply-default-budget
-                :planner
-                (merge {:model "claude-sonnet-4"
-                        :temperature 0.3
-                        :max-tokens 4000}
-                       (:config opts)))]
+        config (->> (merge {:temperature 0.3
+                            :max-tokens 4000}
+                           (:config opts))
+                    (model/apply-default-model :planner)
+                    (budget/apply-default-budget :planner))]
     (specialized/create-base-agent
      {:role :planner
       :system-prompt @planner-system-prompt

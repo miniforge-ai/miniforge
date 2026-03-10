@@ -51,7 +51,7 @@
    - opts    - Optional config overrides
 
    Options:
-   - :model       - LLM model to use (default: claude-sonnet-4)
+   - :model       - LLM model to use (default: configured agent model)
    - :temperature - Sampling temperature (0.0-1.0)
    - :max-tokens  - Max tokens per response
    - :budget      - Token/cost budget {:tokens int :cost-usd double}
@@ -59,7 +59,7 @@
 
    Example:
      (create-agent :implementer)
-     (create-agent :implementer {:model \"claude-opus-4\" :max-tokens 16000})"
+     (create-agent :implementer {:model \"claude-opus-4-6\" :max-tokens 16000})"
   ([role] (core/create-agent role))
   ([role opts] (core/create-agent role opts)))
 
@@ -663,7 +663,7 @@
 (comment
   ;; Create agents by role
   (def planner (create-agent :planner))
-  (def implementer (create-agent :implementer {:model "claude-opus-4"}))
+  (def implementer (create-agent :implementer {:model "claude-opus-4-6"}))
 
   ;; Create agent as map (for storage/validation)
   (create-agent-map :tester {:max-tokens 4000})
@@ -697,7 +697,7 @@
   ;; => {:success true :outputs [...] :metrics {...}}
 
   ;; Cost estimation
-  (estimate-cost 1000 500 "claude-sonnet-4")
+  (estimate-cost 1000 500 "claude-sonnet-4-6")
   ;; => 0.0105 USD
 
   ;; Role configurations

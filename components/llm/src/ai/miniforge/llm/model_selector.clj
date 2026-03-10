@@ -151,8 +151,8 @@
    - constraints: Optional constraints {:context-size :cost-limit :require-local}
 
    Output:
-   {:model :sonnet-4.5
-    :model-id \"claude-sonnet-4-5-20250929\"
+   {:model :sonnet-4.6
+    :model-id \"claude-sonnet-4-6\"
     :provider :anthropic
     :backend :claude
     :task-type :execution-focused
@@ -179,7 +179,7 @@
                     (select-by-automatic task-type constraints))
 
          ;; If no model found, use a safe fallback
-         model-key (or selected :sonnet-4.5)
+         model-key (or selected :sonnet-4.6)
          model (registry/get-model model-key)
          fallback-used (not selected)]
 
