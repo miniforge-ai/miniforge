@@ -21,6 +21,11 @@
 ;; These builders ensure consistent construction across all backends
 ;; (CLI, HTTP/OpenAI, HTTP/Ollama, streaming, non-streaming).
 
+(def ^:private default-claude-cli-budget-usd
+  "Default CLI budget cap used when a request is token-bounded but does not
+   supply an explicit dollar budget."
+  "0.10")
+
 (defn llm-success
   "Build a successful LLM response."
   ([content]
@@ -166,16 +171,18 @@
             :requires-cli? true
             :api-key-var "ANTHROPIC_API_KEY"
             :stream-parser parse-claude-stream-line
-            :args-fn (fn [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools supervision]}]
-                       (cond-> ["-p"]
-                         streaming?                   (conj "--output-format" "stream-json")
-                         streaming?                   (conj "--verbose")
-                         mcp-config                   (into ["--mcp-config" mcp-config])
-                         (seq mcp-allowed-tools)      (into ["--allowedTools" (str/join "," mcp-allowed-tools)])
-                         (:settings-path supervision) (into ["--settings" (:settings-path supervision)])
-                         system                       (into ["--system-prompt" system])
-                         max-tokens                   (into ["--max-budget-usd" "0.10"])
-                         true                         (conj prompt)))}
+            :args-fn (fn [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools supervision budget-usd]}]
+                       (let [budget (or budget-usd
+                                        (when max-tokens default-claude-cli-budget-usd))]
+                         (cond-> ["-p"]
+                           streaming?                   (conj "--output-format" "stream-json")
+                           streaming?                   (conj "--verbose")
+                           mcp-config                   (into ["--mcp-config" mcp-config])
+                           (seq mcp-allowed-tools)      (into ["--allowedTools" (str/join "," mcp-allowed-tools)])
+                           (:settings-path supervision) (into ["--settings" (:settings-path supervision)])
+                           system                       (into ["--system-prompt" system])
+                           budget                       (into ["--max-budget-usd" (str budget)])
+                           true                         (conj prompt))))}
 
    :codex {:cmd "codex"
            :streaming? true

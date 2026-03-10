@@ -1,11 +1,11 @@
 (ns ai.miniforge.phase.verify-failure-modes-test
   "Additional tests for verify phase failure modes and artifact validation.
-  
+
   Extends the existing verify_test.clj with comprehensive failure mode testing."
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.phase.registry :as registry]
-   [ai.miniforge.phase.verify] ;; registers :verify defmethod
+   [ai.miniforge.phase.verify :as verify] ;; registers :verify defmethod
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.response.interface :as response]))
 
@@ -150,6 +150,65 @@
               "Test result should indicate failure")
           (is (seq (:test/failures test-result))
               "Failures should be captured"))))))
+
+;------------------------------------------------------------------------------ Leave-verify redirect suppression tests (PR #288)
+
+(defn make-leave-ctx
+  "Build a minimal context suitable for leave-verify.
+   `result` is the phase result map (agent output).
+   `on-fail` is the redirect target (e.g. :implement) or nil."
+  [result on-fail]
+  (cond-> {:phase {:started-at (- (System/currentTimeMillis) 1000)
+                   :result result
+                   :iterations 1}
+           :execution {:phases-completed []}
+           :execution/metrics {:tokens 0 :duration-ms 0}}
+    on-fail (assoc :phase-config {:on-fail on-fail})))
+
+(deftest leave-verify-redirects-on-normal-failure-test
+  (testing "normal verify failure with :on-fail configured sets :redirect-to"
+    (let [ctx (make-leave-ctx {:status :error
+                               :error {:message "Tests failed: 3 assertions"}}
+                              :implement)
+          result (verify/leave-verify ctx)]
+      (is (= :implement (get-in result [:phase :redirect-to])))
+      (is (= :failed (get-in result [:phase :status]))))))
+
+(deftest leave-verify-no-redirect-on-timeout-test
+  (testing "timeout error does NOT redirect even with :on-fail configured"
+    (let [ctx (make-leave-ctx {:status :error
+                               :error {:message "Agent timed out after 600000ms"}}
+                              :implement)
+          result (verify/leave-verify ctx)]
+      (is (nil? (get-in result [:phase :redirect-to])))
+      (is (= :failed (get-in result [:phase :status])))
+      (is (true? (get-in result [:phase :error :timeout?]))))))
+
+(deftest leave-verify-no-redirect-on-rate-limit-test
+  (testing "rate-limit error does NOT redirect even with :on-fail configured"
+    (let [ctx (make-leave-ctx {:status :error
+                               :error {:message "429 rate limit exceeded"}}
+                              :implement)
+          result (verify/leave-verify ctx)]
+      (is (nil? (get-in result [:phase :redirect-to])))
+      (is (= :failed (get-in result [:phase :status])))
+      (is (some? (get-in result [:phase :error :rate-limited?])))))
+
+  (testing "rate-limit variant: you've hit your limit"
+    (let [ctx (make-leave-ctx {:status :error
+                               :error {:message "You've hit your limit · resets 7pm"}}
+                              :implement)
+          result (verify/leave-verify ctx)]
+      (is (nil? (get-in result [:phase :redirect-to]))))))
+
+(deftest leave-verify-no-redirect-without-on-fail-test
+  (testing "normal failure without :on-fail does not set :redirect-to"
+    (let [ctx (make-leave-ctx {:status :error
+                               :error {:message "Tests failed"}}
+                              nil)
+          result (verify/leave-verify ctx)]
+      (is (nil? (get-in result [:phase :redirect-to])))
+      (is (= :failed (get-in result [:phase :status]))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 

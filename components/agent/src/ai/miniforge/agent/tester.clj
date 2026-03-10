@@ -16,6 +16,11 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Tester-specific schemas
 
+(def ^:private default-tester-budget-usd
+  "Fallback budget cap for tester LLM calls when no budget is supplied
+   through opts or agent context."
+  2.00)
+
 (def TestFile
   "Schema for a test file."
   [:map
@@ -264,9 +269,13 @@
             ;; Use the real LLM with artifact session for MCP tool support
             (let [{:keys [llm-result artifact]}
                   (artifact-session/with-artifact-session [session]
-                    (let [mcp-opts {:mcp-config (:mcp-config-path session)
+                    (let [budget-usd (or (get-in opts [:config :budget :cost-usd])
+                                         (get-in context [:budget :cost-usd])
+                                         default-tester-budget-usd)
+                          mcp-opts {:mcp-config (:mcp-config-path session)
                                     :mcp-allowed-tools (:mcp-allowed-tools session)
-                                    :supervision (:supervision session)}]
+                                    :supervision (:supervision session)
+                                    :budget-usd budget-usd}]
                       (if on-chunk
                         (llm/chat-stream llm-client user-prompt on-chunk
                                          (merge {:system @tester-system-prompt} mcp-opts))

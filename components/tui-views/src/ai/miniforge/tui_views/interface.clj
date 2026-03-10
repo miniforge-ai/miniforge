@@ -39,6 +39,7 @@
    [ai.miniforge.policy-pack.interface :as policy-pack]
    [ai.miniforge.pr-train.interface :as pr-train]
    [ai.miniforge.llm.interface :as llm]
+   [ai.miniforge.tui-views.persistence.github :as github]
    [ai.miniforge.tui-views.prompts :as prompts]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -147,10 +148,63 @@
   (let [fixable (count (filter #(seq (get-in % [:pr/policy :evaluation/violations])) prs))]
     (msg/remediation-completed 0 fixable "Remediation via pr-lifecycle not yet wired")))
 
-(defn handle-decompose-pr [{:keys [pr]}]
-  (msg/decomposition-started [(:pr/repo pr) (:pr/number pr)]
-                             {:sub-prs []
-                              :message "Decomposition analysis not yet wired"}))
+(defonce ^:private decompose-llm-client (delay (llm/create-client)))
+
+(defn handle-decompose-pr
+  "Decompose a large PR into sub-PRs.
+   Entire body is wrapped in try/catch — no exceptions leak."
+  [{:keys [pr]}]
+  (let [pr-id [(:pr/repo pr) (:pr/number pr)]]
+    (try
+      (let [{:keys [diff detail]} (github/fetch-pr-diff-and-detail
+                                   (:pr/repo pr) (:pr/number pr))
+            changed-files (mapv :path (:files detail []))
+            decompose-fn (try (requiring-resolve
+                               'ai.miniforge.pr-decompose.interface/decompose)
+                              (catch Throwable _ nil))]
+        (cond
+          ;; Both fetches failed
+          (and (nil? diff) (nil? detail))
+          (msg/decomposition-started pr-id
+                                     {:sub-prs []
+                                      :message "Failed to fetch PR diff and details"})
+
+          ;; Decompose component not available
+          (nil? decompose-fn)
+          (msg/decomposition-started pr-id
+                                     {:sub-prs []
+                                      :message "Decomposition component not available"})
+
+          :else
+          (let [llm-fn (fn [req] (llm/complete @decompose-llm-client req))
+                result (decompose-fn pr (or diff "") changed-files llm-fn)]
+            (if (:ok? result)
+              (let [plan (get-in result [:data :plan])]
+                (msg/decomposition-started pr-id
+                                           {:sub-prs (:sub-prs plan [])
+                                            :strategy (:strategy plan)
+                                            :original-size (:original-size plan)
+                                            :coverage (:coverage plan)}))
+              (msg/decomposition-started pr-id
+                                         {:sub-prs []
+                                          :message (or (get-in result [:error :message])
+                                                       "Decomposition failed")})))))
+      (catch Throwable e
+        (msg/decomposition-started pr-id
+                                   {:sub-prs []
+                                    :message (.getMessage e)})))))
+
+(defn handle-fetch-pr-diff
+  "Fetch PR diff and detail from GitHub CLI."
+  [{:keys [repo number]}]
+  (try
+    (let [n (long (if (string? number) (Long/parseLong number) number))
+          {:keys [diff detail]} (github/fetch-pr-diff-and-detail repo n)]
+      (if (and (nil? diff) (nil? detail))
+        (msg/pr-diff-fetched [repo n] nil nil "Failed to fetch PR diff and details")
+        (msg/pr-diff-fetched [repo n] diff detail nil)))
+    (catch Throwable e
+      (msg/pr-diff-fetched [repo number] nil nil (.getMessage e)))))
 
 (defn handle-cache-policy-result [{:keys [pr-id result prs]}]
   (pr-cache/persist-policy-result! pr-id result prs)
@@ -178,38 +232,47 @@
   [{:keys [action context]}]
   (try
     (let [action-type (:action action)]
-      (case action-type
-        :review
-        (if-let [pr (:pr context)]
-          (handle-review-prs {:prs [pr]})
-          (msg/chat-action-result {:success? false :message "No PR in context for review"}))
+      (let [result (case action-type
+                     :review
+                     (if-let [pr (:pr context)]
+                       (handle-review-prs {:prs [pr]})
+                       (msg/chat-action-result {:success? false :message "No PR in context for review"}))
 
-        :evaluate
-        (if-let [pr (:pr context)]
-          (handle-evaluate-policy {:pr pr :pr-id [(:pr/repo pr) (:pr/number pr)]})
-          (msg/chat-action-result {:success? false :message "No PR in context for evaluation"}))
+                     :evaluate
+                     (if-let [pr (:pr context)]
+                       (handle-evaluate-policy {:pr pr :pr-id [(:pr/repo pr) (:pr/number pr)]})
+                       (msg/chat-action-result {:success? false :message "No PR in context for evaluation"}))
 
-        :sync
-        (handle-sync-prs {})
+                     :sync
+                     (handle-sync-prs {})
 
-        :open
-        (if-let [url (get-in context [:pr :pr/url])]
-          (do (handle-open-url {:url url})
-              (msg/chat-action-result {:success? true :message (str "Opened " url)}))
-          (msg/chat-action-result {:success? false :message "No PR URL available"}))
+                     :open
+                     (if-let [url (get-in context [:pr :pr/url])]
+                       (do (handle-open-url {:url url})
+                           (msg/chat-action-result {:success? true :message (str "Opened " url)}))
+                       (msg/chat-action-result {:success? false :message "No PR URL available"}))
 
-        :remediate
-        (if-let [pr (:pr context)]
-          (handle-remediate-prs {:prs [pr]})
-          (msg/chat-action-result {:success? false :message "No PR in context"}))
+                     :remediate
+                     (if-let [pr (:pr context)]
+                       (handle-remediate-prs {:prs [pr]})
+                       (msg/chat-action-result {:success? false :message "No PR in context"}))
 
-        :decompose
-        (if-let [pr (:pr context)]
-          (handle-decompose-pr {:pr pr})
-          (msg/chat-action-result {:success? false :message "No PR in context"}))
+                     :decompose
+                     (if-let [pr (:pr context)]
+                       (handle-decompose-pr {:pr pr})
+                       (msg/chat-action-result {:success? false :message "No PR in context"}))
 
-        (msg/chat-action-result {:success? false
-                                 :message (str "Unknown action: " (name (or action-type :none)))})))
+                     (msg/chat-action-result
+                      {:success? false
+                       :message (str "Unknown action: " (name (or action-type :none)))}))]
+        (if (= :msg/side-effect-error (first result))
+          (let [payload (second result)
+                message (or (get-in payload [:error :message])
+                            (:message payload)
+                            (:error payload)
+                            "Action failed")]
+            (msg/chat-action-result {:success? false :message message}))
+          result)))
     (catch Exception e
       (msg/chat-action-result {:success? false :message (.getMessage e)}))))
 
@@ -428,6 +491,7 @@
     :cache-policy-result (handle-cache-policy-result effect)
     :cache-risk-triage   (handle-cache-risk-triage effect)
     :decompose-pr      (handle-decompose-pr effect)
+    :fetch-pr-diff     (handle-fetch-pr-diff effect)
     :control-action    (handle-control-action effect)
     :archive-workflows (handle-archive-workflows effect)
     :chat-send         (handle-chat-send effect)
