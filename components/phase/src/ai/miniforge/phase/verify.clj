@@ -190,6 +190,12 @@
         result (get-in ctx [:phase :result])
         agent-status (:status result)
         gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
+        timeout? (and (= :error agent-status)
+                      (some-> (get-in result [:error :message])
+                              (str/includes? "timed out")))
+        rate-limited? (and (= :error agent-status)
+                           (let [msg (str (get-in result [:error :message]))]
+                             (re-find #"(?i)rate.?limit|429|you've hit your limit|quota.?exceeded" msg)))
         phase-status (cond
                        gate-failed?                :failed
                        (= :error agent-status)     :failed
@@ -210,8 +216,10 @@
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
     ;; When verify failed and on-fail is configured, redirect to target phase
-    ;; and attach verify failure details for the implement agent to use
-    (if (and (= :failed phase-status) on-fail)
+    ;; UNLESS the failure was a timeout or rate limit — those aren't code quality
+    ;; issues and retrying implement won't help.
+    (if (and (= :failed phase-status) on-fail
+             (not timeout?) (not rate-limited?))
       (-> updated-ctx
           (assoc-in [:phase :redirect-to] on-fail)
           (assoc-in [:phase :error]
@@ -220,7 +228,16 @@
                                   "Verification failed")
                      :agent-status agent-status
                      :gate-failed? gate-failed?}))
-      updated-ctx)))
+      (cond-> updated-ctx
+        (= :failed phase-status)
+        (assoc-in [:phase :error]
+                  {:message (or (not-empty (get-in result [:error :message]))
+                                (when gate-failed? "Gate validation failed")
+                                "Verification failed")
+                   :agent-status agent-status
+                   :timeout? timeout?
+                   :rate-limited? rate-limited?
+                   :gate-failed? gate-failed?})))))
 
 (defn error-verify
   "Handle verification phase errors.
