@@ -42,6 +42,14 @@
    ;; Verification can use fast validation - hint at Haiku
    :model-hint :haiku-4.5})
 
+(def ^:private timeout-message-fragment
+  "Substring that marks a non-actionable verify timeout."
+  "timed out")
+
+(def ^:private verify-rate-limit-pattern
+  "Pattern for non-actionable verify failures caused by provider throttling."
+  #"(?i)rate.?limit|429|you've hit your limit|quota.?exceeded")
+
 ;; Register defaults on load
 (registry/register-phase-defaults! :verify default-config)
 
@@ -192,10 +200,10 @@
         gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
         timeout? (and (= :error agent-status)
                       (some-> (get-in result [:error :message])
-                              (str/includes? "timed out")))
+                              (str/includes? timeout-message-fragment)))
         rate-limited? (and (= :error agent-status)
                            (let [msg (str (get-in result [:error :message]))]
-                             (re-find #"(?i)rate.?limit|429|you've hit your limit|quota.?exceeded" msg)))
+                             (re-find verify-rate-limit-pattern msg)))
         phase-status (cond
                        gate-failed?                :failed
                        (= :error agent-status)     :failed

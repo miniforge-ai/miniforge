@@ -21,6 +21,11 @@
 ;; These builders ensure consistent construction across all backends
 ;; (CLI, HTTP/OpenAI, HTTP/Ollama, streaming, non-streaming).
 
+(def ^:private default-claude-cli-budget-usd
+  "Default CLI budget cap used when a request is token-bounded but does not
+   supply an explicit dollar budget."
+  "0.10")
+
 (defn llm-success
   "Build a successful LLM response."
   ([content]
@@ -167,7 +172,8 @@
             :api-key-var "ANTHROPIC_API_KEY"
             :stream-parser parse-claude-stream-line
             :args-fn (fn [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools supervision budget-usd]}]
-                       (let [budget (or budget-usd (when max-tokens "0.10"))]
+                       (let [budget (or budget-usd
+                                        (when max-tokens default-claude-cli-budget-usd))]
                          (cond-> ["-p"]
                            streaming?                   (conj "--output-format" "stream-json")
                            streaming?                   (conj "--verbose")
