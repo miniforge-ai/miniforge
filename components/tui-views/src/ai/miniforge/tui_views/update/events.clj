@@ -623,10 +623,11 @@
 
 (defn handle-decomposition-started
   "Handle result of :decompose-pr side effect."
-  [model {:keys [pr-id plan]}]
+  [model {:keys [pr-id sub-prs message] :as _payload}]
   (-> model
-      (assoc :flash-message (str "Decomposition plan for #" (second pr-id) ": "
-                                 (count (:sub-prs plan [])) " sub-PRs proposed"))
+      (assoc :flash-message (or message
+                                (str "Decomposition plan for #" (second pr-id) ": "
+                                     (count (or sub-prs [])) " sub-PRs proposed")))
       with-timestamp))
 
 (defn handle-repos-discovered
