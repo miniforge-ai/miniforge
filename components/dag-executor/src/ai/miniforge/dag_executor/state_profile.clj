@@ -1,9 +1,13 @@
 (ns ai.miniforge.dag-executor.state-profile
   "State profiles for DAG task workflows.
 
-   Profiles let the DAG executor support domain-neutral task lifecycles while
-   preserving the existing software-factory semantics as the default."
+   The kernel owns only the profile schema, normalization, and resource-backed
+   resolution. Concrete profile data lives in classpath resources so project
+   layers can override the loaded registry without embedding configuration in
+   kernel code."
   (:require
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.set :as set]))
 
 (defn build-profile
@@ -18,106 +22,55 @@
            :task-statuses (set task-statuses)
            :terminal-statuses terminal-statuses
            :success-terminal-statuses success-terminal-statuses
-           :valid-transitions valid-transitions
+           :valid-transitions (into {}
+                                    (map (fn [[from-status targets]]
+                                           [from-status (set targets)]))
+                                    valid-transitions)
            :event-mappings event-mappings
            :failure-terminal-statuses (set/difference terminal-statuses
                                                      success-terminal-statuses))))
 
-(def software-factory-profile
-  (build-profile
-   {:profile/id :software-factory
-    :task-statuses #{:pending :ready :implementing :pr-opening :ci-running
-                     :review-pending :responding :ready-to-merge :merging
-                     :merged :failed :skipped}
-    :terminal-statuses #{:merged :failed :skipped}
-    :success-terminal-statuses #{:merged}
-    :valid-transitions
-    {:pending #{:ready :skipped}
-     :ready #{:implementing :skipped}
-     :implementing #{:pr-opening :failed}
-     :pr-opening #{:ci-running :failed}
-     :ci-running #{:review-pending :responding :failed}
-     :review-pending #{:ready-to-merge :responding}
-     :responding #{:ci-running :failed}
-     :ready-to-merge #{:merging :responding}
-     :merging #{:merged :failed}
-     :merged #{}
-     :failed #{}
-     :skipped #{}}
-    :event-mappings
-    {:pr-opened {:type :transition :to :ci-running}
-     :ci-passed {:type :transition :to :review-pending}
-     :ci-failed {:type :retry-or-fail
-                 :retry-limit-predicate :max-ci-retries-exceeded?
-                 :retry-update-fn :increment-ci-retries
-                 :retry-transition :responding
-                 :failure-reason :ci-failed-max-retries}
-     :review-approved {:type :transition :to :ready-to-merge}
-     :review-changes-requested {:type :retry-or-fail
-                                :retry-limit-predicate :max-fix-iterations-exceeded?
-                                :retry-update-fn :increment-fix-iterations
-                                :retry-transition :responding
-                                :failure-reason :review-failed-max-iterations}
-     :fix-pushed {:type :transition :to :ci-running}
-     :merge-ready {:type :transition :to :merging}
-     :merged {:type :complete :to :merged}
-     :merge-failed {:type :fail :reason :merge-failed}}}))
+(def registry-resource
+  "Classpath resource that identifies which profiles are available."
+  "config/dag-executor/state-profiles/registry.edn")
 
-(def kernel-profile
-  (build-profile
-   {:profile/id :kernel
-    :task-statuses #{:pending :ready :running :completed :failed :skipped}
-    :terminal-statuses #{:completed :failed :skipped}
-    :success-terminal-statuses #{:completed}
-    :valid-transitions
-    {:pending #{:ready :skipped}
-     :ready #{:running :skipped}
-     :running #{:completed :failed}
-     :completed #{}
-     :failed #{}
-     :skipped #{}}
-    :event-mappings
-    {:started {:type :transition :to :running}
-     :completed {:type :complete :to :completed}
-     :failed {:type :fail :reason :failed}}}))
+(defn read-edn-resource
+  [resource-path]
+  (when-let [resource (io/resource resource-path)]
+    (-> resource slurp edn/read-string)))
 
-(def etl-profile
-  (build-profile
-   {:profile/id :etl
-    :task-statuses #{:pending :ready :acquiring :extracting :canonicalizing
-                     :evaluating :publishing :completed :failed :skipped}
-    :terminal-statuses #{:completed :failed :skipped}
-    :success-terminal-statuses #{:completed}
-    :valid-transitions
-    {:pending #{:ready :skipped}
-     :ready #{:acquiring :skipped}
-     :acquiring #{:extracting :failed}
-     :extracting #{:canonicalizing :failed}
-     :canonicalizing #{:evaluating :failed}
-     :evaluating #{:publishing :failed}
-     :publishing #{:completed :failed}
-     :completed #{}
-     :failed #{}
-     :skipped #{}}
-    :event-mappings
-    {:acquired {:type :transition :to :extracting}
-     :extracted {:type :transition :to :canonicalizing}
-     :canonicalized {:type :transition :to :evaluating}
-     :evaluated {:type :transition :to :publishing}
-     :published {:type :complete :to :completed}
-     :failed {:type :fail :reason :failed}}}))
+(defn load-profile-registry
+  []
+  (or (read-edn-resource registry-resource)
+      {:default-profile :kernel
+       :profiles {:kernel "config/dag-executor/state-profiles/kernel.edn"}}))
 
-(def known-profiles
-  {:software-factory software-factory-profile
-   :kernel kernel-profile
-   :etl etl-profile})
+(defn available-profile-ids
+  []
+  (keys (:profiles (load-profile-registry))))
 
-(def default-profile software-factory-profile)
+(defn load-profile-definition
+  [profile-id]
+  (let [registry (load-profile-registry)
+        resource-path (get-in registry [:profiles profile-id])]
+    (when resource-path
+      (read-edn-resource resource-path))))
+
+(defn default-profile-id
+  []
+  (or (:default-profile (load-profile-registry)) :kernel))
 
 (defn resolve-profile
   [profile]
-  (cond
-    (nil? profile) default-profile
-    (keyword? profile) (get known-profiles profile default-profile)
-    (map? profile) (build-profile profile)
-    :else default-profile))
+  (let [fallback-id (default-profile-id)
+        fallback-profile (some-> (load-profile-definition fallback-id) build-profile)]
+    (cond
+      (nil? profile) fallback-profile
+      (keyword? profile) (or (some-> (load-profile-definition profile) build-profile)
+                             fallback-profile)
+      (map? profile) (build-profile profile)
+      :else fallback-profile)))
+
+(defn default-profile
+  []
+  (resolve-profile nil))

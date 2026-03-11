@@ -17,11 +17,11 @@
 (def task-statuses
   "Valid task workflow statuses.
    Defaults to the software-factory profile."
-  (:task-statuses profiles/default-profile))
+  (:task-statuses (profiles/default-profile)))
 
 (def terminal-statuses
   "Terminal statuses (no further transitions)."
-  (:terminal-statuses profiles/default-profile))
+  (:terminal-statuses (profiles/default-profile)))
 
 (def run-statuses
   "Valid DAG run statuses."
@@ -34,7 +34,7 @@
 
 (def valid-transitions
   "Valid state transitions for the default task workflow profile."
-  (:valid-transitions profiles/default-profile))
+  (:valid-transitions (profiles/default-profile)))
 
 (defn resolve-task-profile
   [task-state]
@@ -168,7 +168,7 @@
 (defn valid-transition?
   "Check if a state transition is valid."
   ([from-status to-status]
-   (valid-transition? profiles/default-profile from-status to-status))
+   (valid-transition? (profiles/default-profile) from-status to-status))
   ([profile from-status to-status]
    (contains? (get (:valid-transitions (profiles/resolve-profile profile)) from-status #{})
               to-status)))
@@ -176,7 +176,7 @@
 (defn terminal?
   "Check if a status is terminal (no further transitions)."
   ([status]
-   (terminal? profiles/default-profile status))
+   (terminal? (profiles/default-profile) status))
   ([profile status]
    (contains? (:terminal-statuses (profiles/resolve-profile profile)) status)))
 
