@@ -16,7 +16,7 @@
 
 (def task-statuses
   "Valid task workflow statuses.
-   Defaults to the software-factory profile."
+   Defaults to the kernel profile."
   (:task-statuses (profiles/default-profile)))
 
 (def terminal-statuses
@@ -108,12 +108,14 @@
    Options:
    - :max-fix-iterations - Max fix attempts (default 5)
    - :max-ci-retries - Max CI retry attempts (default 3)
-   - :state-profile - Task lifecycle profile keyword or map"
-  [task-id deps & {:keys [max-fix-iterations max-ci-retries state-profile]
+   - :state-profile - Task lifecycle profile keyword or map
+   - :state-profile-provider - Provider map used to resolve keyword profiles"
+  [task-id deps & {:keys [max-fix-iterations max-ci-retries
+                          state-profile state-profile-provider]
                    :or {max-fix-iterations 5 max-ci-retries 3}}]
   {:task/id task-id
    :task/status :pending
-   :task/state-profile (profiles/resolve-profile state-profile)
+   :task/state-profile (profiles/resolve-profile state-profile-provider state-profile)
    :task/deps (set deps)
    :task/pr nil
    :task/attempts []
@@ -136,9 +138,10 @@
 
    Options:
    - :budget - Budget constraints map with :max-tokens :max-cost-usd :max-duration-ms
-   - :state-profile - Run/task lifecycle profile keyword or map"
-  [dag-id tasks & {:keys [budget state-profile]}]
-  (let [resolved-profile (profiles/resolve-profile state-profile)
+   - :state-profile - Run/task lifecycle profile keyword or map
+   - :state-profile-provider - Provider map used to resolve keyword profiles"
+  [dag-id tasks & {:keys [budget state-profile state-profile-provider]}]
+  (let [resolved-profile (profiles/resolve-profile state-profile-provider state-profile)
         normalized-tasks (into {}
                                (map (fn [[task-id task]]
                                       [task-id (assoc task :task/state-profile
@@ -337,7 +340,8 @@
     (->> tasks
          (filter (fn [[_id task]]
                    (and (not= :pending (:task/status task))
-                        (not (terminal? (:task/status task))))))
+                        (not (terminal? (resolve-task-profile task)
+                                        (:task/status task))))))
          (map first)
          set)))
 
@@ -346,13 +350,18 @@
    Returns map of task-id -> set of blocking task IDs."
   [run-state]
   (let [tasks (:run/tasks run-state)
-        merged (:run/merged run-state)]
+        profile (resolve-run-profile run-state)
+        completed-task-ids (->> tasks
+                                (filter (fn [[_id task]]
+                                          (success-terminal-status? profile (:task/status task))))
+                                (map first)
+                                set)]
     (->> tasks
          (filter (fn [[_id task]]
                    (and (= :pending (:task/status task))
-                        (not (every? merged (:task/deps task))))))
+                        (not (every? completed-task-ids (:task/deps task))))))
          (map (fn [[id task]]
-                [id (set/difference (:task/deps task) merged)]))
+                [id (set/difference (:task/deps task) completed-task-ids)]))
          (into {}))))
 
 (defn all-terminal?

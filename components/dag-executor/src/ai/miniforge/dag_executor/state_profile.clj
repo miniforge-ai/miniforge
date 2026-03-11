@@ -1,10 +1,9 @@
 (ns ai.miniforge.dag-executor.state-profile
   "State profiles for DAG task workflows.
 
-   The kernel owns only the profile schema, normalization, and resource-backed
-   resolution. Concrete profile data lives in classpath resources so project
-   layers can override the loaded registry without embedding configuration in
-   kernel code."
+   The kernel owns only the profile schema, normalization, and profile
+   resolution. Application layers own profile-provider configuration and pass it
+   into DAG construction explicitly."
   (:require
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -30,8 +29,8 @@
            :failure-terminal-statuses (set/difference terminal-statuses
                                                      success-terminal-statuses))))
 
-(def registry-resource
-  "Classpath resource that identifies which profiles are available."
+(def kernel-registry-resource
+  "Classpath resource for the kernel-owned default provider."
   "config/dag-executor/state-profiles/registry.edn")
 
 (defn read-edn-resource
@@ -39,37 +38,80 @@
   (when-let [resource (io/resource resource-path)]
     (-> resource slurp edn/read-string)))
 
-(defn load-profile-registry
+(defn resolve-provider-profile
+  [profile-id profile-definition]
+  (let [normalized-profile
+        (cond
+          (string? profile-definition)
+          (some-> profile-definition read-edn-resource build-profile)
+
+          (map? profile-definition)
+          (build-profile (assoc profile-definition
+                                :profile/id (or (:profile/id profile-definition)
+                                                profile-id)))
+
+          :else nil)]
+    (when normalized-profile
+      [profile-id normalized-profile])))
+
+(defn build-provider
+  [{:keys [default-profile profiles] :as provider}]
+  (let [normalized-profiles
+        (into {}
+              (keep (fn [[profile-id profile-definition]]
+                      (resolve-provider-profile profile-id profile-definition)))
+              profiles)
+        fallback-profile-id (or default-profile
+                                (first (keys normalized-profiles))
+                                :kernel)]
+    (assoc provider
+           :default-profile fallback-profile-id
+           :profiles normalized-profiles)))
+
+(defn load-provider
   []
-  (or (read-edn-resource registry-resource)
-      {:default-profile :kernel
-       :profiles {:kernel "config/dag-executor/state-profiles/kernel.edn"}}))
+  (build-provider
+   (or (read-edn-resource kernel-registry-resource)
+       {:default-profile :kernel
+        :profiles {:kernel "config/dag-executor/state-profiles/kernel.edn"}})))
+
+(def ^:private kernel-provider
+  (delay (load-provider)))
+
+(defn default-provider
+  []
+  @kernel-provider)
 
 (defn available-profile-ids
-  []
-  (keys (:profiles (load-profile-registry))))
-
-(defn load-profile-definition
-  [profile-id]
-  (let [registry (load-profile-registry)
-        resource-path (get-in registry [:profiles profile-id])]
-    (when resource-path
-      (read-edn-resource resource-path))))
+  ([] (available-profile-ids (default-provider)))
+  ([provider]
+   (keys (:profiles (if provider
+                      (build-provider provider)
+                      (default-provider))))))
 
 (defn default-profile-id
-  []
-  (or (:default-profile (load-profile-registry)) :kernel))
+  ([] (default-profile-id (default-provider)))
+  ([provider]
+   (or (:default-profile (if provider
+                          (build-provider provider)
+                          (default-provider)))
+       :kernel)))
 
 (defn resolve-profile
-  [profile]
-  (let [fallback-id (default-profile-id)
-        fallback-profile (some-> (load-profile-definition fallback-id) build-profile)]
-    (cond
-      (nil? profile) fallback-profile
-      (keyword? profile) (or (some-> (load-profile-definition profile) build-profile)
-                             fallback-profile)
-      (map? profile) (build-profile profile)
-      :else fallback-profile)))
+  ([profile]
+   (resolve-profile (default-provider) profile))
+  ([provider profile]
+   (let [resolved-provider (if provider
+                             (build-provider provider)
+                             (default-provider))
+         fallback-id (default-profile-id resolved-provider)
+         fallback-profile (get-in resolved-provider [:profiles fallback-id])]
+     (cond
+       (nil? profile) fallback-profile
+       (keyword? profile) (or (get-in resolved-provider [:profiles profile])
+                              fallback-profile)
+       (map? profile) (build-profile profile)
+       :else fallback-profile))))
 
 (defn default-profile
   []

@@ -5,11 +5,11 @@
    - Dependency ordering and parallelism
    - Task workflow state machine
    - Budget and checkpoint management
-   - Integration with PR lifecycle events
+   - Integration with domain-specific lifecycle events
    - Pluggable execution backends (K8s, Docker, worktree)
 
    A DAG node is not 'generate code once' - it's a task workflow that runs
-   until it reaches a terminal integration state (:merged)."
+   until it reaches a profile-defined terminal success state."
   (:require
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.state-profile :as state-profile]
@@ -54,22 +54,31 @@
   "Build a custom state profile map."
   state-profile/build-profile)
 
-(def resolve-state-profile
-  "Resolve a state profile keyword or inline map via the active resource registry."
-  state-profile/resolve-profile)
+(def build-state-profile-provider
+  "Build a state-profile provider from profile definitions or resource-path entries."
+  state-profile/build-provider)
 
-(def available-state-profile-ids
-  "List the state profile ids exposed by the active resource registry."
-  state-profile/available-profile-ids)
+(defn resolve-state-profile
+  "Resolve a state profile keyword or inline map.
+
+   With one argument, resolves against the kernel provider.
+   With two arguments, resolves against the supplied provider."
+  ([profile]
+   (state-profile/resolve-profile profile))
+  ([provider profile]
+   (state-profile/resolve-profile provider profile)))
+
+(defn available-state-profile-ids
+  "List the state profile ids exposed by the kernel provider or a supplied provider."
+  ([] (state-profile/available-profile-ids))
+  ([provider] (state-profile/available-profile-ids provider)))
 
 (def task-statuses
-  "Valid task workflow statuses: :pending :ready :implementing :pr-opening
-   :ci-running :review-pending :responding :ready-to-merge :merging
-   :merged :failed :skipped"
+  "Valid task workflow statuses for the kernel default profile."
   state/task-statuses)
 
 (def terminal-statuses
-  "Terminal statuses: :merged :failed :skipped"
+  "Terminal statuses for the kernel default profile."
   state/terminal-statuses)
 
 (def run-statuses
@@ -86,6 +95,7 @@
    Options:
    - :max-fix-iterations - Max fix attempts (default 5)
    - :max-ci-retries - Max CI retry attempts (default 3)
+   - :state-profile-provider - Provider map for keyword profile lookup
 
    Example:
      (create-task-state (random-uuid) #{parent-task-id}
@@ -102,6 +112,7 @@
 
    Options:
    - :budget - Budget constraints map with :max-tokens :max-cost-usd :max-duration-ms
+   - :state-profile-provider - Provider map for keyword profile lookup
 
    Example:
      (create-run-state dag-id
@@ -453,6 +464,7 @@
    Options:
    - :budget - Budget constraints
    - :state-profile - Task lifecycle profile keyword or map
+   - :state-profile-provider - Provider map for keyword profile lookup
    - :max-fix-iterations - Default max fix iterations
    - :max-ci-retries - Default max CI retries
 
@@ -463,7 +475,8 @@
         {:task/id b-id :task/deps #{a-id}}
         {:task/id c-id :task/deps #{a-id}}]
        :budget {:max-tokens 500000})"
-  [dag-id task-defs & {:keys [budget state-profile max-fix-iterations max-ci-retries]
+  [dag-id task-defs & {:keys [budget state-profile state-profile-provider
+                              max-fix-iterations max-ci-retries]
                        :or {max-fix-iterations 5 max-ci-retries 3}}]
   (let [tasks (->> task-defs
                    (map (fn [def]
@@ -472,10 +485,14 @@
                             (:task/id def)
                             (or (:task/deps def) #{})
                             :state-profile state-profile
+                            :state-profile-provider state-profile-provider
                             :max-fix-iterations max-fix-iterations
                             :max-ci-retries max-ci-retries)]))
                    (into {}))]
-    (create-run-state dag-id tasks :budget budget :state-profile state-profile)))
+    (create-run-state dag-id tasks
+                      :budget budget
+                      :state-profile state-profile
+                      :state-profile-provider state-profile-provider)))
 
 (defn execute-dag
   "Execute a DAG to completion.

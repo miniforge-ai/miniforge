@@ -42,7 +42,7 @@
   "Compute tasks that are ready to execute.
    A task is ready when:
    - Status is :pending
-   - All dependencies are in :run/merged"
+   - All dependencies have reached a profile-defined success state"
   [run-state]
   (state/ready-tasks run-state))
 

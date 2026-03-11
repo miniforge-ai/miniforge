@@ -4,6 +4,8 @@
   Tests that multiple tasks execute in parallel respecting dependencies,
   resource limits, and budget constraints. Uses diamond DAG pattern."
   (:require
+   [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.task-executor.orchestrator :as orchestrator]
    [clojure.test :refer [deftest testing is]]))
 
 ;------------------------------------------------------------------------------ Mock Data
@@ -465,3 +467,37 @@
 
       (is (= :completed (:status @run-atom))
           "Run should transition to :completed"))))
+
+(deftest execute-dag-passes-state-profile-config-test
+  (testing "execute-dag! forwards state profile configuration into DAG construction"
+    (let [captured (atom nil)
+          run-state {:run/status :completed
+                     :run/tasks {}}
+          run-atom (atom run-state)
+          provider {:default-profile :software-factory
+                    :profiles {:software-factory {:profile/id :software-factory}}}
+          scheduler-value {:status :completed
+                           :pending #{}
+                           :running #{}
+                           :completed #{}}]
+      (with-redefs [dag/create-dag-from-tasks
+                    (fn [dag-id task-defs & opts]
+                      (reset! captured {:dag-id dag-id
+                                        :task-defs task-defs
+                                        :opts (apply hash-map opts)})
+                      run-state)
+                    dag/create-run-atom (fn [_] run-atom)
+                    dag/schedule-iteration (fn [_ _]
+                                             {:ok? true
+                                              :value scheduler-value})
+                    orchestrator/create-orchestrated-scheduler-context
+                    (fn [_ _] {:execute-task-fn (fn [& _] nil)})
+                    orchestrator/log-event (fn [& _] nil)]
+        (let [final-state (orchestrator/execute-dag!
+                           "dag-123"
+                           [{:task/id "task-1" :task/deps #{}}]
+                           {:state-profile :software-factory
+                            :state-profile-provider provider})]
+          (is (= run-state final-state))
+          (is (= :software-factory (get-in @captured [:opts :state-profile])))
+          (is (= provider (get-in @captured [:opts :state-profile-provider]))))))))

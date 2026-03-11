@@ -7,6 +7,7 @@
 ;; Test fixtures
 
 (def test-dirs (atom #{}))
+(def test-stores (atom #{}))
 (def test-store-root (System/getenv "MINIFORGE_ARTIFACT_TEST_DIR"))
 (def test-backend (or (System/getenv "MINIFORGE_ARTIFACT_TEST_BACKEND") "transit"))
 
@@ -27,24 +28,47 @@
       (try
         (let [store (artifact/create-store datalevin-opts)]
           (swap! test-dirs conj dir)
+          (swap! test-stores conj store)
           store)
         (catch Throwable _e
           (let [fallback-dir (create-temp-test-dir (str prefix "transit-"))
                 store (artifact/create-transit-store (assoc opts :dir fallback-dir))]
             (swap! test-dirs conj dir)
             (swap! test-dirs conj fallback-dir)
+            (swap! test-stores conj store)
             store)))
       (let [store (artifact/create-transit-store (assoc opts :dir dir))]
         (swap! test-dirs conj dir)
+        (swap! test-stores conj store)
         store))))
 
+(defn delete-tree-with-retries!
+  [dir]
+  (loop [attempt 0]
+    (let [result (try
+                   (fs/delete-tree dir)
+                   :deleted
+                   (catch java.nio.file.DirectoryNotEmptyException e
+                     (if (< attempt 4)
+                       e
+                       (throw e))))]
+      (when (instance? java.nio.file.DirectoryNotEmptyException result)
+        (Thread/sleep 50)
+        (recur (inc attempt))))))
+
 (defn cleanup-stores [f]
-  (f)
-  ;; Clean up temp directories after tests
-  (doseq [dir @test-dirs]
-    (when (fs/exists? dir)
-      (fs/delete-tree dir)))
-  (reset! test-dirs #{}))
+  (try
+    (f)
+    (finally
+      ;; Close stores first so async persistence can settle before filesystem cleanup.
+      (doseq [store @test-stores]
+        (artifact/close-store store))
+      (reset! test-stores #{})
+      ;; Clean up temp directories after tests.
+      (doseq [dir @test-dirs]
+        (when (fs/exists? dir)
+          (delete-tree-with-retries! dir)))
+      (reset! test-dirs #{}))))
 
 (use-fixtures :each cleanup-stores)
 
