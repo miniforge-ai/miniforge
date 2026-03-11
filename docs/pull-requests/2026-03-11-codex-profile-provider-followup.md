@@ -30,14 +30,21 @@ few merge-centric assumptions that surfaced once the kernel default reverted to 
   - workflow provider loading from resources
   - task-executor forwarding provider config
   - generic blocked/running task behavior after the kernel default changed
+- Fixed the repo integration runner so `bb test:integration` streams child test output instead of buffering until the
+  end of the full suite. This makes slow namespaces visible and avoids the appearance of a hang.
+- Fixed a real integration-test cleanup race in `artifact.interface-integration-test` by closing tracked stores before
+  temp-dir cleanup and retrying directory deletion when async persistence has not fully settled yet.
 
 ## Testing Plan
 
 - `bb pre-commit`
+- `bb test:integration`
 - `clojure -M:dev:test -e "(require '[clojure.test :as t] 'ai.miniforge.dag-executor.state-test
   'ai.miniforge.workflow.state-profile-test 'ai.miniforge.task-executor.orchestrator-test) ..."`
-- Attempted `bb test:integration`, but the repo-wide integration runner stalled idle without producing output or a
-  failure signal during this pass
+- `bb test:integration` now completes green: 293 tests, 1015 assertions, 0 failures, 0 errors
+
+Note: the integration run still emits noisy `babashka.process/destroy_tree` `sysctl failed` warnings in this local
+sandbox when child processes are cleaned up. They do not fail the suite and were pre-existing.
 
 ## Deployment Plan
 
@@ -57,3 +64,4 @@ Merge normally. This is an internal refactor plus test coverage.
 - [x] Remove remaining merge-only assumptions from generic DAG queries
 - [x] Add regression coverage for the new provider seam
 - [x] Re-run `bb pre-commit`
+- [x] Re-run `bb test:integration` and confirm the suite completes

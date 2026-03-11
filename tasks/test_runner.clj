@@ -4,7 +4,11 @@
    [clojure.string :as str]))
 
 (defn run-stream! [& args]
-  (let [{:keys [exit]} (deref (apply p/process {:out :inherit :err :inherit} args))]
+  (let [[opts cmd-args] (if (map? (first args))
+                          [(merge {:out :inherit :err :inherit} (first args))
+                           (rest args)]
+                          [{:out :inherit :err :inherit} args])
+        {:keys [exit]} (deref (apply p/process opts cmd-args))]
     exit))
 
 (defn integration []
@@ -46,11 +50,8 @@
         expr (str "(require 'clojure.test" require-expr ") "
                   "(let [r (clojure.test/run-tests" run-expr ")] "
                   "  (System/exit (if (zero? (+ (:fail r 0) (:error r 0))) 0 1)))")
-        {:keys [exit out err]}
-        (p/sh {:out :string :err :string :dir "projects/miniforge"}
-              "clojure" "-Sdeps" deps "-M" "-e" expr)]
-    (when-not (str/blank? out) (println out))
-    (when-not (str/blank? err) (binding [*out* *err*] (println err)))
+        exit (run-stream! {:dir "projects/miniforge"}
+                          "clojure" "-Sdeps" deps "-M" "-e" expr)]
     (when-not (zero? exit)
       (println "❌ Integration tests failed with exit code:" exit)
       (System/exit exit))))
