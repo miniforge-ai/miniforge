@@ -33,7 +33,9 @@
     (let [agent (planner/create-planner)]
       (is (some? agent))
       (is (= :planner (:role agent)))
-      (is (string? (:system-prompt agent)))))
+      (is (string? (:system-prompt agent)))
+      (is (= {:tokens 100000 :cost-usd 5.0}
+             (get-in agent [:config :budget])))))
 
   (testing "creates planner with custom config"
     (let [agent (planner/create-planner {:config {:temperature 0.5}})]

@@ -206,3 +206,50 @@
     (let [result (gate/check-gate :syntax {:content "(+ 1 2)"} {})]
       (is (:passed? result))
       (is (= :syntax (:gate result))))))
+
+;; ============================================================================
+;; Review-approved gate tests (PR #288)
+;; ============================================================================
+
+(deftest check-gate-review-approved-via-decision-test
+  (testing "review-approved gate passes when :review/decision is :approved"
+    (let [result (gate/check-gate :review-approved
+                                   {:review/decision :approved}
+                                   {})]
+      (is (:passed? result))))
+
+  (testing "review-approved gate passes when :review/decision is :conditionally-approved"
+    (let [result (gate/check-gate :review-approved
+                                   {:review/decision :conditionally-approved}
+                                   {})]
+      (is (:passed? result))))
+
+  (testing "review-approved gate fails when :review/decision is :rejected"
+    (let [result (gate/check-gate :review-approved
+                                   {:review/decision :rejected}
+                                   {})]
+      (is (not (:passed? result)))
+      (is (= :not-approved (get-in (first (:errors result)) [:type]))))))
+
+(deftest check-gate-review-approved-fallback-paths-test
+  (testing "review-approved gate passes via :metadata :approved fallback"
+    (let [result (gate/check-gate :review-approved
+                                   {:metadata {:approved true}}
+                                   {})]
+      (is (:passed? result))))
+
+  (testing "review-approved gate passes via :artifact/metadata :approved fallback"
+    (let [result (gate/check-gate :review-approved
+                                   {:artifact/metadata {:approved true}}
+                                   {})]
+      (is (:passed? result))))
+
+  (testing "review-approved gate passes via :review :approved fallback"
+    (let [result (gate/check-gate :review-approved
+                                   {:review {:approved true}}
+                                   {})]
+      (is (:passed? result))))
+
+  (testing "review-approved gate fails when no approval signal present"
+    (let [result (gate/check-gate :review-approved {} {})]
+      (is (not (:passed? result))))))

@@ -241,13 +241,13 @@
 
 (deftest estimate-cost-test
   (testing "calculates cost for tokens"
-    (let [cost (agent/estimate-cost 1000 500 "claude-sonnet-4")]
+    (let [cost (agent/estimate-cost 1000 500 "claude-sonnet-4-6")]
       (is (pos? cost))
       (is (< cost 1.0)))) ;; Should be cents, not dollars
 
   (testing "different models have different costs"
-    (let [sonnet-cost (agent/estimate-cost 1000 500 "claude-sonnet-4")
-          opus-cost (agent/estimate-cost 1000 500 "claude-opus-4")]
+    (let [sonnet-cost (agent/estimate-cost 1000 500 "claude-sonnet-4-6")
+          opus-cost (agent/estimate-cost 1000 500 "claude-opus-4-6")]
       (is (< sonnet-cost opus-cost)))))
 
 (deftest mock-llm-test

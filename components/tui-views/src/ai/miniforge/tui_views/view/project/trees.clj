@@ -429,36 +429,36 @@
         wf-id    (:pr/workflow-id pr)
         branch   (:pr/branch pr)
         wfs      (get model :workflows [])
-        linked-wf (helpers/find-linked-workflow wfs wf-id branch)]
-    (let [additions (get pr :pr/additions 0)
-          deletions (get pr :pr/deletions 0)
-          total     (+ additions deletions)
-          files     (get pr :pr/changed-files-count 0)]
-      (cond-> [(tree-node (str (:pr/repo pr "") " #" (:pr/number pr "?"))
-                          0 false status-info)
-               (tree-node (str "  " (:pr/title pr "")) 0)
-               (tree-node (str "Branch: " (or branch "?")
-                               (when-let [author (:pr/author pr)]
-                                 (when (seq author) (str " by " author))))
-                          0)
-               (tree-node (str "State: " (helpers/pr-state-label (:pr/status pr))
-                               " │ Status: " (helpers/readiness-indicator r-state))
-                          0 false (readiness-state-color r-state))
-               (tree-node (str "Risk: " (name risk-lvl)
-                               " │ Score: " (int (* 100 (get readiness :readiness/score 0))) "%"
-                               (when (pos? total)
-                                 (str " │ +" additions "/-" deletions
-                                      (when (pos? files) (str " " files " files")))))
-                          0 false (risk-level-color risk-lvl))]
-        recommend
-        (conj (tree-node (str "Action: " (:label recommend) " — " (:reason recommend))
-                         0 false (recommend-action-color (:action recommend))))
-        linked-wf
-        (conj (tree-node (str "Workflow: " (:name linked-wf)
-                              " (" (name (get linked-wf :status :unknown)) ")")
-                         0 false status-info))
-        (not linked-wf)
-        (conj (tree-node "Workflow: not linked" 0))))))
+        linked-wf (helpers/find-linked-workflow wfs wf-id branch)
+        additions (get pr :pr/additions 0)
+        deletions (get pr :pr/deletions 0)
+        total     (+ additions deletions)
+        files     (get pr :pr/changed-files-count 0)]
+    (cond-> [(tree-node (str (:pr/repo pr "") " #" (:pr/number pr "?"))
+                        0 false status-info)
+             (tree-node (str "  " (:pr/title pr "")) 0)
+             (tree-node (str "Branch: " (or branch "?")
+                             (when-let [author (:pr/author pr)]
+                               (when (seq author) (str " by " author))))
+                        0)
+             (tree-node (str "State: " (helpers/pr-state-label (:pr/status pr))
+                             " │ Status: " (helpers/readiness-indicator r-state))
+                        0 false (readiness-state-color r-state))
+             (tree-node (str "Risk: " (name risk-lvl)
+                             " │ Score: " (int (* 100 (get readiness :readiness/score 0))) "%"
+                             (when (pos? total)
+                               (str " │ +" additions "/-" deletions
+                                    (when (pos? files) (str " " files " files")))))
+                        0 false (risk-level-color risk-lvl))]
+      recommend
+      (conj (tree-node (str "Action: " (:label recommend) " — " (:reason recommend))
+                       0 false (recommend-action-color (:action recommend))))
+      linked-wf
+      (conj (tree-node (str "Workflow: " (:name linked-wf)
+                            " (" (name (get linked-wf :status :unknown)) ")")
+                       0 false status-info))
+      (not linked-wf)
+      (conj (tree-node "Workflow: not linked" 0)))))
 
 (defn project-evidence-tree
   "Build evidence tree nodes."
@@ -530,19 +530,19 @@
                                                        (str " — " description)))]
                                        (mapv #(tree-node (str "  " %) 1 false status-info)
                                              (helpers/wrap-text text wrap-width))))
-                                   (range) actions)))]
-        (let [nodes (cond-> (vec msg-nodes)
-                      (seq action-nodes) (into action-nodes))]
-          (if pending?
-            (let [since   (get-in model [:chat :pending-since])
-                  elapsed (if since
-                            (quot (- (System/currentTimeMillis) since) 1000)
-                            0)
-                  spinner (get ["⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏"]
-                               (mod elapsed 10))
-                  label   (str spinner " Agent thinking... (" elapsed "s)")]
-              (conj nodes (tree-node label 0 false status-warning)))
-            nodes))))))
+                                   (range) actions)))
+            nodes (cond-> (vec msg-nodes)
+                    (seq action-nodes) (into action-nodes))
+            since (get-in model [:chat :pending-since])
+            elapsed (if since
+                      (quot (- (System/currentTimeMillis) since) 1000)
+                      0)
+            spinner (get ["⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏"]
+                         (mod elapsed 10))
+            label   (str spinner " Agent thinking... (" elapsed "s)")]
+        (if pending?
+          (conj nodes (tree-node label 0 false status-warning))
+          nodes)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

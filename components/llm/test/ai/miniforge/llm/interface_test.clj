@@ -286,6 +286,37 @@
     (let [resp (impl/streaming-success-response "(defn foo [] 42)" 0 nil nil)]
       (is (:success resp)))))
 
+;------------------------------------------------------------------------------ Layer 4
+;; Claude backend args-fn budget tests (PR #288)
+
+(deftest claude-args-fn-budget-usd-test
+  (let [args-fn (:args-fn (get impl/backends :claude))]
+
+    (testing "budget-usd from request is used as --max-budget-usd value"
+      (let [args (args-fn {:prompt "test" :budget-usd 2.50})]
+        (is (some #{"--max-budget-usd"} args))
+        (is (some #{"2.5"} args))))
+
+    (testing "falls back to 0.10 when max-tokens set but no budget-usd"
+      (let [args (args-fn {:prompt "test" :max-tokens 8000})]
+        (is (some #{"--max-budget-usd"} args))
+        (is (some #{"0.10"} args))))
+
+    (testing "budget-usd takes priority over max-tokens fallback"
+      (let [args (args-fn {:prompt "test" :max-tokens 8000 :budget-usd 5.0})]
+        (is (some #{"5.0"} args))
+        (is (not (some #{"0.10"} args)))))
+
+    (testing "no budget flag when neither budget-usd nor max-tokens"
+      (let [args (args-fn {:prompt "test"})]
+        (is (not (some #{"--max-budget-usd"} args)))))
+
+    (testing "mcp-config flag is included when provided"
+      (let [args (args-fn {:prompt "test" :mcp-config "/tmp/mcp.json"
+                           :budget-usd 2.50})]
+        (is (some #{"--mcp-config"} args))
+        (is (some #{"/tmp/mcp.json"} args))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (test/run-tests 'ai.miniforge.llm.interface-test)

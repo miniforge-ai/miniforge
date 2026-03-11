@@ -66,7 +66,14 @@
   [:msg/remediation-completed {:fixed fixed :failed failed :message message}])
 
 (defn decomposition-started [pr-id plan]
-  [:msg/decomposition-started {:pr-id pr-id :plan plan}])
+  [:msg/decomposition-started (merge {:pr-id pr-id} plan)])
+
+(defn pr-diff-fetched
+  "Build a :msg/pr-diff-fetched message.
+   Omits :error key when error is nil."
+  [pr-id diff detail error]
+  [:msg/pr-diff-fetched (cond-> {:pr-id pr-id :diff diff :detail detail}
+                          error (assoc :error error))])
 
 (defn chat-response [content actions]
   [:msg/chat-response {:content content :actions actions}])

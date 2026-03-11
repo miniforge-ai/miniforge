@@ -333,7 +333,7 @@
 
 (deftest handle-decomposition-started-test
   (let [m (events/handle-decomposition-started (fresh)
-            {:pr-id [:repo 42] :plan {:sub-prs [1 2 3]}})]
+            {:pr-id [:repo 42] :sub-prs [1 2 3]})]
     (is (str/includes? (:flash-message m) "3 sub-PRs"))))
 
 ;; ---------------------------------------------------------------------------- Repos events

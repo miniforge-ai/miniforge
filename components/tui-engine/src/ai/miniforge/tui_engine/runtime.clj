@@ -231,6 +231,8 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
+  (require '[ai.miniforge.tui-engine.layout :as layout])
+
   ;; Minimal app example
   (def my-app
     (core/create-app
@@ -244,7 +246,7 @@
                              model))
                   model))
       :view   (fn [model [cols rows]]
-                (ai.miniforge.tui-engine.layout/text [cols rows]
+                (layout/text [cols rows]
                              (str "Count: " (:count model))))}))
 
   (start! my-app)
