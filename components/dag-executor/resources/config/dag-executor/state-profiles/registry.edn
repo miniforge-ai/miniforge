@@ -1,0 +1,2 @@
+{:default-profile :kernel
+ :profiles {:kernel "config/dag-executor/state-profiles/kernel.edn"}}

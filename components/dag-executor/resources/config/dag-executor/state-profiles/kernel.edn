@@ -1,0 +1,15 @@
+{:profile/id :kernel
+ :task-statuses [:pending :ready :running :completed :failed :skipped]
+ :terminal-statuses [:completed :failed :skipped]
+ :success-terminal-statuses [:completed]
+ :valid-transitions
+ {:pending [:ready :skipped]
+  :ready [:running :skipped]
+  :running [:completed :failed]
+  :completed []
+  :failed []
+  :skipped []}
+ :event-mappings
+ {:started {:type :transition :to :running}
+  :completed {:type :complete :to :completed}
+  :failed {:type :fail :reason :failed}}}

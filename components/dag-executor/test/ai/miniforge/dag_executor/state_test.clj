@@ -103,13 +103,20 @@
     (is (not (state/terminal? :pending)))
     (is (not (state/terminal? :implementing)))))
 
+(deftest resource-backed-profile-registry-test
+  (testing "active profile registry is loaded from classpath resources"
+    (is (= :software-factory (profiles/default-profile-id)))
+    (is (contains? (set (profiles/available-profile-ids)) :kernel))
+    (is (contains? (set (profiles/available-profile-ids)) :software-factory))
+    (is (contains? (set (profiles/available-profile-ids)) :etl))))
+
 (deftest kernel-profile-completion-test
   (testing "generic kernel profile reaches :completed without merge semantics"
     (let [task-id (random-uuid)
           task (state/create-task-state task-id #{} :state-profile :kernel)
           run (state/create-run-state (random-uuid) {task-id task} :state-profile :kernel)
           run-atom (state/create-run-atom run)]
-      (is (= profiles/kernel-profile (get-in @run-atom [:run/config :state-profile])))
+      (is (= (profiles/resolve-profile :kernel) (get-in @run-atom [:run/config :state-profile])))
       (is (result/ok? (state/transition-task! run-atom task-id :ready nil)))
       (is (result/ok? (state/transition-task! run-atom task-id :running nil)))
       (is (result/ok? (state/mark-completed! run-atom task-id nil)))

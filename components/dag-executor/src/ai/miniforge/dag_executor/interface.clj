@@ -54,17 +54,13 @@
   "Build a custom state profile map."
   state-profile/build-profile)
 
-(def software-factory-profile
-  "Software-factory task lifecycle profile."
-  state-profile/software-factory-profile)
+(def resolve-state-profile
+  "Resolve a state profile keyword or inline map via the active resource registry."
+  state-profile/resolve-profile)
 
-(def kernel-profile
-  "Domain-neutral task lifecycle profile."
-  state-profile/kernel-profile)
-
-(def etl-profile
-  "Example ETL task lifecycle profile."
-  state-profile/etl-profile)
+(def available-state-profile-ids
+  "List the state profile ids exposed by the active resource registry."
+  state-profile/available-profile-ids)
 
 (def task-statuses
   "Valid task workflow statuses: :pending :ready :implementing :pr-opening
