@@ -1,0 +1,8 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge/phase {:local/root "../phase"}
+        ai.miniforge/agent {:local/root "../agent"}
+        ai.miniforge/response {:local/root "../response"}
+        ai.miniforge/release-executor {:local/root "../release-executor"}}
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps {babashka/process {:mvn/version "0.5.22"}}}}}

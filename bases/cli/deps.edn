@@ -24,4 +24,8 @@
 
         ;; Flagship app workflow families
         ai.miniforge/workflow-software-factory
-        {:local/root "../../components/workflow-software-factory"}}}
+        {:local/root "../../components/workflow-software-factory"}
+
+        ;; Flagship app phase implementations
+        ai.miniforge/phase-software-factory
+        {:local/root "../../components/phase-software-factory"}}}

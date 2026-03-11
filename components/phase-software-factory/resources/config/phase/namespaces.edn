@@ -1,0 +1,7 @@
+{:phase/namespaces
+ [ai.miniforge.phase.explore
+  ai.miniforge.phase.plan
+  ai.miniforge.phase.implement
+  ai.miniforge.phase.verify
+  ai.miniforge.phase.review
+  ai.miniforge.phase.release]}

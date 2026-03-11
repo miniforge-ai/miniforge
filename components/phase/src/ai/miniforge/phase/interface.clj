@@ -32,19 +32,26 @@
       :leave   (fn [ctx] -> ctx)    ; Post-processing
       :error   (fn [ctx ex] -> ctx) ; Error handling/repair}"
   (:require
-   ;; Require implementation namespaces for side effects (method registration)
-   [ai.miniforge.phase.explore]
-   [ai.miniforge.phase.plan]
-   [ai.miniforge.phase.implement]
-   [ai.miniforge.phase.verify]
-   [ai.miniforge.phase.review]
-   [ai.miniforge.phase.release]
+   [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.phase.registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Re-export registry functions
 
-(def get-phase-interceptor
+(defn ensure-phase-implementations-loaded!
+  "Ensure configured phase implementations have been required."
+  []
+  (loader/ensure-phase-implementations-loaded!))
+
+(def configured-phase-namespaces
+  "Return the configured phase implementation namespaces discovered from resources."
+  loader/configured-phase-namespaces)
+
+(def reset-phase-loader!
+  "Reset phase implementation loader state for tests."
+  loader/reset-loader!)
+
+(defn get-phase-interceptor
   "Get interceptor for a phase configuration.
 
    Arguments:
@@ -53,16 +60,20 @@
 
    Returns:
      Interceptor map with :name, :enter, :leave, :error"
-  registry/get-phase-interceptor)
+  [config]
+  (ensure-phase-implementations-loaded!)
+  (registry/get-phase-interceptor config))
 
-(def list-phases
+(defn list-phases
   "List all registered phase types.
 
    Returns:
      Set of phase keywords"
-  registry/list-phases)
+  []
+  (ensure-phase-implementations-loaded!)
+  (registry/list-phases))
 
-(def phase-defaults
+(defn phase-defaults
   "Get default configuration for a phase type.
 
    Arguments:
@@ -70,7 +81,9 @@
 
    Returns:
      Default config map or nil if unknown"
-  registry/phase-defaults)
+  [phase-kw]
+  (ensure-phase-implementations-loaded!)
+  (registry/phase-defaults phase-kw))
 
 (def merge-with-defaults
   "Merge user config with phase defaults."
@@ -112,6 +125,7 @@
    Returns:
      Vector of interceptor maps"
   [workflow]
+  (ensure-phase-implementations-loaded!)
   (mapv get-phase-interceptor (:workflow/pipeline workflow)))
 
 (defn validate-pipeline
@@ -123,6 +137,7 @@
    Returns:
      {:valid? bool :errors [...] :warnings [...]}"
   [workflow]
+  (ensure-phase-implementations-loaded!)
   (let [pipeline (:workflow/pipeline workflow)
         known-phases (list-phases)
         errors (atom [])

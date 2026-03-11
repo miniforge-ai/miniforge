@@ -39,6 +39,8 @@
                        "components/fsm/resources"
                        "components/phase/src"
                        "components/phase/resources"
+                       "components/phase-software-factory/src"
+                       "components/phase-software-factory/resources"
                        "components/gate/src"
                        "components/gate/resources"
                        "components/workflow/src"
@@ -105,6 +107,7 @@
                       ai.miniforge/response {:local/root "components/response"}
                       ai.miniforge/fsm {:local/root "components/fsm"}
                       ai.miniforge/phase {:local/root "components/phase"}
+                      ai.miniforge/phase-software-factory {:local/root "components/phase-software-factory"}
                       ai.miniforge/gate {:local/root "components/gate"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
                       ai.miniforge/workflow-software-factory {:local/root "components/workflow-software-factory"}
@@ -148,6 +151,7 @@
                        "components/policy/test"
                        "components/heuristic/test"
                        "components/phase/test"
+                       "components/phase-software-factory/test"
                        "components/gate/test"
                        "components/workflow/test"
                        "components/workflow-software-factory/resources"
@@ -191,6 +195,7 @@
                       ai.miniforge/response {:local/root "components/response"}
                       ai.miniforge/fsm {:local/root "components/fsm"}
                       ai.miniforge/phase {:local/root "components/phase"}
+                      ai.miniforge/phase-software-factory {:local/root "components/phase-software-factory"}
                       ai.miniforge/gate {:local/root "components/gate"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
                       ai.miniforge/workflow-software-factory {:local/root "components/workflow-software-factory"}
