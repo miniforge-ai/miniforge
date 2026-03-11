@@ -40,8 +40,12 @@ policy. It also hid two inconsistencies:
 - move specialized agents and reviewer off embedded Claude model literals
 - update configured/default Claude models to Sonnet 4.6 and Opus 4.6 where
   appropriate
+- move the llm model catalog and task recommendations into an EDN resource so
+  model lineup changes are data-only updates instead of code edits
 - update model registry and selection recommendations so automatic selection
   matches the configured Claude defaults
+- add current OpenAI GPT-5.4 and GPT-5.4 Pro entries from the official OpenAI
+  models docs
 - refresh stale Gemini registry entries to the current 2.5 lineup used by
   Google’s model docs
 - keep behavior stable while removing duplicated immediate values

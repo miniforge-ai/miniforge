@@ -16,13 +16,19 @@
 
     (let [haiku (registry/get-model :haiku-4.5)]
       (is (= "claude-haiku-4-5-20251001" (:model-id haiku)))
-      (is (= :fast (get-in haiku [:capabilities :speed]))))))
+      (is (= :fast (get-in haiku [:capabilities :speed]))))
+
+    (let [gpt-5-4-model (registry/get-model :gpt-5.4)]
+      (is (= "gpt-5.4" (:model-id gpt-5-4-model)))
+      (is (= :openai (:provider gpt-5-4-model)))
+      (is (= 1050000 (get-in gpt-5-4-model [:capabilities :context-window]))))))
 
 (deftest test-get-models-by-capability
   (testing "Query by reasoning capability"
     (let [exceptional (registry/get-models-by-capability :reasoning :exceptional)]
       (is (seq exceptional))
       (is (some #{:opus-4.6} exceptional))
+      (is (some #{:gpt-5.4-pro} exceptional))
       (is (some #{:gpt-5.3-codex} exceptional)))
 
     (let [excellent (registry/get-models-by-capability :reasoning :excellent)]
@@ -35,6 +41,7 @@
     (let [exceptional (registry/get-models-by-capability :code-generation :exceptional)]
       (is (seq exceptional))
       (is (some #{:sonnet-4.6} exceptional))
+      (is (some #{:gpt-5.4} exceptional))
       (is (some #{:gpt-5.3-codex} exceptional))))
 
   (testing "Query by speed capability"
@@ -81,6 +88,8 @@
   (testing "Get OpenAI models"
     (let [models (registry/get-models-by-provider :openai)]
       (is (seq models))
+      (is (some #{:gpt-5.4-pro} models))
+      (is (some #{:gpt-5.4} models))
       (is (some #{:gpt-5.3-codex} models))
       (is (some #{:gpt-5.2-codex} models)))))
 
@@ -100,6 +109,7 @@
   (testing "Check large context support"
     (is (registry/supports-large-context? :opus-4.6))
     (is (registry/supports-large-context? :sonnet-4.6))
+    (is (registry/supports-large-context? :gpt-5.4))
     (is (registry/supports-large-context? :gemini-2.5-pro))
     (is (registry/supports-large-context? :gemini-2.5-flash))
     ;; llama-3.3-70b has 128k context, below the 200k default threshold
@@ -115,12 +125,14 @@
     (let [rec (registry/recommend-models-for-task-type :thinking-heavy)]
       (is (seq (:tier-1 rec)))
       (is (some #{:opus-4.6} (:tier-1 rec)))
+      (is (some #{:gpt-5.4-pro} (:tier-1 rec)))
       (is (:rationale rec))))
 
   (testing "Recommend models for execution-focused tasks"
     (let [rec (registry/recommend-models-for-task-type :execution-focused)]
       (is (seq (:tier-1 rec)))
       (is (some #{:sonnet-4.6} (:tier-1 rec)))
+      (is (some #{:gpt-5.4} (:tier-2 rec)))
       (is (:rationale rec))))
 
   (testing "Recommend models for simple-validation tasks"
@@ -143,8 +155,8 @@
     (is (= :gemini-2.5-pro (registry/get-primary-recommendation :large-context)))))
 
 (deftest test-model-registry-completeness
-  (testing "All 16 models are present"
-    (is (= 16 (count registry/model-registry))))
+  (testing "All 18 models are present"
+    (is (= 18 (count registry/model-registry))))
 
   (testing "All models have required fields"
     (doseq [[model-key model-data] registry/model-registry]

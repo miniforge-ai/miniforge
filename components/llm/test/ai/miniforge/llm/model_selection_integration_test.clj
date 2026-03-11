@@ -30,7 +30,7 @@
       (is (= :thinking-heavy (:task-type selection)))
 
       ;; Should select a flagship model for planning
-      (is (some #{(:model selection)} [:opus-4.6 :gpt-5.3-codex :gemini-2.5-pro]))
+      (is (some #{(:model selection)} [:opus-4.6 :gpt-5.4-pro :gpt-5.4]))
 
       ;; Verify model profile
       (let [model (registry/get-model (:model selection))]
@@ -97,7 +97,7 @@
         (is (= :free (get-in model [:capabilities :cost])))))))
 
 (deftest test-large-context-task
-  (testing "Large context task selects Gemini"
+  (testing "Large context task selects a large-context provider"
     (let [task {:phase :implement
                 :context-tokens 500000
                 :description "Refactor entire codebase"}
@@ -113,8 +113,8 @@
       ;; Should select a model with large context window
       (let [model (registry/get-model (:model selection))]
         (is (>= (get-in model [:capabilities :context-window]) 500000))
-        ;; Likely Gemini models with 1M+ context
-        (is (some #{(:provider model)} [:google :anthropic]))))))
+        ;; Current large-context tier includes Google and OpenAI 1M+ models.
+        (is (some #{(:provider model)} [:google :openai]))))))
 
 (deftest test-cost-optimized-strategy
   (testing "Cost-optimized strategy prefers cheaper models"
@@ -236,9 +236,9 @@
       ;; All should succeed
       (is (= 3 (count selections)))
 
-      ;; Large context should likely use Gemini
+      ;; Large context should use a provider with 1M+ context models
       (let [large-context (second selections)]
-        (is (#{:google :anthropic} (:provider large-context))))
+        (is (#{:google :openai} (:provider large-context))))
 
       ;; Privacy should use local (Meta, Alibaba, DeepSeek, etc.)
       (let [privacy (nth selections 2)]
@@ -289,13 +289,13 @@
       (is (:model high-selection))
       (is (:model low-selection)))))
 
-(deftest test-all-16-models-accessible
-  (testing "All 16 models in registry can be selected"
+(deftest test-all-18-models-accessible
+  (testing "All 18 models in registry can be selected"
     (let [;; Get all model keys
           all-models (keys registry/model-registry)]
 
-      ;; Should have exactly 16 models
-      (is (= 16 (count all-models)))
+      ;; Should have exactly 18 models
+      (is (= 18 (count all-models)))
 
       ;; All should be queryable
       (doseq [model-key all-models]
