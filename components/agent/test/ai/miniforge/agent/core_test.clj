@@ -45,7 +45,7 @@
 
 (deftest estimate-cost-test
   (testing "calculates sonnet pricing"
-    (let [cost (core/estimate-cost 1000000 500000 "claude-sonnet-4")]
+    (let [cost (core/estimate-cost 1000000 500000 "claude-sonnet-4-6")]
       ;; Input: 1M * $3/1M = $3.00
       ;; Output: 500K * $15/1M = $7.50
       ;; Total: $10.50
@@ -53,12 +53,12 @@
       (is (< cost 11.0))))
 
   (testing "calculates opus pricing"
-    (let [cost (core/estimate-cost 1000000 500000 "claude-opus-4")]
-      ;; Input: 1M * $15/1M = $15.00
-      ;; Output: 500K * $75/1M = $37.50
-      ;; Total: $52.50
-      (is (> cost 50.0))
-      (is (< cost 55.0))))
+    (let [cost (core/estimate-cost 1000000 500000 "claude-opus-4-6")]
+      ;; Input: 1M * $5/1M = $5.00
+      ;; Output: 500K * $25/1M = $12.50
+      ;; Total: $17.50
+      (is (> cost 17.0))
+      (is (< cost 18.0))))
 
   (testing "uses default pricing for unknown model"
     (let [cost (core/estimate-cost 1000 500 "unknown-model")]

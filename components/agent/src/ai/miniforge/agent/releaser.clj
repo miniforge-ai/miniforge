@@ -4,6 +4,8 @@
    for the release phase."
   (:require
    [ai.miniforge.agent.artifact-session :as artifact-session]
+   [ai.miniforge.agent.budget :as budget]
+   [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
@@ -186,17 +188,19 @@
 
    Example:
      (create-releaser)
-     (create-releaser {:config {:model \"claude-sonnet-4\" :temperature 0.3}})"
+     (create-releaser {:config {:model \"claude-sonnet-4-6\" :temperature 0.3}})"
   [& [opts]]
   (let [logger (or (:logger opts)
-                   (log/create-logger {:min-level :info :output (fn [_])}))]
+                   (log/create-logger {:min-level :info :output (fn [_])}))
+        config (->> (merge {:temperature 0.3
+                            :max-tokens 2000}
+                           (:config opts))
+                    (model/apply-default-model :releaser)
+                    (budget/apply-default-budget :releaser))]
     (specialized/create-base-agent
      {:role :releaser
       :system-prompt @releaser-system-prompt
-      :config (merge {:model "claude-sonnet-4"
-                      :temperature 0.3
-                      :max-tokens 2000}
-                     (:config opts))
+      :config config
       :logger logger
 
       :invoke-fn
@@ -208,9 +212,7 @@
             ;; Use the real LLM with artifact session for MCP tool support
             (let [{:keys [llm-result artifact]}
                   (artifact-session/with-artifact-session [session]
-                    (let [budget-usd (or (get-in opts [:config :budget :cost-usd])
-                                        (get-in context [:budget :cost-usd])
-                                        1.00)
+                    (let [budget-usd (budget/resolve-cost-budget-usd :releaser config context)
                           mcp-opts {:mcp-config (:mcp-config-path session)
                                     :mcp-allowed-tools (:mcp-allowed-tools session)
                                     :supervision (:supervision session)

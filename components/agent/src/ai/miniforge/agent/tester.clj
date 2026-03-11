@@ -3,6 +3,8 @@
    Generates tests for code artifacts and validates coverage."
   (:require
    [ai.miniforge.agent.artifact-session :as artifact-session]
+   [ai.miniforge.agent.budget :as budget]
+   [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.response.interface :as response]
@@ -15,11 +17,6 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Tester-specific schemas
-
-(def ^:private default-tester-budget-usd
-  "Fallback budget cap for tester LLM calls when no budget is supplied
-   through opts or agent context."
-  2.00)
 
 (def TestFile
   "Schema for a test file."
@@ -234,17 +231,19 @@
 
    Example:
      (create-tester)
-     (create-tester {:config {:model \"claude-sonnet-4\"}})"
+     (create-tester {:config {:model \"claude-sonnet-4-6\"}})"
   [& [opts]]
   (let [logger (or (:logger opts)
-                   (log/create-logger {:min-level :info :output (fn [_])}))]
+                   (log/create-logger {:min-level :info :output (fn [_])}))
+        config (->> (merge {:temperature 0.2
+                            :max-tokens 6000}
+                           (:config opts))
+                    (model/apply-default-model :tester)
+                    (budget/apply-default-budget :tester))]
     (specialized/create-base-agent
      {:role :tester
       :system-prompt @tester-system-prompt
-      :config (merge {:model "claude-sonnet-4"
-                      :temperature 0.2
-                      :max-tokens 6000}
-                     (:config opts))
+      :config config
       :logger logger
 
       :invoke-fn
@@ -269,9 +268,7 @@
             ;; Use the real LLM with artifact session for MCP tool support
             (let [{:keys [llm-result artifact]}
                   (artifact-session/with-artifact-session [session]
-                    (let [budget-usd (or (get-in opts [:config :budget :cost-usd])
-                                         (get-in context [:budget :cost-usd])
-                                         default-tester-budget-usd)
+                    (let [budget-usd (budget/resolve-cost-budget-usd :tester config context)
                           mcp-opts {:mcp-config (:mcp-config-path session)
                                     :mcp-allowed-tools (:mcp-allowed-tools session)
                                     :supervision (:supervision session)

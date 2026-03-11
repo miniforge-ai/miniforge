@@ -30,7 +30,7 @@
       (catch Exception _e
         ;; Fallback if resource loading fails
         {:llm {:backend :claude
-               :model "claude-sonnet-4-20250514"
+               :model "claude-sonnet-4-6"
                :timeout-ms 300000
                :line-timeout-ms 60000
                :max-tokens 4000}
@@ -41,6 +41,8 @@
          :meta-loop {:enabled true
                      :max-convergence-iterations 10
                      :convergence-threshold 0.95}
+         :agents {:default-models {:thinking "claude-opus-4-6"
+                                   :execution "claude-sonnet-4-6"}}
          :model-selection {:enabled true
                            :strategy :automatic
                            :cost-limit-per-task 0.10
@@ -56,7 +58,7 @@
                      :auto-open false}}))
     ;; Fallback if resource not found
     {:llm {:backend :claude
-           :model "claude-sonnet-4-20250514"
+           :model "claude-sonnet-4-6"
            :timeout-ms 300000
            :line-timeout-ms 60000
            :max-tokens 4000}
@@ -67,6 +69,8 @@
      :meta-loop {:enabled true
                  :max-convergence-iterations 10
                  :convergence-threshold 0.95}
+     :agents {:default-models {:thinking "claude-opus-4-6"
+                               :execution "claude-sonnet-4-6"}}
      :model-selection {:enabled true
                        :strategy :automatic
                        :cost-limit-per-task 0.10
@@ -126,6 +130,8 @@
    - MINIFORGE_LLM_TIMEOUT
    - MINIFORGE_LLM_LINE_TIMEOUT
    - MINIFORGE_LLM_MAX_TOKENS
+   - MINIFORGE_AGENT_THINKING_MODEL
+   - MINIFORGE_AGENT_EXECUTION_MODEL
    - MINIFORGE_MAX_ITERATIONS
    - MINIFORGE_MAX_TOKENS
    - MINIFORGE_FAILURE_STRATEGY
@@ -155,6 +161,13 @@
 
     (get-env-var "MINIFORGE_LLM_MAX_TOKENS")
     (assoc-in [:llm :max-tokens] (parse-env-value (get-env-var "MINIFORGE_LLM_MAX_TOKENS")))
+
+    ;; Agent model defaults
+    (get-env-var "MINIFORGE_AGENT_THINKING_MODEL")
+    (assoc-in [:agents :default-models :thinking] (get-env-var "MINIFORGE_AGENT_THINKING_MODEL"))
+
+    (get-env-var "MINIFORGE_AGENT_EXECUTION_MODEL")
+    (assoc-in [:agents :default-models :execution] (get-env-var "MINIFORGE_AGENT_EXECUTION_MODEL"))
 
     ;; Workflow settings
     (get-env-var "MINIFORGE_MAX_ITERATIONS")

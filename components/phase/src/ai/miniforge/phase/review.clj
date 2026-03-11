@@ -35,8 +35,8 @@
    :budget {:tokens 20000
             :iterations 4
             :time-seconds 180}
-   ;; Code review needs balanced capabilities - hint at Sonnet
-   :model-hint :sonnet-4.5})
+   ;; Code review needs balanced capabilities - hint at current Sonnet
+   :model-hint :sonnet-4.6})
 
 ;; Register defaults on load
 (registry/register-phase-defaults! :review default-config)

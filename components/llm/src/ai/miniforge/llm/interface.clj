@@ -247,7 +247,7 @@
 
    Example:
      (get-model :opus-4.6)
-     (get-model :sonnet-4.5)"
+     (get-model :sonnet-4.6)"
   [model-key]
   (registry/get-model model-key))
 
