@@ -182,9 +182,12 @@
                    :logger my-logger
                    :max-parallel 4})"
   [dag-id task-defs config]
-  (let [{:keys [logger budget]} config
+  (let [{:keys [logger budget state-profile state-profile-provider]} config
         ;; Initialize DAG using dag-executor's function
-        run-state (dag/create-dag-from-tasks dag-id task-defs :budget budget)
+        run-state (dag/create-dag-from-tasks dag-id task-defs
+                                             :budget budget
+                                             :state-profile state-profile
+                                             :state-profile-provider state-profile-provider)
         run-atom (dag/create-run-atom run-state)
 
         ;; Create orchestrated context

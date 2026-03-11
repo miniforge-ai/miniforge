@@ -5,6 +5,7 @@
   (:require
    [ai.miniforge.workflow.interface.configurable :as configurable]
    [ai.miniforge.workflow.interface.pipeline :as pipeline]
+   [ai.miniforge.workflow.interface.profiles :as profiles]
    [ai.miniforge.workflow.interface.protocols :as protocols]
    [ai.miniforge.workflow.interface.registry :as registry]
    [ai.miniforge.workflow.interface.runtime :as runtime]))
@@ -62,6 +63,11 @@
 (def create-event-trigger configurable/create-event-trigger)
 (def create-merge-trigger configurable/create-merge-trigger)
 (def stop-trigger! configurable/stop-trigger!)
+
+(def load-state-profile-provider profiles/load-state-profile-provider)
+(def available-state-profile-ids profiles/available-state-profile-ids)
+(def default-state-profile-id profiles/default-state-profile-id)
+(def resolve-state-profile profiles/resolve-state-profile)
 
 (def register-workflow! registry/register-workflow!)
 (def get-workflow registry/get-workflow)

@@ -1,5 +1,0 @@
-{:default-profile :software-factory
- :profiles
- {:kernel "config/dag-executor/state-profiles/kernel.edn"
-  :software-factory "config/workflow/state-profiles/software-factory.edn"
-  :etl "config/workflow/state-profiles/etl.edn"}}
