@@ -180,7 +180,7 @@
   (def sample-app
     (create-app
      {:init   (fn [] {:count 0})
-      :update (fn [model msg] model)
+      :update (fn [model _msg] model)
       :view   (fn [model [cols rows]]
                 (layout/text [cols rows]
                              (str "Count: " (:count model))))}))

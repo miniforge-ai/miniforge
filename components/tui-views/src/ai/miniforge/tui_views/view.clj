@@ -87,6 +87,8 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  (def m (ai.miniforge.tui-views.model/init-model))
+  (require '[ai.miniforge.tui-views.model :as model])
+
+  (def m (model/init-model))
   (layout/buf->strings (root-view m [80 24]))
   :leave-this-here)

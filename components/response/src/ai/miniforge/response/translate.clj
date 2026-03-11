@@ -189,7 +189,7 @@
   (let [category (:anomaly/category anomaly-map)]
     {:message (:anomaly/message anomaly-map)
      :anomaly-code category
-     :retryable? (boolean (anomaly/retryable? category))
+     :retryable? (anomaly/retryable? category)
      :phase (:anomaly/phase anomaly-map)}))
 
 ;------------------------------------------------------------------------------ Layer 4

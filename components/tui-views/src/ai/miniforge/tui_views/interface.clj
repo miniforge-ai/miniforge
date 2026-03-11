@@ -90,7 +90,7 @@
                             {:evaluation/passed? nil
                              :evaluation/error (.getMessage e)}))})
              prs)))
-    (catch Exception e
+    (catch Exception _e
       (msg/review-completed []))))
 
 (defn handle-create-train [train-mgr {:keys [name description]
@@ -231,40 +231,40 @@
    based on the action type keyword."
   [{:keys [action context]}]
   (try
-    (let [action-type (:action action)]
-      (let [result (case action-type
-                     :review
-                     (if-let [pr (:pr context)]
-                       (handle-review-prs {:prs [pr]})
-                       (msg/chat-action-result {:success? false :message "No PR in context for review"}))
+    (let [action-type (:action action)
+          result (case action-type
+                   :review
+                   (if-let [pr (:pr context)]
+                     (handle-review-prs {:prs [pr]})
+                     (msg/chat-action-result {:success? false :message "No PR in context for review"}))
 
-                     :evaluate
-                     (if-let [pr (:pr context)]
-                       (handle-evaluate-policy {:pr pr :pr-id [(:pr/repo pr) (:pr/number pr)]})
-                       (msg/chat-action-result {:success? false :message "No PR in context for evaluation"}))
+                   :evaluate
+                   (if-let [pr (:pr context)]
+                     (handle-evaluate-policy {:pr pr :pr-id [(:pr/repo pr) (:pr/number pr)]})
+                     (msg/chat-action-result {:success? false :message "No PR in context for evaluation"}))
 
-                     :sync
-                     (handle-sync-prs {})
+                   :sync
+                   (handle-sync-prs {})
 
-                     :open
-                     (if-let [url (get-in context [:pr :pr/url])]
-                       (do (handle-open-url {:url url})
-                           (msg/chat-action-result {:success? true :message (str "Opened " url)}))
-                       (msg/chat-action-result {:success? false :message "No PR URL available"}))
+                   :open
+                   (if-let [url (get-in context [:pr :pr/url])]
+                     (do (handle-open-url {:url url})
+                         (msg/chat-action-result {:success? true :message (str "Opened " url)}))
+                     (msg/chat-action-result {:success? false :message "No PR URL available"}))
 
-                     :remediate
-                     (if-let [pr (:pr context)]
-                       (handle-remediate-prs {:prs [pr]})
-                       (msg/chat-action-result {:success? false :message "No PR in context"}))
+                   :remediate
+                   (if-let [pr (:pr context)]
+                     (handle-remediate-prs {:prs [pr]})
+                     (msg/chat-action-result {:success? false :message "No PR in context"}))
 
-                     :decompose
-                     (if-let [pr (:pr context)]
-                       (handle-decompose-pr {:pr pr})
-                       (msg/chat-action-result {:success? false :message "No PR in context"}))
+                   :decompose
+                   (if-let [pr (:pr context)]
+                     (handle-decompose-pr {:pr pr})
+                     (msg/chat-action-result {:success? false :message "No PR in context"}))
 
-                     (msg/chat-action-result
-                      {:success? false
-                       :message (str "Unknown action: " (name (or action-type :none)))}))]
+                   (msg/chat-action-result
+                    {:success? false
+                     :message (str "Unknown action: " (name (or action-type :none)))}))]
         (if (= :msg/side-effect-error (first result))
           (let [payload (second result)
                 message (or (get-in payload [:error :message])
@@ -272,7 +272,7 @@
                             (:error payload)
                             "Action failed")]
             (msg/chat-action-result {:success? false :message message}))
-          result)))
+          result))
     (catch Exception e
       (msg/chat-action-result {:success? false :message (.getMessage e)}))))
 

@@ -197,22 +197,21 @@
         selected (:selected-idx model)
         active-chain (:active-chain model)
         flash (:flash-message model)
-        search-active? (and (:filtered-indices model) (= :search (:mode model)))]
-    (let [render-header-bar
-          (fn [[tc tr]]
-            (layout/text [tc tr]
-              (str " MINIFORGE │ Workflows"
-                   (when search-active? (str " [" (count workflows) " matches]")))
-              {:fg palette/status-info :bold? true}))
-
-          render-content-area
-          (fn [[c r]]
-            (layout/split-v [c r] (/ (- r 2.0) r)
-              (fn [size] (render-table workflows selected active-chain size))
-              (fn [size] (render-footer flash size))))]
-      (layout/split-v [cols rows] (/ 2.0 rows)
+        search-active? (and (:filtered-indices model) (= :search (:mode model)))
         render-header-bar
-        render-content-area))))
+        (fn [[tc tr]]
+          (layout/text [tc tr]
+            (str " MINIFORGE │ Workflows"
+                 (when search-active? (str " [" (count workflows) " matches]")))
+            {:fg palette/status-info :bold? true}))
+        render-content-area
+        (fn [[c r]]
+          (layout/split-v [c r] (/ (- r 2.0) r)
+            (fn [size] (render-table workflows selected active-chain size))
+            (fn [size] (render-footer flash size))))]
+    (layout/split-v [cols rows] (/ 2.0 rows)
+      render-header-bar
+      render-content-area)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
