@@ -2,6 +2,7 @@
   "Tests for DAG task state management and event emission wiring."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.dag-executor.state-profile :as profiles]
    [ai.miniforge.dag-executor.state :as state]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.event-stream.interface :as es]))
@@ -101,3 +102,17 @@
     (is (state/terminal? :skipped))
     (is (not (state/terminal? :pending)))
     (is (not (state/terminal? :implementing)))))
+
+(deftest kernel-profile-completion-test
+  (testing "generic kernel profile reaches :completed without merge semantics"
+    (let [task-id (random-uuid)
+          task (state/create-task-state task-id #{} :state-profile :kernel)
+          run (state/create-run-state (random-uuid) {task-id task} :state-profile :kernel)
+          run-atom (state/create-run-atom run)]
+      (is (= profiles/kernel-profile (get-in @run-atom [:run/config :state-profile])))
+      (is (result/ok? (state/transition-task! run-atom task-id :ready nil)))
+      (is (result/ok? (state/transition-task! run-atom task-id :running nil)))
+      (is (result/ok? (state/mark-completed! run-atom task-id nil)))
+      (is (= :completed (get-in @run-atom [:run/tasks task-id :task/status])))
+      (is (contains? (:run/completed @run-atom) task-id))
+      (is (= :completed (state/compute-run-status @run-atom))))))

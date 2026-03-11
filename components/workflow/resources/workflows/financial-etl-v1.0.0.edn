@@ -1,0 +1,50 @@
+{:workflow/id :financial-etl
+ :workflow/version "1.0.0"
+ :workflow/name "Financial Filings ETL"
+ :workflow/description
+ "Minimal governed ETL workflow for public-filings acquisition, extraction,
+  canonicalization, evaluation, and report publication."
+ :workflow/created-at #inst "2026-03-11T00:00:00.000-00:00"
+ :workflow/task-types [:etl :financial-analysis :demo]
+ :workflow/entry :acquire
+
+ :workflow/phases
+ [{:phase/id :acquire
+   :phase/name "Acquire Filing Inputs"
+   :phase/description "Collect source filings and metadata"
+   :phase/agent :none
+   :phase/handler :etl/acquire
+   :phase/gates []
+   :phase/next [{:target :extract}]}
+
+  {:phase/id :extract
+   :phase/name "Extract Facts"
+   :phase/description "Extract candidate facts from filing sources"
+   :phase/agent :none
+   :phase/handler :etl/extract
+   :phase/gates []
+   :phase/next [{:target :canonicalize}]}
+
+  {:phase/id :canonicalize
+   :phase/name "Canonicalize Facts"
+   :phase/description "Normalize extracted facts into canonical schema"
+   :phase/agent :none
+   :phase/handler :etl/canonicalize
+   :phase/gates []
+   :phase/next [{:target :evaluate}]}
+
+  {:phase/id :evaluate
+   :phase/name "Evaluate Policy"
+   :phase/description "Apply haircut and confidence rules"
+   :phase/agent :none
+   :phase/handler :etl/evaluate
+   :phase/gates []
+   :phase/next [{:target :publish-report}]}
+
+  {:phase/id :publish-report
+   :phase/name "Publish Report"
+   :phase/description "Emit a local report artifact"
+   :phase/agent :none
+   :phase/handler :etl/publish-report
+   :phase/gates []
+   :phase/next []}]}

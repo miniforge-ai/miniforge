@@ -19,6 +19,7 @@
 (ns ai.miniforge.workflow.configurable-test
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.workflow.configurable :as configurable]
    [ai.miniforge.workflow.state :as state]
    [ai.miniforge.agent.interface :as agent]))
@@ -114,7 +115,30 @@
       (is (empty? (:artifacts result))
           "Done phase should have no artifacts")
       (is (= 0 (:tokens (:metrics result)))
-          "Done phase should have zero tokens"))))
+          "Done phase should have zero tokens")))
+
+  (testing "Execute handler-backed phase uses caller-provided handler"
+    (let [artifact-id (random-uuid)
+          phase {:phase/id :acquire
+                 :phase/name "Acquire"
+                 :phase/agent :none
+                 :phase/handler :etl/acquire}
+          result (configurable/execute-configurable-phase
+                  phase
+                  {:execution/input {:issuer "ACME"}}
+                  {:phase-handlers
+                   {:etl/acquire
+                    (fn [_phase exec-state _context]
+                      {:success? true
+                       :artifacts [(artifact/build-artifact
+                                    {:id artifact-id
+                                     :type :etl/raw-filing
+                                     :version "1.0.0"
+                                     :content (:execution/input exec-state)})]
+                       :errors []
+                       :metrics {:duration-ms 5}})}})]
+      (is (true? (:success? result)))
+      (is (= artifact-id (get-in result [:artifacts 0 :artifact/id]))))))
 
 (deftest run-configurable-workflow-test
   (testing "Run simple workflow to completion"

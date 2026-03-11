@@ -305,7 +305,7 @@
       (is (= #{task-a task-b} (:task/deps task-c-dag))))))
 
 (deftest test-plan->dag-tasks-keyword-task-ids
-  (testing "keyword task IDs are normalized to deterministic UUIDs"
+  (testing "keyword task IDs are preserved and dependencies resolve against them"
     (let [plan {:plan/id (random-uuid)
                 :plan/tasks [{:task/id :task-a
                               :task/description "A" :task/type :implement
@@ -316,11 +316,8 @@
           dag-tasks (dag-orch/plan->dag-tasks plan {})
           id-a (:task/id (first dag-tasks))
           id-b (:task/id (second dag-tasks))]
-      ;; IDs are UUIDs, not keywords
-      (is (uuid? id-a))
-      (is (uuid? id-b))
-      ;; Same keyword produces same UUID (deterministic)
-      (is (= id-a (java.util.UUID/nameUUIDFromBytes (.getBytes "task-a"))))
+      (is (= :task-a id-a))
+      (is (= :task-b id-b))
       ;; Dependency resolved correctly
       (is (= #{id-a} (:task/deps (second dag-tasks)))))))
 
@@ -342,7 +339,7 @@
       (is (= #{(ids "Alpha") (ids "Beta")} (:task/deps gamma-task))))))
 
 (deftest test-plan->dag-tasks-mixed-id-types
-  (testing "plan with mixed UUID and keyword IDs normalizes consistently"
+  (testing "plan with mixed UUID and keyword IDs preserves both consistently"
     (let [uuid-id (random-uuid)
           plan {:plan/id (random-uuid)
                 :plan/tasks [{:task/id uuid-id
@@ -354,13 +351,13 @@
           dag-tasks (dag-orch/plan->dag-tasks plan {})]
       ;; UUID task ID preserved as-is
       (is (= uuid-id (:task/id (first dag-tasks))))
-      ;; Keyword task ID converted to UUID
-      (is (uuid? (:task/id (second dag-tasks))))
+      ;; Keyword task ID preserved as-is
+      (is (= :keyword-task (:task/id (second dag-tasks))))
       ;; Dependency on UUID task resolves
       (is (= #{uuid-id} (:task/deps (second dag-tasks)))))))
 
 (deftest test-plan->dag-tasks-string-non-uuid-ids
-  (testing "non-UUID string task IDs are normalized to deterministic UUIDs"
+  (testing "non-UUID string task IDs are preserved and dependencies resolve against them"
     (let [plan {:plan/id (random-uuid)
                 :plan/tasks [{:task/id "build-fixtures"
                               :task/description "Build" :task/type :implement
@@ -371,8 +368,8 @@
           dag-tasks (dag-orch/plan->dag-tasks plan {})
           id-build (:task/id (first dag-tasks))
           id-test (:task/id (second dag-tasks))]
-      (is (uuid? id-build))
-      (is (uuid? id-test))
+      (is (= "build-fixtures" id-build))
+      (is (= "run-tests" id-test))
       (is (= #{id-build} (:task/deps (second dag-tasks)))))))
 
 (deftest test-phantom-deps-caused-stuck-tasks-before-fix

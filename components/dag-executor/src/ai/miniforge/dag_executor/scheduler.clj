@@ -6,6 +6,7 @@
    Layer 2: Main scheduling loop"
   (:require
    [ai.miniforge.dag-executor.result :as result]
+   [ai.miniforge.dag-executor.state-profile :as profiles]
    [ai.miniforge.dag-executor.state :as state]
    [ai.miniforge.dag-executor.parallel :as parallel]
    [ai.miniforge.logging.interface :as log]
@@ -116,73 +117,72 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Event handling
 
+(defn resolve-state-helper
+  [helper-key]
+  (case helper-key
+    :max-ci-retries-exceeded? state/max-ci-retries-exceeded?
+    :max-fix-iterations-exceeded? state/max-fix-iterations-exceeded?
+    :increment-ci-retries state/increment-ci-retries
+    :increment-fix-iterations state/increment-fix-iterations
+    nil))
+
 (defn handle-task-event
   "Handle an event from the PR lifecycle controller.
    Updates task state based on the event type."
   [run-atom event context]
   (let [logger (:logger context)
         task-id (:event/task-id event)
-        action (:event/action event)]
+        action (:event/action event)
+        profile (profiles/resolve-profile (get-in @run-atom [:run/config :state-profile]))
+        event-config (get-in profile [:event-mappings action])]
     (when logger
       (log/debug logger :dag-executor :event/received
                  {:message "Handling task event"
                   :data {:task-id task-id :action action}}))
-    (case action
-      :pr-opened
-      (state/transition-task! run-atom task-id :ci-running logger)
-
-      :ci-passed
-      (state/transition-task! run-atom task-id :review-pending logger)
-
-      :ci-failed
-      (let [current-state (get-in @run-atom [:run/tasks task-id])]
-        (if (state/max-ci-retries-exceeded? current-state)
-          (state/mark-failed! run-atom task-id
-                              {:reason :ci-failed-max-retries
-                               :details (:event/error event)}
-                              logger)
-          (do
-            (state/update-task! run-atom task-id state/increment-ci-retries logger)
-            (state/transition-task! run-atom task-id :responding logger))))
-
-      :review-approved
-      (state/transition-task! run-atom task-id :ready-to-merge logger)
-
-      :review-changes-requested
-      (let [current-state (get-in @run-atom [:run/tasks task-id])]
-        (if (state/max-fix-iterations-exceeded? current-state)
-          (state/mark-failed! run-atom task-id
-                              {:reason :review-failed-max-iterations
-                               :details (:event/error event)}
-                              logger)
-          (do
-            (state/update-task! run-atom task-id state/increment-fix-iterations logger)
-            (state/transition-task! run-atom task-id :responding logger))))
-
-      :fix-pushed
-      (state/transition-task! run-atom task-id :ci-running logger)
-
-      :merge-ready
-      (state/transition-task! run-atom task-id :merging logger)
-
-      :merged
-      (state/mark-merged! run-atom task-id logger)
-
-      :merge-failed
-      (state/mark-failed! run-atom task-id
-                          {:reason :merge-failed
-                           :details (:event/error event)}
-                          logger)
-
-      ;; Default: log unknown event
+    (if-not event-config
       (do
         (when logger
           (log/warn logger :dag-executor :event/unknown
                     {:message "Unknown event action"
-                     :data {:action action :event event}}))
+                     :data {:action action :event event
+                            :profile (:profile/id profile)}}))
         (result/err :unknown-event
                     (str "Unknown event action: " action)
-                    {:event event})))))
+                    {:event event
+                     :profile (:profile/id profile)}))
+      (case (:type event-config)
+        :transition
+        (state/transition-task! run-atom task-id (:to event-config) logger)
+
+        :complete
+        (if (= :merged (:to event-config))
+          (state/mark-merged! run-atom task-id logger)
+          (state/mark-completed! run-atom task-id logger))
+
+        :fail
+        (state/mark-failed! run-atom task-id
+                            {:reason (:reason event-config)
+                             :details (:event/error event)}
+                            logger)
+
+        :retry-or-fail
+        (let [current-state (get-in @run-atom [:run/tasks task-id])
+              limit-predicate (resolve-state-helper (:retry-limit-predicate event-config))
+              update-fn (resolve-state-helper (:retry-update-fn event-config))]
+          (if (and limit-predicate (limit-predicate current-state))
+            (state/mark-failed! run-atom task-id
+                                {:reason (:failure-reason event-config)
+                                 :details (:event/error event)}
+                                logger)
+            (do
+              (when update-fn
+                (state/update-task! run-atom task-id update-fn logger))
+              (state/transition-task! run-atom task-id (:retry-transition event-config) logger))))
+
+        (result/err :unknown-event-type
+                    (str "Unknown event config type: " (:type event-config))
+                    {:event event
+                     :event-config event-config})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Scheduling loop

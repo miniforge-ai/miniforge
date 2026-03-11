@@ -14,6 +14,7 @@
                    "ai.miniforge.workflow.loader-integration-test"
                    "ai.miniforge.workflow.configurable-integration-test"
                    "ai.miniforge.workflow.runner-integration-test"
+                   "ai.miniforge.workflow.financial-etl-test"
                    "ai.miniforge.workflow.dag-orchestrator-test"
                    "ai.miniforge.workflow.artifact-persistence-test"
                    "ai.miniforge.dag-executor.executor-test"

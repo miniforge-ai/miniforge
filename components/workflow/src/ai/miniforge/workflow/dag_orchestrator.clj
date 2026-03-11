@@ -120,15 +120,14 @@
 ;--- Layer 1: Plan to DAG Conversion
 
 (defn normalize-task-id
-  "Normalize a task ID to a UUID. Handles UUIDs, UUID strings, keywords, and
-   other values by generating a deterministic UUID from the value's string form."
+  "Preserve task IDs in their domain-native form.
+   UUID strings are parsed to UUIDs so mixed string/UUID inputs still align."
   [x]
   (cond
     (uuid? x) x
-    (string? x) (or (parse-uuid x)
-                     (java.util.UUID/nameUUIDFromBytes (.getBytes (str x))))
-    (keyword? x) (java.util.UUID/nameUUIDFromBytes (.getBytes (name x)))
-    :else (java.util.UUID/nameUUIDFromBytes (.getBytes (pr-str x)))))
+    (string? x) (or (parse-uuid x) x)
+    (keyword? x) x
+    :else x))
 
 (defn validate-deps
   "Filter deps to only those referencing actual task IDs. Warns on phantoms."
@@ -374,6 +373,16 @@
   [completed-task-ids results event-stream workflow-id]
   (doseq [tid completed-task-ids]
     (resilience/emit-dag-task-completed! event-stream workflow-id tid (get results tid))))
+
+(defn emit-batch-events!
+  "Emit checkpointing events for successful results in a completed batch.
+   Returns nil to keep event emission side-effect only."
+  [results event-stream workflow-id]
+  (let [completed-task-ids (->> results
+                                (filter (fn [[_task-id result]] (dag/ok? result)))
+                                (map first))]
+    (emit-completed-checkpoints! completed-task-ids results event-stream workflow-id)
+    nil))
 
 (defn find-unreached-tasks
   "Identify tasks that are neither completed nor failed — stuck due to unmet deps."

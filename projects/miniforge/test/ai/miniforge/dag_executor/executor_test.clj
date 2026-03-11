@@ -18,7 +18,11 @@
   (let [exec (executor/create-docker-executor {:image "alpine:latest"})
         result (executor/available? exec)]
     (and (result/ok? result)
-         (:available? (:data result)))))
+         (:available? (:data result))
+         (let [env-result (executor/acquire-environment! exec (random-uuid) {})]
+           (when (result/ok? env-result)
+             (executor/release-environment! exec (:environment-id (:data env-result))))
+           (result/ok? env-result)))))
 
 (defn k8s-available?
   "Check if Kubernetes is available for testing."

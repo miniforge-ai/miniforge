@@ -12,6 +12,7 @@
    until it reaches a terminal integration state (:merged)."
   (:require
    [ai.miniforge.dag-executor.result :as result]
+   [ai.miniforge.dag-executor.state-profile :as state-profile]
    [ai.miniforge.dag-executor.state :as state]
    [ai.miniforge.dag-executor.parallel :as parallel]
    [ai.miniforge.dag-executor.scheduler :as scheduler]
@@ -48,6 +49,22 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Task workflow state
+
+(def build-state-profile
+  "Build a custom state profile map."
+  state-profile/build-profile)
+
+(def software-factory-profile
+  "Software-factory task lifecycle profile."
+  state-profile/software-factory-profile)
+
+(def kernel-profile
+  "Domain-neutral task lifecycle profile."
+  state-profile/kernel-profile)
+
+(def etl-profile
+  "Example ETL task lifecycle profile."
+  state-profile/etl-profile)
 
 (def task-statuses
   "Valid task workflow statuses: :pending :ready :implementing :pr-opening
@@ -126,6 +143,11 @@
    Example:
      (mark-merged! run-atom task-id logger)"
   state/mark-merged!)
+
+(def mark-completed!
+  "Atomically mark a task as completed in a run atom using the run profile's
+   success terminal status."
+  state/mark-completed!)
 
 (def mark-failed!
   "Atomically mark a task as failed in a run atom.
@@ -434,6 +456,7 @@
 
    Options:
    - :budget - Budget constraints
+   - :state-profile - Task lifecycle profile keyword or map
    - :max-fix-iterations - Default max fix iterations
    - :max-ci-retries - Default max CI retries
 
@@ -444,7 +467,7 @@
         {:task/id b-id :task/deps #{a-id}}
         {:task/id c-id :task/deps #{a-id}}]
        :budget {:max-tokens 500000})"
-  [dag-id task-defs & {:keys [budget max-fix-iterations max-ci-retries]
+  [dag-id task-defs & {:keys [budget state-profile max-fix-iterations max-ci-retries]
                        :or {max-fix-iterations 5 max-ci-retries 3}}]
   (let [tasks (->> task-defs
                    (map (fn [def]
@@ -452,10 +475,11 @@
                            (create-task-state
                             (:task/id def)
                             (or (:task/deps def) #{})
+                            :state-profile state-profile
                             :max-fix-iterations max-fix-iterations
                             :max-ci-retries max-ci-retries)]))
                    (into {}))]
-    (create-run-state dag-id tasks :budget budget)))
+    (create-run-state dag-id tasks :budget budget :state-profile state-profile)))
 
 (defn execute-dag
   "Execute a DAG to completion.

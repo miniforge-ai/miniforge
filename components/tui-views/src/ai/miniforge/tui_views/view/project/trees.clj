@@ -349,10 +349,11 @@
   "Resolve enrichment data for the detail view's selected PR.
    Falls back to naive derivation when enrichment is absent."
   [model]
-  (let [pr-data (get-in model [:detail :selected-pr])]
+  (let [pr-data (get-in model [:detail :selected-pr])
+        enrichment (when pr-data (helpers/resolve-enrichment pr-data))]
     {:pr        pr-data
-     :readiness (or (:pr/readiness pr-data) (when pr-data (helpers/derive-readiness pr-data)))
-     :risk      (or (:pr/risk pr-data) (when pr-data (helpers/derive-risk pr-data)))
+     :readiness (:readiness enrichment)
+     :risk      (:risk enrichment)
      :policy    (:pr/policy pr-data)
      :gates     (get pr-data :pr/gate-results [])}))
 

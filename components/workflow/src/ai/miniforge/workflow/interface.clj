@@ -1,6 +1,6 @@
 (ns ai.miniforge.workflow.interface
   "Public API for the workflow component.
-   Handles SDLC phase execution: Plan → Design → Implement → Verify → Review → Release → Observe"
+   Supports governed workflow execution across SDLC and non-SDLC domains."
   (:require
    [ai.miniforge.workflow.core :as core]
    [ai.miniforge.workflow.persistence :as persist]
@@ -250,6 +250,25 @@
   []
   ((requiring-resolve 'ai.miniforge.workflow.chain-loader/list-chains)))
 
+;------------------------------------------------------------------------------ Layer 5b
+;; Publication helpers
+
+(defn create-directory-publisher
+  "Create a local directory publisher for workflow outputs."
+  ([output-dir]
+   (create-directory-publisher output-dir {}))
+  ([output-dir opts]
+   ((requiring-resolve 'ai.miniforge.workflow.publish/create-directory-publisher)
+    output-dir opts)))
+
+(defn publish-output!
+  "Publish a workflow output using a configured publisher."
+  ([publisher publication]
+   (publish-output! publisher publication nil))
+  ([publisher publication logger]
+   ((requiring-resolve 'ai.miniforge.workflow.publish/publish!)
+    publisher publication logger)))
+
 ;------------------------------------------------------------------------------ Layer 6
 ;; Configurable workflow API (Legacy)
 
@@ -457,29 +476,34 @@
 ;------------------------------------------------------------------------------ Layer 6b
 ;; Event-driven triggers
 
-(defn create-merge-trigger
-  "Create a merge trigger that subscribes to an event stream.
+(defn create-event-trigger
+  "Create an event trigger that subscribes to an event stream.
 
    Arguments:
    - event-stream: Event stream to subscribe to
-   - trigger-config: {:triggers [{:on :pr/merged :repo ... :run {...}}]}
+   - trigger-config: {:triggers [{:on :event/type :match {...} :run {...}}]}
    - opts: Options map, passed to workflow execution
 
    Returns {:subscriber-id keyword, :stop-fn (fn [])}
 
    Example:
-     (def trigger (create-merge-trigger stream
-                    {:triggers [{:on :pr/merged
-                                 :repo \"my-org/my-repo\"
+     (def trigger (create-event-trigger stream
+                    {:triggers [{:on :filing/acquired
+                                 :match {:issuer \"ACME\"}
                                  :run {:workflow-id :deploy-v1
                                        :version \"1.0.0\"
-                                       :input-from-event {:branch :pr/branch}}}]}
+                                       :input-from-event {:issuer :issuer}}]}
                     {}))
      ;; Later:
      (stop-trigger! trigger)"
   [event-stream trigger-config opts]
-  ((requiring-resolve 'ai.miniforge.workflow.trigger/create-merge-trigger)
+  ((requiring-resolve 'ai.miniforge.workflow.trigger/create-event-trigger)
    event-stream trigger-config opts))
+
+(defn create-merge-trigger
+  "Compatibility alias for PR-merge triggered workflows."
+  [event-stream trigger-config opts]
+  (create-event-trigger event-stream trigger-config opts))
 
 (defn stop-trigger!
   "Stop a merge trigger. Unsubscribes and cancels pending work."

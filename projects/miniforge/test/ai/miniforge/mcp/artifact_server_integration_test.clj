@@ -43,7 +43,10 @@
 (defn stop-mcp-server
   "Close stdin and wait for process exit."
   [{:keys [^Process proc ^BufferedWriter writer]}]
-  (.close writer)
+  (when writer
+    (try
+      (.close writer)
+      (catch java.io.IOException _)))
   (.waitFor proc 5 java.util.concurrent.TimeUnit/SECONDS)
   (when (.isAlive proc)
     (.destroyForcibly proc)))

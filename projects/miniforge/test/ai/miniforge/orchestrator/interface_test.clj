@@ -17,7 +17,9 @@
   []
   (let [llm-client (llm/mock-client {:output "Generated response"})
         store (knowledge/create-store)
-        artifact-store (artifact/create-store)]
+        artifact-store (artifact/create-transit-store {:dir (str (java.nio.file.Files/createTempDirectory
+                                                                  "orchestrator-artifacts"
+                                                                  (make-array java.nio.file.attribute.FileAttribute 0)))})]
     (orch/create-orchestrator llm-client store artifact-store)))
 
 ;; ============================================================================
