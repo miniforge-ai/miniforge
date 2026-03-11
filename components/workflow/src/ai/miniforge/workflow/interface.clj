@@ -57,6 +57,9 @@
 (def save-workflow configurable/save-workflow)
 (def list-workflows configurable/list-workflows)
 (def compare-workflows configurable/compare-workflows)
+(def create-directory-publisher configurable/create-directory-publisher)
+(def publish-output! configurable/publish-output!)
+(def create-event-trigger configurable/create-event-trigger)
 (def create-merge-trigger configurable/create-merge-trigger)
 (def stop-trigger! configurable/stop-trigger!)
 

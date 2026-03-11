@@ -47,26 +47,43 @@
       (zero? (.waitFor proc)))
     (catch Exception _ false)))
 
+(defn- find-bb-root
+  "Find the nearest ancestor directory containing bb.edn."
+  []
+  (loop [dir (.getCanonicalFile (io/file (System/getProperty "user.dir")))]
+    (let [bb-file (io/file dir "bb.edn")]
+      (cond
+        (.exists bb-file) (.getPath dir)
+        (nil? (.getParentFile dir)) nil
+        :else (recur (.getParentFile dir))))))
+
 (defn resolve-miniforge-command
   "Resolve the miniforge command to use for spawning subprocesses.
 
    Resolution order:
    1. MINIFORGE_CMD env var (explicit override, e.g. \"/usr/local/bin/mf\")
-   2. \"miniforge\" on PATH (installed binary)
-   3. [\"bb\" \"miniforge\"] (dev mode — bb.edn task, requires CWD at project root)"
+   2. [\"bb\" \"--config\" <root>/bb.edn \"--deps-root\" <root> \"miniforge\"]
+      (dev mode — location-independent bb.edn task)
+   3. \"miniforge\" on PATH (installed binary)
+   4. [\"bb\" \"miniforge\"] as a final fallback"
   []
-  (cond
-    ;; 1. Explicit override
-    (System/getenv "MINIFORGE_CMD")
-    [(System/getenv "MINIFORGE_CMD")]
+  (let [bb-root (find-bb-root)]
+    (cond
+      ;; 1. Explicit override
+      (System/getenv "MINIFORGE_CMD")
+      [(System/getenv "MINIFORGE_CMD")]
 
-    ;; 2. Installed binary on PATH
-    (command-on-path? "miniforge")
-    ["miniforge"]
+      ;; 2. Prefer the current workspace in development and tests.
+      bb-root
+      ["bb" "--config" (str bb-root "/bb.edn") "--deps-root" bb-root "miniforge"]
 
-    ;; 3. Dev mode fallback (bb.edn task)
-    :else
-    ["bb" "miniforge"]))
+      ;; 3. Installed binary on PATH
+      (command-on-path? "miniforge")
+      ["miniforge"]
+
+      ;; 4. Last-resort fallback
+      :else
+      ["bb" "miniforge"])))
 
 (defn server-command
   "Build the MCP config command map for starting the artifact server."

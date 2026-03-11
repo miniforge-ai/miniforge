@@ -19,6 +19,8 @@
     (process/shell {:dir (str dir)} "git init")
     (process/shell {:dir (str dir)} "git config user.email" "test@example.com")
     (process/shell {:dir (str dir)} "git config user.name" "Test User")
+    (process/shell {:dir (str dir)} "git config commit.gpgsign" "false")
+    (process/shell {:dir (str dir)} "git config tag.gpgsign" "false")
     ;; Create an initial commit so branch operations work
     (spit (str (fs/path dir "README.md")) "# Test")
     (process/shell {:dir (str dir)} "git add README.md")

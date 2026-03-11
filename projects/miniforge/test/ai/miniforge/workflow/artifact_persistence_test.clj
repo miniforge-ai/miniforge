@@ -265,8 +265,8 @@
                               :metrics {:files-written 0}})))}})]
       
       ;; Verify release phase detected the failure
-      (is (= :completed (get-in result-ctx [:phase :status]))
-          "Phase should complete (even with failure)")
+      (is (= :failed (get-in result-ctx [:phase :status]))
+          "Phase should be marked failed when release persistence fails")
       
       (is (false? (get-in result-ctx [:phase :result :success]))
           "Result should indicate failure when no files written")

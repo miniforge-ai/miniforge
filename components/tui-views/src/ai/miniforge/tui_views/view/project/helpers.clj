@@ -420,15 +420,44 @@
   [action reason]
   (recommend action (labels action) reason))
 
+(defn- normalize-readiness
+  "Normalize readiness enrichment into the map shape expected by the view layer."
+  [pr readiness]
+  (cond
+    (map? readiness)
+    (merge (derive-readiness pr) readiness)
+
+    (number? readiness)
+    (let [derived (derive-readiness pr)]
+      (assoc derived
+             :readiness/score readiness
+             :readiness/ready? (>= readiness 0.85)))
+
+    :else
+    (derive-readiness pr)))
+
+(defn- normalize-risk
+  "Normalize risk enrichment into the map shape expected by the view layer."
+  [pr risk]
+  (cond
+    (map? risk)
+    risk
+
+    (keyword? risk)
+    {:risk/level risk
+     :risk/score nil
+     :risk/factors []}
+
+    :else
+    (derive-risk pr)))
+
 (defn extract-pr-signals
   "Extract enriched signals from a PR for recommendation.
    Returns a flat map of booleans/keywords for predicate use.
    Merges derived state into enriched readiness (explain-readiness lacks :readiness/state)."
   [pr]
-  (let [derived    (derive-readiness pr)
-        enriched   (:pr/readiness pr)
-        readiness  (if enriched (merge derived enriched) derived)
-        risk       (or (:pr/risk pr) (derive-risk pr))
+  (let [readiness  (normalize-readiness pr (:pr/readiness pr))
+        risk       (normalize-risk pr (:pr/risk pr))
         policy     (:pr/policy pr)
         violations (:evaluation/violations policy)
         changes    (+ (get pr :pr/additions 0)
@@ -525,16 +554,10 @@
    Prefers pr-train/policy-pack data, falls back to naive derivation.
    Always ensures :readiness/state is set (explain-readiness doesn't provide it)."
   [pr]
-  (let [derived  (derive-readiness pr)
-        enriched (:pr/readiness pr)
-        readiness (if enriched
-                    ;; Merge derived state into enriched (explain-readiness lacks :readiness/state)
-                    (merge derived enriched)
-                    derived)]
-    {:readiness readiness
-     :risk      (or (:pr/risk pr) (derive-risk pr))
+  {:readiness (normalize-readiness pr (:pr/readiness pr))
+   :risk      (normalize-risk pr (:pr/risk pr))
      :policy    (:pr/policy pr)
-     :recommend (derive-recommendation pr)}))
+   :recommend (derive-recommendation pr)})
 
 (defn policy-label
   "Policy pass/fail/unknown -> display label."

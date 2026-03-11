@@ -80,6 +80,21 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Phase execution (real implementation)
 
+(defn execute-handler-phase
+  "Execute a phase using a caller-provided handler from :phase-handlers context."
+  [phase exec-state context]
+  (let [handler-key (:phase/handler phase)
+        handler (get (:phase-handlers context) handler-key)]
+    (if handler
+      (handler phase exec-state context)
+      {:success? false
+       :artifacts []
+       :errors [{:type :missing-phase-handler
+                 :phase (:phase/id phase)
+                 :handler handler-key
+                 :message (str "No phase handler registered for " handler-key)}]
+       :metrics {}})))
+
 (defn execute-configurable-phase
   "Execute a single phase of a configurable workflow.
 
@@ -104,6 +119,9 @@
         max-iterations (get inner-loop :max-iterations 5)]
 
     (cond
+      (:phase/handler phase)
+      (execute-handler-phase phase exec-state context)
+
       ;; Skip :none agent
       (= :none phase-agent)
       {:success? true

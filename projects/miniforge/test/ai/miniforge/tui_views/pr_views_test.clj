@@ -225,9 +225,9 @@
       (is (seq (:risk/factors r))))))
 
 (deftest derive-risk-ci-failing-test
-  (testing "CI failing = medium risk"
+  (testing "CI failing = high risk"
     (let [r (project/derive-risk {:pr/status :open :pr/ci-status :failed})]
-      (is (= :medium (:risk/level r)))
+      (is (= :high (:risk/level r)))
       (is (some #(str/includes? (:explanation %) "CI") (:risk/factors r))))))
 
 ;; --- Enter-detail populates readiness/risk ---

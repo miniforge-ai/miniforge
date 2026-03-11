@@ -402,6 +402,8 @@
    :extra-paths ["bases/cli/src"
                  "bases/cli/resources"
                  "bases/lsp-mcp-bridge/src"
+                 "components/config/src"
+                 "components/config/resources"
                  "components/algorithms/src"
                  "components/schema/src"
                  "components/schema/resources"

@@ -59,7 +59,7 @@
 (def violation->warning checking/violation->warning)
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Builders, resolution, and external evaluation
+;; Builders and rule resolution
 
 (def create-pack builders/create-pack)
 (def create-rule builders/create-rule)
@@ -74,5 +74,3 @@
 (def approval-enforcement builders/approval-enforcement)
 (def resolve-rules builders/resolve-rules)
 (def merge-rules builders/merge-rules)
-(def evaluate-external-pr builders/evaluate-external-pr)
-(def parse-pr-diff builders/parse-pr-diff)

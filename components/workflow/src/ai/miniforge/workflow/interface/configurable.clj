@@ -1,5 +1,5 @@
 (ns ai.miniforge.workflow.interface.configurable
-  "Configurable workflow loading, execution, persistence, and triggers."
+  "Configurable workflow loading, execution, persistence, triggers, and publication."
   (:require
    [ai.miniforge.workflow.persistence :as persist]
    [ai.miniforge.workflow.replay :as replay]))
@@ -50,10 +50,28 @@
   ((requiring-resolve 'ai.miniforge.workflow.comparison/compare-workflows)
    execution-states))
 
+(defn create-directory-publisher
+  ([output-dir]
+   (create-directory-publisher output-dir {}))
+  ([output-dir opts]
+   ((requiring-resolve 'ai.miniforge.workflow.publish/create-directory-publisher)
+    output-dir opts)))
+
+(defn publish-output!
+  ([publisher publication]
+   (publish-output! publisher publication nil))
+  ([publisher publication logger]
+   ((requiring-resolve 'ai.miniforge.workflow.publish/publish!)
+    publisher publication logger)))
+
+(defn create-event-trigger
+  [event-stream trigger-config opts]
+  ((requiring-resolve 'ai.miniforge.workflow.trigger/create-event-trigger)
+   event-stream trigger-config opts))
+
 (defn create-merge-trigger
   [event-stream trigger-config opts]
-  ((requiring-resolve 'ai.miniforge.workflow.trigger/create-merge-trigger)
-   event-stream trigger-config opts))
+  (create-event-trigger event-stream trigger-config opts))
 
 (defn stop-trigger!
   [trigger]

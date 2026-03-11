@@ -36,7 +36,7 @@
    [ai.miniforge.tui-views.persistence.pr :as persistence-pr]
    [ai.miniforge.tui-views.persistence.pr-cache :as pr-cache]
    [ai.miniforge.response.interface :as response]
-   [ai.miniforge.policy-pack.interface :as policy-pack]
+   [ai.miniforge.policy-pack.software-factory :as policy-pack]
    [ai.miniforge.pr-train.interface :as pr-train]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.tui-views.persistence.github :as github]
@@ -90,7 +90,7 @@
                             {:evaluation/passed? nil
                              :evaluation/error (.getMessage e)}))})
              prs)))
-    (catch Exception _e
+    (catch Exception _
       (msg/review-completed []))))
 
 (defn handle-create-train [train-mgr {:keys [name description]

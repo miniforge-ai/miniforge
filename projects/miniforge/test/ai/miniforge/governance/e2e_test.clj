@@ -8,7 +8,7 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.pr-train.interface :as pr-train]
    [ai.miniforge.event-stream.interface :as es]
-   [ai.miniforge.policy-pack.interface :as policy]
+   [ai.miniforge.policy-pack.software-factory :as sf-policy]
    [ai.miniforge.policy-pack.knowledge-safety :as ks]))
 
 ;; ============================================================================
@@ -153,7 +153,7 @@
   (let [pack (ks/create-knowledge-safety-pack)]
 
     (testing "prompt injection detected in diff"
-      (let [result (policy/evaluate-external-pr pack {:diff (injection-diff)})]
+      (let [result (sf-policy/evaluate-external-pr pack {:diff (injection-diff)})]
         (is (map? result))
         (is (not (true? (:evaluation/passed? result)))
             "Injection diff should not pass clean")
@@ -161,10 +161,10 @@
             "Should have at least one violation")))
 
     (testing "clean diff produces no injection violations"
-      (let [result (policy/evaluate-external-pr pack {:diff (clean-diff)})]
+      (let [result (sf-policy/evaluate-external-pr pack {:diff (clean-diff)})]
         (is (map? result))
         ;; Clean diff should have fewer violations than injection diff
-        (let [injection-result (policy/evaluate-external-pr pack {:diff (injection-diff)})
+        (let [injection-result (sf-policy/evaluate-external-pr pack {:diff (injection-diff)})
               clean-violations (count (:evaluation/violations result))
               dirty-violations (count (:evaluation/violations injection-result))]
           (is (< clean-violations dirty-violations)

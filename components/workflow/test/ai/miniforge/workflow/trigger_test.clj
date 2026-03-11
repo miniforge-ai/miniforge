@@ -29,6 +29,15 @@
           e {:event/type :pr/merged :pr/repo "org/repo"}]
       (is (true? (trigger/matches-trigger? t e))))))
 
+(deftest matches-trigger?-generic-match-test
+  (testing "matches generic event fields via :match"
+    (let [t {:on :filing/acquired
+             :match {:issuer "ACME" :source :sec}}
+          e {:event/type :filing/acquired
+             :issuer "ACME"
+             :source :sec}]
+      (is (true? (trigger/matches-trigger? t e))))))
+
 (deftest matches-trigger?-nil-repo-matches-any-test
   (testing "nil repo in trigger matches any event repo"
     (let [t {:on :pr/merged}
@@ -90,9 +99,9 @@
       (is (= {:branch nil} result)))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; create-merge-trigger integration test
+;; create-event-trigger integration test
 
-(deftest create-merge-trigger-fires-on-matching-event-test
+(deftest create-event-trigger-fires-on-matching-event-test
   (testing "trigger subscribes, fires workflow on matching event, and stops cleanly"
     (let [fired       (atom [])
           ;; Minimal event-stream stub: atom holding subscribers
@@ -104,11 +113,11 @@
                                                   :version           "1.0.0"
                                                   :input-from-event  {:branch :pr/branch}}}]}]
       ;; Redef cross-component functions
-      (with-redefs [ai.miniforge.workflow.trigger/create-merge-trigger
+      (with-redefs [ai.miniforge.workflow.trigger/create-event-trigger
                     (fn [event-stream trigger-config opts]
                       (let [triggers     (:triggers trigger-config)
                             futures-atom (atom [])
-                            sub-id       :merge-trigger
+                            sub-id       :event-trigger
                             callback     (fn [event]
                                            (doseq [t triggers]
                                              (when (trigger/matches-trigger? t event)
@@ -120,7 +129,7 @@
                          :stop-fn       (fn []
                                           (swap! subscribers dissoc sub-id)
                                           (reset! futures-atom []))}))]
-        (let [handle (trigger/create-merge-trigger stream trigger-cfg {})]
+        (let [handle (trigger/create-event-trigger stream trigger-cfg {})]
           ;; Simulate publishing a matching event
           (doseq [[_ cb] @subscribers]
             (cb {:event/type :pr/merged
@@ -134,7 +143,7 @@
           (trigger/stop-trigger! handle)
           (is (empty? @subscribers)))))))
 
-(deftest create-merge-trigger-ignores-non-matching-event-test
+(deftest create-event-trigger-ignores-non-matching-event-test
   (testing "trigger does not fire for non-matching events"
     (let [fired       (atom [])
           subscribers (atom {})
@@ -142,10 +151,10 @@
           trigger-cfg {:triggers [{:on   :pr/merged
                                    :repo "org/repo"
                                    :run  {:workflow-id :deploy-v1}}]}]
-      (with-redefs [ai.miniforge.workflow.trigger/create-merge-trigger
+      (with-redefs [ai.miniforge.workflow.trigger/create-event-trigger
                     (fn [event-stream trigger-config opts]
                       (let [triggers (:triggers trigger-config)
-                            sub-id   :merge-trigger
+                            sub-id   :event-trigger
                             callback (fn [event]
                                        (doseq [t triggers]
                                          (when (trigger/matches-trigger? t event)
@@ -153,7 +162,7 @@
                         (swap! subscribers assoc sub-id callback)
                         {:subscriber-id sub-id
                          :stop-fn       (fn [] (swap! subscribers dissoc sub-id))}))]
-        (let [handle (trigger/create-merge-trigger stream trigger-cfg {})]
+        (let [handle (trigger/create-event-trigger stream trigger-cfg {})]
           ;; Publish non-matching event (wrong repo)
           (doseq [[_ cb] @subscribers]
             (cb {:event/type :pr/merged

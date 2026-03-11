@@ -14,7 +14,7 @@
    [ai.miniforge.tui-views.persistence.github :as github]
    [ai.miniforge.tui-views.persistence.pr :as persistence-pr]
    [ai.miniforge.tui-views.persistence.pr-cache :as pr-cache]
-   [ai.miniforge.policy-pack.interface :as policy-pack]
+   [ai.miniforge.policy-pack.software-factory :as policy-pack]
    [ai.miniforge.tui-views.prompts :as prompts]))
 
 ;; ---------------------------------------------------------------------------- format-check-context

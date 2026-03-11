@@ -18,7 +18,11 @@
   (let [exec (executor/create-docker-executor {:image "alpine:latest"})
         result (executor/available? exec)]
     (and (result/ok? result)
-         (:available? (:data result)))))
+         (:available? (:data result))
+         (let [env-result (executor/acquire-environment! exec (random-uuid) {})]
+           (when (result/ok? env-result)
+             (executor/release-environment! exec (:environment-id (:data env-result))))
+           (result/ok? env-result)))))
 
 (defn k8s-available?
   "Check if Kubernetes is available for testing."
@@ -84,10 +88,11 @@
 
                 (testing "execute with multiple commands"
                   (let [exec-result (executor/execute! exec env-id
-                                                       "pwd && whoami"
+                                                       "pwd && id -u"
                                                        {})]
                     (is (result/ok? exec-result))
-                    (is (= 0 (:exit-code (:data exec-result))))))
+                    (is (= 0 (:exit-code (:data exec-result))))
+                    (is (= "/workspace\n1000\n" (:stdout (:data exec-result))))))
 
                 (testing "environment-status shows running"
                   (let [status-result (executor/environment-status exec env-id)]

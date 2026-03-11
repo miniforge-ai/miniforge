@@ -20,11 +20,19 @@
   "Event-driven workflow triggers.
 
    Subscribes to event streams and fires workflows or chains
-   when matching events occur. Currently supports :pr/merged triggers."
+   when matching events occur."
   (:require [clojure.edn]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Trigger matching
+
+(defn event-value
+  [event key]
+  (or (get event key)
+      (case key
+        :repo (:pr/repo event)
+        :branch (:pr/branch event)
+        nil)))
 
 (defn matches-trigger?
   "Check if an event matches a trigger rule."
@@ -32,10 +40,14 @@
   (boolean
     (and (= (:on trigger) (:event/type event))
          (or (nil? (:repo trigger))
-             (= (:repo trigger) (:pr/repo event)))
+             (= (:repo trigger) (event-value event :repo)))
          (or (nil? (:branch-pattern trigger))
              (re-matches (re-pattern (:branch-pattern trigger))
-                         (or (:pr/branch event) ""))))))
+                         (or (event-value event :branch) "")))
+         (or (nil? (:match trigger))
+             (every? (fn [[k v]]
+                       (= v (event-value event k)))
+                     (:match trigger))))))
 
 (defn extract-input
   "Extract input from event using trigger's :input-from-event mapping."
@@ -87,12 +99,12 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Trigger lifecycle
 
-(defn create-merge-trigger
-  "Create a merge trigger that subscribes to an event stream.
+(defn create-event-trigger
+  "Create an event trigger that subscribes to an event stream.
 
    Arguments:
    - event-stream: Event stream to subscribe to
-   - trigger-config: {:triggers [{:on :pr/merged :repo ... :run {...}}]}
+   - trigger-config: {:triggers [{:on :event/type :match {...} :run {...}}]}
    - opts: Options map, passed to workflow execution
 
    Returns {:subscriber-id keyword, :stop-fn (fn [])}"
@@ -103,14 +115,19 @@
         unsubscribe! (requiring-resolve 'ai.miniforge.event-stream.interface/unsubscribe!)
         run-pipeline (requiring-resolve 'ai.miniforge.workflow.interface/run-pipeline)
         load-wf      (requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)
-        sub-id       :merge-trigger]
+        sub-id       :event-trigger]
     (subscribe! event-stream sub-id
                 (partial handle-trigger-event triggers opts futures-atom load-wf run-pipeline))
     {:subscriber-id sub-id
      :stop-fn       #(do (unsubscribe! event-stream sub-id)
                          (cancel-futures! futures-atom))}))
 
+(defn create-merge-trigger
+  "Compatibility alias for PR-merge triggered workflows."
+  [event-stream trigger-config opts]
+  (create-event-trigger event-stream trigger-config opts))
+
 (defn stop-trigger!
-  "Stop a merge trigger. Unsubscribes and cancels pending work."
+  "Stop an event trigger. Unsubscribes and cancels pending work."
   [{:keys [stop-fn]}]
   (when stop-fn (stop-fn)))

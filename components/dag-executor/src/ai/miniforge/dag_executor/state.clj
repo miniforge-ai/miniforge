@@ -7,6 +7,7 @@
    Layer 3: State persistence (atom-based)"
   (:require
    [ai.miniforge.dag-executor.result :as result]
+   [ai.miniforge.dag-executor.state-profile :as profiles]
    [ai.miniforge.logging.interface :as log]
    [clojure.set :as set]))
 
@@ -15,23 +16,12 @@
 
 (def task-statuses
   "Valid task workflow statuses.
-   A task progresses through these states on its way to :merged."
-  #{:pending          ; Not yet ready (dependencies not met)
-    :ready            ; Dependencies met, can be started
-    :implementing     ; Inner loop generating code
-    :pr-opening       ; Creating branch and PR
-    :ci-running       ; Waiting for CI to complete
-    :review-pending   ; Waiting for approvals
-    :responding       ; Fix loop responding to CI/review feedback
-    :ready-to-merge   ; All checks passed, ready to merge
-    :merging          ; Merge in progress
-    :merged           ; TERMINAL SUCCESS
-    :failed           ; TERMINAL FAILURE
-    :skipped})        ; Dependency/policy skip
+   Defaults to the software-factory profile."
+  (:task-statuses profiles/default-profile))
 
 (def terminal-statuses
   "Terminal statuses (no further transitions)."
-  #{:merged :failed :skipped})
+  (:terminal-statuses profiles/default-profile))
 
 (def run-statuses
   "Valid DAG run statuses."
@@ -43,19 +33,37 @@
     :partial})  ; Some tasks merged, others failed/skipped
 
 (def valid-transitions
-  "Valid state transitions for task workflows."
-  {:pending       #{:ready :skipped}
-   :ready         #{:implementing :skipped}
-   :implementing  #{:pr-opening :failed}
-   :pr-opening    #{:ci-running :failed}
-   :ci-running    #{:review-pending :responding :failed}
-   :review-pending #{:ready-to-merge :responding}
-   :responding    #{:ci-running :failed}
-   :ready-to-merge #{:merging :responding}
-   :merging       #{:merged :failed}
-   :merged        #{}
-   :failed        #{}
-   :skipped       #{}})
+  "Valid state transitions for the default task workflow profile."
+  (:valid-transitions profiles/default-profile))
+
+(defn resolve-task-profile
+  [task-state]
+  (profiles/resolve-profile (:task/state-profile task-state)))
+
+(defn resolve-run-profile
+  [run-state]
+  (profiles/resolve-profile (get-in run-state [:run/config :state-profile])))
+
+(defn success-terminal-status?
+  [profile status]
+  (contains? (:success-terminal-statuses profile) status))
+
+(defn status-bucket-keys
+  [profile status]
+  (cond-> []
+    (success-terminal-status? profile status) (conj :run/completed)
+    (= status :merged) (conj :run/merged)
+    (= status :failed) (conj :run/failed)
+    (= status :skipped) (conj :run/skipped)))
+
+(defn update-run-status-buckets
+  [run-state profile task-id status]
+  (reduce (fn [state bucket-key]
+            (update state bucket-key (fnil conj #{}) task-id))
+          run-state
+          (status-bucket-keys profile status)))
+
+(declare mark-completed!)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; PR info schema
@@ -99,11 +107,13 @@
 
    Options:
    - :max-fix-iterations - Max fix attempts (default 5)
-   - :max-ci-retries - Max CI retry attempts (default 3)"
-  [task-id deps & {:keys [max-fix-iterations max-ci-retries]
+   - :max-ci-retries - Max CI retry attempts (default 3)
+   - :state-profile - Task lifecycle profile keyword or map"
+  [task-id deps & {:keys [max-fix-iterations max-ci-retries state-profile]
                    :or {max-fix-iterations 5 max-ci-retries 3}}]
   {:task/id task-id
    :task/status :pending
+   :task/state-profile (profiles/resolve-profile state-profile)
    :task/deps (set deps)
    :task/pr nil
    :task/attempts []
@@ -125,43 +135,58 @@
    - tasks: Map of task-id -> TaskWorkflowState
 
    Options:
-   - :budget - Budget constraints map with :max-tokens :max-cost-usd :max-duration-ms"
-  [dag-id tasks & {:keys [budget]}]
-  {:dag/id dag-id
-   :run/id (random-uuid)
-   :run/status :pending
-   :run/tasks tasks
-   :run/merged #{}
-   :run/failed #{}
-   :run/skipped #{}
-   :run/metrics {:total-tokens 0
-                 :total-cost-usd 0.0
-                 :total-duration-ms 0}
-   :run/config (cond-> {}
-                 budget (assoc :budget budget))
-   :run/checkpoint nil
-   :run/created-at (java.util.Date.)
-   :run/updated-at (java.util.Date.)})
+   - :budget - Budget constraints map with :max-tokens :max-cost-usd :max-duration-ms
+   - :state-profile - Run/task lifecycle profile keyword or map"
+  [dag-id tasks & {:keys [budget state-profile]}]
+  (let [resolved-profile (profiles/resolve-profile state-profile)
+        normalized-tasks (into {}
+                               (map (fn [[task-id task]]
+                                      [task-id (assoc task :task/state-profile
+                                                      (or (:task/state-profile task)
+                                                          resolved-profile))]))
+                               tasks)]
+    {:dag/id dag-id
+     :run/id (random-uuid)
+     :run/status :pending
+     :run/tasks normalized-tasks
+     :run/completed #{}
+     :run/merged #{}
+     :run/failed #{}
+     :run/skipped #{}
+     :run/metrics {:total-tokens 0
+                   :total-cost-usd 0.0
+                   :total-duration-ms 0}
+     :run/config (cond-> {:state-profile resolved-profile}
+                   budget (assoc :budget budget))
+     :run/checkpoint nil
+     :run/created-at (java.util.Date.)
+     :run/updated-at (java.util.Date.)}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; State transition functions (pure)
 
 (defn valid-transition?
   "Check if a state transition is valid."
-  [from-status to-status]
-  (contains? (get valid-transitions from-status #{}) to-status))
+  ([from-status to-status]
+   (valid-transition? profiles/default-profile from-status to-status))
+  ([profile from-status to-status]
+   (contains? (get (:valid-transitions (profiles/resolve-profile profile)) from-status #{})
+              to-status)))
 
 (defn terminal?
   "Check if a status is terminal (no further transitions)."
-  [status]
-  (contains? terminal-statuses status))
+  ([status]
+   (terminal? profiles/default-profile status))
+  ([profile status]
+   (contains? (:terminal-statuses (profiles/resolve-profile profile)) status)))
 
 (defn transition-task
   "Transition a task to a new status.
    Returns updated task state or error result."
   [task-state new-status]
-  (let [current-status (:task/status task-state)]
-    (if (valid-transition? current-status new-status)
+  (let [profile (resolve-task-profile task-state)
+        current-status (:task/status task-state)]
+    (if (valid-transition? profile current-status new-status)
       (result/ok (-> task-state
                      (assoc :task/status new-status)
                      (assoc :task/updated-at (java.util.Date.))))
@@ -169,7 +194,7 @@
                   (str "Cannot transition from " current-status " to " new-status)
                   {:from current-status
                    :to new-status
-                   :valid-targets (get valid-transitions current-status)}))))
+                   :valid-targets (get (:valid-transitions profile) current-status)}))))
 
 (defn set-task-pr
   "Set PR information for a task."
@@ -233,22 +258,32 @@
 (defn mark-task-merged
   "Mark a task as merged in the run state."
   [run-state task-id]
-  (-> run-state
-      (update :run/merged conj task-id)
-      (assoc :run/updated-at (java.util.Date.))))
+  (let [profile (resolve-run-profile run-state)]
+    (-> run-state
+        (update-run-status-buckets profile task-id :merged)
+        (assoc :run/updated-at (java.util.Date.)))))
+
+(defn mark-task-completed
+  "Mark a task as completed in the run state."
+  [run-state task-id]
+  (let [profile (resolve-run-profile run-state)
+        success-status (or (first (:success-terminal-statuses profile)) :completed)]
+    (-> run-state
+        (update-run-status-buckets profile task-id success-status)
+        (assoc :run/updated-at (java.util.Date.)))))
 
 (defn mark-task-failed
   "Mark a task as failed in the run state."
   [run-state task-id]
   (-> run-state
-      (update :run/failed conj task-id)
+      (update-run-status-buckets (resolve-run-profile run-state) task-id :failed)
       (assoc :run/updated-at (java.util.Date.))))
 
 (defn mark-task-skipped
   "Mark a task as skipped in the run state."
   [run-state task-id]
   (-> run-state
-      (update :run/skipped conj task-id)
+      (update-run-status-buckets (resolve-run-profile run-state) task-id :skipped)
       (assoc :run/updated-at (java.util.Date.))))
 
 (defn update-run-metrics
@@ -281,11 +316,16 @@
    Returns set of task IDs."
   [run-state]
   (let [tasks (:run/tasks run-state)
-        merged (:run/merged run-state)]
+        profile (resolve-run-profile run-state)
+        completed-task-ids (->> tasks
+                                (filter (fn [[_id task]]
+                                          (success-terminal-status? profile (:task/status task))))
+                                (map first)
+                                set)]
     (->> tasks
          (filter (fn [[_id task]]
                    (and (= :pending (:task/status task))
-                        (every? merged (:task/deps task)))))
+                        (every? completed-task-ids (:task/deps task)))))
          (map first)
          set)))
 
@@ -320,24 +360,28 @@
   [run-state]
   (let [tasks (:run/tasks run-state)]
     (every? (fn [[_id task]]
-              (terminal? (:task/status task)))
+              (terminal? (resolve-task-profile task) (:task/status task)))
             tasks)))
 
 (defn compute-run-status
   "Compute the appropriate run status based on task states."
   [run-state]
-  (let [tasks (:run/tasks run-state)
+  (let [profile (resolve-run-profile run-state)
+        tasks (:run/tasks run-state)
         task-count (count tasks)
-        merged-count (count (:run/merged run-state))
+        completed-count (->> tasks
+                             vals
+                             (filter #(success-terminal-status? profile (:task/status %)))
+                             count)
         failed-count (count (:run/failed run-state))
         skipped-count (count (:run/skipped run-state))
-        terminal-count (+ merged-count failed-count skipped-count)]
+        terminal-count (+ completed-count failed-count skipped-count)]
     (cond
       (zero? task-count) :completed
       (= terminal-count task-count)
       (cond
-        (= merged-count task-count) :completed
-        (pos? merged-count) :partial
+        (= completed-count task-count) :completed
+        (pos? completed-count) :partial
         :else :failed)
       :else :running)))
 
@@ -408,24 +452,55 @@
 (defn mark-merged!
   "Atomically mark a task as merged in a run atom."
   [run-atom task-id logger]
+  (let [profile (resolve-run-profile @run-atom)]
+    (if (contains? (:task-statuses profile) :merged)
+      (let [current-state @run-atom
+            task-state (get-in current-state [:run/tasks task-id])]
+        (if-not task-state
+          (result/err :task-not-found
+                      (str "Task " task-id " not found")
+                      {:task-id task-id})
+          (let [transition-result (transition-task task-state :merged)]
+            (if (result/ok? transition-result)
+              (do
+                (swap! run-atom
+                       (fn [state]
+                         (-> state
+                             (update-run-task task-id (constantly (:data transition-result)))
+                             (mark-task-merged task-id))))
+                (when logger
+                  (log/info logger :dag-executor :task/merged
+                            {:message "Task merged successfully"
+                             :data {:task-id task-id}}))
+                (result/ok @run-atom))
+              transition-result))))
+      (mark-completed! run-atom task-id logger))))
+
+(defn mark-completed!
+  "Atomically mark a task as completed in a run atom using the run profile's
+   success terminal state."
+  [run-atom task-id logger]
   (let [current-state @run-atom
-        task-state (get-in current-state [:run/tasks task-id])]
+        task-state (get-in current-state [:run/tasks task-id])
+        profile (resolve-run-profile current-state)
+        success-status (or (first (:success-terminal-statuses profile)) :completed)]
     (if-not task-state
       (result/err :task-not-found
                   (str "Task " task-id " not found")
                   {:task-id task-id})
-      (let [transition-result (transition-task task-state :merged)]
+      (let [transition-result (transition-task task-state success-status)]
         (if (result/ok? transition-result)
           (do
             (swap! run-atom
                    (fn [state]
                      (-> state
                          (update-run-task task-id (constantly (:data transition-result)))
-                         (mark-task-merged task-id))))
+                         (mark-task-completed task-id))))
             (when logger
-              (log/info logger :dag-executor :task/merged
-                        {:message "Task merged successfully"
-                         :data {:task-id task-id}}))
+              (log/info logger :dag-executor :task/completed
+                        {:message "Task completed successfully"
+                         :data {:task-id task-id
+                                :status success-status}}))
             (result/ok @run-atom))
           transition-result)))))
 
