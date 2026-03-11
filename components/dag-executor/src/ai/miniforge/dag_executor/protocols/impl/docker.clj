@@ -49,6 +49,31 @@
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out ""})))
 
+(defn run-docker-process
+  "Execute a docker command with optional stdin bytes."
+  [docker-path args & {:keys [stdin-bytes]}]
+  (try
+    (let [pb (ProcessBuilder. (into-array String (apply docker-cmd docker-path args)))
+          process (.start pb)]
+      (when stdin-bytes
+        (with-open [stdin (.getOutputStream process)]
+          (.write stdin ^bytes stdin-bytes)))
+      (let [stdout-bytes (.readAllBytes (.getInputStream process))
+            stderr-bytes (.readAllBytes (.getErrorStream process))
+            exit-code (.waitFor process)]
+        {:exit exit-code
+         :out-bytes stdout-bytes
+         :err-bytes stderr-bytes
+         :out (String. ^bytes stdout-bytes "UTF-8")
+         :err (String. ^bytes stderr-bytes "UTF-8")}))
+    (catch Exception e
+      {:exit 1 :err (.getMessage e) :out "" :out-bytes (byte-array 0) :err-bytes (byte-array 0)})))
+
+(defn shell-quote
+  "Single-quote a shell argument."
+  [s]
+  (str "'" (str/replace s "'" "'\"'\"'") "'"))
+
 (defn build-env-args
   "Build -e arguments for environment variables."
   [env-map]
@@ -132,6 +157,26 @@
       (#{:none :restricted} network-profile)
       (into ["--network=none"]))))
 
+(defn build-runtime-fs-args
+  "Build writable tmpfs mounts needed for a read-only container rootfs.
+
+   Containers always run with `--read-only`, so common scratch paths must be
+   provided explicitly. We keep `/tmp` writable and also provide a writable
+   workdir scratch mount when the workdir is not already covered by caller
+   mounts."
+  [workdir execution-plan]
+  (let [mounted-paths (into #{}
+                            (map :container-path)
+                            (get execution-plan :mounts []))
+        scratch-paths (cond-> ["/tmp"]
+                        (and workdir
+                             (not (contains? mounted-paths workdir))
+                             (not= workdir "/tmp"))
+                        (conj workdir))]
+    (mapcat (fn [path]
+              ["--tmpfs" (str path ":rw,nosuid,nodev,size=64m")])
+            scratch-paths)))
+
 ;; ============================================================================
 ;; Docker Operations
 ;; ============================================================================
@@ -162,6 +207,7 @@
   (let [env-args      (build-env-args env-map)
         resource-args (build-resource-args resources)
         security-args (build-security-args execution-plan)
+        runtime-fs-args (build-runtime-fs-args workdir execution-plan)
         mount-args    (when (some? execution-plan)
                         (build-mount-args execution-plan))
         ;; When an execution plan is present its network-profile drives the
@@ -174,6 +220,7 @@
                                "-w" workdir]
                               network-args
                               security-args
+                              runtime-fs-args
                               mount-args
                               env-args
                               resource-args
@@ -207,20 +254,33 @@
 (defn copy-to-container
   "Copy files from host to container."
   [docker-path container-id local-path remote-path]
-  (let [result (run-docker docker-path "cp" local-path
-                           (str container-id ":" remote-path))]
+  (let [source (clojure.java.io/file local-path)
+        parent (.getParent (clojure.java.io/file remote-path))
+        mkdir-cmd (when (seq parent)
+                    (str "mkdir -p " (shell-quote parent) " && "))
+        write-cmd (str (or mkdir-cmd "")
+                       "cat > " (shell-quote remote-path))
+        result (run-docker-process docker-path
+                                   ["exec" "-i" container-id "sh" "-c" write-cmd]
+                                   :stdin-bytes (java.nio.file.Files/readAllBytes (.toPath source)))]
     (if (zero? (:exit result))
-      (result/ok {:copied-bytes -1}) ; docker cp doesn't report bytes
+      (result/ok {:copied-bytes (.length source)})
       (result/err :copy-failed (:err result)))))
 
 (defn copy-from-container
   "Copy files from container to host."
   [docker-path container-id remote-path local-path]
-  (let [result (run-docker docker-path "cp"
-                           (str container-id ":" remote-path)
-                           local-path)]
+  (let [result (run-docker-process docker-path
+                                   ["exec" container-id "sh" "-c"
+                                    (str "cat " (shell-quote remote-path))])
+        dest (clojure.java.io/file local-path)]
     (if (zero? (:exit result))
-      (result/ok {:copied-bytes -1})
+      (do
+        (when-let [parent (.getParentFile dest)]
+          (.mkdirs parent))
+        (with-open [out (clojure.java.io/output-stream dest)]
+          (.write out ^bytes (:out-bytes result)))
+        (result/ok {:copied-bytes (alength ^bytes (:out-bytes result))}))
       (result/err :copy-failed (:err result)))))
 
 (defn stop-container

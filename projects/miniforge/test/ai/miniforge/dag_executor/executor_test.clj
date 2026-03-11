@@ -88,10 +88,11 @@
 
                 (testing "execute with multiple commands"
                   (let [exec-result (executor/execute! exec env-id
-                                                       "pwd && whoami"
+                                                       "pwd && id -u"
                                                        {})]
                     (is (result/ok? exec-result))
-                    (is (= 0 (:exit-code (:data exec-result))))))
+                    (is (= 0 (:exit-code (:data exec-result))))
+                    (is (= "/workspace\n1000\n" (:stdout (:data exec-result))))))
 
                 (testing "environment-status shows running"
                   (let [status-result (executor/environment-status exec env-id)]

@@ -62,9 +62,9 @@
 
    Resolution order:
    1. MINIFORGE_CMD env var (explicit override, e.g. \"/usr/local/bin/mf\")
-   2. \"miniforge\" on PATH (installed binary)
-   3. [\"bb\" \"--config\" <root>/bb.edn \"--deps-root\" <root> \"miniforge\"]
+   2. [\"bb\" \"--config\" <root>/bb.edn \"--deps-root\" <root> \"miniforge\"]
       (dev mode — location-independent bb.edn task)
+   3. \"miniforge\" on PATH (installed binary)
    4. [\"bb\" \"miniforge\"] as a final fallback"
   []
   (let [bb-root (find-bb-root)]
@@ -73,13 +73,13 @@
       (System/getenv "MINIFORGE_CMD")
       [(System/getenv "MINIFORGE_CMD")]
 
-      ;; 2. Installed binary on PATH
-      (command-on-path? "miniforge")
-      ["miniforge"]
-
-      ;; 3. Dev mode fallback with explicit config root
+      ;; 2. Prefer the current workspace in development and tests.
       bb-root
       ["bb" "--config" (str bb-root "/bb.edn") "--deps-root" bb-root "miniforge"]
+
+      ;; 3. Installed binary on PATH
+      (command-on-path? "miniforge")
+      ["miniforge"]
 
       ;; 4. Last-resort fallback
       :else
