@@ -16,6 +16,7 @@
         ai.miniforge/fsm {:local/root "../../components/fsm"}
         ;; Workflow and orchestration
         ai.miniforge/workflow {:local/root "../../components/workflow"}
+        ai.miniforge/workflow-software-factory {:local/root "../../components/workflow-software-factory"}
         ai.miniforge/llm {:local/root "../../components/llm"}
         ai.miniforge/tool {:local/root "../../components/tool"}
         ai.miniforge/artifact {:local/root "../../components/artifact"}
