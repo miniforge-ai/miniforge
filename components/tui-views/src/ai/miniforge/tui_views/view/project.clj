@@ -169,42 +169,42 @@
         pr-id     [(:pr/repo pr) (:pr/number pr)]
         agent-r   (get agent-risk-map pr-id)
         ;; Use agent risk when available, fall back to mechanical
-        display-risk (if agent-r (:level agent-r) risk-lvl)]
-    (let [;; Fold GitHub PR state into the readiness indicator when it adds info.
-          ;; The readiness indicator already covers: merged, closed, draft, ci-failing,
-          ;; merge-ready, needs-review, changes-requested, behind-main, conflicts, policy-fail.
-          ;; GitHub states that add new info: :approved, :reviewing.
-          pr-status (:pr/status pr)
-          status-str (str (helpers/readiness-indicator r-state)
-                          (case pr-status
-                            :approved  " ✓"
-                            :reviewing " ⊙"
-                            ""))]
-      {:_id pr-id
-       :repo (str (get pr :pr/repo "")
-                  (when (:pr/workflow-id pr) " [mf]"))
-       :number (str "#" (:pr/number pr))
-       :title (get pr :pr/title "")
-       :status      status-str
-       :status-fg   (trees/readiness-state-color r-state)
-       :ready       (let [adds (get pr :pr/additions 0)
-                          dels (get pr :pr/deletions 0)]
-                      (if (and (zero? adds) (zero? dels))
-                        "—"
-                        (str "+" adds "/-" dels)))
-       :ready-fg    (let [total (+ (get pr :pr/additions 0) (get pr :pr/deletions 0))
-                          {:keys [red yellow green]} size-display-config]
-                      (cond
-                        (> total red)    palette/status-fail
-                        (> total yellow) palette/status-warning
-                        (> total green)  nil
-                        :else            palette/status-pass))
-       :risk        (helpers/risk-label display-risk)
-       :risk-fg     (trees/risk-level-color display-risk)
-       :policy      (helpers/policy-label policy)
-       :policy-fg   (case pol-pass? true trees/status-pass false trees/status-fail nil)
-       :recommend   (:label recommend)
-       :recommend-fg (trees/recommend-action-color (:action recommend))})))
+        display-risk (if agent-r (:level agent-r) risk-lvl)
+        ;; Fold GitHub PR state into the readiness indicator when it adds info.
+        ;; The readiness indicator already covers: merged, closed, draft, ci-failing,
+        ;; merge-ready, needs-review, changes-requested, behind-main, conflicts, policy-fail.
+        ;; GitHub states that add new info: :approved, :reviewing.
+        pr-status (:pr/status pr)
+        status-str (str (helpers/readiness-indicator r-state)
+                        (case pr-status
+                          :approved  " ✓"
+                          :reviewing " ⊙"
+                          ""))]
+    {:_id pr-id
+     :repo (str (get pr :pr/repo "")
+                (when (:pr/workflow-id pr) " [mf]"))
+     :number (str "#" (:pr/number pr))
+     :title (get pr :pr/title "")
+     :status status-str
+     :status-fg (trees/readiness-state-color r-state)
+     :ready (let [adds (get pr :pr/additions 0)
+                  dels (get pr :pr/deletions 0)]
+              (if (and (zero? adds) (zero? dels))
+                "—"
+                (str "+" adds "/-" dels)))
+     :ready-fg (let [total (+ (get pr :pr/additions 0) (get pr :pr/deletions 0))
+                     {:keys [red yellow green]} size-display-config]
+                 (cond
+                   (> total red)    palette/status-fail
+                   (> total yellow) palette/status-warning
+                   (> total green)  nil
+                   :else            palette/status-pass))
+     :risk (helpers/risk-label display-risk)
+     :risk-fg (trees/risk-level-color display-risk)
+     :policy (helpers/policy-label policy)
+     :policy-fg (case pol-pass? true trees/status-pass false trees/status-fail nil)
+     :recommend (:label recommend)
+     :recommend-fg (trees/recommend-action-color (:action recommend))}))
 
 (defn project-pr-items
   "Project PR items for the fleet table widget.

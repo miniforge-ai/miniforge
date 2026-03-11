@@ -488,17 +488,17 @@
                   (assoc :agent-risk cached-risk))
         pr-hash (hash (mapv #(select-keys % [:pr/repo :pr/number :pr/additions
                                               :pr/deletions :pr/status :pr/ci-status])
-                            prs))]
-    (let [risk-changed? (and (seq prs) (not= pr-hash (:agent-risk-hash model)))
-          unevaluated-prs (filterv #(nil? (:pr/policy %)) prs)
-          effects (cond-> []
-                    risk-changed?
-                    (conj (effect/fleet-risk-triage (mapv pr-triage-summary prs)))
-                    (seq unevaluated-prs)
-                    (conj (effect/batch-evaluate-policy unevaluated-prs)))]
-      (cond-> updated
-        risk-changed?    (assoc :agent-risk-hash pr-hash)
-        (seq effects)    (assoc :side-effects effects)))))
+                            prs))
+        risk-changed? (and (seq prs) (not= pr-hash (:agent-risk-hash model)))
+        unevaluated-prs (filterv #(nil? (:pr/policy %)) prs)
+        effects (cond-> []
+                  risk-changed?
+                  (conj (effect/fleet-risk-triage (mapv pr-triage-summary prs)))
+                  (seq unevaluated-prs)
+                  (conj (effect/batch-evaluate-policy unevaluated-prs)))]
+    (cond-> updated
+      risk-changed? (assoc :agent-risk-hash pr-hash)
+      (seq effects) (assoc :side-effects effects))))
 
 (defn merge-matching-pr
   "Merge updated fields into the PR matching [repo, number]; pass others through."
@@ -707,16 +707,16 @@
                        :content (or content "No response")
                        :timestamp (java.util.Date.)
                        :actions actions-vec
-                       :workflow-id workflow-id}]
-    (let [updated (-> model
-                      (update-in [:chat :messages] conj assistant-msg)
-                      (assoc-in [:chat :pending?] false)
-                      (assoc-in [:chat :suggested-actions] actions-vec)
-                      (assoc-in [:chat :scroll-offset] nil) ;; pin to bottom on new message
-                      with-timestamp)
-          tk (get updated :chat-active-key)]
-      (cond-> updated
-        tk (assoc-in [:chat-threads tk] (:chat updated))))))
+                       :workflow-id workflow-id}
+        updated (-> model
+                    (update-in [:chat :messages] conj assistant-msg)
+                    (assoc-in [:chat :pending?] false)
+                    (assoc-in [:chat :suggested-actions] actions-vec)
+                    (assoc-in [:chat :scroll-offset] nil) ;; pin to bottom on new message
+                    with-timestamp)
+        tk (:chat-active-key updated)]
+    (cond-> updated
+      tk (assoc-in [:chat-threads tk] (:chat updated)))))
 
 (defn handle-chat-action-result
   "Handle result of a :chat-execute-action side effect.

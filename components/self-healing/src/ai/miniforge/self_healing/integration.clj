@@ -187,7 +187,7 @@
    :workflow/id (or (:workflow/id context) (java.util.UUID/randomUUID))
    :from (:from switch-result)
    :to (:to switch-result)
-   :reason (str "Backend health below threshold")
+   :reason "Backend health below threshold"
    :cooldown-until (:cooldown-until switch-result)
    :message (str "Switched backend from " (name (:from switch-result))
                 " to " (name (:to switch-result))
