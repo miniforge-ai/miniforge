@@ -3,6 +3,7 @@
  :deps {ai.miniforge/cli {:local/root "../../bases/cli"}
         ;; Workflow and all its transitive dependencies
         ai.miniforge/workflow {:local/root "../../components/workflow"}
+        ai.miniforge/workflow-software-factory {:local/root "../../components/workflow-software-factory"}
         ai.miniforge/schema {:local/root "../../components/schema"}
         ai.miniforge/config {:local/root "../../components/config"}
         ai.miniforge/algorithms {:local/root "../../components/algorithms"}

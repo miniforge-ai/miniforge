@@ -206,49 +206,26 @@
                   {:pretty true})))
       (throw e))))
 
-(defn parse-workflow-filename [filename]
-  (when-let [[_ id version] (re-matches #"(.+)-v(\d+(?:\.\d+\.\d+)?).edn" filename)]
-    [(keyword id) version]))
-
-(defn load-workflow-metadata [filename]
-  (try
-    (when-let [[id version] (parse-workflow-filename filename)]
-      (when-let [resource (io/resource (str "workflows/" filename))]
-        (let [content (edn/read-string (slurp resource))]
-          {:id id
-           :version version
-           :description (or (:workflow/description content)
-                            (:description content)
-                            "No description available")})))
-    (catch Exception e
-      (println (display/colorize :yellow (str "Warning: Failed to read " filename ": " (ex-message e))))
-      nil)))
-
 (defn format-workflow-listing [workflows]
   (if (empty? workflows)
     (println "No workflows found.")
     (do
       (println (display/colorize :cyan "\nAvailable Workflows:"))
       (println (display/colorize :cyan (apply str (repeat 60 "─"))))
-      (doseq [{:keys [id version description]} workflows]
+      (doseq [{:workflow/keys [id version description type]} workflows]
         (println (str (display/colorize :bold (str "  " (name id)))
                       " (v" version ")"
-                      "  " (display/colorize :yellow (str ":workflow/type :" (name id)))
+                      "  " (display/colorize :yellow (str ":workflow/type " (or type :unknown)))
                       (when description (str "\n    " description))))
         (println))
       (println (display/colorize :cyan (apply str (repeat 60 "─")))))))
 
 (defn list-workflows-from-resources []
   (try
-    (->> ["simple-v2.0.0.edn"
-          "simple-test-v1.0.0.edn"
-          "minimal-test-v1.0.0.edn"
-          "quick-fix-v2.0.0.edn"
-          "lean-sdlc-v1.0.0.edn"
-          "standard-sdlc-v2.0.0.edn"
-          "canonical-sdlc-v1.0.0.edn"]
-         (keep load-workflow-metadata)
-         format-workflow-listing)
+    (let [list-workflows (requiring-resolve 'ai.miniforge.workflow.interface/list-workflows)]
+      (->> (list-workflows)
+           (sort-by (juxt :workflow/id :workflow/version))
+           format-workflow-listing))
     (catch Exception e
       (println (display/colorize :red (str "Failed to list workflows: " (ex-message e)))))))
 

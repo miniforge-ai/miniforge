@@ -12,7 +12,9 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]
-   [ai.miniforge.workflow.schemas :as schemas]))
+   [ai.miniforge.workflow.schemas :as schemas])
+  (:import
+   [java.util.jar JarFile]))
 
 ;;------------------------------------------------------------------------------ Layer 0
 ;; Registry state
@@ -24,6 +26,42 @@
 
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Workflow discovery
+
+(defn jar-entry-names
+  "List entry names under dir-prefix inside a JAR file."
+  [^java.net.URL jar-url dir-prefix]
+  (let [jar-path (-> (.getPath jar-url)
+                     (str/replace #"^file:" "")
+                     (str/replace #"!.*$" ""))]
+    (with-open [jf (JarFile. jar-path)]
+      (->> (enumeration-seq (.entries jf))
+           (map #(.getName %))
+           (filter #(str/starts-with? % dir-prefix))
+           (remove #(= % dir-prefix))
+           vec))))
+
+(defn list-resource-names
+  "List resource names under a classpath directory.
+   Works for both filesystem directories and JAR entries."
+  [dir-name]
+  (let [dir-urls (enumeration-seq (.getResources (clojure.lang.RT/baseLoader) dir-name))
+        prefix (if (str/ends-with? dir-name "/") dir-name (str dir-name "/"))]
+    (when (seq dir-urls)
+      (->> dir-urls
+           (mapcat (fn [dir-url]
+                     (case (.getProtocol dir-url)
+                       "file" (let [dir-file (io/file (.getPath dir-url))]
+                                (if (.isDirectory dir-file)
+                                  (->> (.listFiles dir-file)
+                                       (filter #(.isFile ^java.io.File %))
+                                       (map #(.getName ^java.io.File %)))
+                                  []))
+                       "jar"  (->> (jar-entry-names dir-url prefix)
+                                   (map #(str/replace-first % prefix ""))
+                                   (remove #(str/includes? % "/")))
+                       [])))
+           distinct
+           vec))))
 
 (defn load-workflow-from-resource
   "Load workflow definition from classpath resource.
@@ -41,40 +79,18 @@
                         {:resource-path resource-path
                          :error (ex-message e)} e))))))
 
-(defn load-workflow-registry-config
-  "Load workflow registry configuration from resources.
-
-   Returns: Vector of workflow names or default list"
-  []
-  (if-let [resource (io/resource "config/workflow-registry.edn")]
-    (try
-      (:workflows (edn/read-string (slurp resource)))
-      (catch Exception _e
-        ;; Fallback to hardcoded list if config loading fails
-        ["simple-test-v1.0.0"
-         "minimal-test-v1.0.0"
-         "quick-fix-v2.0.0"
-         "lean-sdlc-v1.0.0"
-         "standard-sdlc-v2.0.0"
-         "canonical-sdlc-v1.0.0"]))
-    ;; Fallback if resource not found
-    ["simple-test-v1.0.0"
-     "minimal-test-v1.0.0"
-     "quick-fix-v2.0.0"
-     "lean-sdlc-v1.0.0"
-     "standard-sdlc-v2.0.0"
-     "canonical-sdlc-v1.0.0"]))
-
 (defn discover-workflows-from-resources
   "Discover workflows from classpath resources.
-   Workflow names are loaded from resources/config/workflow-registry.edn
+   The active workflow families are determined by whichever components contribute
+   `workflows/*.edn` files to the classpath.
 
    Returns: Sequence of workflow maps"
   []
-  (let [workflow-names (load-workflow-registry-config)]
-    (->> workflow-names
-         (map #(str "workflows/" % ".edn"))
-         (keep load-workflow-from-resource))))
+  (->> (list-resource-names "workflows")
+       (filter #(str/ends-with? % ".edn"))
+       (sort)
+       (map #(str "workflows/" %))
+       (keep load-workflow-from-resource)))
 
 ;;------------------------------------------------------------------------------ Layer 2
 ;; Workflow characteristics
