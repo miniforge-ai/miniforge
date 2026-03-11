@@ -235,34 +235,36 @@
       :mixed-content}}
 
    ;; ========== Google Gemini Models ==========
-   :gemini-2.0-flash-thinking-exp
-   {:model-id "gemini-2.0-flash-thinking-exp"
+   :gemini-2.5-pro
+   {:model-id "gemini-2.5-pro"
     :provider :google
     :backend :gemini
     :family :gemini
-    :tier :experimental
+    :tier :flagship
     :capabilities
     {:reasoning :exceptional
      :code-generation :excellent
      :speed :slow
      :cost :expensive
-     :context-window 1000000
-     :output-tokens 8192
-     :streaming true}
+     :context-window 1048576
+     :output-tokens 65536
+     :streaming true
+     :multimodal true}
     :best-for
-    ["Extended reasoning chains"
-     "Complex problem decomposition"
-     "Mathematical reasoning"
-     "Large context analysis"
-     "Research synthesis"]
+    ["Advanced reasoning"
+     "Large codebase analysis"
+     "Design trade-off evaluation"
+     "Research synthesis"
+     "Large context tasks"]
     :use-cases
-    #{:extended-reasoning
-      :problem-decomposition
+    #{:workflow-planning
+      :architecture-design
       :large-context
-      :research-tasks}}
+      :research-synthesis
+      :multimodal}}
 
-   :gemini-2.0-flash
-   {:model-id "gemini-2.0-flash"
+   :gemini-2.5-flash
+   {:model-id "gemini-2.5-flash"
     :provider :google
     :backend :gemini
     :family :gemini
@@ -270,14 +272,15 @@
     :capabilities
     {:reasoning :excellent
      :code-generation :excellent
-     :speed :very-fast
-     :cost :economical
-     :context-window 1000000
-     :output-tokens 8192
+     :speed :fast
+     :cost :moderate
+     :context-window 1048576
+     :output-tokens 65536
      :streaming true
      :multimodal true}
     :best-for
     ["Fast execution tasks"
+     "Reasoning with lower latency"
      "Large context processing"
      "Multimodal inputs (images)"
      "Batch operations"]
@@ -285,31 +288,33 @@
     #{:fast-execution
       :large-context
       :multimodal
+      :code-implementation
       :batch-processing}}
 
-   :gemini-pro-2.0
-   {:model-id "gemini-2.0-pro"
+   :gemini-2.5-flash-lite
+   {:model-id "gemini-2.5-flash-lite"
     :provider :google
     :backend :gemini
     :family :gemini
-    :tier :workhorse
+    :tier :efficient
     :capabilities
-    {:reasoning :excellent
-     :code-generation :excellent
-     :speed :balanced
-     :cost :moderate
-     :context-window 2000000
-     :output-tokens 8192
+    {:reasoning :good
+     :code-generation :good
+     :speed :very-fast
+     :cost :economical
+     :context-window 1048576
+     :output-tokens 65536
      :streaming true
      :multimodal true}
     :best-for
-    ["Balanced performance"
-     "Very large contexts"
+    ["Low-latency validation"
+     "Cheap high-volume tasks"
      "Multimodal tasks"
-     "Production workloads"]
+     "Production batch workloads"]
     :use-cases
-    #{:balanced-tasks
-      :very-large-context
+    #{:validation
+      :fast-execution
+      :multimodal
       :production-workloads}}
 
    ;; ========== Open Source / Local Models ==========
@@ -469,7 +474,7 @@
 (defn get-models-by-speed
   "Get models meeting or exceeding a speed level.
    Example: (get-models-by-speed :fast)
-   Returns: [:haiku-4.5 :gemini-2.0-flash ...]"
+   Returns: [:haiku-4.5 :gemini-2.5-flash-lite ...]"
   [min-speed]
   (let [level-idx (.indexOf speed-levels min-speed)]
     (when (>= level-idx 0)
@@ -522,25 +527,25 @@
 (def task-type-recommendations
   "Recommended models for each task type, organized by tier."
   {:thinking-heavy
-   {:tier-1 [:opus-4.6 :gpt-5.3-codex :gemini-2.0-flash-thinking-exp]
-    :tier-2 [:sonnet-4.6 :gpt-5.2-codex :gemini-pro-2.0]
+   {:tier-1 [:opus-4.6 :gpt-5.3-codex :gemini-2.5-pro]
+    :tier-2 [:sonnet-4.6 :gpt-5.2-codex :gemini-2.5-flash]
     :tier-3-local [:llama-3.3-70b :glm-4-plus]
     :rationale "Exceptional reasoning needed for architecture decisions"}
 
    :execution-focused
    {:tier-1 [:sonnet-4.6 :gpt-5.2-codex :gpt-5.3-codex]
-    :tier-2 [:gpt-5.1-codex-max :gemini-2.0-flash :gemini-pro-2.0]
+    :tier-2 [:gpt-5.1-codex-max :gemini-2.5-flash :gemini-2.5-flash-lite]
     :tier-3-local [:qwen-2.5-coder-32b :deepseek-coder-33b :codellama-34b]
     :rationale "Balance of code capability and cost"}
 
    :simple-validation
-   {:tier-1 [:haiku-4.5 :gemini-2.0-flash :gpt-5.1-codex-max]
-    :tier-2 [:sonnet-4.6 :gpt-5.2]
+   {:tier-1 [:haiku-4.5 :gemini-2.5-flash-lite :gpt-5.1-codex-max]
+    :tier-2 [:sonnet-4.6 :gemini-2.5-flash :gpt-5.2]
     :tier-3-local [:codellama-34b :qwen-2.5-coder-32b]
     :rationale "Speed and cost efficiency for simple tasks"}
 
    :large-context
-   {:tier-1 [:gemini-pro-2.0 :gemini-2.0-flash :opus-4.6]
+   {:tier-1 [:gemini-2.5-pro :gemini-2.5-flash :opus-4.6]
     :tier-2 [:sonnet-4.6 :gpt-5.3-codex :llama-3.3-70b]
     :rationale "Need 1M+ token context windows"}
 
@@ -551,7 +556,7 @@
 
    :cost-optimized
    {:tier-1-free [:codellama-34b :qwen-2.5-coder-32b :deepseek-coder-33b]
-    :tier-2-cheap [:haiku-4.5 :gemini-2.0-flash]
+    :tier-2-cheap [:haiku-4.5 :gemini-2.5-flash-lite :gemini-2.5-flash]
     :tier-3-moderate [:sonnet-4.6 :gpt-5.2]
     :rationale "Minimize cost while maintaining quality"}})
 

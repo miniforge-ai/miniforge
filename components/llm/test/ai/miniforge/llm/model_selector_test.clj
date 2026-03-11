@@ -14,7 +14,7 @@
 (deftest test-meets-context-requirement
   (testing "Context requirement checks"
     (is (selector/meets-context-requirement? :opus-4.6 100000))
-    (is (selector/meets-context-requirement? :gemini-pro-2.0 500000))
+    (is (selector/meets-context-requirement? :gemini-2.5-pro 500000))
     (is (not (selector/meets-context-requirement? :qwen-2.5-coder-32b 100000)))))
 
 (deftest test-meets-cost-constraint
@@ -27,7 +27,7 @@
 (deftest test-select-by-automatic
   (testing "Automatic selection for thinking-heavy"
     (let [selected (selector/select-by-automatic :thinking-heavy {})]
-      (is (some #{selected} [:opus-4.6 :gpt-5.3-codex :gemini-2.0-flash-thinking-exp]))))
+      (is (some #{selected} [:opus-4.6 :gpt-5.3-codex :gemini-2.5-pro]))))
 
   (testing "Automatic selection for execution-focused"
     (let [selected (selector/select-by-automatic :execution-focused {})]
@@ -35,7 +35,7 @@
 
   (testing "Automatic selection for simple-validation"
     (let [selected (selector/select-by-automatic :simple-validation {})]
-      (is (some #{selected} [:haiku-4.5 :gemini-2.0-flash :gpt-5.1-codex-max]))))
+      (is (some #{selected} [:haiku-4.5 :gemini-2.5-flash-lite :gpt-5.1-codex-max]))))
 
   (testing "Automatic selection with local requirement"
     (let [selected (selector/select-by-automatic :execution-focused {:require-local true})]

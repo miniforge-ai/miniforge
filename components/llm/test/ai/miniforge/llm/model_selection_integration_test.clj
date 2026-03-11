@@ -30,7 +30,7 @@
       (is (= :thinking-heavy (:task-type selection)))
 
       ;; Should select a flagship model for planning
-      (is (some #{(:model selection)} [:opus-4.6 :gpt-5.3-codex :gemini-2.0-flash-thinking-exp]))
+      (is (some #{(:model selection)} [:opus-4.6 :gpt-5.3-codex :gemini-2.5-pro]))
 
       ;; Verify model profile
       (let [model (registry/get-model (:model selection))]
@@ -70,7 +70,7 @@
       (is (= :simple-validation (:type classification)))
 
       ;; Should select a fast/efficient model
-      (is (some #{(:model selection)} [:haiku-4.5 :gemini-2.0-flash :gpt-5.1-codex-max]))
+      (is (some #{(:model selection)} [:haiku-4.5 :gemini-2.5-flash-lite :gpt-5.1-codex-max]))
 
       ;; Verify model is fast or economical
       (let [model (registry/get-model (:model selection))]

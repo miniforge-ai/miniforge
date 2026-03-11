@@ -42,6 +42,8 @@ policy. It also hid two inconsistencies:
   appropriate
 - update model registry and selection recommendations so automatic selection
   matches the configured Claude defaults
+- refresh stale Gemini registry entries to the current 2.5 lineup used by
+  Google’s model docs
 - keep behavior stable while removing duplicated immediate values
 
 ## Testing Plan

@@ -44,7 +44,7 @@
 
     (let [very-fast (registry/get-models-by-speed :very-fast)]
       (is (seq very-fast))
-      (is (some #{:gemini-2.0-flash} very-fast)))))
+      (is (some #{:gemini-2.5-flash-lite} very-fast)))))
 
 (deftest test-get-models-by-use-case
   (testing "Query by code-implementation use-case"
@@ -74,8 +74,9 @@
   (testing "Get Google models"
     (let [models (registry/get-models-by-provider :google)]
       (is (seq models))
-      (is (some #{:gemini-2.0-flash} models))
-      (is (some #{:gemini-pro-2.0} models))))
+      (is (some #{:gemini-2.5-pro} models))
+      (is (some #{:gemini-2.5-flash} models))
+      (is (some #{:gemini-2.5-flash-lite} models))))
 
   (testing "Get OpenAI models"
     (let [models (registry/get-models-by-provider :openai)]
@@ -99,13 +100,13 @@
   (testing "Check large context support"
     (is (registry/supports-large-context? :opus-4.6))
     (is (registry/supports-large-context? :sonnet-4.6))
-    (is (registry/supports-large-context? :gemini-pro-2.0))
-    (is (registry/supports-large-context? :gemini-2.0-flash))
+    (is (registry/supports-large-context? :gemini-2.5-pro))
+    (is (registry/supports-large-context? :gemini-2.5-flash))
     ;; llama-3.3-70b has 128k context, below the 200k default threshold
     (is (registry/supports-large-context? :llama-3.3-70b 100000)))
 
   (testing "Check with custom threshold"
-    (is (registry/supports-large-context? :gemini-pro-2.0 1000000))
+    (is (registry/supports-large-context? :gemini-2.5-pro 1000000))
     (is (not (registry/supports-large-context? :opus-4.6 1000000)))
     (is (not (registry/supports-large-context? :haiku-4.5 300000)))))
 
@@ -139,7 +140,7 @@
     (is (= :opus-4.6 (registry/get-primary-recommendation :thinking-heavy)))
     (is (= :sonnet-4.6 (registry/get-primary-recommendation :execution-focused)))
     (is (= :haiku-4.5 (registry/get-primary-recommendation :simple-validation)))
-    (is (= :gemini-pro-2.0 (registry/get-primary-recommendation :large-context)))))
+    (is (= :gemini-2.5-pro (registry/get-primary-recommendation :large-context)))))
 
 (deftest test-model-registry-completeness
   (testing "All 16 models are present"
