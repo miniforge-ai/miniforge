@@ -247,6 +247,25 @@
       (is (state/valid-transition? profile :pending :ready))
       (is (not (state/valid-transition? profile :pending :completed))))))
 
+(deftest resolve-provider-profile-test
+  (testing "map-backed provider entries inherit the map key as profile id"
+    (let [[profile-id profile]
+          (profiles/resolve-provider-profile
+           :software-factory
+           {:task-statuses [:pending :ready :merged]
+            :terminal-statuses [:merged]
+            :success-terminal-statuses [:merged]
+            :valid-transitions {:pending [:ready]
+                                :ready [:merged]
+                                :merged []}
+            :event-mappings {:merged {:type :complete :to :merged}}})]
+      (is (= :software-factory profile-id))
+      (is (= :software-factory (:profile/id profile)))
+      (is (= #{:ready} (get-in profile [:valid-transitions :pending])))))
+
+  (testing "unsupported provider entries are ignored"
+    (is (nil? (profiles/resolve-provider-profile :bogus 42)))))
+
 (deftest kernel-profile-completion-test
   (testing "generic kernel profile reaches :completed without merge semantics"
     (let [task-id (random-uuid)

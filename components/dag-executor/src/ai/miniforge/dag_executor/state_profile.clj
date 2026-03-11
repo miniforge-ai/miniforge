@@ -38,24 +38,28 @@
   (when-let [resource (io/resource resource-path)]
     (-> resource slurp edn/read-string)))
 
+(defn resolve-provider-profile
+  [profile-id profile-definition]
+  (let [normalized-profile
+        (cond
+          (string? profile-definition)
+          (some-> profile-definition read-edn-resource build-profile)
+
+          (map? profile-definition)
+          (build-profile (assoc profile-definition
+                                :profile/id (or (:profile/id profile-definition)
+                                                profile-id)))
+
+          :else nil)]
+    (when normalized-profile
+      [profile-id normalized-profile])))
+
 (defn build-provider
   [{:keys [default-profile profiles] :as provider}]
   (let [normalized-profiles
         (into {}
               (keep (fn [[profile-id profile-definition]]
-                      (let [normalized-profile
-                            (cond
-                              (string? profile-definition)
-                              (some-> profile-definition read-edn-resource build-profile)
-
-                              (map? profile-definition)
-                              (build-profile (assoc profile-definition
-                                                    :profile/id (or (:profile/id profile-definition)
-                                                                    profile-id)))
-
-                              :else nil)]
-                        (when normalized-profile
-                          [profile-id normalized-profile]))))
+                      (resolve-provider-profile profile-id profile-definition)))
               profiles)
         fallback-profile-id (or default-profile
                                 (first (keys normalized-profiles))
