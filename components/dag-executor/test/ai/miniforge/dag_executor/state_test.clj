@@ -110,6 +110,44 @@
     (is (contains? (set (profiles/available-profile-ids)) :software-factory))
     (is (contains? (set (profiles/available-profile-ids)) :etl))))
 
+(deftest profile-resolution-falls-back-to-kernel-test
+  (testing "unknown profiles fall back to the configured default profile"
+    (let [kernel-definition {:profile/id :kernel
+                             :task-statuses [:pending :ready :running :completed :failed :skipped]
+                             :terminal-statuses [:completed :failed :skipped]
+                             :success-terminal-statuses [:completed]
+                             :valid-transitions {:pending [:ready :skipped]
+                                                 :ready [:running :skipped]
+                                                 :running [:completed :failed]
+                                                 :completed []
+                                                 :failed []
+                                                 :skipped []}
+                             :event-mappings {:completed {:type :complete :to :completed}}}]
+      (with-redefs [profiles/load-profile-registry (fn []
+                                                     {:default-profile :kernel
+                                                      :profiles {:kernel "kernel.edn"}})
+                    profiles/load-profile-definition (fn [profile-id]
+                                                       (when (= profile-id :kernel)
+                                                         kernel-definition))]
+        (is (= :kernel (profiles/default-profile-id)))
+        (is (= (profiles/build-profile kernel-definition)
+               (profiles/resolve-profile :missing-profile)))))))
+
+(deftest build-profile-normalizes-transition-targets-test
+  (testing "resource-shaped profile data is normalized into set-based transitions"
+    (let [profile (profiles/build-profile
+                   {:profile/id :vector-backed
+                    :task-statuses [:pending :ready :completed]
+                    :terminal-statuses [:completed]
+                    :success-terminal-statuses [:completed]
+                    :valid-transitions {:pending [:ready]
+                                        :ready [:completed]
+                                        :completed []}
+                    :event-mappings {}})]
+      (is (= #{:ready} (get-in profile [:valid-transitions :pending])))
+      (is (state/valid-transition? profile :pending :ready))
+      (is (not (state/valid-transition? profile :pending :completed))))))
+
 (deftest kernel-profile-completion-test
   (testing "generic kernel profile reaches :completed without merge semantics"
     (let [task-id (random-uuid)
