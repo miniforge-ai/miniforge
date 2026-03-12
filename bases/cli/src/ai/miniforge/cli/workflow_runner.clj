@@ -381,7 +381,7 @@
   "Execute a chain of workflows.
 
    Arguments:
-   - chain-id: Chain identifier keyword (e.g. :spec-to-pr)
+   - chain-id: Chain identifier keyword (e.g. :reporting-chain)
    - opts: {:version \"latest\" :spec \"spec.edn\" :input-json \"{...}\" :quiet false}"
   [chain-id opts]
   (let [quiet (or (:quiet opts) false)
