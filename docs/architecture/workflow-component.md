@@ -1,214 +1,154 @@
 # Workflow Component Architecture
 
-This document describes the architecture of the Workflow component, which makes EDN workflow
-configurations live and executable at runtime.
+This document describes the current architecture of the shared `workflow`
+component.
+
+The component is the generic runtime for loading, validating, and executing
+workflow definitions. It is not the home of every shipped workflow family.
+Application-specific workflows are composed onto the classpath by whichever
+project or base loads them.
 
 ## Overview
 
-The Workflow component is the execution engine for configurable SDLC flows.
+The shared `workflow` component provides the domain-neutral execution layer for
+governed workflows.
 
 **Key responsibilities:**
 
-- Load workflow configs from EDN files
-- Validate configs against Malli schema
-- Execute workflows by interpreting the DAG
-- Track state during execution (current phase, budgets, metrics)
-- Integrate with Policy component for gate evaluation
-- Store/retrieve workflows via Heuristic component
-- Enable Meta loop to propose and activate new workflows
-
-This is the "interpreter" that makes workflow configs executable.
+- Discover workflow definitions from classpath resources
+- Validate workflow EDN against schema and DAG rules
+- Execute workflow phases through the generic runtime
+- Expose registry, loading, replay, event-trigger, and publication APIs
+- Support app-owned composition for workflows, chains, and state profiles
 
 ## Component Structure
 
 ```text
 components/workflow/
 ├── src/ai/miniforge/workflow/
-│   ├── interface.clj       # Public API
-│   ├── core.clj            # Component orchestration
-│   ├── loader.clj          # Load & validate configs
-│   ├── executor.clj        # Execute workflow DAG
-│   ├── state.clj           # Execution state management
-│   └── validator.clj       # Schema & DAG validation
+│   ├── interface.clj       # Public Polylith boundary
+│   ├── configurable.clj    # Config-driven workflow execution
+│   ├── loader.clj          # Workflow loading and caching
+│   ├── registry.clj        # Classpath discovery and registry
+│   ├── trigger.clj         # Generic event-trigger entrypoints
+│   ├── publish.clj         # Generic publication helpers
+│   └── validator.clj       # Schema and DAG validation
 ├── resources/
 │   ├── schemas/
-│   │   └── workflow.edn    # Malli schema
+│   │   └── workflow.edn
+│   ├── config/
+│   │   └── workflow/
+│   │       └── state-profiles/
 │   └── workflows/
-│       ├── canonical-sdlc-v1.0.0.edn
-│       └── lean-sdlc-v1.0.0.edn
+│       ├── financial-etl-v1.0.0.edn
+│       ├── simple-v2.0.0.edn
+│       └── test/demo workflows
 └── test/
 ```
 
-**Runtime configuration:**
+App-specific workflow families live in separate components such as:
+
+- `components/workflow-software-factory/resources/workflows/`
+- `components/workflow-chain-software-factory/resources/chains/`
+- app-owned `config/workflow/*.edn` resources
+
+## Runtime Composition
+
+The current model is classpath composition, not a single kernel-owned workflow
+catalog.
 
 ```text
-~/.miniforge/workflows/
-└── active.edn              # Active workflow per task type
+shared workflow component
+  + shared reference workflows
+  + app-specific workflow resources
+  + app-specific chain resources
+  + app-specific selection profile config
+  + app-specific state profile config
+  = runtime-visible workflow surface
 ```
 
-## Dependencies
+In practice:
 
-- **policy**: Gate evaluation at phase boundaries
-- **heuristic**: Workflow storage and versioning
-- **schema**: Malli validation of configs
-- **llm**: Agent invocation during phase execution
+- the shared `workflow` component contributes reference workflows such as
+  `financial-etl` and `simple-v2`
+- an application component may add software-factory workflows such as
+  `canonical-sdlc-v1`
+- the active project decides what exists by deciding which components are on
+  the classpath
 
-## Live Configuration
+## Discovery and Registry
 
-### Active Workflow Mapping
+Workflow discovery is resource-driven.
 
-File: `~/.miniforge/workflows/active.edn`
+- `workflow.registry/discover-workflows-from-resources` scans every
+  `workflows/` resource root on the active classpath
+- `workflow.loader/list-available-workflows` extracts metadata from those
+  resources
+- `workflow.registry/initialize-registry!` registers the discovered workflows
 
-```clojure
-{:feature :canonical-sdlc-v1
- :bugfix :lean-sdlc-v1
- :refactor :canonical-sdlc-v1
- :component :canonical-sdlc-v1}
-```
+This is the seam that allows the kernel to stay generic while apps own their
+workflow families.
 
-Maps task types to active workflow IDs.
+## Execution Model
 
-### Hot-Reload Mechanism
+The shared runtime executes whichever workflow definition it is given.
 
-Workflows can be updated without restarting miniforge:
+- `workflow.configurable` interprets the workflow DAG
+- phase behavior can be provided through `:phase-handlers`
+- DAG execution can delegate to the `dag-executor` seam when a plan produces
+  parallelizable work
+- publication happens through generic publishers such as the directory
+  publisher, while app layers can wrap git or PR-specific publication
 
-1. Meta loop proposes new workflow config
-2. Saves to `~/.miniforge/workflows/proposed-v1.1.0.edn`
-3. Validates config (schema + DAG)
-4. Updates `active.edn` to point to new version
-5. Next task uses new workflow
-6. Old executions continue with their original workflow
+The runtime should not assume software delivery as the only domain.
 
-### Meta Loop Self-Update Cycle
+## Related App-Owned Configuration
 
-The Meta loop can self-update workflow configs through a 9-step cycle:
+The workflow runtime now expects several important choices to come from the app
+layer.
 
-1. **Observe**: Collect metrics from recent workflow executions
-2. **Analyze**: Identify bottleneck phases (e.g., review takes 40% of time)
-3. **Propose**: Generate new workflow config (e.g., reduce review rounds)
-4. **Validate**: Check schema + DAG correctness
-5. **Save**: Write to heuristic store with new version
-6. **Experiment**: A/B test by routing 50% of tasks to new version
-7. **Measure**: Compare metrics (success rate, time, cost)
-8. **Decide**: If better, update active.edn to make it default
-9. **Version**: Increment version (1.0.0 → 1.1.0)
+### Workflow selection profiles
 
-**Example mutation:**
-
-```clojure
-;; Before (v1.0.0)
-{:phase/id :review
- :phase/review-loop {:max-rounds 3}}
-
-;; After (v1.1.0)
-{:phase/id :review
- :phase/review-loop {:max-rounds 2}}  ; Reduced to save time
-```
-
-**Safety mechanisms:**
-
-- Always validate before activating
-- Keep old versions available for rollback
-- Log all config changes for audit
-- Gradual rollout (A/B test before full deployment)
-
-## Integration with Existing System
-
-### Release Executor
-
-**File**: `components/release/src/ai/miniforge/release/executor.clj`
-
-**Current**: Hardcodes the SDLC flow
-
-**Integration**:
-
-```clojure
-(defn execute [spec]
-  (let [workflow (workflow/get-active-workflow (:task-type spec))]
-    (workflow/execute-workflow workflow spec)))
-```
-
-**Benefit**: Makes the entire flow configurable
-
-### LLM Agents
-
-**Files**: `components/llm/src/ai/miniforge/llm/agent.clj`
-
-**Integration**: Agents are invoked by phases in the workflow config. Phase configs specify
-which agent handles each phase.
-
-### Policy Gates
-
-**Files**: `components/policy/src/ai/miniforge/policy/gates.clj`
-
-**Status**: Already built in Phase 1!
-
-**Integration**: Wire into phase transitions:
-
-```clojure
-(defn advance-phase? [phase artifact]
-  (policy/evaluate-gates artifact
-                         (:phase/id phase)
-                         (:phase/gates phase)))
-```
-
-### Heuristic Storage
-
-**Files**: `components/heuristic/src/ai/miniforge/heuristic/core.clj`
-
-**Status**: Already built in Phase 1!
-
-**Integration**: Workflows are stored as versioned heuristics:
-
-```clojure
-(heuristic/save-heuristic :workflow-config "1.0.0" workflow-edn)
-(heuristic/get-heuristic :workflow-config "1.0.0")
-```
-
-## Configuration Lifecycle
+Logical selection profiles such as `:fast` and `:comprehensive` are resolved
+through classpath resources like:
 
 ```text
-┌─────────────────────────────────────────────────────────────────────┐
-│ WORKFLOW CONFIGURATION LIFECYCLE                                     │
-└─────────────────────────────────────────────────────────────────────┘
-
-1. DESIGN TIME (Human/Meta Loop creates configs)
-   ↓
-   [EDN Config Files]
-   - canonical-sdlc-v1.0.0.edn
-   - lean-sdlc-v1.0.0.edn
-   - proposed-v1.1.0.edn (Meta loop generated)
-   ↓
-2. VALIDATION (Schema + DAG correctness)
-   ↓
-   [Malli Schema Validation]
-   - Type checking
-   - Structure validation
-   - DAG validation (no cycles, reachable nodes)
-   ↓
-3. STORAGE (Versioned in Heuristic component)
-   ↓
-   [Heuristic Storage: ~/.miniforge/heuristics/]
-   - workflow-config/1.0.0.edn
-   - workflow-config/1.1.0.edn
-   ↓
-4. ACTIVATION (Set active workflow per task type)
-   ↓
-   [Active Workflow Mapping: ~/.miniforge/workflows/active.edn]
-   {:feature :canonical-sdlc-v1
-    :bugfix :lean-sdlc-v1}
-   ↓
-5. RUNTIME (Load and execute)
-   ↓
-   [Workflow Executor]
-   (workflow/execute-workflow
-     (workflow/get-active-workflow :feature)
-     user-spec)
+config/workflow/selection-profiles.edn
 ```
+
+If an app does not provide config, shared fallback logic uses generic workflow
+characteristics rather than hardcoded software-factory workflow ids.
+
+### DAG state profiles
+
+Execution lifecycle profiles are loaded through provider-backed resources rather
+than hardcoded kernel literals.
+
+### Chains and workflow families
+
+Chains and workflow families are discovered from every matching classpath
+resource root, so the kernel does not need to know which app owns which
+workflow family.
+
+## What Belongs in the Shared Component
+
+- Workflow loading, validation, execution, replay, and registry APIs
+- Generic publication and event-trigger seams
+- Shared reference workflows and test workflows
+- Generic schemas and runtime helpers
+
+## What Does Not Belong in the Shared Component
+
+- Software-factory workflow families
+- PR-specific chains and release flows
+- App-specific workflow defaults or recommendation vocabulary
+- Enterprise/Fleet control-plane behavior
 
 ## See Also
 
-- `docs/specs/workflow-api.spec.edn` - Public API specification
-- `docs/guides/workflow-implementation.md` - Implementation guide
-- `docs/architecture/live-workflow-configuration.md` - Detailed configuration lifecycle
-- `docs/specs/workflow-configuration.spec.edn` - Workflow EDN format spec
+- `docs/architecture/live-workflow-configuration.md`
+- `docs/architecture/workflow-persistence-and-selection.md`
+- `docs/guides/workflow-implementation.md`
+- `components/workflow/resources/workflows/README.md`
+- `components/workflow-software-factory/README.md`
+- `components/phase-software-factory/README.md`

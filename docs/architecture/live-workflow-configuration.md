@@ -1,368 +1,153 @@
 # Live Workflow Configuration Architecture
 
-This document explains how workflow EDN configs become live, executable configuration
-that the Meta loop can self-update at runtime.
+This document explains how workflow configuration becomes live at runtime in the
+current classpath-composed model.
+
+The important change is that the shared runtime no longer owns a single
+software-factory catalog. Workflow families, chains, selection profiles, and
+state profiles are composed by the active project.
+
+For the parts of workflow configuration that are concretely implemented today,
+including `active.edn`, heuristic-backed workflow saving/loading, and logical
+selection-profile resolution, see
+`docs/architecture/workflow-persistence-and-selection.md`.
 
 ## Configuration Flow
 
 ```text
-┌─────────────────────────────────────────────────────────────────────┐
-│ WORKFLOW CONFIGURATION LIFECYCLE                                     │
-└─────────────────────────────────────────────────────────────────────┘
+1. RESOURCES ON CLASSPATH
+   - shared workflow resources
+   - app-specific workflow resources
+   - app-specific chain resources
+   - app-specific config/workflow/*.edn resources
+   - app-specific config/dag-executor/*.edn resources
 
-1. DESIGN TIME (Human/Meta Loop creates configs)
-   ↓
-   ┌──────────────────────────────────────────────────────────────────┐
-   │ EDN Config Files                                                  │
-   │ components/workflow/resources/workflows/                          │
-   │                                                                   │
-   │ - canonical-sdlc-v1.0.0.edn   (baseline)                         │
-   │ - lean-sdlc-v1.0.0.edn        (alternative)                      │
-   │ - proposed-v1.1.0.edn         (Meta loop generated)              │
-   └──────────────────────────────────────────────────────────────────┘
-   ↓
-2. VALIDATION (Schema + DAG correctness)
-   ↓
-   ┌──────────────────────────────────────────────────────────────────┐
-   │ Malli Schema Validation                                           │
-   │ components/workflow/resources/schemas/workflow.edn                │
-   │                                                                   │
-   │ - Type checking (keyword?, string?, int?)                        │
-   │ - Structure validation (required fields present)                 │
-   │ - DAG validation (no cycles, reachable nodes)                    │
-   └──────────────────────────────────────────────────────────────────┘
-   ↓
-3. STORAGE (Versioned in Heuristic component)
-   ↓
-   ┌──────────────────────────────────────────────────────────────────┐
-   │ Heuristic Storage                                                 │
-   │ ~/.miniforge/heuristics/                                          │
-   │                                                                   │
-   │ workflow-config/1.0.0.edn                                         │
-   │ workflow-config/1.1.0.edn                                         │
-   │ workflow-config/_active → "1.0.0"                                 │
-   └──────────────────────────────────────────────────────────────────┘
-   ↓
-4. ACTIVATION (Set active workflow per task type)
-   ↓
-   ┌──────────────────────────────────────────────────────────────────┐
-   │ Active Workflow Mapping                                           │
-   │ ~/.miniforge/workflows/active.edn                                 │
-   │                                                                   │
-   │ {:feature :canonical-sdlc-v1                                      │
-   │  :bugfix :lean-sdlc-v1                                            │
-   │  :refactor :canonical-sdlc-v1                                     │
-   │  :component :canonical-sdlc-v1}                                   │
-   └──────────────────────────────────────────────────────────────────┘
-   ↓
-5. RUNTIME (Load and execute)
-   ↓
-   ┌──────────────────────────────────────────────────────────────────┐
-   │ Workflow Executor                                                 │
-   │                                                                   │
-   │ (workflow/execute-workflow                                        │
-   │   (workflow/get-active-workflow :feature)                         │
-   │   user-spec)                                                      │
-   └──────────────────────────────────────────────────────────────────┘
+2. DISCOVERY
+   - workflow registry scans every workflows/ root
+   - chain loader scans every chains/ root
+   - selection config merges matching config resources
+   - state profile provider resolves matching profile resources
+
+3. RESOLUTION
+   - caller selects a workflow id directly, or
+   - app config maps a logical selection profile to a workflow id, or
+   - fallback logic derives a workflow from generic characteristics
+
+4. EXECUTION
+   - workflow runtime loads the workflow definition
+   - phase handlers come from execution context
+   - publication and triggers use generic interfaces with app-owned adapters
 ```
 
-## Live Configuration Mechanism
+## Shared vs App-Owned Resources
 
-### Hot-Reload Support
+### Shared resources
 
-Workflows can be updated without restarting miniforge:
+The shared `workflow` component contributes:
 
-```clojure
-;; Current execution
-(let [workflow (load-workflow :canonical-sdlc-v1 "1.0.0")]
-  (execute-workflow workflow spec))
+- workflow schema
+- reference workflows such as `financial-etl` and `simple-v2`
+- generic runtime code
 
-;; Meta loop updates config
-(save-workflow new-workflow-v1.1.0)
-(set-active-workflow :feature :canonical-sdlc-v1 "1.1.0")
+### App-owned resources
 
-;; Next execution (different task)
-(let [workflow (load-workflow :canonical-sdlc-v1 "1.1.0")]
-  (execute-workflow workflow spec))  ; Uses new config!
-```
+Applications contribute:
 
-**Key insight:** Each execution loads the workflow config at start time. Updating the
-active pointer affects new executions, not in-flight ones.
+- additional workflow families
+- chain definitions
+- workflow selection profile config
+- DAG state profile config
+- phase implementations and workflow helpers
 
-### Active Workflow Resolution
+For example, the CLI app can load software-factory workflows without making the
+kernel itself software-factory-specific.
 
-```clojure
-(defn get-active-workflow [task-type]
-  ;; 1. Read active.edn mapping
-  (let [active-map (read-active-config)
-        workflow-id (get active-map task-type)]
+## Workflow Discovery
 
-    ;; 2. Load workflow from heuristic store
-    (heuristic/get-active-heuristic workflow-id)))
-```
+Workflow discovery is driven by all `workflows/*.edn` resources on the active
+classpath.
 
-## Meta Loop Self-Update
+That means:
 
-The Meta loop can update workflows at runtime:
+- a minimal project may only see shared reference workflows
+- the flagship app may see both shared workflows and software-factory workflows
+- a future analytical app can add its own workflows without modifying the
+  shared runtime
+
+## Selection Profile Resolution
+
+Workflow selection now has two layers:
+
+1. Logical profiles such as `:fast`, `:comprehensive`, and `:default`
+2. App-owned mapping from those logical profiles to concrete workflow ids
+
+The mapping comes from:
 
 ```text
-┌─────────────────────────────────────────────────────────────────────┐
-│ META LOOP WORKFLOW UPDATE CYCLE                                      │
-└─────────────────────────────────────────────────────────────────────┘
-
-1. OBSERVE
-   Collect metrics from recent executions:
-   - canonical-sdlc-v1: 80% success, 45min avg, 50k tokens
-   - Review phase: 40% of total time (bottleneck!)
-
-2. ANALYZE
-   Identify optimization opportunities:
-   - Review max-rounds: 3 → could reduce to 2
-   - Hypothesis: Save time without hurting quality
-
-3. PROPOSE
-   Generate new workflow config:
-
-   {:workflow/id :canonical-sdlc-v1
-    :workflow/version "1.1.0"  ; Incremented
-    :workflow/phases
-    [{:phase/id :review
-      :phase/review-loop
-      {:max-rounds 2}}]}  ; Changed from 3
-
-4. VALIDATE
-   Check correctness:
-   (validate-workflow proposed-config)
-   ;; - Schema valid?
-   ;; - DAG valid?
-   ;; - Budgets reasonable?
-
-5. SAVE
-   Version in heuristic store:
-   (heuristic/save-heuristic
-     :workflow-config
-     "1.1.0"
-     proposed-config)
-
-6. EXPERIMENT (A/B Test)
-   Route 50% of tasks to new version:
-   - 10 tasks on v1.0.0
-   - 10 tasks on v1.1.0
-   - Collect metrics
-
-7. MEASURE
-   Compare outcomes:
-   - v1.0.0: 80% success, 45min, 50k tokens
-   - v1.1.0: 79% success, 35min, 48k tokens
-   - Result: Faster with similar quality!
-
-8. DECIDE
-   If better, promote:
-   (set-active-workflow :feature :canonical-sdlc-v1 "1.1.0")
-
-   Update active.edn:
-   {:feature :canonical-sdlc-v1  ; Now uses v1.1.0
-    ...}
-
-9. MONITOR
-   Track v1.1.0 in production:
-   - Continue collecting metrics
-   - Ready to rollback if issues
-   - Iterate again (v1.2.0?)
+config/workflow/selection-profiles.edn
 ```
 
-## Integration with Existing Components
+If no app-specific mapping is present, fallback selection uses generic workflow
+characteristics such as phase count and max iterations.
 
-### Policy Component (Phase 1)
+This keeps the selection seam generic even when the loaded app happens to be
+the software factory.
 
-Gates are evaluated at phase boundaries:
+## DAG State Profile Resolution
 
-```clojure
-;; From workflow config
-{:phase/id :implement-code
- :phase/gates [:syntax-valid :lint-clean :tests-pass]}
+Workflow execution lifecycle semantics are also resource-driven.
 
-;; At runtime
-(defn advance-to-next-phase? [phase artifact]
-  (let [gates (:phase/gates phase)
-        result (policy/evaluate artifact
-                               (:phase/id phase)
-                               gates)]
-    (:passed? result)))
-```
+- the kernel owns profile normalization and consumption
+- profile definitions come from provider-backed resources
+- projects can swap in different lifecycle semantics without editing kernel code
 
-**Already built!** Just wire in the phase transitions.
+This is the seam that allows the same runtime to support both software-factory
+flows and analytical flows such as financial ETL.
 
-### Heuristic Component (Phase 1)
+## Publication and Triggering
 
-Workflows are stored as versioned heuristics:
+The runtime exposes generic seams for:
 
-```clojure
-;; Save workflow
-(heuristic/save-heuristic
-  :workflow-config
-  "1.0.0"
-  {:workflow/id :canonical-sdlc-v1
-   :workflow/phases [...]})
+- event-triggered workflow starts
+- output publication
 
-;; Retrieve workflow
-(heuristic/get-heuristic :workflow-config "1.0.0")
+The shared runtime ships with generic implementations such as directory
+publication. App layers can add git, worktree, or PR-specific publication
+without moving those assumptions back into the kernel.
 
-;; Get active version
-(heuristic/get-active-heuristic :workflow-config)
-```
+## Why This Matters
 
-**Already built!** Workflows are just another heuristic type.
+This composition model supports the open-core boundary directly:
 
-### Loop Component (Future)
+- OSS kernel owns the generic runtime and SDK seams
+- flagship apps own their workflow families and app-specific defaults
+- additional verticals can compose new resources onto the same runtime
 
-Inner loops execute within phases:
+## Practical Examples
 
-```clojure
-;; From workflow config
-{:phase/id :implement-code
- :phase/inner-loop
- {:max-iterations 15
-  :validation-steps [:tests-pass :lint-clean]
-  :repair-strategy :fix-code-errors}}
+### Shared-only project
 
-;; At runtime
-(defn execute-phase-inner-loop [phase artifact agent]
-  (loop-engine/execute
-    {:max-iterations (get-in phase [:phase/inner-loop :max-iterations])
-     :generate-fn (partial agent/generate agent)
-     :validate-fn (partial validate-steps (get-in phase [:phase/inner-loop :validation-steps]))
-     :repair-fn (partial repair-artifact agent (get-in phase [:phase/inner-loop :repair-strategy]))
-     :artifact artifact}))
-```
+- visible workflows: `financial-etl`, `simple-v2`, test/demo workflows
+- publication: directory publisher
+- selection fallback: based on generic workflow characteristics
 
-**To be built in Phase 2.**
+### Flagship software-factory project
 
-## Safety and Rollback
+- visible workflows: shared workflows plus SDLC workflow families
+- selection mapping: app config points `:fast` and `:comprehensive` at
+  software-factory workflows
+- publication: app can layer git or PR-specific publishing on top
 
-### Version Control
+### Analytical vertical project
 
-All workflow configs are versioned:
+- visible workflows: shared workflows plus analytical packs or demos
+- state profile: app-specific lifecycle resource
+- publication: local directories, reports, exports, or domain-specific sinks
 
-```text
-~/.miniforge/heuristics/
-  workflow-config/
-    1.0.0.edn  (stable baseline)
-    1.1.0.edn  (proposed by Meta loop)
-    1.2.0.edn  (experimental)
-    _active → "1.0.0"
-```
+## See Also
 
-### Rollback
-
-If a new workflow causes issues:
-
-```clojure
-;; Quick rollback
-(set-active-workflow :feature :canonical-sdlc-v1 "1.0.0")
-
-;; Or system-wide
-(reset-all-active-workflows "1.0.0")
-```
-
-### Audit Log
-
-All workflow changes are logged:
-
-```clojure
-{:timestamp #inst "2026-01-21T12:00:00"
- :event :workflow-activated
- :workflow-id :canonical-sdlc-v1
- :version "1.1.0"
- :previous-version "1.0.0"
- :reason "Meta loop: Review bottleneck optimization"
- :approver :meta-loop}
-```
-
-## Configuration Precedence
-
-```text
-1. Task-specific override (highest priority)
-   (execute-workflow explicit-workflow spec)
-
-2. Task type mapping
-   (get-active-workflow :bugfix) → :lean-sdlc-v1
-
-3. Default fallback
-   (get-active-workflow :unknown) → :canonical-sdlc-v1
-
-4. System default (lowest priority)
-   :canonical-sdlc-v1
-```
-
-## Performance Considerations
-
-### Caching
-
-Workflow configs are cached in memory:
-
-```clojure
-(def workflow-cache
-  (atom {}))
-
-(defn load-workflow [workflow-id version]
-  (if-let [cached (get @workflow-cache [workflow-id version])]
-    cached
-    (let [loaded (heuristic/get-heuristic workflow-id version)]
-      (swap! workflow-cache assoc [workflow-id version] loaded)
-      loaded)))
-```
-
-### Cache Invalidation
-
-When Meta loop updates a workflow:
-
-```clojure
-(defn set-active-workflow [task-type workflow-id version]
-  ;; 1. Update active.edn
-  (update-active-config task-type workflow-id)
-
-  ;; 2. Invalidate cache
-  (swap! workflow-cache dissoc [workflow-id :active])
-
-  ;; 3. Broadcast to other instances (if distributed)
-  (broadcast-config-change workflow-id version))
-```
-
-## Example: Gradual Rollout
-
-Meta loop can gradually roll out new workflows:
-
-```clojure
-;; Week 1: A/B test (10% traffic)
-(set-rollout-percentage :canonical-sdlc-v1.1 0.1)
-
-;; Week 2: Expand (50% traffic)
-(set-rollout-percentage :canonical-sdlc-v1.1 0.5)
-
-;; Week 3: Full rollout (100% traffic)
-(set-active-workflow :feature :canonical-sdlc-v1 "1.1.0")
-```
-
-## Summary
-
-**Live Configuration Enabled:**
-
-- ✅ Workflows load from EDN at runtime
-- ✅ Validated before activation
-- ✅ Stored as versioned heuristics
-- ✅ Hot-reload without restart
-- ✅ Meta loop can self-update
-- ✅ Gradual rollout supported
-- ✅ Rollback capability
-- ✅ Audit logging
-
-**Integration:**
-
-- ✅ Policy component (gates) - Phase 1
-- ✅ Heuristic component (storage) - Phase 1
-- ⏳ Loop component (inner loops) - Phase 2
-- ⏳ Meta loop (proposals) - Phase 3
-
-The configuration is **truly live** - the Meta loop can experiment with and deploy new
-SDLC workflows without code changes or restarts.
+- `docs/architecture/workflow-component.md`
+- `docs/architecture/workflow-persistence-and-selection.md`
+- `components/workflow/resources/workflows/README.md`
+- `components/workflow-software-factory/README.md`
+- `components/workflow-chain-software-factory/README.md`

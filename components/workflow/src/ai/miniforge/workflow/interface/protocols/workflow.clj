@@ -1,10 +1,10 @@
 (ns ai.miniforge.workflow.interface.protocols.workflow
-  "Public protocol for SDLC workflow execution.
+  "Public protocol for governed workflow execution.
    This is the main extensibility point for custom workflow implementations.")
 
 (defprotocol Workflow
-  "Protocol for SDLC workflow execution.
-   Manages state transitions through phases."
+  "Protocol for governed workflow execution.
+   Manages state transitions through workflow phases."
 
   (start [this spec context]
     "Start a new workflow from a specification.
