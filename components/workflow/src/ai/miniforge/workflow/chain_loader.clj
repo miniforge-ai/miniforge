@@ -47,21 +47,24 @@
   "List resource names under a classpath directory.
    Works for both filesystem directories and JAR entries."
   [dir-name]
-  (when-let [dir-url (io/resource dir-name)]
-    (let [protocol (.getProtocol dir-url)
-          prefix (if (str/ends-with? dir-name "/") dir-name (str dir-name "/"))]
-      (case protocol
-        "file" (let [dir-file (io/file (.getPath dir-url))]
-                 (when (.isDirectory dir-file)
-                   (->> (.listFiles dir-file)
-                        (filter #(.isFile ^java.io.File %))
-                        (map #(.getName ^java.io.File %))
-                        vec)))
-        "jar"  (->> (jar-entry-names dir-url prefix)
-                    (map #(str/replace-first % prefix ""))
-                    (remove #(str/includes? % "/"))
-                    vec)
-        nil))))
+  (let [dir-urls (enumeration-seq (.getResources (clojure.lang.RT/baseLoader) dir-name))
+        prefix (if (str/ends-with? dir-name "/") dir-name (str dir-name "/"))]
+    (when (seq dir-urls)
+      (->> dir-urls
+           (mapcat (fn [dir-url]
+                     (case (.getProtocol dir-url)
+                       "file" (let [dir-file (io/file (.getPath dir-url))]
+                                (if (.isDirectory dir-file)
+                                  (->> (.listFiles dir-file)
+                                       (filter #(.isFile ^java.io.File %))
+                                       (map #(.getName ^java.io.File %)))
+                                  []))
+                       "jar"  (->> (jar-entry-names dir-url prefix)
+                                   (map #(str/replace-first % prefix ""))
+                                   (remove #(str/includes? % "/")))
+                       [])))
+           distinct
+           vec))))
 
 (defn parse-chain-resource
   "Parse a chain resource path into a summary map, or nil on failure."
