@@ -30,6 +30,10 @@
         ai.miniforge/workflow-software-factory
         {:local/root "../../components/workflow-software-factory"}
 
+        ;; Financial ETL product resources
+        ai.miniforge/workflow-financial-etl
+        {:local/root "../../components/workflow-financial-etl"}
+
         ;; Flagship app phase implementations
         ai.miniforge/phase-software-factory
         {:local/root "../../components/phase-software-factory"}}}

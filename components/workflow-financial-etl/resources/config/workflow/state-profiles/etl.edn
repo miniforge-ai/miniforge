@@ -1,0 +1,17 @@
+{:profile/id :etl
+ :task-statuses [:pending :ready :in-progress :completed :failed :cancelled]
+ :terminal-statuses [:completed :failed :cancelled]
+ :success-terminal-statuses [:completed]
+ :valid-transitions
+ {:pending [:ready :cancelled]
+  :ready [:in-progress :cancelled]
+  :in-progress [:completed :failed :cancelled]
+  :completed []
+  :failed []
+  :cancelled []}
+ :event-mappings
+ {:started {:from :ready :to :in-progress}
+  :succeeded {:from :in-progress :to :completed}
+  :published {:from :completed :to :completed}
+  :failed {:from :in-progress :to :failed}
+  :cancelled {:from :ready :to :cancelled}}}

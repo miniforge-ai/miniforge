@@ -11,6 +11,8 @@ the CLI app.
 - SDLC workflow family definitions under `resources/workflows/`
 - software-factory workflow selection mappings under
   `resources/config/workflow/selection-profiles.edn`
+- software-factory DAG state-profile resources under
+  `resources/config/workflow/state-profiles/`
 - software-factory recommendation prompt vocabulary under
   `resources/config/workflow/recommendation-prompt.edn`
 

@@ -1,0 +1,18 @@
+{:profile/id :software-factory
+ :task-statuses [:pending :ready :in-progress :completed :failed :cancelled :merged]
+ :terminal-statuses [:completed :failed :cancelled :merged]
+ :success-terminal-statuses [:merged]
+ :valid-transitions
+ {:pending [:ready :cancelled]
+  :ready [:in-progress :cancelled]
+  :in-progress [:completed :failed :cancelled]
+  :completed [:merged]
+  :failed []
+  :cancelled []
+  :merged []}
+ :event-mappings
+ {:started {:from :ready :to :in-progress}
+  :succeeded {:from :in-progress :to :completed}
+  :published {:from :completed :to :merged}
+  :failed {:from :in-progress :to :failed}
+  :cancelled {:from :ready :to :cancelled}}}
