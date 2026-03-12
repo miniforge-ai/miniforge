@@ -5,6 +5,7 @@
    [clojure.edn :as edn]
    [clojure.string :as str]
    [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
    [ai.miniforge.event-stream.interface :as es]))
@@ -104,6 +105,23 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public API
 
+(defn resolve-resume-workflow
+  "Resolve the workflow identity for a resumed run.
+
+   Uses the recorded workflow spec when present. Otherwise falls back to the
+   app-owned default selection profile."
+  [reconstructed]
+  (let [workflow-spec (:workflow-spec reconstructed)
+        workflow-type (or (some-> workflow-spec :name keyword)
+                          (selection-config/resolve-selection-profile :default))
+        workflow-version (or (:version workflow-spec) "latest")]
+    (when-not workflow-type
+      (throw (ex-info "Could not resolve a default workflow for resume"
+                      {:operation :resume-workflow
+                       :selection-profile :default})))
+    {:workflow-type workflow-type
+     :workflow-version workflow-version}))
+
 (defn resume-workflow
   "Resume a workflow from its last checkpoint.
 
@@ -130,11 +148,9 @@
             load-workflow (requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)
             run-pipeline (requiring-resolve 'ai.miniforge.workflow.interface/run-pipeline)
 
-            ;; Determine workflow type from event spec, fall back to lean-sdlc
-            workflow-spec (:workflow-spec reconstructed)
-            workflow-type (or (when workflow-spec (keyword (:name workflow-spec)))
-                             :lean-sdlc)
-            workflow-version (or (when workflow-spec (:version workflow-spec)) "latest")
+            ;; Determine workflow identity from event spec or app-owned default profile
+            {:keys [workflow-type workflow-version]}
+            (resolve-resume-workflow reconstructed)
 
             ;; Load the workflow definition
             {:keys [workflow]} (load-workflow workflow-type workflow-version {})
