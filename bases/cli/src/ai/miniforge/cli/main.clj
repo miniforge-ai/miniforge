@@ -306,8 +306,9 @@ Examples:
   miniforge tui                        # Start terminal UI (requires miniforge-tui)
   miniforge workflow list
   miniforge workflow run :simple-v2
-  miniforge workflow run :canonical-sdlc-v1 -i input.edn
-  miniforge workflow run :workflow-id --input-json '{\"task\": \"Build feature\"}'
+  miniforge workflow run :financial-etl -i input.edn
+  miniforge workflow run :workflow-id --input-json '{\"task\": \"Prepare report\"}'
+  miniforge chain list
   miniforge fleet add myorg/myrepo
   miniforge pr review https://github.com/org/repo/pull/123
 "))

@@ -83,7 +83,7 @@
 
 (defn find-latest-chain-resource
   "Find the highest-versioned chain EDN resource path for chain-id.
-   Returns a resource path string like \"chains/spec-to-pr-v1.0.0.edn\"."
+   Returns a resource path string like \"chains/reporting-chain-v1.0.0.edn\"."
   [chain-id]
   (let [prefix (str (name chain-id) "-v")
         candidates (->> (list-resource-names "chains")
@@ -107,7 +107,7 @@
   "Load a chain definition from classpath resources.
 
    Arguments:
-   - chain-id: Chain identifier (keyword, e.g. :spec-to-pr)
+   - chain-id: Chain identifier (keyword, e.g. :reporting-chain)
    - version: Version string (e.g. \"1.0.0\" or \"latest\")
 
    Returns chain definition map or throws if not found."
