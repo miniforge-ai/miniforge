@@ -24,10 +24,17 @@
           (chain-loader/load-chain :nonexistent-chain "1.0.0")))))
 
 (deftest list-chains-test
-  (testing "lists available chains"
+  (testing "lists available chains across composed resource roots"
     (let [chains (chain-loader/list-chains)]
       (is (seq chains))
       (is (some #(= :spec-to-pr (:id %)) chains))
+      (is (some #(= :test-chain (:id %)) chains))
       (let [spec-to-pr (first (filter #(= :spec-to-pr (:id %)) chains))]
         (is (= "1.0.0" (:version spec-to-pr)))
         (is (pos? (:steps spec-to-pr)))))))
+
+(deftest list-resource-names-test
+  (testing "resource enumeration aggregates all chain roots on the classpath"
+    (let [resource-names (set (chain-loader/list-resource-names "chains"))]
+      (is (contains? resource-names "spec-to-pr-v1.0.0.edn"))
+      (is (contains? resource-names "test-chain-v1.0.0.edn")))))

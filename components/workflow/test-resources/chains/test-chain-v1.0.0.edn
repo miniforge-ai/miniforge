@@ -1,0 +1,7 @@
+{:chain/id :test-chain
+ :chain/version "1.0.0"
+ :chain/description "Test-only chain used to validate multi-root discovery."
+ :chain/steps
+ [{:step/id :noop
+   :step/workflow-id :simple-test-v1
+   :step/input-bindings {}}]}

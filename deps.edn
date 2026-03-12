@@ -45,6 +45,7 @@
                        "components/gate/resources"
                        "components/workflow/src"
                        "components/workflow/resources"
+                       "components/workflow-chain-software-factory/resources"
                        "components/workflow-software-factory/resources"
                        "components/release-executor/src"
                        "components/release-executor/resources"
@@ -110,6 +111,7 @@
                       ai.miniforge/phase-software-factory {:local/root "components/phase-software-factory"}
                       ai.miniforge/gate {:local/root "components/gate"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
+                      ai.miniforge/workflow-chain-software-factory {:local/root "components/workflow-chain-software-factory"}
                       ai.miniforge/workflow-software-factory {:local/root "components/workflow-software-factory"}
                       ai.miniforge/release-executor {:local/root "components/release-executor"}
                       ai.miniforge/operator {:local/root "components/operator"}
@@ -154,6 +156,8 @@
                        "components/phase-software-factory/test"
                        "components/gate/test"
                        "components/workflow/test"
+                       "components/workflow/test-resources"
+                       "components/workflow-chain-software-factory/resources"
                        "components/workflow-software-factory/resources"
                        "components/operator/test"
                        "components/observer/test"
@@ -198,6 +202,7 @@
                       ai.miniforge/phase-software-factory {:local/root "components/phase-software-factory"}
                       ai.miniforge/gate {:local/root "components/gate"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
+                      ai.miniforge/workflow-chain-software-factory {:local/root "components/workflow-chain-software-factory"}
                       ai.miniforge/workflow-software-factory {:local/root "components/workflow-software-factory"}
                       ai.miniforge/release-executor {:local/root "components/release-executor"}
                       ai.miniforge/operator {:local/root "components/operator"}

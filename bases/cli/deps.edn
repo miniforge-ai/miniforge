@@ -23,6 +23,10 @@
         hiccup/hiccup     {:mvn/version "2.0.0-RC3"}
 
         ;; Flagship app workflow families
+        ai.miniforge/workflow-chain-software-factory
+        {:local/root "../../components/workflow-chain-software-factory"}
+
+        ;; Flagship app chain resources
         ai.miniforge/workflow-software-factory
         {:local/root "../../components/workflow-software-factory"}
 
