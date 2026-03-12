@@ -1,263 +1,149 @@
 # Workflow Component Implementation Guide
 
-This guide provides implementation details for building the Workflow component.
+This guide summarizes the current implementation shape of the shared
+`workflow` component.
+
+The goal of the component is to provide a generic workflow runtime that can be
+composed into different applications. Workflow families, phase handlers, and
+selection defaults are expected to come from app-owned components.
 
 ## Core Namespaces
 
-### Loader (`workflow.loader`)
+### `workflow.loader`
 
-**Purpose**: Load and validate workflow configs
+Loads workflow definitions from classpath resources and caches resolved
+definitions.
 
-**Functions:**
+Use it when you need to:
 
-```clojure
-(defn load-from-file [path]
-  (-> path slurp edn/read-string validate-workflow))
+- load a workflow by id and version
+- inspect available workflow metadata
+- validate that a workflow resource can be resolved in the active project
 
-(defn load-from-heuristic [workflow-id version]
-  (heuristic/get-heuristic workflow-id version))
+### `workflow.registry`
 
-(defn validate-workflow [config]
-  (let [schema (load-schema)]
-    (if (m/validate schema config)
-      config
-      (throw (ex-info "Invalid workflow config"
-                      {:errors (m/explain schema config)})))))
-```
+Discovers workflows from every `workflows/` root on the active classpath and
+maintains the runtime registry.
 
-### Executor (`workflow.executor`)
+Use it when you need to:
 
-**Purpose**: Execute workflow DAG with state management
+- initialize workflow availability for a project
+- inspect visible workflow ids
+- reason about workflow characteristics for fallback selection
 
-**Functions:**
+### `workflow.configurable`
 
-```clojure
-(defn execute [workflow input opts]
-  (let [state (init-state workflow input)]
-    (loop [current-phase (first-phase workflow)
-           state state]
-      (if (terminal-phase? current-phase)
-        (finalize-execution state)
-        (let [result (execute-phase current-phase state)
-              next-phase (select-next-phase result)]
-          (recur next-phase (update-state state result)))))))
+Executes workflow definitions through the generic runtime.
 
-(defn execute-phase [phase state]
-  ;; 1. Check budget
-  ;; 2. Run inner loop (generate → validate → repair)
-  ;; 3. Run review loop (if configured)
-  ;; 4. Evaluate gates
-  ;; 5. Collect metrics
-  ;; 6. Return result
-  {:phase/id (:phase/id phase)
-   :phase/status :passed
-   :phase/iterations 3
-   :phase/metrics {...}})
+Important traits:
 
-(defn select-next-phase [result]
-  ;; Interpret phase/next transitions
-  ;; Support conditional branching
-  ;; Handle parallel phases (future)
-  (first (filter #(gates-pass? % result)
-                 (:phase/next result))))
-```
+- phase behavior can be provided through `:phase-handlers`
+- plan execution can delegate to the DAG orchestrator seam
+- the runtime interprets workflow data rather than hardcoding one domain flow
 
-### State Manager (`workflow.state`)
+### `workflow.trigger`
 
-**Purpose**: Manage workflow execution state
+Provides generic event-trigger entrypoints.
 
-**Functions:**
+Application layers can keep convenience aliases for domain-specific events, but
+the shared interface should remain event-oriented rather than PR-oriented.
 
-```clojure
-(defn init-state [workflow input]
-  {:execution/id (random-uuid)
-   :execution/workflow-id (:workflow/id workflow)
-   :execution/start-time (Instant/now)
-   :execution/current-phase nil
-   :execution/phases []
-   :execution/artifact input
-   :execution/budget-used {:tokens 0 :time 0 :iterations 0}
-   :execution/metrics []})
+### `workflow.publish`
 
-(defn update-state [state phase-result]
-  (-> state
-      (update :execution/phases conj phase-result)
-      (update :execution/budget-used merge-budgets (:budget-used phase-result))
-      (update :execution/metrics conj (:metrics phase-result))
-      (assoc :execution/artifact (:artifact phase-result))))
+Provides generic publication helpers.
 
-(defn finalize-execution [state]
-  (assoc state
-         :execution/end-time (Instant/now)
-         :execution/status :completed
-         :execution/total-time (calculate-duration state)
-         :execution/summary (summarize-metrics state)))
-```
+The shared runtime should prefer neutral sinks such as directories, while app
+layers can wrap git, worktree, or PR-specific behavior outside the kernel.
 
-### Validator (`workflow.validator`)
+## Implementation Principles
 
-**Purpose**: Validate workflow configs and DAG correctness
+### Keep workflow families out of the kernel
 
-**Functions:**
+The shared component should own:
 
-```clojure
-(defn validate-dag [workflow]
-  ;; Check for cycles
-  ;; Verify all phase/next targets exist
-  ;; Ensure single start node
-  ;; Ensure reachability of all phases
-  (when-let [errors (check-dag-structure workflow)]
-    (throw (ex-info "Invalid DAG" {:errors errors}))))
+- schemas
+- loaders
+- registry helpers
+- execution runtime
+- generic triggers and publishers
 
-(defn validate-gates [phase]
-  ;; Ensure all gate types are known
-  ;; Verify gate configs are valid
-  (policy/validate-gate-configs (:phase/gates phase)))
+It should not own:
 
-(defn validate-budgets [workflow]
-  ;; Check phase budgets sum <= total budget
-  ;; Ensure all budgets are positive
-  (when (> (sum-phase-budgets workflow)
-          (get-in workflow [:workflow/config :max-total-tokens]))
-    (throw (ex-info "Budget overflow" {...}))))
-```
+- software-factory workflow families
+- app-specific workflow selection mappings
+- PR-specific publication assumptions
 
-## Integration Examples
+### Treat workflow composition as classpath composition
 
-### Policy Component
+A project becomes “the software factory,” “financial ETL,” or another vertical
+by choosing which components and resources to load.
 
-Evaluate gates at phase boundaries:
+That means implementation work should prefer:
 
-```clojure
-(defn evaluate-phase-gates [phase artifact]
-  (policy/evaluate artifact
-                   (:phase/id phase)
-                   (:phase/gates phase)))
-```
+- resource-backed configuration
+- provider-backed runtime seams
+- generic fallback behavior
 
-### Heuristic Component
+over hardcoded workflow ids in shared code.
 
-Store/retrieve workflows as versioned heuristics:
+### Pass app behavior in through context
 
-```clojure
-(defn save-workflow-as-heuristic [workflow]
-  (heuristic/save-heuristic
-    (:workflow/id workflow)
-    (:workflow/version workflow)
-    workflow))
-```
+When the runtime needs domain behavior, prefer inputs such as:
 
-### Loop Component
+- `:phase-handlers`
+- profile providers
+- selection profile resources
+- publisher implementations
 
-Execute inner loops within phases:
-
-```clojure
-(defn run-inner-loop [phase artifact agent]
-  (loop-engine/execute
-    {:max-iterations (get-in phase [:phase/inner-loop :max-iterations])
-     :validator (get-validator phase)
-     :repairer (get-repairer phase agent)
-     :artifact artifact}))
-```
-
-### LLM Component
-
-Invoke agents for phase actions:
-
-```clojure
-(defn invoke-agent [agent action artifact context]
-  (llm/chat agent
-            (build-prompt action artifact)
-            {:context context}))
-```
+This keeps the shared runtime stable while apps vary around it.
 
 ## Testing Strategy
 
-### Unit Tests
+### Shared runtime tests
 
-- Test workflow loading from EDN
-- Test schema validation (valid and invalid configs)
-- Test DAG validation (cycles, unreachable nodes)
-- Test phase execution (with mocked agents)
-- Test gate evaluation integration
-- Test budget tracking
-- Test state transitions
+Cover:
 
-### Integration Tests
+- workflow loading and validation
+- DAG correctness checks
+- registry discovery across multiple classpath roots
+- generic publication and event-trigger behavior
+- state profile resolution and execution semantics
 
-- Test full workflow execution with real Policy component
-- Test workflow storage/retrieval via Heuristic component
-- Test hot-reload of workflow configs
-- Test Meta loop updating active workflow
+### App-composition tests
 
-### End-to-End Tests
+Cover:
 
-- Execute canonical-sdlc-v1 on a simple spec
-- Execute lean-sdlc-v1 on same spec
-- Compare metrics between executions
-- Verify Meta loop can propose and activate new workflow
+- app-owned workflow resources appearing in the shared registry
+- app-owned selection profile mappings resolving to loaded workflows
+- app-owned state profiles loading through provider seams
+- app-specific publishers or phase handlers working through the shared runtime
 
-## Implementation Plan
+### End-to-end proofs
 
-### Phase 1: Loader and Validator
+At minimum, keep proof workflows for:
 
-**Tasks:**
+- a simple shared workflow such as `simple-v2`
+- a non-software vertical workflow such as `financial-etl`
+- the flagship app workflow family through app composition
 
-1. Create `components/workflow/deps.edn`
-2. Implement `workflow.loader` (load from file/heuristic)
-3. Implement `workflow.validator` (schema + DAG validation)
-4. Add tests for loading and validation
-5. Wire into heuristic component for storage
+The point is to prove the kernel works across more than one domain without
+adding domain branches back into the kernel.
 
-### Phase 2: Executor Core
+## Practical Checklist for New Work
 
-**Tasks:**
+When adding a new workflow capability:
 
-1. Implement `workflow.state` (execution state management)
-2. Implement `workflow.executor` (DAG interpretation)
-3. Implement phase execution (stub agents initially)
-4. Add tests for execution flow
-5. Track budgets and metrics
+1. Decide whether it is kernel behavior or app behavior.
+2. If it is app behavior, put the data or implementation in an app-owned
+   component.
+3. Feed that behavior into the shared runtime through an existing seam.
+4. Add regression coverage for the seam you touched.
+5. Avoid reintroducing workflow ids or domain terms into shared code unless the
+   feature is intentionally app-specific.
 
-### Phase 3: Integration
+## Related Files
 
-**Tasks:**
-
-1. Wire executor to Policy component (gate evaluation)
-2. Wire executor to LLM component (agent invocation)
-3. Wire executor to Loop component (inner loops)
-4. Create `active.edn` config file
-5. Implement `get-active-workflow` / `set-active-workflow`
-
-### Phase 4: Meta Loop Integration
-
-**Tasks:**
-
-1. Enable Meta loop to propose new workflow configs
-2. Implement A/B testing framework
-3. Implement comparison and promotion logic
-4. Add hot-reload support
-5. Test self-updating workflows
-
-## Success Criteria
-
-- ✓ Can load workflow configs from EDN files
-- ✓ Validates configs against Malli schema
-- ✓ Detects invalid DAGs (cycles, unreachable nodes)
-- ✓ Executes workflows by interpreting the DAG
-- ✓ Tracks execution state (phases, budgets, metrics)
-- ✓ Integrates with Policy component for gates
-- ✓ Stores workflows via Heuristic component
-- ✓ Supports active workflow per task type
-- ✓ Meta loop can propose and activate new workflows
-- ✓ Hot-reload works without restart
-- ✓ Can compare workflow executions
-- ✓ All tests pass
-- ✓ Dogfood: Use workflow component to execute Phase 3 tasks
-
-## See Also
-
-- `docs/specs/workflow-api.spec.edn` - Public API specification
-- `docs/architecture/workflow-component.md` - Component architecture
-- `docs/specs/workflow-configuration.spec.edn` - Workflow EDN format
-- `components/workflow/resources/schemas/workflow.edn` - Malli schema
+- `components/workflow/src/ai/miniforge/workflow/interface.clj`
+- `components/workflow/src/ai/miniforge/workflow/registry.clj`
+- `components/workflow/src/ai/miniforge/workflow/configurable.clj`
+- `components/workflow/resources/workflows/README.md`

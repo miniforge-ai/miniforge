@@ -271,7 +271,7 @@
 (comment
   ;; Load workflow from resource
   (def workflow-result
-    (load-workflow :canonical-sdlc-v1 "1.0.0" {}))
+    (load-workflow :financial-etl "1.0.0" {}))
 
   (:source workflow-result)
   (:workflow workflow-result)
@@ -284,13 +284,13 @@
   (clear-cache!)
 
   ;; Test cache behavior
-  (def result1 (load-workflow :canonical-sdlc-v1 "1.0.0" {}))
-  (def result2 (load-workflow :canonical-sdlc-v1 "1.0.0" {}))
+  (def result1 (load-workflow :simple-v2 "2.0.0" {}))
+  (def result2 (load-workflow :simple-v2 "2.0.0" {}))
   (= :resource (:source result1))
   (= :cache (:source result2))
 
   ;; Skip cache
-  (def result3 (load-workflow :canonical-sdlc-v1 "1.0.0" {:skip-cache? true}))
+  (def result3 (load-workflow :simple-v2 "2.0.0" {:skip-cache? true}))
   (= :resource (:source result3))
 
   :end)
