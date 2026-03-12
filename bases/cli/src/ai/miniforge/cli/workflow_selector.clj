@@ -20,13 +20,14 @@
   "Intelligent workflow selection based on spec characteristics.
 
    Analyzes workflow specs and automatically selects the appropriate workflow
-   type (canonical-sdlc-v1, lean-sdlc-v1, or simple-test-v1).
+   profile, then resolves that profile to the active app's workflow id.
 
    Layer 0: Spec analysis - extract features from spec
    Layer 1: Rule matching - apply selection rules
    Layer 2: Workflow selection with reasoning"
   (:require
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [ai.miniforge.cli.workflow-selection-config :as selection-config]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Spec feature extraction
@@ -150,65 +151,73 @@
      :size size
      :constraint-mentions (extract-constraints-mentions spec)}))
 
+(defn selection-result
+  "Build a selection result from a logical profile."
+  [profile confidence reason]
+  {:selection-profile profile
+   :workflow-type (selection-config/resolve-selection-profile profile)
+   :confidence confidence
+   :reason reason})
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Rule matching
 
 (defn match-multi-phase-rule
-  "Multi-phase implementation → canonical-sdlc-v1"
+  "Multi-phase implementation → comprehensive profile"
   [features]
   (when (and (:pr-count features)
              (>= (:pr-count features) 4))
-    {:workflow-type :canonical-sdlc-v1
-     :confidence :high
-     :reason (str "Multi-phase implementation with "
-                  (:pr-count features)
-                  " PRs requires comprehensive review")}))
+    (selection-result :comprehensive
+                      :high
+                      (str "Multi-phase implementation with "
+                           (:pr-count features)
+                           " PRs requires comprehensive review"))))
 
 (defn match-refactoring-stratification-rule
-  "Refactoring with stratification → canonical-sdlc-v1"
+  "Refactoring with stratification → comprehensive profile"
   [features]
   (when (and (or (= (:type features) :refactoring)
                  (contains? (:keywords features) :refactoring))
              (or (contains? (:keywords features) :stratified-design)
                  (contains? (:constraint-mentions features) :rule-210)))
-    {:workflow-type :canonical-sdlc-v1
-     :confidence :high
-     :reason "Refactoring with stratification requires comprehensive design review"}))
+    (selection-result :comprehensive
+                      :high
+                      "Refactoring with stratification requires comprehensive design review")))
 
 (defn match-large-feature-rule
-  "Large feature → canonical-sdlc-v1"
+  "Large feature → comprehensive profile"
   [features]
   (when (and (= (:size features) :large)
              (not (contains? (:keywords features) :bugfix))
              (not (contains? (:keywords features) :docs-only)))
-    {:workflow-type :canonical-sdlc-v1
-     :confidence :medium
-     :reason "Large feature requires comprehensive SDLC phases"}))
+    (selection-result :comprehensive
+                      :medium
+                      "Large feature requires comprehensive workflow phases")))
 
 (defn match-bugfix-rule
-  "Bug fix → lean-sdlc-v1"
+  "Bug fix → fast profile"
   [features]
   (when (or (= (:type features) :bugfix)
             (contains? (:keywords features) :bugfix))
-    {:workflow-type :lean-sdlc-v1
-     :confidence :high
-     :reason "Bug fix is well-suited for lean workflow"}))
+    (selection-result :fast
+                      :high
+                      "Bug fix is well-suited for a fast workflow")))
 
 (defn match-docs-only-rule
-  "Docs only → lean-sdlc-v1"
+  "Docs only → fast profile"
   [features]
   (when (or (= (:type features) :docs)
             (contains? (:keywords features) :docs-only))
-    {:workflow-type :lean-sdlc-v1
-     :confidence :high
-     :reason "Documentation changes use lean workflow"}))
+    (selection-result :fast
+                      :high
+                      "Documentation changes use a fast workflow")))
 
 (defn match-unknown-rule
-  "Unknown/ambiguous → lean-sdlc-v1 (safer default than simple)"
+  "Unknown/ambiguous → default profile"
   [_features]
-  {:workflow-type :lean-sdlc-v1
-   :confidence :low
-   :reason "Unknown task type defaults to lean workflow (safer than simple)"})
+  (selection-result :default
+                    :low
+                    "Unknown task type defaults to the app's default workflow"))
 
 (def selection-rules
   "Ordered list of selection rules. First matching rule wins."
@@ -223,12 +232,12 @@
   "Apply selection rules to features and return first match.
 
    Rules are applied in order:
-   1. Multi-phase implementation → canonical-sdlc-v1
-   2. Refactoring with stratification → canonical-sdlc-v1
-   3. Large feature → canonical-sdlc-v1
-   4. Bug fix → lean-sdlc-v1
-   5. Docs only → lean-sdlc-v1
-   6. Unknown → lean-sdlc-v1 (default)
+   1. Multi-phase implementation → comprehensive profile
+   2. Refactoring with stratification → comprehensive profile
+   3. Large feature → comprehensive profile
+   4. Bug fix → fast profile
+   5. Docs only → fast profile
+   6. Unknown → default profile
 
    Returns map with:
    - :workflow-type - Selected workflow keyword
@@ -252,6 +261,7 @@
    Example:
      (select-workflow spec)
      => {:workflow-type :canonical-sdlc-v1
+         :selection-profile :comprehensive
          :confidence :high
          :reason \"Multi-phase implementation with 6 PRs requires comprehensive review\"
          :features {...}}"
@@ -297,7 +307,9 @@
      :spec/constraints ["Follow stratified design" "≤400 lines per file"]})
 
   (select-workflow emojui-spec)
-  ;; => {:workflow-type :canonical-sdlc-v1, :confidence :high, ...}
+  ;; => {:workflow-type :canonical-sdlc-v1
+  ;;     :selection-profile :comprehensive
+  ;;     :confidence :high, ...}
 
   ;; Test with bug fix spec
   (def bugfix-spec
@@ -306,7 +318,9 @@
      :spec/intent {:type :bugfix}})
 
   (select-workflow bugfix-spec)
-  ;; => {:workflow-type :lean-sdlc-v1, :confidence :high, ...}
+  ;; => {:workflow-type :lean-sdlc-v1
+  ;;     :selection-profile :fast
+  ;;     :confidence :high, ...}
 
   ;; Test with explicit override
   (def override-spec

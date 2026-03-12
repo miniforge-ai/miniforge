@@ -1,0 +1,4 @@
+{:workflow-selection/profiles
+ {:comprehensive :canonical-sdlc-v1
+  :fast :lean-sdlc-v1
+  :default :lean-sdlc-v1}}

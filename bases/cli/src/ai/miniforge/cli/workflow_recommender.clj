@@ -9,6 +9,7 @@
   (:require
    [clojure.string :as str]
    [cheshire.core :as json]
+   [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.response.interface :as response]))
 
@@ -70,7 +71,7 @@
 
    Returns: String prompt"
   [spec workflows]
-  (str "You are a workflow recommendation system for Miniforge, an agentic SDLC platform.\n\n"
+  (str "You are a workflow recommendation system for Miniforge, a governed autonomous workflow platform.\n\n"
        "Your task is to analyze a task specification and recommend the most appropriate workflow.\n\n"
        "Available workflows:\n\n"
        (build-workflow-summaries workflows)
@@ -200,9 +201,9 @@
        :confidence 0.5
        :reasoning (str "Fallback: Selected based on task type " task-type)
        :source :fallback}
-      {:workflow :standard-sdlc
+      {:workflow (selection-config/resolve-selection-profile :default available-workflows)
        :confidence 0.3
-       :reasoning "Fallback: Default to standard SDLC workflow"
+       :reasoning "Fallback: Default to app-configured workflow profile"
        :source :fallback})))
 
 (defn recommend-workflow-with-fallback
