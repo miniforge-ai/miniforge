@@ -9,6 +9,7 @@
   (:require
    [clojure.string :as str]
    [cheshire.core :as json]
+   [ai.miniforge.cli.workflow-recommendation-config :as recommendation-config]
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.response.interface :as response]))
@@ -24,14 +25,18 @@
 
    Returns: String summary"
   [workflow]
-  (let [chars (workflow/workflow-characteristics workflow)]
+  (let [chars (workflow/workflow-characteristics workflow)
+        summary-labels (:summary-labels
+                        (recommendation-config/recommendation-prompt-config))]
     (str "- " (name (:id chars)) " (v" (:version chars) ")"
          "\n  " (:name chars)
          "\n  Complexity: " (name (:complexity chars))
          "\n  Phases: " (:phases chars)
          "\n  Task types: " (str/join ", " (map name (:task-types chars)))
-         (when (:has-review chars) "\n  Includes code review")
-         (when (:has-testing chars) "\n  Includes testing"))))
+         (when (:has-review chars)
+           (str "\n  " (:has-review summary-labels)))
+         (when (:has-testing chars)
+           (str "\n  " (:has-testing summary-labels))))))
 
 (defn build-workflow-summaries
   "Build summaries for all available workflows.
@@ -71,28 +76,30 @@
 
    Returns: String prompt"
   [spec workflows]
-  (str "You are a workflow recommendation system for Miniforge, a governed autonomous workflow platform.\n\n"
-       "Your task is to analyze a task specification and recommend the most appropriate workflow.\n\n"
-       "Available workflows:\n\n"
-       (build-workflow-summaries workflows)
-       "\n\n"
-       "Task specification:\n\n"
-       (extract-spec-summary spec)
-       "\n\n"
-       "Analyze the task based on:\n"
-       "1. Task complexity (simple, medium, complex)\n"
-       "2. Risk level (low, medium, high)\n"
-       "3. Review requirements (minimal, standard, comprehensive)\n"
-       "4. Time constraints (quick, normal, extensive)\n"
-       "5. Task type (feature, bugfix, refactor, test)\n\n"
-       "Provide your recommendation as a JSON object with this exact structure:\n"
-       "{\n"
-       "  \"workflow\": \"workflow-id\",\n"
-       "  \"confidence\": 0.85,\n"
-       "  \"reasoning\": \"Brief explanation of why this workflow is recommended\",\n"
-       "  \"characteristics\": [\"multi-phase\", \"has-review\", \"comprehensive\"]\n"
-       "}\n\n"
-       "Respond ONLY with the JSON object, no additional text."))
+  (let [analysis-dimensions (:analysis-dimensions
+                             (recommendation-config/recommendation-prompt-config))]
+    (str "You are a workflow recommendation system for Miniforge, a governed autonomous workflow platform.\n\n"
+         "Your task is to analyze a task specification and recommend the most appropriate workflow.\n\n"
+         "Available workflows:\n\n"
+         (build-workflow-summaries workflows)
+         "\n\n"
+         "Task specification:\n\n"
+         (extract-spec-summary spec)
+         "\n\n"
+         "Analyze the task based on:\n"
+         (->> analysis-dimensions
+              (map-indexed (fn [idx dimension]
+                             (str (inc idx) ". " dimension)))
+              (str/join "\n"))
+         "\n\n"
+         "Provide your recommendation as a JSON object with this exact structure:\n"
+         "{\n"
+         "  \"workflow\": \"workflow-id\",\n"
+         "  \"confidence\": 0.85,\n"
+         "  \"reasoning\": \"Brief explanation of why this workflow is recommended\",\n"
+         "  \"characteristics\": [\"multi-phase\", \"has-review\", \"comprehensive\"]\n"
+         "}\n\n"
+         "Respond ONLY with the JSON object, no additional text.")))
 
 ;;------------------------------------------------------------------------------ Layer 1
 ;; LLM interaction

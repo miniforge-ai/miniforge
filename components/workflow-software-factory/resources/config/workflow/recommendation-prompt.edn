@@ -1,0 +1,10 @@
+{:workflow-recommendation/prompt
+ {:analysis-dimensions
+  ["Task complexity (simple, medium, complex)"
+   "Risk level (low, medium, high)"
+   "Review requirements (minimal, standard, comprehensive)"
+   "Time constraints (quick, normal, extensive)"
+   "Task type (feature, bugfix, refactor, test)"]
+  :summary-labels
+  {:has-review "Includes code review"
+   :has-testing "Includes testing"}}}
