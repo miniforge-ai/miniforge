@@ -1,0 +1,37 @@
+{:paths ["test"]
+
+ :deps {ai.miniforge/cli {:local/root "../../bases/cli"}
+        ai.miniforge/workflow {:local/root "../../components/workflow"}
+        ai.miniforge/schema {:local/root "../../components/schema"}
+        ai.miniforge/config {:local/root "../../components/config"}
+        ai.miniforge/algorithms {:local/root "../../components/algorithms"}
+        ai.miniforge/logging {:local/root "../../components/logging"}
+        ai.miniforge/llm {:local/root "../../components/llm"}
+        ai.miniforge/tool {:local/root "../../components/tool"}
+        ai.miniforge/artifact {:local/root "../../components/artifact"}
+        ai.miniforge/agent {:local/root "../../components/agent"}
+        ai.miniforge/agent-runtime {:local/root "../../components/agent-runtime"}
+        ai.miniforge/task {:local/root "../../components/task"}
+        ai.miniforge/loop {:local/root "../../components/loop"}
+        ai.miniforge/observer {:local/root "../../components/observer"}
+        ai.miniforge/knowledge {:local/root "../../components/knowledge"}
+        ai.miniforge/spec-parser {:local/root "../../components/spec-parser"}
+        ai.miniforge/policy {:local/root "../../components/policy"}
+        ai.miniforge/heuristic {:local/root "../../components/heuristic"}
+        ai.miniforge/response {:local/root "../../components/response"}
+        ai.miniforge/fsm {:local/root "../../components/fsm"}
+        ai.miniforge/phase {:local/root "../../components/phase"}
+        ai.miniforge/gate {:local/root "../../components/gate"}
+        ai.miniforge/evidence-bundle {:local/root "../../components/evidence-bundle"}
+        ai.miniforge/dag-executor {:local/root "../../components/dag-executor"}
+        ai.miniforge/policy-pack {:local/root "../../components/policy-pack"}
+        ai.miniforge/tool-registry {:local/root "../../components/tool-registry"}
+        ai.miniforge/operator {:local/root "../../components/operator"}
+        ai.miniforge/orchestrator {:local/root "../../components/orchestrator"}
+        ai.miniforge/event-stream {:local/root "../../components/event-stream"}
+        ai.miniforge/self-healing {:local/root "../../components/self-healing"}
+        ai.miniforge/mcp-artifact-server {:local/root "../../components/mcp-artifact-server"}}
+
+ :aliases
+ {:uberjar
+  {:main ai.miniforge.cli.main}}}

@@ -15,6 +15,17 @@
       (println "❌ Build failed with exit code:" exit)
       (System/exit exit))))
 
+(defn kernel []
+  (println "🔨 Building workflow-kernel CLI uberjar...")
+  (println "Command: clojure -T:build bb-uberjar :project workflow-kernel")
+  (let [{:keys [exit out err]} (p/sh {:out :string :err :string}
+                                     "clojure" "-T:build" "bb-uberjar" ":project" "workflow-kernel")]
+    (when-not (str/blank? out) (println out))
+    (when-not (str/blank? err) (binding [*out* *err*] (println err)))
+    (when-not (zero? exit)
+      (println "❌ Build failed with exit code:" exit)
+      (System/exit exit))))
+
 (defn tui []
   (let [jar-file   "dist/miniforge-tui.jar"
         jlink-dir  "dist/miniforge-tui-runtime"
