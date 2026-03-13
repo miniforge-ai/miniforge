@@ -36,6 +36,7 @@
    [babashka.fs :as fs]
    [babashka.process :as process]
    [clojure.string :as str]
+   [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]
    [ai.miniforge.cli.config :as config]
    [ai.miniforge.cli.observability :as observability]
@@ -60,23 +61,9 @@
 ;; Constants and pure helpers
 
 (def version-info
-  {:name "miniforge"
+  {:name (app-config/binary-name)
    :version "2026.01.20.1"
-   :description "AI-powered software development workflows"})
-
-(def default-config-path
-  (str (fs/home) "/.miniforge/config.edn"))
-
-(def default-config
-  {:llm {:backend :claude-cli
-         :model "claude-sonnet-4-20250514"}
-   :fleet {:repos []
-           :poll-interval-ms 60000
-           :auto-review? false
-           :auto-merge? false}
-   :worktree {:base-path (str (fs/home) "/.miniforge/worktrees")}
-   :logging {:level :info
-             :output :human}})
+   :description (app-config/description)})
 
 (defn get-opts
   "Extract opts from dispatch result."
@@ -101,7 +88,7 @@
 
 (defn doctor-cmd
   [_m]
-  (println "\n" (display/style "Miniforge System Check" :foreground :cyan :bold true) "\n")
+  (println "\n" (display/style (app-config/system-check-title) :foreground :cyan :bold true) "\n")
 
   (let [checks [["bb" "Babashka" "Required for CLI"]
                 ["gum" "Charm Gum" "Required for TUI"]
@@ -120,9 +107,11 @@
     (println)
 
     ;; Check config
-    (if (fs/exists? default-config-path)
-      (println (display/style "✓" :foreground :green) "Config file exists at" default-config-path)
-      (println (display/style "!" :foreground :yellow) "No config file. Run 'miniforge config init'"))
+    (if (fs/exists? config/default-user-config-path)
+      (println (display/style "✓" :foreground :green) "Config file exists at" config/default-user-config-path)
+      (println (display/style "!" :foreground :yellow)
+               "No config file. Run"
+               (str "'" (app-config/command-string "config init") "'")))
 
     (println)))
 
@@ -153,7 +142,7 @@
   [m]
   (let [{:keys [workflow-id version input input-json output quiet dashboard-url]} (get-opts m)]
     (if-not workflow-id
-      (display/print-error "Usage: miniforge workflow run <workflow-id> [options]")
+      (display/print-error (str "Usage: " (app-config/command-string "workflow run <workflow-id> [options]")))
       (try
         (workflow-runner/run-workflow!
          (keyword (str/replace workflow-id #"^:" ""))
@@ -173,7 +162,7 @@
   [m]
   (let [{:keys [chain-id version spec input-json quiet]} (get-opts m)]
     (if-not chain-id
-      (display/print-error "Usage: miniforge chain run <chain-id> [options]")
+      (display/print-error (str "Usage: " (app-config/command-string "chain run <chain-id> [options]")))
       (try
         (workflow-runner/run-chain!
          (keyword (str/replace chain-id #"^:" ""))
@@ -198,13 +187,13 @@
 (defn tui-cmd [m] (cmd-monitoring/tui-cmd (get-opts m)))
 (defn fleet-start-cmd [m] (cmd-fleet/fleet-start-cmd (get-opts m)))
 (defn fleet-stop-cmd [m] (cmd-fleet/fleet-stop-cmd (get-opts m)))
-(defn fleet-status-cmd [m] (cmd-fleet/fleet-status-cmd (get-opts m) default-config-path default-config))
-(defn fleet-add-cmd [m] (cmd-fleet/fleet-add-cmd (get-opts m) default-config-path default-config))
-(defn fleet-remove-cmd [m] (cmd-fleet/fleet-remove-cmd (get-opts m) default-config-path default-config))
+(defn fleet-status-cmd [m] (cmd-fleet/fleet-status-cmd (get-opts m) config/default-user-config-path config/default-config))
+(defn fleet-add-cmd [m] (cmd-fleet/fleet-add-cmd (get-opts m) config/default-user-config-path config/default-config))
+(defn fleet-remove-cmd [m] (cmd-fleet/fleet-remove-cmd (get-opts m) config/default-user-config-path config/default-config))
 (defn pr-list-cmd [m]
   (cmd-pr/pr-list-cmd (get-opts m)
                       (fn [config-path]
-                        (cmd-fleet/load-config config-path default-config-path default-config))))
+                        (cmd-fleet/load-config config-path config/default-user-config-path config/default-config))))
 (defn pr-review-cmd [m] (cmd-pr/pr-review-cmd (get-opts m)))
 (defn pr-respond-cmd [m] (cmd-pr/pr-respond-cmd (get-opts m)))
 (defn pr-merge-cmd [m] (cmd-pr/pr-merge-cmd (get-opts m)))
@@ -229,10 +218,10 @@
 
 (defn help-cmd
   [_m]
-  (println "
-miniforge - AI-powered software development workflows
+  (println (str "
+" (app-config/binary-name) " - " (app-config/description) "
 
-Usage: miniforge <command> [options]
+Usage: " (app-config/binary-name) " <command> [options]
 
 Commands:
   run <file>          Execute a workflow (spec, DAG, or plan file)
@@ -268,7 +257,7 @@ Commands:
     stop              Stop fleet daemon
     status            Show fleet status
     dashboard         Open TUI dashboard (deprecated - use tui or web)
-    tui               Terminal UI (5 N5 views, requires miniforge-tui package)
+    tui               Terminal UI (5 N5 views, requires standalone TUI package)
     web [--port N]    Start web dashboard (default port: 8787)
     add <repo>        Add repo to fleet
     remove <repo>     Remove repo from fleet
@@ -295,23 +284,17 @@ Commands:
   help                Show this help
 
 Note:
-  miniforge (this CLI) uses Babashka for fast startup.
-  For terminal UI, install: brew install miniforge-tui (includes jlink-bundled JVM)
+  " (app-config/binary-name) " (this CLI) uses Babashka for fast startup."
+                (when-let [tui-package (app-config/tui-package)]
+                  (str "
+  For terminal UI, install: brew install " tui-package " (includes jlink-bundled JVM)"))
+                "
 
 Examples:
-  miniforge doctor
-  miniforge run feature.spec.edn
-  miniforge web                        # Start web dashboard (port 7878)
-  miniforge web --port 3000 --open     # Custom port, auto-open browser
-  miniforge tui                        # Start terminal UI (requires miniforge-tui)
-  miniforge workflow list
-  miniforge workflow run :simple-v2
-  miniforge workflow run :financial-etl -i input.edn
-  miniforge workflow run :workflow-id --input-json '{\"task\": \"Prepare report\"}'
-  miniforge chain list
-  miniforge fleet add myorg/myrepo
-  miniforge pr review https://github.com/org/repo/pull/123
-"))
+"
+                (str/join "\n" (map #(str "  " (app-config/command-string %))
+                                      (app-config/help-examples)))
+                "\n")))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; CLI dispatch
@@ -448,7 +431,7 @@ Examples:
             (when (and (= (first dispatch) "fleet")
                        (contains? #{"web" "dashboard" "tui"} wrong-input))
               (println "Did you mean:")
-              (println (str "  miniforge " (if (= wrong-input "dashboard") "web" wrong-input)))
+              (println (str "  " (app-config/command-string (if (= wrong-input "dashboard") "web" wrong-input))))
               (println))
 
             (when (seq all-commands)
@@ -457,10 +440,10 @@ Examples:
                                            "")
                            "commands:"))
               (doseq [cmd all-commands]
-                (println (str "  miniforge " (str/join " " (conj (vec dispatch) cmd)))))
+                (println (str "  " (app-config/command-string (str/join " " (conj (vec dispatch) cmd))))))
               (println))
 
-            (println "Run 'miniforge help' for more information.")
+            (println "Run" (str "'" (app-config/command-string "help") "'") "for more information.")
             (System/exit 1))
           ;; Re-throw if not a no-match error
           (throw e))))))

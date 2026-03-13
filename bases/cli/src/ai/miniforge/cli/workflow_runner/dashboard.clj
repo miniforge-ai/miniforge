@@ -2,14 +2,15 @@
   "Dashboard auto-discovery, filesystem command polling, and status display.
 
    Architecture: Zero network communication between CLI and dashboard.
-   - Events (CLI -> Dashboard): CLI writes to ~/.miniforge/events/ via file sink.
+   - Events (CLI -> Dashboard): CLI writes to the app-configured events directory via file sink.
      Dashboard tail-follows the files via watcher.
    - Commands (Dashboard -> CLI): Dashboard writes command files to
-     ~/.miniforge/commands/<workflow-id>/. CLI polls and deletes them."
+     the app-configured commands directory for the workflow. CLI polls and deletes them."
   (:require
    [clojure.java.io :as io]
    [clojure.edn :as edn]
    [cheshire.core :as json]
+   [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.workflow-runner.display :as display]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -24,12 +25,12 @@
     (catch Exception _ false)))
 
 (defn discover-dashboard-url
-  "Auto-discover running dashboard from ~/.miniforge/dashboard.port.
+  "Auto-discover running dashboard from the app-configured dashboard port file.
    Returns dashboard URL string or nil. Verifies the dashboard PID is alive
    and cleans up stale discovery files from crashed processes."
   []
   (try
-    (let [discovery-file (java.io.File. (str (System/getProperty "user.home") "/.miniforge/dashboard.port"))]
+    (let [discovery-file (java.io.File. (app-config/dashboard-port-file))]
       (when (.exists discovery-file)
         (let [info (json/parse-string (slurp discovery-file) true)
               port (:port info)
@@ -44,12 +45,11 @@
 ;; Filesystem command polling
 
 (defn start-command-poller!
-  "Start a background thread that polls ~/.miniforge/commands/<workflow-id>/
+  "Start a background thread that polls the app-configured commands directory
    for .edn command files. Reads command, updates control-state, deletes file.
    Clears stale commands on startup. Returns a cleanup function."
   [workflow-id control-state]
-  (let [commands-dir (io/file (System/getProperty "user.home")
-                              ".miniforge" "commands" (str workflow-id))
+  (let [commands-dir (io/file (app-config/commands-dir workflow-id))
         running (atom true)
         ;; Clear stale commands from a previous crashed run
         _ (when (.exists commands-dir)
@@ -87,7 +87,7 @@
                       (catch Exception _
                         nil)))))]
     (.setDaemon thread true)
-    (.setName thread "miniforge-command-poller")
+    (.setName thread (str (app-config/binary-name) "-command-poller"))
     (.start thread)
     (fn []
       (reset! running false)
@@ -100,8 +100,11 @@
   "Print dashboard URL (if discovered) and events directory path."
   [quiet]
   (when-not quiet
-    (let [events-dir (str (System/getProperty "user.home") "/.miniforge/events")]
+    (let [events-dir (app-config/events-dir)]
       (if-let [url (discover-dashboard-url)]
         (println (display/colorize :cyan (str "   Dashboard: " url)))
-        (println (display/colorize :cyan "   Dashboard: not running (start with `miniforge dashboard`)")))
+        (println (display/colorize :cyan
+                                   (str "   Dashboard: not running (start with `"
+                                        (app-config/command-string "web")
+                                        "`)"))))
       (println (display/colorize :cyan (str "   Events: " events-dir))))))

@@ -27,7 +27,8 @@
   (:require
    [clojure.string :as str]
    [clojure.java.io :as io]
-   [clojure.edn :as edn]))
+   [clojure.edn :as edn]
+   [ai.miniforge.cli.app-config :as app-config]))
 
 ;;------------------------------------------------------------------------------ ANSI Colors
 
@@ -59,10 +60,9 @@
    Arguments:
      workflow-id - UUID or string workflow identifier
 
-   Returns: String path to ~/.miniforge/events/<workflow-id>.edn"
+   Returns: String path to the active CLI app events directory."
   [workflow-id]
-  (let [home (System/getProperty "user.home")
-        events-dir (io/file home ".miniforge" "events")
+  (let [events-dir (io/file (app-config/events-dir))
         event-file (str workflow-id ".edn")]
     (.getPath (io/file events-dir event-file))))
 
@@ -72,19 +72,18 @@
    Arguments:
      workflow-id - UUID or string workflow identifier
 
-   Returns: String path to ~/.miniforge/logs/<workflow-id>.log"
+   Returns: String path to the active CLI app logs directory."
   [workflow-id]
-  (let [home (System/getProperty "user.home")
-        logs-dir (io/file home ".miniforge" "logs")
+  (let [logs-dir (io/file (app-config/logs-dir))
         log-file (str workflow-id ".log")]
     (.getPath (io/file logs-dir log-file))))
 
 (defn find-log-files
-  "Find all log files in ~/.miniforge/logs.
+  "Find all log files in the active CLI app logs directory.
 
    Returns: Vector of file paths sorted by modification time (newest first)"
   []
-  (let [log-dir (io/file (System/getProperty "user.home") ".miniforge" "logs")]
+  (let [log-dir (io/file (app-config/logs-dir))]
     (if (.exists log-dir)
       (->> (.listFiles log-dir)
            (filter #(.isFile %))
@@ -98,7 +97,7 @@
 
    Returns: Vector of file paths sorted by modification time (newest first)"
   []
-  (let [event-dir (io/file (System/getProperty "user.home") ".miniforge" "events")]
+  (let [event-dir (io/file (app-config/events-dir))]
     (if (.exists event-dir)
       (->> (.listFiles event-dir)
            (filter #(.isFile %))
@@ -320,7 +319,7 @@
 
       ;; No logs found
       :else
-      (println (colorize :yellow "No log files found in ~/.miniforge/logs")))))
+      (println (colorize :yellow (str "No log files found in " (app-config/logs-dir)))))))
 
 (defn tail-events
   "Tail MiniForge workflow events in real-time.
@@ -366,7 +365,7 @@
 
       ;; No events found
       :else
-      (println (colorize :yellow "No event files found in ~/.miniforge/events")))))
+      (println (colorize :yellow (str "No event files found in " (app-config/events-dir)))))))
 
 ;;------------------------------------------------------------------------------ Layer 6: Command Helpers
 
@@ -411,7 +410,7 @@
     "tail" (tail-logs {:workflow-id workflow-id :all all :file file :lines lines :follow follow})
     "list" (list-files-command find-log-files "log files")
     "cat" (cat-file-command file)
-    "cleanup" (let [logs-dir (str (System/getProperty "user.home") "/.miniforge/logs")
+    "cleanup" (let [logs-dir (app-config/logs-dir)
                     deleted (requiring-resolve 'ai.miniforge.logging.core/cleanup-old-rotated-logs)]
                 (if deleted
                   (let [count (deleted logs-dir 7)]
