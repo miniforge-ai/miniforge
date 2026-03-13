@@ -6,13 +6,16 @@
 
 (deftest default-app-profile-test
   (let [profile (app-config/app-profile)]
-    (testing "base CLI defaults to the flagship profile"
-      (is (= "miniforge" (:name profile)))
-      (is (= ".miniforge" (:home-dir-name profile)))
-      (is (= "miniforge-tui" (:tui-package profile))))
+    (testing "base CLI exposes a resource-backed profile"
+      (is (= (:name profile) (app-config/binary-name)))
+      (is (= (:display-name profile) (app-config/display-name)))
+      (is (= (:description profile) (app-config/description)))
+      (is (= (:tui-package profile) (app-config/tui-package))))
     (testing "derived paths use the configured home dir"
-      (is (.endsWith (app-config/config-path) "/.miniforge/config.edn"))
-      (is (.endsWith (app-config/events-dir) "/.miniforge/events")))))
+      (is (.endsWith (app-config/config-path)
+                     (str "/" (:home-dir-name profile) "/config.edn")))
+      (is (.endsWith (app-config/events-dir)
+                     (str "/" (:home-dir-name profile) "/events"))))))
 
 (deftest app-profile-loads-resource-backed-config-test
   (testing "app profile delegates to the resource-backed config loader"
