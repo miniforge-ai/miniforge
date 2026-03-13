@@ -1,7 +1,8 @@
 (ns ai.miniforge.cli.main.display
   "Terminal styling and error display for CLI output."
   (:require
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; ANSI styling primitives
@@ -26,7 +27,9 @@
       text)))
 
 (defn print-error [msg]
-  (println (style (str "Error: " msg) :foreground :red)))
+  (println (style (messages/t :classified-error/error-prefix
+                              {:message msg})
+                  :foreground :red)))
 
 (defn print-success [msg]
   (println (style msg :foreground :green)))
@@ -39,46 +42,51 @@
 
 (defn print-agent-backend-error-header
   [completed-work]
-  (println (style "⚠️  Agent System Error (Not Your Fault!)" :foreground :yellow :bold true))
+  (println (style (messages/t :classified-error/agent-backend-header)
+                  :foreground :yellow :bold true))
   (when (seq completed-work)
     (println)
-    (println (style "Your task completed successfully:" :foreground :green))
+    (println (style (messages/t :classified-error/task-completed)
+                    :foreground :green))
     (doseq [work completed-work]
       (println (str "  " (style "✅" :foreground :green) " " work)))))
 
 (defn print-task-code-error-header
   []
-  (println (style "❌ Task Code Error" :foreground :red :bold true)))
+  (println (style (messages/t :classified-error/task-code-header)
+                  :foreground :red :bold true)))
 
 (defn print-external-error-header
   []
-  (println (style "⚠️  External Service Error" :foreground :yellow :bold true)))
+  (println (style (messages/t :classified-error/external-header)
+                  :foreground :yellow :bold true)))
 
 (defn print-generic-error-header
   []
-  (println (style "❌ Error" :foreground :red :bold true)))
+  (println (style (messages/t :classified-error/generic-header)
+                  :foreground :red :bold true)))
 
 (defn print-agent-backend-error-context
   [completed-work]
   (if (seq completed-work)
-    (println "This is a bug in Claude Code's agent runtime, not in your task or miniforge.\nYour work is complete and safe.")
-    (println "This is a bug in Claude Code's agent runtime.")))
+    (println (messages/t :classified-error/agent-backend-context-success))
+    (println (messages/t :classified-error/agent-backend-context))))
 
 (defn print-task-code-error-context
   [completed-work]
-  (println "This is an issue with the code being generated or the task specification.")
+  (println (messages/t :classified-error/task-code-context))
   (when (seq completed-work)
     (println)
-    (println "Partial work completed:")
+    (println (messages/t :classified-error/partial-work))
     (doseq [work completed-work]
       (println (str "  ⏸️  " work)))))
 
 (defn print-external-error-context
   [completed-work]
-  (println "This is not an issue with your code or miniforge. The external service\nis temporarily unavailable.")
+  (println (messages/t :classified-error/external-context))
   (when (seq completed-work)
     (println)
-    (println "Partial work completed:")
+    (println (messages/t :classified-error/partial-work))
     (doseq [work completed-work]
       (println (str "  " (style "✅" :foreground :green) " " work)))))
 
@@ -102,27 +110,31 @@
   [report-url vendor]
   (when report-url
     (println)
-    (println (str (style "📝 Please report this to " :foreground :cyan) vendor ":"))
+    (println (str (style (messages/t :classified-error/report-prefix)
+                         :foreground :cyan)
+                  vendor ":"))
     (println (str "   " report-url))))
 
 (defn get-retry-recommendation
   [error-type]
   (case error-type
-    :task-code "Fix the issue and retry the task."
-    :external "Wait a few minutes and retry - this is likely transient."
-    :agent-backend "Try again later after the bug is fixed."
-    "Check the error and decide if retry is appropriate."))
+    :task-code (messages/t :classified-error/retry-task-code)
+    :external (messages/t :classified-error/retry-external)
+    :agent-backend (messages/t :classified-error/retry-agent-backend)
+    (messages/t :classified-error/retry-generic)))
 
 (defn print-retry-recommendation
   [should-retry error-type completed-work]
   (println)
   (if should-retry
-    (println (str (style "🔄 Recommendation: " :foreground :cyan)
+    (println (str (style (messages/t :classified-error/recommendation-prefix)
+                         :foreground :cyan)
                  (get-retry-recommendation error-type)))
-    (println (str (style "⚙️  " :foreground :cyan)
+    (println (str (style (messages/t :classified-error/no-retry-prefix)
+                         :foreground :cyan)
                  (if (seq completed-work)
-                   "No need to retry - your task succeeded."
-                   "Report this bug and try again later.")))))
+                   (messages/t :classified-error/no-retry-success)
+                   (messages/t :classified-error/no-retry-failure))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Composite error display

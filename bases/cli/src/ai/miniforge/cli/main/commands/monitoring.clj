@@ -4,11 +4,16 @@
    [babashka.process :as process]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.config :as config]))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Web dashboard command
+
+(defn exit!
+  [code]
+  (System/exit code))
 
 (defn web-cmd
   "Start web dashboard for workflow monitoring."
@@ -25,9 +30,9 @@
       (let [dashboard-ns (find-ns 'ai.miniforge.web-dashboard.interface)
             es-ns (find-ns 'ai.miniforge.event-stream.interface)]
         (when-not (and dashboard-ns es-ns)
-          (display/print-error "Web dashboard not available in this runtime.")
-          (println "The dashboard requires JVM components not available in Babashka.")
-          (System/exit 1))
+          (display/print-error (messages/t :web/not-available))
+          (println (messages/t :web/requires-jvm))
+          (exit! 1))
 
         (let [start! (ns-resolve dashboard-ns 'start!)
               create-stream (ns-resolve es-ns 'create-event-stream)
@@ -40,7 +45,8 @@
                                    (when-let [create-fn (ns-resolve pr-ns 'create-manager)]
                                      (create-fn)))
                                  (catch Exception e
-                                   (println "Warning: Could not create PR train manager:" (.getMessage e))
+                                   (println (messages/t :web/pr-train-warning
+                                                        {:error (.getMessage e)}))
                                    nil))
 
               ;; Create repo DAG manager
@@ -50,11 +56,12 @@
                                    (when-let [create-fn (ns-resolve dag-ns 'create-manager)]
                                      (create-fn)))
                                  (catch Exception e
-                                   (println "Warning: Could not create repo DAG manager:" (.getMessage e))
+                                   (println (messages/t :web/repo-dag-warning
+                                                        {:error (.getMessage e)}))
                                    nil))
 
               url (str "http://localhost:" port)]
-          (display/print-info (str "Starting web dashboard on port " port "..."))
+          (display/print-info (messages/t :web/starting {:port port}))
           (start! {:port port
                    :event-stream event-stream
                    :pr-train-manager pr-train-manager
@@ -64,32 +71,34 @@
           (println)
           (if open
             (do
-              (println "Opening browser...")
+              (println (messages/t :web/opening-browser))
               (try
                 (process/sh "open" url)
                 (catch Exception _e nil))
-              (println "Press Ctrl+C to stop")
+              (println (messages/t :web/press-ctrl-c))
               @(promise))
             (do
-              (println "Press Enter to open in browser, Ctrl+C to stop")
+              (println (messages/t :web/press-enter))
               (read-line)
-              (println "Opening browser...")
+              (println (messages/t :web/opening-browser))
               (try
                 (process/sh "open" url)
                 (catch Exception _e nil))
               @(promise)))))  ; Block until interrupted
       (catch java.net.BindException _e
-        (display/print-error (str "Port " port " is already in use."))
+        (display/print-error (messages/t :web/port-in-use {:port port}))
         (println)
-        (println "Solutions:")
-        (println (str "  1. Use a different port: bb "
-                      (app-config/command-string "web --port" (str (inc port)))))
-        (println (str "  2. Kill the process using port " port ":"))
-        (println (str "     lsof -ti:" port " | xargs kill"))
-        (System/exit 1))
+        (println (messages/t :web/solutions))
+        (println (messages/t :web/use-different-port
+                             {:command (app-config/command-string "web --port"
+                                                                  (str (inc port)))}))
+        (println (messages/t :web/kill-port-header {:port port}))
+        (println (messages/t :web/kill-port-command {:port port}))
+        (exit! 1))
       (catch Exception e
-        (display/print-error (str "Failed to start web dashboard: " (ex-message e)))
-        (System/exit 1)))))
+        (display/print-error (messages/t :web/start-failed
+                                         {:error (ex-message e)}))
+        (exit! 1)))))
 
 ;; TUI availability check (set at load time by parent ns)
 (def ^:dynamic *tui-available?* false)
@@ -100,24 +109,25 @@
   [opts]
   (if-not *tui-available?*
     (do
-      (display/print-error "TUI not available in this runtime.")
+      (display/print-error (messages/t :tui/not-available))
       (println)
-      (println "The TUI requires JVM/Lanterna which isn't available in Babashka.")
+      (println (messages/t :tui/requires-jvm))
       (println)
       (if-let [tui-package (app-config/tui-package)]
         (do
-          (println "To use the terminal UI, install the separate package:")
+          (println (messages/t :tui/install-package))
           (println (str "  brew install " tui-package))
           (println)
-          (println "Or use the web dashboard instead:")
+          (println (messages/t :tui/use-web))
           (println (str "  " (app-config/command-string "web"))))
-        (println (str "This app does not ship a standalone TUI package."
-                      "\nUse " (app-config/command-string "web") " instead.")))
-      (System/exit 1))
+        (println (messages/t :tui/no-standalone-package
+                             {:command (app-config/command-string "web")})))
+      (exit! 1))
     (do
-      (display/print-info "Starting TUI monitor...")
-      (display/print-info (str "Watching " (app-config/events-dir) " for workflow activity"))
-      (display/print-info "Press 'q' to quit, '?' for help")
+      (display/print-info (messages/t :tui/starting))
+      (display/print-info (messages/t :tui/watching
+                                      {:events-dir (app-config/events-dir)}))
+      (display/print-info (messages/t :tui/help-hint))
       (println)
       (try
         (let [start-standalone! (requiring-resolve 'ai.miniforge.tui-views.interface/start-standalone-tui!)]
@@ -126,10 +136,11 @@
           ;; Force immediate JVM exit — Clojure's agent thread pool
           ;; keeps the process alive for ~60s otherwise
           (shutdown-agents)
-          (System/exit 0))
+          (exit! 0))
         (catch Exception e
-          (display/print-error (str "Failed to start TUI: " (.getMessage e)))
+          (display/print-error (messages/t :tui/start-failed
+                                           {:error (.getMessage e)}))
           (when (str/includes? (str e) "terminal")
             (println)
-            (println "Note: The TUI requires a proper terminal environment.")
-            (println "Try running from Terminal.app or iTerm2, not from an IDE.")))))))
+            (println (messages/t :tui/proper-terminal-note))
+            (println (messages/t :tui/proper-terminal-advice))))))))
