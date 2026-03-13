@@ -1,0 +1,3 @@
+{:default-profile :software-factory
+ :profiles
+ {:software-factory "config/workflow/state-profiles/software-factory.edn"}}

@@ -4,7 +4,7 @@
    [clojure.test :refer [deftest is testing]]))
 
 (deftest workflow-state-profile-provider-test
-  (testing "workflow component loads its own state-profile provider from resources"
+  (testing "workflow state-profile provider loads from app-owned resources on the classpath"
     (let [provider (workflow/load-state-profile-provider)]
       (is (= :software-factory (workflow/default-state-profile-id)))
       (is (= #{:software-factory :etl}
@@ -15,9 +15,12 @@
              (-> (workflow/resolve-state-profile :etl)
                  :profile/id)))))
 
-  (testing "workflow provider exposes ETL completion semantics explicitly"
+  (testing "ETL completion semantics are still available through the ETL-owned resource layer"
     (let [etl-profile (workflow/resolve-state-profile :etl)]
       (is (= #{:completed}
              (:success-terminal-statuses etl-profile)))
       (is (= :completed
-             (get-in etl-profile [:event-mappings :published :to]))))))
+             (get-in etl-profile [:event-mappings :published :to])))))
+
+  (testing "missing app profile ids are explicit rather than silently falling back"
+    (is (nil? (workflow/resolve-state-profile :missing-profile)))))

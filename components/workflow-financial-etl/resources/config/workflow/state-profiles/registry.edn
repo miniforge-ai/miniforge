@@ -1,0 +1,2 @@
+{:profiles
+ {:etl "config/workflow/state-profiles/etl.edn"}}
