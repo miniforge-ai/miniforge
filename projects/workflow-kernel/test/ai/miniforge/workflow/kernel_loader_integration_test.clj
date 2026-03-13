@@ -2,6 +2,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.main :as main]
    [ai.miniforge.workflow.interface :as workflow]))
 
@@ -17,11 +18,17 @@
       (is (not (contains? workflow-ids :financial-etl))))))
 
 (deftest kernel-project-overrides-cli-identity
-  (testing "kernel project uses its own app profile"
-    (is (= "workflow-kernel" (app-config/binary-name)))
-    (is (.endsWith (app-config/config-path) "/.workflow-kernel/config.edn")))
-  (testing "kernel help uses kernel-specific copy"
-    (let [output (with-out-str (main/help-cmd {}))]
-      (is (.contains output "workflow-kernel - Local governed workflow engine"))
-      (is (.contains output "workflow-kernel workflow list"))
-      (is (not (.contains output "workflow-kernel workflow run :financial-etl -i input.edn"))))))
+  (let [profile (app-config/app-profile)]
+    (testing "kernel project uses its own app profile"
+      (is (= (:name profile) (app-config/binary-name)))
+      (is (.endsWith (app-config/config-path)
+                     (str "/" (:home-dir-name profile) "/config.edn"))))
+    (testing "kernel help uses kernel-specific copy"
+      (let [output (with-out-str (main/help-cmd {}))
+            title (messages/t :help/title {:binary (app-config/binary-name)
+                                           :description (app-config/description)})]
+        (is (.contains output title))
+        (doseq [example (app-config/help-examples)]
+          (is (.contains output (app-config/command-string example))))
+        (is (not (.contains output (app-config/command-string
+                                    "workflow run :financial-etl -i input.edn"))))))))
