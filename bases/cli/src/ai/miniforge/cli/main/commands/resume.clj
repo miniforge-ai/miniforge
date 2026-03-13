@@ -4,6 +4,7 @@
    [babashka.fs :as fs]
    [clojure.edn :as edn]
    [clojure.string :as str]
+   [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.cli.workflow-runner.context :as context]
@@ -14,7 +15,7 @@
 ;; Event file parsing
 
 (def events-dir
-  (str (fs/home) "/.miniforge/events"))
+  (app-config/events-dir))
 
 (defn read-event-file
   "Read all events from a workflow event file (one EDN map per line)."

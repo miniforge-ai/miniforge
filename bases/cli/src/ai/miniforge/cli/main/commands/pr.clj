@@ -3,6 +3,7 @@
   (:require
    [babashka.process :as process]
    [cheshire.core :as json]
+   [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -18,7 +19,8 @@
     (if (empty? repos)
       (do
         (display/print-error "No repositories specified.")
-        (println "Use --repo <owner/repo> or add repos with 'miniforge fleet add'"))
+        (println "Use --repo <owner/repo> or add repos with"
+                 (str "'" (app-config/command-string "fleet add") "'")))
       (doseq [r repos]
         (println)
         (println (display/style (str "PRs for " r) :foreground :cyan :bold true))
@@ -50,7 +52,7 @@
   [opts]
   (let [{:keys [url]} opts]
     (if-not url
-      (display/print-error "Usage: miniforge pr review <pr-url>")
+      (display/print-error (str "Usage: " (app-config/command-string "pr review <pr-url>")))
       (do
         (display/print-info (str "Reviewing: " url))
         (println "TODO: Implement PR review with agent")))))
@@ -59,7 +61,7 @@
   [opts]
   (let [{:keys [url]} opts]
     (if-not url
-      (display/print-error "Usage: miniforge pr respond <pr-url>")
+      (display/print-error (str "Usage: " (app-config/command-string "pr respond <pr-url>")))
       (do
         (display/print-info (str "Responding to comments on: " url))
         (println "TODO: Implement PR comment response")))))
@@ -68,7 +70,7 @@
   [opts]
   (let [{:keys [url]} opts]
     (if-not url
-      (display/print-error "Usage: miniforge pr merge <pr-url>")
+      (display/print-error (str "Usage: " (app-config/command-string "pr merge <pr-url>")))
       (do
         (display/print-info (str "Merging: " url))
         (println "TODO: Use gh pr merge")))))

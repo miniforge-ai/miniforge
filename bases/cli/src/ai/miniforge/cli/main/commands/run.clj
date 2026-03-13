@@ -3,6 +3,7 @@
   (:require
    [babashka.fs :as fs]
    [clojure.edn :as edn]
+   [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.spec-parser :as spec-parser]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]
@@ -48,7 +49,9 @@
 
       ;; No file specified
       (not spec)
-      (display/print-error "Usage: miniforge run <spec-file> [--interactive] [--resume <workflow-id>]")
+      (display/print-error
+       (str "Usage: "
+            (app-config/command-string "run <spec-file> [--interactive] [--resume <workflow-id>]")))
 
       ;; File not found
       (not (fs/exists? spec))

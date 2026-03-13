@@ -3,6 +3,7 @@
   (:require
    [clojure.edn :as edn]
    [babashka.fs :as fs]
+   [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -29,18 +30,18 @@
 (defn fleet-start-cmd
   [_opts]
   (display/print-info "Starting fleet daemon...")
-  (println "TODO: Fleet daemon is an enterprise extension point (see miniforge-fleet)"))
+  (println "TODO: Fleet daemon is an enterprise extension point."))
 
 (defn fleet-stop-cmd
   [_opts]
   (display/print-info "Stopping fleet daemon...")
-  (println "TODO: Fleet daemon is an enterprise extension point (see miniforge-fleet)"))
+  (println "TODO: Fleet daemon is an enterprise extension point."))
 
 (defn fleet-status-cmd
   [opts default-config-path default-config]
   (let [config (load-config (:config opts) default-config-path default-config)
         repos (get-in config [:fleet :repos] [])
-        state-file (str (fs/home) "/.miniforge/state.edn")
+        state-file (app-config/state-file)
         state (if (fs/exists? state-file)
                 (edn/read-string (slurp state-file))
                 {:workflows {:active 0 :pending 0 :completed 0 :failed 0}})]
@@ -59,7 +60,7 @@
   [opts default-config-path default-config]
   (let [{:keys [repo config]} opts]
     (if-not repo
-      (display/print-error "Usage: miniforge fleet add <repo>")
+      (display/print-error (str "Usage: " (app-config/command-string "fleet add <repo>")))
       (let [cfg (load-config config default-config-path default-config)
             repos (get-in cfg [:fleet :repos] [])
             new-cfg (assoc-in cfg [:fleet :repos] (conj repos repo))]
@@ -70,7 +71,7 @@
   [opts default-config-path default-config]
   (let [{:keys [repo config]} opts]
     (if-not repo
-      (display/print-error "Usage: miniforge fleet remove <repo>")
+      (display/print-error (str "Usage: " (app-config/command-string "fleet remove <repo>")))
       (let [cfg (load-config config default-config-path default-config)
             repos (get-in cfg [:fleet :repos] [])
             new-cfg (assoc-in cfg [:fleet :repos] (vec (remove #{repo} repos)))]

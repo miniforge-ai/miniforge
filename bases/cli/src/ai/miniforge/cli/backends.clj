@@ -4,6 +4,7 @@
    Provides functions to list, check status, and configure LLM backends."
   (:require
    [clojure.string :as str]
+   [ai.miniforge.cli.app-config :as app-config]
    [babashka.process :as process]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -215,9 +216,10 @@
         (println (str "  1. Get an API key from " (or docs-url "the provider")))
         (println "  2. Set the environment variable:")
         (println (str "     export " api-key-var "='your-key-here'"))
-        (println "  3. Or add to ~/.miniforge/config.edn:")
+        (println (str "  3. Or add to " (app-config/config-path) ":"))
         (println (str "     {:llm {:backend " backend-id "}}"))
-        (println (str "  4. Try again: miniforge config backend " (name backend-id))))
+        (println (str "  4. Try again: "
+                      (app-config/command-string "config backend" (name backend-id)))))
 
       :not-installed
       (do
@@ -239,7 +241,8 @@
   (if-not (contains? backend-specs backend-id)
     {:valid? false
      :message (str "Unknown backend: " (name backend-id)
-                  "\nRun 'miniforge config backends' to see available backends.")}
+                   "\nRun '" (app-config/command-string "config backends")
+                   "' to see available backends.")}
     (let [status (check-backend-status backend-id)]
       (if (:available status)
         {:valid? true

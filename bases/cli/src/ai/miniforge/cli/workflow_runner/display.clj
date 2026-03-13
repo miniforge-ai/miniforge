@@ -3,6 +3,7 @@
   (:require
    [clojure.pprint]
    [cheshire.core :as json]
+   [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -31,7 +32,7 @@
 (defn print-workflow-header [workflow-id version quiet?]
   (when-not quiet?
     (println (colorize :cyan (str "\n" (apply str (repeat 65 "━")))))
-    (println (colorize :bold "  Miniforge Workflow Runner"))
+    (println (colorize :bold (str "  " (app-config/display-name) " Workflow Runner")))
     (println (str "  Workflow: " (colorize :cyan (name workflow-id))))
     (println (str "  Version:  " (colorize :cyan version)))
     (println (colorize :cyan (str (apply str (repeat 65 "━")) "\n")))))

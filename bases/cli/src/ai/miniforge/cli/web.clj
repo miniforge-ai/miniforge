@@ -22,6 +22,7 @@
    [clojure.edn :as edn]
    [clojure.string :as str]
    [org.httpkit.server :as http]
+   [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.web.response :as response]
    [ai.miniforge.cli.web.handlers :as handlers]
    [ai.miniforge.cli.web.sse :as sse]))
@@ -30,7 +31,7 @@
 (def server-atom (atom nil))
 
 (defn parse-repos-from-config []
-  (-> (str (System/getProperty "user.home") "/.miniforge/config.edn")
+  (-> (app-config/config-path)
       java.io.File.
       (as-> f (when (.exists f) (slurp f)))
       (some-> edn/read-string (get-in [:fleet :repos]))

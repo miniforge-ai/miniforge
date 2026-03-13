@@ -3,6 +3,7 @@
   (:require
    [babashka.process :as process]
    [clojure.string :as str]
+   [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.config :as config]))
 
@@ -81,7 +82,8 @@
         (display/print-error (str "Port " port " is already in use."))
         (println)
         (println "Solutions:")
-        (println (str "  1. Use a different port: bb miniforge web --port " (inc port)))
+        (println (str "  1. Use a different port: bb "
+                      (app-config/command-string "web --port" (str (inc port)))))
         (println (str "  2. Kill the process using port " port ":"))
         (println (str "     lsof -ti:" port " | xargs kill"))
         (System/exit 1))
@@ -94,7 +96,7 @@
 
 (defn tui-cmd
   "Start terminal UI for workflow monitoring.
-   Launches standalone TUI that tail-follows ~/.miniforge/events/ files."
+   Launches standalone TUI that tail-follows app event files."
   [opts]
   (if-not *tui-available?*
     (do
@@ -102,15 +104,19 @@
       (println)
       (println "The TUI requires JVM/Lanterna which isn't available in Babashka.")
       (println)
-      (println "To use the terminal UI, install the separate package:")
-      (println "  brew install miniforge-tui")
-      (println)
-      (println "Or use the web dashboard instead:")
-      (println "  miniforge web")
+      (if-let [tui-package (app-config/tui-package)]
+        (do
+          (println "To use the terminal UI, install the separate package:")
+          (println (str "  brew install " tui-package))
+          (println)
+          (println "Or use the web dashboard instead:")
+          (println (str "  " (app-config/command-string "web"))))
+        (println (str "This app does not ship a standalone TUI package."
+                      "\nUse " (app-config/command-string "web") " instead.")))
       (System/exit 1))
     (do
       (display/print-info "Starting TUI monitor...")
-      (display/print-info "Watching ~/.miniforge/events/ for workflow activity")
+      (display/print-info (str "Watching " (app-config/events-dir) " for workflow activity"))
       (display/print-info "Press 'q' to quit, '?' for help")
       (println)
       (try

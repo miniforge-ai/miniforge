@@ -7,13 +7,14 @@
    [clojure.pprint :as pprint]
    [babashka.fs :as fs]
    [babashka.process :as process]
+   [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.backends :as backends]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration paths and utilities
 
 (def default-user-config-path
-  (str (fs/home) "/.miniforge/config.edn"))
+  (app-config/config-path))
 
 (def default-config
   {:llm {:backend :claude
@@ -24,7 +25,7 @@
    :workflow {:max-iterations 50
               :max-tokens 150000
               :failure-strategy :retry}
-   :artifacts {:dir (str (fs/home) "/.miniforge/artifacts")}
+   :artifacts {:dir (app-config/artifacts-dir)}
    :meta-loop {:enabled true
                :max-convergence-iterations 10
                :convergence-threshold 0.95}
@@ -169,8 +170,8 @@
     (if-not key-str
       (do
         (print-error "Missing key argument")
-        (println "Usage: miniforge config get <key>")
-        (println "Example: miniforge config get llm.backend"))
+        (println "Usage:" (app-config/command-string "config get <key>"))
+        (println "Example:" (app-config/command-string "config get llm.backend")))
       (let [config (load-merged-config config-path)
             key-path (parse-config-key key-str)
             value (get-in config key-path)]
@@ -187,8 +188,8 @@
     (if (or (not key-str) (not value-str))
       (do
         (print-error "Missing arguments")
-        (println "Usage: miniforge config set <key> <value>")
-        (println "Example: miniforge config set llm.backend openai"))
+        (println "Usage:" (app-config/command-string "config set <key> <value>"))
+        (println "Example:" (app-config/command-string "config set llm.backend openai")))
       (let [user-config (or (read-config-file config-path) default-config)
             key-path (parse-config-key key-str)
             value (parse-config-value value-str)
@@ -206,14 +207,14 @@
     (if (fs/exists? config-path)
       (do
         (print-info (str "Config already exists at " config-path))
-        (println "Use 'miniforge config set <key> <value>' to modify"))
+        (println "Use" (str "'" (app-config/command-string "config set <key> <value>") "'") "to modify"))
       (do
         (write-config-file config-path default-config)
         (println)
         (print-success (str "✅ Created config at " config-path))
         (println)
-        (println "Edit with: miniforge config edit")
-        (println "View with: miniforge config list")
+        (println "Edit with:" (app-config/command-string "config edit"))
+        (println "View with:" (app-config/command-string "config list"))
         (println)))))
 
 (defn cmd-edit
@@ -263,13 +264,13 @@
     (if-not backend-str
       (do
         (print-error "Missing backend argument")
-        (println "Usage: miniforge config backend <name>")
+        (println "Usage:" (app-config/command-string "config backend <name>"))
         (println)
         (println "Available backends:")
         (doseq [backend (keys backends/backend-specs)]
           (println (str "  " (name backend))))
         (println)
-        (println "Run 'miniforge config backends' for detailed status."))
+        (println "Run" (str "'" (app-config/command-string "config backends") "'") "for detailed status."))
       (let [backend-kw (keyword backend-str)
             validation (backends/validate-backend backend-kw)]
         (if (:valid? validation)
@@ -286,7 +287,7 @@
                 (println (str "   Model: " (:default-model info) " (default)"))))
             (println)
             (println "To change model:")
-            (println "  miniforge config set llm.model <model-name>")
+            (println " " (app-config/command-string "config set llm.model <model-name>"))
             (println))
           ;; Backend not available, show helpful error
           (backends/print-backend-error backend-kw))))))
@@ -299,7 +300,7 @@
     (if-not (fs/exists? config-path)
       (do
         (print-error "Config file does not exist")
-        (println (str "Run 'miniforge config init' to create: " config-path))
+        (println (str "Run '" (app-config/command-string "config init") "' to create: " config-path))
         (println))
       (let [config (read-config-file config-path)]
         (if config
@@ -318,7 +319,7 @@
             (print-error "Config file is invalid or unreadable")
             (println (str "   Location: " config-path))
             (println)
-            (println "Try resetting: miniforge config reset")))))))
+            (println "Try resetting:" (app-config/command-string "config reset"))))))))
 
 ;------------------------------------------------------------------------------ Compatibility functions for workflow-runner
 

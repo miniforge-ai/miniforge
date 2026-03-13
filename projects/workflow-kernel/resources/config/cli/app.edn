@@ -1,0 +1,15 @@
+{:cli-app/profile
+ {:name "workflow-kernel"
+  :display-name "Workflow Kernel"
+  :description "Local governed workflow engine"
+  :system-check-title "Workflow Kernel System Check"
+  :home-dir-name ".workflow-kernel"
+  :tui-package nil
+  :help-examples ["doctor"
+                  "run analysis.spec.edn"
+                  "workflow list"
+                  "workflow run :simple-v2"
+                  "workflow run :workflow-id --input-json '{\"task\": \"Prepare report\"}'"
+                  "chain list"
+                  "config init"
+                  "events list"]}}

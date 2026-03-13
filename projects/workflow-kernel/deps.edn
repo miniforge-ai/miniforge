@@ -1,4 +1,4 @@
-{:paths ["test"]
+{:paths ["test" "resources"]
 
  :deps {ai.miniforge/cli {:local/root "../../bases/cli"}
         ai.miniforge/workflow {:local/root "../../components/workflow"}
