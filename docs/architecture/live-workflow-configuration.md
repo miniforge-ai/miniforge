@@ -46,7 +46,7 @@ selection-profile resolution, see
 The shared `workflow` component contributes:
 
 - workflow schema
-- reference workflows such as `financial-etl` and `simple-v2`
+- reference workflows such as `simple-v2`
 - generic runtime code
 
 ### App-owned resources
@@ -58,6 +58,11 @@ Applications contribute:
 - workflow selection profile config
 - DAG state profile config
 - phase implementations and workflow helpers
+
+Examples:
+
+- `workflow-software-factory` contributes SDLC workflow families
+- `workflow-financial-etl` contributes the ETL product workflow family
 
 For example, the CLI app can load software-factory workflows without making the
 kernel itself software-factory-specific.
@@ -127,7 +132,7 @@ This composition model supports the open-core boundary directly:
 
 ### Shared-only project
 
-- visible workflows: `financial-etl`, `simple-v2`, test/demo workflows
+- visible workflows: `simple-v2`, test/demo workflows
 - publication: directory publisher
 - selection fallback: based on generic workflow characteristics
 
@@ -140,7 +145,7 @@ This composition model supports the open-core boundary directly:
 
 ### Analytical vertical project
 
-- visible workflows: shared workflows plus analytical packs or demos
+- visible workflows: shared workflows plus ETL or other analytical workflows
 - state profile: app-specific lifecycle resource
 - publication: local directories, reports, exports, or domain-specific sinks
 
