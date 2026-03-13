@@ -143,6 +143,11 @@
    :requires ([build])
    :task (build/cli)}
 
+  build:kernel
+  {:doc  "Build workflow-kernel CLI as distributable uberjar"
+   :requires ([build])
+   :task (build/kernel)}
+
   build:jar
   {:doc  "Build JVM uberjar for a project"
    :task (let [[project] *command-line-args*]
