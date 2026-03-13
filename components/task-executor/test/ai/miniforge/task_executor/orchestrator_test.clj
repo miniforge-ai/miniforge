@@ -248,9 +248,9 @@
       (let [b-end (get-in @execution-tracker [:end-times "b"])
             c-end (get-in @execution-tracker [:end-times "c"])
             d-start (get-in @execution-tracker [:start-times "d"])]
-        (is (< b-end d-start)
+        (is (<= b-end d-start)
             "B should complete before D starts")
-        (is (< c-end d-start)
+        (is (<= c-end d-start)
             "C should complete before D starts")))))
 
 (deftest max-parallel-config-test

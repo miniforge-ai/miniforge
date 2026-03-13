@@ -3,15 +3,17 @@
 This component owns app-specific workflow resources for the financial ETL
 product.
 
-The current scope is the shipped ETL workflow family plus the ETL
-state-profile configuration used to run the analytical product on top of the
-shared runtime.
+The current scope is the shipped ETL workflow family, the ETL
+state-profile configuration, and ETL-owned runtime helpers used to run the
+analytical product on top of the shared runtime.
 
 ## What This Component Owns
 
 - ETL workflow definitions under `resources/workflows/`
 - ETL workflow state-profile resources under
   `resources/config/workflow/state-profiles/`
+- ETL-specific execution helpers under `src/`
+- ETL-specific lifecycle event helpers under `src/`
 
 ## Why This Exists
 
