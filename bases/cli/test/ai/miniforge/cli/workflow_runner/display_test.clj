@@ -9,9 +9,15 @@
   (testing "workflow runner header uses the active app display name"
     (with-redefs [app-config/display-name (constantly "Workflow Kernel")]
       (let [output (with-out-str (sut/print-workflow-header :simple-v2 "latest" false))]
-        (is (.contains output "Workflow Kernel Workflow Runner"))
-        (is (.contains output "Workflow: "))
-        (is (.contains output "simple-v2"))))))
+        (is (.contains output
+                       (messages/t :workflow-runner/header
+                                   {:display-name (app-config/display-name)})))
+        (is (.contains output
+                       (messages/t :workflow-runner/workflow
+                                   {:workflow-id "simple-v2"})))
+        (is (.contains output
+                       (messages/t :workflow-runner/version
+                                   {:version "latest"})))))))
 
 (deftest workflow-runner-event-lines-use-message-catalog-test
   (testing "event formatting reads labels from the message catalog"

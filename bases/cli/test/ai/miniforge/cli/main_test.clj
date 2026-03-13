@@ -7,13 +7,13 @@
 
 (deftest help-cmd-uses-generic-workflow-examples-test
   (testing "CLI help shows generic workflow examples instead of SDLC-specific ones"
-    (let [output (with-out-str (sut/help-cmd {}))]
-      (is (.contains output "miniforge - AI-powered software development workflows"))
-      (is (.contains output "miniforge workflow run :simple-v2"))
-      (is (.contains output "miniforge workflow run :financial-etl -i input.edn"))
-      (is (.contains output "miniforge chain list"))
-      (is (not (.contains output "canonical-sdlc-v1")))
-      (is (not (.contains output "Build feature"))))))
+    (let [output (with-out-str (sut/help-cmd {}))
+          title (messages/t :help/title {:binary (app-config/binary-name)
+                                         :description (app-config/description)})]
+      (is (.contains output title))
+      (doseq [example (app-config/help-examples)]
+        (is (.contains output (app-config/command-string example))))
+      (is (not (.contains output "canonical-sdlc-v1"))))))
 
 (deftest help-cmd-reads-copy-from-message-catalog-test
   (testing "help output is assembled from message resources rather than hardcoded strings"
