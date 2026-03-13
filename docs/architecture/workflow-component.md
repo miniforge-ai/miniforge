@@ -40,7 +40,6 @@ components/workflow/
 │   │   └── workflow/
 │   │       └── state-profiles/
 │   └── workflows/
-│       ├── financial-etl-v1.0.0.edn
 │       ├── simple-v2.0.0.edn
 │       └── test/demo workflows
 └── test/
@@ -49,6 +48,7 @@ components/workflow/
 App-specific workflow families live in separate components such as:
 
 - `components/workflow-software-factory/resources/workflows/`
+- `components/workflow-financial-etl/resources/workflows/`
 - `components/workflow-chain-software-factory/resources/chains/`
 - app-owned `config/workflow/*.edn` resources
 
@@ -70,9 +70,11 @@ shared workflow component
 In practice:
 
 - the shared `workflow` component contributes reference workflows such as
-  `financial-etl` and `simple-v2`
+  `simple-v2`
 - an application component may add software-factory workflows such as
   `canonical-sdlc-v1`
+- an analytical product component may add ETL workflows such as
+  `financial-etl`
 - the active project decides what exists by deciding which components are on
   the classpath
 
