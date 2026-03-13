@@ -27,7 +27,7 @@
             (is (.contains prompt (get-in prompt-config [:summary-labels :has-testing])))))))
 
     (testing "generic fallback vocabulary is available when no app config is present"
-      (let [prompt-config cfg/default-prompt-config]
+      (let [prompt-config (cfg/default-prompt-config)]
         (with-redefs [cfg/recommendation-prompt-config
                       (fn []
                         prompt-config)

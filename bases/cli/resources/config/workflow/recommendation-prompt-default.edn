@@ -1,0 +1,10 @@
+{:workflow-recommendation/prompt
+ {:analysis-dimensions
+  ["Task complexity (simple, medium, complex)"
+   "Risk level (low, medium, high)"
+   "Review requirements (minimal, standard, comprehensive)"
+   "Time constraints (quick, normal, extensive)"
+   "Work category and expected outputs"]
+  :summary-labels
+  {:has-review "Includes review checkpoints"
+   :has-testing "Includes verification/testing"}}}
