@@ -1,6 +1,6 @@
 # Contributing to Miniforge
 
-Thank you for contributing to miniforge! This guide will help you get started.
+Thank you for contributing to Miniforge! This guide will help you get started.
 
 ## Quick Start
 
@@ -80,20 +80,28 @@ See [Development Guidelines](docs/development-guidelines.md) for detailed exampl
 
 ## Architecture
 
-Miniforge uses [Polylith](https://polylith.gitbook.io/) architecture:
+This repo is a Polylith monorepo with three product layers:
+
+- **MiniForge Core** — governed workflow engine (shared kernel)
+- **Miniforge** — autonomous software factory (SDLC product)
+- **Data Foundry** — ETL product (data extraction, transformation, and loading)
 
 ```text
 miniforge/
 ├── components/          # Reusable components
+│   ├── workflow/       # MiniForge Core — shared workflow runtime
+│   ├── workflow-software-factory/  # Miniforge product workflows
+│   ├── workflow-financial-etl/     # Data Foundry product workflows
 │   ├── agent/          # AI agent implementations
-│   ├── workflow/       # Workflow engine
 │   ├── loop/           # Inner loop (generate-validate-repair)
 │   └── ...
 ├── bases/              # Runnable applications
 │   ├── cli/            # Command-line interface
-│   └── web/            # Web interface
+│   └── lsp-mcp-bridge/ # MCP server bridge
 └── projects/           # Deployable projects
-    └── miniforge/      # Main project
+    ├── miniforge/      # Miniforge (software factory) project
+    ├── miniforge-core/ # MiniForge Core (engine-only) project
+    └── miniforge-tui/  # Terminal UI project
 ```
 
 Each component is independently testable and reusable.
@@ -212,7 +220,8 @@ Key principles:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the same license as the project (see [LICENSE](LICENSE)).
+By contributing, you agree that your contributions will be licensed under the same license as the project (see
+[LICENSE](LICENSE)).
 
 ---
 

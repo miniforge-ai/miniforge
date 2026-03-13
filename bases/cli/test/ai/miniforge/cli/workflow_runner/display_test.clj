@@ -7,7 +7,7 @@
 
 (deftest print-workflow-header-uses-app-display-name-test
   (testing "workflow runner header uses the active app display name"
-    (with-redefs [app-config/display-name (constantly "Workflow Kernel")]
+    (with-redefs [app-config/display-name (constantly "MiniForge Core")]
       (let [output (with-out-str (sut/print-workflow-header :simple-v2 "latest" false))]
         (is (.contains output
                        (messages/t :workflow-runner/header

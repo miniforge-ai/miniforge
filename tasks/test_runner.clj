@@ -60,9 +60,9 @@
     (when-not (zero? miniforge-exit)
       (println "❌ Integration tests failed in project: miniforge")
       (System/exit miniforge-exit))
-    (let [kernel-exit (run-project-tests! "workflow-kernel" kernel-tests)]
+    (let [kernel-exit (run-project-tests! "miniforge-core" kernel-tests)]
       (when-not (zero? kernel-exit)
-        (println "❌ Integration tests failed in project: workflow-kernel")
+        (println "❌ Integration tests failed in project: miniforge-core")
         (System/exit kernel-exit)))))
 
 (defn conformance []

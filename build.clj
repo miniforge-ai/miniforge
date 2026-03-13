@@ -17,7 +17,7 @@
 ;; limitations under the License.
 
 (ns build
-  "Build tooling for miniforge Polylith workspace.
+  "Build tooling for Miniforge Polylith workspace.
 
    Produces:
    - Babashka scripts (dev launchers with absolute paths)

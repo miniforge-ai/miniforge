@@ -1,8 +1,8 @@
-;; Built-in policy pack for miniforge agent behaviors.
+;; Built-in policy pack for MiniForge Core agent behaviors.
 ;; Loaded from the classpath by ai.miniforge.phase.agent-behavior.
 
 {:pack/id "ai.miniforge/builtin-agent-behaviors"
- :pack/name "Miniforge Built-in Agent Behaviors"
+ :pack/name "MiniForge Core Built-in Agent Behaviors"
  :pack/version "2026.02.12"
  :pack/description "Built-in rules that inject behavioral guidance into agent prompts. These rules use :rule/agent-behavior to influence how agents respond, rather than detecting violations in artifacts."
  :pack/author "miniforge.ai"

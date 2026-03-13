@@ -17,7 +17,7 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.cli.main
-  "Miniforge CLI entry point.
+  "CLI entry point for MiniForge Core and product CLIs.
 
    Provides commands for:
    - run      : Execute workflows from spec files

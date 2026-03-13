@@ -16,10 +16,10 @@
       (System/exit exit))))
 
 (defn kernel []
-  (println "🔨 Building workflow-kernel CLI uberjar...")
-  (println "Command: clojure -T:build bb-uberjar :project workflow-kernel")
+  (println "🔨 Building miniforge-core CLI uberjar...")
+  (println "Command: clojure -T:build bb-uberjar :project miniforge-core")
   (let [{:keys [exit out err]} (p/sh {:out :string :err :string}
-                                     "clojure" "-T:build" "bb-uberjar" ":project" "workflow-kernel")]
+                                     "clojure" "-T:build" "bb-uberjar" ":project" "miniforge-core")]
     (when-not (str/blank? out) (println out))
     (when-not (str/blank? err) (binding [*out* *err*] (println err)))
     (when-not (zero? exit)
