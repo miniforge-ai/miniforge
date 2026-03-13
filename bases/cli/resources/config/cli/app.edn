@@ -1,7 +1,7 @@
 {:cli-app/profile
  {:name "miniforge"
   :display-name "Miniforge"
-  :description "AI-powered software development workflows"
+  :description "Autonomous software factory — built on MiniForge Core"
   :system-check-title "Miniforge System Check"
   :home-dir-name ".miniforge"
   :tui-package "miniforge-tui"
@@ -12,8 +12,8 @@
                   "tui                        # Start terminal UI (requires miniforge-tui)"
                   "workflow list"
                   "workflow run :simple-v2"
-                  "workflow run :financial-etl -i input.edn"
-                  "workflow run :workflow-id --input-json '{\"task\": \"Prepare report\"}'"
+                  "workflow run :simple-v2 -i input.edn"
+                  "workflow run :workflow-id --input-json '{\"task\": \"Build feature\"}'"
                   "chain list"
                   "fleet add myorg/myrepo"
                   "pr review https://github.com/org/repo/pull/123"]}}

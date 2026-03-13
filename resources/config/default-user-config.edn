@@ -1,4 +1,4 @@
-{:description "Default user configuration for Miniforge"
+{:description "Default user configuration for MiniForge Core"
  :config
  {:llm {:backend :claude
         :model "claude-sonnet-4-6"

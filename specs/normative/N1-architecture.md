@@ -10,7 +10,8 @@
 ## 1. Purpose & Scope
 
 This specification defines the **core architectural concepts** and **structural model** of
-miniforge.ai, the autonomous software factory. It establishes:
+**MiniForge Core**, the governed workflow engine that powers Miniforge (the autonomous
+software factory) and Data Foundry (ETL product). It establishes:
 
 - **Core domain nouns** and their precise definitions
 - **Three-layer architecture** that enables autonomous execution

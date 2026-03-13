@@ -1,9 +1,9 @@
 {:cli-app/profile
- {:name "workflow-kernel"
-  :display-name "Workflow Kernel"
-  :description "Local governed workflow engine"
-  :system-check-title "Workflow Kernel System Check"
-  :home-dir-name ".workflow-kernel"
+ {:name "miniforge-core"
+  :display-name "MiniForge Core"
+  :description "Governed workflow engine"
+  :system-check-title "MiniForge Core System Check"
+  :home-dir-name ".miniforge-core"
   :tui-package nil
   :help-examples ["doctor"
                   "run analysis.spec.edn"

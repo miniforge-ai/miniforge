@@ -21,8 +21,8 @@
   (testing "app profile delegates to the resource-backed config loader"
     (with-redefs [resource-config/merged-resource-config
                   (fn [_resource _key _default]
-                    {:name "workflow-kernel"
+                    {:name "miniforge-core"
                      :help-examples '("run demo" "doctor")})]
       (let [profile (app-config/app-profile)]
-        (is (= "workflow-kernel" (:name profile)))
+        (is (= "miniforge-core" (:name profile)))
         (is (= ["run demo" "doctor"] (:help-examples profile)))))))

@@ -1,14 +1,25 @@
-<img src="logo.png" width="30%" alt="miniforge" id="logo">
+<img src="logo.png" width="30%" alt="Miniforge" id="logo">
 
-# miniforge
+# Miniforge
 
-Autonomous SDLC platform — a self-directing software factory built on multi-agent cognition.
+Autonomous software factory — a self-directing SDLC platform built on
+multi-agent cognition, powered by [MiniForge Core](#miniforge-core).
+
+## Products
+
+This repository is a Polylith monorepo that houses three layers:
+
+| Layer | Description |
+|-------|-------------|
+| **MiniForge Core** | Governed workflow engine — DAG executor, phase registry, policy SDK, shared CLI base. Designed to be embedded in any product that needs a governed workflow runtime. |
+| **Miniforge** | Autonomous software factory — SDLC workflows, fleet management, PR lifecycle, multi-agent code generation. |
+| **Data Foundry** | ETL product — data extraction, transformation, and loading workflows built on the same governed runtime. |
 
 ## Installation
 
 ### For End Users
 
-Install miniforge via Homebrew:
+Install Miniforge via Homebrew:
 
 ```bash
 # Add the miniforge tap
@@ -38,7 +49,7 @@ Note: Full workflow and meta-loop features will be available as components are i
 
 ### For Contributors
 
-If you want to contribute to miniforge development, follow the Quick Start guide below.
+If you want to contribute to Miniforge development, follow the Quick Start guide below.
 
 ## Quick Start (Development)
 
@@ -148,7 +159,7 @@ bb test             # Run unit tests
 bb test:all         # Run all tests including integration
 
 # Building
-bb build:cli        # Build miniforge CLI as uberscript
+bb build:cli        # Build Miniforge CLI as uberscript
 bb build:jar <proj> # Build JVM uberjar for a project
 bb build:all        # Build all changed projects
 bb clean            # Clean build artifacts
@@ -164,18 +175,39 @@ bb hooks:uninstall  # Reset git hooks to default
 miniforge/
 ├── bases/          # Entry points (CLI, servers)
 ├── components/     # Reusable building blocks
+│   ├── workflow/               # MiniForge Core — shared workflow runtime
+│   ├── workflow-software-factory/  # Miniforge — SDLC workflows
+│   ├── workflow-financial-etl/     # Data Foundry — ETL workflows (financial is one family)
 │   ├── schema/     # Malli schemas for domain types
 │   └── logging/    # Structured EDN logging
 ├── projects/       # Deployable artifacts
+│   ├── miniforge/      # Miniforge (software factory) project
+│   ├── miniforge-core/ # MiniForge Core (engine-only) project
+│   └── miniforge-tui/  # Terminal UI project
 ├── development/    # Dev-time utilities
 └── docs/
     └── specs/      # Product specifications
 ```
 
+## MiniForge Core
+
+MiniForge Core is the shared governed workflow engine extracted from this
+repository. It provides:
+
+- DAG executor with profile seams
+- Generic workflow runtime, triggers, and publication
+- Generic phase registry
+- Policy-pack SDK surface
+- Shared CLI base with app/config/message seams
+
+The `projects/miniforge-core/` project composes only the kernel components,
+producing a standalone artifact suitable for embedding in other products
+(Data Foundry, Fleet, or any future governed workflow application).
+
 ## Documentation
 
 - [Polylith Documentation](https://polylith.gitbook.io/polylith)
-- [Product Specs](docs/specs/) — Detailed specifications for miniforge features
+- [Product Specs](docs/specs/) — Detailed specifications
 
 ## Architecture
 
@@ -183,7 +215,7 @@ See [docs/specs/architecture.spec](docs/specs/architecture.spec) for the full ar
 
 ## License
 
-miniforge is licensed under the [Apache License 2.0](LICENSE).
+Miniforge is licensed under the [Apache License 2.0](LICENSE).
 
 Title: Miniforge.ai
 Subtitle: An agentic SDLC / fleet-control platform

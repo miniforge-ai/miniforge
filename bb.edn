@@ -144,7 +144,7 @@
    :task (build/cli)}
 
   build:kernel
-  {:doc  "Build workflow-kernel CLI as distributable uberjar"
+  {:doc  "Build MiniForge Core CLI as distributable uberjar"
    :requires ([build])
    :task (build/kernel)}
 

@@ -3,6 +3,14 @@
 This document serves as the entry point for AI agents working in this repository.
 It provides quick access to all rules, conventions, and expert knowledge encoded in the system.
 
+## Product Layers
+
+This repo houses three product layers on one Polylith workspace:
+
+- **MiniForge Core** — governed workflow engine (shared kernel)
+- **Miniforge** — autonomous software factory (SDLC product)
+- **Data Foundry** — ETL product (data extraction, transformation, loading)
+
 ## Quick Reference
 
 | Need to... | Consult |
@@ -117,7 +125,14 @@ miniforge/
 ├── .cursor/rules/     # AI agent rules (this knowledge base)
 ├── bases/             # Polylith bases (entry points)
 ├── components/        # Polylith components (domain logic)
+│   ├── workflow/               # MiniForge Core — shared runtime
+│   ├── workflow-software-factory/  # Miniforge product workflows
+│   ├── workflow-financial-etl/     # Data Foundry product workflows
+│   └── ...
 ├── projects/          # Deployable artifacts
+│   ├── miniforge/      # Miniforge (software factory)
+│   ├── miniforge-core/ # MiniForge Core (engine-only)
+│   └── miniforge-tui/  # Terminal UI
 ├── development/       # REPL & dev tooling
 ├── docs/              # Documentation
 │   └── pull-requests/ # PR documentation
