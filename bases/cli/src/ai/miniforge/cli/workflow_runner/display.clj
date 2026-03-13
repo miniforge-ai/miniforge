@@ -4,6 +4,7 @@
    [clojure.pprint]
    [cheshire.core :as json]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -32,9 +33,12 @@
 (defn print-workflow-header [workflow-id version quiet?]
   (when-not quiet?
     (println (colorize :cyan (str "\n" (apply str (repeat 65 "━")))))
-    (println (colorize :bold (str "  " (app-config/display-name) " Workflow Runner")))
-    (println (str "  Workflow: " (colorize :cyan (name workflow-id))))
-    (println (str "  Version:  " (colorize :cyan version)))
+    (println (colorize :bold (messages/t :workflow-runner/header
+                                         {:display-name (app-config/display-name)})))
+    (println (colorize :cyan (messages/t :workflow-runner/workflow
+                                         {:workflow-id (name workflow-id)})))
+    (println (colorize :cyan (messages/t :workflow-runner/version
+                                         {:version version})))
     (println (colorize :cyan (str (apply str (repeat 65 "━")) "\n")))))
 
 (defn format-event-line
@@ -46,30 +50,44 @@
         agent (or (:agent/id event) (:agent event))
         tool-id (:tool/id event)]
     (case evt
-      :workflow/started (str (colorize :cyan "▶") " Workflow started")
-      :workflow/completed (str (colorize :green "✓") " Workflow completed"
+      :workflow/started (colorize :cyan (messages/t :workflow-runner/start))
+      :workflow/completed (str (colorize :green (messages/t :workflow-runner/completed))
                                (when-let [d (:workflow/duration-ms event)]
                                  (str " (" (format-duration d) ")")))
-      :workflow/failed (str (colorize :red "✗") " Workflow failed"
+      :workflow/failed (str (colorize :red (messages/t :workflow-runner/failed))
                             (when-let [r (:workflow/failure-reason event)]
                               (str ": " r)))
-      :workflow/phase-started (str (colorize :yellow "→") " Phase " phase " started")
-      :workflow/phase-completed (str (colorize :green "✓") " Phase " phase " "
-                                     (name (or (:phase/outcome event) :completed))
+      :workflow/phase-started (colorize :yellow (messages/t :workflow-runner/phase-started
+                                                            {:phase phase}))
+      :workflow/phase-completed (str (colorize :green (messages/t :workflow-runner/phase-completed
+                                                                   {:phase phase
+                                                                    :outcome (name (or (:phase/outcome event)
+                                                                                       :completed))}))
                                      (when-let [d (:phase/duration-ms event)]
                                        (str " (" (format-duration d) ")")))
-      :workflow/milestone-reached (str (colorize :green "★") " Milestone: "
-                                       (:message event))
-      :agent/started (str "  " (colorize :cyan "•") " Agent " agent " started")
-      :agent/completed (str "  " (colorize :green "•") " Agent " agent " completed")
-      :agent/failed (str "  " (colorize :red "•") " Agent " agent " failed")
-      :agent/status (str "  " (colorize :cyan "•") " Agent " agent ": "
-                         (or (:message event) (:status/type event) "working"))
-      :tool/invoked (str "  " (colorize :yellow "•") " Tool " tool-id " invoked")
-      :tool/completed (str "  " (colorize :green "•") " Tool " tool-id " completed")
-      :gate/started (str "  " (colorize :yellow "•") " Gate " gate " running")
-      :gate/passed (str "  " (colorize :green "•") " Gate " gate " passed")
-      :gate/failed (str "  " (colorize :red "•") " Gate " gate " failed")
+      :workflow/milestone-reached (colorize :green (messages/t :workflow-runner/milestone
+                                                                {:message (:message event)}))
+      :agent/started (colorize :cyan (messages/t :workflow-runner/agent-started
+                                                 {:agent agent}))
+      :agent/completed (colorize :green (messages/t :workflow-runner/agent-completed
+                                                    {:agent agent}))
+      :agent/failed (colorize :red (messages/t :workflow-runner/agent-failed
+                                               {:agent agent}))
+      :agent/status (colorize :cyan (messages/t :workflow-runner/agent-status
+                                                {:agent agent
+                                                 :status (or (:message event)
+                                                             (:status/type event)
+                                                             (messages/t :workflow-runner/default-status))}))
+      :tool/invoked (colorize :yellow (messages/t :workflow-runner/tool-invoked
+                                                  {:tool-id tool-id}))
+      :tool/completed (colorize :green (messages/t :workflow-runner/tool-completed
+                                                   {:tool-id tool-id}))
+      :gate/started (colorize :yellow (messages/t :workflow-runner/gate-started
+                                                  {:gate gate}))
+      :gate/passed (colorize :green (messages/t :workflow-runner/gate-passed
+                                                {:gate gate}))
+      :gate/failed (colorize :red (messages/t :workflow-runner/gate-failed
+                                              {:gate gate}))
       nil)))
 
 (defn start-progress!
@@ -94,14 +112,15 @@
   (let [{:execution/keys [status metrics errors]} result
         success? (= status :completed)]
     (println (if success?
-               (colorize :green "✓ Workflow completed")
-               (colorize :red "✗ Workflow failed")))
+               (colorize :green (messages/t :workflow-runner/summary-success))
+               (colorize :red (messages/t :workflow-runner/summary-failure))))
     (when metrics
-      (println (str "Tokens: " (:tokens metrics 0)
-                    " | Cost: $" (format "%.4f" (:cost-usd metrics 0.0))
-                    " | Duration: " (format-duration (:duration-ms metrics 0)))))
+      (println (messages/t :workflow-runner/metrics
+                           {:tokens (:tokens metrics 0)
+                            :cost (format "%.4f" (:cost-usd metrics 0.0))
+                            :duration (format-duration (:duration-ms metrics 0))})))
     (when (seq errors)
-      (println (colorize :red "\nErrors:"))
+      (println (colorize :red (str "\n" (messages/t :workflow-runner/errors))))
       (doseq [err errors]
         (println (str "  • " err))))))
 
@@ -109,7 +128,7 @@
   (println (colorize :cyan (str "\n" (apply str (repeat 65 "━")))))
   (print-workflow-summary result)
   (println (colorize :cyan (str (apply str (repeat 65 "━")) "\n")))
-  (println "\nFull result:")
+  (println (str "\n" (messages/t :workflow-runner/full-result)))
   (clojure.pprint/pprint result))
 
 (defn print-result [result {:keys [output quiet]}]
@@ -124,32 +143,32 @@
 (defn print-error-header
   "Print error header with message, details, and cause."
   [msg data cause]
-  (println (colorize :red "\n✗ Failed to load workflow interface"))
-  (println (str "  Error: " msg))
+  (println (colorize :red (str "\n" (messages/t :workflow-runner/load-failed))))
+  (println (messages/t :workflow-runner/error {:message msg}))
   (when data
-    (println (str "  Details: " (pr-str data))))
+    (println (messages/t :workflow-runner/details {:details (pr-str data)})))
   (when cause
-    (println (str "  Cause: " (ex-message cause))))
-  (println (colorize :yellow "\nPossible causes:"))
-  (println "  - Missing dependency in deps.edn: ai.miniforge/workflow")
-  (println "  - Namespace compilation error in workflow component")
-  (println "  - Circular dependency issue"))
+    (println (messages/t :workflow-runner/cause {:cause (ex-message cause)})))
+  (println (colorize :yellow (str "\n" (messages/t :workflow-runner/possible-causes))))
+  (println (messages/t :workflow-runner/cause-missing-dep))
+  (println (messages/t :workflow-runner/cause-compile))
+  (println (messages/t :workflow-runner/cause-cycle)))
 
 (defn print-namespace-resolution-help
   "Print help for namespace resolution errors."
   []
-  (println (colorize :cyan "\nIf the namespace doesn't exist:"))
-  (println "  - Check that ai.miniforge/workflow is in your deps.edn")
-  (println "  - Verify the component was built: clojure -M:poly test"))
+  (println (colorize :cyan (str "\n" (messages/t :workflow-runner/namespace-help-header))))
+  (println (messages/t :workflow-runner/namespace-help-dep))
+  (println (messages/t :workflow-runner/namespace-help-build)))
 
 (defn print-babashka-fallback-help
   "Print help for Babashka compatibility issues."
   []
-  (println (colorize :cyan "\nIf running with Babashka (bb):"))
-  (println "  - Try the JVM version: clojure -M:dev -m ai.miniforge.cli.main workflow run <id>"))
+  (println (colorize :cyan (str "\n" (messages/t :workflow-runner/bb-help-header))))
+  (println (messages/t :workflow-runner/bb-help-command)))
 
 (defn print-general-debugging-help
   "Print general debugging tips."
   []
-  (println (colorize :cyan "\nFor debugging:"))
-  (println "  - Run with verbose output: bb -e '(requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)'"))
+  (println (colorize :cyan (str "\n" (messages/t :workflow-runner/debug-header))))
+  (println (messages/t :workflow-runner/debug-command)))

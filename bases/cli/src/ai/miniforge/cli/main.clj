@@ -37,6 +37,7 @@
    [babashka.process :as process]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]
    [ai.miniforge.cli.config :as config]
    [ai.miniforge.cli.observability :as observability]
@@ -90,11 +91,7 @@
   [_m]
   (println "\n" (display/style (app-config/system-check-title) :foreground :cyan :bold true) "\n")
 
-  (let [checks [["bb" "Babashka" "Required for CLI"]
-                ["gum" "Charm Gum" "Required for TUI"]
-                ["git" "Git" "Required for version control"]
-                ["gh" "GitHub CLI" "Required for PR operations"]
-                ["claude" "Claude CLI" "Required for LLM backend"]]]
+  (let [checks (messages/t :doctor/checks)]
 
     (doseq [[cmd name desc] checks]
       (let [available? (check-command cmd)
@@ -108,10 +105,12 @@
 
     ;; Check config
     (if (fs/exists? config/default-user-config-path)
-      (println (display/style "✓" :foreground :green) "Config file exists at" config/default-user-config-path)
+      (println (display/style "✓" :foreground :green)
+               (messages/t :doctor/config-exists
+                           {:config-path config/default-user-config-path}))
       (println (display/style "!" :foreground :yellow)
-               "No config file. Run"
-               (str "'" (app-config/command-string "config init") "'")))
+               (messages/t :doctor/no-config
+                           {:command (app-config/command-string "config init")})))
 
     (println)))
 
@@ -120,11 +119,11 @@
   (let [{:keys [workflow-id]} (get-opts m)]
     (if workflow-id
       (do
-        (display/print-info (str "Status for workflow: " workflow-id))
-        (println "TODO: Query workflow component"))
+        (display/print-info (messages/t :status/workflow {:workflow-id workflow-id}))
+        (println (messages/t :status/workflow-todo)))
       (do
-        (display/print-info "All workflows:")
-        (println "TODO: List active workflows")))))
+        (display/print-info (messages/t :status/all-workflows))
+        (println (messages/t :status/all-workflows-todo))))))
 
 ;; Config commands — one-liner delegates
 (defn config-init-cmd [m] (config/cmd-init (get-opts m)))
@@ -142,7 +141,8 @@
   [m]
   (let [{:keys [workflow-id version input input-json output quiet dashboard-url]} (get-opts m)]
     (if-not workflow-id
-      (display/print-error (str "Usage: " (app-config/command-string "workflow run <workflow-id> [options]")))
+      (display/print-error (messages/t :workflow-run/usage
+                                       {:command (app-config/command-string "workflow run <workflow-id> [options]")}))
       (try
         (workflow-runner/run-workflow!
          (keyword (str/replace workflow-id #"^:" ""))
@@ -153,7 +153,8 @@
           :quiet (boolean quiet)
           :dashboard-url dashboard-url})
         (catch Exception e
-          (display/print-error (str "Workflow execution failed: " (ex-message e))))))))
+          (display/print-error (messages/t :workflow-run/failed
+                                           {:error (ex-message e)})))))))
 
 (defn workflow-list-cmd [_m] (workflow-runner/list-workflows!))
 
@@ -162,7 +163,8 @@
   [m]
   (let [{:keys [chain-id version spec input-json quiet]} (get-opts m)]
     (if-not chain-id
-      (display/print-error (str "Usage: " (app-config/command-string "chain run <chain-id> [options]")))
+      (display/print-error (messages/t :chain-run/usage
+                                       {:command (app-config/command-string "chain run <chain-id> [options]")}))
       (try
         (workflow-runner/run-chain!
          (keyword (str/replace chain-id #"^:" ""))
@@ -171,7 +173,8 @@
           :input-json input-json
           :quiet (boolean quiet)})
         (catch Exception e
-          (display/print-error (str "Chain execution failed: " (ex-message e))))))))
+          (display/print-error (messages/t :chain-run/failed
+                                           {:error (ex-message e)})))))))
 
 (defn chain-list-cmd [_m] (workflow-runner/list-chains!))
 
@@ -203,7 +206,7 @@
   [m]
   (let [{:keys [artifact-dir]} (get-opts m)]
     (when-not artifact-dir
-      (display/print-error "--artifact-dir is required")
+      (display/print-error (messages/t :mcp/required-artifact-dir))
       (System/exit 1))
     (let [run-server (requiring-resolve 'ai.miniforge.mcp-artifact-server.interface/start-server)]
       (run-server artifact-dir))))
@@ -218,83 +221,27 @@
 
 (defn help-cmd
   [_m]
-  (println (str "
-" (app-config/binary-name) " - " (app-config/description) "
-
-Usage: " (app-config/binary-name) " <command> [options]
-
-Commands:
-  run <file>          Execute a workflow (spec, DAG, or plan file)
-    --interactive     Interactive mode (chat-based)
-    --worktree <path> Custom worktree path
-    --resume <id>     Resume a workflow from its last checkpoint
-
-  status [id]         Show workflow status
-
-  dashboard           Start workflow monitoring dashboard (default port: 7878)
-    --port N          Port number
-    --open            Open browser automatically
-
-  workflow <subcommand>  Workflow execution
-    run <id>          Execute a workflow by ID
-      -v, --version   Workflow version (default: latest)
-      -i, --input     Input file (EDN or JSON)
-      --input-json    Inline JSON input
-      -o, --output    Output format: pretty, json, edn (default: pretty)
-      -q, --quiet     Suppress progress output
-    list              List available workflows
-
-  chain <subcommand>  Chain execution (multi-workflow)
-    run <id>          Execute a chain by ID
-      -v, --version   Chain version (default: latest)
-      -s, --spec      Input spec file (EDN)
-      --input-json    Inline JSON input
-      -q, --quiet     Suppress progress output
-    list              List available chains
-
-  fleet <subcommand>  Multi-repo management
-    start             Start fleet daemon
-    stop              Stop fleet daemon
-    status            Show fleet status
-    dashboard         Open TUI dashboard (deprecated - use tui or web)
-    tui               Terminal UI (5 N5 views, requires standalone TUI package)
-    web [--port N]    Start web dashboard (default port: 8787)
-    add <repo>        Add repo to fleet
-    remove <repo>     Remove repo from fleet
-
-  pr <subcommand>     PR operations
-    list              List PRs
-    review <url>      Review a PR
-    respond <url>     Respond to comments
-    merge <url>       Merge a PR
-
-  config <subcommand> Configuration management
-    init              Initialize config file
-    list              List all configuration values
-    get <key>         Get specific config value
-    set <key> <val>   Set config value
-    edit              Open config in $EDITOR
-    reset             Reset config to defaults
-    backends          List available LLM backends with status
-    backend <name>    Set LLM backend (shorthand)
-    validate          Validate config file
-
-  doctor              Check system health
-  version             Show version info
-  help                Show this help
-
-Note:
-  " (app-config/binary-name) " (this CLI) uses Babashka for fast startup."
-                (when-let [tui-package (app-config/tui-package)]
-                  (str "
-  For terminal UI, install: brew install " tui-package " (includes jlink-bundled JVM)"))
-                "
-
-Examples:
-"
-                (str/join "\n" (map #(str "  " (app-config/command-string %))
+  (let [binary-name (app-config/binary-name)
+        description (app-config/description)
+        command-lines (messages/t :help/command-lines)
+        note (messages/t :help/note {:binary binary-name})
+        tui-install (when-let [tui-package (app-config/tui-package)]
+                      (messages/t :help/tui-install {:tui-package tui-package}))]
+    (println (str "\n"
+                  (messages/t :help/title {:binary binary-name
+                                           :description description})
+                  "\n\n"
+                  (messages/t :help/usage {:binary binary-name})
+                  "\n\n"
+                  (str/join "\n" command-lines)
+                  "\n\nNote:\n  "
+                  note
+                  (when tui-install
+                    (str "\n  " tui-install))
+                  "\n\nExamples:\n"
+                  (str/join "\n" (map #(str "  " (app-config/command-string %))
                                       (app-config/help-examples)))
-                "\n")))
+                  "\n"))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; CLI dispatch
@@ -424,26 +371,29 @@ Examples:
           (let [wrong-input (:wrong-input data)
                 dispatch (:dispatch data)
                 all-commands (:all-commands data)]
-            (display/print-error (str "Unknown command: " (str/join " " (conj (vec dispatch) wrong-input))))
+            (display/print-error (messages/t :main/unknown-command
+                                             {:command (str/join " " (conj (vec dispatch)
+                                                                           wrong-input))}))
             (println)
 
             ;; Special case: suggest alternatives for moved commands
             (when (and (= (first dispatch) "fleet")
                        (contains? #{"web" "dashboard" "tui"} wrong-input))
-              (println "Did you mean:")
+              (println (messages/t :main/did-you-mean))
               (println (str "  " (app-config/command-string (if (= wrong-input "dashboard") "web" wrong-input))))
               (println))
 
             (when (seq all-commands)
-              (println (str "Available " (if (seq dispatch)
-                                           (str "'" (str/join " " dispatch) "' ")
-                                           "")
-                           "commands:"))
+              (println (messages/t :main/available-commands
+                                   {:scope (if (seq dispatch)
+                                             (str "'" (str/join " " dispatch) "' ")
+                                             "")}))
               (doseq [cmd all-commands]
                 (println (str "  " (app-config/command-string (str/join " " (conj (vec dispatch) cmd))))))
               (println))
 
-            (println "Run" (str "'" (app-config/command-string "help") "'") "for more information.")
+            (println (messages/t :main/run-help
+                                 {:command (app-config/command-string "help")}))
             (System/exit 1))
           ;; Re-throw if not a no-match error
           (throw e))))))
