@@ -1,7 +1,7 @@
 (ns ai.miniforge.cli.workflow-recommendation-config
   "Resource-driven workflow recommendation prompt configuration."
   (:require
-   [clojure.edn :as edn]))
+   [ai.miniforge.cli.resource-config :as resource-config]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Resource loading
@@ -10,22 +10,16 @@
   "Classpath resource path for workflow recommendation prompt config."
   "config/workflow/recommendation-prompt.edn")
 
-(def default-prompt-config
-  {:analysis-dimensions
-   ["Task complexity (simple, medium, complex)"
-    "Risk level (low, medium, high)"
-    "Review requirements (minimal, standard, comprehensive)"
-    "Time constraints (quick, normal, extensive)"
-    "Work category and expected outputs"]
-   :summary-labels
-   {:has-review "Includes review checkpoints"
-    :has-testing "Includes verification/testing"}})
+(def default-recommendation-config-resource
+  "Classpath resource path for base workflow recommendation prompt config."
+  "config/workflow/recommendation-prompt-default.edn")
 
-(defn- read-recommendation-config
-  "Read a single recommendation prompt config resource."
-  [resource]
-  (let [config (-> resource slurp edn/read-string)]
-    (or (:workflow-recommendation/prompt config) {})))
+(defn default-prompt-config
+  "Load the base workflow recommendation prompt config from resources."
+  []
+  (resource-config/merged-resource-config default-recommendation-config-resource
+                                          :workflow-recommendation/prompt
+                                          {}))
 
 (defn- merge-prompt-config
   "Merge prompt config maps, preserving nested summary labels."
@@ -37,7 +31,7 @@
 (defn recommendation-prompt-config
   "Resolve the active workflow recommendation prompt config from the classpath."
   []
-  (->> (enumeration-seq (.getResources (clojure.lang.RT/baseLoader)
-                                       recommendation-config-resource))
-       (map read-recommendation-config)
-       (reduce merge-prompt-config default-prompt-config)))
+  (merge-prompt-config (default-prompt-config)
+                       (resource-config/merged-resource-config recommendation-config-resource
+                                                               :workflow-recommendation/prompt
+                                                               {})))
