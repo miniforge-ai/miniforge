@@ -2,8 +2,7 @@
   "Public API for structured EDN logging.
    Provides logger creation, context management, and level-specific log functions."
   (:require
-   [ai.miniforge.logging.core :as core]
-   [ai.miniforge.logging.events.etl :as etl-events]))
+   [ai.miniforge.logging.core :as core]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Logger creation and configuration
@@ -130,45 +129,6 @@
        (do-expensive-work))"
   [logger level category event & body]
   `(timed ~logger ~level ~category ~event (fn [] ~@body)))
-
-;------------------------------------------------------------------------------ Layer 3
-;; ETL lifecycle events
-
-(defn emit-etl-completed
-  "Emit an etl/completed event per N3 §3.4.
-
-   Arguments:
-   - logger - Logger instance
-   - workflow-id - UUID of the ETL workflow
-   - duration-ms - Total ETL execution time in milliseconds
-   - summary - Summary statistics map with :packs-generated, :packs-promoted,
-               :high-risk-findings, :sources-processed
-
-   Example:
-     (emit-etl-completed logger workflow-id 1500
-       {:packs-generated 5
-        :packs-promoted 3
-        :high-risk-findings 2
-        :sources-processed 10})"
-  [logger workflow-id duration-ms summary]
-  (etl-events/emit-etl-completed logger workflow-id duration-ms summary))
-
-(defn emit-etl-failed
-  "Emit an etl/failed event per N3 §3.4.
-
-   Arguments:
-   - logger - Logger instance
-   - workflow-id - UUID of the ETL workflow
-   - failure-stage - Failure stage keyword (:classification | :scanning | :extraction | :validation)
-   - failure-reason - Human-readable failure description
-   - error-details - Optional structured error details map
-
-   Example:
-     (emit-etl-failed logger workflow-id :scanning
-       \"Prompt injection detected\"
-       {:file \"config.md\" :severity :critical})"
-  [logger workflow-id failure-stage failure-reason & [error-details]]
-  (etl-events/emit-etl-failed logger workflow-id failure-stage failure-reason error-details))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
