@@ -845,6 +845,68 @@ Rules:
 
 This pack is RECOMMENDED for production environments.
 
+#### 5.1.11 Data Foundry Quality Packs
+
+**Purpose:** Register Data Foundry data quality policy packs as standard packs in the Core registry. These packs extend the Core N4 gate model with data-specific quality validation. See Data Foundry N4 for full specifications.
+
+**financial-statement-validation** (severity: critical)
+**ID:** `financial-statement-validation`
+
+Rules:
+
+- `accounting-equation-balance` (severity: critical)
+  - FAIL if Assets ≠ Liabilities + Equity beyond 0.01% materiality tolerance per GAAP
+- `gaap-receivables-non-null` (severity: critical)
+  - FAIL if accounts receivable contains null values in financial statement datasets
+- `inventory-non-negative` (severity: high)
+  - FAIL if inventory quantities are negative, indicating data corruption
+- `material-account-non-null` (severity: critical)
+  - FAIL if total-assets, total-liabilities, or total-equity are null
+
+This pack is REQUIRED for all Data Foundry pipelines producing financial statement datasets.
+
+**macro-series-integrity** (severity: medium)
+**ID:** `macro-series-integrity`
+
+Rules:
+
+- `distribution-drift-detection` (severity: medium)
+  - WARN if z-score exceeds 2.5σ against trailing baseline for macro time series
+- `row-count-stability` (severity: medium)
+  - WARN if row count deviates > ±5% from rolling average
+- `temporal-continuity` (severity: high)
+  - FAIL if time series contains missing periods or non-monotonic timestamps
+
+This pack is RECOMMENDED for Data Foundry pipelines processing macroeconomic data.
+
+**valuation-consistency** (severity: critical)
+**ID:** `valuation-consistency`
+
+Rules:
+
+- `cross-table-sum-check` (severity: critical)
+  - FAIL if derived valuation totals diverge from component sums
+- `derivation-chain-validation` (severity: high)
+  - FAIL if computed values cannot be reproduced from declared inputs
+- `timestamp-ordering` (severity: high)
+  - FAIL if valuation timestamps are non-monotonic or predate input timestamps
+
+This pack is REQUIRED for Data Foundry pipelines producing valuation datasets.
+
+**time-series-completeness** (severity: critical)
+**ID:** `time-series-completeness`
+
+Rules:
+
+- `no-missing-periods` (severity: critical)
+  - FAIL if expected time periods are absent from the dataset
+- `partition-key-completeness` (severity: high)
+  - FAIL if partition keys have gaps
+- `weekend-holiday-gap-validation` (severity: medium)
+  - WARN if gaps exist on non-holiday business days (financial calendars)
+
+This pack is REQUIRED for Data Foundry pipelines publishing time series datasets.
+
 ### 5.2 Pack Discovery & Installation
 
 Implementations SHOULD support:

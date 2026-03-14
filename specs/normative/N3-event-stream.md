@@ -1432,6 +1432,161 @@ Emitted when index canary queries detect a recall regression.
  :message "Index canary failed: repo={repo/id} recall={actual-recall} < {expected-recall}"}
 ```
 
+### 3.17 Data Foundry Events
+
+For Data Foundry data pipeline execution (see Data Foundry N1–N4), implementations MUST
+emit the following event types. All events use the `:data-foundry/` namespace prefix.
+
+#### data-foundry/pipeline-started
+
+```clojure
+{:event/type :data-foundry/pipeline-started
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :pipeline/id uuid
+ :pipeline/name string
+ :pipeline/version string
+ :pipeline-run/id uuid
+ :pipeline-run/mode keyword            ; :full-refresh | :incremental | :backfill | :reprocess
+
+ :message "Data pipeline started: {pipeline.name} ({mode})"}
+```
+
+#### data-foundry/stage-completed
+
+```clojure
+{:event/type :data-foundry/stage-completed
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :pipeline-run/id uuid
+ :stage/id uuid
+ :stage/family keyword                  ; :ingest | :extract | :normalize | :transform | :aggregate | :validate | :enrich | :publish
+ :stage/records-in long
+ :stage/records-out long
+ :stage/duration-ms long
+
+ :message "Pipeline stage completed: {stage.family}"}
+```
+
+#### data-foundry/pipeline-completed
+
+```clojure
+{:event/type :data-foundry/pipeline-completed
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :pipeline-run/id uuid
+ :pipeline/id uuid
+ :pipeline-run/duration-ms long
+ :pipeline-run/records-published long
+ :pipeline-run/output-dataset-versions [uuid ...]
+
+ :message "Data pipeline completed: {pipeline.name}"}
+```
+
+#### data-foundry/pipeline-failed
+
+```clojure
+{:event/type :data-foundry/pipeline-failed
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :pipeline-run/id uuid
+ :pipeline/id uuid
+ :pipeline-run/failed-stage-id uuid
+ :pipeline-run/failure-reason string
+ :failure/class keyword
+
+ :message "Data pipeline failed: {pipeline.name} at stage {stage.id} — {failure-reason}"}
+```
+
+#### data-foundry/quality-evaluated
+
+```clojure
+{:event/type :data-foundry/quality-evaluated
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :pipeline-run/id uuid
+ :quality-pack/id string
+ :quality-pack/version string
+ :quality-eval/verdict keyword          ; :pass | :fail | :warning
+ :quality-eval/rule-count long
+ :quality-eval/violation-count long
+ :quality-eval/blocking? boolean
+ :dataset/id uuid
+
+ :message "Quality pack evaluated: {pack.id} — {verdict}"}
+```
+
+#### data-foundry/lineage-edge-created
+
+```clojure
+{:event/type :data-foundry/lineage-edge-created
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :lineage-edge/source-dataset-id uuid
+ :lineage-edge/target-dataset-id uuid
+ :lineage-edge/pipeline-run-id uuid
+ :lineage-edge/stage-id uuid
+ :lineage-edge/transformation-type keyword  ; OPTIONAL
+
+ :message "Lineage edge created: {source} → {target}"}
+```
+
+#### data-foundry/freshness-sla-breach
+
+```clojure
+{:event/type :data-foundry/freshness-sla-breach
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :dataset/id uuid
+ :dataset/name string
+ :sla/max-age-hours long
+ :sla/actual-age-hours double
+ :sla/last-refresh inst
+
+ :message "Freshness SLA breach: {dataset.name} — {actual-age-hours}h (limit: {max-age-hours}h)"}
+```
+
+#### data-foundry/schema-drift-detected
+
+```clojure
+{:event/type :data-foundry/schema-drift-detected
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number long
+
+ :dataset/id uuid
+ :schema/expected-version string
+ :schema/observed-hash string
+ :schema/changes [{:field string :change-type keyword}]  ; :field-added | :field-removed | :type-changed
+
+ :message "Schema drift detected: {dataset.id} — {change-count} field changes"}
+```
+
+All Data Foundry events MUST link to pipeline-run/id for correlation. Events that
+produce evidence bundles MUST include an `:evidence-bundle-id` field per N6.
+
 ---
 
 ## 4. Event Emission Requirements

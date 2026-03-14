@@ -300,6 +300,17 @@ An **artifact** is a work product created during workflow execution.
 
 See N6 for detailed artifact provenance specification.
 
+#### 2.9.1 Data Foundry Extension Nouns
+
+The following nouns are defined by the Data Foundry extension (see Data Foundry N1–N4) and recognised as first-class concepts within the Core domain model:
+
+- **Dataset** — A versioned, structured collection of data with a formal schema, storage location, partitioning strategy, and complete provenance chain. Datasets are artifacts (`:artifact/type :dataset`) and MUST satisfy N6 §3.1 requirements. See Data Foundry N1.
+- **Schema** — A formal, versioned definition of dataset structure including field names, types, constraints, and nullability rules. Schemas are versioned independently and MAY be shared across dataset versions. See Data Foundry N1.
+- **Connector** — A governed tool (N10) that bridges Data Foundry and external systems for data ingestion or publication. Connectors declare capabilities, authentication requirements, and configuration schemas. See Data Foundry N2.
+- **Pipeline** — A declarative DAG of stages that ingests, transforms, and publishes data. Pipelines are specialised workflows (N2) with data-specific execution semantics. See Data Foundry N3.
+- **QualityRule** — A named, versioned data validation constraint that extends Core policy rules (N4) with data-specific check types and thresholds. See Data Foundry N4.
+- **LineageGraph** — A directed acyclic graph tracking dataset dependencies and transformations, enabling impact analysis and reprocessing decisions. See Data Foundry N4.
+
 ### 2.10 Knowledge Base
 
 A **knowledge base** is a structured repository of learnings from workflow executions.

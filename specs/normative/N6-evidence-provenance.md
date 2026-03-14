@@ -561,6 +561,17 @@ Implementations MUST support:
 - `:metrics-snapshot` - Query + parameters + time window + result digest
 - `:report-artifact` - Rendered report referencing input artifacts and templates by digest
 
+**Data Foundry artifact types (Data Foundry N1–N4):**
+
+- `:dataset` - Versioned tabular dataset with schema, partitioning, and lineage (see Data Foundry N1)
+- `:time-series` - Time-indexed dataset with temporal properties and continuity constraints
+- `:document-collection` - Semi-structured text document collection (e.g., regulatory filings)
+- `:feature-set` - ML feature vectors with labels and training metadata
+- `:report` - Aggregated, human-readable analytical output (e.g., risk dashboard, quarterly summary)
+- `:connector-state` - Persisted connector cursor and extraction state (see Data Foundry N2)
+- `:quality-evaluation` - Immutable record of a quality rule execution against a dataset snapshot (see Data Foundry N4)
+- `:lineage-graph` - Directed acyclic graph of dataset dependencies and transformations (see Data Foundry N4)
+
 Artifacts of type `:feature-pack`, `:policy-pack`, `:agent-profile-pack`, and `:workflow-pack` MUST include:
 
 - `:artifact/metadata {:trust-level ... :authority ...}`
