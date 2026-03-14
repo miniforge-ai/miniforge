@@ -153,10 +153,12 @@
         result (get-in ctx [:phase :result])
         agent-status (:status result)
         rate-limited? (and (= :error agent-status) (rate-limit-in-result? result))
+        gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
         iterations (get-in ctx [:phase :iterations] 1)
         max-iterations (get-in ctx [:phase :budget :iterations]
                                (get-in default-config [:budget :iterations]))
         phase-status (cond
+                       gate-failed? :failed
                        (= :already-implemented agent-status) :already-implemented
                        ;; Rate limit: fail immediately, don't burn retry budget
                        rate-limited? :failed
