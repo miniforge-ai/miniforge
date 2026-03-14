@@ -5,6 +5,7 @@
    [clojure.edn :as edn]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.spec-parser :as spec-parser]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]
    [ai.miniforge.cli.main.commands.plan-executor :as plan-executor]
@@ -44,18 +45,18 @@
       ;; Interactive mode
       interactive
       (do
-        (display/print-info "Interactive mode not yet implemented")
-        (println "Coming soon: conversational workflow execution"))
+        (display/print-info (messages/t :run/interactive-not-implemented))
+        (println (messages/t :run/interactive-coming-soon)))
 
       ;; No file specified
       (not spec)
       (display/print-error
-       (str "Usage: "
-            (app-config/command-string "run <spec-file> [--interactive] [--resume <workflow-id>]")))
+       (messages/t :run/usage
+                   {:command (app-config/command-string "run <spec-file> [--interactive] [--resume <workflow-id>]")}))
 
       ;; File not found
       (not (fs/exists? spec))
-      (display/print-error (str "File not found: " spec))
+      (display/print-error (messages/t :run/file-not-found {:path spec}))
 
       ;; Dispatch based on file content
       :else
@@ -66,16 +67,16 @@
             ;; Spec file — existing workflow path
             :spec
             (do
-              (display/print-info (str "Parsing workflow spec: " spec))
+              (display/print-info (messages/t :run/parsing-spec {:path spec}))
               (let [parsed-spec (spec-parser/parse-spec-file spec)
                     validation (spec-parser/validate-spec parsed-spec)]
                 (if-not (:valid? validation)
                   (do
-                    (display/print-error "Invalid workflow spec:")
+                    (display/print-error (messages/t :run/invalid-spec))
                     (doseq [error (:errors validation)]
-                      (println (str "  - " error))))
+                      (println (messages/t :run/validation-error {:error error}))))
                   (do
-                    (display/print-info (str "Running workflow: " (:spec/title parsed-spec)))
+                    (display/print-info (messages/t :run/running-workflow {:title (:spec/title parsed-spec)}))
                     (workflow-runner/run-workflow-from-spec!
                      parsed-spec
                      (cond-> {:output :pretty :quiet false}
@@ -84,13 +85,12 @@
             ;; DAG or Plan file — execute directly
             (:dag :plan)
             (do
-              (display/print-info (str "Detected " (name input-type) " format: " spec))
+              (display/print-info (messages/t :run/detected-format {:format (name input-type) :path spec}))
               (plan-executor/execute-plan parsed opts))
 
             ;; Unrecognized format
             (display/print-error
-             (str "Unrecognized file format in: " spec
-                  "\nExpected :spec/title (spec), :dag-id (DAG), or :plan/id (plan)"))))
+             (messages/t :run/unrecognized-format {:path spec}))))
         (catch Exception e
           (let [error-classification (try
                                       (let [classifier (requiring-resolve 'ai.miniforge.agent-runtime.interface/classify-error)]
@@ -100,6 +100,6 @@
             (if error-classification
               (display/print-classified-error error-classification)
               (do
-                (display/print-error (str "Failed to run workflow: " (ex-message e)))
+                (display/print-error (messages/t :run/failed {:error (ex-message e)}))
                 (when-let [data (ex-data e)]
-                  (println (str "  Details: " (pr-str data))))))))))))
+                  (println (messages/t :run/error-details {:details (pr-str data)})))))))))))

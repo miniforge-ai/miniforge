@@ -7,4 +7,10 @@
    "Work category and expected outputs"]
   :summary-labels
   {:has-review "Includes review checkpoints"
-   :has-testing "Includes verification/testing"}}}
+   :has-testing "Includes verification/testing"}
+  :system-intro "You are a workflow recommendation system for Miniforge, a governed autonomous workflow platform."
+  :task-instruction "Your task is to analyze a task specification and recommend the most appropriate workflow."
+  :available-workflows-header "Available workflows:"
+  :task-spec-header "Task specification:"
+  :analysis-intro "Analyze the task based on:"
+  :json-instruction "Provide your recommendation as a JSON object with this exact structure:\n{\n  \"workflow\": \"workflow-id\",\n  \"confidence\": 0.85,\n  \"reasoning\": \"Brief explanation of why this workflow is recommended\",\n  \"characteristics\": [\"multi-phase\", \"has-review\", \"comprehensive\"]\n}\n\nRespond ONLY with the JSON object, no additional text."}}

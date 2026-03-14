@@ -5,6 +5,7 @@
    [clojure.java.io :as io]
    [cheshire.core :as json]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-recommender :as recommender]
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.cli.workflow-runner.context :as context]
@@ -52,10 +53,10 @@
 (defn load-and-validate-workflow [load-workflow workflow-id version]
   (let [{:keys [workflow validation]} (load-workflow workflow-id version {})]
     (when-not workflow
-      (throw (ex-info (str "Workflow '" workflow-id "' not found. Use 'workflow list' to see available workflows.")
+      (throw (ex-info (messages/t :workflow-runner/not-found {:workflow-id workflow-id})
                       {:workflow-id workflow-id :version version})))
     (when (and validation (not (:valid? validation)))
-      (throw (ex-info (str "Workflow validation failed: " (:errors validation))
+      (throw (ex-info (messages/t :workflow-runner/validation-failed {:errors (:errors validation)})
                       {:workflow-id workflow-id :validation validation})))
     workflow))
 
@@ -65,7 +66,7 @@
       (create-transit-store))
     (catch Exception _e
       (when-not quiet
-        (println (display/colorize :yellow "Warning: Could not create artifact store, running without persistence")))
+        (println (display/colorize :yellow (messages/t :workflow-runner/artifact-store-warning))))
       nil)))
 
 (defn close-artifact-store [artifact-store]
@@ -81,15 +82,15 @@
   (if-let [explicit-type (:spec/workflow-type spec)]
     (do
       (when-not quiet
-        (println (display/colorize :cyan (str "ℹ️  Workflow: " (name explicit-type) " [user-specified]"))))
+        (println (display/colorize :cyan (messages/t :workflow-runner/user-specified {:workflow-type (name explicit-type)}))))
       explicit-type)
     (let [recommendation (recommender/recommend-workflow-with-fallback spec llm-client)]
       (when-not quiet
-        (println (display/colorize :cyan (str "\nℹ️  Workflow Auto-Selected: " (name (:workflow recommendation)))))
-        (println (str "   Reason: " (:reasoning recommendation)))
+        (println (display/colorize :cyan (messages/t :workflow-runner/auto-selected {:workflow-type (name (:workflow recommendation))})))
+        (println (messages/t :workflow-runner/auto-selected-reason {:reasoning (:reasoning recommendation)}))
         (when (= :llm (:source recommendation))
-          (println (str "   Confidence: " (format "%.0f%%" (* 100 (:confidence recommendation 0.0))))))
-        (println (display/colorize :yellow "   Override with :spec/workflow-type in your spec\n")))
+          (println (messages/t :workflow-runner/auto-selected-confidence {:confidence (format "%.0f%%" (* 100 (:confidence recommendation 0.0)))})))
+        (println (display/colorize :yellow (messages/t :workflow-runner/auto-selected-override))))
       (:workflow recommendation))))
 
 (defn load-or-create-workflow [load-workflow workflow-type workflow-version]
@@ -146,7 +147,7 @@
           (try
             (es/publish! event-stream
                          (es/workflow-failed event-stream workflow-id
-                                             {:message (str "Workflow stopped: " (ex-message e))
+                                             {:message (messages/t :workflow-runner/stopped {:error (ex-message e)})
                                               :errors [{:type :interrupted :message (ex-message e)}]}))
             (reset! completed? true)
             (catch Exception _ nil)))
@@ -157,13 +158,13 @@
           (try
             (es/publish! event-stream
                          (es/workflow-failed event-stream workflow-id
-                                             {:message "Workflow cancelled"
-                                              :errors [{:type :cancelled :message "Process terminated"}]}))
+                                             {:message (messages/t :workflow-runner/cancelled)
+                                              :errors [{:type :cancelled :message (messages/t :workflow-runner/process-terminated)}]}))
             (catch Exception _ nil)))
         (when sandbox-cleanup
           (sandbox-cleanup)
           (when-not (:quiet opts)
-            (println (display/colorize :yellow "🐳 Sandbox container released"))))))))
+            (println (display/colorize :yellow (messages/t :workflow-runner/sandbox-released)))))))))
 
 (defn run-workflow! [workflow-id {:keys [version output quiet event-stream dashboard-url]
                                     :or {version "latest" output :pretty quiet false}
@@ -197,7 +198,7 @@
             (progress-cleanup)))))
     (catch Exception e
       (when-not quiet
-        (println (display/colorize :red (str "\n✗ Error: " (ex-message e)))))
+        (println (display/colorize :red (messages/t :workflow-runner/run-error {:error (ex-message e)}))))
       (when (= output :json)
         (println (json/generate-string
                   {:status "error"
@@ -208,14 +209,14 @@
 
 (defn format-workflow-listing [workflows]
   (if (empty? workflows)
-    (println "No workflows found.")
+    (println (messages/t :workflow-runner/no-workflows))
     (do
-      (println (display/colorize :cyan "\nAvailable Workflows:"))
+      (println (display/colorize :cyan (messages/t :workflow-runner/available-workflows)))
       (println (display/colorize :cyan (apply str (repeat 60 "─"))))
       (doseq [{:workflow/keys [id version description type]} workflows]
         (println (str (display/colorize :bold (str "  " (name id)))
                       " (v" version ")"
-                      "  " (display/colorize :yellow (str ":workflow/type " (or type :unknown)))
+                      "  " (display/colorize :yellow (messages/t :workflow-runner/workflow-type-label {:type (or type :unknown)}))
                       (when description (str "\n    " description))))
         (println))
       (println (display/colorize :cyan (apply str (repeat 60 "─")))))))
@@ -227,13 +228,13 @@
            (sort-by (juxt :workflow/id :workflow/version))
            format-workflow-listing))
     (catch Exception e
-      (println (display/colorize :red (str "Failed to list workflows: " (ex-message e)))))))
+      (println (display/colorize :red (messages/t :workflow-runner/list-failed {:error (ex-message e)}))))))
 
 (defn list-workflows! []
   (try
     (list-workflows-from-resources)
     (catch Exception e
-      (println (display/colorize :red (str "Failed to list workflows: " (ex-message e))))
+      (println (display/colorize :red (messages/t :workflow-runner/list-failed {:error (ex-message e)})))
       (throw e))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -292,7 +293,7 @@
           (when command-poller-cleanup (command-poller-cleanup)))))
     (catch Exception e
       (when-not quiet
-        (println (display/colorize :red (str "\n❌ Workflow execution failed: " (ex-message e)))))
+        (println (display/colorize :red (messages/t :workflow-runner/spec-execution-failed {:error (ex-message e)}))))
       (throw e))))
 
 ;------------------------------------------------------------------------------ Layer 2b
@@ -315,16 +316,16 @@
                      (catch Exception e
                        (when-not quiet
                          (println (display/colorize :red
-                                   (str "Failed to read event file: " (ex-message e)))))
+                                   (messages/t :workflow-runner/event-file-failed {:error (ex-message e)}))))
                        nil))]
     (when-not quiet
       (println (display/colorize :cyan
-                (str "\n🔄 Resuming workflow " workflow-id-str)))
+                (messages/t :workflow-runner/resuming {:workflow-id workflow-id-str})))
       (println (display/colorize :cyan
-                (str "   Previously completed: " (count (:pre-completed-ids resume-ctx)) " tasks")))
+                (messages/t :workflow-runner/previously-completed {:count (count (:pre-completed-ids resume-ctx))})))
       (when (seq (:pre-completed-artifacts resume-ctx))
         (println (display/colorize :cyan
-                  (str "   Recovered artifacts: " (count (:pre-completed-artifacts resume-ctx)))))))
+                  (messages/t :workflow-runner/recovered-artifacts {:count (count (:pre-completed-artifacts resume-ctx))})))))
     (if (and resume-ctx (seq (:pre-completed-ids resume-ctx)))
       ;; Re-run with pre-completed task IDs injected
       (let [opts-with-resume (assoc-in opts [:execution-opts :pre-completed-dag-tasks]
@@ -333,7 +334,7 @@
       (do
         (when-not quiet
           (println (display/colorize :yellow
-                    "   No completed tasks found in event file. Starting fresh run.")))
+                    (messages/t :workflow-runner/no-completed-tasks))))
         (run-workflow-from-spec! spec opts)))))
 
 ;------------------------------------------------------------------------------ Layer 3
@@ -356,9 +357,9 @@
   [chain-id chain-def quiet]
   (when-not quiet
     (println)
-    (println (display/colorize :cyan (str "⛓  Chain: " (name chain-id))))
-    (println (display/colorize :cyan (str "   " (:chain/description chain-def))))
-    (println (display/colorize :cyan (str "   Steps: " (count (:chain/steps chain-def)))))
+    (println (display/colorize :cyan (messages/t :workflow-runner/chain-header {:chain-id (name chain-id)})))
+    (println (display/colorize :cyan (messages/t :workflow-runner/chain-description {:description (:chain/description chain-def)})))
+    (println (display/colorize :cyan (messages/t :workflow-runner/chain-steps {:count (count (:chain/steps chain-def))})))
     (println (display/colorize :cyan (apply str (repeat 60 "─"))))))
 
 (defn print-chain-result
@@ -370,12 +371,9 @@
       (println)
       (println (display/colorize :cyan (apply str (repeat 60 "─"))))
       (if (phase/succeeded? result)
-        (println (display/colorize :green (str "✓ Chain completed — "
-                                                (count steps) " steps in "
-                                                duration "ms")))
+        (println (display/colorize :green (messages/t :workflow-runner/chain-completed {:count (count steps) :duration duration})))
         (let [failed-step (some #(when (phase/failed? %) (:step/id %)) steps)]
-          (println (display/colorize :red (str "✗ Chain failed at step: "
-                                                (when failed-step (name failed-step))))))))))
+          (println (display/colorize :red (messages/t :workflow-runner/chain-failed-at {:step (when failed-step (name failed-step))}))))))))
 
 (defn run-chain!
   "Execute a chain of workflows.
@@ -415,7 +413,7 @@
             (progress-cleanup))))
       (catch Exception e
         (when-not quiet
-          (println (display/colorize :red (str "\n❌ Chain execution failed: " (ex-message e)))))
+          (println (display/colorize :red (messages/t :workflow-runner/chain-execution-failed {:error (ex-message e)}))))
         (throw e)))))
 
 (defn list-chains!
@@ -425,18 +423,18 @@
     (let [list-chains-fn (requiring-resolve 'ai.miniforge.workflow.interface/list-chains)
           chains (list-chains-fn)]
       (if (empty? chains)
-        (println "No chains found.")
+        (println (messages/t :workflow-runner/no-chains))
         (do
-          (println (display/colorize :cyan "\nAvailable Chains:"))
+          (println (display/colorize :cyan (messages/t :workflow-runner/available-chains)))
           (println (display/colorize :cyan (apply str (repeat 60 "─"))))
           (doseq [{:keys [id version description steps]} chains]
             (println (str (display/colorize :bold (str "  " (name id)))
                           " (v" version ")"
-                          "  " steps " step(s)"))
+                          "  " (messages/t :workflow-runner/chain-steps-label {:steps steps})))
             (when description
               (println (str "    " description)))
             (println))
           (println (display/colorize :cyan (apply str (repeat 60 "─")))))))
     (catch Exception e
-      (println (display/colorize :red (str "Failed to list chains: " (ex-message e))))
+      (println (display/colorize :red (messages/t :workflow-runner/list-chains-failed {:error (ex-message e)})))
       (throw e))))

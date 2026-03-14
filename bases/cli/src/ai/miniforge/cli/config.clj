@@ -8,7 +8,8 @@
    [babashka.fs :as fs]
    [babashka.process :as process]
    [ai.miniforge.cli.app-config :as app-config]
-   [ai.miniforge.cli.backends :as backends]))
+   [ai.miniforge.cli.backends :as backends]
+   [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration paths and utilities
@@ -42,7 +43,7 @@
   (println (style msg :green)))
 
 (defn print-error [msg]
-  (println (style (str "Error: " msg) :red)))
+  (println (style (messages/t :config/error-prefix {:message msg}) :red)))
 
 (defn print-info [msg]
   (println (style msg :cyan)))
@@ -57,7 +58,7 @@
     (try
       (read-string (slurp path))
       (catch Exception e
-        (println (style (str "Warning: Failed to read config file: " (.getMessage e)) :yellow))
+        (println (style (messages/t :config/warning-read-failed {:message (.getMessage e)}) :yellow))
         nil))))
 
 (defn write-config-file
@@ -113,43 +114,44 @@
   "Display configuration in human-readable format."
   [config config-path]
   (println)
-  (println (style "Current Configuration:" :cyan))
+  (println (style (messages/t :config/title) :cyan))
   (println)
 
   ;; LLM Settings
-  (println "LLM Settings:")
-  (println (str "  backend: " (format-config-value (get-in config [:llm :backend]))
-               " (" (get-in backends/backend-specs [(get-in config [:llm :backend]) :provider] "Unknown") ")"))
-  (println (str "  model: " (get-in config [:llm :model])))
-  (println (str "  max-tokens: " (get-in config [:llm :max-tokens])))
-  (println (str "  timeout: " (quot (get-in config [:llm :timeout-ms]) 60000) " minutes"))
+  (println (messages/t :config/section-llm))
+  (println (messages/t :config/llm-backend
+                       {:backend (format-config-value (get-in config [:llm :backend]))
+                        :provider (get-in backends/backend-specs [(get-in config [:llm :backend]) :provider] "Unknown")}))
+  (println (messages/t :config/llm-model {:model (get-in config [:llm :model])}))
+  (println (messages/t :config/llm-max-tokens {:max-tokens (get-in config [:llm :max-tokens])}))
+  (println (messages/t :config/llm-timeout {:minutes (quot (get-in config [:llm :timeout-ms]) 60000)}))
   (println)
 
   ;; Workflow Settings
-  (println "Workflow Settings:")
-  (println (str "  max-iterations: " (get-in config [:workflow :max-iterations])))
-  (println (str "  max-tokens: " (get-in config [:workflow :max-tokens])))
-  (println (str "  failure-strategy: " (format-config-value (get-in config [:workflow :failure-strategy]))))
+  (println (messages/t :config/section-workflow))
+  (println (messages/t :config/workflow-max-iterations {:max-iterations (get-in config [:workflow :max-iterations])}))
+  (println (messages/t :config/workflow-max-tokens {:max-tokens (get-in config [:workflow :max-tokens])}))
+  (println (messages/t :config/workflow-failure-strategy {:failure-strategy (format-config-value (get-in config [:workflow :failure-strategy]))}))
   (println)
 
   ;; Artifacts
-  (println "Artifacts:")
-  (println (str "  dir: " (get-in config [:artifacts :dir])))
+  (println (messages/t :config/section-artifacts))
+  (println (messages/t :config/artifacts-dir {:dir (get-in config [:artifacts :dir])}))
   (println)
 
   ;; Config file location
-  (println "Config Files:")
-  (println (str "  User: " config-path
+  (println (messages/t :config/section-config-files))
+  (println (str (messages/t :config/user-config {:path config-path})
                (if (fs/exists? config-path)
-                 (style " ✓" :green)
-                 (style " (not created)" :yellow))))
-  (println "  Defaults: <embedded>")
+                 (style (messages/t :config/user-config-exists) :green)
+                 (style (messages/t :config/user-config-not-created) :yellow))))
+  (println (messages/t :config/defaults-embedded))
   (println)
 
   ;; Env var hints
-  (println "Override with environment variables:")
-  (println "  MINIFORGE_LLM_BACKEND=openai")
-  (println "  MINIFORGE_LLM_MODEL=gpt-4")
+  (println (messages/t :config/section-env-overrides))
+  (println (messages/t :config/env-backend))
+  (println (messages/t :config/env-model))
   (println))
 
 ;------------------------------------------------------------------------------ Layer 3
@@ -169,15 +171,15 @@
         config-path (or (:config opts) default-user-config-path)]
     (if-not key-str
       (do
-        (print-error "Missing key argument")
-        (println "Usage:" (app-config/command-string "config get <key>"))
-        (println "Example:" (app-config/command-string "config get llm.backend")))
+        (print-error (messages/t :config/get-missing-key))
+        (println (messages/t :config/get-usage {:command (app-config/command-string "config get <key>")}))
+        (println (messages/t :config/get-example {:command (app-config/command-string "config get llm.backend")})))
       (let [config (load-merged-config config-path)
             key-path (parse-config-key key-str)
             value (get-in config key-path)]
         (if value
           (println (pr-str value))
-          (print-error (str "Key not found: " key-str)))))))
+          (print-error (messages/t :config/get-not-found {:key key-str})))))))
 
 (defn cmd-set
   "Set a configuration value."
@@ -187,17 +189,17 @@
         config-path (or (:config opts) default-user-config-path)]
     (if (or (not key-str) (not value-str))
       (do
-        (print-error "Missing arguments")
-        (println "Usage:" (app-config/command-string "config set <key> <value>"))
-        (println "Example:" (app-config/command-string "config set llm.backend openai")))
+        (print-error (messages/t :config/set-missing-args))
+        (println (messages/t :config/set-usage {:command (app-config/command-string "config set <key> <value>")}))
+        (println (messages/t :config/set-example {:command (app-config/command-string "config set llm.backend openai")})))
       (let [user-config (or (read-config-file config-path) default-config)
             key-path (parse-config-key key-str)
             value (parse-config-value value-str)
             updated-config (assoc-in user-config key-path value)]
         (write-config-file config-path updated-config)
         (println)
-        (print-success (str "✅ Set " key-str " to " (pr-str value)))
-        (println (str "   Saved to: " config-path))
+        (print-success (messages/t :config/set-success {:key key-str :value (pr-str value)}))
+        (println (messages/t :config/set-saved {:path config-path}))
         (println)))))
 
 (defn cmd-init
@@ -206,15 +208,15 @@
   (let [config-path (or (:config opts) default-user-config-path)]
     (if (fs/exists? config-path)
       (do
-        (print-info (str "Config already exists at " config-path))
-        (println "Use" (str "'" (app-config/command-string "config set <key> <value>") "'") "to modify"))
+        (print-info (messages/t :config/init-exists {:path config-path}))
+        (println (messages/t :config/init-modify-hint {:command (app-config/command-string "config set <key> <value>")})))
       (do
         (write-config-file config-path default-config)
         (println)
-        (print-success (str "✅ Created config at " config-path))
+        (print-success (messages/t :config/init-created {:path config-path}))
         (println)
-        (println "Edit with:" (app-config/command-string "config edit"))
-        (println "View with:" (app-config/command-string "config list"))
+        (println (messages/t :config/init-edit-hint {:command (app-config/command-string "config edit")}))
+        (println (messages/t :config/init-view-hint {:command (app-config/command-string "config list")}))
         (println)))))
 
 (defn cmd-edit
@@ -228,26 +230,26 @@
 
     (try
       (process/shell editor (str config-path))
-      (print-success (str "Config saved: " config-path))
+      (print-success (messages/t :config/edit-saved {:path config-path}))
       (catch Exception e
-        (print-error (str "Failed to open editor: " (.getMessage e)))))))
+        (print-error (messages/t :config/edit-failed {:message (.getMessage e)}))))))
 
 (defn cmd-reset
   "Reset config to defaults."
   [opts]
   (let [config-path (or (:config opts) default-user-config-path)]
     (println)
-    (print-info "This will reset your config to defaults.")
-    (print "Continue? (y/N): ")
+    (print-info (messages/t :config/reset-warning))
+    (print (messages/t :config/reset-prompt))
     (flush)
     (let [response (read-line)]
       (if (= (str/lower-case (str/trim response)) "y")
         (do
           (write-config-file config-path default-config)
           (println)
-          (print-success "✅ Config reset to defaults")
+          (print-success (messages/t :config/reset-success))
           (println))
-        (println "Cancelled.")))))
+        (println (messages/t :config/reset-cancelled))))))
 
 (defn cmd-backends
   "List available backends with status."
@@ -263,14 +265,14 @@
         config-path (or (:config opts) default-user-config-path)]
     (if-not backend-str
       (do
-        (print-error "Missing backend argument")
-        (println "Usage:" (app-config/command-string "config backend <name>"))
+        (print-error (messages/t :config/backend-missing))
+        (println (messages/t :config/backend-usage {:command (app-config/command-string "config backend <name>")}))
         (println)
-        (println "Available backends:")
+        (println (messages/t :config/backend-available-header))
         (doseq [backend (keys backends/backend-specs)]
-          (println (str "  " (name backend))))
+          (println (messages/t :config/backend-item {:name (name backend)})))
         (println)
-        (println "Run" (str "'" (app-config/command-string "config backends") "'") "for detailed status."))
+        (println (messages/t :config/backend-detail-hint {:command (app-config/command-string "config backends")})))
       (let [backend-kw (keyword backend-str)
             validation (backends/validate-backend backend-kw)]
         (if (:valid? validation)
@@ -279,15 +281,15 @@
                 updated-config (assoc-in user-config [:llm :backend] backend-kw)]
             (write-config-file config-path updated-config)
             (println)
-            (print-success (str "✅ Backend set to " backend-str))
-            (println (str "   Saved to: " config-path))
+            (print-success (messages/t :config/backend-set-success {:backend backend-str}))
+            (println (messages/t :config/backend-saved {:path config-path}))
             (let [info (backends/get-backend-info backend-kw)]
-              (println (str "   Provider: " (:provider info)))
+              (println (messages/t :config/backend-provider {:provider (:provider info)}))
               (when (:default-model info)
-                (println (str "   Model: " (:default-model info) " (default)"))))
+                (println (messages/t :config/backend-model {:model (:default-model info)}))))
             (println)
-            (println "To change model:")
-            (println " " (app-config/command-string "config set llm.model <model-name>"))
+            (println (messages/t :config/backend-change-model))
+            (println (messages/t :config/backend-change-model-hint {:command (app-config/command-string "config set llm.model <model-name>")}))
             (println))
           ;; Backend not available, show helpful error
           (backends/print-backend-error backend-kw))))))
@@ -299,27 +301,31 @@
     (println)
     (if-not (fs/exists? config-path)
       (do
-        (print-error "Config file does not exist")
-        (println (str "Run '" (app-config/command-string "config init") "' to create: " config-path))
+        (print-error (messages/t :config/validate-no-file))
+        (println (messages/t :config/validate-create-hint {:command (app-config/command-string "config init") :path config-path}))
         (println))
       (let [config (read-config-file config-path)]
         (if config
           (do
-            (print-success "✅ Config file is valid")
-            (println (str "   Location: " config-path))
+            (print-success (messages/t :config/validate-valid))
+            (println (messages/t :config/validate-location {:path config-path}))
             (println)
             ;; Check backend validity
             (let [backend (get-in config [:llm :backend])
                   validation (when backend (backends/validate-backend backend))]
               (when validation
                 (if (:valid? validation)
-                  (println (str "   Backend " (name backend) ": " (style "Available" :green)))
-                  (println (str "   Backend " (name backend) ": " (style (:message validation) :yellow)))))))
+                  (println (messages/t :config/validate-backend-available
+                                       {:backend (name backend)
+                                        :status (style "Available" :green)}))
+                  (println (messages/t :config/validate-backend-available
+                                       {:backend (name backend)
+                                        :status (style (:message validation) :yellow)}))))))
           (do
-            (print-error "Config file is invalid or unreadable")
-            (println (str "   Location: " config-path))
+            (print-error (messages/t :config/validate-invalid))
+            (println (messages/t :config/validate-location {:path config-path}))
             (println)
-            (println "Try resetting:" (app-config/command-string "config reset"))))))))
+            (println (messages/t :config/validate-reset-hint {:command (app-config/command-string "config reset")}))))))))
 
 ;------------------------------------------------------------------------------ Compatibility functions for workflow-runner
 

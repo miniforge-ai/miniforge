@@ -28,7 +28,8 @@
    [clojure.string :as str]
    [clojure.java.io :as io]
    [clojure.edn :as edn]
-   [ai.miniforge.cli.app-config :as app-config]))
+   [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.messages :as messages]))
 
 ;;------------------------------------------------------------------------------ ANSI Colors
 
@@ -215,7 +216,7 @@
               (recur (.length file)))
             (recur last-pos))))
       (catch Exception e
-        (println (colorize :red (str "Error tailing file: " (.getMessage e)))))
+        (println (colorize :red (messages/t :observability/error-tailing {:error (.getMessage e)}))))
       (finally
         (.close raf)))))
 
@@ -248,7 +249,7 @@
      file-path - Path being tailed
      extra-info - Optional extra info to display (e.g., filter)"
   [icon label file-path & [extra-info]]
-  (println (colorize :cyan (str icon " Tailing " label ": " file-path)))
+  (println (colorize :cyan (messages/t :observability/tailing-header {:icon icon :label label :file-path file-path})))
   (when extra-info
     (println (colorize :gray extra-info)))
   (println (colorize :gray (apply str (repeat 80 "─")))))
@@ -280,7 +281,7 @@
                          (format-fn entry))))
                    {:lines lines})
         (show-last-n-lines file-path parse-fn format-fn lines filter-fn)))
-    (println (colorize :yellow (str "File not found: " file-path)))))
+    (println (colorize :yellow (messages/t :observability/file-not-found {:file-path file-path})))))
 
 ;;------------------------------------------------------------------------------ Layer 5: Stream Tailing
 
@@ -303,9 +304,9 @@
       ;; Tail all workflows
       all
       (do
-        (println (colorize :cyan "📋 Tailing ALL workflow logs"))
+        (println (colorize :cyan (messages/t :observability/tailing-all-logs {:icon "📋"})))
         (println (colorize :gray (apply str (repeat 80 "─"))))
-        (println (colorize :yellow "Aggregated tailing not yet implemented - use specific workflow-id")))
+        (println (colorize :yellow (messages/t :observability/aggregated-not-implemented))))
 
       ;; Tail specific workflow
       target-file
@@ -319,7 +320,7 @@
 
       ;; No logs found
       :else
-      (println (colorize :yellow (str "No log files found in " (app-config/logs-dir)))))))
+      (println (colorize :yellow (messages/t :observability/no-log-files {:dir (app-config/logs-dir)}))))))
 
 (defn tail-events
   "Tail MiniForge workflow events in real-time.
@@ -345,11 +346,11 @@
       ;; Tail all workflows
       all
       (do
-        (println (colorize :cyan "📊 Tailing ALL workflow events"))
+        (println (colorize :cyan (messages/t :observability/tailing-all-events {:icon "📊"})))
         (when filter
           (println (colorize :gray (str "Filter: " filter))))
         (println (colorize :gray (apply str (repeat 80 "─"))))
-        (println (colorize :yellow "Aggregated tailing not yet implemented - use specific workflow-id")))
+        (println (colorize :yellow (messages/t :observability/aggregated-not-implemented))))
 
       ;; Tail specific workflow
       target-file
@@ -365,7 +366,7 @@
 
       ;; No events found
       :else
-      (println (colorize :yellow (str "No event files found in " (app-config/events-dir)))))))
+      (println (colorize :yellow (messages/t :observability/no-event-files {:dir (app-config/events-dir)}))))))
 
 ;;------------------------------------------------------------------------------ Layer 6: Command Helpers
 
@@ -379,11 +380,11 @@
   (let [files (find-fn)]
     (if (seq files)
       (do
-        (println (colorize :cyan (str "Available " label ":")))
+        (println (colorize :cyan (messages/t :observability/available-files {:label label})))
         (doseq [f files]
           (let [size-mb (/ (.length (io/file f)) 1024.0 1024.0)]
-            (println (str "  " f " (" (format "%.2f" size-mb) " MB)")))))
-      (println (colorize :yellow (str "No " label " found"))))))
+            (println (messages/t :observability/file-entry {:path f :size (format "%.2f" size-mb)})))))
+      (println (colorize :yellow (messages/t :observability/no-files-found {:label label}))))))
 
 (defn cat-file-command
   "Display contents of a file.
@@ -393,7 +394,7 @@
   [file]
   (if file
     (println (slurp file))
-    (println (colorize :red "Error: --file required for 'cat' command"))))
+    (println (colorize :red (messages/t :observability/file-required)))))
 
 ;;------------------------------------------------------------------------------ Layer 7: CLI Commands
 
@@ -414,9 +415,9 @@
                     deleted (requiring-resolve 'ai.miniforge.logging.core/cleanup-old-rotated-logs)]
                 (if deleted
                   (let [count (deleted logs-dir 7)]
-                    (println (colorize :green (str "Cleaned up " count " old rotated log files"))))
-                  (println (colorize :yellow "Cleanup not available"))))
-    (println (colorize :red (str "Unknown subcommand: " subcommand)))))
+                    (println (colorize :green (messages/t :observability/cleanup-result {:count count}))))
+                  (println (colorize :yellow (messages/t :observability/cleanup-not-available)))))
+    (println (colorize :red (messages/t :observability/unknown-subcommand {:subcommand subcommand})))))
 
 (defn events-command
   "Handle 'mf events' command.
@@ -430,7 +431,7 @@
     "tail" (tail-events {:workflow-id workflow-id :all all :file file :lines lines :follow follow :filter filter})
     "list" (list-files-command find-event-stream-files "event files")
     "cat" (cat-file-command file)
-    (println (colorize :red (str "Unknown subcommand: " subcommand)))))
+    (println (colorize :red (messages/t :observability/unknown-subcommand {:subcommand subcommand})))))
 
 ;;------------------------------------------------------------------------------ Public API
 

@@ -9,6 +9,7 @@
   (:require
    [clojure.string :as str]
    [cheshire.core :as json]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-recommendation-config :as recommendation-config]
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.workflow.interface :as workflow]
@@ -76,30 +77,23 @@
 
    Returns: String prompt"
   [spec workflows]
-  (let [analysis-dimensions (:analysis-dimensions
-                             (recommendation-config/recommendation-prompt-config))]
-    (str "You are a workflow recommendation system for Miniforge, a governed autonomous workflow platform.\n\n"
-         "Your task is to analyze a task specification and recommend the most appropriate workflow.\n\n"
-         "Available workflows:\n\n"
+  (let [prompt-config (recommendation-config/recommendation-prompt-config)
+        analysis-dimensions (:analysis-dimensions prompt-config)]
+    (str (:system-intro prompt-config) "\n\n"
+         (:task-instruction prompt-config) "\n\n"
+         (:available-workflows-header prompt-config) "\n\n"
          (build-workflow-summaries workflows)
          "\n\n"
-         "Task specification:\n\n"
+         (:task-spec-header prompt-config) "\n\n"
          (extract-spec-summary spec)
          "\n\n"
-         "Analyze the task based on:\n"
+         (:analysis-intro prompt-config) "\n"
          (->> analysis-dimensions
               (map-indexed (fn [idx dimension]
                              (str (inc idx) ". " dimension)))
               (str/join "\n"))
          "\n\n"
-         "Provide your recommendation as a JSON object with this exact structure:\n"
-         "{\n"
-         "  \"workflow\": \"workflow-id\",\n"
-         "  \"confidence\": 0.85,\n"
-         "  \"reasoning\": \"Brief explanation of why this workflow is recommended\",\n"
-         "  \"characteristics\": [\"multi-phase\", \"has-review\", \"comprehensive\"]\n"
-         "}\n\n"
-         "Respond ONLY with the JSON object, no additional text.")))
+         (:json-instruction prompt-config))))
 
 ;;------------------------------------------------------------------------------ Layer 1
 ;; LLM interaction
@@ -122,7 +116,7 @@
       ;; Convert workflow string to keyword
       (update parsed :workflow keyword))
     (catch Exception e
-      (println "Warning: Failed to parse LLM response:" (ex-message e))
+      (println (messages/t :recommender/parse-warning {:error (ex-message e)}))
       nil)))
 
 (defn call-llm-for-recommendation
@@ -141,7 +135,7 @@
         (when (:success result)
           (:content result)))
       (catch Exception e
-        (println "Warning: LLM recommendation failed:" (ex-message e))
+        (println (messages/t :recommender/llm-failed-warning {:error (ex-message e)}))
         nil))))
 
 ;;------------------------------------------------------------------------------ Layer 2
@@ -161,7 +155,7 @@
   [spec available-workflows llm-client]
   (if-not llm-client
     (response/make-anomaly :anomalies/unavailable
-                           "LLM client not available for workflow recommendation"
+                           (messages/t :recommender/llm-unavailable)
                            {:operation :recommend-workflow
                             :spec-title (:spec/title spec)})
     (try
@@ -169,7 +163,7 @@
             response-text (call-llm-for-recommendation llm-client prompt)]
         (if-not response-text
           (response/make-anomaly :anomalies/unavailable
-                                 "LLM did not return a response"
+                                 (messages/t :recommender/no-response)
                                  {:operation :recommend-workflow
                                   :spec-title (:spec/title spec)})
           (if-let [parsed (parse-llm-response response-text)]
@@ -178,12 +172,12 @@
               (if (workflow/valid-recommendation? recommendation)
                 recommendation
                 (response/make-anomaly :anomalies/incorrect
-                                       "LLM returned invalid recommendation format"
+                                       (messages/t :recommender/invalid-format)
                                        {:operation :recommend-workflow
                                         :validation-errors (workflow/explain-recommendation recommendation)
                                         :recommendation recommendation})))
             (response/make-anomaly :anomalies/fault
-                                   "Failed to parse LLM response"
+                                   (messages/t :recommender/parse-failed)
                                    {:operation :recommend-workflow
                                     :raw-response response-text}))))
       (catch Exception e
@@ -206,11 +200,11 @@
     (if (seq matching-workflows)
       {:workflow (:workflow/id (first matching-workflows))
        :confidence 0.5
-       :reasoning (str "Fallback: Selected based on task type " task-type)
+       :reasoning (messages/t :recommender/fallback-task-type {:task-type task-type})
        :source :fallback}
       {:workflow (selection-config/resolve-selection-profile :default available-workflows)
        :confidence 0.3
-       :reasoning "Fallback: Default to app-configured workflow profile"
+       :reasoning (messages/t :recommender/fallback-default)
        :source :fallback})))
 
 (defn recommend-workflow-with-fallback
