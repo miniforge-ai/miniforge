@@ -4,6 +4,7 @@
    [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.edn :as edn]
    [babashka.fs :as fs]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.main.commands.fleet :as sut]))
 
 ;; ============================================================================
@@ -126,7 +127,7 @@
   (testing "Prints error when no repo is provided"
     (let [output (with-out-str
                    (sut/fleet-add-cmd {:repo nil} nil default-config))]
-      (is (re-find #"Usage" output)))))
+      (is (.contains output "Usage")))))
 
 ;; ============================================================================
 ;; fleet-remove-cmd tests
@@ -152,7 +153,7 @@
   (testing "Prints error when no repo is provided"
     (let [output (with-out-str
                    (sut/fleet-remove-cmd {:repo nil} nil default-config))]
-      (is (re-find #"Usage" output)))))
+      (is (.contains output "Usage")))))
 
 ;; ============================================================================
 ;; fleet-status-cmd tests
@@ -164,7 +165,7 @@
       (spit path (pr-str {:fleet {:repos ["org/a" "org/b"]}}))
       (let [output (with-out-str
                      (sut/fleet-status-cmd {:config path} nil default-config))]
-        (is (re-find #"Repositories.*2" output))))))
+        (is (.contains output (messages/t :fleet/repositories {:count 2})))))))
 
 (deftest fleet-status-cmd-shows-default-state-when-no-state-file-test
   (testing "Shows zero counts when state file does not exist"
@@ -172,7 +173,7 @@
       (spit path (pr-str {:fleet {:repos []}}))
       (let [output (with-out-str
                      (sut/fleet-status-cmd {:config path} nil default-config))]
-        (is (re-find #"Active Workflows.*0" output))
-        (is (re-find #"Pending Workflows.*0" output))
-        (is (re-find #"Completed.*0" output))
-        (is (re-find #"Failed.*0" output))))))
+        (is (.contains output (messages/t :fleet/active-workflows {:count 0})))
+        (is (.contains output (messages/t :fleet/pending-workflows {:count 0})))
+        (is (.contains output (messages/t :fleet/completed {:count 0})))
+        (is (.contains output (messages/t :fleet/failed {:count 0})))))))
