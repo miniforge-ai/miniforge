@@ -118,9 +118,12 @@
         ;; tells the execution engine to jump back (not stay at review).
         ;; Within budget: redirect to implement for repair.
         ;; Over budget: fail without redirect (terminal failure).
-        phase-status (if (= :changes-requested review-decision)
-                       :failed
-                       :completed)
+        ;; Preserve :failed from gate validation — don't overwrite with :completed.
+        gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
+        phase-status (cond
+                       (= :changes-requested review-decision) :failed
+                       gate-failed? :failed
+                       :else :completed)
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
