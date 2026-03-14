@@ -12,7 +12,7 @@
   aren't incorrect (e.g., resolving because it couldn't access the code rather
   than actually fixing the issue).
 
-  This is the miniforge equivalent of Autodev's PR monitoring pattern: push PR →
+  This is the miniforge equivalent of an autonomous PR monitoring pattern: push PR →
   monitor → fix → push fix → resolve comments → meta-agent verification loop.
 
   Can run as a background daemon per-PR or as a batch action on selected PRs."
@@ -26,8 +26,8 @@
           "Integration with Sentry, CI bots, and review comments"]
 
   :context
-  {:autodev-pattern
-   ["Autodev pushes PR → starts monitoring workflow"
+  {:reference-pattern
+   ["System pushes PR → starts monitoring workflow"
     "Monitoring workflow polls for new comments"
     "When comment found: analyze → fix → push fix → resolve comment"
     "Resolution includes reasoning (why this fix addresses the comment)"
