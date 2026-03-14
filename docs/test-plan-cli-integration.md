@@ -1,5 +1,7 @@
 # CLI Integration Test Plan
 
+> This test plan covers the **Miniforge SDLC** CLI and its integration with external coding-assistant backends.
+
 ## Overview
 
 This document defines the test plan for integrating miniforge with external CLI tools

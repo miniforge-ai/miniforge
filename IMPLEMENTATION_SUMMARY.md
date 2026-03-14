@@ -1,8 +1,12 @@
 # Intelligent Model Selection - Implementation Summary
 
+> This document describes **Miniforge SDLC's** intelligent model selection feature.
+
 ## Overview
 
-The intelligent model selection system has been fully implemented according to the specification in `work/intelligent-model-selection.edn`. This system automatically selects the optimal AI model for each task based on task characteristics, enabling cost optimization without sacrificing quality.
+The intelligent model selection system has been fully implemented according to the specification in
+`work/intelligent-model-selection.edn`. This system automatically selects the optimal AI model for each task based on
+task characteristics, enabling cost optimization without sacrificing quality.
 
 ## Implementation Status: ✅ COMPLETE
 
@@ -139,7 +143,8 @@ Environment variables:
 **Model Registry Tests** (`components/llm/test/ai/miniforge/llm/model_registry_test.clj`)
 
 - ✅ 154 lines, comprehensive coverage
-- Tests: get-model, query by capability, query by use-case, provider queries, local models, context support, recommendations
+- Tests: get-model, query by capability, query by use-case, provider queries, local models, context support,
+  recommendations
 
 **Model Selector Tests** (`components/llm/test/ai/miniforge/llm/model_selector_test.clj`)
 
@@ -156,7 +161,8 @@ Environment variables:
 **Model Selection Integration** (`components/llm/test/ai/miniforge/llm/model_selection_integration_test.clj`)
 
 - ✅ 383 lines, NEW
-- Tests: end-to-end workflows, privacy constraints, large context, cost optimization, cross-provider, transparency, all 16 models
+- Tests: end-to-end workflows, privacy constraints, large context, cost optimization, cross-provider, transparency, all
+  16 models
 
 ## Documentation
 
@@ -232,7 +238,7 @@ Every selection includes:
 
 Example:
 
-```
+```text
 🎯 Model Auto-Selected: Sonnet 4.5
 
 Task: execution-focused (confidence: 90%)
@@ -426,4 +432,5 @@ The intelligent model selection system is **fully implemented and production-rea
 7. ✅ Comprehensive test coverage
 8. ✅ Complete user documentation
 
-The system is ready for use in production workflows and can immediately start optimizing costs while maintaining code quality.
+The system is ready for use in production workflows and can immediately start optimizing costs while maintaining code
+quality.

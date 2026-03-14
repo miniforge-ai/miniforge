@@ -1,5 +1,8 @@
 # Gap Analysis: Current State vs. Normative Specs (N1-N9)
 
+> The normative specs (N1-N9) define the **MiniForge Core** engine contract; **Miniforge SDLC** serves as the reference
+implementation.
+
 **Date:** 2026-02-13
 **Baseline commit:** 5c975b6 (+ PR #174 self-healing wiring)
 

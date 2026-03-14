@@ -1,5 +1,8 @@
 # Configuration Management
 
+> This document covers configuration for the **Miniforge** SDLC product (CLI/TUI). MiniForge Core exposes configuration
+seams that products customize via their own `app.edn`; the settings below are Miniforge-specific defaults and overrides.
+
 Miniforge uses [Aero](https://github.com/juxt/aero) for centralized configuration with environment variable overrides.
 
 ## Configuration File

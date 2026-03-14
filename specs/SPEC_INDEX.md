@@ -6,6 +6,19 @@
 
 ---
 
+## Three-Product Architecture
+
+These specifications define three products built on a shared kernel:
+
+- **MiniForge Core** (N1-N6) — the governed workflow engine. These six core specs define the engine contract that all
+  products must conform to.
+- **Miniforge** (N1-N10) — the autonomous software factory for SDLC. Consumes Core plus extension specs N7-N10 for fleet
+  operations, observability control, external PR integration, and governed tool execution.
+- **Data Foundry** (N1-N6) — a generic ETL product. Consumes the same Core engine contract with domain-specific workflow
+  packs and policy configurations.
+
+---
+
 ## What miniforge Is (Canonical Description)
 
 **miniforge** executes a **workflow DAG** (planner → implementer → tester → reviewer → release
@@ -30,9 +43,13 @@ drill-down without scraping logs.
 These specifications define contractual requirements for miniforge implementations.
 They use RFC 2119 terminology (MUST, SHALL, SHOULD, MAY).
 
-**Core specs (N1-N6):** Fundamental contracts for architecture, workflows, events, policy, UI, and evidence.
+**Core specs (N1-N6) — MiniForge Core contract.** Fundamental contracts for architecture, workflows, events, policy, UI,
+  and evidence. These define the shared engine consumed by all products (Miniforge SDLC, Data Foundry, and any future
+  product).
 
-**Extension specs (N7+):** Cross-cutting capabilities that extend core specs (Fleet Mode, Control Interface).
+**Extension specs (N7+) — product-specific capabilities.** Cross-cutting capabilities that extend core specs. Currently
+  these are Miniforge SDLC concerns (Fleet Mode, Control Interface, PR Integration, Governed Tool Execution); Data
+  Foundry does not consume N7-N10.
 
 ### N1 — Core Architecture & Concepts ✅
 
