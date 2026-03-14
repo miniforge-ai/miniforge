@@ -1,5 +1,8 @@
 # work/
 
+> These work specs drive **Miniforge SDLC** development — they are consumed by the Miniforge autonomous factory to plan
+and execute development tasks.
+
 This directory contains **ephemeral workflow specifications and task definitions**
 that are **inputs to miniforge** for active development work.
 

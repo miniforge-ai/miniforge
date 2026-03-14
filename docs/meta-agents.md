@@ -1,5 +1,7 @@
 # Meta-Agent Architecture
 
+> Meta-agents are a **Miniforge SDLC** feature, built on top of the MiniForge Core workflow engine.
+
 Miniforge uses a **team of specialized meta-agents** to monitor and control workflow execution. This is
 analogous to how the main workflow uses specialized agents (Planner, Implementer, Tester, Reviewer), but
 applied at the meta level.

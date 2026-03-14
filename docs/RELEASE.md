@@ -1,6 +1,8 @@
 # Release Process
 
-This document describes how to create and publish a new miniforge release.
+This document describes how to create and publish a new release of the **Miniforge** SDLC product (CLI/TUI). MiniForge
+Core ships as part of the monorepo and is versioned alongside Miniforge. Data Foundry does not yet have a separate
+release process.
 
 ## Prerequisites
 

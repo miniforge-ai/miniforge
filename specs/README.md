@@ -1,6 +1,19 @@
 # miniforge Specifications
 
-This directory contains the **canonical specifications** for miniforge.
+This directory contains the **canonical specifications** for the miniforge ecosystem.
+
+## Three-Product Architecture
+
+The miniforge ecosystem comprises three products built on a shared kernel:
+
+- **MiniForge Core** — the governed workflow engine (kernel/runtime). Normative specs N1-N6 define its contract:
+  architecture, workflow execution, event stream, policy packs, interface standards, and evidence/provenance. Any
+  product built on the engine must conform to these six specs.
+- **Miniforge** — the autonomous software factory (SDLC product). Consumes MiniForge Core and adds SDLC-specific
+  capabilities defined in N5 and N7-N10 (fleet mode, observability control, external PR integration, governed tool
+  execution).
+- **Data Foundry** — a generic ETL product built on MiniForge Core. Consumes the same N1-N6 engine contract with
+  ETL-specific workflow packs and policy configurations.
 
 ## Entry Point
 
@@ -10,7 +23,7 @@ The spec index is the authoritative map of all normative and informative documen
 
 ## Directory Structure
 
-```
+```text
 specs/
 ├── SPEC_INDEX.md              # START HERE - Complete spec catalog
 ├── README.md                  # This file
@@ -39,9 +52,10 @@ specs/
 
 ## Normative vs. Informative
 
-### Normative Specifications (N1-N6)
+### Normative Specifications (N1-N6) — MiniForge Core Contract
 
-**Normative specs** define **contractual requirements** for miniforge implementations.
+**Normative specs N1-N6** define the **contractual requirements** for MiniForge Core — the shared engine that both
+  Miniforge (SDLC) and Data Foundry consume.
 
 - Use RFC 2119 keywords: MUST, SHALL, SHOULD, MAY
 - Breaking changes require version bump

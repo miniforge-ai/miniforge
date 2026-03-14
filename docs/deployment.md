@@ -1,5 +1,9 @@
 # Miniforge Deployment
 
+> This document describes deployment of the **Miniforge** SDLC product (the CLI/TUI). MiniForge Core is a library/kernel
+embedded in products and is not deployed standalone. Data Foundry (generic ETL product built on MiniForge Core) will
+have its own deployment strategy in the future.
+
 ## Two-Package Architecture
 
 Miniforge uses a two-package deployment model to optimize for both speed and features:

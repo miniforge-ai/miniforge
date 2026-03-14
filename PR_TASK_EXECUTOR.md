@@ -1,5 +1,7 @@
 # PR: Implement Task-Executor Component (DAG-to-PR Lifecycle Integration)
 
+> The task-executor is part of **Miniforge SDLC**, connecting the DAG scheduler to the PR lifecycle controller.
+
 ## Summary
 
 This PR implements the **task-executor** component, completing the integration between the DAG scheduler

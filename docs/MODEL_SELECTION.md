@@ -1,6 +1,10 @@
 # Intelligent Model Selection
 
-Miniforge automatically selects the optimal AI model for each task based on task characteristics, optimizing for quality, cost, and performance.
+> Model selection is a **Miniforge SDLC** feature that leverages MiniForge Core's agent protocol to choose the optimal
+model per task.
+
+Miniforge automatically selects the optimal AI model for each task based on task characteristics, optimizing for
+quality, cost, and performance.
 
 ## Overview
 
@@ -204,7 +208,7 @@ Force a specific model for a workflow phase:
 - Reasoning: 8/10 | Code: 8/10 | Speed: 9/10 | Cost: ¢
 - Context: 1M tokens
 
-**Gemini 2.0 Flash Thinking (Experimental)**
+#### Gemini 2.0 Flash Thinking (Experimental)
 
 - Best for: Extended reasoning, complex problem decomposition
 - Reasoning: 10/10 | Code: 8/10 | Speed: 3/10 | Cost: $$
@@ -322,7 +326,7 @@ Compare to using Opus for everything: **$0.84**
 
 Decision tree for model selection:
 
-```
+```text
 Task Type?
 │
 ├─ Privacy Required? ──> LOCAL MODELS

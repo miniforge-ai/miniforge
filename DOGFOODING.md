@@ -1,5 +1,7 @@
 # Miniforge Dogfooding Guide
 
+> This guide is for dogfooding **Miniforge SDLC** — using the autonomous software factory to build and improve itself.
+
 ## Overview
 
 This guide explains how to have miniforge work on itself using the DAG orchestration system.

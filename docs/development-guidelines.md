@@ -1,5 +1,8 @@
 # Development Guidelines
 
+> These guidelines apply to the Miniforge monorepo, which houses three products: **MiniForge Core** (the governed
+workflow engine), **Miniforge** (the autonomous SDLC product), and **Data Foundry** (the generic ETL product).
+
 **Purpose:** This document defines development practices for miniforge contributors to avoid
 common anti-patterns that degrade code quality and team velocity.
 

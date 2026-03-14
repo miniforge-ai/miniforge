@@ -1,5 +1,7 @@
 # Fast Iteration Test Opportunities
 
+> These test opportunities target **Miniforge SDLC** components and their integration points.
+
 Analysis of components that would benefit from focused integration tests similar to `handoff_test.clj`.
 
 ## Criteria for Fast Iteration Tests
@@ -18,6 +20,7 @@ Analysis of components that would benefit from focused integration tests similar
 **Why Critical:** PR lifecycle orchestrates git operations, CI monitoring, and PR merging - all slow and complex
 
 **Proposed Test:** `pr_lifecycle_integration_test.clj`
+
 - Mock gh CLI calls and git operations
 - Test state transitions: pending → ci-running → approved → merged
 - Test error handling: CI failures, merge conflicts, rebase needed
@@ -35,6 +38,7 @@ Analysis of components that would benefit from focused integration tests similar
 **Why Critical:** File writing bugs (like the one we just fixed) silently fail with zero files written
 
 **Proposed Test:** `release_file_writing_test.clj`
+
 - Mock git operations (branch creation, commit, push)
 - Test file writing from code artifacts
 - Verify files are staged correctly
@@ -53,6 +57,7 @@ Analysis of components that would benefit from focused integration tests similar
 **Why Critical:** Agents return structured data that flows through entire system
 
 **Proposed Test:** `agent_response_integration_test.clj`
+
 - Mock LLM responses (success, error, timeout cases)
 - Test response parsing and validation
 - Test that response structure matches what phases expect
@@ -70,6 +75,7 @@ Analysis of components that would benefit from focused integration tests similar
 **Why Critical:** Gates validate artifacts through the inner loop - failures cause repair cycles
 
 **Proposed Test:** `gate_pipeline_test.clj`
+
 - Mock gate implementations (syntax, lint, tests, security)
 - Test artifact flow through gate chain
 - Test that failures trigger repair correctly
@@ -88,6 +94,7 @@ Analysis of components that would benefit from focused integration tests similar
 **Why Critical:** Metrics must aggregate correctly across phases for cost tracking and budgets
 
 **Proposed Test:** `metrics_accumulation_test.clj`
+
 - Mock phases returning metrics
 - Test metrics flow through workflow execution
 - Test budget enforcement (token limits, time limits, iteration limits)
@@ -106,6 +113,7 @@ Analysis of components that would benefit from focused integration tests similar
 **Why Critical:** Evidence bundles must capture complete workflow state for auditability
 
 **Proposed Test:** `evidence_bundle_integration_test.clj`
+
 - Mock workflow execution with phase results
 - Test bundle assembly from context
 - Test that all required fields are present
@@ -161,6 +169,7 @@ Based on `handoff_test.clj`, successful fast iteration tests:
 ## Estimated Value
 
 Adding these 5-6 tests would:
+
 - **Reduce debug time** from hours to minutes (like the handoff bug)
 - **Enable rapid iteration** on integration logic
 - **Catch bugs earlier** in development cycle
