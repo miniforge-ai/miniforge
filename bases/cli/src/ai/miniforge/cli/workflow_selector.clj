@@ -27,6 +27,7 @@
    Layer 2: Workflow selection with reasoning"
   (:require
    [clojure.string :as str]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-selection-config :as selection-config]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -169,9 +170,8 @@
              (>= (:pr-count features) 4))
     (selection-result :comprehensive
                       :high
-                      (str "Multi-phase implementation with "
-                           (:pr-count features)
-                           " PRs requires comprehensive review"))))
+                      (messages/t :selector/reason-multi-phase
+                                  {:pr-count (:pr-count features)}))))
 
 (defn match-refactoring-stratification-rule
   "Refactoring with stratification → comprehensive profile"
@@ -182,7 +182,7 @@
                  (contains? (:constraint-mentions features) :rule-210)))
     (selection-result :comprehensive
                       :high
-                      "Refactoring with stratification requires comprehensive design review")))
+                      (messages/t :selector/reason-refactoring-stratification))))
 
 (defn match-large-feature-rule
   "Large feature → comprehensive profile"
@@ -192,7 +192,7 @@
              (not (contains? (:keywords features) :docs-only)))
     (selection-result :comprehensive
                       :medium
-                      "Large feature requires comprehensive workflow phases")))
+                      (messages/t :selector/reason-large-feature))))
 
 (defn match-bugfix-rule
   "Bug fix → fast profile"
@@ -201,7 +201,7 @@
             (contains? (:keywords features) :bugfix))
     (selection-result :fast
                       :high
-                      "Bug fix is well-suited for a fast workflow")))
+                      (messages/t :selector/reason-bugfix))))
 
 (defn match-docs-only-rule
   "Docs only → fast profile"
@@ -210,14 +210,14 @@
             (contains? (:keywords features) :docs-only))
     (selection-result :fast
                       :high
-                      "Documentation changes use a fast workflow")))
+                      (messages/t :selector/reason-docs-only))))
 
 (defn match-unknown-rule
   "Unknown/ambiguous → default profile"
   [_features]
   (selection-result :default
                     :low
-                    "Unknown task type defaults to the app's default workflow"))
+                    (messages/t :selector/reason-unknown)))
 
 (def selection-rules
   "Ordered list of selection rules. First matching rule wins."
@@ -283,12 +283,14 @@
   (let [{:keys [workflow-type confidence reason]} selection
         confidence-marker (case confidence
                             :high ""
-                            :medium " (medium confidence)"
-                            :low " (low confidence)"
+                            :medium (messages/t :selector/confidence-medium)
+                            :low (messages/t :selector/confidence-low)
                             "")]
-    (str "ℹ️  Auto-selected workflow: " (name workflow-type) confidence-marker "\n"
-         "    Reason: " reason "\n"
-         "    Override with :spec/workflow-type in your spec")))
+    (str (messages/t :selector/auto-selected
+                     {:workflow (name workflow-type)
+                      :confidence-marker confidence-marker}) "\n"
+         (messages/t :selector/reason {:reason reason}) "\n"
+         (messages/t :selector/override-hint))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

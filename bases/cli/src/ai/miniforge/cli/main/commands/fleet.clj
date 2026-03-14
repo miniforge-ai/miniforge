@@ -4,6 +4,7 @@
    [clojure.edn :as edn]
    [babashka.fs :as fs]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.main.display :as display]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -29,13 +30,13 @@
 
 (defn fleet-start-cmd
   [_opts]
-  (display/print-info "Starting fleet daemon...")
-  (println "TODO: Fleet daemon is an enterprise extension point."))
+  (display/print-info (messages/t :fleet/starting-daemon))
+  (println (messages/t :fleet/daemon-todo)))
 
 (defn fleet-stop-cmd
   [_opts]
-  (display/print-info "Stopping fleet daemon...")
-  (println "TODO: Fleet daemon is an enterprise extension point."))
+  (display/print-info (messages/t :fleet/stopping-daemon))
+  (println (messages/t :fleet/daemon-todo)))
 
 (defn fleet-status-cmd
   [opts default-config-path default-config]
@@ -47,33 +48,33 @@
                 {:workflows {:active 0 :pending 0 :completed 0 :failed 0}})]
 
     (println)
-    (println (display/style "Fleet Status" :foreground :cyan :bold true))
+    (println (display/style (messages/t :fleet/status-header) :foreground :cyan :bold true))
     (println)
-    (println (str "  Repositories: " (count repos)))
-    (println (str "  Active Workflows: " (get-in state [:workflows :active] 0)))
-    (println (str "  Pending Workflows: " (get-in state [:workflows :pending] 0)))
-    (println (str "  Completed: " (get-in state [:workflows :completed] 0)))
-    (println (str "  Failed: " (get-in state [:workflows :failed] 0)))
+    (println (messages/t :fleet/repositories {:count (count repos)}))
+    (println (messages/t :fleet/active-workflows {:count (get-in state [:workflows :active] 0)}))
+    (println (messages/t :fleet/pending-workflows {:count (get-in state [:workflows :pending] 0)}))
+    (println (messages/t :fleet/completed {:count (get-in state [:workflows :completed] 0)}))
+    (println (messages/t :fleet/failed {:count (get-in state [:workflows :failed] 0)}))
     (println)))
 
 (defn fleet-add-cmd
   [opts default-config-path default-config]
   (let [{:keys [repo config]} opts]
     (if-not repo
-      (display/print-error (str "Usage: " (app-config/command-string "fleet add <repo>")))
+      (display/print-error (messages/t :fleet/add-usage {:command (app-config/command-string "fleet add <repo>")}))
       (let [cfg (load-config config default-config-path default-config)
             repos (get-in cfg [:fleet :repos] [])
             new-cfg (assoc-in cfg [:fleet :repos] (conj repos repo))]
         (save-config new-cfg config default-config-path)
-        (display/print-success (str "Added " repo " to fleet"))))))
+        (display/print-success (messages/t :fleet/added {:repo repo}))))))
 
 (defn fleet-remove-cmd
   [opts default-config-path default-config]
   (let [{:keys [repo config]} opts]
     (if-not repo
-      (display/print-error (str "Usage: " (app-config/command-string "fleet remove <repo>")))
+      (display/print-error (messages/t :fleet/remove-usage {:command (app-config/command-string "fleet remove <repo>")}))
       (let [cfg (load-config config default-config-path default-config)
             repos (get-in cfg [:fleet :repos] [])
             new-cfg (assoc-in cfg [:fleet :repos] (vec (remove #{repo} repos)))]
         (save-config new-cfg config default-config-path)
-        (display/print-success (str "Removed " repo " from fleet"))))))
+        (display/print-success (messages/t :fleet/removed {:repo repo}))))))
