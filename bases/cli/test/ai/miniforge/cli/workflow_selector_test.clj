@@ -2,6 +2,7 @@
   "Tests for intelligent workflow selection."
   (:require
    [clojure.test :refer [deftest testing is]]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-selector :as ws]))
 
 ;------------------------------------------------------------------------------ Test Data
@@ -185,14 +186,15 @@
 
 (deftest explain-selection-test
   (testing "explain-selection generates user-facing explanation"
-    (let [selection {:workflow-type :canonical-sdlc-v1
+    (let [reason (messages/t :selector/reason-multi-phase {:pr-count 6})
+          selection {:workflow-type :canonical-sdlc-v1
                      :confidence :high
-                     :reason "Multi-phase implementation with 6 PRs requires comprehensive review"}
+                     :reason reason}
           explanation (ws/explain-selection selection)]
       (is (string? explanation))
       (is (.contains explanation "canonical-sdlc-v1"))
-      (is (.contains explanation "Multi-phase implementation"))
-      (is (.contains explanation "Override with :spec/workflow-type"))))
+      (is (.contains explanation reason))
+      (is (.contains explanation (messages/t :selector/override-hint)))))
 
   (testing "explain-selection shows confidence markers"
     (let [high-conf (ws/explain-selection {:workflow-type :canonical-sdlc-v1
@@ -205,8 +207,8 @@
                                           :confidence :low
                                           :reason "Test"})]
       (is (not (.contains high-conf "confidence")))
-      (is (.contains medium-conf "medium confidence"))
-      (is (.contains low-conf "low confidence")))))
+      (is (.contains medium-conf (messages/t :selector/confidence-medium)))
+      (is (.contains low-conf (messages/t :selector/confidence-low))))))
 
 ;------------------------------------------------------------------------------ Integration Tests
 ;; End-to-end workflow selection
