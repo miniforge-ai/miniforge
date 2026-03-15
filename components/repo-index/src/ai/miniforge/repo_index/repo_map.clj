@@ -150,7 +150,7 @@
 
 (defn- walk-directory-groups
   "Walk directory groups accumulating text within the token budget."
-  [entries remaining-budget grouped dir-order]
+  [remaining-budget grouped dir-order]
   (reduce (render-directory-group remaining-budget grouped)
           (factory/->render-acc)
           dir-order))
@@ -177,7 +177,7 @@
          header (build-header index (count entries) total-entry-lines)
          header-tokens (estimate-tokens header)
          remaining-budget (- budget header-tokens)
-         result (walk-directory-groups entries remaining-budget grouped dir-order)
+         result (walk-directory-groups remaining-budget grouped dir-order)
          full-text (str header (:text result))
          total-tokens (+ header-tokens (:tokens result))
          shown (:shown result)
