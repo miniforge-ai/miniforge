@@ -69,6 +69,23 @@
    [:truncated? :boolean]
    [:token-estimate :int]])
 
+;------------------------------------------------------------------------------ Layer 0
+;; Search Hit
+
+(def Snippet
+  "Schema for a search result snippet."
+  [:map
+   [:start-line :int]
+   [:end-line :int]
+   [:text [:string {:min 0}]]])
+
+(def SearchHit
+  "Schema for a single search result."
+  [:map
+   [:path [:string {:min 1}]]
+   [:score :double]
+   [:snippets [:vector Snippet]]])
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (require '[malli.core :as m])

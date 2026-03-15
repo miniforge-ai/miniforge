@@ -99,3 +99,13 @@
   "Create a render accumulator with updated fields."
   [text tokens shown truncated?]
   {:text text :tokens tokens :shown shown :truncated? truncated?})
+
+;------------------------------------------------------------------------------ Layer 0
+;; SearchHit (returned by search-lex)
+
+(defn ->search-hit
+  "Create a search hit result map."
+  [path score snippets]
+  {:path path
+   :score score
+   :snippets snippets})

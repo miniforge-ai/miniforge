@@ -107,9 +107,9 @@
                                            :model "mock"})
           result (agent/invoke a test-task {:llm-backend mock-llm})]
       (is (map? result))
-      ;; Agent invoke returns {:status :success/:error :output {...} ...}
-      (is (contains? result :status))
-      (is (contains? result :output)))))
+      ;; BaseAgent invoke returns {:success bool :outputs [...] ...}
+      (is (contains? result :success))
+      (is (contains? result :outputs)))))
 
 (deftest validate-test
   (testing "validates correct output"
