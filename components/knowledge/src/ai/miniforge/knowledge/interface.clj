@@ -49,6 +49,21 @@
      (create-store {:logger my-logger})"
   store/create-store)
 
+(def create-file-backed-store
+  "Create a file-backed persistent knowledge store.
+
+   On startup, scans the directory and loads all .edn files into
+   in-memory indices for fast querying. Writes are atomic (temp + rename).
+
+   Options:
+   - :path   - Base directory (default: ~/.miniforge/knowledge)
+   - :logger - Logger instance
+
+   Example:
+     (create-file-backed-store)
+     (create-file-backed-store {:path \"/repo/.miniforge/knowledge\"})"
+  store/create-file-backed-store)
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Zettel CRUD
 
@@ -198,6 +213,16 @@
 
    Returns vector of zettels relevant to the agent."
   store/inject-knowledge)
+
+(def format-for-prompt
+  "Format a collection of zettels as a markdown knowledge block for LLM context.
+
+   Arguments:
+   - zettels - Collection of zettels to format
+   - role    - Agent role keyword (for header)
+
+   Returns markdown string, or nil if no zettels."
+  store/format-for-prompt)
 
 ;------------------------------------------------------------------------------ Layer 6
 ;; Learning capture

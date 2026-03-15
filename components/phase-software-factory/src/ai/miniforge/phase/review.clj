@@ -24,6 +24,7 @@
    Default gates: [:review-approved :quality-check]"
   (:require [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.agent.interface :as agent]
+            [ai.miniforge.knowledge.interface :as knowledge]
             [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -138,12 +139,27 @@
     ;; Handle changes-requested: redirect to implement with review feedback
     (if (and (= :changes-requested review-decision)
              (< iterations max-iterations))
-      (-> updated-ctx
-          (update-in [:phase :iterations] (fnil inc 1))
-          (assoc-in [:phase :review-feedback]
-                    (or (get-in result [:output :review/feedback])
-                        (get-in result [:output :review/issues])))
-          (assoc-in [:phase :redirect-to] :implement))
+      (let [feedback (or (get-in result [:output :review/feedback])
+                         (get-in result [:output :review/issues]))]
+        ;; Capture review feedback as learning
+        (when (and feedback (:knowledge-store ctx))
+          (try
+            (knowledge/capture-learning
+             (:knowledge-store ctx)
+             {:type :inner-loop
+              :agent :reviewer
+              :title (str "Review feedback: " (get-in ctx [:execution/input :title]))
+              :content (str "## Review Feedback\n\n"
+                            (if (string? feedback)
+                              feedback
+                              (pr-str feedback)))
+              :tags [:review :feedback :inner-loop]
+              :confidence 0.6})
+            (catch Exception _e nil)))
+        (-> updated-ctx
+            (update-in [:phase :iterations] (fnil inc 1))
+            (assoc-in [:phase :review-feedback] feedback)
+            (assoc-in [:phase :redirect-to] :implement)))
       updated-ctx)))
 
 (defn error-review

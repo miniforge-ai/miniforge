@@ -207,6 +207,7 @@
                                :router router
                                :budget-manager budget-mgr
                                :knowledge-coordinator knowledge-coord
+                               :knowledge-store (:knowledge-store knowledge-coord)
                                :artifact-store artifact-store})
             result (wf/run-workflow workflow-mgr spec wf-context)]
 

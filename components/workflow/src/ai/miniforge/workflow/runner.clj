@@ -399,6 +399,18 @@
                           :timestamp (java.time.Instant/now)})))
          (catch Exception _e nil))
 
+       ;; Post-workflow: auto-promote high-confidence learnings
+       (try
+         (when-let [kb (:knowledge-store opts)]
+           (let [knowledge-ns (requiring-resolve 'ai.miniforge.knowledge.interface/list-learnings)
+                 promote-fn (requiring-resolve 'ai.miniforge.knowledge.interface/promote-learning)
+                 promotable (knowledge-ns kb {:promotable? true})]
+             (doseq [learning promotable]
+               (try
+                 (promote-fn kb (:zettel/id learning) {})
+                 (catch Exception _e nil)))))
+         (catch Exception _e nil))
+
        output-ctx))))
 
 ;------------------------------------------------------------------------------ Rich Comment

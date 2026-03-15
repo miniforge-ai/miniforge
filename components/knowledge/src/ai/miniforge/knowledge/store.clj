@@ -1,11 +1,14 @@
 (ns ai.miniforge.knowledge.store
   "Knowledge store for zettels.
    Layer 0: In-memory store protocol and implementation
+   Layer 0.5: File-backed persistent store
    Layer 1: Query operations
    Layer 2: Agent injection"
   (:require
    [ai.miniforge.knowledge.zettel :as zettel]
    [ai.miniforge.logging.interface :as log]
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -113,6 +116,138 @@
    (atom {})
    (atom {})
    (or logger (log/create-logger {:min-level :info :output (fn [_])}))))
+
+;------------------------------------------------------------------------------ Layer 0.5
+;; File-backed persistent store
+
+(defn- expand-path
+  "Expand ~ in file paths to home directory."
+  [path]
+  (if (str/starts-with? path "~")
+    (str (System/getProperty "user.home") (subs path 1))
+    path))
+
+(defn- ensure-directory
+  "Ensure a directory exists, creating it if necessary."
+  [path]
+  (let [dir (io/file path)]
+    (when-not (.exists dir)
+      (.mkdirs dir))
+    dir))
+
+(defn- uid->filename
+  "Convert a zettel UID to a safe filename."
+  [uid]
+  (-> uid
+      (str/replace #"[^a-zA-Z0-9_-]" "_")
+      (str ".edn")))
+
+
+(defn- atomic-write!
+  "Write content to file atomically via temp + rename."
+  [file content]
+  (let [parent (.getParentFile file)
+        tmp (java.io.File/createTempFile "zettel-" ".edn.tmp" parent)]
+    (try
+      (spit tmp content)
+      (.renameTo tmp file)
+      (catch Exception e
+        (when (.exists tmp) (.delete tmp))
+        (throw e)))))
+
+(defn- load-zettel-file
+  "Load a single .edn zettel file. Returns zettel map or nil."
+  [file]
+  (try
+    (edn/read-string (slurp file))
+    (catch Exception _e nil)))
+
+(defn- scan-directory
+  "Scan a directory for .edn zettel files and load them all.
+   Returns {:by-id {uuid zettel} :by-uid {uid zettel}}."
+  [dir]
+  (let [d (io/file dir)]
+    (if (.exists d)
+      (reduce
+       (fn [acc file]
+         (when-let [z (load-zettel-file file)]
+           (-> acc
+               (assoc-in [:by-id (:zettel/id z)] z)
+               (assoc-in [:by-uid (:zettel/uid z)] z))))
+       {:by-id {} :by-uid {}}
+       (->> (.listFiles d)
+            (filter #(.isFile %))
+            (filter #(str/ends-with? (.getName %) ".edn"))))
+      {:by-id {} :by-uid {}})))
+
+(defrecord FileBackedStore [base-path zettels-by-id zettels-by-uid logger]
+  KnowledgeStore
+  (put-zettel [_this zettel]
+    (let [id (:zettel/id zettel)
+          uid (:zettel/uid zettel)
+          file (io/file base-path (uid->filename uid))]
+      (ensure-directory base-path)
+      (atomic-write! file (pr-str zettel))
+      (swap! zettels-by-id assoc id zettel)
+      (swap! zettels-by-uid assoc uid zettel)
+      (log/debug logger :knowledge :knowledge/zettel-persisted
+                 {:data {:id id :uid uid :path (.getPath file)}})
+      zettel))
+
+  (get-zettel-by-id [_this id]
+    (get @zettels-by-id id))
+
+  (get-zettel-by-uid [_this uid]
+    (get @zettels-by-uid uid))
+
+  (delete-zettel [_this id]
+    (when-let [zettel (get @zettels-by-id id)]
+      (let [uid (:zettel/uid zettel)
+            file (io/file base-path (uid->filename uid))]
+        (when (.exists file) (.delete file))
+        (swap! zettels-by-id dissoc id)
+        (swap! zettels-by-uid dissoc uid)
+        (log/debug logger :knowledge :knowledge/zettel-deleted
+                   {:data {:id id :uid uid}})
+        true)))
+
+  (list-zettels [_this]
+    (mapv zettel/zettel-summary (vals @zettels-by-id)))
+
+  (query [_this query-map]
+    (let [all-zettels (vals @zettels-by-id)
+          matching (filter #(matches-query? % query-map) all-zettels)
+          limited (if-let [limit (:limit query-map)]
+                    (take limit matching)
+                    matching)]
+      (vec limited))))
+
+(defn create-file-backed-store
+  "Create a file-backed persistent knowledge store.
+
+   On startup, scans the directory and loads all .edn files into
+   in-memory indices for fast querying. Writes are atomic (temp + rename).
+
+   Options:
+   - :path   - Base directory (default: ~/.miniforge/knowledge)
+   - :logger - Logger instance
+
+   Example:
+     (create-file-backed-store)
+     (create-file-backed-store {:path \"/repo/.miniforge/knowledge\"})"
+  [& [{:keys [path logger]}]]
+  (let [base-path (expand-path (or path "~/.miniforge/knowledge"))
+        _ (ensure-directory base-path)
+        log (or logger (log/create-logger {:min-level :info :output (fn [_])}))
+        initial (scan-directory base-path)]
+    (log/debug log :knowledge :knowledge/store-initialized
+               {:data {:path base-path
+                       :zettel-count (count (:by-id initial))}})
+    (->FileBackedStore
+     base-path
+     (atom (:by-id initial))
+     (atom (:by-uid initial))
+     log)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Query operations
@@ -227,6 +362,36 @@
         combined-query (assoc base-query
                               :tags (distinct (concat manifest-tags context-tags)))]
     (query store combined-query)))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Prompt formatting
+
+(defn format-zettel-for-prompt
+  "Format a single zettel as a compact markdown block for LLM context."
+  [zettel]
+  (str "### " (:zettel/title zettel)
+       (when-let [dewey (:zettel/dewey zettel)]
+         (str " [" dewey "]"))
+       (when (= :learning (:zettel/type zettel))
+         " (learning)")
+       "\n"
+       (:zettel/content zettel)
+       "\n"))
+
+(defn format-for-prompt
+  "Format a collection of zettels as a markdown knowledge block for LLM context.
+
+   Arguments:
+   - zettels - Collection of zettels to format
+   - role    - Agent role keyword (for header)
+
+   Returns markdown string, or nil if no zettels."
+  [zettels role]
+  (when (seq zettels)
+    (str "## Relevant Knowledge for " (name role) "\n\n"
+         "The following rules and learnings apply to your task:\n\n"
+         (apply str (map format-zettel-for-prompt zettels))
+         "\n---\n\n")))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

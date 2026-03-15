@@ -130,7 +130,10 @@
   ([path]
    (try
      (if (.exists (io/file path))
-       (edn/read-string (slurp path))
+       (let [config (edn/read-string (slurp path))]
+         (if (map? config)
+           config
+           {:fleet {:repos []}}))
        {:fleet {:repos []}})
      (catch Exception _
        {:fleet {:repos []}}))))
@@ -235,7 +238,7 @@
                       vec)}))
         (catch Exception e
           (result-failure (str "Failed to parse PR list for " repo ".")
-                          {:repo repo :provider :github :error (.getMessage e)}))))))
+                          {:repo repo :provider :github :parse-error (.getMessage e)}))))))
 
 (defn fetch-open-github-prs
   [repo]
@@ -346,7 +349,7 @@
             :prs filtered}))
         (catch Exception e
           (result-failure (str "Failed to parse merge request list for " repo ".")
-                          {:repo repo :provider :gitlab :error (.getMessage e)}))))))
+                          {:repo repo :provider :gitlab :parse-error (.getMessage e)}))))))
 
 (defn fetch-open-gitlab-mrs
   [repo]
@@ -368,6 +371,115 @@
   (case (repo-provider repo)
     :gitlab (fetch-gitlab-mrs-by-state repo state)
     (fetch-github-prs repo state)))
+
+(defn classify-error
+  "Classify a provider error message into a category keyword."
+  [error-msg]
+  (let [msg (str/lower-case (or error-msg ""))]
+    (cond
+      (or (str/includes? msg "401") (str/includes? msg "403")
+          (str/includes? msg "bad credentials") (str/includes? msg "forbidden"))
+      :auth-failure
+
+      (or (str/includes? msg "rate limit") (str/includes? msg "rate_limit"))
+      :rate-limited
+
+      (or (str/includes? msg "404") (str/includes? msg "not found"))
+      :not-found
+
+      (or (str/includes? msg "econnrefused") (str/includes? msg "connection")
+          (str/includes? msg "timeout") (str/includes? msg "network"))
+      :network-error
+
+      (or (str/includes? msg "parse") (str/includes? msg "json")
+          (str/includes? msg "unexpected"))
+      :parse-error
+
+      :else :unknown)))
+
+(defn error-hint
+  "Return a human-readable hint for a given error category."
+  [category]
+  (case category
+    :auth-failure  "Check your authentication token or repository permissions."
+    :rate-limited  "You have been rate-limited. Wait a few minutes and try again."
+    :not-found     "Repository not found. Check the slug or your access permissions."
+    :network-error "Network error. Check your internet connection."
+    :parse-error   "Failed to parse the provider response."
+    "An unexpected error occurred."))
+
+(defn classify-sync-error
+  "Classify an error message and return a map with :error-category and :hint."
+  [error-msg]
+  (let [category (classify-error error-msg)]
+    {:error-category category
+     :hint           (error-hint category)}))
+
+(defn fetch-repo-with-status
+  "Fetch open PRs for a single repo and return a status map.
+   Returns {:status :ok/:error, :repo str, :prs [...], :pr-count N,
+            :error-category kw, :error str, :hint str}."
+  [repo]
+  (try
+    (let [result (fetch-open-prs repo)]
+      (if (succeeded? result)
+        {:status   :ok
+         :repo     repo
+         :prs      (vec (:prs result))
+         :pr-count (count (:prs result))}
+        (let [err-msg (or (:error result)
+                          (gh-error-message (:out result) (:err result))
+                          "Unknown error")
+              category (classify-error err-msg)]
+          {:status         :error
+           :repo           repo
+           :error          err-msg
+           :error-category category
+           :hint           (error-hint category)})))
+    (catch Exception e
+      (let [err-msg (ex-msg e)
+            category (classify-error err-msg)]
+        {:status         :error
+         :repo           repo
+         :error          err-msg
+         :error-category category
+         :hint           (error-hint category)}))))
+
+(defn build-sync-summary
+  "Build a summary map from a sequence of repo sync statuses."
+  [sync-statuses]
+  (let [total  (count sync-statuses)
+        ok     (count (filter #(= :ok (:status %)) sync-statuses))
+        errors (- total ok)]
+    {:total    total
+     :ok       ok
+     :errors   errors
+     :all-ok?  (zero? errors)
+     :partial? (and (pos? ok) (pos? errors))
+     :none-ok? (and (pos? total) (zero? ok))}))
+
+(defn fetch-fleet-with-status
+  "Fetch open PRs for all configured fleet repos, returning structured results.
+   Returns {:prs [...], :sync-statuses [...], :summary {...}}.
+
+   Options:
+   - :config-path  - Override config file path (for testing)
+   - :parallel?    - Use parallel fetching (default false)"
+  [& [{:keys [config-path parallel?] :or {parallel? false}}]]
+  (let [repos (get-configured-repos (or config-path default-fleet-config-path))]
+    (if (empty? repos)
+      {:prs           []
+       :sync-statuses []
+       :summary       (build-sync-summary [])}
+      (let [map-fn       (if parallel? pmap map)
+            statuses     (vec (map-fn fetch-repo-with-status repos))
+            all-prs      (->> statuses
+                              (filter #(= :ok (:status %)))
+                              (mapcat :prs)
+                              vec)]
+        {:prs           all-prs
+         :sync-statuses statuses
+         :summary       (build-sync-summary statuses)}))))
 
 (defn fetch-all-fleet-prs
   "Fetch open PRs for all configured fleet repositories.

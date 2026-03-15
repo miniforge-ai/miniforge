@@ -24,6 +24,7 @@
    Default gates: [:plan-complete]"
   (:require [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.agent.interface :as agent]
+            [ai.miniforge.knowledge.interface :as knowledge]
             [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -76,8 +77,15 @@
 
 (defn build-planner-task
   "Build the task map to pass to the planner agent."
-  [input explore-result]
-  (let [existing-files (:exploration/files explore-result)]
+  [input explore-result knowledge-store]
+  (let [existing-files (:exploration/files explore-result)
+        kb-zettels (when knowledge-store
+                     (try
+                       (knowledge/inject-knowledge knowledge-store :planner
+                                                    {:tags (or (:tags input) [])})
+                       (catch Exception _e nil)))
+        kb-context (when (seq kb-zettels)
+                     (knowledge/format-for-prompt kb-zettels :planner))]
     (cond-> {:task/id (random-uuid)
              :task/type :plan
              :task/description (:description input)
@@ -85,7 +93,9 @@
              :task/intent (:intent input)
              :task/constraints (:constraints input)}
       (seq existing-files)
-      (assoc :task/existing-files existing-files))))
+      (assoc :task/existing-files existing-files)
+      kb-context
+      (assoc :task/knowledge-context kb-context))))
 
 (defn create-streaming-callback
   "Create a streaming callback for agent output, if event-stream is available."
@@ -100,7 +110,7 @@
   "Invoke the planner agent to generate a plan via LLM."
   [ctx input]
   (let [explore-result (get-in ctx [:execution/phase-results :explore :result :output])
-        task (build-planner-task input explore-result)
+        task (build-planner-task input explore-result (:knowledge-store ctx))
         on-chunk (create-streaming-callback ctx)
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
         planner-agent (agent/create-planner {})]
