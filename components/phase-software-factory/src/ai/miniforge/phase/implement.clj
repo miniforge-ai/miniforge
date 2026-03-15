@@ -27,6 +27,7 @@
             [ai.miniforge.phase.agent-behavior :as agent-beh]
             [ai.miniforge.phase.messages :as messages]
             [ai.miniforge.agent.interface :as agent]
+            [ai.miniforge.context-pack.interface :as context-pack]
             [ai.miniforge.knowledge.interface :as knowledge]
             [ai.miniforge.repo-index.interface :as repo-index]
             [ai.miniforge.response.interface :as response]
@@ -73,14 +74,22 @@
                     [(str "\n... [" skipped " lines omitted] ...\n")]
                     tail)))))))
 
-(defn- build-repo-map-context
-  "Build a repo map for the target repository, falling back gracefully.
-   Returns {:repo-index <RepoIndex> :repo-map-text <string>} or nil."
-  [worktree-path]
+(defn- build-context-pack
+  "Build a context pack for the implement phase, falling back gracefully."
+  [worktree-path files-in-scope]
   (try
     (when-let [index (repo-index/build-index worktree-path)]
-      {:repo-index index
-       :repo-map-text (repo-index/repo-map-text index)})
+      (let [search-index (try (repo-index/build-search-index index)
+                              (catch Exception _ nil))
+            pack (context-pack/build-pack :implement index
+                   {:files-in-scope files-in-scope
+                    :search-index search-index
+                    :search-query (when (seq files-in-scope)
+                                    (first files-in-scope))})]
+        {:repo-index index
+         :context-pack pack
+         :repo-map-text (:repo-map pack)
+         :existing-files (:files pack)}))
     (catch Exception _e
       nil)))
 
@@ -105,12 +114,11 @@
       (get-in input [:intent :scope])))
 
 (defn- resolve-existing-files
-  "Load existing files from cache, repo index, or disk."
-  [ctx repo-ctx worktree-path files-in-scope]
+  "Load existing files from cache, context pack, or disk."
+  [ctx pack-ctx worktree-path files-in-scope]
   (or (get-in ctx [:execution/cached-files])
-      (if (and (:repo-index repo-ctx) (seq files-in-scope))
-        (repo-index/get-files (:repo-index repo-ctx) files-in-scope)
-        (file-ctx/load-files-in-scope worktree-path files-in-scope))))
+      (:existing-files pack-ctx)
+      (file-ctx/load-files-in-scope worktree-path files-in-scope)))
 
 (defn- resolve-review-feedback
   "Extract review feedback from phase results."
@@ -119,13 +127,15 @@
       (get-in ctx [:execution/phase-results :review :result :output :review/issues])))
 
 (defn- assoc-optional-task-fields
-  "Conditionally assoc repo-map, repo-index, and knowledge-context onto a task."
-  [task repo-ctx kb-context]
+  "Conditionally assoc repo-map, repo-index, context-pack, and knowledge-context onto a task."
+  [task pack-ctx kb-context]
   (cond-> task
-    (:repo-map-text repo-ctx)
-    (assoc :task/repo-map (:repo-map-text repo-ctx))
-    (:repo-index repo-ctx)
-    (assoc :task/repo-index (:repo-index repo-ctx))
+    (:repo-map-text pack-ctx)
+    (assoc :task/repo-map (:repo-map-text pack-ctx))
+    (:repo-index pack-ctx)
+    (assoc :task/repo-index (:repo-index pack-ctx))
+    (:context-pack pack-ctx)
+    (assoc :task/context-pack (:context-pack pack-ctx))
     kb-context
     (assoc :task/knowledge-context kb-context)))
 
@@ -137,9 +147,9 @@
         verify-failure (get-in ctx [:execution/phase-results :verify])
         worktree-path (resolve-worktree-path ctx)
         files-in-scope (resolve-files-in-scope input)
-        repo-ctx (or (get-in ctx [:execution/repo-context])
-                     (build-repo-map-context worktree-path))
-        existing-files (resolve-existing-files ctx repo-ctx worktree-path files-in-scope)
+        pack-ctx (or (get-in ctx [:execution/pack-context])
+                     (build-context-pack worktree-path files-in-scope))
+        existing-files (resolve-existing-files ctx pack-ctx worktree-path files-in-scope)
         behavior-addendum (agent-beh/load-and-filter-behaviors
                             :implement {:task {:task/intent (:intent input)}})
         review-feedback (resolve-review-feedback ctx)
@@ -155,7 +165,7 @@
                      :task/plan plan-result
                      :task/existing-files existing-files
                      :task/behavior-addendum behavior-addendum}
-                    repo-ctx kb-context)]
+                    pack-ctx kb-context)]
     (cond-> base-task
       verify-failure
       (assoc :task/verify-failures (build-verify-failures verify-failure))
@@ -194,14 +204,16 @@
         start-time (System/currentTimeMillis)
         implementer-agent (agent/create-implementer {})
         task (build-implement-task ctx)
-        ;; Cache loaded files and repo context for subsequent retries
+        ;; Cache loaded files and context pack for subsequent retries
         ctx (cond-> ctx
               (not (get-in ctx [:execution/cached-files]))
               (assoc-in [:execution/cached-files] (:task/existing-files task))
-              (and (:task/repo-index task) (not (get-in ctx [:execution/repo-context])))
-              (assoc-in [:execution/repo-context]
+              (and (:task/context-pack task) (not (get-in ctx [:execution/pack-context])))
+              (assoc-in [:execution/pack-context]
                         {:repo-index (:task/repo-index task)
-                         :repo-map-text (:task/repo-map task)}))
+                         :context-pack (:task/context-pack task)
+                         :repo-map-text (:task/repo-map task)
+                         :existing-files (:task/existing-files task)}))
         on-chunk (create-streaming-callback ctx)
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
         peer-advice (collect-peer-advice ctx)
