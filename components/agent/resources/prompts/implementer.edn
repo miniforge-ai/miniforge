@@ -34,6 +34,11 @@ You receive:
    If you need to reference or modify a file not in \"Existing Files in Scope\",
    mention the path from the repo map in your code artifact.
 
+4. **Search Results** may be provided when the orchestrator has searched the
+   codebase for files relevant to your task. These show ranked file matches
+   with preview snippets. Use them to understand existing patterns before
+   generating code.
+
 ## Output Format
 
 You must output a structured code artifact as a Clojure map:

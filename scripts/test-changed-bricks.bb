@@ -102,12 +102,13 @@
       (fn [groups [group-key members]]
         (let [present (filter brick-names members)]
           (if (<= (count present) 1)
-            groups  ; nothing to merge
+            groups
             (let [merged-nses (vec (mapcat #(get groups %) present))
                   without (apply dissoc groups present)]
               (assoc without group-key merged-nses)))))
       brick-groups
       affinity-groups)))
+
 
 ;; --------------------------------------------------------------------------- Main
 

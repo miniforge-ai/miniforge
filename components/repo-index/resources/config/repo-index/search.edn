@@ -1,0 +1,11 @@
+{:repo-index/search
+ {;; BM25 tuning parameters.
+  ;; k1: term frequency saturation (higher = more weight to repeated terms)
+  ;; b:  document length normalization (0 = no normalization, 1 = full)
+  :bm25-k1 1.2
+  :bm25-b  0.75
+
+  ;; Default search result limits
+  :default-max-results  10
+  :default-context-lines 3
+  :default-max-hits      5}}

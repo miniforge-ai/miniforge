@@ -99,3 +99,43 @@
   "Create a render accumulator with updated fields."
   [text tokens shown truncated?]
   {:text text :tokens tokens :shown shown :truncated? truncated?})
+
+;------------------------------------------------------------------------------ Layer 0
+;; Search domain maps
+
+(defn ->snippet
+  "Create a search result snippet map."
+  [start-line end-line text]
+  {:start-line start-line
+   :end-line end-line
+   :text text})
+
+(defn ->search-hit
+  "Create a search hit result map."
+  [path score snippets]
+  {:path path
+   :score score
+   :snippets snippets})
+
+(defn ->doc-entry
+  "Create a document entry for the search inverted index."
+  [path token-count term-freqs content]
+  {:path path
+   :token-count token-count
+   :term-freqs term-freqs
+   :content content})
+
+(defn ->inverted-index
+  "Create an empty inverted index accumulator."
+  []
+  {:term->doc-ids {}
+   :doc-freq {}})
+
+(defn ->search-index
+  "Create a SearchIndex map from docs, corpus stats, and inverted index."
+  [doc-map doc-count avg-doc-length term->doc-ids doc-freq]
+  {:docs doc-map
+   :doc-count doc-count
+   :avg-doc-length avg-doc-length
+   :term->doc-ids term->doc-ids
+   :doc-freq doc-freq})

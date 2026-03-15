@@ -1,0 +1,25 @@
+;; Lexical search tool — BM25 keyword search over repo file contents
+;;
+;; Agents invoke this to find files relevant to their task by keyword,
+;; instead of relying on the orchestrator to guess which files are needed.
+
+{:tool/id          :repo/search-lex
+ :tool/type        :function
+ :tool/name        "Repo Lexical Search"
+ :tool/description "Search repository files by keyword using BM25 ranking. Returns ranked file paths with preview snippets showing matching lines in context."
+ :tool/version     "1.0.0"
+
+ :tool/config
+ {:function/namespace "ai.miniforge.repo-index.interface"
+  :function/name      "search-lex"
+  :function/params    {:query        {:type :string  :required true
+                                      :description "Search query — keywords, function names, error messages, etc."}
+                       :max-results  {:type :int     :required false :default 10
+                                      :description "Maximum number of file results to return"}
+                       :context-lines {:type :int    :required false :default 3
+                                       :description "Lines of context around each matching line"}}}
+
+ :tool/capabilities  #{:code/navigation}
+ :tool/requires      #{}
+ :tool/enabled       true
+ :tool/tags          #{:search :lexical :bm25 :repo-index}}

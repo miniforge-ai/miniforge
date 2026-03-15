@@ -28,6 +28,7 @@
             [ai.miniforge.repo-index.factory :as factory]
             [ai.miniforge.repo-index.scanner :as scanner]
             [ai.miniforge.repo-index.repo-map :as repo-map]
+            [ai.miniforge.repo-index.search-lex :as search-lex]
             [ai.miniforge.repo-index.storage :as storage]
             [clojure.java.io :as io]
             [clojure.string :as str]))
@@ -39,6 +40,8 @@
 (def RepoIndex schema/RepoIndex)
 (def RepoMapEntry schema/RepoMapEntry)
 (def RepoMapSlice schema/RepoMapSlice)
+(def SearchHit schema/SearchHit)
+(def Snippet schema/Snippet)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Index building
@@ -85,6 +88,40 @@
   ([index opts] (:text (repo-map index opts))))
 
 ;------------------------------------------------------------------------------ Layer 2
+;; Lexical search
+
+(defn build-search-index
+  "Build a BM25 search index from a repo index.
+
+   Should be called once after build-index; the result is reusable for
+   multiple queries within the same session.
+
+   Arguments:
+   - repo-index - RepoIndex map from build-index
+
+   Returns:
+   - SearchIndex map (opaque, pass to search-lex)"
+  [repo-index]
+  (search-lex/build-search-index repo-index))
+
+(defn search-lex
+  "Search the codebase by keyword using BM25 ranking.
+
+   Arguments:
+   - search-index - SearchIndex from build-search-index
+   - query        - Search query string
+   - opts         - Optional map:
+     - :max-results   - Maximum results (default 10)
+     - :context-lines - Lines of context around hits (default 3)
+     - :max-hits      - Max snippet hits per file (default 5)
+
+   Returns:
+   - Vector of SearchHit maps sorted by relevance:
+     [{:path :score :snippets [{:start-line :end-line :text}]}]"
+  ([search-index query] (search-lex/search search-index query))
+  ([search-index query opts] (search-lex/search search-index query opts)))
+
+;------------------------------------------------------------------------------ Layer 3
 ;; File retrieval
 
 (defn- find-in-index
