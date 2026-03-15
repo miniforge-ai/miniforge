@@ -79,13 +79,8 @@
   "Build the task map to pass to the planner agent."
   [input explore-result knowledge-store]
   (let [existing-files (:exploration/files explore-result)
-        kb-zettels (when knowledge-store
-                     (try
-                       (knowledge/inject-knowledge knowledge-store :planner
-                                                    {:tags (or (:tags input) [])})
-                       (catch Exception _e nil)))
-        kb-context (when (seq kb-zettels)
-                     (knowledge/format-for-prompt kb-zettels :planner))]
+        kb-context (knowledge/inject-and-format
+                    knowledge-store :planner (get input :tags []))]
     (cond-> {:task/id (random-uuid)
              :task/type :plan
              :task/description (:description input)

@@ -224,6 +224,24 @@
    Returns markdown string, or nil if no zettels."
   store/format-for-prompt)
 
+(defn inject-and-format
+  "Inject knowledge for an agent role and format for prompt inclusion.
+   Combines inject-knowledge + format-for-prompt into a single safe call.
+
+   Arguments:
+   - knowledge-store - KnowledgeStore instance (or nil — returns nil)
+   - role            - Agent role keyword (:planner, :implementer, etc.)
+   - tags            - Vector of keyword tags for context filtering
+
+   Returns formatted markdown string, or nil if no store or no matches."
+  [knowledge-store role tags]
+  (when knowledge-store
+    (try
+      (let [zettels (store/inject-knowledge knowledge-store role {:tags tags})]
+        (when (seq zettels)
+          (store/format-for-prompt zettels role)))
+      (catch Exception _e nil))))
+
 ;------------------------------------------------------------------------------ Layer 6
 ;; Learning capture
 
@@ -247,6 +265,54 @@
 (def capture-inner-loop-learning
   "Convenience function to capture learning from repair cycle."
   learning/capture-inner-loop-learning)
+
+(defn capture-repair-learning!
+  "Capture a learning when a repair cycle succeeds.
+   Safe to call unconditionally — no-ops when store is nil or iterations <= 1.
+
+   Arguments:
+   - knowledge-store - KnowledgeStore instance (or nil)
+   - agent-role      - Keyword (:implementer, :reviewer, etc.)
+   - task-title      - Task title string
+   - iterations      - Number of repair iterations"
+  [knowledge-store agent-role task-title iterations]
+  (when (and knowledge-store (> iterations 1))
+    (try
+      (learning/capture-inner-loop-learning
+       knowledge-store
+       {:agent agent-role
+        :title (str "Repair success: " (or task-title (name agent-role)))
+        :content (str "## Repair Context\n\n"
+                      "Task: " task-title "\n"
+                      "Repair iterations: " iterations "\n\n"
+                      "## Resolution\n\n"
+                      "The " (name agent-role) " resolved the issue after "
+                      iterations " attempts.")
+        :tags [:repair :inner-loop (keyword (name agent-role))]})
+      (catch Exception _e nil))))
+
+(defn capture-feedback-learning!
+  "Capture review feedback as a learning.
+   Safe to call unconditionally — no-ops when store is nil or feedback is empty.
+
+   Arguments:
+   - knowledge-store - KnowledgeStore instance (or nil)
+   - agent-role      - Keyword (:reviewer, etc.)
+   - task-title      - Task title string
+   - feedback        - Feedback string or data"
+  [knowledge-store agent-role task-title feedback]
+  (when (and knowledge-store feedback)
+    (try
+      (learning/capture-learning
+       knowledge-store
+       {:type :inner-loop
+        :agent agent-role
+        :title (str "Review feedback: " task-title)
+        :content (str "## Review Feedback\n\n"
+                      (if (string? feedback) feedback (pr-str feedback)))
+        :tags [:review :feedback :inner-loop]
+        :confidence 0.6})
+      (catch Exception _e nil))))
 
 (def capture-meta-loop-learning
   "Convenience function to capture learning from observed patterns."

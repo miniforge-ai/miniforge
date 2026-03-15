@@ -423,27 +423,27 @@
   (try
     (let [result (fetch-open-prs repo)]
       (if (succeeded? result)
-        {:status   :ok
-         :repo     repo
-         :prs      (vec (:prs result))
-         :pr-count (count (:prs result))}
+        (result-success {:status   :ok
+                         :repo     repo
+                         :prs      (vec (:prs result))
+                         :pr-count (count (:prs result))})
         (let [err-msg (or (:error result)
                           (gh-error-message (:out result) (:err result))
                           "Unknown error")
               category (classify-error err-msg)]
-          {:status         :error
-           :repo           repo
-           :error          err-msg
-           :error-category category
-           :hint           (error-hint category)})))
+          (result-failure err-msg
+                          {:status         :error
+                           :repo           repo
+                           :error-category category
+                           :hint           (error-hint category)}))))
     (catch Exception e
       (let [err-msg (ex-msg e)
             category (classify-error err-msg)]
-        {:status         :error
-         :repo           repo
-         :error          err-msg
-         :error-category category
-         :hint           (error-hint category)}))))
+        (result-failure err-msg
+                        {:status         :error
+                         :repo           repo
+                         :error-category category
+                         :hint           (error-hint category)})))))
 
 (defn build-sync-summary
   "Build a summary map from a sequence of repo sync statuses."

@@ -141,21 +141,9 @@
              (< iterations max-iterations))
       (let [feedback (or (get-in result [:output :review/feedback])
                          (get-in result [:output :review/issues]))]
-        ;; Capture review feedback as learning
-        (when (and feedback (:knowledge-store ctx))
-          (try
-            (knowledge/capture-learning
-             (:knowledge-store ctx)
-             {:type :inner-loop
-              :agent :reviewer
-              :title (str "Review feedback: " (get-in ctx [:execution/input :title]))
-              :content (str "## Review Feedback\n\n"
-                            (if (string? feedback)
-                              feedback
-                              (pr-str feedback)))
-              :tags [:review :feedback :inner-loop]
-              :confidence 0.6})
-            (catch Exception _e nil)))
+        (knowledge/capture-feedback-learning!
+         (:knowledge-store ctx) :reviewer
+         (get-in ctx [:execution/input :title]) feedback)
         (-> updated-ctx
             (update-in [:phase :iterations] (fnil inc 1))
             (assoc-in [:phase :review-feedback] feedback)

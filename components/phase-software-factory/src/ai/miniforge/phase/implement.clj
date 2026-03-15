@@ -83,6 +83,15 @@
     (catch Exception _e
       nil)))
 
+(defn- build-verify-failures
+  "Extract lean verify-failure data from phase results."
+  [verify-result]
+  (let [test-results (get-in verify-result [:result :output :metadata :test-results])
+        test-results-lean (dissoc test-results :output)]
+    {:test-results test-results-lean
+     :test-output (truncate-test-output
+                   (get-in verify-result [:result :output :metadata :test-results :output]))}))
+
 (defn build-implement-task
   "Build the task map for the implementer agent from execution context."
   [ctx]
@@ -107,13 +116,8 @@
         review-feedback (or (get-in ctx [:execution/phase-results :review :result :output :review/feedback])
                             (get-in ctx [:execution/phase-results :review :result :output :review/issues]))
         ;; Inject knowledge for implementer
-        kb-zettels (when-let [kb (:knowledge-store ctx)]
-                     (try
-                       (knowledge/inject-knowledge kb :implementer
-                                                    {:tags (or (:tags input) [])})
-                       (catch Exception _e nil)))
-        kb-context (when (seq kb-zettels)
-                     (knowledge/format-for-prompt kb-zettels :implementer))
+        kb-context (knowledge/inject-and-format
+                    (:knowledge-store ctx) :implementer (get input :tags []))
         base-task (cond-> {:task/id (random-uuid)
                            :task/type :implement
                            :task/description (:description input)
@@ -131,14 +135,7 @@
                     (assoc :task/knowledge-context kb-context))]
     (cond-> base-task
       verify-failure
-      (assoc :task/verify-failures
-             (let [test-results (get-in verify-failure [:result :output :metadata :test-results])
-                   ;; Strip raw :output from test-results to avoid sending it twice
-                   ;; (it's already included as :test-output, truncated)
-                   test-results-lean (dissoc test-results :output)]
-               {:test-results test-results-lean
-                :test-output (truncate-test-output
-                               (get-in verify-failure [:result :output :metadata :test-results :output]))}))
+      (assoc :task/verify-failures (build-verify-failures verify-failure))
       review-feedback
       (assoc :task/review-feedback review-feedback))))
 
@@ -254,22 +251,10 @@
                         (update-in [:execution/metrics :cost-usd] (fnil + 0.0) cost-usd)
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
     ;; Capture inner-loop learning when repair succeeded (iterations > 1, completed)
-    (when (and (= :completed phase-status)
-               (> iterations 1)
-               (:knowledge-store ctx))
-      (try
-        (knowledge/capture-inner-loop-learning
-         (:knowledge-store ctx)
-         {:agent :implementer
-          :task-id (get-in ctx [:execution/input :task/id])
-          :title (str "Repair success: " (or (:title (get-in ctx [:execution/input])) "implementation"))
-          :content (str "## Repair Context\n\n"
-                        "Task: " (get-in ctx [:execution/input :title]) "\n"
-                        "Repair iterations: " iterations "\n\n"
-                        "## Resolution\n\n"
-                        "The implementer resolved the issue after " iterations " attempts.")
-          :tags [:repair :inner-loop :implementer]})
-        (catch Exception _e nil)))
+    (when (= :completed phase-status)
+      (knowledge/capture-repair-learning!
+       (:knowledge-store ctx) :implementer
+       (get-in ctx [:execution/input :title]) iterations))
     ;; Warn if result has no output and isn't already-implemented
     (when (and (not= :already-implemented agent-status)
                (nil? (:output result)))

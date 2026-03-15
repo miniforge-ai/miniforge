@@ -295,6 +295,23 @@
             :last-phase-result last-result
             :status (:execution/status ctx)})))
 
+;------------------------------------------------------------------------------ Layer 1.75: Post-execution hooks
+
+(defn promote-mature-learnings!
+  "Query promotable learnings from KB and auto-promote high-confidence ones.
+   No-ops when knowledge-store is nil."
+  [knowledge-store]
+  (try
+    (when knowledge-store
+      (let [list-learnings (requiring-resolve 'ai.miniforge.knowledge.interface/list-learnings)
+            promote-learning (requiring-resolve 'ai.miniforge.knowledge.interface/promote-learning)
+            promotable (list-learnings knowledge-store {:promotable? true})]
+        (doseq [learning promotable]
+          (try
+            (promote-learning knowledge-store (:zettel/id learning) {})
+            (catch Exception _e nil)))))
+    (catch Exception _e nil)))
+
 ;------------------------------------------------------------------------------ Layer 2: Main entry point
 
 (defn run-pipeline
@@ -400,16 +417,7 @@
          (catch Exception _e nil))
 
        ;; Post-workflow: auto-promote high-confidence learnings
-       (try
-         (when-let [kb (:knowledge-store opts)]
-           (let [knowledge-ns (requiring-resolve 'ai.miniforge.knowledge.interface/list-learnings)
-                 promote-fn (requiring-resolve 'ai.miniforge.knowledge.interface/promote-learning)
-                 promotable (knowledge-ns kb {:promotable? true})]
-             (doseq [learning promotable]
-               (try
-                 (promote-fn kb (:zettel/id learning) {})
-                 (catch Exception _e nil)))))
-         (catch Exception _e nil))
+       (promote-mature-learnings! (:knowledge-store opts))
 
        output-ctx))))
 
