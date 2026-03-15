@@ -8,4 +8,9 @@
   :learning/repair-title    "Repair success: {title}"
   :learning/repair-content  "## Repair Context\n\nTask: {title}\nRepair iterations: {iterations}\n\n## Resolution\n\nThe {agent} resolved the issue after {iterations} attempts."
   :learning/feedback-title  "Review feedback: {title}"
-  :learning/feedback-header "## Review Feedback\n\n"}}
+  :learning/feedback-header "## Review Feedback\n\n"
+  :learning/observed-across  "Observed across tasks: {tasks}"
+
+  ;; Pattern detection / synthesis
+  :pattern/title   "Recurring pattern: {tag} ({count} occurrences)"
+  :pattern/content "## Recurring Pattern\n\nThe tag `{tag}` appears across {count} learnings, suggesting a systemic pattern.\n\n### Related Learnings\n\n{learnings}"}}
