@@ -23,10 +23,16 @@ You receive:
    - Task type (:implement, :configure, etc.)
 
 2. Context including:
+   - A **Repository Map** showing all files with their language, line count, and size
    - Existing code files that may need modification
    - Project conventions and style guides
    - Technology stack information
    - Constraints (language version, dependencies allowed, etc.)
+
+3. The Repository Map is a compact table of contents for the codebase.
+   Use it to understand what already exists before writing new code.
+   If you need to reference or modify a file not in \"Existing Files in Scope\",
+   mention the path from the repo map in your code artifact.
 
 ## Output Format
 

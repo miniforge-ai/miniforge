@@ -88,6 +88,8 @@
                        "components/spec-parser/resources"
                        "components/mcp-artifact-server/src"
                        "components/mcp-artifact-server/resources"
+                       "components/repo-index/src"
+                       "components/repo-index/resources"
                        "bases/cli/src"
                        "bases/cli/resources"
                        "bases/lsp-mcp-bridge/src"]
@@ -136,6 +138,7 @@
                      ai.miniforge/pr-sync {:local/root "components/pr-sync"}
                      ai.miniforge/spec-parser {:local/root "components/spec-parser"}
                      ai.miniforge/mcp-artifact-server {:local/root "components/mcp-artifact-server"}
+                     ai.miniforge/repo-index {:local/root "components/repo-index"}
                      ai.miniforge/cli {:local/root "bases/cli"}}}
 
   :test {:extra-paths ["development/test"
@@ -184,6 +187,7 @@
                        "components/pr-sync/test"
                        "components/spec-parser/test"
                        "components/mcp-artifact-server/test"
+                       "components/repo-index/test"
                        "components/task-executor/test"
                        "bases/cli/test"
                        "bases/lsp-mcp-bridge/test"]
@@ -230,6 +234,7 @@
                       ai.miniforge/pr-sync {:local/root "components/pr-sync"}
                       ai.miniforge/spec-parser {:local/root "components/spec-parser"}
                       ai.miniforge/mcp-artifact-server {:local/root "components/mcp-artifact-server"}
+                      ai.miniforge/repo-index {:local/root "components/repo-index"}
                       ai.miniforge/task-executor {:local/root "components/task-executor"}
                       ai.miniforge/lsp-mcp-bridge {:local/root "bases/lsp-mcp-bridge"}}}
 

@@ -98,6 +98,21 @@
           "rs" "rust"
           most-common))))
 
+(defn format-repo-map
+  "Format a repo map for inclusion in the user prompt.
+
+   Arguments:
+   - repo-map-text - Pre-rendered markdown repo map string
+
+   Returns:
+   - Formatted markdown string, or nil if no repo map"
+  [repo-map-text]
+  (when (and repo-map-text (not (str/blank? repo-map-text)))
+    (str "\n\n## Repository Structure\n\n"
+         "Below is a map of the repository. Use it to understand what exists before generating code.\n"
+         "If you need a file not listed in \"Existing Files in Scope\", reference it by path.\n\n"
+         repo-map-text)))
+
 (defn format-existing-files
   "Format existing file contents for inclusion in the user prompt.
 
@@ -290,6 +305,7 @@
               ;; Include existing files and already-implemented escape hatch
               user-prompt (str "Implement the following task:\n\n"
                                task-text
+                               (format-repo-map (:task/repo-map input))
                                (format-existing-files (:task/existing-files input))
                                "\n\nOutput your code as a Clojure map following the format in your system prompt. "
                                "Include full file contents, not placeholders."
