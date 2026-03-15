@@ -82,6 +82,33 @@
          "               (:error summary) \" errors\"))"
          "  (System/exit (if (zero? (+ (:fail summary) (:error summary))) 0 1)))")))
 
+;; --------------------------------------------------------------------------- Affinity groups
+;; Bricks whose tests with-redefs vars from other bricks must run in the
+;; same sequential group.  Key = canonical name, value = set of bricks that
+;; must be coalesced into one group when any of them is changed.
+
+(def affinity-groups
+  "Bricks that share with-redefs targets and must NOT run in parallel.
+   phase-software-factory tests redefine agent/invoke, agent/create-implementer,
+   etc., so they must run in the same sequential group as the agent brick."
+  {"agent+phases" #{"agent" "phase-software-factory"}})
+
+(defn coalesce-by-affinity
+  "Merge brick-groups that belong to the same affinity group into a single
+   sequential group. Returns an updated brick-groups map."
+  [brick-groups]
+  (let [brick-names (set (keys brick-groups))]
+    (reduce
+      (fn [groups [group-key members]]
+        (let [present (filter brick-names members)]
+          (if (<= (count present) 1)
+            groups  ; nothing to merge
+            (let [merged-nses (vec (mapcat #(get groups %) present))
+                  without (apply dissoc groups present)]
+              (assoc without group-key merged-nses)))))
+      brick-groups
+      affinity-groups)))
+
 ;; --------------------------------------------------------------------------- Main
 
 (defn -main []
@@ -90,16 +117,17 @@
         bases (poly-changed-names "changed-bases")
         ;; Group namespaces by brick so we can parallelize across bricks
         ;; but run sequentially within each brick
-        brick-groups (into {}
-                       (concat
-                         (for [c components
-                               :let [nses (find-test-nses "components" c)]
-                               :when (seq nses)]
-                           [c nses])
-                         (for [b bases
-                               :let [nses (find-test-nses "bases" b)]
-                               :when (seq nses)]
-                           [b nses])))
+        brick-groups (-> (into {}
+                           (concat
+                             (for [c components
+                                   :let [nses (find-test-nses "components" c)]
+                                   :when (seq nses)]
+                               [c nses])
+                             (for [b bases
+                                   :let [nses (find-test-nses "bases" b)]
+                                   :when (seq nses)]
+                               [b nses])))
+                         coalesce-by-affinity)
         total-nses (reduce + 0 (map count (vals brick-groups)))]
     (if (empty? brick-groups)
       (println "✓ No changed bricks — nothing to test")

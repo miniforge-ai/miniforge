@@ -1,0 +1,48 @@
+{:repo-index/messages
+ {;; Implementer prompt — repo map section
+  :prompt/repo-map-header
+  "Below is a map of the repository. Use it to understand what exists before generating code.\nIf you need a file not listed in \"Existing Files in Scope\", reference it by path."
+
+  :prompt/repo-map-section-title  "Repository Structure"
+
+  :prompt/existing-files-header
+  "The following files already exist. Review them before generating code."
+
+  :prompt/existing-files-section-title "Existing Files in Scope"
+
+  ;; Implementer prompt — task framing
+  :prompt/implement-task-prefix   "Implement the following task:"
+  :prompt/output-instruction      "Output your code as a Clojure map following the format in your system prompt. Include full file contents, not placeholders."
+  :prompt/already-impl-instruction
+  "If the task is already fully implemented in the existing files, respond with:"
+
+  :prompt/already-impl-template
+  "```clojure\n{:status :already-implemented\n :summary \"Brief explanation of why no changes are needed\"}\n```"
+
+  ;; task->text section headers
+  :prompt/plan-header             "Plan"
+  :prompt/intent-header           "Intent"
+  :prompt/review-feedback-header  "Review Feedback (MUST FIX)"
+  :prompt/review-feedback-intro   "The previous implementation was reviewed and changes were requested. You MUST address ALL of the following issues:"
+  :prompt/test-failures-header    "Test Failures (MUST FIX)"
+  :prompt/test-failures-intro     "The previous implementation failed verification. You MUST fix these failing tests:"
+  :prompt/test-results-label      "Test results:"
+  :prompt/verify-details-label    "Verify failure details:"
+  :prompt/test-output-label       "Test output:"
+
+  ;; Error messages
+  :error/parse-failed             "LLM response could not be parsed as code artifact"
+  :error/llm-failed               "LLM call failed"
+  :error/no-llm-backend           "No LLM backend provided"
+
+  ;; Repo map formatting
+  :repo-map/header-title          "Repository Map"
+  :repo-map/tree-label            "Tree"
+  :repo-map/files-label           "Files"
+  :repo-map/lines-label           "Lines"
+  :repo-map/languages-label       "Languages"
+  :repo-map/table-header          "| Path | Lang | Lines | Size |"
+  :repo-map/table-separator       "|------|------|------:|-----:|"
+
+  ;; Scanner
+  :scanner/omitted-lines          "... [{count} lines omitted] ..."}}

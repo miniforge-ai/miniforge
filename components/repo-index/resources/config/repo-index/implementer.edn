@@ -1,0 +1,7 @@
+{:repo-index/implementer
+ {;; Extension → language name mapping for code artifact language detection.
+  ;; Subset of scanner config; only extensions likely in generated code.
+  :extension->language
+  {"clj" "clojure" "cljs" "clojurescript" "cljc" "clojure"
+   "py" "python" "js" "javascript" "ts" "typescript"
+   "java" "java" "go" "go" "rs" "rust"}}}
