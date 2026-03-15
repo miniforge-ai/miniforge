@@ -20,7 +20,8 @@
   "Generate token-budgeted repo maps from a repo index.
 
    Layer 1 — depends on scanner output (RepoIndex)."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [ai.miniforge.repo-index.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Token estimation
@@ -51,14 +52,91 @@
   (str "| " path " | " (or lang "-") " | " lines " | " size " |"))
 
 (defn- format-group-header
-  "Format a directory group header."
+  "Format a directory group header with table columns."
   [dir file-count total-lines]
   (str "\n### " dir "/ (" file-count " files, " total-lines " lines)\n"
-       "| Path | Lang | Lines | Size |\n"
-       "|------|------|------:|-----:|"))
+       (messages/t :repo-map/table-header) "\n"
+       (messages/t :repo-map/table-separator)))
+
+(defn- to-map-entry
+  "Convert a FileRecord to a RepoMapEntry."
+  [{:keys [path language lines size]}]
+  {:path path :lang language :lines lines :size size})
+
+(defn- format-language-summary
+  "Format language frequency map as a summary string."
+  [languages]
+  (->> (sort-by (comp - val) languages)
+       (map (fn [[k v]] (str k " (" v ")")))
+       (str/join ", ")))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Repo map generation
+;; Budget-aware group rendering
+
+(defn- fit-partial-group
+  "Try to fit as many entries from a group as the budget allows.
+   Returns updated accumulator with :truncated? true."
+  [{:keys [tokens shown] :as acc} group-header group-entries remaining-budget]
+  (let [header-tokens (estimate-tokens group-header)
+        result (reduce
+                 (fn [{:keys [row-tokens] :as pacc} entry]
+                   (let [row (format-entry entry)
+                         rt (+ row-tokens (estimate-tokens row) 1)]
+                     (if (> (+ tokens header-tokens rt) remaining-budget)
+                       (reduced pacc)
+                       (-> pacc
+                           (update :rows conj row)
+                           (assoc :row-tokens rt)))))
+                 {:rows [] :row-tokens 0}
+                 group-entries)]
+    (if (seq (:rows result))
+      {:text (str (:text acc) "\n" group-header "\n" (str/join "\n" (:rows result)))
+       :tokens (+ tokens header-tokens (:row-tokens result))
+       :shown (+ shown (count (:rows result)))
+       :truncated? true}
+      (assoc acc :truncated? true))))
+
+(defn- append-full-group
+  "Append a complete directory group to the accumulator."
+  [{:keys [text tokens shown]} group-text group-tokens group-entry-count]
+  {:text (str text "\n" group-text)
+   :tokens (+ tokens group-tokens)
+   :shown (+ shown group-entry-count)
+   :truncated? false})
+
+(defn- render-directory-group
+  "Render one directory group into the accumulator, respecting the budget."
+  [remaining-budget grouped]
+  (fn [{:keys [tokens truncated?] :as acc} dir]
+    (if truncated?
+      acc
+      (let [group-entries (get grouped dir)
+            group-lines (reduce + 0 (map :lines group-entries))
+            group-header (format-group-header dir (count group-entries) group-lines)
+            group-rows (map format-entry group-entries)
+            group-text (str group-header "\n" (str/join "\n" group-rows))
+            group-tokens (estimate-tokens group-text)
+            new-tokens (+ tokens group-tokens)]
+        (if (> new-tokens remaining-budget)
+          (fit-partial-group acc group-header group-entries remaining-budget)
+          (append-full-group acc group-text group-tokens (count group-entries)))))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Repo map header
+
+(defn- build-header
+  "Build the repo map header with summary statistics."
+  [index entry-count total-entry-lines]
+  (str "## " (messages/t :repo-map/header-title) "\n"
+       (messages/t :repo-map/tree-label) ": " (:tree-sha index) "\n"
+       (messages/t :repo-map/files-label) ": " entry-count " | "
+       (messages/t :repo-map/lines-label) ": " total-entry-lines " | "
+       (messages/t :repo-map/languages-label) ": "
+       (format-language-summary (:languages index))
+       "\n"))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Public API
 
 (def default-token-budget
   "Default token budget for repo map (configurable)."
@@ -81,66 +159,17 @@
          exclude-gen? (get opts :exclude-generated? true)
          files (cond->> (:files index)
                  exclude-gen? (remove :generated?))
-         ;; Sort by directory grouping, then path
          sorted (sort-by :path files)
-         ;; Build entries
-         entries (mapv (fn [{:keys [path language lines size]}]
-                         {:path path
-                          :lang language
-                          :lines lines
-                          :size size})
-                       sorted)
-         ;; Group by top directory
+         entries (mapv to-map-entry sorted)
          grouped (group-by #(top-directory (:path %)) entries)
          dir-order (sort (keys grouped))
-         ;; Build text incrementally, respecting token budget
-         header (str "## Repository Map\n"
-                     "Tree: " (:tree-sha index) "\n"
-                     "Files: " (count entries) " | "
-                     "Lines: " (reduce + 0 (map :lines entries)) " | "
-                     "Languages: " (str/join ", " (map (fn [[k v]] (str k " (" v ")"))
-                                                       (sort-by (comp - val) (:languages index))))
-                     "\n")
+         total-entry-lines (reduce + 0 (map :lines entries))
+         header (build-header index (count entries) total-entry-lines)
          header-tokens (estimate-tokens header)
          remaining-budget (- budget header-tokens)
-         ;; Walk directory groups, accumulating text until budget is reached
-         result (reduce
-                  (fn [{:keys [text tokens shown truncated?] :as acc} dir]
-                    (if truncated?
-                      acc
-                      (let [group-entries (get grouped dir)
-                            group-lines (reduce + 0 (map :lines group-entries))
-                            group-header (format-group-header dir (count group-entries) group-lines)
-                            group-rows (map format-entry group-entries)
-                            group-text (str group-header "\n" (str/join "\n" group-rows))
-                            group-tokens (estimate-tokens group-text)
-                            new-tokens (+ tokens group-tokens)]
-                        (if (> new-tokens remaining-budget)
-                          ;; Over budget — try to fit partial group
-                          (let [partial-entries (reduce
-                                                 (fn [{:keys [row-tokens] :as pacc} entry]
-                                                   (let [row (format-entry entry)
-                                                         rt (+ row-tokens (estimate-tokens row) 1)]
-                                                     (if (> (+ tokens (estimate-tokens group-header) rt) remaining-budget)
-                                                       (reduced pacc)
-                                                       (-> pacc
-                                                           (update :rows conj row)
-                                                           (assoc :row-tokens rt)))))
-                                                 {:rows [] :row-tokens 0}
-                                                 group-entries)]
-                            (if (seq (:rows partial-entries))
-                              {:text (str text "\n" group-header "\n" (str/join "\n" (:rows partial-entries)))
-                               :tokens (+ tokens (estimate-tokens group-header) (:row-tokens partial-entries))
-                               :shown (+ shown (count (:rows partial-entries)))
-                               :truncated? true}
-                              (assoc acc :truncated? true)))
-                          ;; Fits in budget
-                          {:text (str text "\n" group-text)
-                           :tokens new-tokens
-                           :shown (+ shown (count group-entries))
-                           :truncated? false}))))
-                  {:text "" :tokens 0 :shown 0 :truncated? false}
-                  dir-order)
+         result (reduce (render-directory-group remaining-budget grouped)
+                        {:text "" :tokens 0 :shown 0 :truncated? false}
+                        dir-order)
          full-text (str header (:text result))
          total-tokens (+ header-tokens (:tokens result))]
      {:tree-sha (:tree-sha index)
@@ -156,16 +185,14 @@
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (require '[ai.miniforge.repo-index.scanner :as scanner])
-  (def idx (scanner/scan "/Users/chris/Local/miniforge.ai/miniforge"))
+  (def idx (scanner/scan "."))
 
-  ;; Generate with default budget
   (def rmap (generate idx))
   (:token-estimate rmap)
   (:shown-files rmap)
   (:truncated? rmap)
   (println (:text rmap))
 
-  ;; Generate with larger budget
   (def rmap-big (generate idx {:token-budget 2000}))
   (:shown-files rmap-big)
 

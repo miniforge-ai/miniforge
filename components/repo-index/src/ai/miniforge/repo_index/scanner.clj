@@ -79,26 +79,27 @@
    "graphql" "graphql"
    "dockerfile" "dockerfile"})
 
+(def ^:private special-filenames
+  "Filenames that map to languages without extensions."
+  {"dockerfile" "dockerfile"
+   "makefile"   "make"
+   "rakefile"   "ruby"
+   "gemfile"    "ruby"})
+
 (defn- detect-language
-  "Detect language from file path extension."
+  "Detect language from file path extension or special filename."
   [path]
   (let [filename (last (str/split path #"/"))
         lower-filename (str/lower-case filename)]
-    (cond
-      ;; Special filenames
-      (= lower-filename "dockerfile") "dockerfile"
-      (= lower-filename "makefile")   "make"
-      (= lower-filename "rakefile")   "ruby"
-      (= lower-filename "gemfile")    "ruby"
-      ;; Extension-based
-      :else (when-let [ext (last (re-find #"\.(\w+)$" filename))]
-              (get extension->language (str/lower-case ext))))))
+    (or (get special-filenames lower-filename)
+        (when-let [ext (last (re-find #"\.(\w+)$" filename))]
+          (get extension->language (str/lower-case ext))))))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Generated file detection
 
 (def ^:private generated-path-patterns
-  "Glob-like patterns that indicate generated files."
+  "Regex patterns that indicate generated/vendored files."
   [#"^vendor/"
    #"^node_modules/"
    #"^\.git/"
@@ -126,36 +127,35 @@
   (boolean (some #(re-find % path) generated-path-patterns)))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Git tree scanning
+;; Git commands
 
-(defn- run-git-ls-tree
-  "Execute `git ls-tree -r --long HEAD` and return raw output lines.
-   Returns nil on failure."
-  [repo-root]
+(defn- run-git-command
+  "Execute a git command in repo-root and return trimmed stdout, or nil on failure."
+  [repo-root args]
   (try
-    (let [pb (ProcessBuilder. ["git" "ls-tree" "-r" "--long" "HEAD"])
+    (let [pb (ProcessBuilder. ^java.util.List args)
           _ (.directory pb (io/file repo-root))
           proc (.start pb)
           output (slurp (.getInputStream proc))
           exit-code (.waitFor proc)]
       (when (zero? exit-code)
-        (str/split-lines output)))
+        (str/trim output)))
     (catch Exception _
       nil)))
+
+(defn- run-git-ls-tree
+  "Execute `git ls-tree -r --long HEAD` and return raw output lines."
+  [repo-root]
+  (when-let [output (run-git-command repo-root ["git" "ls-tree" "-r" "--long" "HEAD"])]
+    (str/split-lines output)))
 
 (defn- run-git-rev-parse-tree
   "Get the tree SHA for HEAD."
   [repo-root]
-  (try
-    (let [pb (ProcessBuilder. ["git" "rev-parse" "HEAD^{tree}"])
-          _ (.directory pb (io/file repo-root))
-          proc (.start pb)
-          output (str/trim (slurp (.getInputStream proc)))
-          exit-code (.waitFor proc)]
-      (when (zero? exit-code)
-        output))
-    (catch Exception _
-      nil)))
+  (run-git-command repo-root ["git" "rev-parse" "HEAD^{tree}"]))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Parsing
 
 (defn- parse-ls-tree-line
   "Parse a single line of `git ls-tree -r --long` output.
@@ -179,6 +179,27 @@
     (catch Exception _
       0)))
 
+(defn- enrich-blob-entry
+  "Enrich a parsed blob entry with language, line count, and generated? flag."
+  [repo-root {:keys [path blob-sha size]}]
+  {:path path
+   :blob-sha blob-sha
+   :size size
+   :lines (or (count-lines repo-root path) 0)
+   :language (detect-language path)
+   :generated? (generated-by-path? path)})
+
+(defn- compute-language-frequencies
+  "Compute language frequency map from non-generated file entries."
+  [entries]
+  (->> entries
+       (remove :generated?)
+       (keep :language)
+       frequencies))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Public scan
+
 (defn scan
   "Scan a git repository and build a repo index.
 
@@ -192,41 +213,25 @@
     (when-let [ls-tree-lines (run-git-ls-tree repo-root)]
       (let [entries (->> ls-tree-lines
                          (keep parse-ls-tree-line)
-                         (mapv (fn [{:keys [path blob-sha size]}]
-                                 (let [lang (detect-language path)
-                                       lines (count-lines repo-root path)]
-                                   {:path path
-                                    :blob-sha blob-sha
-                                    :size size
-                                    :lines (or lines 0)
-                                    :language lang
-                                    :generated? (generated-by-path? path)}))))
-            non-generated (remove :generated? entries)
-            languages (->> non-generated
-                           (keep :language)
-                           frequencies)]
+                         (mapv (partial enrich-blob-entry repo-root)))]
         {:tree-sha tree-sha
          :repo-root repo-root
          :files entries
          :file-count (count entries)
          :total-lines (reduce + 0 (map :lines entries))
-         :languages languages
+         :languages (compute-language-frequencies entries)
          :indexed-at (java.util.Date.)}))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; Scan the miniforge repo itself
-  (def idx (scan "/Users/chris/Local/miniforge.ai/miniforge"))
+  (def idx (scan "."))
 
   (:tree-sha idx)
   (:file-count idx)
   (:total-lines idx)
   (:languages idx)
 
-  ;; Check first few files
   (take 5 (:files idx))
-
-  ;; Check generated files
   (filter :generated? (:files idx))
 
   :leave-this-here)

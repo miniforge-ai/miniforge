@@ -93,6 +93,29 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; File retrieval
 
+(defn- find-in-index
+  "Find a file record in the index by path. Returns nil if absent."
+  [index file-path]
+  (first (filter #(= (:path %) file-path) (:files index))))
+
+(defn- read-file-limited
+  "Read a file from disk, truncating to max-lines.
+   Returns {:path :content :lines :truncated?} or nil on error."
+  [repo-root file-path max-lines]
+  (try
+    (let [f (io/file repo-root file-path)]
+      (when (.isFile f)
+        (let [all-lines (str/split-lines (slurp f))
+              line-count (count all-lines)
+              truncated? (> line-count max-lines)
+              kept-lines (if truncated? (take max-lines all-lines) all-lines)]
+          {:path file-path
+           :content (str/join "\n" kept-lines)
+           :lines (min line-count max-lines)
+           :truncated? truncated?})))
+    (catch Exception _
+      nil)))
+
 (defn get-file
   "Read a single file's contents from disk, using the index for validation.
 
@@ -106,24 +129,9 @@
    - {:path :content :lines :truncated?} or nil if file not in index"
   ([index file-path] (get-file index file-path {}))
   ([index file-path opts]
-   (let [max-lines (or (:max-lines opts) 500)
-         record (first (filter #(= (:path %) file-path) (:files index)))]
-     (when record
-       (try
-         (let [f (io/file (:repo-root index) file-path)]
-           (when (.isFile f)
-             (let [all-lines (str/split-lines (slurp f))
-                   line-count (count all-lines)
-                   truncated? (> line-count max-lines)
-                   kept-lines (if truncated?
-                                (take max-lines all-lines)
-                                all-lines)]
-               {:path file-path
-                :content (str/join "\n" kept-lines)
-                :lines (min line-count max-lines)
-                :truncated? truncated?})))
-         (catch Exception _
-           nil))))))
+   (let [max-lines (or (:max-lines opts) 500)]
+     (when (find-in-index index file-path)
+       (read-file-limited (:repo-root index) file-path max-lines)))))
 
 (defn get-files
   "Read multiple files from disk, using the index for validation.
@@ -170,21 +178,15 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; Full workflow
-  (def idx (build-index "/Users/chris/Local/miniforge.ai/miniforge"))
+  (def idx (build-index "."))
 
-  ;; Get repo map
   (println (repo-map-text idx))
   (println (repo-map-text idx {:token-budget 1000}))
 
-  ;; Retrieve specific files
   (get-file idx "deps.edn")
   (get-files idx ["deps.edn" "workspace.edn"])
 
-  ;; Find Clojure files
   (count (files-by-language idx "clojure"))
-
-  ;; Find large files
   (find-files idx #(> (:lines %) 200))
 
   :leave-this-here)
