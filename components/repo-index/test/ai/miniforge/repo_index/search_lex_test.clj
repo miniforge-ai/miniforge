@@ -67,10 +67,12 @@
           (is (string? (:text s))))))))
 
 (deftest search-no-results-test
-  (testing "search returns empty vector for nonsense query"
+  (testing "search returns empty vector when no terms match"
     (let [idx (repo-index/build-index ".")
           si (repo-index/build-search-index idx)
-          results (repo-index/search-lex si "xyzzy-nonexistent-gibberish-qwerty")]
+          ;; Generate a query dynamically so it doesn't appear as a literal in any file
+          nonsense (str (random-uuid) (random-uuid))
+          results (repo-index/search-lex si nonsense)]
       (is (vector? results))
       (is (zero? (count results))))))
 

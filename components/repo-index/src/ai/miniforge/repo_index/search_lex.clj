@@ -23,9 +23,28 @@
    single-repo indexing (thousands of files, not millions).
 
    Layer 1 — depends on factory (Layer 0)."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [ai.miniforge.repo-index.factory :as factory]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Configuration (loaded from EDN resource)
+
+(def ^:private config-path "config/repo-index/search.edn")
+
+(defn- load-search-config []
+  (if-let [res (io/resource config-path)]
+    (get (edn/read-string (slurp res)) :repo-index/search {})
+    {}))
+
+(def ^:private search-config (delay (load-search-config)))
+
+(defn- bm25-k1 [] (get @search-config :bm25-k1 1.2))
+(defn- bm25-b  [] (get @search-config :bm25-b 0.75))
+(defn- default-max-results [] (get @search-config :default-max-results 10))
+(defn- default-context-lines [] (get @search-config :default-context-lines 3))
+(defn- default-max-hits [] (get @search-config :default-max-hits 5))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Tokenization
@@ -35,17 +54,6 @@
   [text]
   (->> (str/split (str/lower-case text) #"[^a-z0-9_-]+")
        (remove str/blank?)))
-
-;------------------------------------------------------------------------------ Layer 0
-;; BM25 parameters (config)
-
-(def ^:private bm25-k1
-  "Term frequency saturation parameter."
-  1.2)
-
-(def ^:private bm25-b
-  "Document length normalization parameter."
-  0.75)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Index construction
@@ -64,12 +72,8 @@
   "Build a document entry for the inverted index."
   [repo-root {:keys [path]}]
   (when-let [content (read-file-content repo-root path)]
-    (let [tokens (tokenize content)
-          tf (frequencies tokens)]
-      {:path path
-       :token-count (count tokens)
-       :term-freqs tf
-       :content content})))
+    (let [tokens (tokenize content)]
+      (factory/->doc-entry path (count tokens) (frequencies tokens) content))))
 
 (defn- build-inverted-index
   "Build an inverted index from document entries.
@@ -84,8 +88,15 @@
               (update-in [:doc-freq term] (fnil inc 0))))
         acc
         term-freqs))
-    {:term->doc-ids {} :doc-freq {}}
+    (factory/->inverted-index)
     docs))
+
+(defn- compute-avg-doc-length
+  "Compute average document length from doc entries."
+  [docs]
+  (if (seq docs)
+    (double (/ (reduce + 0 (map :token-count docs)) (count docs)))
+    0.0))
 
 (defn build-search-index
   "Build a BM25 search index from a repo index.
@@ -97,22 +108,14 @@
    - SearchIndex map with inverted index, doc entries, and corpus stats"
   [repo-index]
   (let [repo-root (:repo-root repo-index)
-        files (->> (:files repo-index)
-                   (remove :generated?))
-        docs (->> files
-                  (keep (partial build-doc-entry repo-root))
-                  vec)
-        avg-dl (if (seq docs)
-                 (double (/ (reduce + 0 (map :token-count docs))
-                            (count docs)))
-                 0.0)
+        files (->> (:files repo-index) (remove :generated?))
+        docs (->> files (keep (partial build-doc-entry repo-root)) vec)
         doc-map (into {} (map (fn [d] [(:path d) d]) docs))
         inv-idx (build-inverted-index docs)]
-    {:docs doc-map
-     :doc-count (count docs)
-     :avg-doc-length avg-dl
-     :term->doc-ids (:term->doc-ids inv-idx)
-     :doc-freq (:doc-freq inv-idx)}))
+    (factory/->search-index doc-map (count docs)
+                            (compute-avg-doc-length docs)
+                            (:term->doc-ids inv-idx)
+                            (:doc-freq inv-idx))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; BM25 scoring
@@ -126,11 +129,11 @@
 (defn- bm25-term-score
   "Compute BM25 score for a single term in a single document."
   [tf-in-doc doc-length avg-doc-length idf-value]
-  (let [numerator (* tf-in-doc (+ bm25-k1 1.0))
+  (let [k1 (bm25-k1)
+        b (bm25-b)
+        numerator (* tf-in-doc (+ k1 1.0))
         denominator (+ tf-in-doc
-                       (* bm25-k1
-                          (+ (- 1.0 bm25-b)
-                             (* bm25-b (/ doc-length avg-doc-length)))))]
+                       (* k1 (+ (- 1.0 b) (* b (/ doc-length avg-doc-length)))))]
     (* idf-value (/ numerator denominator))))
 
 (defn- score-document
@@ -152,17 +155,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Context extraction
 
-(def ^:private default-context-lines 3)
-(def ^:private default-max-hits 5)
-
 (defn- extract-snippet
   "Extract a snippet around a matching line with context."
   [lines line-idx context-lines]
   (let [start (max 0 (- line-idx context-lines))
         end (min (count lines) (+ line-idx context-lines 1))]
-    {:start-line (inc start)
-     :end-line (inc (dec end))
-     :text (str/join "\n" (subvec lines start end))}))
+    (factory/->snippet (inc start) (inc (dec end))
+                       (str/join "\n" (subvec lines start end)))))
 
 (defn- find-matching-lines
   "Find line indices containing any query term."
@@ -185,6 +184,30 @@
          (mapv #(extract-snippet lines % context-lines))
          (filterv #(not (str/blank? (:text %)))))))
 
+;------------------------------------------------------------------------------ Layer 1
+;; Candidate collection
+
+(defn- collect-candidates
+  "Collect all document paths matching any query term."
+  [search-index query-terms]
+  (reduce
+    (fn [paths term]
+      (into paths (get (:term->doc-ids search-index) term #{})))
+    #{}
+    query-terms))
+
+(defn- score-and-rank
+  "Score candidate documents and return top results."
+  [search-index candidate-paths query-terms max-results]
+  (->> candidate-paths
+       (map (fn [path]
+              (let [doc (get (:docs search-index) path)]
+                {:path path
+                 :score (score-document doc query-terms search-index)
+                 :doc doc})))
+       (sort-by :score >)
+       (take max-results)))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public search API
 
@@ -195,38 +218,26 @@
    - search-index - SearchIndex from build-search-index
    - query        - Search query string
    - opts         - Optional map:
-     - :max-results   - Maximum results to return (default 10)
-     - :context-lines - Lines of context around hits (default 3)
-     - :max-hits      - Max snippet hits per file (default 5)
+     - :max-results   - Maximum results to return (default from config)
+     - :context-lines - Lines of context around hits (default from config)
+     - :max-hits      - Max snippet hits per file (default from config)
 
    Returns:
    - Vector of SearchHit maps, sorted by BM25 score descending:
      [{:path :score :snippets [{:start-line :end-line :text}]}]"
   ([search-index query] (search search-index query {}))
   ([search-index query opts]
-   (let [max-results (or (:max-results opts) 10)
-         context-lines (or (:context-lines opts) default-context-lines)
-         max-hits (or (:max-hits opts) default-max-hits)
+   (let [max-results (or (:max-results opts) (default-max-results))
+         ctx-lines (or (:context-lines opts) (default-context-lines))
+         max-hits (or (:max-hits opts) (default-max-hits))
          query-terms (tokenize query)
-         candidate-paths (reduce
-                           (fn [paths term]
-                             (into paths (get (:term->doc-ids search-index) term #{})))
-                           #{}
-                           query-terms)
-         scored (->> candidate-paths
-                     (map (fn [path]
-                            (let [doc (get (:docs search-index) path)]
-                              {:path path
-                               :score (score-document doc query-terms search-index)
-                               :doc doc})))
-                     (sort-by :score >)
-                     (take max-results))]
+         candidates (collect-candidates search-index query-terms)
+         scored (score-and-rank search-index candidates query-terms max-results)]
      (->> scored
           (mapv (fn [{:keys [path score doc]}]
                   (factory/->search-hit
                     path score
-                    (build-snippets (:content doc) query-terms
-                                    context-lines max-hits))))))))
+                    (build-snippets (:content doc) query-terms ctx-lines max-hits))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
@@ -242,8 +253,5 @@
   (count results)
   (map :path results)
   (first results)
-
-  (def results2 (search si "BM25 search" {:max-results 5}))
-  (map (juxt :path :score) results2)
 
   :leave-this-here)
