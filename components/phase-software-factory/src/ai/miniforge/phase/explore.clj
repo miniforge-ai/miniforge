@@ -69,11 +69,10 @@
                                                     :max-lines-per-file (:max-lines-per-file config)})
 
         ;; Query KB for relevant knowledge based on spec description
-        kb-results (when-let [kb (:knowledge-store ctx)]
+        spec-desc (or (:description input) (:title input))
+        kb-results (when (and (:knowledge-store ctx) (seq spec-desc))
                      (try
-                       (let [desc (or (:description input) (:title input) "")]
-                         (when (seq desc)
-                           (take 5 (knowledge/search kb desc))))
+                       (take 5 (knowledge/search (:knowledge-store ctx) spec-desc))
                        (catch Exception _e nil)))
 
         ;; Build exploration result

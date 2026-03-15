@@ -415,6 +415,16 @@
     {:error-category category
      :hint           (error-hint category)}))
 
+(defn- repo-sync-error
+  "Build a classified sync error result for a repo."
+  [repo err-msg]
+  (let [category (classify-error err-msg)]
+    (result-failure err-msg
+                    {:status         :error
+                     :repo           repo
+                     :error-category category
+                     :hint           (error-hint category)})))
+
 (defn fetch-repo-with-status
   "Fetch open PRs for a single repo and return a status map.
    Returns {:status :ok/:error, :repo str, :prs [...], :pr-count N,
@@ -427,23 +437,12 @@
                          :repo     repo
                          :prs      (vec (:prs result))
                          :pr-count (count (:prs result))})
-        (let [err-msg (or (:error result)
-                          (gh-error-message (:out result) (:err result))
-                          "Unknown error")
-              category (classify-error err-msg)]
-          (result-failure err-msg
-                          {:status         :error
-                           :repo           repo
-                           :error-category category
-                           :hint           (error-hint category)}))))
+        (repo-sync-error repo
+                         (or (:error result)
+                             (gh-error-message (:out result) (:err result))
+                             "Unknown error"))))
     (catch Exception e
-      (let [err-msg (ex-msg e)
-            category (classify-error err-msg)]
-        (result-failure err-msg
-                        {:status         :error
-                         :repo           repo
-                         :error-category category
-                         :hint           (error-hint category)})))))
+      (repo-sync-error repo (ex-msg e)))))
 
 (defn build-sync-summary
   "Build a summary map from a sequence of repo sync statuses."
