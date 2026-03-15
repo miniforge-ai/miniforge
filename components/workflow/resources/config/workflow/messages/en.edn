@@ -1,0 +1,19 @@
+{:workflow/messages
+ {;; Event publishing warnings
+  :warn/websocket-send       "Warning: Failed to send event via WebSocket: {error}"
+  :warn/publish-event        "Warning: Failed to publish event: {error}"
+  :warn/publish-started      "Warning: Failed to publish workflow-started event: {error}"
+  :warn/publish-completed    "Warning: Failed to publish workflow-completed event: {error}"
+  :warn/publish-phase-started   "Warning: Failed to publish phase-started event: {error}"
+  :warn/publish-phase-completed "Warning: Failed to publish phase-completed event: {error}"
+  :warn/health-check         "Warning: Self-healing health check failed: {error}"
+
+  ;; Workflow status messages
+  :status/failed             "Workflow failed"
+  :status/gate-failed        "Gate validation failed"
+  :status/no-phases          "Workflow has no phases"
+  :status/max-phases         "Exceeded maximum phase count: {max-phases}"
+  :status/paused             "⏸  Workflow paused, waiting for resume..."
+  :status/stopped-dashboard  "⏹  Workflow stopped by dashboard"
+  :status/stopped-control    "Workflow stopped by control plane"
+  :status/empty-completion   "Workflow completed but produced no artifacts or phase results"}}

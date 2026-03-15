@@ -10,6 +10,7 @@
         ai.miniforge/tool {:local/root "../tool"}
         ai.miniforge/policy {:local/root "../policy"}      ; Gate evaluation
         ai.miniforge/heuristic {:local/root "../heuristic"} ; Workflow storage
+        ai.miniforge/knowledge {:local/root "../knowledge"} ; KB for post-execution learning promotion
         ai.miniforge/phase {:local/root "../phase"}        ; Phase interceptors
         ai.miniforge/gate {:local/root "../gate"}          ; Gate interceptors
         babashka/fs {:mvn/version "0.5.22"}

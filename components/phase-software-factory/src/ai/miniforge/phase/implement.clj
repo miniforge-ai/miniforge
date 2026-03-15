@@ -25,8 +25,12 @@
   (:require [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.phase.file-context :as file-ctx]
             [ai.miniforge.phase.agent-behavior :as agent-beh]
+            [ai.miniforge.phase.messages :as messages]
             [ai.miniforge.agent.interface :as agent]
-            [ai.miniforge.response.interface :as response]))
+            [ai.miniforge.knowledge.interface :as knowledge]
+            [ai.miniforge.repo-index.interface :as repo-index]
+            [ai.miniforge.response.interface :as response]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
@@ -46,35 +50,115 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
+(def ^:private max-test-output-lines
+  "Cap raw test output sent to implementer to avoid token waste.
+   Failure summaries are typically in the first/last 30 lines."
+  60)
+
+(defn- truncate-test-output
+  "Truncate test output to max-test-output-lines, keeping head and tail."
+  [output]
+  (when (string? output)
+    (let [lines (str/split-lines output)
+          n (count lines)]
+      (if (<= n max-test-output-lines)
+        output
+        (let [head-n 30
+              tail-n 25
+              head (take head-n lines)
+              tail (take-last tail-n lines)
+              skipped (- n head-n tail-n)]
+          (str/join "\n"
+            (concat head
+                    [(str "\n... [" skipped " lines omitted] ...\n")]
+                    tail)))))))
+
+(defn- build-repo-map-context
+  "Build a repo map for the target repository, falling back gracefully.
+   Returns {:repo-index <RepoIndex> :repo-map-text <string>} or nil."
+  [worktree-path]
+  (try
+    (when-let [index (repo-index/build-index worktree-path)]
+      {:repo-index index
+       :repo-map-text (repo-index/repo-map-text index)})
+    (catch Exception _e
+      nil)))
+
+(defn- build-verify-failures
+  "Extract lean verify-failure data from phase results."
+  [verify-result]
+  (let [test-results (get-in verify-result [:result :output :metadata :test-results])
+        test-results-lean (dissoc test-results :output)]
+    {:test-results test-results-lean
+     :test-output (truncate-test-output
+                   (get-in verify-result [:result :output :metadata :test-results :output]))}))
+
+(defn- resolve-worktree-path
+  "Resolve the worktree path from context, falling back to user.dir."
+  [ctx]
+  (get ctx :worktree-path (System/getProperty "user.dir")))
+
+(defn- resolve-files-in-scope
+  "Resolve files-in-scope from input, checking context and intent."
+  [input]
+  (or (get-in input [:context :files-in-scope])
+      (get-in input [:intent :scope])))
+
+(defn- resolve-existing-files
+  "Load existing files from cache, repo index, or disk."
+  [ctx repo-ctx worktree-path files-in-scope]
+  (or (get-in ctx [:execution/cached-files])
+      (if (and (:repo-index repo-ctx) (seq files-in-scope))
+        (repo-index/get-files (:repo-index repo-ctx) files-in-scope)
+        (file-ctx/load-files-in-scope worktree-path files-in-scope))))
+
+(defn- resolve-review-feedback
+  "Extract review feedback from phase results."
+  [ctx]
+  (or (get-in ctx [:execution/phase-results :review :result :output :review/feedback])
+      (get-in ctx [:execution/phase-results :review :result :output :review/issues])))
+
+(defn- assoc-optional-task-fields
+  "Conditionally assoc repo-map, repo-index, and knowledge-context onto a task."
+  [task repo-ctx kb-context]
+  (cond-> task
+    (:repo-map-text repo-ctx)
+    (assoc :task/repo-map (:repo-map-text repo-ctx))
+    (:repo-index repo-ctx)
+    (assoc :task/repo-index (:repo-index repo-ctx))
+    kb-context
+    (assoc :task/knowledge-context kb-context)))
+
 (defn build-implement-task
   "Build the task map for the implementer agent from execution context."
   [ctx]
   (let [input (get-in ctx [:execution/input])
         plan-result (get-in ctx [:execution/phase-results :plan :result :output])
         verify-failure (get-in ctx [:execution/phase-results :verify])
-        worktree-path (or (:worktree-path ctx) (System/getProperty "user.dir"))
-        files-in-scope (or (get-in input [:context :files-in-scope])
-                           (get-in input [:intent :scope]))
-        existing-files (file-ctx/load-files-in-scope worktree-path files-in-scope)
+        worktree-path (resolve-worktree-path ctx)
+        files-in-scope (resolve-files-in-scope input)
+        repo-ctx (or (get-in ctx [:execution/repo-context])
+                     (build-repo-map-context worktree-path))
+        existing-files (resolve-existing-files ctx repo-ctx worktree-path files-in-scope)
         behavior-addendum (agent-beh/load-and-filter-behaviors
                             :implement {:task {:task/intent (:intent input)}})
-        ;; Read review feedback from phase results (survives :phase clearing between phases)
-        review-feedback (or (get-in ctx [:execution/phase-results :review :result :output :review/feedback])
-                            (get-in ctx [:execution/phase-results :review :result :output :review/issues]))
-        base-task {:task/id (random-uuid)
-                   :task/type :implement
-                   :task/description (:description input)
-                   :task/title (:title input)
-                   :task/intent (:intent input)
-                   :task/constraints (:constraints input)
-                   :task/plan plan-result
-                   :task/existing-files existing-files
-                   :task/behavior-addendum behavior-addendum}]
+        review-feedback (resolve-review-feedback ctx)
+        kb-context (knowledge/inject-and-format
+                    (:knowledge-store ctx) :implementer (get input :tags []))
+        base-task (assoc-optional-task-fields
+                    {:task/id (random-uuid)
+                     :task/type :implement
+                     :task/description (:description input)
+                     :task/title (:title input)
+                     :task/intent (:intent input)
+                     :task/constraints (:constraints input)
+                     :task/plan plan-result
+                     :task/existing-files existing-files
+                     :task/behavior-addendum behavior-addendum}
+                    repo-ctx kb-context)]
     (cond-> base-task
       verify-failure
-      (assoc :task/verify-failures
-             {:test-results (get-in verify-failure [:result :output :metadata :test-results])
-              :test-output (get-in verify-failure [:result :output :metadata :test-results :output])})
+      (assoc :task/verify-failures (build-verify-failures verify-failure))
       review-feedback
       (assoc :task/review-feedback review-feedback))))
 
@@ -110,6 +194,14 @@
         start-time (System/currentTimeMillis)
         implementer-agent (agent/create-implementer {})
         task (build-implement-task ctx)
+        ;; Cache loaded files and repo context for subsequent retries
+        ctx (cond-> ctx
+              (not (get-in ctx [:execution/cached-files]))
+              (assoc-in [:execution/cached-files] (:task/existing-files task))
+              (and (:task/repo-index task) (not (get-in ctx [:execution/repo-context])))
+              (assoc-in [:execution/repo-context]
+                        {:repo-index (:task/repo-index task)
+                         :repo-map-text (:task/repo-map task)}))
         on-chunk (create-streaming-callback ctx)
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
         peer-advice (collect-peer-advice ctx)
@@ -142,6 +234,24 @@
         [(get-in result [:error :message])
          (when (string? (:output result)) (:output result))]))
 
+(defn- extract-error-message
+  "Extract the most relevant error message from an agent result."
+  [result default-msg]
+  (or (not-empty (get-in result [:error :message]))
+      (not-empty (get-in result [:output :error]))
+      default-msg))
+
+(defn- build-phase-error
+  "Build a structured phase error map from an agent result."
+  [result agent-status rate-limited? iterations]
+  {:message (or (extract-error-message result nil)
+                (when (string? (:output result))
+                  (not-empty (:output result)))
+                (messages/t :implement/exhausted-retries))
+   :agent-status agent-status
+   :rate-limited? (boolean rate-limited?)
+   :iterations iterations})
+
 (defn leave-implement
   "Post-processing for implementation phase.
 
@@ -167,7 +277,7 @@
         metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
         cost-usd (or (:cost-usd result)
                      (:cost-usd metrics)
-                     (* (:tokens metrics 0) 0.000015))
+                     (* (get metrics :tokens 0) 0.000015))
         metrics (assoc metrics :cost-usd cost-usd :duration-ms duration-ms)
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
@@ -181,29 +291,25 @@
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :cost-usd] (fnil + 0.0) cost-usd)
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
+    ;; Capture inner-loop learning when repair succeeded (iterations > 1, completed)
+    (when (= :completed phase-status)
+      (knowledge/capture-repair-learning!
+       (:knowledge-store ctx) :implementer
+       (get-in ctx [:execution/input :title]) iterations))
     ;; Warn if result has no output and isn't already-implemented
     (when (and (not= :already-implemented agent-status)
                (nil? (:output result)))
-      (println "WARNING: implement phase result has no :output — artifact may be nil"))
+      (println (messages/t :implement/warn-no-output)))
     ;; Handle retrying, failure, or already-implemented outcomes
     (cond-> updated-ctx
       (registry/retrying? (:phase updated-ctx))
       (-> (update-in [:phase :iterations] (fnil inc 1))
           (assoc-in [:phase :last-error]
-                    (or (not-empty (get-in result [:error :message]))
-                        (not-empty (get-in result [:output :error]))
-                        "Agent returned error status")))
+                    (extract-error-message result (messages/t :implement/agent-error))))
 
       (= :failed phase-status)
       (assoc-in [:phase :error]
-                {:message (or (not-empty (get-in result [:error :message]))
-                              (not-empty (get-in result [:output :error]))
-                              (when (string? (:output result))
-                                (not-empty (:output result)))
-                              "Implementation failed after exhausting retry budget")
-                 :agent-status agent-status
-                 :rate-limited? (boolean rate-limited?)
-                 :iterations iterations})
+                (build-phase-error result agent-status rate-limited? iterations))
 
       (= :already-implemented agent-status)
       (assoc-in [:phase :skipped-reason] :already-implemented))))

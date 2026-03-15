@@ -28,6 +28,7 @@
 
    Pure status mapping lives in ai.miniforge.pr-sync.status."
   (:require
+   [ai.miniforge.pr-sync.messages :as messages]
    [ai.miniforge.pr-sync.status :as status]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -93,7 +94,7 @@
    (result-failure message nil))
   ([message data]
    (merge {:success? false :error (or (some-> message str not-empty)
-                                      "Operation failed with no additional error details.")}
+                                      (messages/t :error/default))}
           data)))
 
 (defn gh-error-message
@@ -130,7 +131,10 @@
   ([path]
    (try
      (if (.exists (io/file path))
-       (edn/read-string (slurp path))
+       (let [config (edn/read-string (slurp path))]
+         (if (map? config)
+           config
+           {:fleet {:repos []}}))
        {:fleet {:repos []}})
      (catch Exception _
        {:fleet {:repos []}}))))
@@ -160,10 +164,10 @@
    (let [repo (normalize-repo-slug repo-slug)]
      (cond
        (str/blank? repo)
-       (result-failure "Repository is required. Use owner/name or gitlab:group/name." {:repo repo})
+       (result-failure (messages/t :repo/required) {:repo repo})
 
        (not (valid-repo-slug? repo))
-       (result-failure "Invalid repository format. Expected owner/name or gitlab:group/name (not a filesystem path or URL)." {:repo repo})
+       (result-failure (messages/t :repo/invalid-format) {:repo repo})
 
        :else
        (let [cfg (load-fleet-config path)
@@ -183,7 +187,7 @@
   ([repo-slug path]
    (let [repo (normalize-repo-slug repo-slug)]
      (if (str/blank? repo)
-       (result-failure "Repository is required." {:repo repo})
+       (result-failure (messages/t :repo/required-short) {:repo repo})
        (let [cfg (load-fleet-config path)
              repos (normalized-repos cfg)
              existed? (some #{repo} repos)
@@ -234,8 +238,8 @@
                       (sort-by :pr/number)
                       vec)}))
         (catch Exception e
-          (result-failure (str "Failed to parse PR list for " repo ".")
-                          {:repo repo :provider :github :error (.getMessage e)}))))))
+          (result-failure (messages/t :error/parse-pr {:repo repo})
+                          {:repo repo :provider :github :parse-error (.getMessage e)}))))))
 
 (defn fetch-open-github-prs
   [repo]
@@ -345,8 +349,8 @@
             :provider :gitlab
             :prs filtered}))
         (catch Exception e
-          (result-failure (str "Failed to parse merge request list for " repo ".")
-                          {:repo repo :provider :gitlab :error (.getMessage e)}))))))
+          (result-failure (messages/t :error/parse-mr {:repo repo})
+                          {:repo repo :provider :gitlab :parse-error (.getMessage e)}))))))
 
 (defn fetch-open-gitlab-mrs
   [repo]
@@ -368,6 +372,122 @@
   (case (repo-provider repo)
     :gitlab (fetch-gitlab-mrs-by-state repo state)
     (fetch-github-prs repo state)))
+
+(defn classify-error
+  "Classify a provider error message into a category keyword."
+  [error-msg]
+  (let [msg (str/lower-case (or error-msg ""))]
+    (cond
+      (or (str/includes? msg "401") (str/includes? msg "403")
+          (str/includes? msg "bad credentials") (str/includes? msg "forbidden"))
+      :auth-failure
+
+      (or (str/includes? msg "rate limit") (str/includes? msg "rate_limit"))
+      :rate-limited
+
+      (or (str/includes? msg "404") (str/includes? msg "not found"))
+      :not-found
+
+      (or (str/includes? msg "econnrefused") (str/includes? msg "connection")
+          (str/includes? msg "timeout") (str/includes? msg "network"))
+      :network-error
+
+      (or (str/includes? msg "parse") (str/includes? msg "json")
+          (str/includes? msg "unexpected"))
+      :parse-error
+
+      :else :unknown)))
+
+;; Error category → message key mapping for localized hints.
+(def ^:private error-hint-keys
+  {:auth-failure  :hint/auth-failure
+   :rate-limited  :hint/rate-limited
+   :not-found     :hint/not-found
+   :network-error :hint/network-error
+   :parse-error   :hint/parse-error
+   :unknown       :hint/unknown})
+
+(defn error-hint
+  "Return a human-readable hint for a given error category."
+  [category]
+  (messages/t (get error-hint-keys category :hint/unknown)))
+
+(defn classify-sync-error
+  "Classify an error message and return a map with :error-category and :hint."
+  [error-msg]
+  (let [category (classify-error error-msg)]
+    {:error-category category
+     :hint           (error-hint category)}))
+
+(defn- repo-sync-error
+  "Build a classified sync error result for a repo."
+  [repo err-msg]
+  (let [category (classify-error err-msg)]
+    (result-failure err-msg
+                    {:status         :error
+                     :repo           repo
+                     :error-category category
+                     :hint           (error-hint category)})))
+
+(defn- extract-sync-error-message
+  "Extract the most relevant error message from a failed sync result."
+  [result]
+  (or (:error result)
+      (gh-error-message (:out result) (:err result))
+      (messages/t :error/unknown)))
+
+(defn fetch-repo-with-status
+  "Fetch open PRs for a single repo and return a status map.
+   Returns {:status :ok/:error, :repo str, :prs [...], :pr-count N,
+            :error-category kw, :error str, :hint str}."
+  [repo]
+  (try
+    (let [result (fetch-open-prs repo)]
+      (if (succeeded? result)
+        (result-success {:status   :ok
+                         :repo     repo
+                         :prs      (vec (:prs result))
+                         :pr-count (count (:prs result))})
+        (repo-sync-error repo
+                         (extract-sync-error-message result))))
+    (catch Exception e
+      (repo-sync-error repo (ex-msg e)))))
+
+(defn build-sync-summary
+  "Build a summary map from a sequence of repo sync statuses."
+  [sync-statuses]
+  (let [total  (count sync-statuses)
+        ok     (count (filter #(= :ok (:status %)) sync-statuses))
+        errors (- total ok)]
+    {:total    total
+     :ok       ok
+     :errors   errors
+     :all-ok?  (zero? errors)
+     :partial? (and (pos? ok) (pos? errors))
+     :none-ok? (and (pos? total) (zero? ok))}))
+
+(defn fetch-fleet-with-status
+  "Fetch open PRs for all configured fleet repos, returning structured results.
+   Returns {:prs [...], :sync-statuses [...], :summary {...}}.
+
+   Options:
+   - :config-path  - Override config file path (for testing)
+   - :parallel?    - Use parallel fetching (default false)"
+  [& [{:keys [config-path parallel?] :or {parallel? false}}]]
+  (let [repos (get-configured-repos (or config-path default-fleet-config-path))]
+    (if (empty? repos)
+      {:prs           []
+       :sync-statuses []
+       :summary       (build-sync-summary [])}
+      (let [map-fn       (if parallel? pmap map)
+            statuses     (vec (map-fn fetch-repo-with-status repos))
+            all-prs      (->> statuses
+                              (filter #(= :ok (:status %)))
+                              (mapcat :prs)
+                              vec)]
+        {:prs           all-prs
+         :sync-statuses statuses
+         :summary       (build-sync-summary statuses)}))))
 
 (defn fetch-all-fleet-prs
   "Fetch open PRs for all configured fleet repositories.

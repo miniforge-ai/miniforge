@@ -24,6 +24,7 @@
    Default gates: [:review-approved :quality-check]"
   (:require [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.agent.interface :as agent]
+            [ai.miniforge.knowledge.interface :as knowledge]
             [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -44,6 +45,31 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
+(defn- create-streaming-callback
+  "Create a streaming callback for agent output if event-stream is available."
+  [ctx phase-name]
+  (when-let [es (:event-stream ctx)]
+    (when-let [create-cb (requiring-resolve
+                           'ai.miniforge.event-stream.interface/create-streaming-callback)]
+      (create-cb es (:execution/id ctx) phase-name
+                 {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)}))))
+
+(defn- build-review-task
+  "Build the task map for the reviewer agent from execution context."
+  [ctx]
+  (let [input (get-in ctx [:execution/input])
+        implement-result (get-in ctx [:execution/phase-results :implement :result :output])
+        verify-result (get-in ctx [:execution/phase-results :verify :result :output])]
+    {:task/id (random-uuid)
+     :task/type :review
+     :task/description (:description input)
+     :task/title (:title input)
+     :task/intent (:intent input)
+     :task/constraints (:constraints input)
+     :task/artifact (or (:artifact implement-result)
+                        implement-result)
+     :task/tests verify-result}))
+
 (defn enter-review
   "Execute review phase.
 
@@ -52,36 +78,11 @@
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
-
-        ;; Create reviewer agent with LLM backend from context
-        llm-backend (:llm-backend ctx)
         reviewer-agent (agent/create-reviewer
-                        (cond-> {}
-                          llm-backend (assoc :llm-backend llm-backend)))
-
-        ;; Build task from workflow input and previous phase results
-        input (get-in ctx [:execution/input])
-        implement-result (get-in ctx [:execution/phase-results :implement :result :output])
-        verify-result (get-in ctx [:execution/phase-results :verify :result :output])
-        task {:task/id (random-uuid)
-              :task/type :review
-              :task/description (:description input)
-              :task/title (:title input)
-              :task/intent (:intent input)
-              :task/constraints (:constraints input)
-              :task/artifact (or (:artifact implement-result)
-                                 implement-result) ; Extract code artifact
-              :task/tests verify-result} ; Test results if available
-
-        ;; Create streaming callback for agent output
-        on-chunk (when-let [es (:event-stream ctx)]
-                   (when-let [create-cb (requiring-resolve
-                                         'ai.miniforge.event-stream.interface/create-streaming-callback)]
-                     (create-cb es (:execution/id ctx) :review
-                                {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)})))
+                        (select-keys ctx [:llm-backend]))
+        task (build-review-task ctx)
+        on-chunk (create-streaming-callback ctx :review)
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
-
-        ;; Invoke agent
         result (try
                  (agent/invoke reviewer-agent task agent-ctx)
                  (catch Exception e
@@ -138,12 +139,15 @@
     ;; Handle changes-requested: redirect to implement with review feedback
     (if (and (= :changes-requested review-decision)
              (< iterations max-iterations))
-      (-> updated-ctx
-          (update-in [:phase :iterations] (fnil inc 1))
-          (assoc-in [:phase :review-feedback]
-                    (or (get-in result [:output :review/feedback])
-                        (get-in result [:output :review/issues])))
-          (assoc-in [:phase :redirect-to] :implement))
+      (let [feedback (or (get-in result [:output :review/feedback])
+                         (get-in result [:output :review/issues]))]
+        (knowledge/capture-feedback-learning!
+         (:knowledge-store ctx) :reviewer
+         (get-in ctx [:execution/input :title]) feedback)
+        (-> updated-ctx
+            (update-in [:phase :iterations] (fnil inc 1))
+            (assoc-in [:phase :review-feedback] feedback)
+            (assoc-in [:phase :redirect-to] :implement)))
       updated-ctx)))
 
 (defn error-review

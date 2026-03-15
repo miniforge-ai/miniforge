@@ -1,0 +1,19 @@
+{:orchestrator/messages
+ {;; Knowledge coordinator
+  :knowledge/header         "## Relevant Knowledge for {role}\n\n"
+  :knowledge/preamble       "The following rules and learnings apply to your task:\n\n"
+  :knowledge/separator      "\n---\n\n"
+
+  ;; Task routing
+  :route/reason             "Task type {task-type} maps to {agent-role}"
+
+  ;; Learning promotion
+  :promote/ready            "High confidence learning ready for promotion"
+  :promote/below-threshold  "Confidence below {threshold} threshold"
+
+  ;; Repair learning
+  :repair/title             "Repair pattern: {error-type}"
+  :repair/content           "## Repair Context\n\nTask: {task}\nAgent: {agent}\nRepair iterations: {iterations}\n\n## Pattern\n\n{fix-description}"
+
+  ;; Workflow lifecycle
+  :workflow/cancelled       "Cancelled by user"}}

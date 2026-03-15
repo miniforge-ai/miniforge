@@ -19,6 +19,7 @@
    [ai.miniforge.knowledge.store :as store]
    [ai.miniforge.knowledge.learning :as learning]
    [ai.miniforge.knowledge.loader :as loader]
+   [ai.miniforge.knowledge.messages :as messages]
    [ai.miniforge.knowledge.trust]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -48,6 +49,21 @@
      (create-store)
      (create-store {:logger my-logger})"
   store/create-store)
+
+(def create-file-backed-store
+  "Create a file-backed persistent knowledge store.
+
+   On startup, scans the directory and loads all .edn files into
+   in-memory indices for fast querying. Writes are atomic (temp + rename).
+
+   Options:
+   - :path   - Base directory (default: ~/.miniforge/knowledge)
+   - :logger - Logger instance
+
+   Example:
+     (create-file-backed-store)
+     (create-file-backed-store {:path \"/repo/.miniforge/knowledge\"})"
+  store/create-file-backed-store)
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Zettel CRUD
@@ -199,6 +215,34 @@
    Returns vector of zettels relevant to the agent."
   store/inject-knowledge)
 
+(def format-for-prompt
+  "Format a collection of zettels as a markdown knowledge block for LLM context.
+
+   Arguments:
+   - zettels - Collection of zettels to format
+   - role    - Agent role keyword (for header)
+
+   Returns markdown string, or nil if no zettels."
+  store/format-for-prompt)
+
+(defn inject-and-format
+  "Inject knowledge for an agent role and format for prompt inclusion.
+   Combines inject-knowledge + format-for-prompt into a single safe call.
+
+   Arguments:
+   - knowledge-store - KnowledgeStore instance (or nil — returns nil)
+   - role            - Agent role keyword (:planner, :implementer, etc.)
+   - tags            - Vector of keyword tags for context filtering
+
+   Returns formatted markdown string, or nil if no store or no matches."
+  [knowledge-store role tags]
+  (when knowledge-store
+    (try
+      (let [zettels (store/inject-knowledge knowledge-store role {:tags tags})]
+        (when (seq zettels)
+          (store/format-for-prompt zettels role)))
+      (catch Exception _e nil))))
+
 ;------------------------------------------------------------------------------ Layer 6
 ;; Learning capture
 
@@ -222,6 +266,53 @@
 (def capture-inner-loop-learning
   "Convenience function to capture learning from repair cycle."
   learning/capture-inner-loop-learning)
+
+(defn capture-repair-learning!
+  "Capture a learning when a repair cycle succeeds.
+   Safe to call unconditionally — no-ops when store is nil or iterations <= 1.
+
+   Arguments:
+   - knowledge-store - KnowledgeStore instance (or nil)
+   - agent-role      - Keyword (:implementer, :reviewer, etc.)
+   - task-title      - Task title string
+   - iterations      - Number of repair iterations"
+  [knowledge-store agent-role task-title iterations]
+  (when (and knowledge-store (> iterations 1))
+    (let [display-title (or task-title (name agent-role))
+          params {:title display-title
+                  :agent (name agent-role)
+                  :iterations iterations}]
+      (try
+        (learning/capture-inner-loop-learning
+         knowledge-store
+         {:agent agent-role
+          :title (messages/t :learning/repair-title params)
+          :content (messages/t :learning/repair-content params)
+          :tags [:repair :inner-loop (keyword (name agent-role))]})
+        (catch Exception _e nil)))))
+
+(defn capture-feedback-learning!
+  "Capture review feedback as a learning.
+   Safe to call unconditionally — no-ops when store is nil or feedback is empty.
+
+   Arguments:
+   - knowledge-store - KnowledgeStore instance (or nil)
+   - agent-role      - Keyword (:reviewer, etc.)
+   - task-title      - Task title string
+   - feedback        - Feedback string or data"
+  [knowledge-store agent-role task-title feedback]
+  (when (and knowledge-store feedback)
+    (try
+      (learning/capture-learning
+       knowledge-store
+       {:type :inner-loop
+        :agent agent-role
+        :title (messages/t :learning/feedback-title {:title task-title})
+        :content (str (messages/t :learning/feedback-header)
+                      (if (string? feedback) feedback (pr-str feedback)))
+        :tags [:review :feedback :inner-loop]
+        :confidence 0.6})
+      (catch Exception _e nil))))
 
 (def capture-meta-loop-learning
   "Convenience function to capture learning from observed patterns."

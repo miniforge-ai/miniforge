@@ -27,7 +27,8 @@
    Agent: nil (no LLM — deterministic file loading)
    Default gates: []"
   (:require [ai.miniforge.phase.registry :as registry]
-            [ai.miniforge.phase.file-context :as file-ctx]))
+            [ai.miniforge.phase.file-context :as file-ctx]
+            [ai.miniforge.knowledge.interface :as knowledge]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
@@ -67,10 +68,19 @@
                                                    {:max-files (:max-files config)
                                                     :max-lines-per-file (:max-lines-per-file config)})
 
+        ;; Query KB for relevant knowledge based on spec description
+        spec-desc (or (:description input) (:title input))
+        kb-results (when (and (:knowledge-store ctx) (seq spec-desc))
+                     (try
+                       (take 5 (knowledge/search (:knowledge-store ctx) spec-desc))
+                       (catch Exception _e nil)))
+
         ;; Build exploration result
-        exploration {:exploration/files (or loaded-files [])
-                     :exploration/file-count (count (or loaded-files []))
-                     :exploration/spec-description (:description input)}]
+        exploration (cond-> {:exploration/files (or loaded-files [])
+                             :exploration/file-count (count (or loaded-files []))
+                             :exploration/spec-description (:description input)}
+                      (seq kb-results)
+                      (assoc :exploration/knowledge kb-results))]
 
     (-> ctx
         (assoc-in [:phase :name] :explore)

@@ -1,0 +1,19 @@
+{:pr-sync/messages
+ {;; Error hints by category
+  :hint/auth-failure   "Check your authentication token or repository permissions."
+  :hint/rate-limited   "You have been rate-limited. Wait a few minutes and try again."
+  :hint/not-found      "Repository not found. Check the slug or your access permissions."
+  :hint/network-error  "Network error. Check your internet connection."
+  :hint/parse-error    "Failed to parse the provider response."
+  :hint/unknown        "An unexpected error occurred."
+
+  ;; Validation messages
+  :repo/required       "Repository is required. Use owner/name or gitlab:group/name."
+  :repo/invalid-format "Invalid repository format. Expected owner/name or gitlab:group/name (not a filesystem path or URL)."
+  :repo/required-short "Repository is required."
+
+  ;; Error messages
+  :error/default       "Operation failed with no additional error details."
+  :error/parse-pr      "Failed to parse PR list for {repo}."
+  :error/parse-mr      "Failed to parse merge request list for {repo}."
+  :error/unknown       "Unknown error"}}

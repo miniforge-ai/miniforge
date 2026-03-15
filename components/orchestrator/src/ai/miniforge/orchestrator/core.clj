@@ -10,6 +10,7 @@
    Workflow execution is delegated to the workflow component.
    Meta-loop management is delegated to the operator component."
   (:require
+   [ai.miniforge.orchestrator.messages :as messages]
    [ai.miniforge.orchestrator.protocol :as proto]
    [ai.miniforge.workflow.interface :as wf]
    [ai.miniforge.knowledge.interface :as knowledge]
@@ -24,13 +25,12 @@
   (let [last-repair (last repair-history)]
     {:agent agent-role
      :task-id (:task/id task)
-     :title (str "Repair pattern: " (name (:error-type last-repair)))
-     :content (str "## Repair Context\n\n"
-                   "Task: " (:task/title task) "\n"
-                   "Agent: " (name agent-role) "\n"
-                   "Repair iterations: " (count repair-history) "\n\n"
-                   "## Pattern\n\n"
-                   (:fix-description last-repair))
+     :title (messages/t :repair/title {:error-type (name (:error-type last-repair))})
+     :content (messages/t :repair/content
+                          {:task (:task/title task)
+                           :agent (name agent-role)
+                           :iterations (count repair-history)
+                           :fix-description (:fix-description last-repair)})
      :tags [:repair :inner-loop (keyword (name agent-role))]
      :confidence 0.7}))
 
@@ -62,7 +62,7 @@
     (let [task-type (:task/type task)
           agent-role (get task-type->agent-role task-type :implementer)]
       {:agent-role agent-role
-       :reason (str "Task type " task-type " maps to " agent-role)}))
+       :reason (messages/t :route/reason {:task-type task-type :agent-role agent-role})}))
 
   (can-handle? [_this task agent-role]
     (let [task-type (:task/type task)
@@ -125,10 +125,10 @@
   "Format injected knowledge as a context block."
   [zettels agent-role]
   (when (seq zettels)
-    (str "## Relevant Knowledge for " (name agent-role) "\n\n"
-         "The following rules and learnings apply to your task:\n\n"
+    (str (messages/t :knowledge/header {:role (name agent-role)})
+         (messages/t :knowledge/preamble)
          (apply str (map format-zettel-for-context zettels))
-         "\n---\n\n")))
+         (messages/t :knowledge/separator))))
 
 (defrecord SimpleKnowledgeCoordinator [knowledge-store config]
   proto/KnowledgeCoordinator
@@ -167,8 +167,8 @@
       {:promote? promotable?
        :confidence confidence
        :reason (if promotable?
-                 "High confidence learning ready for promotion"
-                 "Confidence below 0.85 threshold")})))
+                 (messages/t :promote/ready)
+                 (messages/t :promote/below-threshold {:threshold 0.85}))})))
 
 (defn create-knowledge-coordinator
   "Create a knowledge coordinator."
@@ -207,6 +207,7 @@
                                :router router
                                :budget-manager budget-mgr
                                :knowledge-coordinator knowledge-coord
+                               :knowledge-store (:knowledge-store knowledge-coord)
                                :artifact-store artifact-store})
             result (wf/run-workflow workflow-mgr spec wf-context)]
 
@@ -239,7 +240,7 @@
 
   (cancel-workflow [_this workflow-id]
     (when (wf/get-state workflow-mgr workflow-id)
-      (wf/fail workflow-mgr workflow-id {:type :cancelled :message "Cancelled by user"})
+      (wf/fail workflow-mgr workflow-id {:type :cancelled :message (messages/t :workflow/cancelled)})
       (swap! active-workflows dissoc workflow-id)
       true))
 
