@@ -28,6 +28,7 @@
 
    Pure status mapping lives in ai.miniforge.pr-sync.status."
   (:require
+   [ai.miniforge.pr-sync.messages :as messages]
    [ai.miniforge.pr-sync.status :as status]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -93,7 +94,7 @@
    (result-failure message nil))
   ([message data]
    (merge {:success? false :error (or (some-> message str not-empty)
-                                      "Operation failed with no additional error details.")}
+                                      (messages/t :error/default))}
           data)))
 
 (defn gh-error-message
@@ -163,10 +164,10 @@
    (let [repo (normalize-repo-slug repo-slug)]
      (cond
        (str/blank? repo)
-       (result-failure "Repository is required. Use owner/name or gitlab:group/name." {:repo repo})
+       (result-failure (messages/t :repo/required) {:repo repo})
 
        (not (valid-repo-slug? repo))
-       (result-failure "Invalid repository format. Expected owner/name or gitlab:group/name (not a filesystem path or URL)." {:repo repo})
+       (result-failure (messages/t :repo/invalid-format) {:repo repo})
 
        :else
        (let [cfg (load-fleet-config path)
@@ -186,7 +187,7 @@
   ([repo-slug path]
    (let [repo (normalize-repo-slug repo-slug)]
      (if (str/blank? repo)
-       (result-failure "Repository is required." {:repo repo})
+       (result-failure (messages/t :repo/required-short) {:repo repo})
        (let [cfg (load-fleet-config path)
              repos (normalized-repos cfg)
              existed? (some #{repo} repos)
@@ -237,7 +238,7 @@
                       (sort-by :pr/number)
                       vec)}))
         (catch Exception e
-          (result-failure (str "Failed to parse PR list for " repo ".")
+          (result-failure (messages/t :error/parse-pr {:repo repo})
                           {:repo repo :provider :github :parse-error (.getMessage e)}))))))
 
 (defn fetch-open-github-prs
@@ -348,7 +349,7 @@
             :provider :gitlab
             :prs filtered}))
         (catch Exception e
-          (result-failure (str "Failed to parse merge request list for " repo ".")
+          (result-failure (messages/t :error/parse-mr {:repo repo})
                           {:repo repo :provider :gitlab :parse-error (.getMessage e)}))))))
 
 (defn fetch-open-gitlab-mrs
@@ -397,16 +398,19 @@
 
       :else :unknown)))
 
+;; Error category → message key mapping for localized hints.
+(def ^:private error-hint-keys
+  {:auth-failure  :hint/auth-failure
+   :rate-limited  :hint/rate-limited
+   :not-found     :hint/not-found
+   :network-error :hint/network-error
+   :parse-error   :hint/parse-error
+   :unknown       :hint/unknown})
+
 (defn error-hint
   "Return a human-readable hint for a given error category."
   [category]
-  (case category
-    :auth-failure  "Check your authentication token or repository permissions."
-    :rate-limited  "You have been rate-limited. Wait a few minutes and try again."
-    :not-found     "Repository not found. Check the slug or your access permissions."
-    :network-error "Network error. Check your internet connection."
-    :parse-error   "Failed to parse the provider response."
-    "An unexpected error occurred."))
+  (messages/t (get error-hint-keys category :hint/unknown)))
 
 (defn classify-sync-error
   "Classify an error message and return a map with :error-category and :hint."
@@ -440,7 +444,7 @@
         (repo-sync-error repo
                          (or (:error result)
                              (gh-error-message (:out result) (:err result))
-                             "Unknown error"))))
+                             (messages/t :error/unknown)))))
     (catch Exception e
       (repo-sync-error repo (ex-msg e)))))
 

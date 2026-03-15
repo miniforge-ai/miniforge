@@ -5,6 +5,7 @@
    Layer 1: Query operations
    Layer 2: Agent injection"
   (:require
+   [ai.miniforge.knowledge.messages :as messages]
    [ai.miniforge.knowledge.zettel :as zettel]
    [ai.miniforge.logging.interface :as log]
    [clojure.edn :as edn]
@@ -388,10 +389,10 @@
    Returns markdown string, or nil if no zettels."
   [zettels role]
   (when (seq zettels)
-    (str "## Relevant Knowledge for " (name role) "\n\n"
-         "The following rules and learnings apply to your task:\n\n"
+    (str (messages/t :prompt/header {:role (name role)})
+         (messages/t :prompt/preamble)
          (apply str (map format-zettel-for-prompt zettels))
-         "\n---\n\n")))
+         (messages/t :prompt/separator))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

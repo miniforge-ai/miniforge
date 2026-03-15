@@ -25,6 +25,7 @@
   (:require [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.phase.file-context :as file-ctx]
             [ai.miniforge.phase.agent-behavior :as agent-beh]
+            [ai.miniforge.phase.messages :as messages]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.knowledge.interface :as knowledge]
             [ai.miniforge.repo-index.interface :as repo-index]
@@ -258,7 +259,7 @@
     ;; Warn if result has no output and isn't already-implemented
     (when (and (not= :already-implemented agent-status)
                (nil? (:output result)))
-      (println "WARNING: implement phase result has no :output — artifact may be nil"))
+      (println (messages/t :implement/warn-no-output)))
     ;; Handle retrying, failure, or already-implemented outcomes
     (cond-> updated-ctx
       (registry/retrying? (:phase updated-ctx))
@@ -266,7 +267,7 @@
           (assoc-in [:phase :last-error]
                     (or (not-empty (get-in result [:error :message]))
                         (not-empty (get-in result [:output :error]))
-                        "Agent returned error status")))
+                        (messages/t :implement/agent-error))))
 
       (= :failed phase-status)
       (assoc-in [:phase :error]
@@ -274,7 +275,7 @@
                               (not-empty (get-in result [:output :error]))
                               (when (string? (:output result))
                                 (not-empty (:output result)))
-                              "Implementation failed after exhausting retry budget")
+                              (messages/t :implement/exhausted-retries))
                  :agent-status agent-status
                  :rate-limited? (boolean rate-limited?)
                  :iterations iterations})

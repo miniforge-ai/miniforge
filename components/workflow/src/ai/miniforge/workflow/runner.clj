@@ -29,6 +29,7 @@
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.execution :as exec]
+            [ai.miniforge.workflow.messages :as messages]
             [ai.miniforge.workflow.monitoring :as monitoring]
             [cheshire.core :as json]))
 
@@ -49,7 +50,7 @@
               (when-let [send-fn (ns-resolve http-ns 'send!)]
                 (send-fn ws (json/generate-string event)))))
           (catch Exception e
-            (println "Warning: Failed to send event via WebSocket:" (ex-message e))))
+            (println (messages/t :warn/websocket-send {:error (ex-message e)}))))
 
         ;; In-memory event stream (same process)
         :else
@@ -58,7 +59,7 @@
             (when-let [publish! (ns-resolve es-ns 'publish!)]
               (publish! event-stream event)))))
       (catch Exception e
-        (println "Warning: Failed to publish event:" (ex-message e))))))
+        (println (messages/t :warn/publish-event {:error (ex-message e)}))))))
 
 (defn publish-workflow-started!
   "Publish workflow started event using N3-compliant constructor."
@@ -72,7 +73,7 @@
                                          (select-keys (:execution/workflow context)
                                                       [:workflow/id :workflow/version]))))
       (catch Exception e
-        (println "Warning: Failed to publish workflow-started event:" (ex-message e))))))
+        (println (messages/t :warn/publish-started {:error (ex-message e)}))))))
 
 (defn publish-workflow-completed!
   "Publish workflow completed/failed event using N3-compliant constructor."
@@ -95,13 +96,13 @@
         (if (= status :failed)
           (publish-event! event-stream
                           (workflow-failed event-stream wf-id
-                                          {:message "Workflow failed"
+                                          {:message (messages/t :status/failed)
                                            :errors (:execution/errors context)}))
           (publish-event! event-stream
                           (workflow-completed event-stream wf-id status duration-ms
                                               (when (seq metrics-opts) metrics-opts)))))
       (catch Exception e
-        (println "Warning: Failed to publish workflow-completed event:" (ex-message e))))))
+        (println (messages/t :warn/publish-completed {:error (ex-message e)}))))))
 
 (defn publish-phase-started!
   "Publish phase started event."
@@ -113,7 +114,7 @@
                         (phase-started event-stream (:execution/id context) phase-name
                                        {:phase/index (:execution/phase-index context)})))
       (catch Exception e
-        (println "Warning: Failed to publish phase-started event:" (ex-message e))))))
+        (println (messages/t :warn/publish-phase-started {:error (ex-message e)}))))))
 
 (defn publish-phase-completed!
   "Publish phase completed event."
@@ -128,7 +129,7 @@
           error-info (when-not succeeded?
                        (or (:error result)
                            (when-let [msg (get-in result [:phase/gate-errors])]
-                             {:message "Gate validation failed" :details msg})
+                             {:message (messages/t :status/gate-failed) :details msg})
                            (when-let [msg (:message result)]
                              {:message msg})))
           redirect-to (:redirect-to result)
@@ -147,7 +148,7 @@
                           (phase-completed event-stream (:execution/id context) phase-name
                                            event-data)))
         (catch Exception e
-          (println "Warning: Failed to publish phase-completed event:" (ex-message e)))))))
+          (println (messages/t :warn/publish-phase-completed {:error (ex-message e)})))))))
 
 (defn check-backend-health-at-boundary!
   "Check backend health at phase boundary. Returns switch-result or nil."
@@ -166,7 +167,7 @@
             (publish-event! event-stream (emit-fn sh-ctx switch-result)))
           switch-result)))
     (catch Exception e
-      (println "Warning: Self-healing health check failed:" (ex-message e))
+      (println (messages/t :warn/health-check {:error (ex-message e)}))
       nil)))
 
 ;------------------------------------------------------------------------------ Layer 0: Pipeline helpers
@@ -203,29 +204,31 @@
 (defn handle-empty-pipeline
   "Handle error case of empty pipeline."
   [context]
-  (-> context
-      (update :execution/errors conj
-              {:type :empty-pipeline
-               :message "Workflow has no phases"})
-      (update :execution/response-chain
-              response/add-failure :pipeline
-              :anomalies.workflow/empty-pipeline
-              {:error "Workflow has no phases"})
-      (ctx/transition-to-failed)))
+  (let [msg (messages/t :status/no-phases)]
+    (-> context
+        (update :execution/errors conj
+                {:type :empty-pipeline
+                 :message msg})
+        (update :execution/response-chain
+                response/add-failure :pipeline
+                :anomalies.workflow/empty-pipeline
+                {:error msg})
+        (ctx/transition-to-failed))))
 
 (defn handle-max-phases-exceeded
   "Handle error case of max phases exceeded."
   [context max-phases]
-  (-> context
-      (update :execution/errors conj
-              {:type :max-phases-exceeded
-               :message (str "Exceeded maximum phase count: " max-phases)})
-      (update :execution/response-chain
-              response/add-failure :pipeline
-              :anomalies.workflow/max-phases
-              {:error (str "Exceeded maximum phase count: " max-phases)
-               :max-phases max-phases})
-      (ctx/transition-to-failed)))
+  (let [msg (messages/t :status/max-phases {:max-phases max-phases})]
+    (-> context
+        (update :execution/errors conj
+                {:type :max-phases-exceeded
+                 :message msg})
+        (update :execution/response-chain
+                response/add-failure :pipeline
+                :anomalies.workflow/max-phases
+                {:error msg
+                 :max-phases max-phases})
+        (ctx/transition-to-failed))))
 
 (defn terminal-state?
   "Check if workflow is in terminal state."
@@ -242,14 +245,14 @@
 
         ;; Handle pause - wait until resumed
         _ (when (:paused state)
-            (println "⏸  Workflow paused, waiting for resume...")
+            (println (messages/t :status/paused))
             (while (:paused @control-state)
               (Thread/sleep 1000)))
 
         ;; Check for stop command
         _ (when (:stopped state)
-            (println "⏹  Workflow stopped by dashboard")
-            (throw (ex-info "Workflow stopped by control plane" {:reason :dashboard-stop})))
+            (println (messages/t :status/stopped-dashboard))
+            (throw (ex-info (messages/t :status/stopped-control) {:reason :dashboard-stop})))
 
         ;; Check workflow health via meta-agents
         coordinator (:execution/meta-coordinator context)
@@ -393,7 +396,7 @@
                        (-> final-ctx
                            (update :execution/errors conj
                                    {:type :empty-completion
-                                    :message "Workflow completed but produced no artifacts or phase results"})
+                                    :message (messages/t :status/empty-completion)})
                            (assoc :execution/status :completed-with-warnings))
                        final-ctx)
            ;; Extract output and publish workflow completed event
