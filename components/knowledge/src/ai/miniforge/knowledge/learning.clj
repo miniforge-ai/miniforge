@@ -1,11 +1,13 @@
 (ns ai.miniforge.knowledge.learning
   "Learning capture from agent execution.
    Layer 0: Learning capture
-   Layer 1: Learning promotion (learning -> rule)"
+   Layer 1: Learning promotion (learning -> rule)
+   Layer 2: Pattern detection"
   (:require
    [ai.miniforge.knowledge.schema :as schema]
    [ai.miniforge.knowledge.zettel :as zettel]
    [ai.miniforge.knowledge.store :as store]
+   [ai.miniforge.knowledge.messages :as messages]
    [clojure.string :as str]
    [malli.core :as m]))
 
@@ -114,9 +116,8 @@
                      :tags tags
                      :confidence (or confidence 0.85)
                      :context (when (seq related-tasks)
-                                (str "Observed across tasks: "
-                                     (str/join ", "
-                                                          (map str related-tasks))))}))
+                                (messages/t :learning/observed-across
+                                            {:tasks (str/join ", " (map str related-tasks))}))}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Learning promotion
@@ -165,6 +166,87 @@
         ;; Delete old learning and store as rule
         (store/delete-zettel knowledge-store learning-id)
         (store/put-zettel knowledge-store rule)))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Pattern detection
+
+(defn detect-recurring-patterns
+  "Detect recurring patterns among learnings by grouping on tags.
+
+   Scans all learnings in the store and groups them by their tags.
+   Returns patterns where 3+ learnings share a tag, sorted by frequency.
+
+   Arguments:
+   - knowledge-store - KnowledgeStore instance
+
+   Options:
+   - :min-occurrences - Minimum occurrences to flag (default 3)
+   - :exclude-tags    - Tags to ignore when grouping (default #{:inner-loop :repair})
+
+   Returns vector of maps:
+     {:tag       keyword
+      :count     int
+      :learnings [zettel-summary...]}"
+  [knowledge-store & [{:keys [min-occurrences exclude-tags]
+                        :or {min-occurrences 3
+                             exclude-tags #{:inner-loop :repair}}}]]
+  (let [learnings (store/query knowledge-store {:include-types [:learning]})
+        ;; Build tag -> learnings index
+        tag-groups (reduce
+                    (fn [acc z]
+                      (let [tags (remove exclude-tags (:zettel/tags z []))]
+                        (reduce (fn [a tag]
+                                  (update a tag (fnil conj [])
+                                          {:id (:zettel/id z)
+                                           :uid (:zettel/uid z)
+                                           :title (:zettel/title z)
+                                           :confidence (get-in z [:zettel/source :source/confidence] 0)}))
+                                acc tags)))
+                    {} learnings)
+        ;; Filter to patterns with enough occurrences
+        patterns (->> tag-groups
+                      (filter (fn [[_tag items]] (>= (count items) min-occurrences)))
+                      (map (fn [[tag items]]
+                             {:tag tag
+                              :count (count items)
+                              :learnings items}))
+                      (sort-by :count >)
+                      vec)]
+    patterns))
+
+(defn synthesize-recurring-patterns!
+  "Detect recurring patterns and capture them as meta-loop learnings.
+
+   Scans learnings for recurring tags, creates a meta-loop learning for each
+   new pattern found. Skips patterns that already have a corresponding learning.
+
+   Arguments:
+   - knowledge-store - KnowledgeStore instance
+
+   Returns count of new patterns synthesized."
+  [knowledge-store]
+  (let [patterns (detect-recurring-patterns knowledge-store)
+        new-count (atom 0)]
+    (doseq [{:keys [tag count learnings]} patterns]
+      ;; Check if we already captured a pattern learning for this tag.
+      ;; Search for learnings tagged :pattern that mention this tag name.
+      (let [existing (store/query knowledge-store
+                                  {:include-types [:learning]
+                                   :tags [:pattern]
+                                   :text-search (name tag)})]
+        (when (empty? existing)
+          (let [learning-list (str/join "\n" (map #(str "- " (:title %)) learnings))]
+            (capture-meta-loop-learning
+             knowledge-store
+             {:title (messages/t :pattern/title {:tag (name tag) :count count})
+              :content (messages/t :pattern/content {:tag (name tag)
+                                                     :count count
+                                                     :learnings learning-list})
+              :tags [tag :meta-loop :pattern]
+              :confidence 0.85
+              :related-tasks (mapv :id learnings)})
+            (swap! new-count inc)))))
+    @new-count))
 
 (defn list-learnings
   "List all learnings, optionally filtered.

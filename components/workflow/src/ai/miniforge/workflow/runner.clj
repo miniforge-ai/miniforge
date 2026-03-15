@@ -315,6 +315,16 @@
             (catch Exception _e nil)))))
     (catch Exception _e nil)))
 
+(defn- synthesize-patterns!
+  "Detect recurring patterns in KB learnings and synthesize meta-loop learnings.
+   Delegates to knowledge component. No-ops when knowledge-store is nil."
+  [knowledge-store]
+  (try
+    (when knowledge-store
+      (let [synthesize (requiring-resolve 'ai.miniforge.knowledge.interface/synthesize-recurring-patterns!)]
+        (synthesize knowledge-store)))
+    (catch Exception _e nil)))
+
 (defn- observe-workflow-signal!
   "Feed workflow completion/failure signal to the operator for pattern analysis.
    No-ops when no operator is configured."
@@ -424,6 +434,9 @@
 
        ;; Post-workflow: feed signals to operator for pattern analysis
        (observe-workflow-signal! opts output-ctx)
+
+       ;; Post-workflow: synthesize recurring patterns into meta-loop learnings
+       (synthesize-patterns! (:knowledge-store opts))
 
        ;; Post-workflow: auto-promote high-confidence learnings
        (promote-mature-learnings! (:knowledge-store opts))

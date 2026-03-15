@@ -318,6 +318,27 @@
   "Convenience function to capture learning from observed patterns."
   learning/capture-meta-loop-learning)
 
+(def detect-recurring-patterns
+  "Detect recurring patterns among learnings by grouping on tags.
+
+   Scans all learnings and flags tags with 3+ occurrences.
+
+   Options:
+   - :min-occurrences - Minimum occurrences to flag (default 3)
+   - :exclude-tags    - Tags to ignore (default #{:inner-loop :repair})
+
+   Returns vector of {:tag :count :learnings}."
+  learning/detect-recurring-patterns)
+
+(def synthesize-recurring-patterns!
+  "Detect recurring patterns and capture them as meta-loop learnings.
+
+   Scans learnings for recurring tags, creates a meta-loop learning for each
+   new pattern found. Skips patterns that already have a corresponding learning.
+
+   Returns count of new patterns synthesized."
+  learning/synthesize-recurring-patterns!)
+
 (def promote-learning
   "Promote a validated learning to a rule.
 
