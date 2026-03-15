@@ -19,6 +19,7 @@
    [ai.miniforge.knowledge.store :as store]
    [ai.miniforge.knowledge.learning :as learning]
    [ai.miniforge.knowledge.loader :as loader]
+   [ai.miniforge.knowledge.messages :as messages]
    [ai.miniforge.knowledge.trust]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -277,19 +278,18 @@
    - iterations      - Number of repair iterations"
   [knowledge-store agent-role task-title iterations]
   (when (and knowledge-store (> iterations 1))
-    (try
-      (learning/capture-inner-loop-learning
-       knowledge-store
-       {:agent agent-role
-        :title (str "Repair success: " (or task-title (name agent-role)))
-        :content (str "## Repair Context\n\n"
-                      "Task: " task-title "\n"
-                      "Repair iterations: " iterations "\n\n"
-                      "## Resolution\n\n"
-                      "The " (name agent-role) " resolved the issue after "
-                      iterations " attempts.")
-        :tags [:repair :inner-loop (keyword (name agent-role))]})
-      (catch Exception _e nil))))
+    (let [display-title (or task-title (name agent-role))
+          params {:title display-title
+                  :agent (name agent-role)
+                  :iterations iterations}]
+      (try
+        (learning/capture-inner-loop-learning
+         knowledge-store
+         {:agent agent-role
+          :title (messages/t :learning/repair-title params)
+          :content (messages/t :learning/repair-content params)
+          :tags [:repair :inner-loop (keyword (name agent-role))]})
+        (catch Exception _e nil)))))
 
 (defn capture-feedback-learning!
   "Capture review feedback as a learning.
@@ -307,8 +307,8 @@
        knowledge-store
        {:type :inner-loop
         :agent agent-role
-        :title (str "Review feedback: " task-title)
-        :content (str "## Review Feedback\n\n"
+        :title (messages/t :learning/feedback-title {:title task-title})
+        :content (str (messages/t :learning/feedback-header)
                       (if (string? feedback) feedback (pr-str feedback)))
         :tags [:review :feedback :inner-loop]
         :confidence 0.6})

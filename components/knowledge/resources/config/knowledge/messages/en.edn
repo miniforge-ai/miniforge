@@ -2,4 +2,10 @@
  {;; Prompt formatting
   :prompt/header    "## Relevant Knowledge for {role}\n\n"
   :prompt/preamble  "The following rules and learnings apply to your task:\n\n"
-  :prompt/separator "\n---\n\n"}}
+  :prompt/separator "\n---\n\n"
+
+  ;; Learning capture
+  :learning/repair-title    "Repair success: {title}"
+  :learning/repair-content  "## Repair Context\n\nTask: {title}\nRepair iterations: {iterations}\n\n## Resolution\n\nThe {agent} resolved the issue after {iterations} attempts."
+  :learning/feedback-title  "Review feedback: {title}"
+  :learning/feedback-header "## Review Feedback\n\n"}}
