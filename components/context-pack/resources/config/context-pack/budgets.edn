@@ -1,0 +1,27 @@
+{:context-pack/budgets
+ {;; Token budgets per phase.
+  ;; Controls how much context each agent phase receives.
+  ;; Values are approximate token counts (chars ÷ 4).
+  :phase-budgets
+  {:plan     1200
+   :implement 3500
+   :test     2200
+   :review   2800}
+
+  ;; Default budget when phase is not in the map above.
+  :default-budget 2000
+
+  ;; Repo map token budget (subset of phase budget allocated to the map).
+  :repo-map-budget 500
+
+  ;; Maximum files to include in a context pack.
+  :max-files 25
+
+  ;; Maximum lines per file.
+  :max-lines-per-file 500
+
+  ;; Maximum search results to include.
+  :max-search-results 5
+
+  ;; On budget exhaustion: :fail-closed (stop) or :warn (continue with warning).
+  :exhaustion-policy :fail-closed}}
