@@ -10,16 +10,19 @@
             [ai.miniforge.context-pack.factory :as factory]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Token estimation (matches repo-map convention)
-
-(def ^:private chars-per-token 4)
+;; Token estimation
 
 (defn estimate-tokens
-  "Estimate token count for a string."
+  "Estimate token count for a string (~4 chars per token)."
   [s]
   (if (string? s)
-    (int (Math/ceil (/ (count s) chars-per-token)))
+    (int (Math/ceil (/ (count s) 4)))
     0))
+
+(defn would-exceed?
+  "Check if adding tokens would exceed the pack's budget."
+  [pack additional-tokens]
+  (> (+ (:tokens-used pack) additional-tokens) (:budget pack)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Budget tracking
@@ -40,6 +43,17 @@
           (cond->
             (and over-budget? (= policy :warn))
             (assoc :exhausted? true))))))
+
+(defn try-add-item
+  "Try to add an item to the pack within budget.
+   Returns updated pack if it fits, or pack with :exhausted? true if not."
+  [pack kind path content update-fn]
+  (let [tokens (estimate-tokens content)]
+    (if (would-exceed? pack tokens)
+      (assoc pack :exhausted? true)
+      (-> pack
+          update-fn
+          (add-source kind path content)))))
 
 (defn tokens-remaining
   "Get remaining token budget for a pack."

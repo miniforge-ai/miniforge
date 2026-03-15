@@ -7,29 +7,31 @@
 
    Layer 0 — pure functions, no dependencies.")
 
+(defn- path-not-seen?
+  "Returns true if the file's path has not been seen, marking it as seen."
+  [seen f]
+  (let [path (:path f)]
+    (if (contains? @seen path)
+      false
+      (do (vswap! seen conj path) true))))
+
 (defn dedup-files
   "Deduplicate file entries by path, keeping the first occurrence."
   [files]
   (let [seen (volatile! #{})]
-    (filterv (fn [f]
-               (let [path (:path f)]
-                 (if (contains? @seen path)
-                   false
-                   (do (vswap! seen conj path) true))))
-             files)))
+    (filterv (partial path-not-seen? seen) files)))
 
 (defn dedup-search-results
   "Deduplicate search results by path, keeping the highest-scoring entry."
   [results]
-  (let [by-path (group-by :path results)]
-    (->> (vals by-path)
-         (mapv (fn [group]
-                 (apply max-key :score group)))
-         (sort-by :score >)
-         vec)))
+  (->> (group-by :path results)
+       vals
+       (mapv #(apply max-key :score %))
+       (sort-by :score >)
+       vec))
 
-(defn dedup-files-against-search
-  "Remove files that already appear in search results (avoid double-counting)."
-  [files search-results]
-  (let [search-paths (set (map :path search-results))]
-    (filterv #(not (contains? search-paths (:path %))) files)))
+(defn remove-already-included
+  "Remove search results whose paths are already in the included files."
+  [included-files search-results]
+  (let [included-paths (set (map :path included-files))]
+    (filterv #(not (contains? included-paths (:path %))) search-results)))

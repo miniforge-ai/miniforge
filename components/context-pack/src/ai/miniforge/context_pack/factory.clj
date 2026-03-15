@@ -47,3 +47,14 @@
   {:kind kind
    :path path
    :tokens tokens})
+
+;------------------------------------------------------------------------------ Layer 0
+;; Pack context (used by implement phase to cache context-pack results)
+
+(defn ->pack-context
+  "Create a pack-context map for caching in execution context."
+  [repo-index context-pack]
+  {:repo-index repo-index
+   :context-pack context-pack
+   :repo-map-text (:repo-map context-pack)
+   :existing-files (:files context-pack)})

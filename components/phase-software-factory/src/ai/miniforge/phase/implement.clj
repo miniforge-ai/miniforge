@@ -28,6 +28,7 @@
             [ai.miniforge.phase.messages :as messages]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.context-pack.interface :as context-pack]
+            [ai.miniforge.context-pack.factory :as ctx-factory]
             [ai.miniforge.knowledge.interface :as knowledge]
             [ai.miniforge.repo-index.interface :as repo-index]
             [ai.miniforge.response.interface :as response]
@@ -86,10 +87,7 @@
                     :search-index search-index
                     :search-query (when (seq files-in-scope)
                                     (first files-in-scope))})]
-        {:repo-index index
-         :context-pack pack
-         :repo-map-text (:repo-map pack)
-         :existing-files (:files pack)}))
+        (ctx-factory/->pack-context index pack)))
     (catch Exception _e
       nil)))
 
@@ -210,10 +208,9 @@
               (assoc-in [:execution/cached-files] (:task/existing-files task))
               (and (:task/context-pack task) (not (get-in ctx [:execution/pack-context])))
               (assoc-in [:execution/pack-context]
-                        {:repo-index (:task/repo-index task)
-                         :context-pack (:task/context-pack task)
-                         :repo-map-text (:task/repo-map task)
-                         :existing-files (:task/existing-files task)}))
+                        (ctx-factory/->pack-context
+                          (:task/repo-index task)
+                          (:task/context-pack task))))
         on-chunk (create-streaming-callback ctx)
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
         peer-advice (collect-peer-advice ctx)
