@@ -19,112 +19,53 @@
 (ns ai.miniforge.repo-index.scanner
   "Walk git tree via `git ls-tree` to build a repo index.
 
-   Layer 1 — depends on schema (Layer 0)."
-  (:require [clojure.java.io :as io]
+   Layer 1 — config-driven language detection and generated-file patterns."
+  (:require [ai.miniforge.repo-index.factory :as factory]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Language detection (extension-based)
+;; Configuration (loaded from EDN resource)
 
-(def ^:private extension->language
-  "Map file extensions to language names."
-  {"clj"   "clojure"
-   "cljc"  "clojure"
-   "cljs"  "clojurescript"
-   "edn"   "edn"
-   "py"    "python"
-   "js"    "javascript"
-   "ts"    "typescript"
-   "tsx"   "typescript"
-   "jsx"   "javascript"
-   "java"  "java"
-   "go"    "go"
-   "rs"    "rust"
-   "rb"    "ruby"
-   "sh"    "shell"
-   "bash"  "shell"
-   "zsh"   "shell"
-   "yml"   "yaml"
-   "yaml"  "yaml"
-   "json"  "json"
-   "toml"  "toml"
-   "xml"   "xml"
-   "html"  "html"
-   "css"   "css"
-   "scss"  "scss"
-   "sql"   "sql"
-   "md"    "markdown"
-   "txt"   "text"
-   "cfg"   "config"
-   "ini"   "config"
-   "conf"  "config"
-   "c"     "c"
-   "cpp"   "cpp"
-   "h"     "c"
-   "hpp"   "cpp"
-   "cs"    "csharp"
-   "swift" "swift"
-   "kt"    "kotlin"
-   "scala" "scala"
-   "ex"    "elixir"
-   "exs"   "elixir"
-   "hs"    "haskell"
-   "lua"   "lua"
-   "r"     "r"
-   "R"     "r"
-   "pl"    "perl"
-   "php"   "php"
-   "tf"    "terraform"
-   "proto" "protobuf"
-   "graphql" "graphql"
-   "dockerfile" "dockerfile"})
+(def ^:private config-path "config/repo-index/scanner.edn")
 
-(def ^:private special-filenames
-  "Filenames that map to languages without extensions."
-  {"dockerfile" "dockerfile"
-   "makefile"   "make"
-   "rakefile"   "ruby"
-   "gemfile"    "ruby"})
+(defn- load-scanner-config []
+  (if-let [res (io/resource config-path)]
+    (get (edn/read-string (slurp res)) :repo-index/scanner {})
+    {}))
+
+(def ^:private scanner-config (delay (load-scanner-config)))
+
+(defn- extension->language []
+  (get @scanner-config :extension->language {}))
+
+(defn- special-filenames []
+  (get @scanner-config :special-filenames {}))
+
+(defn- generated-path-patterns []
+  (->> (get @scanner-config :generated-path-patterns [])
+       (mapv re-pattern)))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Language detection
 
 (defn- detect-language
   "Detect language from file path extension or special filename."
   [path]
   (let [filename (last (str/split path #"/"))
         lower-filename (str/lower-case filename)]
-    (or (get special-filenames lower-filename)
+    (or (get (special-filenames) lower-filename)
         (when-let [ext (last (re-find #"\.(\w+)$" filename))]
-          (get extension->language (str/lower-case ext))))))
+          (get (extension->language) (str/lower-case ext))))))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Generated file detection
 
-(def ^:private generated-path-patterns
-  "Regex patterns that indicate generated/vendored files."
-  [#"^vendor/"
-   #"^node_modules/"
-   #"^\.git/"
-   #"^target/"
-   #"^dist/"
-   #"^build/"
-   #"^out/"
-   #"^\.cpcache/"
-   #"^\.clj-kondo/\.cache/"
-   #"\.min\.(js|css)$"
-   #"\.bundle\.(js|css)$"
-   #"\.generated\."
-   #"^package-lock\.json$"
-   #"^yarn\.lock$"
-   #"^pnpm-lock\.yaml$"
-   #"^Cargo\.lock$"
-   #"^go\.sum$"
-   #"^poetry\.lock$"
-   #"^Gemfile\.lock$"
-   #"^composer\.lock$"])
-
 (defn- generated-by-path?
   "Check if a file path matches known generated file patterns."
   [path]
-  (boolean (some #(re-find % path) generated-path-patterns)))
+  (boolean (some #(re-find % path) (generated-path-patterns))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Git commands
@@ -182,12 +123,10 @@
 (defn- enrich-blob-entry
   "Enrich a parsed blob entry with language, line count, and generated? flag."
   [repo-root {:keys [path blob-sha size]}]
-  {:path path
-   :blob-sha blob-sha
-   :size size
-   :lines (or (count-lines repo-root path) 0)
-   :language (detect-language path)
-   :generated? (generated-by-path? path)})
+  (factory/->file-record path blob-sha size
+                         (or (count-lines repo-root path) 0)
+                         (detect-language path)
+                         (generated-by-path? path)))
 
 (defn- compute-language-frequencies
   "Compute language frequency map from non-generated file entries."
@@ -214,13 +153,8 @@
       (let [entries (->> ls-tree-lines
                          (keep parse-ls-tree-line)
                          (mapv (partial enrich-blob-entry repo-root)))]
-        {:tree-sha tree-sha
-         :repo-root repo-root
-         :files entries
-         :file-count (count entries)
-         :total-lines (reduce + 0 (map :lines entries))
-         :languages (compute-language-frequencies entries)
-         :indexed-at (java.util.Date.)}))))
+        (factory/->repo-index tree-sha repo-root entries
+                              (compute-language-frequencies entries))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

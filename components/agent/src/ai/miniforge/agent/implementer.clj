@@ -12,6 +12,7 @@
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
+   [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.edn :as edn]
    [malli.core :as m]))
@@ -43,12 +44,16 @@
   (delay (prompts/load-prompt :implementer)))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Extension → language mapping
+;; Extension → language mapping (loaded from config)
 
-(def ^:private ext->language
-  {"clj" "clojure" "cljs" "clojurescript" "cljc" "clojure"
-   "py" "python" "js" "javascript" "ts" "typescript"
-   "java" "java" "go" "go" "rs" "rust"})
+(def ^:private impl-config-path "config/repo-index/implementer.edn")
+
+(defn- load-ext->language []
+  (if-let [res (io/resource impl-config-path)]
+    (get-in (edn/read-string (slurp res)) [:repo-index/implementer :extension->language] {})
+    {}))
+
+(def ^:private ext->language (delay (load-ext->language)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Validation
@@ -69,21 +74,21 @@
   "Validate a code artifact against the schema and check for issues."
   [artifact]
   (if-not (m/validate CodeArtifact artifact)
-    {:valid? false
-     :errors (schema/explain CodeArtifact artifact)}
+    (schema/invalid (schema/explain CodeArtifact artifact)
+                    {:errors (schema/explain CodeArtifact artifact)})
     (let [files (:code/files artifact)
           empty-creates (find-empty-creates files)
           duplicate-paths (find-duplicate-paths files)]
       (cond
         (seq empty-creates)
-        {:valid? false
-         :errors {:files (str "Empty content for :create files: "
-                              (mapv :path empty-creates))}}
+        (schema/invalid (str "Empty content for :create files: " (mapv :path empty-creates))
+                        {:errors {:files (str "Empty content for :create files: "
+                                              (mapv :path empty-creates))}})
         (seq duplicate-paths)
-        {:valid? false
-         :errors {:files (str "Duplicate file paths: " (keys duplicate-paths))}}
+        (schema/invalid (str "Duplicate file paths: " (keys duplicate-paths))
+                        {:errors {:files (str "Duplicate file paths: " (keys duplicate-paths))}})
         :else
-        {:valid? true :errors nil}))))
+        (schema/valid)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Language detection
@@ -103,7 +108,7 @@
         most-common (when (seq extensions)
                       (key (apply max-key val extensions)))]
     (or (:language context)
-        (get ext->language most-common most-common))))
+        (get @ext->language most-common most-common))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Prompt formatting
@@ -236,7 +241,7 @@
       (->> blocks
            (map-indexed (fn [idx [_full lang content]]
                           {:path (str "generated/file" idx
-                                      (get ext->language lang ".clj"))
+                                      (get @ext->language lang ".clj"))
                            :content (str/trim content)
                            :action :create}))
            vec))))
@@ -245,12 +250,12 @@
 ;; Artifact repair
 
 (defn- ensure-required-fields
-  "Ensure a file entry has path, content, and action."
+  "Ensure a file entry has content and action. Drops entries with no path."
   [f]
-  (cond-> f
-    (not (:path f))    (assoc :path "src/generated/unknown.clj")
-    (nil? (:content f)) (assoc :content "")
-    (not (:action f))  (assoc :action :create)))
+  (when (:path f)
+    (cond-> f
+      (nil? (:content f)) (assoc :content "")
+      (not (:action f))   (assoc :action :create))))
 
 (defn- fill-empty-creates
   "Add placeholder content to empty :create files."
@@ -278,7 +283,7 @@
   (let [repaired (-> artifact
                      (update :code/id #(or % (random-uuid)))
                      (update :code/files #(or % []))
-                     (update :code/files #(mapv ensure-required-fields %))
+                     (update :code/files #(filterv some? (map ensure-required-fields %)))
                      (update :code/files #(mapv fill-empty-creates %))
                      (update :code/files deduplicate-files))]
     {:status :success

@@ -25,6 +25,7 @@
    Layer 1: Index building and repo map
    Layer 2: File retrieval"
   (:require [ai.miniforge.repo-index.schema :as schema]
+            [ai.miniforge.repo-index.factory :as factory]
             [ai.miniforge.repo-index.scanner :as scanner]
             [ai.miniforge.repo-index.repo-map :as repo-map]
             [ai.miniforge.repo-index.storage :as storage]
@@ -79,14 +80,7 @@
   ([index opts] (repo-map/generate index opts)))
 
 (defn repo-map-text
-  "Convenience: generate repo map and return just the rendered text.
-
-   Arguments:
-   - index - RepoIndex map
-   - opts  - Optional map (same as repo-map)
-
-   Returns:
-   - String with rendered repo map markdown"
+  "Convenience: generate repo map and return just the rendered text."
   ([index] (:text (repo-map index)))
   ([index opts] (:text (repo-map index opts))))
 
@@ -100,7 +94,7 @@
 
 (defn- read-file-limited
   "Read a file from disk, truncating to max-lines.
-   Returns {:path :content :lines :truncated?} or nil on error."
+   Returns a file-content map or nil on error."
   [repo-root file-path max-lines]
   (try
     (let [f (io/file repo-root file-path)]
@@ -108,11 +102,11 @@
         (let [all-lines (str/split-lines (slurp f))
               line-count (count all-lines)
               truncated? (> line-count max-lines)
-              kept-lines (if truncated? (take max-lines all-lines) all-lines)]
-          {:path file-path
-           :content (str/join "\n" kept-lines)
-           :lines (min line-count max-lines)
-           :truncated? truncated?})))
+              kept (if truncated? (take max-lines all-lines) all-lines)]
+          (factory/->file-content file-path
+                                  (str/join "\n" kept)
+                                  (min line-count max-lines)
+                                  truncated?))))
     (catch Exception _
       nil)))
 
@@ -134,15 +128,7 @@
        (read-file-limited (:repo-root index) file-path max-lines)))))
 
 (defn get-files
-  "Read multiple files from disk, using the index for validation.
-
-   Arguments:
-   - index      - RepoIndex map
-   - file-paths - Seq of relative file paths
-   - opts       - Optional map (same as get-file)
-
-   Returns:
-   - Vector of file maps, filtered to only files that exist in the index"
+  "Read multiple files from disk, using the index for validation."
   ([index file-paths] (get-files index file-paths {}))
   ([index file-paths opts]
    (->> file-paths
@@ -150,43 +136,23 @@
         (filterv some?))))
 
 (defn find-files
-  "Find files in the index matching a predicate.
-
-   Arguments:
-   - index - RepoIndex map
-   - pred  - Predicate fn taking a FileRecord
-
-   Returns:
-   - Vector of matching FileRecord maps"
+  "Find files in the index matching a predicate."
   [index pred]
   (filterv pred (:files index)))
 
 (defn files-by-language
-  "Get all non-generated files for a given language.
-
-   Arguments:
-   - index    - RepoIndex map
-   - language - Language string (e.g. \"clojure\")
-
-   Returns:
-   - Vector of FileRecord maps"
+  "Get all non-generated files for a given language."
   [index language]
   (find-files index
-    (fn [f]
-      (and (= (:language f) language)
-           (not (:generated? f))))))
+    (fn [f] (and (= (:language f) language) (not (:generated? f))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (def idx (build-index "."))
 
   (println (repo-map-text idx))
-  (println (repo-map-text idx {:token-budget 1000}))
-
   (get-file idx "deps.edn")
   (get-files idx ["deps.edn" "workspace.edn"])
-
   (count (files-by-language idx "clojure"))
-  (find-files idx #(> (:lines %) 200))
 
   :leave-this-here)
