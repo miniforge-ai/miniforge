@@ -228,10 +228,13 @@
   (let [patterns (detect-recurring-patterns knowledge-store)
         new-count (atom 0)]
     (doseq [{:keys [tag count learnings]} patterns]
-      ;; Check if we already captured this pattern
-      (let [existing (store/search knowledge-store
-                                   (messages/t :pattern/title {:tag (name tag) :count count}))]
-        (when (empty? (filter #(= :learning (:zettel/type %)) existing))
+      ;; Check if we already captured a pattern learning for this tag.
+      ;; Search for learnings tagged :pattern that mention this tag name.
+      (let [existing (store/query knowledge-store
+                                  {:include-types [:learning]
+                                   :tags [:pattern]
+                                   :text-search (name tag)})]
+        (when (empty? existing)
           (let [learning-list (str/join "\n" (map #(str "- " (:title %)) learnings))]
             (capture-meta-loop-learning
              knowledge-store
