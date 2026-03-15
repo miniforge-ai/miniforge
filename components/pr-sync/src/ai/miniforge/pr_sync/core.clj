@@ -429,6 +429,13 @@
                      :error-category category
                      :hint           (error-hint category)})))
 
+(defn- extract-sync-error-message
+  "Extract the most relevant error message from a failed sync result."
+  [result]
+  (or (:error result)
+      (gh-error-message (:out result) (:err result))
+      (messages/t :error/unknown)))
+
 (defn fetch-repo-with-status
   "Fetch open PRs for a single repo and return a status map.
    Returns {:status :ok/:error, :repo str, :prs [...], :pr-count N,
@@ -442,9 +449,7 @@
                          :prs      (vec (:prs result))
                          :pr-count (count (:prs result))})
         (repo-sync-error repo
-                         (or (:error result)
-                             (gh-error-message (:out result) (:err result))
-                             (messages/t :error/unknown)))))
+                         (extract-sync-error-message result))))
     (catch Exception e
       (repo-sync-error repo (ex-msg e)))))
 

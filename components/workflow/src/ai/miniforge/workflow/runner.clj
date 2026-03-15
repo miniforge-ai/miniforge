@@ -315,6 +315,24 @@
             (catch Exception _e nil)))))
     (catch Exception _e nil)))
 
+(defn- observe-workflow-signal!
+  "Feed workflow completion/failure signal to the operator for pattern analysis.
+   No-ops when no operator is configured."
+  [opts output-ctx]
+  (try
+    (when-let [operator (:operator opts)]
+      (let [observe-fn (requiring-resolve 'ai.miniforge.operator.interface/observe-signal)
+            signal-type (if (phase/succeeded? output-ctx)
+                          :workflow-complete
+                          :workflow-failed)]
+        (observe-fn operator
+                    {:signal/type signal-type
+                     :workflow-id (:execution/id output-ctx)
+                     :phase-results (:execution/phase-results output-ctx)
+                     :metrics (:execution/metrics output-ctx)
+                     :timestamp (java.time.Instant/now)})))
+    (catch Exception _e nil)))
+
 ;------------------------------------------------------------------------------ Layer 2: Main entry point
 
 (defn run-pipeline
@@ -405,19 +423,7 @@
          (publish-workflow-completed! event-stream output-ctx))
 
        ;; Post-workflow: feed signals to operator for pattern analysis
-       (try
-         (when-let [operator (:operator opts)]
-           (let [observe-fn (requiring-resolve 'ai.miniforge.operator.interface/observe-signal)
-                 signal-type (if (phase/succeeded? output-ctx)
-                               :workflow-complete
-                               :workflow-failed)]
-             (observe-fn operator
-                         {:signal/type signal-type
-                          :workflow-id (:execution/id output-ctx)
-                          :phase-results (:execution/phase-results output-ctx)
-                          :metrics (:execution/metrics output-ctx)
-                          :timestamp (java.time.Instant/now)})))
-         (catch Exception _e nil))
+       (observe-workflow-signal! opts output-ctx)
 
        ;; Post-workflow: auto-promote high-confidence learnings
        (promote-mature-learnings! (:knowledge-store opts))
