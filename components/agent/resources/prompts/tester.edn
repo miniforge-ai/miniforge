@@ -124,7 +124,15 @@ Call `submit_test_artifact` with:
 
 Do NOT output raw EDN text when the MCP tool is available.
 
-If the tool is NOT available, fall back to the EDN output format described above.
+If the tool is NOT available, output your tests as Clojure code blocks in markdown.
+Each code block should contain a complete test namespace starting with `(ns ...`.
+
+## Critical: Do NOT explore the codebase
+
+All context you need is provided in this prompt (the code artifact to test).
+Do NOT use Read, Grep, Bash, or other file exploration tools.
+Generate your tests directly from the code provided. You have a maximum
+of 3 turns — use them to submit your test artifact, not to read files.
 
 Remember: Good tests are documentation. They show how the code is intended to be used
 and what behavior is expected. Make tests readable and maintainable."}
