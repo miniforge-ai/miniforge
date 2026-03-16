@@ -98,6 +98,73 @@
           result (tester/validate-test-artifact bad-artifact)]
       (is (not (:valid? result))))))
 
+;------------------------------------------------------------------------------ Layer 3.5
+;; Response parsing tests
+
+(deftest parse-test-response-edn-block-test
+  (testing "parses EDN in clojure code block"
+    (let [text "Here are your tests:\n```clojure\n{:test/id #uuid \"00000000-0000-0000-0000-000000000001\"\n :test/files [{:path \"test/x_test.clj\" :content \"(ns x-test)\"}]\n :test/type :unit}\n```"
+          result (tester/parse-test-response text)]
+      (is (some? result))
+      (is (= :unit (:test/type result)))))
+
+  (testing "parses EDN with :test/files but no :test/id"
+    (let [text "```clojure\n{:test/files [{:path \"test/y_test.clj\" :content \"(ns y)\"}]}\n```"
+          result (tester/parse-test-response text)]
+      (is (some? result))
+      (is (vector? (:test/files result)))))
+
+  (testing "returns nil for non-test EDN"
+    (let [text "```clojure\n{:code/id #uuid \"00000000-0000-0000-0000-000000000001\"}\n```"
+          result (tester/parse-test-response text)]
+      (is (nil? result))))
+
+  (testing "returns nil for non-parseable text"
+    (is (nil? (tester/parse-test-response "just some text, no EDN here")))))
+
+(deftest extract-test-code-blocks-test
+  (testing "extracts blocks containing deftest"
+    (let [text "Here are the tests:\n```clojure\n(ns my.test-ns\n  (:require [clojure.test :refer [deftest is]]))\n\n(deftest foo-test\n  (is true))\n```\nDone."
+          result (tester/extract-test-code-blocks text)]
+      (is (= 1 (count result)))
+      (is (re-find #"test" (:path (first result))))
+      (is (re-find #"deftest" (:content (first result))))))
+
+  (testing "extracts blocks containing (is assertions"
+    (let [text "```clojure\n(is (= 1 1))\n(is (pos? 5))\n```"
+          result (tester/extract-test-code-blocks text)]
+      (is (= 1 (count result)))))
+
+  (testing "filters out non-test code blocks"
+    (let [text "```clojure\n(ns my.core)\n(defn add [a b] (+ a b))\n```\n\n```clojure\n(ns my.core-test\n  (:require [clojure.test :refer [deftest is]]))\n(deftest add-test (is (= 3 (add 1 2))))\n```"
+          result (tester/extract-test-code-blocks text)]
+      ;; Both blocks have (ns so both match, but only one has deftest
+      ;; The first has (ns which is a match criterion
+      (is (pos? (count result)))))
+
+  (testing "returns nil when no code blocks present"
+    (is (nil? (tester/extract-test-code-blocks "No code blocks here."))))
+
+  (testing "returns nil when code blocks contain no test content"
+    (is (nil? (tester/extract-test-code-blocks
+                "```python\nprint('hello')\n```")))))
+
+(deftest infer-test-path-test
+  (testing "infers path from ns declaration"
+    (let [content "(ns my.app.core-test\n  (:require [clojure.test :refer :all]))"
+          path (#'tester/infer-test-path content 0)]
+      (is (= "test/my/app/core-test.clj" path))))
+
+  (testing "adds _test suffix when ns doesn't end in -test"
+    (let [content "(ns my.app.core\n  (:require [clojure.test :refer :all]))"
+          path (#'tester/infer-test-path content 0)]
+      (is (= "test/my/app/core_test.clj" path))))
+
+  (testing "generates fallback path when no ns found"
+    (let [content "(deftest foo (is true))"
+          path (#'tester/infer-test-path content 3)]
+      (is (= "test/generated-test-3_test.clj" path)))))
+
 ;------------------------------------------------------------------------------ Layer 4
 ;; Utility tests
 

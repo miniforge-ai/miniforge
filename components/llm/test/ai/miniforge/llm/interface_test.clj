@@ -315,7 +315,16 @@
       (let [args (args-fn {:prompt "test" :mcp-config "/tmp/mcp.json"
                            :budget-usd 2.50})]
         (is (some #{"--mcp-config"} args))
-        (is (some #{"/tmp/mcp.json"} args))))))
+        (is (some #{"/tmp/mcp.json"} args))))
+
+    (testing "max-turns flag is included when provided"
+      (let [args (args-fn {:prompt "test" :max-turns 5 :budget-usd 1.0})]
+        (is (some #{"--max-turns"} args))
+        (is (some #{"5"} args))))
+
+    (testing "max-turns flag omitted when not provided"
+      (let [args (args-fn {:prompt "test" :budget-usd 1.0})]
+        (is (not (some #{"--max-turns"} args)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
