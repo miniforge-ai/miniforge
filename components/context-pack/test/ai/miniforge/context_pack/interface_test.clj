@@ -7,13 +7,13 @@
 
 (deftest phase-budget-test
   (testing "returns configured budgets for known phases"
-    (is (= 3500 (ctx/phase-budget :implement)))
-    (is (= 1200 (ctx/phase-budget :plan)))
-    (is (= 2200 (ctx/phase-budget :test)))
-    (is (= 2800 (ctx/phase-budget :review))))
+    (is (= 100000 (ctx/phase-budget :implement)))
+    (is (= 20000 (ctx/phase-budget :plan)))
+    (is (= 60000 (ctx/phase-budget :test)))
+    (is (= 40000 (ctx/phase-budget :review))))
 
   (testing "returns default budget for unknown phases"
-    (is (= 2000 (ctx/phase-budget :unknown)))))
+    (is (= 40000 (ctx/phase-budget :unknown)))))
 
 (deftest build-pack-basic-test
   (testing "builds a context pack with repo map and files"
@@ -23,7 +23,7 @@
                  {:files-in-scope ["workspace.edn" "claude.md"]})]
       (is (some? pack))
       (is (= :implement (:phase pack)))
-      (is (= 3500 (:budget pack)))
+      (is (= 100000 (:budget pack)))
       (is (pos? (:tokens-used pack)))
       (is (string? (:repo-map pack)))
       (is (pos? (count (:files pack))))
@@ -77,7 +77,7 @@
                  {:files-in-scope ["workspace.edn"]})
           a (ctx/audit pack)]
       (is (= :implement (:phase a)))
-      (is (= 3500 (:budget a)))
+      (is (= 100000 (:budget a)))
       (is (pos? (:tokens-used a)))
       (is (pos? (:tokens-remaining a)))
       (is (pos? (:source-count a)))

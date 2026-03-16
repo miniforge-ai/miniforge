@@ -2,26 +2,31 @@
  {;; Token budgets per phase.
   ;; Controls how much context each agent phase receives.
   ;; Values are approximate token counts (chars ÷ 4).
+  ;;
+  ;; Modern LLMs have 200K–1M token context windows. Input tokens are cheap
+  ;; (~$3/M Sonnet, ~$15/M Opus). Exploration turns are expensive (~$0.05-0.10
+  ;; each + 1-2 min wall time). Pre-loading sufficient context eliminates
+  ;; exploration and pays for itself in saved turns.
   :phase-budgets
-  {:plan     1200
-   :implement 3500
-   :test     2200
-   :review   2800}
+  {:plan      20000
+   :implement 100000
+   :test      60000
+   :review    40000}
 
   ;; Default budget when phase is not in the map above.
-  :default-budget 2000
+  :default-budget 40000
 
   ;; Repo map token budget (subset of phase budget allocated to the map).
-  :repo-map-budget 500
+  :repo-map-budget 5000
 
   ;; Maximum files to include in a context pack.
-  :max-files 25
+  :max-files 50
 
   ;; Maximum lines per file.
   :max-lines-per-file 500
 
   ;; Maximum search results to include.
-  :max-search-results 5
+  :max-search-results 15
 
   ;; On budget exhaustion: :fail-closed (stop) or :warn (continue with warning).
   :exhaustion-policy :fail-closed}}
