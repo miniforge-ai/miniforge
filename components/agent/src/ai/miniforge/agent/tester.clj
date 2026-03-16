@@ -124,32 +124,59 @@
       (str/join "\n\n" file-texts))
     (str code-artifact)))
 
+(defn- try-parse-edn-block
+  "Try to extract a test artifact EDN map from a fenced code block."
+  [text]
+  (when-let [match (re-find #"```(?:clojure|edn)?\s*\n(\{[\s\S]*?\})\n```" text)]
+    (try
+      (let [parsed (edn/read-string (second match))]
+        (when (and (map? parsed) (or (:test/id parsed) (:test/files parsed)))
+          parsed))
+      (catch Exception _ nil))))
+
+(defn- try-parse-raw-edn
+  "Try to parse the entire text as an EDN test artifact."
+  [text]
+  (try
+    (let [parsed (edn/read-string text)]
+      (when (and (map? parsed) (or (:test/id parsed) (:test/files parsed)))
+        parsed))
+    (catch Exception _ nil)))
+
 (defn parse-test-response
   "Parse the LLM response to extract test artifact.
-   Handles both EDN in code blocks and plain EDN."
+   Tries EDN code blocks first, then raw EDN."
   [response-content]
-  (try
-    ;; Try to extract EDN from ```clojure or ```edn block
-    (if-let [match (re-find #"```(?:clojure|edn)?\s*\n(\{:test/id[\s\S]*?\})\n```" response-content)]
-      (edn/read-string (second match))
-      ;; Try to parse the whole response as EDN
-      (edn/read-string response-content))
-    (catch Exception _
-      nil)))
+  (or (try-parse-edn-block response-content)
+      (try-parse-raw-edn response-content)))
+
+(defn- infer-test-path
+  "Infer a test file path from code content."
+  [content idx]
+  (let [ns-match (re-find #"\(ns\s+([^\s\)]+)" content)
+        ns-name (or (second ns-match) (str "generated-test-" idx))]
+    (str "test/" (str/replace ns-name "." "/")
+         (when-not (str/ends-with? ns-name "-test") "_test")
+         ".clj")))
 
 (defn extract-test-code-blocks
-  "Extract test code blocks from markdown response."
+  "Extract test code blocks from markdown response.
+   Matches any Clojure code block containing test-like content."
   [response-content]
-  (let [blocks (re-seq #"```(?:clojure)?\s*\n(\(ns [^`]+)\n?```" response-content)]
+  (let [blocks (re-seq #"```(?:clojure|clj)?\s*\n([\s\S]*?)```" response-content)]
     (when (seq blocks)
-      (->> blocks
-           (map-indexed (fn [idx [_full content]]
-                          (let [ns-match (re-find #"\(ns\s+([^\s\)]+)" content)
-                                ns-name (or (second ns-match) (str "generated-test-" idx))
-                                path (str "test/" (str/replace ns-name "." "/") "_test.clj")]
-                            {:path path
-                             :content (str/trim content)})))
-           vec))))
+      (let [test-blocks (->> blocks
+                             (map second)
+                             (filter #(or (re-find #"deftest\s" %)
+                                          (re-find #"\(ns\s" %)
+                                          (re-find #"clojure\.test" %)
+                                          (re-find #"\(is\s" %))))]
+        (when (seq test-blocks)
+          (->> test-blocks
+               (map-indexed (fn [idx content]
+                              {:path (infer-test-path content idx)
+                               :content (str/trim content)}))
+               vec))))))
 
 ;; make-fallback-tests removed — silent fallback masks real failures,
 ;; prevents retry/repair from working, and short-circuits checkpoint resume.
@@ -272,7 +299,8 @@
                           mcp-opts {:mcp-config (:mcp-config-path session)
                                     :mcp-allowed-tools (:mcp-allowed-tools session)
                                     :supervision (:supervision session)
-                                    :budget-usd budget-usd}]
+                                    :budget-usd budget-usd
+                                    :max-turns 5}]
                       (if on-chunk
                         (llm/chat-stream llm-client user-prompt on-chunk
                                          (merge {:system @tester-system-prompt} mcp-opts))

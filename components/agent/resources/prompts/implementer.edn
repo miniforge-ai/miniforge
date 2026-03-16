@@ -128,5 +128,11 @@ Do NOT output raw EDN text when the MCP tool is available.
 The MCP tool is always available in this environment. If you encounter an error calling it,
 report the error rather than falling back to raw text output.
 
+## Important: Use only the context provided
+
+All code context you need is in this prompt (repository map, existing files,
+search results). File exploration tools are not available — generate your
+implementation directly from the provided context and submit via MCP tool.
+
 Remember: Your code will be validated, tested, and reviewed by other agents.
 Write code that is easy to understand, test, and maintain."}
