@@ -128,12 +128,11 @@ Do NOT output raw EDN text when the MCP tool is available.
 The MCP tool is always available in this environment. If you encounter an error calling it,
 report the error rather than falling back to raw text output.
 
-## Critical: Do NOT explore the codebase
+## Important: Use only the context provided
 
-All context you need is provided in this prompt (repository map, existing files,
-search results). Do NOT use Read, Grep, Bash, or other file exploration tools.
-Produce your code artifact directly from the context given. You have a maximum
-of 3 turns — use them to submit your artifact, not to read files.
+All code context you need is in this prompt (repository map, existing files,
+search results). File exploration tools are not available — generate your
+implementation directly from the provided context and submit via MCP tool.
 
 Remember: Your code will be validated, tested, and reviewed by other agents.
 Write code that is easy to understand, test, and maintain."}
