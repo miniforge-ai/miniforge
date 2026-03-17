@@ -7,6 +7,7 @@
 {:prompt/id :tester
  :prompt/version "1.0.0"
  :prompt/agent :tester
+ :prompt/max-turns 10
 
  :prompt/system
  "You are a Testing Agent for an autonomous software development team.

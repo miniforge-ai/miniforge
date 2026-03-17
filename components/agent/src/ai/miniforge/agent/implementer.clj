@@ -43,6 +43,10 @@
    Loaded from EDN resource for configurability."
   (delay (prompts/load-prompt :implementer)))
 
+(def ^:private implementer-prompt-data
+  "Full prompt data map for the implementer agent."
+  (delay (prompts/load-prompt-data :implementer)))
+
 ;------------------------------------------------------------------------------ Layer 0
 ;; Extension → language mapping (loaded from config)
 
@@ -379,11 +383,12 @@
   (let [{:keys [llm-result artifact]}
         (artifact-session/with-artifact-session [session]
           (let [budget-usd (budget/resolve-cost-budget-usd :implementer config context)
+                max-turns (get @implementer-prompt-data :prompt/max-turns 10)
                 mcp-opts {:mcp-config (:mcp-config-path session)
                           :mcp-allowed-tools (:mcp-allowed-tools session)
                           :supervision (:supervision session)
                           :budget-usd budget-usd
-                          :max-turns 5}]
+                          :max-turns max-turns}]
             (if on-chunk
               (llm/chat-stream llm-client user-prompt on-chunk
                                (merge {:system effective-system-prompt} mcp-opts))
