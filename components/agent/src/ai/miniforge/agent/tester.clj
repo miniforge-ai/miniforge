@@ -51,6 +51,10 @@
    Loaded from EDN resource for configurability."
   (delay (prompts/load-prompt :tester)))
 
+(def ^:private tester-prompt-data
+  "Full prompt data map for the tester agent."
+  (delay (prompts/load-prompt-data :tester)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Tester functions
 
@@ -296,11 +300,12 @@
             (let [{:keys [llm-result artifact]}
                   (artifact-session/with-artifact-session [session]
                     (let [budget-usd (budget/resolve-cost-budget-usd :tester config context)
+                          max-turns (get @tester-prompt-data :prompt/max-turns 10)
                           mcp-opts {:mcp-config (:mcp-config-path session)
                                     :mcp-allowed-tools (:mcp-allowed-tools session)
                                     :supervision (:supervision session)
                                     :budget-usd budget-usd
-                                    :max-turns 10}]
+                                    :max-turns max-turns}]
                       (if on-chunk
                         (llm/chat-stream llm-client user-prompt on-chunk
                                          (merge {:system @tester-system-prompt} mcp-opts))
