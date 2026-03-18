@@ -26,6 +26,7 @@
             [ai.miniforge.phase.file-context :as file-ctx]
             [ai.miniforge.phase.agent-behavior :as agent-beh]
             [ai.miniforge.phase.messages :as messages]
+            [ai.miniforge.phase.phase-config :as phase-config]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.context-pack.interface :as context-pack]
             [ai.miniforge.context-pack.factory :as ctx-factory]
@@ -38,13 +39,8 @@
 ;; Defaults
 
 (def default-config
-  {:agent :implementer
-   :gates [:syntax :lint]
-   :budget {:tokens 30000
-            :iterations 8
-            :time-seconds 600}
-   ;; Implementation is code-heavy - hint at current Sonnet
-   :model-hint :sonnet-4.6})
+  "Phase defaults loaded from config/phase/defaults.edn."
+  (phase-config/defaults-for :implement))
 
 ;; Register defaults on load
 (registry/register-phase-defaults! :implement default-config)

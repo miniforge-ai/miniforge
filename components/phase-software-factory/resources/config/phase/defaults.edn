@@ -1,0 +1,44 @@
+{:phase/defaults
+ {;; Implementation phase defaults.
+  :implement
+  {:agent :implementer
+   :gates [:syntax :lint]
+   :budget {:tokens 30000
+            :iterations 8
+            :time-seconds 600}
+   :model-hint :sonnet-4.6}
+
+  ;; Verify phase defaults.
+  :verify
+  {:agent :tester
+   :gates [:tests-pass :coverage]
+   :budget {:tokens 15000
+            :iterations 3
+            :time-seconds 300}
+   :model-hint :haiku-4.5}
+
+  ;; Review phase defaults.
+  :review
+  {:agent :reviewer
+   :gates [:review-approved :quality-check]
+   :budget {:tokens 20000
+            :iterations 2
+            :time-seconds 180}
+   :model-hint :sonnet-4.6}
+
+  ;; Plan phase defaults.
+  :plan
+  {:agent :planner
+   :gates [:plan-complete]
+   :budget {:tokens 10000
+            :iterations 3
+            :time-seconds 300}
+   :model-hint :opus-4.6}
+
+  ;; Release phase defaults.
+  :release
+  {:agent :releaser
+   :gates [:release-ready]
+   :budget {:tokens 5000
+            :iterations 2
+            :time-seconds 180}}}}

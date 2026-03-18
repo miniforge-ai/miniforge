@@ -482,9 +482,11 @@
             (let [user-prompt (build-review-prompt input)
                   response (if on-chunk
                              (llm/chat-stream llm-client user-prompt on-chunk
-                                              {:system @reviewer-system-prompt})
+                                              {:system @reviewer-system-prompt
+                                               :max-turns 10})
                              (llm/chat llm-client user-prompt
-                                       {:system @reviewer-system-prompt}))
+                                       {:system @reviewer-system-prompt
+                                        :max-turns 10}))
                   tokens (get response :tokens 0)
                   cost-usd (get response :cost-usd)]
 
