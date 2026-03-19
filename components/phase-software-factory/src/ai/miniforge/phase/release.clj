@@ -23,6 +23,7 @@
    Agent: :releaser
    Default gates: [:release-ready]"
   (:require [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.phase.phase-config :as phase-config]
             [ai.miniforge.release-executor.interface :as release-executor]
             [ai.miniforge.response.interface :as response]))
 
@@ -30,11 +31,8 @@
 ;; Defaults
 
 (def default-config
-  {:agent :releaser
-   :gates [:release-ready]
-   :budget {:tokens 5000
-            :iterations 2
-            :time-seconds 180}})
+  "Phase defaults loaded from config/phase/defaults.edn."
+  (phase-config/defaults-for :release))
 
 ;; Register defaults on load
 (registry/register-phase-defaults! :release default-config)

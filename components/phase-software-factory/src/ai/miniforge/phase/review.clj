@@ -23,6 +23,7 @@
    Agent: :reviewer
    Default gates: [:review-approved :quality-check]"
   (:require [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.phase.phase-config :as phase-config]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.knowledge.interface :as knowledge]
             [ai.miniforge.response.interface :as response]))
@@ -31,13 +32,8 @@
 ;; Defaults
 
 (def default-config
-  {:agent :reviewer
-   :gates [:review-approved :quality-check]
-   :budget {:tokens 20000
-            :iterations 4
-            :time-seconds 180}
-   ;; Code review needs balanced capabilities - hint at current Sonnet
-   :model-hint :sonnet-4.6})
+  "Phase defaults loaded from config/phase/defaults.edn."
+  (phase-config/defaults-for :review))
 
 ;; Register defaults on load
 (registry/register-phase-defaults! :review default-config)

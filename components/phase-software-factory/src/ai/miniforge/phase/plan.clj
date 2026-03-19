@@ -23,6 +23,7 @@
    Agent: :planner
    Default gates: [:plan-complete]"
   (:require [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.phase.phase-config :as phase-config]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.knowledge.interface :as knowledge]
             [ai.miniforge.response.interface :as response]))
@@ -31,13 +32,8 @@
 ;; Defaults
 
 (def default-config
-  {:agent :planner
-   :gates [:plan-complete]
-   :budget {:tokens 10000
-            :iterations 3
-            :time-seconds 300}
-   ;; Planning requires complex reasoning - hint at Opus
-   :model-hint :opus-4.6})
+  "Phase defaults loaded from config/phase/defaults.edn."
+  (phase-config/defaults-for :plan))
 
 ;; Register defaults on load
 (registry/register-phase-defaults! :plan default-config)
