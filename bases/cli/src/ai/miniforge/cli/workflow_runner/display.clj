@@ -88,6 +88,42 @@
                                                 {:gate gate}))
       :gate/failed (colorize :red (messages/t :workflow-runner/gate-failed
                                               {:gate gate}))
+      :chain/completed (str (colorize :green (str "chain " (name (or (:chain/id event) :unknown)) " completed"))
+                            (when-let [d (:chain/duration-ms event)]
+                              (str " (" (format-duration d) ")")))
+      nil)))
+
+(defn format-demo-line
+  "Format a plain-text (no ANSI) progress line for demo/test output.
+   Uses '?' for nil values and 'unknown' for missing failure reasons."
+  [event]
+  (let [evt (:event/type event)
+        phase (or (:workflow/phase event) (:phase event) "?")
+        gate (or (:gate/id event) (:gate event) "?")
+        agent (or (:agent/id event) (:agent event) "?")]
+    (case evt
+      :workflow/started "workflow started"
+      :workflow/completed (str "workflow completed"
+                               (if-let [d (:workflow/duration-ms event)]
+                                 (str " (" (format-duration d) ")")
+                                 " (?)"))
+      :workflow/failed (str "workflow failed: "
+                            (or (:workflow/failure-reason event) "unknown"))
+      :workflow/phase-started (str "phase " phase " started")
+      :workflow/phase-completed (str "phase " phase " completed"
+                                     (if-let [d (:phase/duration-ms event)]
+                                       (str " (" (format-duration d) ")")
+                                       " (?)"))
+      :workflow/milestone-reached (str "milestone: " (:message event "?"))
+      :agent/started (str "agent " agent " started")
+      :agent/completed (str "agent " agent " completed")
+      :agent/failed (str "agent " agent " failed")
+      :agent/status (str "agent " agent " status")
+      :tool/invoked (str "tool " (or (:tool/id event) "?") " invoked")
+      :tool/completed (str "tool " (or (:tool/id event) "?") " completed")
+      :gate/started (str "gate " gate " started")
+      :gate/passed (str "gate " gate " passed")
+      :gate/failed (str "gate " gate " failed")
       nil)))
 
 (defn start-progress!

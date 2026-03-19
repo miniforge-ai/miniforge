@@ -167,21 +167,17 @@
   "Build a sub-workflow config for a single DAG task.
 
    Derives pipeline from the parent workflow, removing explore/plan phases
-   (the plan already exists — we're executing it) and keeping implement
-   through done. Disables DAG execution to prevent infinite recursion."
+   (the plan already exists — we're executing it). Keeps :release so each
+   DAG task produces its own PR."
   [task-def context]
   (let [parent-workflow (:execution/workflow context)
         parent-pipeline (or (:workflow/pipeline parent-workflow) [])
-        ;; Keep phases after plan (implement, verify, review, done)
-        ;; Drop explore/plan (task description IS the plan) and release
-        ;; (parent workflow handles release with collected artifacts)
         sub-phases (->> parent-pipeline
-                        (remove #(#{:explore :plan :release} (:phase %)))
+                        (remove #(#{:explore :plan} (:phase %)))
                         vec)
-        ;; If no implement phase found, use a minimal pipeline
         sub-pipeline (if (seq sub-phases)
                        sub-phases
-                       [{:phase :implement} {:phase :done}])]
+                       [{:phase :implement} {:phase :release} {:phase :done}])]
     {:workflow/id (keyword (str "dag-task-" (:task/id task-def)))
      :workflow/version "2.0.0"
      :workflow/name (str "DAG sub-task: " (subs (str (:task/description task-def "task"))
@@ -193,12 +189,14 @@
 
    The task description becomes the spec description, and the task itself
    is passed as the plan (single-task plan) so the implement phase can
-   pick it up directly."
+   pick it up directly. Includes task title and acceptance criteria for
+   use by the release phase (PR title/body)."
   [task-def]
   {:title (:task/description task-def "Implement task")
    :description (:task/description task-def "Implement task")
    :task/type (:task/type task-def :implement)
    :task/acceptance-criteria (:task/acceptance-criteria task-def [])
+   :task/id (:task/id task-def)
    ;; Provide the task as a single-task plan so the implement phase
    ;; receives it without needing another plan phase
    :plan/tasks [{:task/id (random-uuid)
@@ -214,7 +212,8 @@
   [context]
   (cond-> {:disable-dag-execution true
            :skip-lifecycle-events true
-           :quiet true}
+           :quiet true
+           :create-pr? true}
     (:llm-backend context)      (assoc :llm-backend (:llm-backend context))
     (:event-stream context)     (assoc :event-stream (:event-stream context))
     (get-in context [:execution/opts :event-stream])
@@ -239,12 +238,27 @@
            first)
       "Sub-workflow failed"))
 
+(defn extract-pr-info-from-result
+  "Extract PR info from a sub-workflow result if the release phase produced one."
+  [result task-def]
+  (let [release-result (get-in result [:execution/phase-results :release])
+        pr-info (or (get-in release-result [:result :output :workflow/pr-info])
+                    ;; Also check metrics path where leave-release stores it
+                    (get-in result [:metrics :release :pr-info]))]
+    (when pr-info
+      (merge pr-info
+             {:task-id (:task/id task-def)
+              :deps (set (map normalize-task-id (:task/dependencies task-def [])))}))))
+
 (defn run-mini-workflow
   "Execute a full sub-workflow pipeline for a single DAG task.
 
    Each task gets its own workflow (implement → verify → review → done)
    derived from the parent workflow config. The plan phase is skipped
-   because the task description IS the plan."
+   because the task description IS the plan.
+
+   Extracts PR info from the release phase result and includes it
+   in the workflow result."
   [task-def context]
   (let [sub-workflow (task-sub-workflow task-def context)
         sub-input (task-sub-input task-def)
@@ -252,18 +266,21 @@
         run-pipeline (requiring-resolve 'ai.miniforge.workflow.runner/run-pipeline)
         result (run-pipeline sub-workflow sub-input sub-opts)
         artifacts (:execution/artifacts result)
-        metrics (:execution/metrics result)]
+        metrics (:execution/metrics result)
+        pr-info (extract-pr-info-from-result result task-def)]
     (if (phase/succeeded? result)
-      (workflow-success (first artifacts) metrics)
+      (cond-> (workflow-success (first artifacts) metrics)
+        pr-info (assoc :pr-info pr-info))
       (workflow-failure (extract-sub-workflow-error result) metrics))))
 
 (defn workflow-result->dag-result [task-id description wf-result]
   (if (:success? wf-result)
-    (dag/ok {:task-id task-id
-             :description description
-             :status :implemented
-             :artifacts [(:artifact wf-result)]
-             :metrics (:metrics wf-result)})
+    (dag/ok (cond-> {:task-id task-id
+                     :description description
+                     :status :implemented
+                     :artifacts [(:artifact wf-result)]
+                     :metrics (:metrics wf-result)}
+              (:pr-info wf-result) (assoc :pr-info (:pr-info wf-result))))
     (dag/err :task-execution-failed
              (:error wf-result)
              {:task-id task-id :metrics (:metrics wf-result)})))
@@ -328,10 +345,12 @@
 (defn aggregate-results [all-results]
   (let [results (vals all-results)
         artifacts (->> results (mapcat #(get-in % [:data :artifacts] [])))
+        pr-infos (->> results (keep #(get-in % [:data :pr-info])) vec)
         total-tokens (->> results (map #(get-in % [:data :metrics :tokens] 0)) (reduce + 0))
         total-cost (->> results (map #(get-in % [:data :metrics :cost-usd] 0.0)) (reduce + 0.0))
         total-duration (->> results (map #(get-in % [:data :metrics :duration-ms] 0)) (reduce + 0))]
-    {:artifacts artifacts :total-tokens total-tokens :total-cost total-cost :total-duration total-duration}))
+    (cond-> {:artifacts artifacts :total-tokens total-tokens :total-cost total-cost :total-duration total-duration}
+      (seq pr-infos) (assoc :pr-infos pr-infos))))
 
 (defn has-failed-dependency?
   "Check if a task depends on any task in the failed set."
@@ -412,9 +431,10 @@
                       :failed (count all-failed)
                       :unreached unreached
                       :iterations iteration}})
-    (assoc (dag-execution-result (count completed-ids) (count all-failed) (:artifacts metrics-agg) metrics-agg)
-           :tasks-unreached unreached
-           :sub-workflow-ids (vec sub-workflow-ids))))
+    (cond-> (assoc (dag-execution-result (count completed-ids) (count all-failed) (:artifacts metrics-agg) metrics-agg)
+                   :tasks-unreached unreached
+                   :sub-workflow-ids (vec sub-workflow-ids))
+      (:pr-infos metrics-agg) (assoc :pr-infos (:pr-infos metrics-agg)))))
 
 (defn execute-dag-loop [tasks-map context logger]
   (let [{:keys [on-task-start on-task-complete]} context

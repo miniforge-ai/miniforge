@@ -37,6 +37,78 @@
     :needs-review "Needs Review"
     (if state (name state) "Unknown")))
 
+(defn readiness-state-variant
+  "Maps readiness state keywords to badge variant keywords."
+  [state]
+  (case state
+    :merge-ready :success
+    :ci-failing :error
+    :changes-requested :warning
+    :merge-conflicts :error
+    :policy-failing :error
+    :dep-blocked :neutral
+    :needs-review :info
+    :neutral))
+
+(defn error-category-variant
+  "Maps error category keywords to badge variant keywords."
+  [cat]
+  (case cat
+    (:auth :auth-failure :access :not-found) :error
+    (:rate-limit :rate-limited :parse :parse-error :network :network-error) :warning
+    :error))
+
+(defn error-category-label
+  "Maps error category keywords to human-readable labels."
+  [cat]
+  (case cat
+    :auth "Auth"
+    :auth-failure "Auth"
+    :access "Access"
+    :not-found "Not Found"
+    :rate-limit "Rate Limit"
+    :rate-limited "Rate Limit"
+    :parse "Parse"
+    :parse-error "Parse"
+    :network "Network"
+    :network-error "Network"
+    (if cat (name cat) "Error")))
+
+(defn sync-failure-entry
+  "Renders a single sync failure entry with optional error-category badge."
+  [{:keys [repo error action error-category]}]
+  [:div.sync-failure
+   [:span.sync-repo repo]
+   [:span.sync-error error]
+   (when (and action (not (str/blank? action)))
+     [:span.sync-action action])
+   (when error-category
+     (c/badge (error-category-label error-category)
+              {:variant (error-category-variant error-category)}))])
+
+(defn blocking-reason-line
+  "Renders a blocking reason with type-appropriate variant."
+  [{:keys [blocker/type blocker/message]}]
+  (let [variant (case type
+                  :dependency :neutral
+                  :ci :error
+                  :review :warning
+                  :policy :error
+                  :conflict :error
+                  :neutral)]
+    [:div.blocking-reason
+     (c/badge (name type) {:variant variant})
+     [:span.blocker-message (or message "Blocked")]]))
+
+(defn pr-readiness-fragment
+  "Renders a readiness state label with optional score."
+  [{:keys [readiness/state readiness/score]}]
+  [:div.pr-readiness
+   (c/badge (readiness-state-label state)
+            {:variant (readiness-state-variant state)})
+   (when (some? score)
+     [:span.readiness-score (format "%.2f" (double score))])])
+
 (defn fleet-action-onclick
   [action]
   (case action

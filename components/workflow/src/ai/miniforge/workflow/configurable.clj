@@ -180,7 +180,8 @@
 
 (defn execute-dag-for-plan
   "Execute plan tasks via DAG orchestrator.
-   Returns updated exec-state with DAG results merged."
+   Returns updated exec-state with DAG results merged.
+   Each DAG task produces its own PR; stores :execution/dag-pr-infos."
   [exec-state plan context callbacks]
   (let [{:keys [on-phase-start on-phase-complete]} callbacks
         dag-context (merge context
@@ -200,17 +201,19 @@
         dag-context (assoc dag-context :pre-completed-ids
                           (or (get-in exec-state [:execution/opts :pre-completed-dag-tasks])
                               (get-in context [:pre-completed-dag-tasks] #{})))
-        dag-result (dag-orch/execute-plan-as-dag plan dag-context)]
+        dag-result (dag-orch/execute-plan-as-dag plan dag-context)
+        pr-infos (:pr-infos dag-result)]
 
     ;; Merge DAG results + recovered artifacts into execution state
-    (-> exec-state
-        (update :execution/artifacts into (concat pre-completed-artifacts
-                                                  (:artifacts dag-result [])))
-        (update :execution/metrics
-                (fn [m]
-                  (merge-with + m (:metrics dag-result {:tokens 0 :cost-usd 0.0}))))
-        (assoc-in [:execution/phase-results :dag-execution] dag-result)
-        (assoc :execution/dag-result dag-result))))
+    (cond-> (-> exec-state
+                (update :execution/artifacts into (concat pre-completed-artifacts
+                                                          (:artifacts dag-result [])))
+                (update :execution/metrics
+                        (fn [m]
+                          (merge-with + m (:metrics dag-result {:tokens 0 :cost-usd 0.0}))))
+                (assoc-in [:execution/phase-results :dag-execution] dag-result)
+                (assoc :execution/dag-result dag-result))
+      (seq pr-infos) (assoc :execution/dag-pr-infos pr-infos))))
 
 (defn execute-phase-step
   "Execute a single phase step in the workflow.
@@ -244,19 +247,14 @@
                                      (not (:disable-dag-parallelization context)))]
 
         (if should-parallelize?
-          ;; Execute plan via DAG, then skip implement phase
+          ;; Execute plan via DAG — each task produces its own PR
           (let [exec-state-with-dag (execute-dag-for-plan exec-state' plan context callbacks)
                 dag-success? (get-in exec-state-with-dag [:execution/dag-result :success?])]
             (if dag-success?
-              ;; Skip to verify phase (or next phase after implement)
-              (let [implement-phase (find-phase workflow :implement)
-                    post-implement-transitions (:phase/next implement-phase [])
-                    next-after-implement (or (:target (first post-implement-transitions)) :done)]
-                (if (= :done next-after-implement)
-                  (state/mark-completed exec-state-with-dag)
-                  [:continue (state/transition-to-phase exec-state-with-dag
-                                                        next-after-implement
-                                                        :dag-complete)]))
+              ;; DAG tasks produced PRs — transition to :pr-monitor for CI/review/merge
+              [:continue (state/transition-to-phase exec-state-with-dag
+                                                    :pr-monitor
+                                                    :dag-complete)]
               ;; DAG failed
               (state/mark-failed exec-state-with-dag
                                  {:type :dag-execution-failed
