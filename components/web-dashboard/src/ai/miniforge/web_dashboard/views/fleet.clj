@@ -17,7 +17,8 @@
   (:require
    [hiccup2.core :refer [html]]
    [clojure.string :as str]
-   [ai.miniforge.web-dashboard.components :as c])
+   [ai.miniforge.web-dashboard.components :as c]
+   [ai.miniforge.web-dashboard.messages :as messages])
   (:import
    [java.text SimpleDateFormat]))
 
@@ -28,14 +29,14 @@
   "Maps readiness state keywords to human-readable labels."
   [state]
   (case state
-    :merge-ready "Ready"
-    :ci-failing "CI Failing"
-    :changes-requested "Changes Requested"
-    :merge-conflicts "Merge Conflicts"
-    :policy-failing "Policy Failing"
-    :dep-blocked "Dep Blocked"
-    :needs-review "Needs Review"
-    (if state (name state) "Unknown")))
+    :merge-ready (messages/t :readiness/merge-ready)
+    :ci-failing (messages/t :readiness/ci-failing)
+    :changes-requested (messages/t :readiness/changes-requested)
+    :merge-conflicts (messages/t :readiness/merge-conflicts)
+    :policy-failing (messages/t :readiness/policy-failing)
+    :dep-blocked (messages/t :readiness/dep-blocked)
+    :needs-review (messages/t :readiness/needs-review)
+    (if state (name state) (messages/t :readiness/unknown))))
 
 (defn readiness-state-variant
   "Maps readiness state keywords to badge variant keywords."
@@ -62,17 +63,17 @@
   "Maps error category keywords to human-readable labels."
   [cat]
   (case cat
-    :auth "Auth"
-    :auth-failure "Auth"
-    :access "Access"
-    :not-found "Not Found"
-    :rate-limit "Rate Limit"
-    :rate-limited "Rate Limit"
-    :parse "Parse"
-    :parse-error "Parse"
-    :network "Network"
-    :network-error "Network"
-    (if cat (name cat) "Error")))
+    :auth (messages/t :error-category/auth)
+    :auth-failure (messages/t :error-category/auth)
+    :access (messages/t :error-category/access)
+    :not-found (messages/t :error-category/not-found)
+    :rate-limit (messages/t :error-category/rate-limit)
+    :rate-limited (messages/t :error-category/rate-limit)
+    :parse (messages/t :error-category/parse)
+    :parse-error (messages/t :error-category/parse)
+    :network (messages/t :error-category/network)
+    :network-error (messages/t :error-category/network)
+    (if cat (name cat) (messages/t :error-category/fallback))))
 
 (defn sync-failure-entry
   "Renders a single sync failure entry with optional error-category badge."
@@ -98,7 +99,7 @@
                   :neutral)]
     [:div.blocking-reason
      (c/badge (name type) {:variant variant})
-     [:span.blocker-message (or message "Blocked")]]))
+     [:span.blocker-message (or message (messages/t :blocker/fallback-message))]]))
 
 (defn pr-readiness-fragment
   "Renders a readiness state label with optional score."
