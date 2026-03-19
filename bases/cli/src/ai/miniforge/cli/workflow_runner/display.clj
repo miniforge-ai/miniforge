@@ -2,6 +2,7 @@
   "Terminal output formatting for workflow execution."
   (:require
    [clojure.pprint]
+   [clojure.string :as str]
    [cheshire.core :as json]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
@@ -88,7 +89,66 @@
                                                 {:gate gate}))
       :gate/failed (colorize :red (messages/t :workflow-runner/gate-failed
                                               {:gate gate}))
+      :chain/completed (str (colorize :green (messages/t :workflow-runner/chain-step-completed
+                                                                 {:chain-id (name (or (:chain/id event) :unknown))}))
+                            (when-let [d (:chain/duration-ms event)]
+                              (str " (" (format-duration d) ")")))
       nil)))
+
+(defn- strip-ansi
+  "Remove ANSI escape codes from a string."
+  [s]
+  (str/replace s #"\u001b\[[0-9;]*m" ""))
+
+(defn- demo-defaults
+  "Fill in '?' defaults for nil event params so format-event-line produces
+   visible placeholders instead of empty strings."
+  [event]
+  (let [evt (:event/type event)]
+    (cond-> event
+      (and (#{:workflow/phase-started :workflow/phase-completed} evt)
+           (nil? (or (:workflow/phase event) (:phase event))))
+      (assoc :workflow/phase "?")
+
+      (and (#{:agent/started :agent/completed :agent/failed :agent/status} evt)
+           (nil? (or (:agent/id event) (:agent event))))
+      (assoc :agent/id "?")
+
+      (and (#{:gate/started :gate/passed :gate/failed} evt)
+           (nil? (or (:gate/id event) (:gate event))))
+      (assoc :gate/id "?")
+
+      (and (#{:tool/invoked :tool/completed} evt)
+           (nil? (:tool/id event)))
+      (assoc :tool/id "?")
+
+      (and (= :workflow/milestone-reached evt)
+           (nil? (:message event)))
+      (assoc :message "?")
+
+      (and (= :workflow/failed evt)
+           (nil? (:workflow/failure-reason event)))
+      (assoc :workflow/failure-reason "unknown"))))
+
+(defn format-demo-line
+  "Format a plain-text (no ANSI) progress line for demo/test output.
+   Delegates to format-event-line with nil-defaulted params, then strips ANSI.
+   Uses '?' for nil values and 'unknown' for missing failure reasons."
+  [event]
+  (let [evt (:event/type event)
+        patched (demo-defaults event)
+        base (format-event-line patched)]
+    (when base
+      (let [stripped (strip-ansi base)]
+        (case evt
+          ;; Append (?) when duration is missing
+          :workflow/completed (if (nil? (:workflow/duration-ms event))
+                                (str stripped " (?)")
+                                stripped)
+          :workflow/phase-completed (if (nil? (:phase/duration-ms event))
+                                      (str stripped " (?)")
+                                      stripped)
+          stripped)))))
 
 (defn start-progress!
   "Subscribe to lifecycle events and print concise progress lines.

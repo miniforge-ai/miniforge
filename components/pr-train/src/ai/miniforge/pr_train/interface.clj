@@ -74,6 +74,20 @@
   [manager train-id]
   (core/link-prs manager train-id))
 
+(defn link-prs-from-dag
+  "Link PR dependencies based on actual DAG topology.
+
+   Arguments:
+   - manager: PRTrainManager
+   - train-id: Train UUID
+   - dag-deps-map: {task-id #{dep-task-id ...}} — the original DAG edges
+   - task-to-pr-map: {task-id pr-number}
+
+   Independent DAG tasks produce independent PRs.
+   Returns updated train."
+  [manager train-id dag-deps-map task-to-pr-map]
+  (core/link-prs-from-dag manager train-id dag-deps-map task-to-pr-map))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; State management
 

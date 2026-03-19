@@ -309,6 +309,48 @@
         (assoc :train/prs linked-prs)
         recompute-train-state)))
 
+;------------------------------------------------------------------------------ Layer 8b
+;; DAG-aware dependency linking
+
+(defn link-prs-from-dag
+  "Link PR dependencies based on actual DAG topology rather than linear merge order.
+
+   Arguments:
+   - train: PRTrain map
+   - dag-deps-map: Map of task-id -> set of dependency task-ids (the original DAG edges)
+   - task-to-pr-map: Map of task-id -> pr-number
+
+   Independent tasks in the DAG produce independent PRs that can merge in any order.
+   Diamond dependency (A→B, A→C, B+C→D) produces PR-D blocked by PR-B and PR-C.
+
+   Returns updated train with :pr/depends-on and :pr/blocks set from DAG topology."
+  [train dag-deps-map task-to-pr-map]
+  (let [;; Invert task-to-pr to pr-to-task for lookup
+        pr-to-task (into {} (map (fn [[tid prn]] [prn tid]) task-to-pr-map))
+        prs (:train/prs train)
+        linked-prs (mapv (fn [pr]
+                           (let [pr-num (:pr/number pr)
+                                 task-id (get pr-to-task pr-num)
+                                 ;; Get DAG deps for this task, map to PR numbers
+                                 task-deps (get dag-deps-map task-id #{})
+                                 pr-deps (->> task-deps
+                                              (keep task-to-pr-map)
+                                              vec)
+                                 ;; Compute blocks: PRs whose tasks depend on this task
+                                 pr-blocks (->> task-to-pr-map
+                                                (filter (fn [[tid _prn]]
+                                                          (contains? (get dag-deps-map tid #{})
+                                                                     task-id)))
+                                                (map second)
+                                                vec)]
+                             (-> pr
+                                 (assoc :pr/depends-on pr-deps)
+                                 (assoc :pr/blocks pr-blocks))))
+                         prs)]
+    (-> train
+        (assoc :train/prs linked-prs)
+        recompute-train-state)))
+
 ;------------------------------------------------------------------------------ Layer 9
 ;; Rollback planning
 

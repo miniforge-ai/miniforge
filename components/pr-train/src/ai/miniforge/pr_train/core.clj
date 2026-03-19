@@ -30,6 +30,12 @@
     "Auto-compute depends-on/blocks relationships from merge order.
      Returns updated train.")
 
+  (link-prs-from-dag [this train-id dag-deps-map task-to-pr-map]
+    "Link PR dependencies based on DAG topology.
+     dag-deps-map: {task-id #{dep-task-id ...}}
+     task-to-pr-map: {task-id pr-number}
+     Returns updated train.")
+
   ;; State management
   (sync-pr-status [this train-id status-map]
     "Update status for all PRs from external source.
@@ -150,6 +156,12 @@
   (link-prs [_this train-id]
     (when-let [train (get @trains train-id)]
       (let [updated (state/link-pr-dependencies train)]
+        (swap! trains assoc train-id updated)
+        updated)))
+
+  (link-prs-from-dag [_this train-id dag-deps-map task-to-pr-map]
+    (when-let [train (get @trains train-id)]
+      (let [updated (state/link-prs-from-dag train dag-deps-map task-to-pr-map)]
         (swap! trains assoc train-id updated)
         updated)))
 

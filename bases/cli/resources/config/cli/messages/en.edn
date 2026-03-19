@@ -58,6 +58,12 @@
    "    backend <name>    Set LLM backend (shorthand)"
    "    validate          Validate config file"
    ""
+   "  control-plane <sub> Agent control plane"
+   "    status            Show all agents and their states"
+   "    decisions         List pending decisions from agents"
+   "    resolve <id> <r>  Resolve a decision (--comment for note)"
+   "    terminate <id>    Terminate an agent"
+   ""
    "  doctor              Check system health"
    "  version             Show version info"
    "  help                Show this help"]
@@ -351,4 +357,5 @@
   :workflow-runner/no-chains "No chains found."
   :workflow-runner/available-chains "\nAvailable Chains:"
   :workflow-runner/chain-steps-label "{steps} step(s)"
-  :workflow-runner/list-chains-failed "Failed to list chains: {error}"}}
+  :workflow-runner/list-chains-failed "Failed to list chains: {error}"
+  :workflow-runner/chain-step-completed "chain {chain-id} completed"}}
