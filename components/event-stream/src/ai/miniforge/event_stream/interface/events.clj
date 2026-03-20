@@ -1,5 +1,5 @@
 (ns ai.miniforge.event-stream.interface.events
-  "Workflow, agent, gate, task, listener, control, and chain event constructors."
+  "Workflow, agent, gate, task, listener, control, chain, and control-plane event constructors."
   (:require
    [ai.miniforge.event-stream.core :as core]))
 
@@ -40,3 +40,23 @@
 (def chain-step-failed core/chain-step-failed)
 (def chain-completed core/chain-completed)
 (def chain-failed core/chain-failed)
+
+;------------------------------------------------------------------------------ Layer 1
+;; OCI container event constructors
+
+(def container-started core/container-started)
+(def container-completed core/container-completed)
+
+;------------------------------------------------------------------------------ Layer 1
+;; Tool supervision event constructors
+
+(def tool-use-evaluated core/tool-use-evaluated)
+
+;------------------------------------------------------------------------------ Layer 1
+;; Control plane event constructors
+
+(def cp-agent-registered core/cp-agent-registered)
+(def cp-agent-heartbeat core/cp-agent-heartbeat)
+(def cp-agent-state-changed core/cp-agent-state-changed)
+(def cp-decision-created core/cp-decision-created)
+(def cp-decision-resolved core/cp-decision-resolved)

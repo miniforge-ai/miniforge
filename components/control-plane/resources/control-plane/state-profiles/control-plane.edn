@@ -1,0 +1,46 @@
+;; Control Plane state profile
+;; Normalized lifecycle for agents from any vendor
+
+{:profile/id :control-plane
+ :profile/description "Multi-vendor agent lifecycle for the control plane."
+
+ :task-statuses
+ [:unknown         ;; registered but no heartbeat yet
+  :initializing    ;; agent starting up
+  :running         ;; actively working
+  :idle            ;; alive, no current task
+  :blocked         ;; waiting for human decision
+  :paused          ;; human-initiated pause
+  :completed       ;; finished successfully
+  :failed          ;; terminal failure
+  :unreachable     ;; missed heartbeats, presumed dead
+  :terminated]     ;; explicitly killed
+
+ :terminal-statuses [:completed :failed :terminated]
+ :success-terminal-statuses [:completed]
+
+ :valid-transitions
+ {:unknown       #{:initializing :running :idle :unreachable :terminated}
+  :initializing  #{:running :idle :failed :terminated}
+  :running       #{:idle :blocked :paused :completed :failed :unreachable :terminated}
+  :idle          #{:running :blocked :paused :completed :terminated :unreachable}
+  :blocked       #{:running :idle :paused :failed :terminated}
+  :paused        #{:running :idle :terminated}
+  :unreachable   #{:running :idle :terminated :failed}
+  :completed     #{}
+  :failed        #{}
+  :terminated    #{}}
+
+ :event-mappings
+ {:agent/heartbeat         {:type :keep-alive}
+  :agent/started           {:type :transition :to :running}
+  :agent/task-assigned     {:type :transition :to :running}
+  :agent/task-completed    {:type :transition :to :idle}
+  :agent/decision-needed   {:type :transition :to :blocked}
+  :agent/decision-provided {:type :transition :from :blocked :to :running}
+  :agent/paused            {:type :transition :to :paused}
+  :agent/resumed           {:type :transition :to :running}
+  :agent/completed         {:type :complete :to :completed}
+  :agent/failed            {:type :fail :to :failed}
+  :agent/heartbeat-missed  {:type :transition :to :unreachable}
+  :agent/terminated        {:type :transition :to :terminated}}}

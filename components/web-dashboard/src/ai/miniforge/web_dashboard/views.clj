@@ -24,7 +24,8 @@
    [ai.miniforge.web-dashboard.views.dag :as dag]
    [ai.miniforge.web-dashboard.views.evidence :as evidence]
    [ai.miniforge.web-dashboard.views.workflows :as workflows]
-   [ai.miniforge.web-dashboard.views.archived :as archived]))
+   [ai.miniforge.web-dashboard.views.archived :as archived]
+   [ai.miniforge.web-dashboard.views.control-plane :as control-plane]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Layout and shared utilities
@@ -122,7 +123,10 @@
         [:span.icon "▸"] "Evidence"]
        [:a.nav-item {:href "/workflows"
                      :class (when (= title "Workflows") "active")}
-        [:span.icon "▸"] "Workflows"]]]
+        [:span.icon "▸"] "Workflows"]
+       [:a.nav-item {:href "/control-plane"
+                     :class (when (= title "Control Plane") "active")}
+        [:span.icon "▸"] "Control Plane"]]]
      [:main.main
       [:div.page-header
        [:h1.page-title title]]
@@ -175,3 +179,10 @@
   (workflows/workflows-view layout wfs))
 (defn workflow-detail-view [workflow events]
   (workflows/workflow-detail-view layout workflow events))
+
+;; Control Plane views
+(def agents-grid-fragment control-plane/agents-grid-fragment)
+(def decision-queue-fragment control-plane/decision-queue-fragment)
+(defn control-plane-view [agents decisions stats]
+  (layout "Control Plane"
+          (control-plane/control-plane-content agents decisions stats)))

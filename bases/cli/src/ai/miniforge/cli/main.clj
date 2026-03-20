@@ -45,7 +45,8 @@
    [ai.miniforge.cli.main.commands.run :as cmd-run]
    [ai.miniforge.cli.main.commands.monitoring :as cmd-monitoring]
    [ai.miniforge.cli.main.commands.fleet :as cmd-fleet]
-   [ai.miniforge.cli.main.commands.pr :as cmd-pr]))
+   [ai.miniforge.cli.main.commands.pr :as cmd-pr]
+   [ai.miniforge.cli.main.commands.control-plane :as cmd-cp]))
 
 ;; TUI components loaded conditionally (only in JVM/jlink bundled runtime)
 (def tui-available?
@@ -200,6 +201,12 @@
 (defn pr-review-cmd [m] (cmd-pr/pr-review-cmd (get-opts m)))
 (defn pr-respond-cmd [m] (cmd-pr/pr-respond-cmd (get-opts m)))
 (defn pr-merge-cmd [m] (cmd-pr/pr-merge-cmd (get-opts m)))
+
+;; Control Plane commands
+(defn cp-status-cmd [m] (cmd-cp/status-cmd (get-opts m)))
+(defn cp-decisions-cmd [m] (cmd-cp/decisions-cmd (get-opts m)))
+(defn cp-resolve-cmd [m] (cmd-cp/resolve-cmd (get-opts m)))
+(defn cp-terminate-cmd [m] (cmd-cp/terminate-cmd (get-opts m)))
 
 (defn mcp-serve-cmd
   "Run the MCP artifact server (stdin/stdout JSON-RPC)."
@@ -357,7 +364,16 @@
    {:cmds ["pr" "list"]    :fn pr-list-cmd    :spec {:repo {:alias :r}}}
    {:cmds ["pr" "review"]  :fn pr-review-cmd  :args->opts [:url]}
    {:cmds ["pr" "respond"] :fn pr-respond-cmd :args->opts [:url]}
-   {:cmds ["pr" "merge"]   :fn pr-merge-cmd   :args->opts [:url]}])
+   {:cmds ["pr" "merge"]   :fn pr-merge-cmd   :args->opts [:url]}
+
+   ;; Control Plane subcommands
+   {:cmds ["control-plane" "status"]    :fn cp-status-cmd}
+   {:cmds ["control-plane" "decisions"] :fn cp-decisions-cmd}
+   {:cmds ["control-plane" "resolve"]   :fn cp-resolve-cmd
+    :args->opts [:decision-id :resolution]
+    :spec {:comment {:alias :c}}}
+   {:cmds ["control-plane" "terminate"] :fn cp-terminate-cmd
+    :args->opts [:agent-id]}])
 
 (defn -main
   "CLI entry point."

@@ -493,6 +493,54 @@
         (:confidence opts) (assoc :supervision/confidence (:confidence opts))
         (:phase opts)      (assoc :workflow/phase (:phase opts)))))
 
+;------------------------------------------------------------------------------ Layer 5
+;; Control plane events
+
+(defn cp-agent-registered
+  "Emit when an external agent registers with the control plane."
+  [stream workflow-id agent-id vendor & [opts]]
+  (-> (create-envelope stream :control-plane/agent-registered workflow-id
+                       (str (name vendor) " agent " agent-id " registered"))
+      (assoc :cp/agent-id agent-id
+             :cp/vendor vendor)
+      (cond->
+        (:name opts) (assoc :cp/agent-name (:name opts)))))
+
+(defn cp-agent-heartbeat
+  "Emit when the control plane receives a heartbeat from an agent."
+  [stream workflow-id agent-id status]
+  (-> (create-envelope stream :control-plane/agent-heartbeat workflow-id
+                       (str "Heartbeat from " agent-id ": " (name status)))
+      (assoc :cp/agent-id agent-id
+             :cp/status status)))
+
+(defn cp-agent-state-changed
+  "Emit when an agent's normalized state changes."
+  [stream workflow-id agent-id from-status to-status]
+  (-> (create-envelope stream :control-plane/agent-state-changed workflow-id
+                       (str "Agent " agent-id ": " (name from-status) " → " (name to-status)))
+      (assoc :cp/agent-id agent-id
+             :cp/from-status from-status
+             :cp/to-status to-status)))
+
+(defn cp-decision-created
+  "Emit when an agent submits a decision request."
+  [stream workflow-id agent-id decision-id summary & [priority]]
+  (-> (create-envelope stream :control-plane/decision-created workflow-id
+                       (str "Decision needed from " agent-id ": " summary))
+      (assoc :cp/agent-id agent-id
+             :cp/decision-id decision-id
+             :cp/summary summary)
+      (cond-> priority (assoc :cp/priority priority))))
+
+(defn cp-decision-resolved
+  "Emit when a human resolves a decision."
+  [stream workflow-id decision-id resolution]
+  (-> (create-envelope stream :control-plane/decision-resolved workflow-id
+                       (str "Decision " decision-id " resolved: " resolution))
+      (assoc :cp/decision-id decision-id
+             :cp/resolution resolution)))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Create event stream
