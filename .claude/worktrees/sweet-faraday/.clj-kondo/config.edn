@@ -1,4 +1,0 @@
-{:hooks
- {:analyze-call
-  {ai.miniforge.agent.artifact-session/with-artifact-session
-   hooks.artifact-session/with-artifact-session}}}

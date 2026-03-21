@@ -1,3 +1,0 @@
-{:paths ["src"]
- :deps {cheshire/cheshire {:mvn/version "5.13.0"}}
- :aliases {:test {:extra-paths ["test"]}}}

@@ -58,6 +58,7 @@ dist/
 # Tool config (local)
 .codex/
 .cursor/
+.claude/worktrees/
 
 # Checkpoints (local development snapshots)
 docs/checkpoints/

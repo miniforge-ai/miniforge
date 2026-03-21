@@ -1,8 +1,0 @@
-{:description "Workflow registry configuration - lists available workflows"
- :workflows
- ["simple-test-v1.0.0"
-  "minimal-test-v1.0.0"
-  "quick-fix-v2.0.0"
-  "lean-sdlc-v1.0.0"
-  "standard-sdlc-v2.0.0"
-  "canonical-sdlc-v1.0.0"]}
