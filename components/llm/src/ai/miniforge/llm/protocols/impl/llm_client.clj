@@ -79,9 +79,15 @@
                                     (when (= "text" (:type block))
                                       (:text block)))
                                   content-blocks)
+                tool-names (keep (fn [block]
+                                   (when (= "tool_use" (:type block))
+                                     (:name block)))
+                                 content-blocks)
                 text (str/join text-blocks)]
-            (when-not (str/blank? text)
-              {:delta text :done? false}))
+            (if (seq tool-names)
+              {:delta (or text "") :done? false :tool-use true :tool-names tool-names}
+              (when-not (str/blank? text)
+                {:delta text :done? false})))
 
           ;; Legacy format support
           "stream_event"
@@ -538,10 +544,12 @@
       (when-let [cost (:cost-usd parsed)]
         (reset! accumulated-cost cost))
       (if (or (:tool-use parsed) (:heartbeat parsed))
-        ;; Tool-use and heartbeat events: track tool name and fire on-chunk
+        ;; Tool-use and heartbeat events: track tool names and fire on-chunk
         (do
           (when-let [tool-name (:tool-name parsed)]
             (swap! accumulated-tools conj tool-name))
+          (when-let [tool-names (:tool-names parsed)]
+            (swap! accumulated-tools into tool-names))
           (on-chunk (assoc parsed :content @accumulated-content)))
         ;; Normal text deltas
         (when-let [delta (:delta parsed)]
