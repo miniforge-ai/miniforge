@@ -109,11 +109,21 @@
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
 
-        ;; Build workflow state and context
-        workflow-state (build-workflow-state ctx)
+        ;; Build workflow state and context — with diagnostic on failure
+        workflow-state (try
+                         (build-workflow-state ctx)
+                         (catch Exception e
+                           (binding [*out* *err*]
+                             (println "RELEASE ERROR:" (ex-message e) (pr-str (ex-data e))))
+                           (throw e)))
         exec-context (build-executor-context ctx config)
         releaser-agent (get config :releaser-agent)
 
+        _ (binding [*out* *err*]
+            (println "RELEASE: workflow-state built OK. Artifacts:"
+                     (count (:workflow/artifacts workflow-state))
+                     "files:" (count (get-in (first (:workflow/artifacts workflow-state))
+                                             [:artifact/content :code/files]))))
         ;; Execute the release phase
         result (try
                  (let [exec-result (release-executor/execute-release-phase
