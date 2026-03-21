@@ -272,13 +272,19 @@
         iterations (get-in ctx [:phase :iterations] 1)
         max-iterations (get-in ctx [:phase :budget :iterations]
                                (get-in default-config [:budget :iterations]))
+        ;; Treat nil output as error — the LLM produced no usable artifact.
+        ;; This prevents a "successful" implement with nothing for release to consume.
+        nil-output? (and (= :success agent-status)
+                         (not= :already-implemented agent-status)
+                         (nil? (:output result)))
+        effective-status (if nil-output? :error agent-status)
         phase-status (cond
                        gate-failed? :failed
                        (= :already-implemented agent-status) :already-implemented
                        ;; Rate limit: fail immediately, don't burn retry budget
                        rate-limited? :failed
                        :else (registry/determine-phase-status
-                               agent-status iterations max-iterations))
+                               effective-status iterations max-iterations))
         metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
         cost-usd (or (:cost-usd result)
                      (:cost-usd metrics)

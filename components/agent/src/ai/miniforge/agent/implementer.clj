@@ -237,18 +237,43 @@
     (catch Exception _
       nil)))
 
+(defn- extract-path-from-context
+  "Try to extract a file path from text immediately preceding a code block.
+   Looks for common patterns like '### path/to/file.clj' or '**path/to/file.clj**'
+   or 'File: path/to/file.clj' in the preceding lines."
+  [text block-start]
+  (let [preceding (subs text 0 block-start)
+        ;; Take last 3 lines before the code block
+        lines (take-last 3 (str/split-lines preceding))]
+    (some (fn [line]
+            (or
+             ;; ### path/to/file.clj or ## path/to/file.clj
+             (second (re-find #"#{1,4}\s+[`*]*([^\s`*]+\.\w{1,6})[`*]*" line))
+             ;; **path/to/file.clj** or `path/to/file.clj`
+             (second (re-find #"[`*]+([^\s`*]+\.\w{1,6})[`*]+" line))
+             ;; File: path/to/file.clj or Path: path/to/file.clj
+             (second (re-find #"(?i)(?:file|path):\s*`?([^\s`]+\.\w{1,6})`?" line))))
+          lines)))
+
 (defn extract-code-blocks
-  "Extract code blocks from markdown response and convert to file list."
+  "Extract code blocks from markdown response and convert to file list.
+   Tries to detect file paths from markdown headings before each block."
   [response-content]
-  (let [blocks (re-seq #"```(?:(\w+)\n)?([^`]+)```" response-content)]
-    (when (seq blocks)
-      (->> blocks
-           (map-indexed (fn [idx [_full lang content]]
-                          {:path (str "generated/file" idx
-                                      (get @ext->language lang ".clj"))
-                           :content (str/trim content)
-                           :action :create}))
-           vec))))
+  (let [pattern #"```(?:(\w+)\n)?([^`]+)```"
+        matcher (re-matcher pattern response-content)]
+    (loop [results [] idx 0]
+      (if (.find matcher)
+        (let [lang (.group matcher 1)
+              content (.group matcher 2)
+              block-start (.start matcher)
+              path (or (extract-path-from-context response-content block-start)
+                       (str "generated/file" idx
+                            (get @ext->language lang ".clj")))]
+          (recur (conj results {:path path
+                                :content (str/trim content)
+                                :action :create})
+                 (inc idx)))
+        (when (seq results) results)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Artifact repair
@@ -368,9 +393,12 @@
   [response artifact context logger tokens cost-usd]
   (let [content (llm/get-content response)
         parsed (or artifact (parse-code-response content))]
-    (when artifact
+    (if artifact
       (log/info logger :implementer :implementer/mcp-artifact-received
-                {:data {:file-count (count (:code/files artifact))}}))
+                {:data {:file-count (count (:code/files artifact))}})
+      (log/warn logger :implementer :implementer/mcp-tool-not-called
+                {:data {:content-length (count (or content ""))
+                        :has-code-blocks? (boolean (re-find #"```" (or content "")))}}))
     (if (= :already-implemented (:status parsed))
       (build-already-implemented-response parsed tokens cost-usd)
       (if-let [code (or parsed (code-from-blocks content))]
@@ -401,7 +429,8 @@
               {:data {:success (llm/success? response)
                       :tokens tokens
                       :streaming? (boolean on-chunk)
-                      :mcp-artifact? (boolean artifact)}})
+                      :mcp-artifact? (boolean artifact)
+                      :tools-called (get response :tools-called [])}})
     (if (llm/success? response)
       (process-llm-response response artifact context logger tokens cost-usd)
       (response/error (or (:message (llm/get-error response))
