@@ -1,0 +1,139 @@
+;; Workflow: Diagnose and fix hanging tests
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; This workflow provides a systematic approach for diagnosing and fixing
+;; hanging tests in the miniforge codebase. Tests can hang due to various
+;; reasons including nested deftests, blocking I/O, resource exhaustion, or
+;; infinite loops.
+;;
+;; Usage:
+;;   mf run examples/workflows/diagnose-hanging-tests.edn
+
+{:workflow/spec-version "1.0.0"
+ :workflow/type :diagnostic-and-fix
+ :workflow/version "1.0.0"
+
+ :spec/title "Diagnose and fix hanging test"
+ :spec/description
+ "When tests hang during execution, systematically identify the problematic test
+  and fix the underlying issue. Tests may hang in any git worktree or branch,
+  and may be caused by syntax errors, blocking operations, or resource issues."
+
+ :spec/intent
+ "Quickly identify and resolve hanging tests to unblock CI/CD pipeline and
+  development workflow by:
+  - Identifying which specific test is hanging
+  - Locating the test file
+  - Diagnosing the root cause
+  - Applying the appropriate fix
+  - Verifying the fix works"
+
+ :diagnostic-steps
+ ["Step 1: Identify the hanging test
+   - Check test runner output for the last test that started
+   - Look for namespace/test name in console output
+   - Note: Test name will be in format like 'ai.miniforge.llm.interface-test'"
+
+  "Step 2: Locate the test file
+   - Use glob pattern to find test file: **/*<test-name>.clj
+   - Common locations: components/*/test/**/*.clj
+   - May be in different git worktrees"
+
+  "Step 3: Read and analyze the test file
+   - Look for common hanging causes:
+     * Nested deftest forms (deftest inside deftest)
+     * Blocking I/O without timeouts
+     * Tests waiting on resources (channels, promises, futures)
+     * Infinite loops or recursive calls
+     * Tests that create but don't clean up resources
+     * Missing test fixtures or setup/teardown issues"
+
+  "Step 4: Check for syntax errors first
+   - CRITICAL: Look for nested deftest forms - this is invalid Clojure
+   - Check for unmatched parentheses or brackets
+   - Verify proper indentation and structure
+   - Example problematic pattern:
+     (deftest outer-test
+       ...
+       (deftest inner-test  ;; <-- WRONG: deftest cannot be nested
+         ...))"]
+
+ :common-fixes
+ {"Nested deftest forms"
+  "Move inner deftest to top level (same indentation as other deftests).
+   This is the most common cause of hanging tests."
+
+  "Blocking I/O without timeout"
+  "Add timeout to blocking operations:
+   - Use clojure.core.async/alt! or alt!! with timeout
+   - Wrap blocking calls with future and deref with timeout
+   - Add :timeout metadata to test"
+
+  "Resource cleanup"
+  "Use fixtures or try/finally blocks to ensure cleanup:
+   - (use-fixtures :each (fn [f] (try (f) (finally (cleanup!)))))
+   - Wrap resource creation in try/finally
+   - Use with-open for closeable resources"
+
+  "Infinite loops"
+  "Add explicit termination conditions:
+   - Add iteration limits to loops
+   - Use take with lazy sequences
+   - Add timeout guards"}
+
+ :spec/constraints
+ ["Fix must not break other tests"
+  "Maintain test coverage and assertions"
+  "Follow existing code style and patterns"
+  "Document the fix if it's non-obvious"
+  "Run tests after fix to verify resolution"]
+
+ :spec/acceptance-criteria
+ ["Hanging test is identified (namespace and test name)"
+  "Root cause is diagnosed and documented"
+  "Fix is applied to the test file"
+  "Test suite runs to completion without hanging"
+  "All tests pass (or only expected failures remain)"
+  "Fix is committed with descriptive commit message"]
+
+ :workflow-steps
+ ["1. IDENTIFY: Find which test is hanging by checking test output"
+  "2. LOCATE: Find the test file using glob/grep"
+  "3. ANALYZE: Read the test file and identify the issue"
+  "4. FIX: Apply the appropriate fix based on root cause"
+  "5. VERIFY: Run tests to confirm they complete successfully"
+  "6. COMMIT: Commit the fix with clear description"]
+
+ :example
+ "Real example (2026-01-29): LLM streaming tests hanging
+
+  Issue: ai.miniforge.llm.interface-test was hanging indefinitely
+  Location: components/llm/test/ai/miniforge/llm/interface_test.clj
+
+  Root causes found:
+  1. Nested deftest: stream-parser-test was nested inside stream-accumulation-test
+     (line 229) - INVALID Clojure syntax
+  2. Implementation bug: stream-exec-fn (llm_client.clj:114) used @process with
+     NO TIMEOUT - blocked forever if process hung
+  3. Test design issue: Streaming tests called real p/process even with mock
+     clients because stream-exec-fn ignores mock exec-fn
+
+  Fixes applied:
+  1. Fixed nested deftest structure
+  2. Added timeout to process deref: (deref process 300000 {...})
+  3. Removed streaming tests from brick tests (moved to integration tests)
+
+  Result: Brick tests now pass in 2 seconds. Streaming needs integration tests
+  with real CLI to validate it actually works with the timeout fix."
+
+ :prevention-tips
+ ["Use IDE/editor with Clojure syntax checking (e.g., Cursive, Calva)"
+  "Run tests locally before pushing to avoid CI hangs"
+  "Add test timeouts for integration tests that use external resources"
+  "Use linting tools (e.g., clj-kondo) to catch structural issues"
+  "Review test code for proper structure during code review"]
+
+ :related-rules
+ ["Rule 715: Pre-commit discipline (run tests before commit)"
+  "Polylith testing practices: Keep tests fast and isolated"
+  "Use test fixtures for proper setup/teardown"]}

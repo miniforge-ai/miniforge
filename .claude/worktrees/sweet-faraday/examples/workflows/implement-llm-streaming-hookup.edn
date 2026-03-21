@@ -1,0 +1,135 @@
+;; Implement LLM Streaming Hookup
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; This workflow implements real-time token streaming for LLM interactions,
+;; enabling users to see LLM output as it's generated rather than waiting for
+;; complete responses.
+;;
+;; Usage:
+;;   mf run examples/workflows/implement-llm-streaming-hookup.edn
+
+{:workflow/spec-version "1.0.0"
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :spec/title "Implement LLM Streaming Hookup"
+ :spec/description
+ "Wire up token streaming in agents and workflow runner to enable real-time output visibility.
+
+  Current state:
+  - LLM component has streaming API (complete-stream, chat-stream) ✅
+  - Agents use synchronous llm/chat ❌
+  - Workflow runner doesn't pass streaming callbacks ❌
+
+  The implementation should:
+  1. Add streaming support to agent protocol (optional :on-chunk callback in opts)
+  2. Update agent implementations to use chat-stream when :on-chunk provided
+  3. Wire streaming callbacks in workflow runner to display agent progress
+  4. Add tests for streaming behavior in agents
+  5. Ensure backward compatibility (streaming is opt-in via context/opts)"
+
+ :spec/intent
+ {:type "feature"
+  :description "Enable real-time streaming of LLM token output to provide progress visibility
+  during long-running operations. Currently, LLM interactions are synchronous - users must
+  wait for the entire response before seeing any output. This creates poor UX for workflows
+  that take minutes to complete.
+
+  Context: During the pre-commit discipline gate workflow, we had no visibility into what
+  miniforge was doing for 4+ minutes. The streaming implementation exists conceptually
+  (PR #96 mentioned it) but isn't wired up in the public API or CLI runner.
+
+  This implementation will enable:
+  - Real-time progress monitoring during workflow execution
+  - Better debugging visibility into agent reasoning
+  - Improved user experience for long-running operations
+  - Foundation for interactive agent sessions"}
+
+ :spec/constraints
+ ["Maintain backward compatibility (streaming is opt-in, not default)"
+  "Check for :on-chunk in opts/context before using streaming"
+  "Use existing llm/chat-stream API (already implemented)"
+  "Handle cases where :on-chunk is nil (fall back to sync)"
+  "Add tests for both streaming and non-streaming agent behavior"
+  "Document streaming usage in agent docstrings"
+  "Ensure all existing tests pass without modification"
+  "Follow existing agent architecture patterns"
+  "No breaking changes to agent protocol"
+  "CLI flag: --streaming to enable for mf run command"]
+
+ :spec/acceptance-criteria
+ ["Agents check for :on-chunk in opts/context"
+  "When :on-chunk present, agents use llm/chat-stream instead of llm/chat"
+  "When :on-chunk absent, agents use llm/chat (existing behavior)"
+  "Workflow runner creates :on-chunk callback when streaming enabled"
+  "Callback prints formatted output: \"[agent-name] chunk-content\""
+  "CLI accepts --streaming flag for mf run command"
+  "Unit tests verify agents use streaming when :on-chunk provided"
+  "Integration test shows real-time output during workflow execution"
+  "Backward compatibility: all existing tests pass without changes"
+  "Documentation explains streaming usage in agent rich comments"]
+
+ :context
+ {:supporting-docs
+  ["components/llm/src/ai/miniforge/llm/interface.clj"
+   "components/llm/src/ai/miniforge/llm/interface/protocols/llm_client.clj"
+   "components/llm/src/ai/miniforge/llm/protocols/impl/llm_client.clj"
+   "components/llm/src/ai/miniforge/llm/protocols/records/llm_client.clj"
+   "components/workflow/src/ai/miniforge/workflow/runner.clj"]
+
+  :current-state
+  "LLM component HAS streaming (merged in feat/llm-token-streaming):
+  - Protocol has: complete-stream* [this request on-chunk] ✅
+  - Public API has: complete-stream, chat-stream ✅
+  - Implementation processes output line-by-line ✅
+  - Tests verify streaming callbacks work ✅
+
+  What's MISSING:
+  - Agents use llm/chat (sync) instead of llm/chat-stream
+  - Workflow runner doesn't provide :on-chunk callbacks to agents
+  - No way to opt into streaming during workflow execution
+  - Users can't see agent reasoning in real-time"
+
+  :technical-approach
+  "Wire streaming from LLM component → agents → workflow runner:
+
+  1. Agent implementation changes:
+     - Check for :on-chunk in opts/context
+     - If present, use llm/chat-stream instead of llm/chat
+     - Pass :on-chunk callback through
+     - Affects: planner.clj, implementer.clj, tester.clj, reviewer.clj
+
+  2. Workflow runner integration:
+     - Create on-chunk callback that prints to stdout
+     - Format: \"[phase-name/agent-name] chunk-content\"
+     - Pass callback in agent context via :on-chunk key
+     - Add :enable-streaming? flag to workflow runner opts
+
+  3. Backward compatibility:
+     - Streaming is opt-in via :enable-streaming? flag
+     - Default behavior unchanged (synchronous)
+     - Existing tests continue to pass
+
+  4. User-facing changes:
+     - mf run --streaming workflow.edn
+     - Shows real-time agent output during execution"}
+
+ :meta-loop-monitoring
+ {:test-with-callbacks
+  "Create test that verifies :on-token is called for each output chunk"
+
+  :test-error-handling
+  "Verify :on-error is called when CLI command fails"
+
+  :test-backward-compatibility
+  "Ensure existing complete/chat tests still pass unchanged"
+
+  :integration-test
+  "Run a workflow with streaming enabled and verify output appears incrementally"}
+
+ :evidence-requirements
+ ["Streaming implementation passes all unit tests"
+  "Integration test shows incremental output during execution"
+  "Existing tests continue to pass (no regressions)"
+  "Documentation clearly explains streaming vs non-streaming usage"
+  "Code follows existing component architecture patterns"]}

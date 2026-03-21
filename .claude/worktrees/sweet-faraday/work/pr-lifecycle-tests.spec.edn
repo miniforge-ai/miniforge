@@ -1,0 +1,89 @@
+{:spec/title "Add Comprehensive pr-lifecycle Tests"
+ :spec/description
+ "The pr-lifecycle component has 9 source files but only 1 integration test file.
+  Add focused unit tests for each submodule: controller state machine, CI monitoring,
+  review monitoring, comment triage, merge operations, and fix loop enforcement.
+  This is critical test coverage needed before YC MVP demo."
+
+ :spec/intent
+ {:type :test
+  :scope ["components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/"
+          "components/pr-lifecycle/test/ai/miniforge/pr_lifecycle/"]}
+
+ :spec/constraints
+ ["Test each source file independently with mocked dependencies"
+  "Use with-redefs for shell command mocking (gh CLI calls)"
+  "No real GitHub API calls - all mocked"
+  "Follow existing test patterns (see pr-train tests for examples)"
+  "All tests must pass with bb test"
+  "Pre-commit hooks must pass"]
+
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :plan/tasks
+ [{:task/id :test-controller
+   :task/description
+   "Create pr_lifecycle/controller_test.clj with tests for:
+    - Controller creation with valid config
+    - State machine transitions (open -> ci-pending -> ci-passed -> review -> approved -> merging -> merged)
+    - Invalid state transition rejection
+    - Controller config validation
+    Read source: components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/controller.clj"
+   :task/type :test
+   :task/dependencies []}
+
+  {:task/id :test-ci-monitor
+   :task/description
+   "Create pr_lifecycle/ci_monitor_test.clj with tests for:
+    - CI status check parsing (success, failure, pending, no checks)
+    - Retry logic on transient failures
+    - Timeout handling
+    - Status change detection
+    Mock: (sh \"gh\" \"pr\" \"checks\" ...) calls
+    Read source: components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/ci_monitor.clj"
+   :task/type :test
+   :task/dependencies []}
+
+  {:task/id :test-review-monitor
+   :task/description
+   "Create pr_lifecycle/review_monitor_test.clj with tests for:
+    - Review status parsing (approved, changes-requested, pending)
+    - Multiple reviewer handling
+    - Review state transitions
+    Mock: (sh \"gh\" \"pr\" \"view\" ...) calls
+    Read source: components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/review_monitor.clj"
+   :task/type :test
+   :task/dependencies []}
+
+  {:task/id :test-triage
+   :task/description
+   "Create pr_lifecycle/triage_test.clj with tests for:
+    - Comment classification (actionable vs informational)
+    - Review comment parsing
+    - Priority assignment
+    Read source: components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/triage.clj"
+   :task/type :test
+   :task/dependencies []}
+
+  {:task/id :test-merge
+   :task/description
+   "Create pr_lifecycle/merge_test.clj with tests for:
+    - Merge execution (squash, rebase, merge commit)
+    - Conflict detection and handling
+    - Auto-merge enable/disable
+    - Post-merge cleanup
+    Mock: (sh \"gh\" \"pr\" \"merge\" ...) calls
+    Read source: components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/merge.clj"
+   :task/type :test
+   :task/dependencies []}
+
+  {:task/id :test-fix-loop
+   :task/description
+   "Create pr_lifecycle/fix_loop_test.clj with tests for:
+    - Fix iteration counting
+    - Max iteration enforcement
+    - Fix loop state management
+    Read source: components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/fix_loop.clj"
+   :task/type :test
+   :task/dependencies []}]}

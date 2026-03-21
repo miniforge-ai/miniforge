@@ -1,0 +1,21 @@
+{;; Miniforge Configuration
+ ;; Uses Aero for environment variable overrides and profiles
+ 
+ :llm
+ {:backend #or [#env MINIFORGE_LLM_BACKEND :claude]
+  :timeout-ms #or [#env MINIFORGE_LLM_TIMEOUT 300000]  ; 5 minutes
+  :line-timeout-ms #or [#env MINIFORGE_LLM_LINE_TIMEOUT 60000]  ; 1 minute per line
+  :max-tokens #or [#env MINIFORGE_LLM_MAX_TOKENS 4000]}
+ 
+ :workflow
+ {:max-iterations #or [#env MINIFORGE_MAX_ITERATIONS 50]
+  :max-tokens #or [#env MINIFORGE_MAX_TOKENS 150000]
+  :failure-strategy #or [#env MINIFORGE_FAILURE_STRATEGY :retry]}
+ 
+ :artifacts
+ {:dir #or [#env MINIFORGE_ARTIFACTS_DIR "~/.miniforge/artifacts"]}
+ 
+ :meta-loop
+ {:enabled #or [#env MINIFORGE_META_LOOP_ENABLED true]
+  :max-convergence-iterations #or [#env MINIFORGE_META_MAX_ITERATIONS 10]
+  :convergence-threshold #or [#env MINIFORGE_META_THRESHOLD 0.95]}}

@@ -1,0 +1,121 @@
+;; Reliability Nines — RN-09: Trust Boundary Validation
+;; Tier 3 (Governance) — depends on RN-01
+;; No downstream blocks (independent governance)
+
+{:spec/title "RN-09: Complete Trust Boundary Validation (TB-1 through TB-5)"
+ :version "1.0.0"
+ :type :enhancement
+ :priority :medium
+
+ :spec/description
+ "Complete the 5 trust boundaries defined in N1 §5.7. Currently only TB-3
+  (agent↔external, ingestion boundary) is partially covered via
+  knowledge_safety.clj. Implement remaining 4 boundaries and the 5
+  architectural invariants.
+
+  Current state: TB-3 prompt injection detection only.
+  Target state: All 5 boundaries enforced with invariant validation."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/policy-pack/src/ai/miniforge/policy_pack"
+          "components/gate/src/ai/miniforge/gate"]}
+
+ :normative-refs
+ {:primary "N1 §5.7 — Trust Boundary Validation"
+  :secondary ["N1 §5.7 — TB-INV-1 through TB-INV-5"]}
+
+ :gap-analysis-ref "gap-analysis-reliability-nines.md #6"
+ :dag/id :rn-09
+ :dag/depends-on [:rn-01]
+ :dag/blocks []
+
+ :current-state
+ {:tb-3 "knowledge_safety.clj — prompt injection detection (partial)"
+  :tb-1 "User↔Control Plane: not implemented"
+  :tb-2 "Control Plane↔Agent: not implemented"
+  :tb-4 "Agent↔Tool: not implemented"
+  :tb-5 "Tool↔Target System: not implemented"
+  :completion "15%"}
+
+ :target-state
+ {:boundaries
+  [{:id :TB-1 :name "User ↔ Control Plane"
+    :enforcement "Input sanitization, auth validation, rate limiting"}
+   {:id :TB-2 :name "Control Plane ↔ Agent"
+    :enforcement "Context scoping, instruction validation, budget enforcement"}
+   {:id :TB-3 :name "Agent ↔ External Data"
+    :enforcement "Prompt injection detection, data sanitization (existing)"}
+   {:id :TB-4 :name "Agent ↔ Tool"
+    :enforcement "Capability verification, input schema validation, response sanitization"}
+   {:id :TB-5 :name "Tool ↔ Target System"
+    :enforcement "Credential scoping, blast radius limiting, action classification"}]
+  :invariants
+  [{:id :TB-INV-1 :rule "No data crosses boundary without classification"}
+   {:id :TB-INV-2 :rule "Boundary crossings are logged as events"}
+   {:id :TB-INV-3 :rule "Each boundary has a validation gate"}
+   {:id :TB-INV-4 :rule "Failure at boundary does not leak internal state"}
+   {:id :TB-INV-5 :rule "Boundary enforcement cannot be bypassed by agents"}]}
+
+ :implementation
+ {:step-1-boundary-registry
+  {:title "Create trust boundary registry"
+   :files-to-create
+   ["components/policy-pack/src/ai/miniforge/policy_pack/trust_boundary.clj"]
+   :changes
+   ["Define 5 boundaries with validation functions"
+    "Boundary crossing record schema"
+    "validate-crossing! function"]}
+
+  :step-2-tb1-tb2
+  {:title "Implement TB-1 and TB-2"
+   :files-to-modify
+   ["components/gate/src/ai/miniforge/gate/core.clj"]
+   :changes
+   ["TB-1: Validate user inputs at CLI/API entry point"
+    "TB-2: Scope context before passing to agent"]}
+
+  :step-3-tb4-tb5
+  {:title "Implement TB-4 and TB-5"
+   :files-to-modify
+   ["components/tool/src/ai/miniforge/tool/core.clj"]
+   :changes
+   ["TB-4: Validate tool inputs/outputs at agent↔tool boundary"
+    "TB-5: Validate tool actions at tool↔target boundary"]}
+
+  :step-4-invariants
+  {:title "Enforce architectural invariants"
+   :changes
+   ["TB-INV-1: Classification check on all crossing records"
+    "TB-INV-2: Event emission on crossing"
+    "TB-INV-3: Gate function per boundary"
+    "TB-INV-4: Error wrapping at boundary (no internal state leak)"
+    "TB-INV-5: Agent cannot invoke validate-crossing! with bypass flag"]}}
+
+ :spec/constraints
+ ["TB-3 changes MUST be additive to existing knowledge_safety.clj"
+  "Boundary validation MUST NOT block on external calls"
+  "Crossing records MUST be lightweight (not full payloads)"
+  "Follow Polylith interface-only deps"]
+
+ :testing-strategy
+ {:unit-tests
+  ["Each boundary validates and rejects invalid crossings"
+   "Crossing records created for all 5 boundaries"
+   "Invariant validation: no data without classification"
+   "Error wrapping: internal state not leaked"]
+  :integration-tests
+  ["Workflow execution crosses TB-1, TB-2, TB-4 in sequence"
+   "Each crossing produces boundary event"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "All 5 boundaries have validation functions"
+   :verification "validate-crossing! works for TB-1 through TB-5"}
+  {:criterion "5 invariants enforced"
+   :verification "Invariant violation detected and reported"}
+  {:criterion "Backward compatible with existing TB-3"
+   :verification "knowledge_safety.clj tests still pass"}]
+
+ :estimated-effort "3-5 days"
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"}

@@ -1,0 +1,37 @@
+{:spec/title "Complete tool-registry Phases 4-6"
+ :spec/description
+ "Implement remaining phases from the tool-registry spec (specs/informative/tool-registry.md):
+
+ ## Phase 4: Dashboard
+ - Add web panel to bases/cli/src/ai/miniforge/cli/web.clj for tools management
+ - Add API endpoints: GET /api/tools, GET /api/tools/:id, POST /api/tools/:id/start|stop
+ - Add CLI commands: miniforge tools list|info|start|stop|reload
+
+ ## Phase 5: File Watching
+ - Create components/tool-registry/src/ai/miniforge/tool_registry/watcher.clj
+ - Use Java WatchService for detecting tool config file changes
+ - Implement hot-reload on config changes
+
+ ## Phase 6: Agent Integration
+ - Extend components/workflow/src/.../context.clj to include tool-registry
+ - Add tool discovery helpers for agents based on capabilities
+
+ Follow existing patterns in the codebase:
+ - CLI patterns in bases/cli/src/ai/miniforge/cli/main.clj
+ - Web patterns in bases/cli/src/ai/miniforge/cli/web.clj
+ - Pipeline pattern in components/release-executor/src/.../core.clj
+ - Result helpers ok/err in components/tool-registry/src/.../schema.clj"
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/tool-registry"
+          "bases/cli/src/ai/miniforge/cli"
+          "components/workflow"]}
+
+ :spec/constraints
+ ["Follow existing code patterns in the codebase"
+  "Add unit tests for new functionality"
+  "Use Malli schemas for validation"
+  "Use ok/err result helpers from schema.clj"]
+
+ :workflow/type :simple}

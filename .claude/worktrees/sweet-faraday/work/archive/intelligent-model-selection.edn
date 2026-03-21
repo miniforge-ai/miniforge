@@ -1,0 +1,1019 @@
+;; Intelligent Model Selection
+
+{:spec/title "Intelligent Model Selection Based on Task Characteristics"
+ :version "1.0.0"
+ :type :enhancement
+ :priority :high
+
+ :spec/description
+ "Automatically select the optimal model (Opus 4.6, Sonnet 4.5, Haiku 4.5, etc.)
+  based on task characteristics, agent type, and workflow phase. Different tasks
+  need different capabilities - complex reasoning requires Opus, execution uses
+  Sonnet, simple tasks use Haiku. Make this selection automatic and intelligent."
+
+ :motivation
+ {:user-quote "The workflow should default to having agent backends automatically
+               chosen for the task (for example, Opus 4.6 for thinking tasks,
+               Sonnet 4.5 for most execution tasks, Haiku for simple ones)"
+
+  :current-problem
+  ["Backend is selected globally (Claude, Codex, etc.)"
+   "Model is fixed per backend configuration"
+   "No automatic model selection based on task type"
+   "Opus used for everything (expensive, slow)"
+   "Or Sonnet used for everything (not optimal for complex reasoning)"
+   "No capability metadata for models"]
+
+  :desired-behavior
+  ["Opus 4.6 for complex reasoning, planning, architecture decisions"
+   "Sonnet 4.5 for most code generation, implementation, review"
+   "Haiku 4.5 for simple tasks, validation, formatting"
+   "Automatic selection based on task characteristics"
+   "Cost optimization without sacrificing quality"
+   "Workflow phases can specify model requirements"]}
+
+ :model-capabilities
+ {;; ========== Anthropic Claude Models ==========
+  :opus-4.6
+  {:model-id "claude-opus-4-6"
+   :provider :anthropic
+   :backend :claude
+   :family :claude
+   :tier :flagship
+   :capabilities
+   {:reasoning :exceptional        ; 10/10 - Best for complex reasoning
+    :code-generation :excellent    ; 9/10
+    :speed :slow                   ; 2/10 - Deliberate, thorough
+    :cost :expensive               ; $$ - Premium pricing
+    :context-window 200000
+    :output-tokens 16000
+    :streaming true}
+   :best-for
+   ["Complex reasoning and planning"
+    "Architecture decisions"
+    "Novel problem solving"
+    "Spec analysis and interpretation"
+    "Multi-step logical deduction"
+    "Design trade-off evaluation"
+    "Meta-reasoning about workflows"]
+   :use-cases
+   [:workflow-planning
+    :architecture-design
+    :spec-interpretation
+    :complex-debugging
+    :research-synthesis
+    :strategic-decisions]}
+
+  :sonnet-4.5
+  {:model-id "claude-sonnet-4-5-20250929"
+   :provider :anthropic
+   :backend :claude
+   :family :claude
+   :tier :workhorse
+   :capabilities
+   {:reasoning :excellent          ; 8/10
+    :code-generation :exceptional  ; 10/10 - Best for code
+    :speed :balanced               ; 7/10
+    :cost :moderate                ; $ - Good value
+    :context-window 200000
+    :output-tokens 16000
+    :streaming true}
+   :best-for
+   ["Code implementation"
+    "File editing and refactoring"
+    "Test writing"
+    "PR review and comments"
+    "Standard development tasks"
+    "Documentation generation"]
+   :use-cases
+   [:code-implementation
+    :file-editing
+    :test-generation
+    :code-review
+    :documentation
+    :standard-tasks]}
+
+  :haiku-4.5
+  {:model-id "claude-haiku-4-5-20251001"
+   :provider :anthropic
+   :backend :claude
+   :family :claude
+   :tier :efficient
+   :capabilities
+   {:reasoning :good               ; 6/10
+    :code-generation :good         ; 7/10
+    :speed :fast                   ; 10/10 - Fastest
+    :cost :economical              ; ¢ - Very cheap
+    :context-window 200000
+    :output-tokens 8000
+    :streaming true}
+   :best-for
+   ["Simple validation tasks"
+    "Syntax checking"
+    "Formatting and linting"
+    "Simple file operations"
+    "Quick sanity checks"
+    "Repetitive operations"]
+   :use-cases
+   [:validation
+    :syntax-checking
+    :formatting
+    :simple-edits
+    :quick-checks
+    :batch-operations]}
+
+  ;; ========== Codex GPT-5 Models ==========
+  :gpt-5.3-codex
+  {:model-id "gpt-5.3-codex"
+   :provider :openai
+   :backend :codex
+   :family :gpt-5
+   :tier :flagship
+   :capabilities
+   {:reasoning :exceptional        ; 10/10
+    :code-generation :exceptional  ; 10/10 - Code specialist
+    :speed :moderate               ; 6/10
+    :cost :expensive               ; $$
+    :context-window 128000
+    :output-tokens 16000
+    :streaming true}
+   :best-for
+   ["Advanced code generation"
+    "Multi-language codebases"
+    "Complex refactoring"
+    "API integration"
+    "Polyglot programming"]
+   :use-cases
+   [:advanced-codegen
+    :multi-language
+    :api-integration
+    :complex-refactoring
+    :polyglot-tasks]}
+
+  :gpt-5.2-codex
+  {:model-id "gpt-5.2-codex"
+   :provider :openai
+   :backend :codex
+   :family :gpt-5
+   :tier :workhorse
+   :capabilities
+   {:reasoning :excellent          ; 8/10
+    :code-generation :excellent    ; 9/10
+    :speed :balanced               ; 7/10
+    :cost :moderate                ; $
+    :context-window 128000
+    :output-tokens 8000
+    :streaming true}
+   :best-for
+   ["Standard code tasks"
+    "Implementation work"
+    "Code review"
+    "Debugging"]
+   :use-cases
+   [:code-implementation
+    :standard-tasks
+    :code-review
+    :debugging]}
+
+  :gpt-5.1-codex-max
+  {:model-id "gpt-5.1-codex-max"
+   :provider :openai
+   :backend :codex
+   :family :gpt-5
+   :tier :balanced
+   :capabilities
+   {:reasoning :excellent          ; 8/10
+    :code-generation :excellent    ; 9/10
+    :speed :fast                   ; 8/10
+    :cost :moderate                ; $
+    :context-window 128000
+    :output-tokens 12000
+    :streaming true}
+   :best-for
+   ["Fast code generation"
+    "Large output requirements"
+    "Batch processing"]
+   :use-cases
+   [:fast-codegen
+    :batch-processing
+    :large-outputs]}
+
+  :gpt-5.2
+  {:model-id "gpt-5.2"
+   :provider :openai
+   :backend :codex
+   :family :gpt-5
+   :tier :general
+   :capabilities
+   {:reasoning :excellent          ; 8/10
+    :code-generation :good         ; 7/10
+    :speed :balanced               ; 7/10
+    :cost :moderate                ; $
+    :context-window 128000
+    :output-tokens 8000
+    :streaming true}
+   :best-for
+   ["General tasks"
+    "Mixed code and text"
+    "Documentation"]
+   :use-cases
+   [:general-tasks
+    :documentation
+    :mixed-content]}
+
+  ;; ========== Google Gemini Models ==========
+  :gemini-2.0-flash-thinking-exp
+  {:model-id "gemini-2.0-flash-thinking-exp"
+   :provider :google
+   :backend :gemini
+   :family :gemini
+   :tier :experimental
+   :capabilities
+   {:reasoning :exceptional        ; 10/10 - Extended thinking mode
+    :code-generation :excellent    ; 8/10
+    :speed :slow                   ; 3/10 - Deep reasoning takes time
+    :cost :expensive               ; $$
+    :context-window 1000000        ; 1M tokens!
+    :output-tokens 8192
+    :streaming true}
+   :best-for
+   ["Extended reasoning chains"
+    "Complex problem decomposition"
+    "Mathematical reasoning"
+    "Large context analysis"
+    "Research synthesis"]
+   :use-cases
+   [:extended-reasoning
+    :problem-decomposition
+    :large-context
+    :research-tasks]}
+
+  :gemini-2.0-flash
+  {:model-id "gemini-2.0-flash"
+   :provider :google
+   :backend :gemini
+   :family :gemini
+   :tier :fast
+   :capabilities
+   {:reasoning :excellent          ; 8/10
+    :code-generation :excellent    ; 8/10
+    :speed :very-fast              ; 9/10
+    :cost :economical              ; ¢
+    :context-window 1000000
+    :output-tokens 8192
+    :streaming true
+    :multimodal true}
+   :best-for
+   ["Fast execution tasks"
+    "Large context processing"
+    "Multimodal inputs (images)"
+    "Batch operations"]
+   :use-cases
+   [:fast-execution
+    :large-context
+    :multimodal
+    :batch-processing]}
+
+  :gemini-pro-2.0
+  {:model-id "gemini-2.0-pro"
+   :provider :google
+   :backend :gemini
+   :family :gemini
+   :tier :workhorse
+   :capabilities
+   {:reasoning :excellent          ; 8/10
+    :code-generation :excellent    ; 8/10
+    :speed :balanced               ; 7/10
+    :cost :moderate                ; $
+    :context-window 2000000        ; 2M tokens!
+    :output-tokens 8192
+    :streaming true
+    :multimodal true}
+   :best-for
+   ["Balanced performance"
+    "Very large contexts"
+    "Multimodal tasks"
+    "Production workloads"]
+   :use-cases
+   [:balanced-tasks
+    :very-large-context
+    :production-workloads]}
+
+  ;; ========== Open Source / Local Models ==========
+  :llama-3.3-70b
+  {:model-id "llama-3.3-70b"
+   :provider :meta
+   :backend :ollama
+   :family :llama
+   :tier :oss-flagship
+   :capabilities
+   {:reasoning :excellent          ; 8/10 - Best open source
+    :code-generation :good         ; 7/10
+    :speed :moderate               ; 5/10 - Depends on hardware
+    :cost :free                    ; Free (local inference)
+    :context-window 128000
+    :output-tokens 8192
+    :streaming true
+    :local true}
+   :best-for
+   ["Privacy-sensitive tasks"
+    "Offline development"
+    "Cost-free inference"
+    "Open source stacks"]
+   :use-cases
+   [:privacy-tasks
+    :offline-work
+    :cost-optimization
+    :oss-projects]}
+
+  :qwen-2.5-coder-32b
+  {:model-id "qwen-2.5-coder-32b"
+   :provider :alibaba
+   :backend :ollama
+   :family :qwen
+   :tier :oss-specialist
+   :capabilities
+   {:reasoning :good               ; 7/10
+    :code-generation :excellent    ; 9/10 - Code specialist
+    :speed :fast                   ; 8/10
+    :cost :free                    ; Free (local)
+    :context-window 32768
+    :output-tokens 4096
+    :streaming true
+    :local true}
+   :best-for
+   ["Fast code generation"
+    "Local development"
+    "Code completion"
+    "Small-medium codebases"]
+   :use-cases
+   [:local-codegen
+    :code-completion
+    :fast-local-tasks]}
+
+  :deepseek-coder-33b
+  {:model-id "deepseek-coder-33b"
+   :provider :deepseek
+   :backend :ollama
+   :family :deepseek
+   :tier :oss-specialist
+   :capabilities
+   {:reasoning :good               ; 7/10
+    :code-generation :excellent    ; 9/10 - Code specialist
+    :speed :moderate               ; 6/10
+    :cost :free                    ; Free (local)
+    :context-window 16384
+    :output-tokens 4096
+    :streaming true
+    :local true}
+   :best-for
+   ["Code-focused tasks"
+    "Local inference"
+    "Fill-in-the-middle"
+    "Code understanding"]
+   :use-cases
+   [:code-generation
+    :code-completion
+    :local-inference]}
+
+  :glm-4-plus
+  {:model-id "glm-4-plus"
+   :provider :zhipu
+   :backend :ollama
+   :family :glm
+   :tier :oss-advanced
+   :capabilities
+   {:reasoning :excellent          ; 8/10
+    :code-generation :good         ; 7/10
+    :speed :balanced               ; 6/10
+    :cost :free                    ; Free (local)
+    :context-window 128000
+    :output-tokens 4096
+    :streaming true
+    :local true
+    :multilingual true}
+   :best-for
+   ["Chinese language tasks"
+    "Multilingual codebases"
+    "Local inference"
+    "Asian market applications"]
+   :use-cases
+   [:chinese-language
+    :multilingual
+    :local-inference
+    :asian-markets]}
+
+  :codellama-34b
+  {:model-id "codellama-34b"
+   :provider :meta
+   :backend :ollama
+   :family :llama
+   :tier :oss-specialist
+   :capabilities
+   {:reasoning :good               ; 6/10
+    :code-generation :excellent    ; 8/10
+    :speed :fast                   ; 8/10
+    :cost :free                    ; Free (local)
+    :context-window 16384
+    :output-tokens 4096
+    :streaming true
+    :local true}
+   :best-for
+   ["Code completion"
+    "Fast local inference"
+    "Low-resource environments"
+    "Code understanding"]
+   :use-cases
+   [:code-completion
+    :fast-local
+    :low-resource
+    :code-understanding]}}
+
+ :task-classification
+ {:thinking-heavy
+  {:description "Complex reasoning, planning, architecture"
+   :characteristics
+   ["Multi-step logical reasoning required"
+    "Trade-off evaluation"
+    "Novel problem solving"
+    "Spec interpretation"
+    "Strategic planning"
+    "Extended reasoning chains"]
+   :recommended-models
+   {:tier-1 [:opus-4.6 :gpt-5.3-codex :gemini-2.0-flash-thinking-exp]
+    :tier-2 [:sonnet-4.5 :gpt-5.2-codex :gemini-pro-2.0]
+    :tier-3-local [:llama-3.3-70b :glm-4-plus]
+    :rationale "Exceptional reasoning needed for architecture decisions"
+    :selection-strategy
+    "Prefer: Opus 4.6 (best reasoning)
+     Codex: gpt-5.3-codex (code-focused reasoning)
+     Gemini: gemini-2.0-flash-thinking-exp (extended thinking)
+     Local: llama-3.3-70b (privacy/cost)"}}
+
+  :execution-focused
+  {:description "Standard code implementation and development"
+   :characteristics
+   ["Code generation and editing"
+    "File manipulation"
+    "Test writing"
+    "Documentation"
+    "Standard workflows"
+    "PR review"]
+   :recommended-models
+   {:tier-1 [:sonnet-4.5 :gpt-5.2-codex :gpt-5.3-codex]
+    :tier-2 [:gpt-5.1-codex-max :gemini-2.0-flash :gemini-pro-2.0]
+    :tier-3-local [:qwen-2.5-coder-32b :deepseek-coder-33b :codellama-34b]
+    :rationale "Balance of code capability and cost"
+    :selection-strategy
+    "Prefer: Sonnet 4.5 (best code generation)
+     Codex: gpt-5.2-codex or gpt-5.3-codex (code specialist)
+     Gemini: gemini-2.0-flash (fast with large context)
+     Local: qwen-2.5-coder-32b (fast local code)"}}
+
+  :simple-validation
+  {:description "Quick checks and simple operations"
+   :characteristics
+   ["Syntax validation"
+    "Formatting"
+    "Simple checks"
+    "Repetitive tasks"
+    "Low complexity"
+    "Batch operations"]
+   :recommended-models
+   {:tier-1 [:haiku-4.5 :gemini-2.0-flash :gpt-5.1-codex-max]
+    :tier-2 [:sonnet-4.5 :gpt-5.2]
+    :tier-3-local [:codellama-34b :qwen-2.5-coder-32b]
+    :rationale "Speed and cost efficiency for simple tasks"
+    :selection-strategy
+    "Prefer: Haiku 4.5 (fastest, cheapest)
+     Gemini: gemini-2.0-flash (very fast with huge context)
+     Codex: gpt-5.1-codex-max (fast with large output)
+     Local: codellama-34b (instant local validation)"}}
+
+  :large-context
+  {:description "Tasks requiring massive context windows"
+   :characteristics
+   ["Large codebase analysis"
+    "Multi-file refactoring"
+    "Entire repository understanding"
+    ">100k token contexts"]
+   :recommended-models
+   {:tier-1 [:gemini-pro-2.0 :gemini-2.0-flash :opus-4.6]
+    :tier-2 [:sonnet-4.5 :gpt-5.3-codex :llama-3.3-70b]
+    :rationale "Need 1M+ token context windows"
+    :selection-strategy
+    "Prefer: Gemini Pro 2.0 (2M context!)
+     Gemini: gemini-2.0-flash (1M context, fast)
+     Claude: Opus/Sonnet (200k context)
+     Local: llama-3.3-70b (128k context)"}}
+
+  :privacy-sensitive
+  {:description "Tasks requiring local/private inference"
+   :characteristics
+   ["Proprietary code"
+    "Sensitive data"
+    "Offline development"
+    "Air-gapped environments"
+    "Compliance requirements"]
+   :recommended-models
+   {:tier-1-local [:llama-3.3-70b :qwen-2.5-coder-32b :deepseek-coder-33b]
+    :tier-2-local [:glm-4-plus :codellama-34b]
+    :rationale "Must use local models for privacy"
+    :selection-strategy
+    "Primary: llama-3.3-70b (best local reasoning)
+     Code: qwen-2.5-coder-32b or deepseek-coder-33b
+     Multilingual: glm-4-plus
+     Fast: codellama-34b"}}
+
+  :cost-optimized
+  {:description "Tasks where cost is primary constraint"
+   :characteristics
+   ["Budget-constrained projects"
+    "High-volume batch processing"
+    "Non-critical tasks"
+    "Experimentation"]
+   :recommended-models
+   {:tier-1-free [:codellama-34b :qwen-2.5-coder-32b :deepseek-coder-33b]
+    :tier-2-cheap [:haiku-4.5 :gemini-2.0-flash]
+    :tier-3-moderate [:sonnet-4.5 :gpt-5.2]
+    :rationale "Minimize cost while maintaining quality"
+    :selection-strategy
+    "Free: Local OSS models (zero cost)
+     Cheap: Haiku 4.5, Gemini Flash
+     Value: Sonnet 4.5 (best $/quality)"}}}
+
+ :automatic-selection
+ {:workflow-phase-mapping
+  {:plan
+   {:task-type :thinking-heavy
+    :model :opus-4.6
+    :rationale "Planning requires deep reasoning"}
+
+   :implement
+   {:task-type :execution-focused
+    :model :sonnet-4.5
+    :rationale "Implementation is code-heavy"}
+
+   :review
+   {:task-type :execution-focused
+    :model :sonnet-4.5
+    :rationale "Code review needs balanced capabilities"}
+
+   :validate
+   {:task-type :simple-validation
+    :model :haiku-4.5
+    :rationale "Validation is quick checks"}
+
+   :test
+   {:task-type :execution-focused
+    :model :sonnet-4.5
+    :rationale "Test writing needs code generation"}
+
+   :document
+   {:task-type :execution-focused
+    :model :sonnet-4.5
+    :rationale "Documentation needs understanding + generation"}}
+
+  :agent-type-mapping
+  {:planner-agent
+   {:task-type :thinking-heavy
+    :model :opus-4.6
+    :rationale "Planning is pure reasoning"}
+
+   :executor-agent
+   {:task-type :execution-focused
+    :model :sonnet-4.5
+    :rationale "Execution is code generation"}
+
+   :validator-agent
+   {:task-type :simple-validation
+    :model :haiku-4.5
+    :rationale "Validation is fast checks"}
+
+   :reviewer-agent
+   {:task-type :execution-focused
+    :model :sonnet-4.5
+    :rationale "Review needs code understanding"}
+
+   :research-agent
+   {:task-type :thinking-heavy
+    :model :opus-4.6
+    :rationale "Research requires synthesis"}}}
+
+ :implementation
+ {:phase-1-model-registry
+  {:files-to-create
+   ["components/llm/src/ai/miniforge/llm/model_registry.clj (~250 lines)"
+    "- Model capability definitions"
+    "- Query by capability (reasoning, speed, cost)"
+    "- Query by use-case"
+    "- Get recommended model for task type"]
+
+   :model-registry-structure
+   "(def model-registry
+      {:opus-4.6 {:capabilities {...} :best-for [...] :use-cases [...]}
+       :sonnet-4.5 {...}
+       :haiku-4.5 {...}
+       :gpt-5.3-codex {...}})
+
+    (defn get-models-by-capability [capability min-level]
+      ;; e.g., (get-models-by-capability :reasoning :excellent)
+      ;; => [:opus-4.6 :gpt-5.3-codex])
+
+    (defn recommend-model-for-task [task-characteristics]
+      ;; Returns {:model :sonnet-4.5 :rationale \"...\"})"}
+
+  :phase-2-task-classifier
+  {:files-to-create
+   ["components/agent/src/ai/miniforge/agent/task_classifier.clj (~200 lines)"
+    "- Classify task as :thinking-heavy, :execution-focused, :simple-validation"
+    "- Analyze task description, spec, phase, agent type"
+    "- Return classification with confidence"]
+
+   :classification-logic
+   "(defn classify-task [{:keys [phase agent-type description spec]}]
+      (cond
+        (#{:plan :research :architecture} phase)
+        {:type :thinking-heavy :confidence 0.95}
+
+        (#{:validate :format :syntax-check} phase)
+        {:type :simple-validation :confidence 0.9}
+
+        :else
+        {:type :execution-focused :confidence 0.8}))"}
+
+  :phase-3-model-selector
+  {:files-to-create
+   ["components/llm/src/ai/miniforge/llm/model_selector.clj (~200 lines)"
+    "- Select optimal model given task classification"
+    "- Consider cost constraints"
+    "- Fallback to alternatives if primary unavailable"
+    "- Explain selection reasoning"]
+
+   :selection-logic
+   "(defn select-model [task-classification & {:keys [cost-limit]}]
+      (let [task-type (:type task-classification)
+            recommendations (get-in task-classification-map
+                                   [task-type :recommended-models])
+            primary (:primary recommendations)]
+        (if (model-available? primary)
+          {:model primary
+           :rationale (:rationale recommendations)
+           :confidence (:confidence task-classification)}
+          {:model (:fallback recommendations)
+           :rationale \"Primary unavailable, using fallback\"})))"}
+
+  :phase-4-integration
+  {:files-to-modify
+   ["components/agent/src/ai/miniforge/agent/core.clj"
+    "- Before creating agent, classify task"
+    "- Select appropriate model"
+    "- Pass model to LLM client"
+    "- Log model selection reasoning"]
+
+   :workflow-integration
+   ["components/workflow/src/ai/miniforge/workflow/phase.clj"
+    "- Each phase can specify model requirements"
+    "- Override automatic selection if needed"
+    "- E.g., {:phase :plan :require-model :opus-4.6}"]}}
+
+ :configuration
+ {:config-keys
+  {:model-selection-enabled "default: true"
+   :model-selection-strategy "[:automatic | :fixed | :cost-optimized]"
+   :cost-limit-per-task "default: 0.10 (USD)"
+   :prefer-speed-over-quality "default: false"
+   :allow-model-downgrade "default: true (if primary unavailable)"}
+
+  :user-override
+  "# Disable automatic selection (use fixed model):
+   miniforge config set model-selection.strategy fixed
+   miniforge config set llm.model claude-sonnet-4-5
+
+   # Enable cost optimization:
+   miniforge config set model-selection.strategy cost-optimized
+   miniforge config set model-selection.cost-limit 0.05
+
+   # Force specific model for workflow:
+   :spec/model-override :opus-4.6"}
+
+ :user-experience
+ {:automatic-selection
+  "🎯 Model Auto-Selected: Sonnet 4.5
+
+   Task: Code implementation (execution-focused)
+   Phase: implement
+   Reasoning: Implementation needs balanced code generation
+              and cost efficiency. Sonnet 4.5 is optimal for
+              standard development tasks.
+
+   Alternative: Opus 4.6 available for complex reasoning
+   Override: :spec/model-override :opus-4.6"
+
+  :phase-specific
+  "📋 Workflow Phases with Model Selection:
+
+   Phase 1: Plan (Opus 4.6)
+   → Complex reasoning for architecture design
+
+   Phase 2-5: Implement (Sonnet 4.5)
+   → Standard code generation
+
+   Phase 6: Validate (Haiku 4.5)
+   → Quick syntax and format checks
+
+   Phase 7: Review (Sonnet 4.5)
+   → Code understanding + feedback
+
+   Estimated cost: $0.08
+   Time: ~15 minutes"
+
+  :cost-savings
+  "💰 Cost Optimization:
+
+   Without intelligent selection: $0.25
+   - All phases using Opus 4.6
+
+   With intelligent selection: $0.08
+   - Opus for planning (1 phase)
+   - Sonnet for implementation (4 phases)
+   - Haiku for validation (1 phase)
+
+   Savings: 68% ($0.17)
+   Quality: Maintained (right model for each task)"}
+
+ :integration-with-existing-systems
+ {:workflow-selector
+  "Workflow selector chooses process (lean-sdlc vs canonical-sdlc)
+   Model selector chooses intelligence level per phase
+   → Orthogonal concerns, complementary"
+
+  :backend-health
+  "If Claude backend unhealthy, switch to Codex backend
+   Model selector adapts: opus-4.6 → gpt-5.3-codex
+   → Self-healing at both backend and model level"
+
+  :error-classifier
+  "Track failures by model (not just backend)
+   If Opus consistently fails on task type, downgrade
+   → Learn from failures"}
+
+ :advanced-features
+ {:cost-aware-selection
+  "Given budget constraint: select cheapest sufficient model
+   E.g., '$0.05 limit' → prefer Haiku, upgrade only if needed"
+
+  :latency-aware-selection
+  "If user waiting (interactive), prefer Haiku for speed
+   If background batch, optimize for cost/quality"
+
+  :context-aware-selection
+  "Long context (>100k tokens) → exclude models with small windows
+   Short context (<10k tokens) → all models eligible"
+
+  :learning-from-usage
+  "Track model performance per task type
+   If Sonnet succeeds at complex reasoning 95% of time,
+   reduce Opus usage for cost savings"
+
+  :multi-model-consensus
+  "For critical decisions, query both Opus + Codex
+   Use consensus or present both viewpoints to user"}
+
+ :testing-strategy
+ {:unit-tests
+  ["Test model capability queries"
+   "Test task classification logic"
+   "Test model selection with various constraints"
+   "Test fallback behavior"]
+
+  :integration-tests
+  ["Run workflow with automatic model selection"
+   "Verify correct models used per phase"
+   "Test cost calculations"
+   "Test model unavailability handling"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "Models have capability metadata"
+   :verification "Query model registry for reasoning capability"}
+
+  {:criterion "Tasks classified automatically"
+   :verification "Planning phase → :thinking-heavy classification"}
+
+  {:criterion "Models selected intelligently"
+   :verification "Planning uses Opus, implementation uses Sonnet"}
+
+  {:criterion "Cost optimized"
+   :verification "Haiku used for simple tasks, Opus only for complex"}
+
+  {:criterion "User override works"
+   :verification ":spec/model-override forces specific model"}
+
+  {:criterion "Transparent reasoning"
+   :verification "User sees why each model was selected"}]
+
+ :success-metrics
+ ["Opus usage reduced by 70% (only complex reasoning)"
+  "Haiku usage increased by 40% (simple tasks)"
+  "Total cost per workflow reduced by 50-70%"
+  "Quality maintained (same success rates)"
+  "User satisfaction with automatic selection"]
+
+ :rollout-strategy
+ {:phase-1 "Model registry + task classifier (no behavior change)"
+  :phase-2 "Opt-in automatic selection (config flag)"
+  :phase-3 "Default enabled, user can disable"
+  :phase-4 "Learning and optimization from usage data"}
+
+ :model-selection-matrix
+ "Decision tree for model selection:
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ Task Type?                                                  │
+  └─────────────────────────────────────────────────────────────┘
+         │
+         ├─ Privacy Required? ──> LOCAL MODELS
+         │                        • llama-3.3-70b (reasoning)
+         │                        • qwen-2.5-coder-32b (code)
+         │                        • deepseek-coder-33b (code)
+         │
+         ├─ Large Context (>200k)? ──> GEMINI
+         │                              • gemini-pro-2.0 (2M)
+         │                              • gemini-2.0-flash (1M)
+         │
+         ├─ Complex Reasoning? ──> TIER 1 THINKERS
+         │                        • opus-4.6 (best overall)
+         │                        • gpt-5.3-codex (code focus)
+         │                        • gemini-thinking (extended)
+         │
+         ├─ Standard Code Work? ──> TIER 1 CODERS
+         │                         • sonnet-4.5 (best codegen)
+         │                         • gpt-5.2/5.3-codex (specialists)
+         │                         • gemini-2.0-flash (fast+large)
+         │
+         └─ Simple/Fast Tasks? ──> EFFICIENT MODELS
+                                  • haiku-4.5 (cheapest)
+                                  • gemini-2.0-flash (fastest)
+                                  • codellama-34b (free local)
+  "
+
+ :examples
+ {:emojui-refactor
+  "Spec: Multi-phase refactoring (6 PRs)
+
+   Phase 1: Plan architecture
+   → Model: Opus 4.6 (Anthropic)
+   → Reasoning: Complex architecture decisions
+   → Cost: $0.03
+
+   Phases 2-6: Implement refactorings
+   → Model: Sonnet 4.5 (Anthropic)
+   → Reasoning: Best code generation
+   → Cost: $0.05 × 5 = $0.25
+
+   Phase 7: Validate all files
+   → Model: Haiku 4.5 (Anthropic)
+   → Reasoning: Fast syntax checks
+   → Cost: $0.01
+
+   Total: $0.29 (vs $0.84 all-Opus)
+   Savings: 65%"
+
+  :cross-provider-workflow
+  "Spec: Large codebase refactoring with privacy constraints
+
+   Phase 1: Analyze codebase (large context)
+   → Model: Gemini Pro 2.0 (Google)
+   → Reasoning: 2M token context window
+   → Cost: $0.05
+
+   Phase 2: Plan refactoring (complex reasoning)
+   → Model: gpt-5.3-codex (Codex)
+   → Reasoning: Code-focused reasoning
+   → Cost: $0.04
+
+   Phases 3-5: Implement (private code)
+   → Model: qwen-2.5-coder-32b (Local)
+   → Reasoning: Proprietary code, must stay local
+   → Cost: $0 (local inference)
+
+   Phase 6: Review
+   → Model: Sonnet 4.5 (Anthropic)
+   → Reasoning: Best code review capabilities
+   → Cost: $0.03
+
+   Total: $0.12 (mixed providers for optimal cost/privacy/capability)"
+
+  :cost-optimized-batch
+  "Spec: Batch validate 100 files
+
+   All files: Syntax + format checks
+   → Model: Gemini 2.0 Flash (Google)
+   → Reasoning: Very fast, very cheap, handles batch well
+   → Cost: $0.001 per file × 100 = $0.10
+
+   vs Haiku 4.5: $0.15
+   vs Sonnet 4.5: $0.50
+   vs Local (free but slower): $0
+
+   Chose: Gemini Flash (best speed/cost balance)"
+
+  :privacy-first
+  "Spec: Banking application development (compliance: all local)
+
+   All phases: Planning, implementation, testing
+   → Model: llama-3.3-70b (Local via Ollama)
+   → Reasoning: Compliance requires local inference
+   → Cost: $0 (local GPU)
+   → Trade-off: Slower than cloud, but meets requirements
+
+   Fallback for complex reasoning:
+   → Model: glm-4-plus (Local)
+   → Reasoning: Better at complex tasks than Llama"
+
+  :multilingual-codebase
+  "Spec: Chinese/English mixed codebase
+
+   Phase 1: Analyze (large context, multilingual)
+   → Model: Gemini Pro 2.0 (Google)
+   → Reasoning: Large context + multilingual
+   → Cost: $0.04
+
+   Phase 2: Implement (Chinese comments)
+   → Model: glm-4-plus (Local)
+   → Reasoning: Best Chinese language understanding
+   → Cost: $0 (local)
+
+   Phase 3: Review (English)
+   → Model: Sonnet 4.5 (Anthropic)
+   → Reasoning: Best code review
+   → Cost: $0.03
+
+   Total: $0.07 (mixed providers for multilingual needs)"}
+
+ :provider-strengths
+ {:anthropic-claude
+  {:best-at "Overall reasoning quality and code generation balance"
+   :context "200k (large)"
+   :streaming "Excellent"
+   :choose-when "Need best overall quality, standard to complex tasks"
+   :avoid-when "Need >200k context or local inference"}
+
+  :openai-codex
+  {:best-at "Code-specialized tasks, polyglot programming"
+   :context "128k (good)"
+   :streaming "Excellent"
+   :choose-when "Code-heavy tasks, multi-language codebases"
+   :avoid-when "Need very large context or local inference"}
+
+  :google-gemini
+  {:best-at "Massive context (1-2M tokens), multimodal, speed"
+   :context "1-2M (exceptional)"
+   :streaming "Excellent"
+   :choose-when "Large codebases, multimodal inputs, need speed"
+   :avoid-when "Local inference required"}
+
+  :meta-llama
+  {:best-at "Best open source reasoning, privacy"
+   :context "128k (good)"
+   :streaming "Excellent"
+   :choose-when "Privacy requirements, offline work, cost optimization"
+   :avoid-when "Need absolute best quality"}
+
+  :alibaba-qwen
+  {:best-at "Fast local code generation"
+   :context "32k (moderate)"
+   :streaming "Good"
+   :choose-when "Fast local code tasks, cost optimization"
+   :avoid-when "Need large context or cloud quality"}
+
+  :zhipu-glm
+  {:best-at "Chinese language, multilingual tasks"
+   :context "128k (good)"
+   :streaming "Good"
+   :choose-when "Chinese codebases, Asian markets, multilingual"
+   :avoid-when "English-only tasks (use specialists)"}}
+
+ :selection-heuristics
+ ["If privacy/offline required → Local OSS models only"
+  "If context >200k tokens → Gemini (1-2M context)"
+  "If complex reasoning → Opus 4.6 or gpt-5.3-codex"
+  "If standard code work → Sonnet 4.5 or gpt-5.2-codex"
+  "If simple/fast tasks → Haiku 4.5 or Gemini Flash"
+  "If cost critical → Local models (free) or Haiku/Flash (cheap)"
+  "If multilingual → Gemini Pro or glm-4-plus"
+  "If code specialist needed → Codex or Qwen/DeepSeek"
+  "If multimodal inputs → Gemini"
+  "Default to Sonnet 4.5 (best all-around value)"]
+
+ :notes
+ ["This is orthogonal to backend and workflow selection"
+  "Three levels: Backend (provider) → Model (intelligence tier) → Workflow (process)"
+  "Intelligent selection at all three levels = optimal efficiency"
+  "Cost savings without quality loss (right tool for each job)"
+  "Cross-provider selection enables best-of-breed approach"
+  "Privacy-first option available with local models"
+  "Transparency crucial - user sees and understands selection"
+  "Learning from usage improves selection over time"
+  "Model registry is extensible - new models easy to add"
+  "Provider-agnostic architecture future-proofs system"]}

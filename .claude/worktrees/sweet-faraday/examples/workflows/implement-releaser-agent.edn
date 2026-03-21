@@ -1,0 +1,106 @@
+;; Workflow: Implement Releaser Agent
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; This workflow implements the Releaser agent to complete miniforge's
+;; ability to create PRs autonomously. This is miniforge building itself!
+;;
+;; The Releaser agent is the missing piece that generates:
+;; - Commit messages (following rule 715)
+;; - PR titles and descriptions
+;; - PR documentation in /docs/pr/
+;; - Branch names
+;;
+;; It also wires up git operations (commit, push, gh pr create) into the
+;; release phase.
+;;
+;; Usage:
+;;   mf run examples/workflows/implement-releaser-agent.edn
+
+{:workflow/spec-version "1.0.0"
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ ;; Required root-level keys for spec validation
+ :spec/title "Implement Releaser agent to enable autonomous PR creation"
+ :spec/description
+ "Implement the Releaser agent component that generates commit messages, PR
+  descriptions, and PR documentation. Wire it into the release phase to enable
+  miniforge to autonomously create PRs.
+
+  Current state:
+  - Planner, Implementer, Tester, Reviewer agents all work ✓
+  - Files are written to disk and staged with git add ✓
+  - BUT: No git commit, branch creation, or PR creation happens
+
+  Gap in components/workflow/src/ai/miniforge/workflow/release.clj:
+  After line 247, files are staged but nothing commits/pushes/creates PR.
+  Comment says 'In the future, this would invoke a releaser agent...'
+
+  That future is now!"
+
+ :spec/intent
+ {:type :implement
+  :scope ["components/agent/src/ai/miniforge/agent/releaser.clj"
+          "components/agent/test/ai/miniforge/agent/releaser_test.clj"
+          "components/schema/src/ai/miniforge/schema/release_artifact.clj"
+          "components/workflow/src/ai/miniforge/workflow/release.clj"
+          "components/agent/src/ai/miniforge/agent/interface.clj"]}
+
+ :spec/constraints
+ ["Follow existing agent patterns (see planner.clj, implementer.clj, tester.clj)"
+  "Releaser agent creates ReleaseArtifact with commit message, PR description, branch name"
+  "System prompt must follow rule 715 for commit messages"
+  "PR description must include evidence bundle summary (test results, policies)"
+  "Generate PR doc in /docs/pr/<workflow-id>.md with full context"
+  "Wire releaser into release phase (release.clj) after git staging"
+  "Add git operations: checkout -b, commit, push, gh pr create"
+  "Handle errors gracefully (what if gh CLI not available?)"
+  "All tests must pass"
+  "Follow polylith architecture (interface + implementation)"]
+
+ ;; Additional metadata (preserved in :spec/raw-data)
+ :spec/acceptance-criteria
+ ["New file: components/agent/src/ai/miniforge/agent/releaser.clj exists"
+  "Releaser agent has system prompt for commit/PR message generation"
+  "Releaser generates ReleaseArtifact with required fields"
+  "ReleaseArtifact schema defined in components/schema/"
+  "Release phase (release.clj) invokes releaser agent"
+  "Git operations added: branch create, commit, push"
+  "PR creation via gh pr create implemented"
+  "PR documentation generated in /docs/pr/"
+  "Unit tests for releaser agent pass"
+  "Integration test shows full workflow creates actual PR"
+  "Miniforge can now complete this workflow by creating its own PR!"]
+
+ :technical-details
+ "Key files to modify/create:
+
+  NEW FILES:
+  - components/agent/src/ai/miniforge/agent/releaser.clj (main implementation)
+  - components/agent/test/ai/miniforge/agent/releaser_test.clj (tests)
+  - components/schema/src/ai/miniforge/schema/release_artifact.clj (schema)
+
+  MODIFY:
+  - components/workflow/src/ai/miniforge/workflow/release.clj
+    * Add invoke-releaser-agent function (after line 247)
+    * Add git-commit!, git-push!, create-pr! functions
+    * Add write-pr-doc! function
+    * Wire releaser agent into release-artifacts! function
+  - components/agent/src/ai/miniforge/agent/interface.clj
+    * Export releaser agent in public API
+
+  REFERENCE:
+  - See components/agent/src/ai/miniforge/agent/implementer.clj for agent pattern
+  - See components/workflow/src/ai/miniforge/workflow/release.clj line 75-77
+  - Rule 715 in docs/ for commit message format
+  - Evidence bundle structure for PR documentation content"
+
+ :success-metrics
+ "After this workflow completes:
+  1. Miniforge creates a PR for this very implementation
+  2. PR includes /docs/pr/<workflow-id>.md with evidence
+  3. PR description has proper formatting and evidence summary
+  4. Commit message follows rule 715
+  5. Branch name follows convention (feat/implement-releaser-agent)
+  6. All tests pass in CI
+  7. Meta-achievement unlocked: Miniforge built itself! 🎉"}

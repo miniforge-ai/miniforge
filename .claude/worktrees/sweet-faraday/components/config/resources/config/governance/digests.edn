@@ -1,0 +1,4 @@
+{:readiness            "sha256:29dd89ac0172c8def994aad6498ed5ad04ffa94e6362df9d9a019ed9025b8027"
+ :risk                 "sha256:98b1724f02d3a26bde61321c5a57dba21930f9f2d7225a7132d897702c524217"
+ :tiers                "sha256:7ada347e0ba0f77b4deb7c3faa19644db4f596bb4aa0ccd8f75427af6bf0651f"
+ :knowledge-safety     "sha256:c234736d09b4b4f9d3dac1bc4a8fcde12031d1a4af7d7ce20b9a530986d90942"}

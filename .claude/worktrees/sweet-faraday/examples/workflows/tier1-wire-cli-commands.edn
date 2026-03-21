@@ -1,0 +1,43 @@
+;; Dogfood: Wire CLI commands for all component interfaces
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; Implementation task: audit all components/*/interface.clj files,
+;; verify CLI commands exist in bases/cli/, and wire missing commands
+;; following the existing `miniforge <ns> <cmd>` pattern.
+;;
+;; Usage:
+;;   mf run examples/workflows/tier1-wire-cli-commands.edn
+
+{:workflow/spec-version "1.0.0"
+ :workflow/type :full-sdlc
+ :workflow/version "1.0.0"
+
+ :task/title "Wire missing CLI commands for all component interfaces"
+ :task/description
+ "Audit every components/*/src/ai/miniforge/*/interface.clj to enumerate
+  public functions. Cross-reference against bases/cli/ to find CLI commands
+  that should exist but don't. Wire missing commands following the existing
+  `miniforge <namespace> <command>` dispatch pattern.
+
+  Scope:
+  - components/*/src/ai/miniforge/*/interface.clj (all components)
+  - bases/cli/src/ai/miniforge/cli/ (CLI command dispatch)
+  - bases/cli/src/ai/miniforge/cli/commands/ (individual commands)"
+
+ :task/intent
+ "Ensure every key interface function is accessible via CLI, enabling
+  operational use and testing without requiring a REPL."
+
+ :task/constraints
+ ["Follow existing CLI dispatch pattern in bases/cli/"
+  "Use `miniforge <ns> <cmd>` naming convention"
+  "Include --help text for each new command"
+  "Do not modify existing commands"
+  "Add integration tests for new commands"]
+
+ :task/acceptance-criteria
+ ["Audit report listing all interface functions and their CLI status"
+  "All high-priority functions have CLI commands wired"
+  "New commands follow existing dispatch pattern"
+  "bb test passes after changes"
+  "Each new command has --help output"]}

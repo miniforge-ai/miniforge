@@ -1,0 +1,531 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+{:spec/id :cli-streaming-output
+ :spec/version "1.0.0"
+ :spec/status :draft
+ :spec/created "2026-01-22"
+ :spec/author "miniforge.ai"
+
+ :spec/title "CLI Streaming Output - Real-time Progress"
+ :spec/description
+ "Stream workflow execution progress, LLM responses, and phase updates
+  to terminal in real-time with structured, parseable output."
+
+ :spec/context
+ {:problem
+  "Long-running workflows provide no feedback during execution:
+   - Users don't know if workflow is making progress
+   - No visibility into current phase or step
+   - LLM generation appears frozen
+   - Can't see token usage or costs accumulating
+   - Hard to debug which phase is slow
+
+   Need real-time streaming output for better UX and observability."
+
+  :constraints
+  ["Must support both TTY and non-TTY environments"
+   "Must be parseable by external tools (JSON lines)"
+   "Must not interfere with execution performance"
+   "Must handle backpressure (slow terminals)"
+   "Must support multiple concurrent executions"]
+
+  :dependencies
+  ["observer - Metrics and event hooks"
+   "workflow.interface - WorkflowObserver protocol"
+   "cli/tui - Terminal rendering"
+   "llm - Token streaming (future)"]}
+
+ :spec/requirements
+ {:functional
+  {:output-modes
+   {:pretty-mode
+    {:description "Human-readable terminal output with colors and progress bars"
+     :target "Interactive terminal sessions (TTY)"
+     :features
+     ["ANSI colors and styling"
+      "Progress bars and spinners"
+      "Live-updating status lines"
+      "Collapsible phase sections"
+      "Emoji indicators"]
+     :example
+     "
+     ╭─ Workflow: canonical-sdlc-v1 (v1.0.0)
+     │  Status: ⚙️  Running
+     │  Phase:  📝 PLAN (2/8)
+     ├────────────────────────────────────
+     │  ✓ INPUT    completed in 1.2s
+     │  ⚙ PLAN     generating implementation plan...
+     │             [████████░░░░░░░░] 45% (2/4 tasks)
+     │             Tokens: 1,234 | Cost: $0.02
+     │  ○ DESIGN   pending
+     │  ○ TEST     pending
+     ├────────────────────────────────────
+     │  Total: 45s elapsed | $0.02 spent
+     ╰────────────────────────────────────
+     "}
+
+    :json-mode
+    {:description "Structured JSON lines for programmatic consumption"
+     :target "CI, automation, external tools"
+     :features
+     ["One JSON object per line (JSONL)"
+      "Self-describing event types"
+      "Timestamp on every event"
+      "Parseable by jq, etc."]
+     :example
+     "{\"type\":\"execution.started\",\"execution_id\":\"abc123\",\"workflow_id\":\"canonical-sdlc-v1\",\"timestamp\":\"2026-01-22T10:00:00Z\"}
+{\"type\":\"phase.started\",\"execution_id\":\"abc123\",\"phase\":\"plan\",\"timestamp\":\"2026-01-22T10:00:01Z\"}
+{\"type\":\"phase.progress\",\"execution_id\":\"abc123\",\"phase\":\"plan\",\"progress\":0.45,\"tokens\":1234,\"timestamp\":\"2026-01-22T10:00:15Z\"}
+{\"type\":\"phase.completed\",\"execution_id\":\"abc123\",\"phase\":\"plan\",\"duration_ms\":18200,\"timestamp\":\"2026-01-22T10:00:19Z\"}"}
+
+    :quiet-mode
+    {:description "Minimal output, errors only"
+     :target "Scripts, background jobs"
+     :features
+     ["No progress output"
+      "Only final result or error"
+      "Suitable for cron jobs"]
+     :example
+     "# (no output during execution)
+     ✓ Workflow completed successfully
+     # or on error:
+     ✗ Workflow failed: Gate tests-pass failed"}
+
+    :verbose-mode
+    {:description "Detailed debug output"
+     :target "Debugging, development"
+     :features
+     ["All events logged"
+      "Inner loop iterations shown"
+      "Gate evaluation details"
+      "Agent prompts and responses"
+      "Full stack traces"]}}
+
+   :event-types
+   {:execution-lifecycle
+    [{:event "execution.started"
+      :data ["execution_id" "workflow_id" "workflow_version" "input"]}
+     {:event "execution.paused"
+      :data ["execution_id" "reason" "checkpoint_id"]}
+     {:event "execution.resumed"
+      :data ["execution_id" "checkpoint_id"]}
+     {:event "execution.completed"
+      :data ["execution_id" "duration_ms" "artifacts" "metrics"]}
+     {:event "execution.failed"
+      :data ["execution_id" "error" "phase" "stack_trace"]}
+     {:event "execution.cancelled"
+      :data ["execution_id" "reason"]}]
+
+    :phase-lifecycle
+    [{:event "phase.started"
+      :data ["execution_id" "phase" "agent" "input"]}
+     {:event "phase.progress"
+      :data ["execution_id" "phase" "progress" "tokens" "iteration"]}
+     {:event "phase.completed"
+      :data ["execution_id" "phase" "duration_ms" "artifacts" "metrics"]}
+     {:event "phase.failed"
+      :data ["execution_id" "phase" "error" "attempts"]}]
+
+    :gate-events
+    [{:event "gate.evaluating"
+      :data ["execution_id" "phase" "gate" "criteria"]}
+     {:event "gate.passed"
+      :data ["execution_id" "phase" "gate" "result"]}
+     {:event "gate.failed"
+      :data ["execution_id" "phase" "gate" "errors" "can_retry"]}]
+
+    :llm-events
+    [{:event "llm.request.started"
+      :data ["execution_id" "phase" "model" "prompt_tokens"]}
+     {:event "llm.response.chunk"
+      :data ["execution_id" "phase" "chunk" "cumulative_tokens"]}
+     {:event "llm.request.completed"
+      :data ["execution_id" "phase" "completion_tokens" "cost_usd" "duration_ms"]}
+     {:event "llm.request.failed"
+      :data ["execution_id" "phase" "error" "will_retry"]}]
+
+    :artifact-events
+    [{:event "artifact.created"
+      :data ["execution_id" "phase" "artifact_id" "artifact_type" "size"]}
+     {:event "artifact.modified"
+      :data ["execution_id" "artifact_id" "modification_type"]}]
+
+    :metrics-events
+    [{:event "metrics.updated"
+      :data ["execution_id" "tokens_total" "cost_total_usd" "duration_ms"]}]}
+
+   :streaming-features
+   {:live-progress
+    {:description "Real-time progress indicators"
+     :components
+     ["Phase progress bars"
+      "Token counters"
+      "Cost accumulators"
+      "Duration timers"
+      "Iteration counts"]}
+
+    :llm-streaming
+    {:description "Stream LLM responses as they generate"
+     :behavior "Show LLM output incrementally, not just final result"
+     :use-case "See agent thinking process in real-time"
+     :example
+     "⚙ Agent (Planner): Generating implementation plan...
+     > **Phase 1: Requirements Analysis**
+     > - Review user specification
+     > - Identify core features
+     > - Define success criteria
+     >
+     > **Phase 2: Architecture Design**
+     > ..."}
+
+    :parallel-phases
+    {:description "Show multiple phases running concurrently"
+     :use-case "Future: parallel phase execution"
+     :display "Split terminal or interleaved events"}
+
+    :backpressure-handling
+    {:description "Handle slow terminal consumption"
+     :strategies
+     ["Buffer events up to limit"
+      "Drop non-critical events if buffer full"
+      "Never drop errors or final results"
+      "Emit 'events_dropped' indicator"]}}
+
+   :formatting-and-styling
+   {:colors
+    {:phase-states
+     {:pending "gray"
+      :running "cyan + spinner"
+      :completed "green + checkmark"
+      :failed "red + X"
+      :paused "yellow + pause icon"}
+     :event-types
+     {:info "blue"
+      :success "green"
+      :warning "yellow"
+      :error "red"}}
+
+    :progress-bars
+    {:styles
+     ["ASCII: [=====>    ] 50%"
+      "Unicode: [█████░░░░░] 50%"
+      "Minimal: 50% (5/10)"]}
+
+    :timestamps
+    {:formats
+     ["Relative: '2m 34s ago'"
+      "Absolute: '10:23:45'"
+      "ISO 8601: '2026-01-22T10:23:45Z'"]
+     :modes
+     {:pretty "Relative"
+      :json "ISO 8601"
+      :verbose "Absolute"}}
+
+    :truncation
+    {:long-output "Truncate with '... (show more)' hint"
+     :artifact-content "Preview first N lines"
+     :error-traces "Show first N frames, link to full log"}}}
+
+  :non-functional
+  {:performance
+   ["Event emission latency < 10ms"
+    "Terminal rendering < 16ms (60 FPS)"
+    "Buffer size configurable (default 1000 events)"
+    "Async writing to prevent blocking execution"]
+
+   :reliability
+   ["Graceful degradation if terminal slow"
+    "No crashes on broken pipe (user exits)"
+    "State recoverable if output interrupted"
+    "Events logged even if display fails"]
+
+   :usability
+   ["Auto-detect terminal capabilities (colors, size)"
+    "Responsive layout for narrow terminals"
+    "Scrollback friendly (no excessive clear/redraw)"
+    "Copy-pasteable output"]}
+
+  :compatibility
+  ["POSIX terminals (Linux, macOS, WSL)"
+   "Windows Terminal and ConEmu"
+   "tmux and screen sessions"
+   "CI environments (GitHub Actions, CircleCI, Jenkins)"
+   "Non-TTY pipes and redirects"]}
+
+ :spec/architecture
+ {:components
+  {:stream-emitter
+   {:namespace "ai.miniforge.cli.stream"
+    :description "Core event emission and streaming"
+    :responsibilities
+    ["Emit events with metadata"
+     "Route to appropriate formatters"
+     "Handle backpressure"
+     "Buffer events if needed"
+     "Guarantee event ordering"]
+    :protocols
+    [{:name "StreamEmitter"
+      :methods
+      [{:name "emit-event"
+        :args ["event-type" "data"]
+        :returns "nil"}
+       {:name "emit-progress"
+        :args ["phase" "progress" "metrics"]
+        :returns "nil"}
+       {:name "flush"
+        :args []
+        :returns "nil"}]}]}
+
+   :output-formatter
+   {:namespace "ai.miniforge.cli.output.formatter"
+    :description "Format events for different output modes"
+    :responsibilities
+    ["Format events as JSON, pretty, or quiet"
+     "Apply styling and colors"
+     "Truncate long content"
+     "Generate progress bars"]
+    :multimethods
+    ["format-event [mode event-type data]"
+     "format-progress [mode phase progress]"
+     "format-error [mode error]"]}
+
+   :terminal-renderer
+   {:namespace "ai.miniforge.cli.render"
+    :description "Render formatted output to terminal"
+    :responsibilities
+    ["Manage terminal state (cursor, clear)"
+     "Handle live-updating lines"
+     "Detect terminal capabilities"
+     "Adaptive layout for terminal size"
+     "Thread-safe writes"]
+    :functions
+    ["render-line"
+     "update-line"
+     "render-progress-bar"
+     "clear-section"
+     "detect-terminal-caps"]}
+
+   :observer-bridge
+   {:namespace "ai.miniforge.cli.observer-bridge"
+    :description "Bridge Observer events to stream emitter"
+    :responsibilities
+    ["Implement WorkflowObserver protocol"
+     "Convert observer events to stream events"
+     "Add timestamps and metadata"
+     "Filter events based on verbosity"]
+    :implementation
+    "Implements WorkflowObserver, emits to StreamEmitter"}}
+
+  :integration-points
+  {:workflow-observer
+   {:protocol "ai.miniforge.workflow.interface/WorkflowObserver"
+    :methods
+    ["on-phase-start - emit phase.started"
+     "on-phase-complete - emit phase.completed"
+     "on-phase-error - emit phase.failed"
+     "on-workflow-complete - emit execution.completed"
+     "on-workflow-error - emit execution.failed"]}
+
+   :observer-component
+   {:hooks "ai.miniforge.observer.interface/create-observer"
+    :metrics "Stream metrics.updated events periodically"}
+
+   :llm-client
+   {:streaming "Future: LLM client emits llm.response.chunk events"
+    :integration "StreamEmitter receives chunks and forwards"}}}
+
+ :spec/data-structures
+ {:stream-event
+  {:description "Base event structure"
+   :schema
+   {:event/type "keyword - event type (e.g., :phase.started)"
+    :event/execution-id "uuid - parent execution"
+    :event/timestamp "inst - when event occurred"
+    :event/data "map - event-specific data"
+    :event/metadata "map - optional metadata (tags, source)"}}
+
+  :progress-state
+  {:description "Live progress tracking state"
+   :schema
+   {:progress/execution-id "uuid"
+    :progress/current-phase "keyword"
+    :progress/phase-progress "double - 0.0 to 1.0"
+    :progress/completed-phases "[keyword] - phases done"
+    :progress/total-phases "integer"
+    :progress/metrics "map - current metrics"
+    :progress/started-at "inst"
+    :progress/estimated-completion "inst | nil"}}
+
+  :render-state
+  {:description "Terminal rendering state"
+   :schema
+   {:render/mode "keyword - :pretty :json :quiet :verbose"
+    :render/terminal-width "integer"
+    :render/terminal-height "integer"
+    :render/supports-color? "boolean"
+    :render/supports-unicode? "boolean"
+    :render/live-lines "[string] - currently displayed live-updating lines"
+    :render/line-offsets "[integer] - cursor positions for live lines"}}}
+
+ :spec/user-flows
+ [{:flow "Watch workflow execution (pretty mode)"
+   :steps
+   ["User runs: miniforge run :canonical-sdlc-v1"
+    "Terminal shows: 'Workflow: canonical-sdlc-v1 (v1.0.0)'"
+    "Phase plan starts, progress bar appears"
+    "Progress bar updates as tokens accumulate"
+    "Phase plan completes, checkmark appears"
+    "Next phase starts immediately"
+    "Process repeats for all phases"
+    "Final summary shows total time and cost"]}
+
+  {:flow "Parse execution in CI (JSON mode)"
+   :steps
+   ["CI runs: miniforge run :build-workflow --output json"
+    "Each event emitted as JSON line"
+    "CI tool parses JSON with jq"
+    "CI extracts metrics: jq -r '.event/data.metrics'"
+    "CI fails build if cost exceeds threshold"]}
+
+  {:flow "Debug slow phase (verbose mode)"
+   :steps
+   ["User runs: miniforge run :workflow-id --verbose"
+    "All inner loop iterations shown"
+    "Agent prompts displayed"
+    "LLM responses streamed in real-time"
+    "Gate evaluation details shown"
+    "User identifies bottleneck in test phase"]}
+
+  {:flow "Monitor from another terminal"
+   :steps
+   ["Terminal 1: miniforge run :workflow-id > output.jsonl"
+    "Terminal 2: tail -f output.jsonl | jq -r '.event/type'"
+    "Terminal 2 shows live stream of event types"
+    "User watches progress in real-time"]}]
+
+ :spec/implementation-phases
+ [{:phase 1
+   :title "Basic Event Streaming"
+   :deliverables
+   ["StreamEmitter implementation"
+    "WorkflowObserver bridge"
+    "JSON output formatter"
+    "Basic pretty formatter"]
+   :tests
+   ["Emits execution lifecycle events"
+    "Emits phase lifecycle events"
+    "JSON mode outputs valid JSONL"
+    "Pretty mode shows basic progress"]}
+
+  {:phase 2
+   :title "Progress Indicators"
+   :deliverables
+   ["Progress bar rendering"
+    "Live-updating status lines"
+    "Metrics display (tokens, cost, time)"
+    "Terminal capability detection"]
+   :tests
+   ["Progress bars update correctly"
+    "Metrics accumulate accurately"
+    "Detects TTY vs non-TTY"
+    "Handles narrow terminals"]}
+
+  {:phase 3
+   :title "Advanced Formatting"
+   :deliverables
+   ["Color and styling"
+    "Collapsible sections"
+    "Truncation and pagination"
+    "Quiet and verbose modes"]
+   :tests
+   ["Colors disabled when --no-color"
+    "Long output truncated with hint"
+    "Quiet mode suppresses progress"
+    "Verbose mode shows all details"]}
+
+  {:phase 4
+   :title "LLM Streaming"
+   :deliverables
+   ["LLM chunk event support"
+    "Incremental response display"
+    "Token counting during stream"
+    "Abort streaming on cancel"]
+   :tests
+   ["Displays LLM chunks as they arrive"
+    "Token count updates incrementally"
+    "Can cancel during LLM generation"]}
+
+  {:phase 5
+   :title "Performance and Reliability"
+   :deliverables
+   ["Async event emission"
+    "Buffering and backpressure"
+    "Graceful degradation"
+    "Event logging to file"]
+   :tests
+   ["No blocking on slow terminal"
+    "Handles broken pipe gracefully"
+    "Events buffered under load"
+    "All events logged to file"]}]
+
+ :spec/testing-strategy
+ {:unit-tests
+  {:stream-emitter
+   ["Emits events with correct structure"
+    "Buffers events when requested"
+    "Flushes buffer correctly"
+    "Handles concurrent emission"]
+
+   :output-formatter
+   ["Formats events as JSON"
+    "Formats events as pretty text"
+    "Applies colors correctly"
+    "Truncates long content"]
+
+   :terminal-renderer
+   ["Detects terminal capabilities"
+    "Renders progress bars"
+    "Updates live lines"
+    "Handles terminal resize"]}
+
+  :integration-tests
+  ["WorkflowObserver events trigger stream events"
+   "JSON output is parseable by jq"
+   "Pretty output renders in terminal"
+   "Metrics accumulate correctly across phases"
+   "No duplicate or out-of-order events"
+   "Graceful handling of terminal disconnect"]
+
+  :user-acceptance-tests
+  ["Developer sees progress during workflow execution"
+   "CI tool parses JSON output successfully"
+   "Verbose mode helps debug slow phase"
+   "Output is readable on 80-column terminal"
+   "No garbled output in tmux/screen"]}
+
+ :spec/success-criteria
+ ["Events emitted for all workflow lifecycle points"
+  "JSON mode outputs valid, parseable JSONL"
+  "Pretty mode shows progress bars and colors"
+  "Quiet mode suitable for automation"
+  "Verbose mode useful for debugging"
+  "No performance impact on workflow execution"
+  "Works in TTY and non-TTY environments"
+  "Integration tests pass"
+  "Documentation with examples complete"]}

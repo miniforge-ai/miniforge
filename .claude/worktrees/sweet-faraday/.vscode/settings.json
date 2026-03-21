@@ -1,0 +1,16 @@
+{
+    "calva.replConnectSequences": [
+        {
+            "projectType": "deps.edn",
+            "name": "miniforge",
+            "cljsType": "none",
+            "menuSelections": {
+                "cljAliases": ["dev", "test", "+default"]
+            }
+        }
+    ],
+
+    "files.associations": {
+  "*.spec": "markdown"
+    }
+}

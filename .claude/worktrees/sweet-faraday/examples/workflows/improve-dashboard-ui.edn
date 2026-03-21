@@ -1,0 +1,46 @@
+;; Workflow: Improve Web Dashboard UI/UX
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; Have miniforge improve its own web dashboard UI based on user feedback.
+;;
+;; Usage:
+;;   miniforge workflow run examples/workflows/improve-dashboard-ui.edn
+
+{:workflow/spec-version "1.0.0"
+ :workflow/type :full-sdlc
+ :workflow/version "2.0.0"
+
+ :spec/title "Improve web dashboard UI/UX based on user feedback"
+ :spec/description
+ "Improve the web dashboard user interface to address specific UI/UX issues
+  identified during initial user testing. Focus on making the interface more
+  intuitive, professional, and data-dense."
+
+ :spec/intent
+ "Create a polished dashboard experience that:
+  - Presents PR train fleet data in a clear, table-like format
+  - Makes empty states obvious and actionable
+  - Improves visual hierarchy and information density
+  - Ensures consistent spacing and alignment
+  - Provides clear calls-to-action for creating new trains"
+
+ :spec/constraints
+ ["Maintain the mid-century industrial design aesthetic"
+  "Keep all existing functionality working"
+  "Ensure theme-aware styling (dark/light/high-contrast)"
+  "Keep markup semantic and accessible"
+  "Preserve htmx-based reactivity"
+  "Follow existing code organization patterns"
+  "Include proper empty states for zero-data views"
+  "Test with and without data"]
+
+ :spec/acceptance-criteria
+ ["PR Fleet view shows trains in a table/grid format (excel-like)"
+  "'Create Train' action uses a professional button or + icon"
+  "Empty state shows helpful message and prominent 'Create Train' button"
+  "Workflows table has proper column spacing (not squished)"
+  "Empty workflows state shows clear message"
+  "All table headers are properly spaced and readable"
+  "Cards maintain consistent sizing and spacing"
+  "Dashboard remains responsive at various screen sizes"
+  "Theme switching works correctly across all views"]}

@@ -1,0 +1,12 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge/dag-executor {:local/root "../dag-executor"}
+        ai.miniforge/pr-lifecycle {:local/root "../pr-lifecycle"}
+        ai.miniforge/agent        {:local/root "../agent"}
+        ai.miniforge/loop         {:local/root "../loop"}
+        ai.miniforge/logging      {:local/root "../logging"}
+        ai.miniforge/event-stream {:local/root "../event-stream"}
+        ai.miniforge/schema       {:local/root "../schema"}
+        ai.miniforge/agent-runtime {:local/root "../agent-runtime"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {io.github.cognitect-labs/test-runner
+                               {:git/tag "v0.5.1" :git/sha "dfb30dd"}}}}}

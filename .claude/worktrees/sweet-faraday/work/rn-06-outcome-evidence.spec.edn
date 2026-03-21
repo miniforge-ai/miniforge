@@ -1,0 +1,92 @@
+;; Reliability Nines — RN-06: Outcome Evidence Extensions
+;; Tier 2 (Core Reliability) — depends on RN-01, RN-02
+;; Blocks: RN-13
+
+{:spec/title "RN-06: Extend Outcome Evidence with Reliability Fields"
+ :version "1.0.0"
+ :type :enhancement
+ :priority :high
+
+ :spec/description
+ "Extend the evidence bundle outcome schema with :outcome/failure-class,
+  :outcome/tier, :outcome/degradation-mode, and :outcome/sli-measurements.
+  Update the evidence collector to capture these fields at workflow completion.
+
+  Current state: outcome-schema in evidence_bundle/schema.clj has no reliability fields.
+  Target state: Every evidence bundle carries reliability context."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/evidence-bundle/src/ai/miniforge/evidence_bundle"]}
+
+ :normative-refs
+ {:primary "N6 §2.6 — Outcome Evidence"
+  :secondary ["N1 §5.3.3 — Failure Taxonomy"
+              "N1 §5.5.1 — Workflow Tiers"]}
+
+ :gap-analysis-ref "gap-analysis-reliability-nines.md #17"
+ :dag/id :rn-06
+ :dag/depends-on [:rn-01 :rn-02]
+ :dag/blocks [:rn-13]
+
+ :current-state
+ {:schema "outcome-schema missing failure-class, tier, degradation-mode, sli-measurements"
+  :collector "build-outcome-evidence does not capture reliability fields"
+  :completion "0%"}
+
+ :target-state
+ {:schema-additions
+  [":outcome/failure-class keyword — canonical class from RN-01 (on failure only)"
+   ":outcome/tier keyword — workflow tier (:best-effort :standard :critical)"
+   ":outcome/degradation-mode keyword — system mode at completion time"
+   ":outcome/sli-measurements map — snapshot of SLI values at completion"]
+  :collector "build-outcome-evidence captures all 4 fields from context"}
+
+ :implementation
+ {:step-1-schema
+  {:title "Add 4 fields to outcome evidence schema"
+   :files-to-modify
+   ["components/evidence-bundle/src/ai/miniforge/evidence_bundle/schema.clj"]
+   :changes
+   ["Add :outcome/failure-class [:maybe FailureClass] (nil on success)"
+    "Add :outcome/tier [:enum :best-effort :standard :critical]"
+    "Add :outcome/degradation-mode [:enum :nominal :degraded :safe-mode]"
+    "Add :outcome/sli-measurements [:maybe [:map-of keyword double]]"]}
+
+  :step-2-collector
+  {:title "Capture reliability fields in collector"
+   :files-to-modify
+   ["components/evidence-bundle/src/ai/miniforge/evidence_bundle/collector.clj"]
+   :changes
+   ["Extract :failure/class from workflow failure event"
+    "Extract :workflow/tier from execution context"
+    "Query current degradation mode"
+    "Snapshot current SLI values (if RN-04 component available)"]}}
+
+ :spec/constraints
+ ["Backward compatible: existing evidence bundles valid without new fields"
+  ":outcome/failure-class MUST be nil on success, keyword on failure"
+  ":outcome/sli-measurements MAY be nil if SLI engine not yet available"
+  "Follow Polylith interface-only deps"]
+
+ :testing-strategy
+ {:unit-tests
+  ["Schema accepts evidence with new fields"
+   "Schema accepts evidence without new fields (backward compat)"
+   "Collector populates fields from context"
+   "failure-class nil on successful outcome"]
+  :integration-tests
+  ["Workflow failure → evidence bundle has :outcome/failure-class"
+   "Workflow with :critical tier → evidence bundle has :outcome/tier"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "4 new fields in outcome schema"
+   :verification "Malli schema validates evidence with all 4 fields"}
+  {:criterion "Collector captures reliability context"
+   :verification "build-outcome-evidence includes tier and failure-class"}
+  {:criterion "Backward compatible"
+   :verification "Existing evidence bundles pass validation"}]
+
+ :estimated-effort "1-2 days"
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"}

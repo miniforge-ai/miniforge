@@ -1,0 +1,119 @@
+;; Reliability Nines — RN-07: Unified Autonomy Model
+;; Tier 3 (Governance) — depends on RN-02, RN-03, RN-04, RN-05
+;; Blocks: RN-08
+
+{:spec/title "RN-07: Unified Autonomy Model (A0-A5)"
+ :version "1.0.0"
+ :type :feature
+ :priority :high
+
+ :spec/description
+ "Create a new autonomy Polylith component implementing the unified A0-A5
+  autonomy model from N1 §5.6. Replaces three parallel tier systems
+  (N8 capability levels, N9 automation tiers, N10 trust levels) with a
+  single scale. Configurable per workflow, demotable by degradation mode.
+
+  Current state: N8 has OBSERVE/ADVISE/CONTROL, N9 has automation tiers,
+  N10 has L0-L4 trust — all independent and unmapped.
+  Target state: Single A0-A5 model with cross-spec mapping."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/autonomy (NEW)"
+          "components/event-stream (extend)"
+          "components/workflow (extend)"]}
+
+ :normative-refs
+ {:primary "N1 §5.6 — Unified Autonomy Model"
+  :secondary ["N8 §3.4 — Safe-Mode Posture (demotion to A0)"
+              "N1 §5.5.5 — Degradation Modes"]}
+
+ :gap-analysis-ref "gap-analysis-reliability-nines.md #5"
+ :dag/id :rn-07
+ :dag/depends-on [:rn-02 :rn-03 :rn-04 :rn-05]
+ :dag/blocks [:rn-08]
+
+ :current-state
+ {:n8 "OBSERVE / ADVISE / CONTROL capability levels"
+  :n9 "Observe / Advise / Converse / Govern automation tiers"
+  :n10 "L0-L4 trust levels"
+  :unified "No mapping between them"
+  :completion "0%"}
+
+ :target-state
+ {:levels
+  [{:level :A0 :name "Human-in-the-Loop" :description "Every action requires approval"}
+   {:level :A1 :name "Supervised" :description "Agent proposes, human approves batches"}
+   {:level :A2 :name "Guided" :description "Agent acts within guardrails, human monitors"}
+   {:level :A3 :name "Autonomous" :description "Full autonomy within policy bounds"}
+   {:level :A4 :name "Adaptive" :description "Agent adjusts own parameters within policy"}
+   {:level :A5 :name "Self-Governing" :description "Agent proposes policy changes"}]
+  :mapping
+  {:A0 {:n8 :OBSERVE :n9 :observe :n10 :L0}
+   :A1 {:n8 :ADVISE  :n9 :advise :n10 :L1}
+   :A2 {:n8 :ADVISE  :n9 :converse :n10 :L2}
+   :A3 {:n8 :CONTROL :n9 :govern :n10 :L3}
+   :A4 {:n8 :CONTROL :n9 :govern :n10 :L4}
+   :A5 {:n8 :CONTROL :n9 :govern :n10 :L4}}}
+
+ :implementation
+ {:step-1-component
+  {:title "Create autonomy Polylith component"
+   :files-to-create
+   ["components/autonomy/src/ai/miniforge/autonomy/interface.clj"
+    "components/autonomy/src/ai/miniforge/autonomy/core.clj"
+    "components/autonomy/src/ai/miniforge/autonomy/schema.clj"]
+   :changes
+   ["Define A0-A5 enum and mapping table"
+    "autonomy-level function: resolve from workflow config or system default"
+    "effective-level function: min(configured, degradation-constrained)"
+    "map-to-n8, map-to-n9, map-to-n10 translation functions"
+    "demote function: force lower autonomy (used by safe-mode)"]}
+
+  :step-2-workflow-config
+  {:title "Add autonomy configuration to workflow specs"
+   :files-to-modify
+   ["components/workflow/src/ai/miniforge/workflow/schema.clj"]
+   :changes
+   ["Add :workflow/autonomy-level [:enum :A0 :A1 :A2 :A3 :A4 :A5] to spec"
+    "Default to :A3 if not specified"]}
+
+  :step-3-degradation-integration
+  {:title "Wire autonomy demotion to degradation modes"
+   :files-to-modify
+   ["components/reliability-metrics/src/ai/miniforge/reliability_metrics/degradation.clj"]
+   :changes
+   ["On :safe-mode: demote all workflows to A0"
+    "On :degraded: optionally cap at A2"
+    "On :nominal: restore configured level"]}}
+
+ :spec/constraints
+ ["A0 MUST block all autonomous actions (require human approval)"
+  "Degradation-driven demotion MUST override workflow-configured level"
+  "Mapping functions MUST be pure (no side effects)"
+  "Follow Polylith interface-only deps"
+  "Babashka compatible"]
+
+ :testing-strategy
+ {:unit-tests
+  ["A0-A5 enum validation"
+   "Cross-spec mapping correctness"
+   "Effective level: min(configured, degradation-constrained)"
+   "Demotion from A3 to A0 on safe-mode"]
+  :integration-tests
+  ["Workflow with :A3 + safe-mode → effective level A0"
+   "Workflow with :A1 + nominal → effective level A1 (no inflation)"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "A0-A5 levels defined with cross-spec mapping"
+   :verification "map-to-n8/n9/n10 return correct values for each level"}
+  {:criterion "Per-workflow configuration"
+   :verification "Workflow spec with :workflow/autonomy-level :A2 respected"}
+  {:criterion "Degradation demotion"
+   :verification "safe-mode forces A0 regardless of configured level"}
+  {:criterion "No autonomy inflation"
+   :verification "Effective level ≤ configured level"}]
+
+ :estimated-effort "3-5 days"
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"}

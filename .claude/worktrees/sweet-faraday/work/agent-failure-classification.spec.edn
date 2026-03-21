@@ -1,0 +1,342 @@
+;; Agent Backend Failure Classification and Reporting
+
+{:spec/title "Agent Backend Failure Classification & Graceful Error Handling"
+ :version "1.0.0"
+ :type :enhancement
+ :priority :high
+
+ :spec/description
+ "Add intelligent error classification to distinguish agent backend failures from
+  task failures. Provide users with clear context, appropriate vendor reporting
+  links, and graceful UX when work completed successfully before backend error.
+
+  Motivation: The 'classifyHandoffIfNeeded is not defined' failure showed that
+  agent backend errors are indistinguishable from task failures, leaving users
+  confused about what went wrong and who to report to."
+
+ :spec/intent
+ {:type :error-handling-improvement
+  :scope ["Agent task execution error classification"
+          "User-facing error messages and reporting"
+          "Graceful degradation when work completed before error"
+          "Vendor-specific issue reporting links"]
+
+  :context
+   {:triggering-incident
+    ["Task adf6dd2 failed with 'classifyHandoffIfNeeded is not defined'"
+     "All work completed successfully (code written, tests passed, PR created)"
+     "Error occurred in agent system cleanup/handoff, not in task execution"
+     "User confused: Is this miniforge's bug? Claude Code's bug? Their code?"
+     "No clear way to report to the right vendor"]
+
+    :current-behavior
+    ["All errors bubble up as generic 'task failed'"
+     "No distinction between agent backend vs task code errors"
+     "User sees error but doesn't know if they should retry or report"
+     "No guidance on where to report (Claude Code vs miniforge)"
+     "Completed work not separated from error context"]
+
+    :desired-behavior
+    ["Errors classified by source: :agent-backend, :task-code, :external"
+     "Clear user messaging: 'not your fault' vs 'check your code'"
+     "Direct reporting links to appropriate vendor"
+     "Show completed work separately from error"
+     "Recommend retry strategy based on error type"
+     "Log errors for analytics and pattern detection"]}}
+
+ :requirements
+ [{:id "R1"
+   :requirement "Classify errors by source"
+   :details "Detect agent backend errors vs task code errors vs external errors"
+   :examples
+   ["Agent backend: 'X is not defined', 'classifyHandoffIfNeeded', null toolResults"
+    "Task code: Compilation errors, linting errors, test failures"
+    "External: Network errors, API rate limits, GitHub unavailable"]}
+
+  {:id "R2"
+   :requirement "User-friendly error messages"
+   :details "Show clear context about what happened and whose responsibility it is"
+   :format
+   "⚠️  Error Type
+    Context: what happened and why
+    Your work status: completed/partial/failed
+    Action: retry/report/check-code
+    Report to: [vendor] at [URL]"}
+
+  {:id "R3"
+   :requirement "Vendor-specific reporting links"
+   :details "Direct links to issue trackers with pre-filled context"
+   :vendors
+   {"Claude Code" "https://github.com/anthropics/claude-code/issues/new?title=Agent+Backend+Error&body=..."
+    "miniforge" "https://github.com/miniforge-ai/miniforge/issues/new?title=Task+Error"}}
+
+  {:id "R4"
+   :requirement "Separate completed work from errors"
+   :details "If task completed work before error, show that clearly"
+   :example
+   "✅ Your task completed successfully:
+    - Created 4 files (523 lines)
+    - All tests passed
+    - PR #151 created and merged
+
+    ⚠️  Agent system error occurred after completion:
+    Error: classifyHandoffIfNeeded is not defined
+    This is a Claude Code bug, not an issue with your task."}
+
+  {:id "R5"
+   :requirement "Retry recommendations"
+   :details "Based on error type, recommend whether to retry"
+   :logic
+   {:agent-backend "Don't retry - work completed, report bug"
+    :task-code "Fix code and retry"
+    :external "Retry in a few minutes (may be transient)"}}
+
+  {:id "R6"
+   :requirement "Error analytics and logging"
+   :details "Track error patterns for debugging and improvements"
+   :data-to-log
+   ["Error type classification"
+    "Task state at error time (completed/in-progress/failed)"
+    "Error message and stack trace"
+    "Agent ID and task ID"
+    "Timestamp and duration"]}]
+
+ :error-classification-rules
+ {:agent-backend
+  {:patterns
+   ["is not defined$"
+    "classifyHandoff"
+    "^ReferenceError:"
+    "^TypeError: .* is not a function"
+    "null.*toolResult"
+    "agent.*undefined"
+    "handoff.*failed"]
+
+   :characteristics
+   ["Occurs after all task work completed"
+    "Error in agent system code, not user/task code"
+    "Usually not recoverable by retry"
+    "Requires vendor fix"]
+
+   :example-errors
+   ["classifyHandoffIfNeeded is not defined"
+    "Cannot read property 'handoff' of undefined"
+    "ReferenceError: agentCleanup is not a function"]}
+
+  :task-code
+  {:patterns
+   ["Syntax error"
+    "Compilation failed"
+    "linting.*error"
+    "test.*failed"
+    "Could not resolve"
+    "No such file"]
+
+   :characteristics
+   ["Occurs during task execution"
+    "Error in user's code or spec"
+    "Recoverable by fixing code"
+    "Not an agent/system bug"]
+
+   :example-errors
+   ["SyntaxError: Unexpected token"
+    "linting took 100ms, errors: 5"
+    "Tests failed: 3 assertions"
+    "Could not resolve namespace"]}
+
+  :external
+  {:patterns
+   ["ECONNREFUSED"
+    "Network error"
+    "Rate limit"
+    "API.*unavailable"
+    "timeout"
+    "502.*Bad Gateway"]
+
+   :characteristics
+   ["Occurs during external API calls"
+    "Not caused by user or agent code"
+    "Often transient, retry may succeed"
+    "May require waiting"]
+
+   :example-errors
+   ["ECONNREFUSED: Connection refused to github.com"
+    "GitHub API rate limit exceeded"
+    "timeout after 30000ms"
+    "502 Bad Gateway from api.anthropic.com"]}}
+
+ :implementation
+ {:new-namespace
+  {:path "components/agent-runtime/src/ai/miniforge/agent_runtime/error_classifier.clj"
+   :purpose "Error classification and user-facing message generation"
+   :size "~250 lines"
+   :layers
+   ["Layer 0: Error pattern matching and classification"
+    "Layer 1: Message generation and formatting"
+    "Layer 2: Reporting URL generation with context"]
+
+   :functions
+   [{:name "classify-error"
+     :signature "(classify-error error-msg task-state)"
+     :returns "{:type keyword :vendor string :report-url string :message string
+                :should-retry boolean :completed-work [...] :original-error string}"
+     :description "Classify an error by matching against known patterns"}
+
+    {:name "format-error-message"
+     :signature "(format-error-message classified-error)"
+     :returns "string"
+     :description "Generate user-friendly error message with context"}
+
+    {:name "generate-report-url"
+     :signature "(generate-report-url error-type vendor error-context)"
+     :returns "string"
+     :description "Generate pre-filled issue reporting URL"}
+
+    {:name "extract-completed-work"
+     :signature "(extract-completed-work task-state)"
+     :returns "[work-items]"
+     :description "Extract completed work items from task state"}
+
+    {:name "should-retry?"
+     :signature "(should-retry? classified-error)"
+     :returns "boolean"
+     :description "Determine if user should retry based on error type"}]}
+
+  :integration-points
+  [{:component "Task tool"
+    :change "Wrap task execution with error classifier"
+    :before
+    "catch Exception e
+       (throw (ex-info \"Task failed\" {:error e}))"
+    :after
+    "catch Exception e
+       (let [classified (error-classifier/classify-error e @task-state)]
+         (throw (ex-info (error-classifier/format-error-message classified)
+                         classified)))"}
+
+   {:component "Agent background tasks"
+    :change "Apply same error classification to async agents"
+    :file "components/agent/src/ai/miniforge/agent/core.clj"}
+
+   {:component "CLI error display"
+    :change "Pretty-print classified errors with colors and formatting"
+    :file "bases/cli/src/ai/miniforge/cli/main.clj"}]}
+
+ :user-experience-examples
+ {:agent-backend-error
+  "⚠️  Agent System Error (Not Your Fault!)
+
+   Your task completed successfully:
+   ✅ Created 4 files (523 lines of code)
+   ✅ All tests passed (789 assertions)
+   ✅ PR #151 created and merged
+
+   However, an error occurred in the Claude Code agent system after your
+   work was done:
+
+   Error: classifyHandoffIfNeeded is not defined
+
+   This is a bug in Claude Code's agent runtime, not in your task or miniforge.
+   Your work is complete and safe.
+
+   📝 Please report this to Claude Code:
+   https://github.com/anthropics/claude-code/issues/new?title=Agent+Backend+Error%3A+classifyHandoffIfNeeded&body=...
+
+   ⚙️  No need to retry - your task succeeded."
+
+  :task-code-error
+  "❌ Task Code Error
+
+   The task failed during execution due to a code error:
+
+   Error: Syntax error in components/web-dashboard/src/foo.clj:42
+          Expected closing parenthesis
+
+   This is an issue with the code being generated or the task specification.
+
+   🔧 Action Required:
+   1. Check the task specification for errors
+   2. Review the generated code at the error location
+   3. Fix the issue and retry
+
+   🔄 Retry: Yes - fix the code and run again
+
+   If the error persists, report to miniforge:
+   https://github.com/miniforge-ai/miniforge/issues"
+
+  :external-error
+  "⚠️  External Service Error
+
+   The task failed due to an external service issue:
+
+   Error: GitHub API rate limit exceeded
+          Reset at: 2026-02-09 03:15:00 UTC (in 12 minutes)
+
+   This is not an issue with your code or miniforge. The external service
+   is temporarily unavailable.
+
+   ⏰ Action: Wait 12 minutes and retry
+
+   🔄 Retry: Yes - this is likely transient
+
+   Partial work completed:
+   ✅ Created branch feat/new-feature
+   ⏸️  PR creation failed (will retry)"}
+
+ :testing-strategy
+ {:unit-tests
+  ["Test error pattern matching for each classification type"
+   "Test message formatting with various error types"
+   "Test URL generation with error context"
+   "Test retry recommendation logic"
+   "Test completed work extraction"]
+
+  :integration-tests
+  ["Simulate agent backend error (mock classifyHandoffIfNeeded failure)"
+   "Simulate task code error (inject syntax error)"
+   "Simulate external error (mock GitHub API failure)"
+   "Verify error messages display correctly in CLI"
+   "Verify reporting URLs are well-formed"]
+
+  :manual-tests
+  ["Review error messages for clarity and helpfulness"
+   "Verify reporting URLs pre-fill issue templates correctly"
+   "Test with real agent backend errors when they occur"
+   "Verify completed work is shown accurately"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "All error types correctly classified"
+   :verification "Unit tests pass for all pattern matching"}
+
+  {:criterion "User-friendly error messages for each type"
+   :verification "Manual review confirms messages are clear and actionable"}
+
+  {:criterion "Reporting URLs work and pre-fill context"
+   :verification "Click links in error messages, verify issue templates"}
+
+  {:criterion "Completed work shown when present"
+   :verification "Test with task that completes work then errors"}
+
+  {:criterion "Retry recommendations are correct"
+   :verification "Backend errors say don't retry, code errors say fix & retry"}
+
+  {:criterion "Integration with existing error handling"
+   :verification "All task failures go through classifier"}]
+
+ :success-metrics
+ ["Users can distinguish agent bugs from their own issues"
+  "Clear path to report bugs to correct vendor"
+  "Reduced confusion when tasks 'fail' after completing work"
+  "Better error analytics for identifying systemic issues"]
+
+ :future-enhancements
+ ["Automatic error reporting to vendors (with user consent)"
+  "Error pattern learning (detect new agent backend error patterns)"
+  "Integration with error tracking services (Sentry, etc.)"
+  "Proactive retry with exponential backoff for external errors"]
+
+ :notes
+ ["This addresses a real dogfooding failure mode discovered in task adf6dd2"
+  "Error classification should be conservative - when in doubt, classify as :task-code"
+  "Keep patterns updated as new agent backend errors are discovered"
+  "Consider making this a separate reusable component for other CLI tools"]}

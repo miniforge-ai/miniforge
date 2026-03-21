@@ -1,0 +1,278 @@
+{:spec/title "Fix Workflow Artifact Persistence Bug"
+ :spec/description
+ "The workflow system generates code artifacts in-memory but fails to persist
+  them to disk. The release phase completes with :success false and 0 files
+  written, yet the workflow continues and marks all phases as completed. This
+  was discovered during dogfooding when the integration spec generated code but
+  wrote nothing to the filesystem.
+
+  Root causes:
+  1. Artifact handoff between phases fails - verify phase receives no code
+  2. Release phase doesn't actually write files to disk
+  3. Tests don't validate that files were written
+  4. Silent failure - workflow continues despite :success false
+
+  This is a critical bug that prevents any workflow from producing actual results."
+
+ :spec/intent
+ {:type :bugfix
+  :scope ["components/workflow/src/ai/miniforge/workflow/runner.clj"
+          "components/phase/src/ai/miniforge/phase/implement.clj"
+          "components/phase/src/ai/miniforge/phase/verify.clj"
+          "components/phase/src/ai/miniforge/phase/release.clj"
+          "components/artifact/src/ai/miniforge/artifact/interface.clj"
+          "components/workflow/test/ai/miniforge/workflow/artifact_persistence_test.clj"]}
+
+ :spec/constraints
+ ["Fix must be backward compatible with existing workflows"
+  "Tests must validate actual file system changes"
+  "Fail loudly and early when artifact persistence fails"
+  "Verify phase must fail if it receives no code artifact"
+  "Release phase must fail if it writes 0 files"
+  "Add integration test that runs full workflow and checks files exist"
+  "All existing tests must continue to pass"]
+
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :plan/tasks
+ [{:task/id :analyze-artifact-flow
+   :task/description
+   "Trace artifact flow through workflow phases to find where persistence breaks.
+
+    Investigate:
+    - How implement phase creates and stores code artifacts
+    - How artifacts are passed to verify phase (currently failing)
+    - How release phase retrieves artifacts for writing
+    - Where in the flow does the artifact get lost
+
+    Read files:
+    - components/workflow/src/ai/miniforge/workflow/runner.clj (phase execution)
+    - components/phase/src/ai/miniforge/phase/implement.clj (artifact creation)
+    - components/phase/src/ai/miniforge/phase/release.clj (file writing)
+    - components/artifact/src/ai/miniforge/artifact/interface.clj (storage)
+
+    Document:
+    - Current artifact flow diagram
+    - Where handoff fails
+    - Why verify phase gets no artifact
+    - Why release writes 0 files"
+   :task/type :design
+   :task/dependencies []}
+
+  {:task/id :fix-phase-artifact-handoff
+   :task/description
+   "Fix artifact passing between phases so verify/release receive the code.
+
+    In components/workflow/src/ai/miniforge/workflow/runner.clj:
+    - Ensure implement phase result includes :artifact in context
+    - Pass context with artifact to next phase
+    - Validate artifact exists before calling next phase
+    - Log artifact metadata (file count, size) for debugging
+
+    In components/phase/src/ai/miniforge/phase/implement.clj:
+    - Ensure code artifact is stored in execution context
+    - Return artifact in phase result map
+    - Add validation that artifact was created
+
+    Expected result:
+    - Verify phase receives non-empty :artifact in context
+    - Release phase can retrieve artifact for writing
+    - Context flows correctly: implement -> verify -> release"
+   :task/type :implement
+   :task/dependencies [:analyze-artifact-flow]}
+
+  {:task/id :add-verify-phase-validation
+   :task/description
+   "Make verify phase fail loudly if it receives no code artifact.
+
+    In components/phase/src/ai/miniforge/phase/verify.clj:
+    - Check if context contains :artifact or :phase/result/artifact
+    - If no artifact found, throw descriptive error
+    - Error message: 'Verify phase received no code artifact from implement phase'
+    - Include debugging info: what keys ARE in context, what phase completed
+    - Don't mark verify as 'completed' if validation fails
+
+    This prevents silent failures where verify says 'I don't see any code'
+    but still marks itself as completed."
+   :task/type :implement
+   :task/dependencies [:fix-phase-artifact-handoff]}
+
+  {:task/id :fix-release-phase-file-writing
+   :task/description
+   "Fix release phase to actually write artifact files to disk.
+
+    In components/phase/src/ai/miniforge/phase/release.clj:
+    - Retrieve code artifact from context/phase result
+    - For each file in artifact.code/files:
+      - Write to filesystem at correct path
+      - Create parent directories if needed
+      - Handle :create, :modify, :delete actions
+    - Return metrics with actual files-written count
+    - Fail if artifact has files but 0 were written
+
+    Integration with artifact store:
+    - Check if artifact store has the code
+    - Pull from store if not in direct context
+    - Ensure file paths are absolute or relative to project root
+
+    Expected result:
+    - Files physically exist on disk after release
+    - Metrics show files-written > 0 for successful release
+    - git status shows modified/created files"
+   :task/type :implement
+   :task/dependencies [:add-verify-phase-validation]}
+
+  {:task/id :add-release-phase-validation
+   :task/description
+   "Add validation that release phase actually persisted files.
+
+    In components/phase/src/ai/miniforge/phase/release.clj:
+    - After writing files, verify they exist on filesystem
+    - Read back at least one file to confirm write succeeded
+    - If files-written = 0 but artifact had files, throw error
+    - Error: 'Release phase failed to persist N files from artifact'
+    - Mark release as :failed not :completed when this happens
+
+    Return enriched metrics:
+    - :files-written (count of successfully written files)
+    - :files-verified (count verified to exist post-write)
+    - :bytes-written (total size)
+    - :paths-written (list of file paths for debugging)"
+   :task/type :implement
+   :task/dependencies [:fix-release-phase-file-writing]}
+
+  {:task/id :add-workflow-success-validation
+   :task/description
+   "Make workflow fail loudly when phases complete but :success is false.
+
+    In components/workflow/src/ai/miniforge/workflow/runner.clj:
+    - After all phases complete, check final :success flag
+    - If :success is false, throw error with phase details
+    - Include which phase failed, what the error was
+    - Don't just return {:success false} quietly
+
+    Also check:
+    - If :files-written = 0 but workflow type expects code, warn or fail
+    - If any phase marked :failed, workflow should fail
+    - Aggregate phase errors into workflow error message
+
+    This prevents workflows from 'completing' when they actually failed."
+   :task/type :implement
+   :task/dependencies [:add-release-phase-validation]}
+
+  {:task/id :add-artifact-persistence-tests
+   :task/description
+   "Add integration tests that validate files are actually written.
+
+    Create: components/workflow/test/ai/miniforge/workflow/artifact_persistence_test.clj
+
+    Tests:
+    1. test-full-workflow-writes-files
+       - Run complete workflow with simple spec
+       - Verify files exist on filesystem after completion
+       - Check git status shows changes
+       - Read file contents to verify correctness
+
+    2. test-verify-fails-without-artifact
+       - Mock implement phase to return empty artifact
+       - Verify phase should throw error, not complete
+       - Workflow should fail with descriptive message
+
+    3. test-release-fails-with-zero-files-written
+       - Mock release phase to return :files-written 0
+       - Should throw error about persistence failure
+       - Workflow should fail, not mark as completed
+
+    4. test-workflow-fails-when-success-false
+       - Mock phase to complete with :success false
+       - Workflow should throw error, not return quietly
+       - Error message should include phase details
+
+    These tests should have caught the bug we found in dogfooding."
+   :task/type :test
+   :task/dependencies [:add-workflow-success-validation]}
+
+  {:task/id :add-phase-result-validation-tests
+   :task/description
+   "Add unit tests for phase-level artifact validation.
+
+    In existing test files, add:
+
+    components/phase/test/ai/miniforge/phase/implement_test.clj:
+    - Test that implement phase returns :artifact in result
+    - Test that artifact contains :code/files
+    - Test error when implementation produces no code
+
+    components/phase/test/ai/miniforge/phase/verify_test.clj:
+    - Test verify fails when context has no :artifact
+    - Test verify succeeds when artifact is present
+    - Test error message is descriptive
+
+    components/phase/test/ai/miniforge/phase/release_test.clj:
+    - Test release writes files to temp directory
+    - Test release returns correct :files-written count
+    - Test release fails when artifact has files but write fails
+    - Test release verifies files exist after writing"
+   :task/type :test
+   :task/dependencies [:add-artifact-persistence-tests]}
+
+  {:task/id :update-artifact-store-interface
+   :task/description
+   "Ensure artifact store properly persists and retrieves code artifacts.
+
+    In components/artifact/src/ai/miniforge/artifact/interface.clj:
+    - Review store-artifact! and get-artifact functions
+    - Ensure artifacts persist correctly to store
+    - Add validation that retrieved artifacts match what was stored
+    - Add :artifact/type tag to distinguish code vs other artifacts
+
+    If artifact store is working correctly but not being used:
+    - Update workflow runner to explicitly use artifact store
+    - Store artifact after implement phase
+    - Retrieve artifact in verify/release phases
+    - Add logging for store/retrieve operations"
+   :task/type :implement
+   :task/dependencies [:analyze-artifact-flow]}
+
+  {:task/id :add-workflow-debugging-instrumentation
+   :task/description
+   "Add logging and debugging output to trace artifact flow.
+
+    Add debug logging at each handoff point:
+    - Implement phase: 'Storing artifact with N files'
+    - Between phases: 'Passing artifact to next phase: keys=...'
+    - Verify phase: 'Received artifact with N files' or 'ERROR: No artifact'
+    - Release phase: 'Writing N files from artifact'
+    - Post-release: 'Verified N files exist on disk'
+
+    Add to workflow result:
+    - :debug/artifact-trace (list of artifact transitions)
+    - :debug/phase-contexts (what each phase received)
+    - :debug/files-written-paths (actual paths written)
+
+    This makes debugging future artifact issues much easier."
+   :task/type :implement
+   :task/dependencies [:fix-phase-artifact-handoff]}
+
+  {:task/id :test-with-dogfooding-spec
+   :task/description
+   "Re-run the original integration spec to verify fix works.
+
+    Steps:
+    1. Run: miniforge run integrate-dag-into-workflow.spec.edn
+    2. Verify workflow completes with :success true
+    3. Verify files exist: git status shows modifications
+    4. Verify file contents are correct
+    5. Verify metrics show files-written > 0
+
+    If successful:
+    - The original dogfooding attempt should now work
+    - Files should be written to disk
+    - Workflow should complete successfully
+
+    This validates the fix end-to-end with the spec that revealed the bug."
+   :task/type :test
+   :task/dependencies [:add-artifact-persistence-tests
+                       :add-phase-result-validation-tests
+                       :add-workflow-debugging-instrumentation]}]}

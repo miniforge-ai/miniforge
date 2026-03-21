@@ -1,0 +1,294 @@
+{:paths []
+
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}}
+
+ :aliases
+ {:dev  {:extra-paths ["development/src"
+                       "components/schema/src"
+                       "components/schema/resources"
+                       "components/config/src"
+                       "components/config/resources"
+                       "components/algorithms/src"
+                       "components/algorithms/resources"
+                       "components/logging/src"
+                       "components/logging/resources"
+                       "components/llm/src"
+                       "components/llm/resources"
+                       "components/tool/src"
+                       "components/tool/resources"
+                       "components/artifact/src"
+                       "components/artifact/resources"
+                       "components/agent/src"
+                       "components/agent/resources"
+                       "components/agent-runtime/src"
+                       "components/agent-runtime/resources"
+                       "components/task/src"
+                       "components/task/resources"
+                       "components/task-executor/src"
+                       "components/task-executor/resources"
+                       "components/loop/src"
+                       "components/loop/resources"
+                       "components/knowledge/src"
+                       "components/knowledge/resources"
+                       "components/policy/src"
+                       "components/policy/resources"
+                       "components/heuristic/src"
+                       "components/heuristic/resources"
+                       "components/response/src"
+                       "components/fsm/src"
+                       "components/fsm/resources"
+                       "components/phase/src"
+                       "components/phase/resources"
+                       "components/gate/src"
+                       "components/gate/resources"
+                       "components/workflow/src"
+                       "components/workflow/resources"
+                       "components/release-executor/src"
+                       "components/release-executor/resources"
+                       "components/operator/src"
+                       "components/operator/resources"
+                       "components/observer/src"
+                       "components/observer/resources"
+                       "components/orchestrator/src"
+                       "components/orchestrator/resources"
+                       "components/reporting/src"
+                       "components/reporting/resources"
+                       "components/tool-registry/src"
+                       "components/tool-registry/resources"
+                       "components/dag-executor/src"
+                       "components/dag-executor/resources"
+                       "components/pr-lifecycle/src"
+                       "components/pr-lifecycle/resources"
+                       "components/evidence-bundle/src"
+                       "components/evidence-bundle/resources"
+                       "components/policy-pack/src"
+                       "components/policy-pack/resources"
+                       "components/pr-train/src"
+                       "components/pr-train/resources"
+                       "components/repo-dag/src"
+                       "components/repo-dag/resources"
+                       "components/event-stream/src"
+                       "components/event-stream/resources"
+                       "components/tui-engine/src"
+                       "components/tui-engine/resources"
+                       "components/tui-views/src"
+                       "components/tui-views/resources"
+                       "components/web-dashboard/src"
+                       "components/web-dashboard/resources"
+                       "components/self-healing/src"
+                       "components/self-healing/resources"
+                       "components/pr-sync/src"
+                       "components/spec-parser/src"
+                       "components/spec-parser/resources"
+                       "components/mcp-artifact-server/src"
+                       "components/mcp-artifact-server/resources"
+                       "bases/cli/src"
+                       "bases/cli/resources"
+                       "bases/lsp-mcp-bridge/src"]
+         :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
+                      ai.miniforge/config {:local/root "components/config"}
+                      ai.miniforge/lsp-mcp-bridge {:local/root "bases/lsp-mcp-bridge"}
+                      ai.miniforge/algorithms {:local/root "components/algorithms"}
+                      ai.miniforge/logging {:local/root "components/logging"}
+                      ai.miniforge/llm {:local/root "components/llm"}
+                      ai.miniforge/tool {:local/root "components/tool"}
+                      ai.miniforge/artifact {:local/root "components/artifact"}
+                      ai.miniforge/agent {:local/root "components/agent"}
+                      ai.miniforge/agent-runtime {:local/root "components/agent-runtime"}
+                      ai.miniforge/task {:local/root "components/task"}
+                      ai.miniforge/task-executor {:local/root "components/task-executor"}
+                      ai.miniforge/loop {:local/root "components/loop"}
+                      ai.miniforge/knowledge {:local/root "components/knowledge"}
+                      ai.miniforge/policy {:local/root "components/policy"}
+                      ai.miniforge/heuristic {:local/root "components/heuristic"}
+                      ai.miniforge/response {:local/root "components/response"}
+                      ai.miniforge/fsm {:local/root "components/fsm"}
+                      ai.miniforge/phase {:local/root "components/phase"}
+                      ai.miniforge/gate {:local/root "components/gate"}
+                      ai.miniforge/workflow {:local/root "components/workflow"}
+                      ai.miniforge/release-executor {:local/root "components/release-executor"}
+                      ai.miniforge/operator {:local/root "components/operator"}
+                      ai.miniforge/observer {:local/root "components/observer"}
+                      ai.miniforge/orchestrator {:local/root "components/orchestrator"}
+                      ai.miniforge/reporting {:local/root "components/reporting"}
+                      ai.miniforge/tool-registry {:local/root "components/tool-registry"}
+                     ai.miniforge/dag-executor {:local/root "components/dag-executor"}
+                     ai.miniforge/pr-lifecycle {:local/root "components/pr-lifecycle"}
+                     ai.miniforge/evidence-bundle {:local/root "components/evidence-bundle"}
+                     ai.miniforge/policy-pack {:local/root "components/policy-pack"}
+                     ai.miniforge/pr-train {:local/root "components/pr-train"}
+                     ai.miniforge/repo-dag {:local/root "components/repo-dag"}
+                     ai.miniforge/event-stream {:local/root "components/event-stream"}
+                     ai.miniforge/tui-engine {:local/root "components/tui-engine"}
+                     ai.miniforge/tui-views {:local/root "components/tui-views"}
+                     ai.miniforge/web-dashboard {:local/root "components/web-dashboard"}
+                     ai.miniforge/self-healing {:local/root "components/self-healing"}
+                     ai.miniforge/pr-sync {:local/root "components/pr-sync"}
+                     ai.miniforge/spec-parser {:local/root "components/spec-parser"}
+                     ai.miniforge/mcp-artifact-server {:local/root "components/mcp-artifact-server"}
+                     ai.miniforge/cli {:local/root "bases/cli"}}}
+
+  :test {:extra-paths ["development/test"
+                       "components/schema/test"
+                       "components/config/test"
+                       "components/algorithms/test"
+                       "components/response/test"
+                       "components/fsm/test"
+                       "components/logging/test"
+                       "components/llm/test"
+                       "components/tool/test"
+                       "components/artifact/test"
+                       "components/agent/test"
+                       "components/agent-runtime/test"
+                       "components/task/test"
+                       "components/loop/test"
+                       "components/knowledge/test"
+                       "components/policy/test"
+                       "components/heuristic/test"
+                       "components/phase/test"
+                       "components/gate/test"
+                       "components/workflow/test"
+                       "components/operator/test"
+                       "components/observer/test"
+                       "components/orchestrator/test"
+                       "components/reporting/test"
+                       "components/tool-registry/test"
+                       "components/dag-executor/test"
+                       "components/pr-lifecycle/test"
+                       "components/release-executor/test"
+                       "components/evidence-bundle/test"
+                       "components/policy-pack/test"
+                       "components/pr-train/test"
+                       "components/repo-dag/test"
+                       "components/event-stream/test"
+                       "components/tui-engine/test"
+                       "components/tui-views/test"
+                       "components/web-dashboard/test"
+                       "components/self-healing/test"
+                       "components/pr-sync/test"
+                       "components/spec-parser/test"
+                       "components/mcp-artifact-server/test"
+                       "components/task-executor/test"
+                       "bases/cli/test"
+                       "bases/lsp-mcp-bridge/test"]
+         :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
+                      ai.miniforge/config {:local/root "components/config"}
+                      ai.miniforge/algorithms {:local/root "components/algorithms"}
+                      ai.miniforge/logging {:local/root "components/logging"}
+                      ai.miniforge/llm {:local/root "components/llm"}
+                      ai.miniforge/tool {:local/root "components/tool"}
+                      ai.miniforge/artifact {:local/root "components/artifact"}
+                      ai.miniforge/agent {:local/root "components/agent"}
+                      ai.miniforge/agent-runtime {:local/root "components/agent-runtime"}
+                      ai.miniforge/task {:local/root "components/task"}
+                      ai.miniforge/loop {:local/root "components/loop"}
+                      ai.miniforge/knowledge {:local/root "components/knowledge"}
+                      ai.miniforge/policy {:local/root "components/policy"}
+                      ai.miniforge/heuristic {:local/root "components/heuristic"}
+                      ai.miniforge/response {:local/root "components/response"}
+                      ai.miniforge/fsm {:local/root "components/fsm"}
+                      ai.miniforge/phase {:local/root "components/phase"}
+                      ai.miniforge/gate {:local/root "components/gate"}
+                      ai.miniforge/workflow {:local/root "components/workflow"}
+                      ai.miniforge/release-executor {:local/root "components/release-executor"}
+                      ai.miniforge/operator {:local/root "components/operator"}
+                      ai.miniforge/observer {:local/root "components/observer"}
+                      ai.miniforge/orchestrator {:local/root "components/orchestrator"}
+                      ai.miniforge/reporting {:local/root "components/reporting"}
+                      ai.miniforge/tool-registry {:local/root "components/tool-registry"}
+                      ai.miniforge/dag-executor {:local/root "components/dag-executor"}
+                      ai.miniforge/pr-lifecycle {:local/root "components/pr-lifecycle"}
+                      ai.miniforge/evidence-bundle {:local/root "components/evidence-bundle"}
+                      ai.miniforge/policy-pack {:local/root "components/policy-pack"}
+                      ai.miniforge/pr-train {:local/root "components/pr-train"}
+                      ai.miniforge/repo-dag {:local/root "components/repo-dag"}
+                      ai.miniforge/event-stream {:local/root "components/event-stream"}
+                      ai.miniforge/tui-engine {:local/root "components/tui-engine"}
+                      ai.miniforge/tui-views {:local/root "components/tui-views"}
+                      ai.miniforge/web-dashboard {:local/root "components/web-dashboard"}
+                      ai.miniforge/self-healing {:local/root "components/self-healing"}
+                      ai.miniforge/pr-sync {:local/root "components/pr-sync"}
+                      ai.miniforge/spec-parser {:local/root "components/spec-parser"}
+                      ai.miniforge/mcp-artifact-server {:local/root "components/mcp-artifact-server"}
+                      ai.miniforge/task-executor {:local/root "components/task-executor"}
+                      ai.miniforge/lsp-mcp-bridge {:local/root "bases/lsp-mcp-bridge"}}}
+
+  :conformance {:extra-paths ["development/test"
+                              "tests/conformance"
+                              "components/schema/src"
+                              "components/schema/test"
+                              "components/algorithms/src"
+                              "components/algorithms/test"
+                              "components/logging/src"
+                              "components/logging/test"
+                              "components/llm/src"
+                              "components/llm/test"
+                              "components/tool/src"
+                              "components/tool/test"
+                              "components/artifact/src"
+                              "components/artifact/test"
+                              "components/agent/src"
+                              "components/agent/test"
+                              "components/task/src"
+                              "components/task/test"
+                              "components/loop/src"
+                              "components/loop/test"
+                              "components/knowledge/src"
+                              "components/knowledge/test"
+                              "components/policy/src"
+                              "components/policy/test"
+                              "components/heuristic/src"
+                              "components/heuristic/test"
+                              "components/response/src"
+                              "components/response/test"
+                              "components/fsm/src"
+                              "components/fsm/test"
+                              "components/phase/src"
+                              "components/phase/test"
+                              "components/gate/src"
+                              "components/gate/test"
+                              "components/workflow/src"
+                              "components/workflow/test"
+                              "components/operator/src"
+                              "components/operator/test"
+                              "components/observer/src"
+                              "components/observer/test"
+                              "components/orchestrator/src"
+                              "components/orchestrator/test"
+                              "components/reporting/src"
+                              "components/reporting/test"
+                              "components/evidence-bundle/src"
+                              "components/evidence-bundle/test"
+                              "components/tool-registry/src"
+                              "components/tool-registry/test"]
+                :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
+                             ai.miniforge/algorithms {:local/root "components/algorithms"}
+                             ai.miniforge/logging {:local/root "components/logging"}
+                             ai.miniforge/llm {:local/root "components/llm"}
+                             ai.miniforge/tool {:local/root "components/tool"}
+                             ai.miniforge/artifact {:local/root "components/artifact"}
+                             ai.miniforge/agent {:local/root "components/agent"}
+                             ai.miniforge/task {:local/root "components/task"}
+                             ai.miniforge/loop {:local/root "components/loop"}
+                             ai.miniforge/knowledge {:local/root "components/knowledge"}
+                             ai.miniforge/policy {:local/root "components/policy"}
+                             ai.miniforge/heuristic {:local/root "components/heuristic"}
+                             ai.miniforge/response {:local/root "components/response"}
+                             ai.miniforge/fsm {:local/root "components/fsm"}
+                             ai.miniforge/phase {:local/root "components/phase"}
+                             ai.miniforge/gate {:local/root "components/gate"}
+                             ai.miniforge/workflow {:local/root "components/workflow"}
+                             ai.miniforge/operator {:local/root "components/operator"}
+                             ai.miniforge/observer {:local/root "components/observer"}
+                             ai.miniforge/orchestrator {:local/root "components/orchestrator"}
+                             ai.miniforge/reporting {:local/root "components/reporting"}
+                             ai.miniforge/evidence-bundle {:local/root "components/evidence-bundle"}
+                             ai.miniforge/tool-registry {:local/root "components/tool-registry"}}}
+
+  :poly {:main-opts  ["-m" "polylith.clj.core.poly-cli.core"]
+         :extra-deps {polylith/clj-poly {:mvn/version "0.2.21"}}}
+
+  :build {:deps       {io.github.clojure/tools.build {:mvn/version "0.10.6"}
+                       babashka/fs                   {:mvn/version "0.5.22"}
+                       babashka/process              {:mvn/version "0.5.22"}}
+          :ns-default build}}}

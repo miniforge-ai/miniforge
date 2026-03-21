@@ -1,0 +1,127 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+{:spec/title "Control Plane Completion — Decision Wiring, Events, and Dashboard"
+ :spec/description
+ "Complete the multi-vendor agent control plane by wiring decision delivery
+  to the existing approval system, emitting control plane events from the
+  orchestrator loops, and building out the web dashboard views. The core
+  infrastructure (state machine, registry, decision queue, heartbeat,
+  adapters) is already merged via PR #326."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/adapter-miniforge"
+          "components/control-plane"
+          "components/event-stream"
+          "components/web-dashboard"]}
+
+ :spec/constraints
+ ["Build on the existing control plane components from feat/control-plane (PR #326)"
+  "Decision delivery must use the existing es/approval system (event-stream.approval)"
+  "Control plane events must use existing event-stream event types (:control-plane/*)"
+  "Dashboard views are server-rendered Hiccup with htmx for live updates"
+  "All tests must pass with bb test"
+  "No changes to the adapter protocol interface — only implementations"]
+
+ :spec/acceptance-criteria
+ ["adapter-miniforge deliver-decision calls es/create-approval-request and bridges resolution"
+  "Orchestrator emits :control-plane/agent-discovered, :control-plane/status-changed,
+   :control-plane/decision-submitted, :control-plane/decision-resolved events"
+  "Dashboard shows live agent grid with status badges, vendor icons, and task descriptions"
+  "Dashboard decision queue supports both structured options and free-form resolution"
+  "Dashboard summary bar shows agent counts by status"
+  "All existing control plane tests continue to pass"
+  "New integration tests cover decision delivery round-trip and event emission"]
+
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :plan/tasks
+ [{:task/id :wire-decision-delivery
+   :task/description
+   "Wire adapter-miniforge's deliver-decision to the approval system.
+    In interface.clj MiniforgeAdapter deliver-decision, replace the stub with:
+    1. Call (es/create-approval-request action-id required-signers quorum opts)
+       using the decision's agent-id and resolution data
+    2. Bridge the approval resolution back to the control plane by subscribing
+       to approval-status events and calling the on-decision-resolved callback
+    3. Remove the TODO comment at line 82
+    Files: components/adapter-miniforge/src/ai/miniforge/adapter_miniforge/interface.clj
+           components/event-stream/src/ai/miniforge/event_stream/approval.clj (reference only)"
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :emit-orchestrator-events
+   :task/description
+   "Add event emission to the control plane orchestrator loops.
+    In orchestrator.clj, add an event-stream dependency and emit events:
+    1. run-discovery-pass: emit :control-plane/agent-discovered for each new agent found
+    2. run-poll-pass: emit :control-plane/status-changed when an agent's status changes
+    3. submit-decision-from-agent!: emit :control-plane/decision-submitted
+    4. resolve-and-deliver!: emit :control-plane/decision-resolved
+    The event-stream instance should be passed via the orchestrator config map.
+    Use the event types already defined in event-stream/interface/events.clj.
+    Files: components/control-plane/src/ai/miniforge/control_plane/orchestrator.clj
+           components/event-stream/src/ai/miniforge/event_stream/interface/events.clj (reference)"
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :dashboard-agent-detail
+   :task/description
+   "Build out the dashboard agent detail view and enhance the agent grid.
+    In views/control_plane.clj, add:
+    1. Agent detail panel (slide-out or modal) showing full agent info:
+       vendor, status, task, last heartbeat, session metadata, heartbeat history
+    2. Agent actions: pause, resume, terminate (htmx POST to existing API endpoints)
+    3. Status filter toolbar for the agent grid (show/hide by status)
+    4. Corresponding CSS in app.css for new components
+    Files: components/web-dashboard/src/ai/miniforge/web_dashboard/views/control_plane.clj
+           components/web-dashboard/resources/public/css/app.css"
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :dashboard-decision-history
+   :task/description
+   "Add a decision history view to the dashboard.
+    1. New endpoint GET /api/control-plane/decisions/history returning resolved decisions
+    2. History panel below the active queue showing resolved decisions with:
+       agent name, summary, resolution, resolved-by, timestamp
+    3. Pagination via htmx (load more button)
+    Files: components/web-dashboard/src/ai/miniforge/web_dashboard/server/control_plane.clj
+           components/web-dashboard/src/ai/miniforge/web_dashboard/views/control_plane.clj"
+   :task/type :implement
+   :task/dependencies [:wire-decision-delivery]}
+
+  {:task/id :integration-tests
+   :task/description
+   "Add integration tests for the new wiring:
+    1. Decision delivery round-trip: submit decision → adapter delivers to approval
+       system → approval resolved → control plane updated
+    2. Event emission: verify orchestrator emits expected events during discovery,
+       polling, decision submit, and decision resolve
+    3. Dashboard endpoint tests: verify HTML fragments render correctly with
+       test agent/decision data
+    Files: components/control-plane/test/ai/miniforge/control_plane/orchestrator_test.clj
+           components/adapter-miniforge/test/ai/miniforge/adapter_miniforge/interface_test.clj
+           components/web-dashboard/test/ai/miniforge/web_dashboard/server/control_plane_test.clj"
+   :task/type :test
+   :task/dependencies [:wire-decision-delivery
+                       :emit-orchestrator-events
+                       :dashboard-agent-detail
+                       :dashboard-decision-history]}]}

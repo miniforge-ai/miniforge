@@ -32,6 +32,7 @@
             [ai.miniforge.context-pack.factory :as ctx-factory]
             [ai.miniforge.knowledge.interface :as knowledge]
             [ai.miniforge.repo-index.interface :as repo-index]
+            [ai.miniforge.logging.interface :as log]
             [ai.miniforge.response.interface :as response]
             [clojure.string :as str]))
 
@@ -196,7 +197,9 @@
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
-        implementer-agent (agent/create-implementer {})
+        logger (or (get-in ctx [:execution/logger])
+                   (log/create-logger {:min-level :info :output :human}))
+        implementer-agent (agent/create-implementer {:logger logger})
         task (build-implement-task ctx)
         ;; Cache loaded files and context pack for subsequent retries
         ctx (cond-> ctx

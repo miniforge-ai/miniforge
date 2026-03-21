@@ -1,0 +1,18 @@
+{:description "Patterns that indicate agent system bugs (Claude Code internal errors)"
+ :type :agent-backend
+ :vendor "Claude Code"
+ :patterns
+ [{:regex "classifyHandoffIfNeeded is not defined"
+   :description "Missing agent function definition"}
+  {:regex "ReferenceError:.*agent.*is not defined"
+   :description "Agent reference error"}
+  {:regex "TypeError:.*agent\\..*is not a function"
+   :description "Agent type error"}
+  {:regex "Cannot read property.*of undefined"
+   :description "Undefined property access"}
+  {:regex "null toolResult received"
+   :description "Null tool result"}
+  {:regex "agent is undefined"
+   :description "Agent undefined"}
+  {:regex "handoff failed for agent"
+   :description "Agent handoff failure"}]}

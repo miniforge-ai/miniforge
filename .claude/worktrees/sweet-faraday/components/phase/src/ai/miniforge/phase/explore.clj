@@ -1,0 +1,142 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+(ns ai.miniforge.phase.explore
+  "Explore phase interceptor.
+
+   Deterministic file-loading phase that runs before planning.
+   Loads files-in-scope from disk and passes discovery results
+   to downstream phases (plan, implement) so they can make
+   informed decisions about existing code state.
+
+   Agent: nil (no LLM — deterministic file loading)
+   Default gates: []"
+  (:require [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.phase.file-context :as file-ctx]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Defaults
+
+(def default-config
+  {:agent nil
+   :gates []
+   :budget {:tokens 5000
+            :iterations 1
+            :time-seconds 120}
+   :max-files 25
+   :max-lines-per-file 500
+   :model-hint :haiku-4.5})
+
+;; Register defaults on load
+(registry/register-phase-defaults! :explore default-config)
+
+;------------------------------------------------------------------------------ Layer 1
+;; Interceptor implementation
+
+(defn enter-explore
+  "Execute exploration phase.
+
+   Reads files-in-scope from execution input, loads their contents
+   from disk, and stores the exploration result for downstream phases."
+  [ctx]
+  (let [start-time (System/currentTimeMillis)
+        input (get-in ctx [:execution/input])
+        config (get ctx :phase-config default-config)
+        files-in-scope (:files-in-scope input)
+        worktree-path (or (:worktree-path input)
+                          (:execution/worktree-path ctx)
+                          ".")
+
+        ;; Load files from disk (deterministic, no LLM)
+        loaded-files (file-ctx/load-files-in-scope worktree-path files-in-scope
+                                                   {:max-files (:max-files config)
+                                                    :max-lines-per-file (:max-lines-per-file config)})
+
+        ;; Build exploration result
+        exploration {:exploration/files (or loaded-files [])
+                     :exploration/file-count (count (or loaded-files []))
+                     :exploration/spec-description (:description input)}]
+
+    (-> ctx
+        (assoc-in [:phase :name] :explore)
+        (assoc-in [:phase :agent] nil)
+        (assoc-in [:phase :gates] [])
+        (assoc-in [:phase :budget] (:budget default-config))
+        (assoc-in [:phase :started-at] start-time)
+        (assoc-in [:phase :status] :running)
+        (assoc-in [:phase :result] {:status :completed
+                                    :output exploration}))))
+
+(defn leave-explore
+  "Post-processing for exploration phase.
+
+   Records metrics (file count, load time)."
+  [ctx]
+  (let [start-time (get-in ctx [:phase :started-at])
+        end-time (System/currentTimeMillis)
+        duration-ms (- end-time start-time)
+        result (get-in ctx [:phase :result])
+        file-count (get-in result [:output :exploration/file-count] 0)]
+    (-> ctx
+        (assoc-in [:phase :ended-at] end-time)
+        (assoc-in [:phase :duration-ms] duration-ms)
+        (assoc-in [:phase :status] :completed)
+        (assoc-in [:phase :metrics] {:file-count file-count
+                                     :duration-ms duration-ms})
+        (update-in [:execution :phases-completed] (fnil conj []) :explore)
+        (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
+
+(defn error-explore
+  "Handle exploration phase errors.
+
+   Simple retry within budget."
+  [ctx ex]
+  (let [iterations (get-in ctx [:phase :iterations] 0)
+        max-iterations (get-in ctx [:phase :budget :iterations] 1)]
+    (if (< iterations max-iterations)
+      (-> ctx
+          (update-in [:phase :iterations] (fnil inc 0))
+          (assoc-in [:phase :last-error] (ex-message ex))
+          (assoc-in [:phase :status] :retrying))
+      (-> ctx
+          (assoc-in [:phase :status] :failed)
+          (assoc-in [:phase :error] {:message (ex-message ex)
+                                     :data (ex-data ex)})))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Registry method
+
+(defmethod registry/get-phase-interceptor :explore
+  [config]
+  (let [merged (registry/merge-with-defaults config)]
+    {:name ::explore
+     :config merged
+     :enter (fn [ctx]
+              (enter-explore (assoc ctx :phase-config merged)))
+     :leave leave-explore
+     :error error-explore}))
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  ;; Get explore interceptor with defaults
+  (registry/get-phase-interceptor {:phase :explore})
+
+  ;; Check defaults
+  (registry/phase-defaults :explore)
+
+  :leave-this-here)

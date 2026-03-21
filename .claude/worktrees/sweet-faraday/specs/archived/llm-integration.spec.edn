@@ -1,0 +1,522 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+{:spec/id :llm-integration
+ :spec/version "1.0.0"
+ :spec/status :draft
+ :spec/created "2026-01-22"
+ :spec/author "miniforge.ai"
+
+ :spec/title "LLM Integration - Claude API Client"
+ :spec/description
+ "Real LLM integration to replace stubs. Connect agents to Claude API
+  for actual code generation, with streaming, tools, and error handling."
+
+ :spec/context
+ {:problem
+  "Current agents use stub implementations that return mock responses:
+   - Planner returns fake plans
+   - Implementer returns placeholder code
+   - Reviewer returns stub feedback
+
+   Need real Claude API integration for actual:
+   - Code generation
+   - Test writing
+   - Code review
+   - Planning and design
+
+   Must support Claude's features:
+   - Streaming responses
+   - Tool use (future: for file ops, git, etc.)
+   - Extended thinking
+   - Prompt caching
+   - Vision (for screenshots/diagrams)"
+
+  :constraints
+  ["Must use official Anthropic Clojure SDK (or HTTP client)"
+   "Must support multiple Claude models (Sonnet, Opus, Haiku)"
+   "Must track token usage and costs accurately"
+   "Must handle rate limits and retries"
+   "Must respect budget constraints from workflow config"
+   "Must stream responses for real-time feedback"]
+
+  :dependencies
+  ["Anthropic API key (ANTHROPIC_API_KEY env var)"
+   "HTTP client (clj-http or httpkit)"
+   "JSON parsing (cheshire)"
+   "workflow/configurable - Phase execution"
+   "heuristic - System prompts storage"
+   "observer - Metrics tracking"]}
+
+ :spec/requirements
+ {:functional
+  {:llm-client-core
+   {:api-communication
+    {:endpoint "https://api.anthropic.com/v1/messages"
+     :authentication "API key via X-API-Key header"
+     :version "anthropic-version: 2023-06-01"
+     :methods
+     ["POST /v1/messages - Create message"
+      "POST /v1/messages (streaming) - Create with streaming"]}
+
+    :model-support
+    {:models
+     [{:id "claude-sonnet-4-5-20250929"
+       :alias :sonnet-4.5
+       :context-window 200000
+       :cost-per-mtok {:input 3.00 :output 15.00}
+       :use-case "Default for most agents"}
+      {:id "claude-opus-4-5-20251101"
+       :alias :opus-4.5
+       :context-window 200000
+       :cost-per-mtok {:input 15.00 :output 75.00}
+       :use-case "Complex reasoning, architecture decisions"}
+      {:id "claude-haiku-4-20250131"
+       :alias :haiku-4
+       :context-window 200000
+       :cost-per-mtok {:input 0.80 :output 4.00}
+       :use-case "Simple tasks, gates, validators"}]
+     :selection
+     "Configurable per agent in heuristic store"}
+
+    :request-parameters
+    {:required
+     ["model - Model ID string"
+      "messages - Array of message objects"
+      "max_tokens - Maximum tokens to generate"]
+     :optional
+     ["system - System prompt (cached)"
+      "temperature - 0.0 to 1.0 (default 1.0)"
+      "top_p - Nucleus sampling"
+      "top_k - Top-k sampling"
+      "stop_sequences - Stop generation early"
+      "stream - Enable streaming (default false)"
+      "metadata - User ID, tags"]}
+
+    :prompt-caching
+    {:description "Cache system prompts to reduce costs"
+     :usage "Mark system prompt with cache_control: {type: 'ephemeral'}"
+     :benefits "System prompts cached for 5 minutes, 90% cost reduction on cache hits"
+     :implementation "Add cache_control to system message"}
+
+    :extended-thinking
+    {:description "Enable extended thinking for complex tasks"
+     :usage "Include {type: 'thinking'} message in response"
+     :models ["claude-sonnet-4-5" "claude-opus-4-5"]
+     :cost "Thinking tokens billed at same rate as output"
+     :use-case "Architecture design, complex debugging"}}
+
+   :streaming-support
+   {:stream-events
+    [{:event "message_start"
+      :data ["id" "type" "role" "model"]}
+     {:event "content_block_start"
+      :data ["index" "content_block.type"]}
+     {:event "content_block_delta"
+      :data ["index" "delta.type" "delta.text"]}
+     {:event "content_block_stop"
+      :data ["index"]}
+     {:event "message_delta"
+      :data ["delta.stop_reason" "delta.stop_sequence" "usage"]}
+     {:event "message_stop"
+      :data []}
+     {:event "error"
+      :data ["error.type" "error.message"]}]
+
+    :implementation
+    {:http-client "Use streaming HTTP client (httpkit)"
+     :parsing "Parse SSE (server-sent events) format"
+     :buffering "Accumulate deltas into full response"
+     :callback "Call handler for each chunk"}}
+
+   :tool-use
+    {:description "Future: Enable agent tool use"
+     :tools
+     [{:name "read_file"
+       :description "Read file contents"
+       :parameters {:path "string"}}
+      {:name "write_file"
+       :description "Write file contents"
+       :parameters {:path "string" :content "string"}}
+      {:name "run_command"
+       :description "Execute shell command"
+       :parameters {:command "string"}}
+      {:name "search_code"
+       :description "Search codebase"
+       :parameters {:pattern "string" :scope "string"}}]
+     :flow
+     ["Agent requests tool use in response"
+      "Tool executed by system"
+      "Result sent back to agent in next message"
+      "Agent continues with tool result"]
+     :implementation "Phase 2 feature, not in initial MVP"}
+
+   :error-handling
+    {:error-types
+     [{:type "invalid_request_error"
+       :causes ["Missing required parameter" "Invalid parameter value"]
+       :handling "Return error to caller, don't retry"}
+      {:type "authentication_error"
+       :causes ["Invalid API key" "Missing API key"]
+       :handling "Fail fast, log error"}
+      {:type "permission_error"
+       :causes ["API key lacks permission"]
+       :handling "Fail fast, log error"}
+      {:type "not_found_error"
+       :causes ["Model doesn't exist"]
+       :handling "Check model ID, suggest valid models"}
+      {:type "rate_limit_error"
+       :causes ["Too many requests"]
+       :handling "Retry with exponential backoff"}
+      {:type "overloaded_error"
+       :causes ["API temporarily overloaded"]
+       :handling "Retry with exponential backoff"}
+      {:type "timeout"
+       :causes ["Request exceeded timeout"]
+       :handling "Retry with longer timeout, max 3 attempts"}]
+
+     :retry-strategy
+     {:max-retries 3
+      :backoff "Exponential: 1s, 2s, 4s"
+      :retryable ["rate_limit_error" "overloaded_error" "timeout"]
+      :non-retryable ["invalid_request_error" "authentication_error" "permission_error"]}}
+
+   :budget-enforcement
+    {:token-budget
+     {:description "Enforce max tokens per phase/workflow"
+      :config "workflow/phases/*/budget/tokens"
+      :tracking "Accumulate tokens from all LLM calls in phase"
+      :enforcement "Reject LLM call if would exceed budget"
+      :error "Throw BudgetExceededError with details"}
+
+     :cost-budget
+     {:description "Enforce max cost per phase/workflow"
+      :config "workflow/phases/*/budget/cost-usd"
+      :tracking "Calculate cost from token usage and model pricing"
+      :enforcement "Reject LLM call if would exceed budget"
+      :error "Throw BudgetExceededError with details"}
+
+     :time-budget
+     {:description "Enforce max wall-clock time per phase"
+      :config "workflow/phases/*/budget/duration-ms"
+      :tracking "Track elapsed time since phase start"
+      :enforcement "Abort LLM call if time budget exceeded"
+      :error "Throw TimeoutError"}}}
+
+  :non-functional
+  {:performance
+   ["Response latency < 2s for Haiku"
+    "Streaming chunk latency < 100ms"
+    "Support concurrent requests (different phases)"
+    "Connection pooling for HTTP clients"
+    "Request timeout: 60s default, 180s for complex tasks"]
+
+   :reliability
+   ["Automatic retry on transient errors"
+    "Exponential backoff for rate limits"
+    "Circuit breaker for persistent failures"
+    "Request/response logging for debugging"
+    "Graceful degradation (return partial response if interrupted)"]
+
+   :security
+   ["API key from environment variable only"
+    "Never log API key"
+    "Never include API key in error messages"
+    "Sanitize prompts (remove secrets before sending)"
+    "Use HTTPS only"]
+
+   :observability
+   ["Log all requests and responses (minus API key)"
+    "Track token usage per request"
+    "Track costs per request"
+    "Emit metrics for latency, errors, retries"
+    "Integrate with Observer component"]}}
+
+ :spec/architecture
+ {:components
+  {:llm-client
+   {:namespace "ai.miniforge.llm.client"
+    :description "Core Claude API client"
+    :responsibilities
+    ["Send requests to Claude API"
+     "Parse responses"
+     "Handle streaming"
+     "Retry on errors"
+     "Track token usage and costs"]
+    :protocols
+    [{:name "LLMClient"
+      :methods
+      [{:name "generate"
+        :args ["model" "messages" "opts"]
+        :returns "response-map"
+        :description "Non-streaming generation"}
+       {:name "generate-stream"
+        :args ["model" "messages" "opts" "chunk-handler"]
+        :returns "response-map"
+        :description "Streaming generation, calls chunk-handler for each chunk"}
+       {:name "count-tokens"
+        :args ["text"]
+        :returns "integer"
+        :description "Estimate token count (simple heuristic)"}
+       {:name "calculate-cost"
+        :args ["model" "input-tokens" "output-tokens"]
+        :returns "double (USD)"
+        :description "Calculate cost for token usage"}]}]}
+
+   :agent-llm-bridge
+   {:namespace "ai.miniforge.llm.agent-bridge"
+    :description "Integrate LLM client with agents"
+    :responsibilities
+    ["Load system prompts from heuristic store"
+     "Format agent inputs as Claude messages"
+     "Parse agent outputs from Claude responses"
+     "Enforce budgets before LLM calls"
+     "Track metrics per agent type"]
+    :functions
+    ["invoke-agent"
+     "format-messages-for-agent"
+     "parse-agent-response"
+     "check-budget"
+     "record-usage"]}
+
+   :prompt-manager
+   {:namespace "ai.miniforge.llm.prompts"
+    :description "Manage system prompts and caching"
+    :responsibilities
+    ["Load prompts from heuristic store"
+     "Version prompts"
+     "Apply prompt caching"
+     "Render prompts with context"]
+    :storage "Heuristic component, type :prompt/<agent-type>"
+    :caching "Mark system prompts for caching"}
+
+   :model-selector
+   {:namespace "ai.miniforge.llm.models"
+    :description "Select appropriate model for task"
+    :responsibilities
+    ["Map agent types to models"
+     "Respect model overrides from config"
+     "Provide model metadata (costs, limits)"
+     "Validate model availability"]
+    :defaults
+    {:planner :sonnet-4.5
+     :designer :sonnet-4.5
+     :implementer :sonnet-4.5
+     :tester :sonnet-4.5
+     :reviewer :sonnet-4.5
+     :validator :haiku-4
+     :gate-runner :haiku-4}}
+
+   :cost-tracker
+   {:namespace "ai.miniforge.llm.cost"
+    :description "Track token usage and costs"
+    :responsibilities
+    ["Accumulate token counts per phase"
+     "Calculate costs from usage and pricing"
+     "Check against budgets"
+     "Emit cost metrics"]
+    :integration "Registers with Observer to track costs"}}
+
+  :integration-points
+  {:agents
+   {:current-stubs
+    ["ai.miniforge.agent.planner"
+     "ai.miniforge.agent.implementer"
+     "ai.miniforge.agent.tester"
+     "ai.miniforge.agent.reviewer"]
+    :replacement
+    "Replace stub generate functions with LLM client calls"}
+
+   :workflow-system
+   {:configurable "ai.miniforge.workflow.configurable/execute-phase"
+    :budget-check "Check budgets before invoking agent"
+    :metrics "Report token/cost metrics to observer"}
+
+   :heuristic-system
+   {:prompts "Load system prompts: heuristic/get-heuristic :prompt/<agent>"
+    :model-config "Load model selections: heuristic/get-heuristic :model-config"}
+
+   :observer-system
+   {:metrics "Report LLM request/response metrics"
+    :costs "Report accumulated costs"}}}
+
+ :spec/data-structures
+ {:llm-request
+  {:description "LLM API request"
+   :schema
+   {:request/id "uuid - unique request ID"
+    :request/model "string - Claude model ID"
+    :request/messages "[message] - conversation history"
+    :request/system "string | nil - system prompt"
+    :request/max-tokens "integer - max tokens to generate"
+    :request/temperature "double | nil"
+    :request/stream? "boolean - enable streaming"
+    :request/cache-system? "boolean - cache system prompt"
+    :request/metadata "map - request metadata"}}
+
+  :llm-response
+  {:description "LLM API response"
+   :schema
+   {:response/id "string - Claude message ID"
+    :response/model "string - Model used"
+    :response/role "string - 'assistant'"
+    :response/content "[content-block] - Response content"
+    :response/stop-reason "string - why generation stopped"
+    :response/usage "map - token usage"
+    :response/cost-usd "double - calculated cost"
+    :response/latency-ms "integer - request duration"}}
+
+  :message
+  {:description "Claude API message format"
+   :schema
+   {:role "string - 'user' or 'assistant'"
+    :content "string | [content-block]"}}
+
+  :usage-metrics
+  {:description "Token usage from API"
+   :schema
+   {:usage/input-tokens "integer"
+    :usage/output-tokens "integer"
+    :usage/cache-creation-tokens "integer | nil"
+    :usage/cache-read-tokens "integer | nil"
+    :usage/total-tokens "integer"}}}
+
+ :spec/implementation-phases
+ [{:phase 1
+   :title "Basic LLM Client"
+   :deliverables
+   ["HTTP client for Claude API"
+    "Non-streaming message generation"
+    "API key configuration"
+    "Error handling and retries"
+    "Token counting (simple heuristic)"]
+   :tests
+   ["Can send request to Claude API"
+    "Receives valid response"
+    "Handles authentication errors"
+    "Retries on rate limit"
+    "Calculates token costs"]}
+
+  {:phase 2
+   :title "Agent Integration"
+   :deliverables
+   ["Replace stub agents with LLM calls"
+    "Load system prompts from heuristic store"
+    "Format agent I/O as messages"
+    "Model selection per agent type"
+    "Budget enforcement"]
+   :tests
+   ["Planner generates real plans"
+    "Implementer generates real code"
+    "Reviewer provides real feedback"
+    "Budgets enforced correctly"
+    "Prompts loaded from heuristic store"]}
+
+  {:phase 3
+   :title "Streaming Support"
+   :deliverables
+   ["Streaming HTTP client"
+    "SSE parsing"
+    "Chunk handler callbacks"
+    "Integration with CLI streaming output"
+    "Graceful stream interruption"]
+   :tests
+   ["Receives streamed chunks"
+    "Accumulates chunks into full response"
+    "Calls handler for each chunk"
+    "Can cancel streaming request"
+    "Handles stream errors"]}
+
+  {:phase 4
+   :title "Advanced Features"
+   :deliverables
+   ["Prompt caching"
+    "Extended thinking support"
+    "Multiple model support (Sonnet, Opus, Haiku)"
+    "Cost optimization heuristics"
+    "Request/response logging"]
+   :tests
+   ["System prompt cached correctly"
+    "Cache hits reduce costs"
+    "Extended thinking generates <thinking> blocks"
+    "Model selection based on task complexity"
+    "All requests logged for audit"]}
+
+  {:phase 5
+   :title "Tool Use (Future)"
+   :deliverables
+   ["Tool definition framework"
+    "Tool execution engine"
+    "File operation tools"
+    "Git command tools"
+    "Multi-turn tool use loops"]
+   :tests
+   ["Agent can request file read"
+    "File read executed and returned"
+    "Agent uses file content"
+    "Agent can write files"
+    "Agent can run git commands"]}]
+
+ :spec/testing-strategy
+ {:unit-tests
+  {:llm-client
+   ["Build request correctly"
+    "Parse response correctly"
+    "Handle errors appropriately"
+    "Retry with backoff"
+    "Calculate costs accurately"]
+
+   :agent-bridge
+   ["Format messages for agents"
+    "Parse agent responses"
+    "Enforce budgets"
+    "Track usage metrics"]
+
+   :prompt-manager
+   ["Load prompts from heuristic store"
+    "Apply prompt caching"
+    "Render prompts with context"]}
+
+  :integration-tests
+  ["Planner agent generates valid plan using LLM"
+   "Implementer agent generates valid code using LLM"
+   "Reviewer agent provides structured feedback using LLM"
+   "Budget exceeded error thrown when over budget"
+   "Streaming mode delivers chunks in real-time"
+   "Prompt caching reduces costs on repeat calls"
+   "All metrics reported to Observer"]
+
+  :dogfooding-tests
+  ["Run workflow with LLM integration"
+   "Verify generated code is functional"
+   "Verify tests pass"
+   "Verify costs tracked accurately"
+   "Use LLM to implement a new feature"]}
+
+ :spec/success-criteria
+ ["Claude API client successfully communicates with API"
+  "All agents use real LLM instead of stubs"
+  "Token usage and costs tracked accurately"
+  "Budgets enforced at phase and workflow level"
+  "Streaming works and integrates with CLI output"
+  "System prompts loaded from heuristic store"
+  "Errors handled gracefully with retries"
+  "Prompt caching reduces costs"
+  "Generated code is syntactically valid and functional"
+  "Integration tests pass"
+  "Documentation and examples complete"]}

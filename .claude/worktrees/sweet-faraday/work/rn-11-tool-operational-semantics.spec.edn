@@ -1,0 +1,144 @@
+;; Reliability Nines — RN-11: Tool Operational Semantics
+;; Tier 3 (Governance) — depends on RN-01
+;; Blocks: RN-14, RN-15
+
+{:spec/title "RN-11: Tool Operational Semantics (Timeout/Retry/Circuit-Breaker)"
+ :version "1.0.0"
+ :type :feature
+ :priority :high
+
+ :spec/description
+ "Extend the tool registry with :tool/operational config per N10 §3.4-3.5.
+  Add timeout enforcement, retry with configurable backoff/jitter, circuit-
+  breaker state machine, concurrency semaphore, and fallback tool routing.
+  Also implement tool health tracking by generalizing the existing LLM
+  backend health pattern.
+
+  Current state: tool/core.clj has a comment about future :tool/timeout-ms.
+  Tool registry schema has no :tool/operational. Backend health tracks LLM
+  backends only.
+  Target state: Every tool has configurable operational semantics."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/tool-registry/src/ai/miniforge/tool_registry"
+          "components/tool/src/ai/miniforge/tool"
+          "components/self-healing/src/ai/miniforge/self_healing"]}
+
+ :normative-refs
+ {:primary "N10 §3.4 — Operational Semantics"
+  :secondary ["N10 §3.5 — Tool Health Tracking"]}
+
+ :gap-analysis-ref "gap-analysis-reliability-nines.md #14, #15"
+ :dag/id :rn-11
+ :dag/depends-on [:rn-01]
+ :dag/blocks [:rn-14 :rn-15]
+
+ :current-state
+ {:tool-registry "ToolConfig Malli schema — no :tool/operational field"
+  :tool-core "FunctionTool — input validation only, comment re :tool/timeout-ms"
+  :backend-health "backend_health.clj — LLM backends only"
+  :completion "5%"}
+
+ :target-state
+ {:operational-schema
+  {:op/timeout-ms "Max execution time before timeout (default 30000)"
+   :op/retry-policy {:retry/max-attempts "int (default 3)"
+                     :retry/backoff ":exponential | :linear | :constant"
+                     :retry/base-delay-ms "long (default 1000)"
+                     :retry/max-delay-ms "long (default 30000)"
+                     :retry/jitter? "boolean (default true)"
+                     :retry/retryable-classes "[:failure.class/timeout :failure.class/external ...]"}
+   :op/circuit-breaker {:cb/failure-threshold "int (default 5)"
+                        :cb/reset-timeout-ms "long (default 60000)"
+                        :cb/half-open-permits "int (default 1)"}
+   :op/concurrency {:conc/max-parallel "int (default 10)"
+                    :conc/semaphore-key "string"}
+   :op/fallback {:fallback/tool-id "keyword"
+                 :fallback/conditions "[:failure.class/timeout :failure.class/external]"}}
+  :health-tracking
+  {:consecutive-failures "int"
+   :last-success "inst"
+   :last-failure "inst"
+   :circuit-state ":closed | :open | :half-open"
+   :availability-ratio "double"}}
+
+ :implementation
+ {:step-1-schema
+  {:title "Extend tool registry schema with :tool/operational"
+   :files-to-modify
+   ["components/tool-registry/src/ai/miniforge/tool_registry/schema.clj"]
+   :changes
+   ["Add ToolOperational Malli schema"
+    "Add RetryPolicy sub-schema"
+    "Add CircuitBreaker sub-schema"
+    "Add Concurrency sub-schema"
+    "Add Fallback sub-schema"
+    "Extend ToolConfig with optional :tool/operational"]}
+
+  :step-2-execution-engine
+  {:title "Implement operational semantics execution wrapper"
+   :files-to-create
+   ["components/tool/src/ai/miniforge/tool/operational.clj"]
+   :changes
+   ["with-timeout: wrap execution with timeout"
+    "with-retry: retry with backoff/jitter on retryable classes"
+    "with-circuit-breaker: check/update circuit state"
+    "with-concurrency: semaphore-based parallel limit"
+    "with-fallback: route to fallback tool on failure"
+    "execute-with-operational: compose all wrappers"]}
+
+  :step-3-health-tracking
+  {:title "Generalize backend health to all tools"
+   :files-to-create
+   ["components/self-healing/src/ai/miniforge/self_healing/tool_health.clj"]
+   :changes
+   ["Generalize backend_health.clj pattern to any tool-id"
+    "record-tool-call! function"
+    "get-tool-health function"
+    "Circuit-breaker state transitions: closed→open→half-open→closed"]}
+
+  :step-4-wire
+  {:title "Wire operational semantics into tool execution"
+   :files-to-modify
+   ["components/tool/src/ai/miniforge/tool/core.clj"]
+   :changes
+   ["Look up :tool/operational from registry before execution"
+    "Wrap FunctionTool/execute with execute-with-operational"
+    "Record call result in tool health tracking"]}}
+
+ :spec/constraints
+ ["Operational config is OPTIONAL per tool (sensible defaults)"
+  "Timeout MUST use Babashka-compatible mechanism (not CompletableFuture)"
+  "Circuit-breaker state MUST be per-tool-id (not global)"
+  "Retry MUST classify errors using RN-01 failure taxonomy"
+  "Follow Polylith interface-only deps"]
+
+ :testing-strategy
+ {:unit-tests
+  ["Timeout: execution exceeding timeout returns :failure.class/timeout"
+   "Retry: 3 attempts with exponential backoff"
+   "Retry: non-retryable errors fail immediately"
+   "Circuit-breaker: 5 failures → open → reject → half-open → close"
+   "Concurrency: semaphore limits parallel executions"
+   "Fallback: timeout → route to fallback tool"
+   "Health: consecutive failures tracked correctly"]
+  :integration-tests
+  ["Tool with timeout config → timeout enforced"
+   "Tool with circuit-breaker → opens after threshold"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "Timeout enforcement"
+   :verification "Tool execution exceeding timeout-ms returns failure"}
+  {:criterion "Retry with backoff"
+   :verification "Retryable failures retried up to max-attempts"}
+  {:criterion "Circuit-breaker state machine"
+   :verification "Opens after threshold, half-opens after reset timeout"}
+  {:criterion "Health tracking per tool"
+   :verification "Consecutive failures and availability ratio tracked"}
+  {:criterion "Fallback routing"
+   :verification "Failed tool routes to configured fallback"}]
+
+ :estimated-effort "1-2 weeks"
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"}

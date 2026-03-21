@@ -1,0 +1,417 @@
+{:spec/id "complete-core-loop-v1"
+ :spec/version "0.1.0"
+ :spec/created "2026-01-21"
+ :spec/status "active"
+
+ :title "Complete miniforge Core Loop - Self-Implementation"
+
+ :description
+ "miniforge will implement its own missing core loop components, demonstrating
+  the system's ability to build itself. This is the ultimate dogfooding test.
+
+  Current state: We have planner and implementer agents, basic loop structure,
+  and workflow components. Missing: tester agent, reviewer agent, policy engine,
+  full outer loop integration.
+
+  Success criteria: miniforge can take a spec and produce a complete PR with
+  code, tests, and automated review."
+
+ :context
+ {:existing-components
+  ["agent - has planner, implementer, memory"
+   "artifact - schema and provenance"
+   "task - schema, graph, queue"
+   "loop - inner/outer loop engines, gates, repair"
+   "workflow - state machine, release phase executor"
+   "orchestrator - protocol"
+   "operator - protocol"
+   "knowledge - Zettelkasten for agent context"
+   "llm - Claude CLI integration"
+   "logging - structured EDN logging"
+   "schema - domain schemas"
+   "tool - tool protocol"
+   "reporting - CLI dashboard"]
+
+  :missing-components
+  ["policy - gates, budgets, governance"
+   "heuristic - prompt storage, versioning, A/B"
+   "pr-loop - PR lifecycle management"]
+
+  :missing-agents
+  ["tester - generate tests from code"
+   "reviewer - review against policies"]
+
+  :architecture-refs
+  ["docs/specs/miniforge.spec - full product spec"
+   "docs/specs/architecture.spec - polylith structure"
+   "docs/specs/operational-modes.spec - loop modes"
+   ".cursor/rules/000-foundations/001-stratified-design.mdc"
+   ".cursor/rules/200-languages/210-clojure.mdc"]}
+
+ :objectives
+ ["Implement Tester agent that generates tests from code + spec"
+  "Implement Reviewer agent that validates against policies"
+  "Implement Policy component with gate evaluation"
+  "Implement Heuristic component for prompt/threshold storage"
+  "Integrate all outer loop phases (plan → design → implement → test → review)"
+  "Demonstrate end-to-end: spec → code → tests → review → PR"]
+
+ :deliverables
+ [{:id :policy-component
+   :type :component
+   :path "components/policy/"
+   :priority :p0
+   :description "Policy engine with gate evaluation, budgets, governance rules"
+   :interfaces
+   {:public-api
+    ["(evaluate-gates artifact phase gates) → {:passed? bool :failures [...]}"
+     "(check-budget context budget-type) → {:within-budget? bool :remaining ...}"
+     "(enforce-policy artifact policy-rules) → {:compliant? bool :violations [...]}"]
+    :schemas
+    ["Gate - validation checkpoint schema"
+     "Budget - cost/token/time budget schema"
+     "Policy - governance rule schema"
+     "PolicyViolation - violation report schema"]}
+   :dependencies ["schema" "logging" "artifact"]
+   :tests
+   ["Unit tests for gate evaluation"
+    "Budget tracking tests"
+    "Policy violation detection tests"]}
+
+  {:id :heuristic-component
+   :type :component
+   :path "components/heuristic/"
+   :priority :p0
+   :description "Heuristic storage for prompts, thresholds, repair strategies"
+   :interfaces
+   {:public-api
+    ["(get-heuristic type version) → heuristic-data"
+     "(save-heuristic type version data) → uuid"
+     "(list-versions type) → [versions]"
+     "(get-active-heuristic type) → heuristic-data"]
+    :schemas
+    ["Heuristic - prompt/threshold/strategy schema"
+     "HeuristicVersion - versioning metadata"]}
+   :dependencies ["schema" "logging"]
+   :storage "~/.miniforge/heuristics/ for local mode"
+   :tests
+   ["Heuristic storage/retrieval tests"
+    "Version management tests"
+    "Active heuristic resolution tests"]}
+
+  {:id :tester-agent
+   :type :agent
+   :path "components/agent/src/ai/miniforge/agent/tester.clj"
+   :priority :p0
+   :description "Agent that generates tests from code and specifications"
+   :responsibilities
+   ["Analyze code structure and identify testable units"
+    "Generate unit tests with proper assertions"
+    "Generate integration tests for component interactions"
+    "Ensure tests follow project conventions (210-clojure.mdc)"
+    "Achieve reasonable coverage (aim for 80%+)"]
+   :inputs
+   ["Code artifacts from implement phase"
+    "Original spec/requirements"
+    "Existing test files (for convention reference)"
+    "Project test configuration"]
+   :outputs
+   ["Test artifacts (:artifact/type :test)"
+    "Coverage report"
+    "Test execution results"]
+   :prompts
+   {:system
+    "You are a Tester agent. Your role is to generate comprehensive tests
+     that validate code correctness against specifications.
+
+     Guidelines:
+     - Write tests that cover normal cases, edge cases, and error conditions
+     - Follow the project's test conventions (check existing tests)
+     - Use meaningful test names that describe what is being tested
+     - Include docstrings explaining the test's purpose
+     - Ensure tests are deterministic and isolated
+     - For Clojure: use clojure.test, follow (deftest name ...) pattern"
+
+    :task-template
+    "Generate tests for the following code:
+
+     Code:
+     {{code-content}}
+
+     Specification:
+     {{spec-content}}
+
+     Existing test conventions (reference):
+     {{existing-tests}}
+
+     Generate comprehensive tests following the project conventions."}
+   :validation-gates
+   ["Tests parse without errors"
+    "Tests follow naming conventions"
+    "Tests can be executed"
+    "Generated tests pass"]
+   :dependencies ["llm" "artifact" "knowledge"]
+   :tests
+   ["Test generation from simple code"
+    "Test generation from complex code"
+    "Convention following test"
+    "Edge case coverage test"]}
+
+  {:id :reviewer-agent
+   :type :agent
+   :path "components/agent/src/ai/miniforge/agent/reviewer.clj"
+   :priority :p0
+   :description "Agent that reviews artifacts against policies and best practices"
+   :responsibilities
+   ["Review code for adherence to stratified design (001-stratified-design.mdc)"
+    "Check Clojure conventions (210-clojure.mdc)"
+    "Validate test coverage and quality"
+    "Ensure documentation is adequate"
+    "Identify security issues or anti-patterns"
+    "Provide actionable feedback"]
+   :inputs
+   ["Artifacts to review (code, tests, etc.)"
+    "Project policies and rules"
+    "Codebase context from knowledge component"
+    "Review checklist/criteria"]
+   :outputs
+   ["Review artifact (:artifact/type :review)"
+    "Approval/rejection decision"
+    "Detailed feedback and suggestions"
+    "Policy violations (if any)"]
+   :prompts
+   {:system
+    "You are a Reviewer agent. Your role is to ensure code quality and
+     compliance with project standards.
+
+     Review criteria:
+     1. Stratified Design: Check layer dependencies flow downward only
+     2. Clojure Conventions: Polylith structure, interface pattern, max 3 layers per file
+     3. Test Quality: Coverage, assertions, edge cases
+     4. Documentation: Docstrings, comments where needed
+     5. Security: No obvious vulnerabilities
+     6. Simplicity: Prefer simple over complex (010-simple-made-easy.mdc)
+
+     Provide constructive, specific feedback. Approve if standards are met."
+
+    :task-template
+    "Review the following artifacts:
+
+     Code:
+     {{code-artifacts}}
+
+     Tests:
+     {{test-artifacts}}
+
+     Context:
+     {{codebase-context}}
+
+     Evaluate against project standards and provide detailed feedback.
+     Format: {:approved? bool :feedback [...] :violations [...]}"}
+   :validation-gates
+   ["Review artifact is well-formed"
+    "Feedback is specific and actionable"
+    "Decision (approve/reject) is justified"]
+   :dependencies ["llm" "artifact" "policy" "knowledge"]
+   :tests
+   ["Review approval test (good code)"
+    "Review rejection test (bad code)"
+    "Feedback specificity test"
+    "Policy violation detection test"]}
+
+  {:id :outer-loop-integration
+   :type :integration
+   :path "components/loop/src/ai/miniforge/loop/outer.clj"
+   :priority :p1
+   :description "Complete outer loop integration with all phases"
+   :phases
+   {:plan
+    {:agent :planner
+     :entry "Spec received"
+     :exit "Plan approved by policy engine"
+     :outputs [:plan :task-graph]}
+
+    :design
+    {:agent :architect
+     :entry "Plan approved"
+     :exit "ADRs approved"
+     :outputs [:adr :interfaces]
+     :note "Architect agent not yet implemented - can defer or use planner"}
+
+    :implement
+    {:agent :implementer
+     :entry "Design approved OR plan approved (if no design phase)"
+     :exit "Code passes inner loop gates"
+     :outputs [:code]}
+
+    :verify
+    {:agent :tester
+     :entry "Code produced"
+     :exit "Tests generated and passing"
+     :outputs [:test :coverage]}
+
+    :review
+    {:agent :reviewer
+     :entry "Code and tests complete"
+     :exit "Reviewer approves"
+     :outputs [:review :approval]}
+
+    :release
+    {:agent :release
+     :entry "Review approved"
+     :exit "Artifacts written to worktree, ready for PR"
+     :outputs [:worktree-path :files-written]
+     :note "Uses existing workflow/release.clj"}
+
+    :observe
+    {:entry "PR created (external)"
+     :exit "PR merged and stable"
+     :note "Phase 2 - can defer for now"}}
+
+   :state-machine
+   {:initial :plan
+    :transitions
+    {"plan → implement" {:condition "Plan approved, skip design for MVP"}
+     "implement → verify" {:condition "Code passes inner loop"}
+     "verify → review" {:condition "Tests generated and passing"}
+     "review → implement" {:condition "Review requests changes"}
+     "review → release" {:condition "Review approves"}
+     "release → complete" {:condition "Files written to worktree"}}}
+
+   :rollback-strategy
+   "On phase failure: retry with feedback N times, then escalate to human"
+
+   :tests
+   ["End-to-end loop test: spec → code → tests → review → release"
+    "Phase transition tests"
+    "Rollback mechanism test"
+    "Gate enforcement at phase boundaries"]}
+
+  {:id :end-to-end-demonstration
+   :type :test
+   :path "components/workflow/test/ai/miniforge/workflow/e2e_test.clj"
+   :priority :p1
+   :description "End-to-end test demonstrating complete core loop"
+   :scenario
+   "Given a simple spec (e.g., 'Add a function to calculate Fibonacci numbers'),
+    miniforge should:
+    1. Plan the implementation
+    2. Generate the code
+    3. Generate tests
+    4. Review the code and tests
+    5. Write files to a worktree
+    6. Validate all artifacts are correct and linked"
+   :assertions
+   ["All phases complete successfully"
+    "Code artifact is generated and valid"
+    "Test artifact is generated and valid"
+    "Review artifact shows approval"
+    "Files are written to worktree"
+    "Provenance chain is intact: spec → plan → code → test → review"]
+   :success-criteria
+   "Test passes, demonstrating miniforge can build complete features autonomously"}]
+
+ :implementation-strategy
+ {:approach "Incremental self-implementation"
+  :phases
+  [{:phase 1
+    :focus "Foundation components (policy, heuristic)"
+    :deliverables [:policy-component :heuristic-component]
+    :validation "Components have tests and follow Polylith conventions"}
+
+   {:phase 2
+    :focus "Agent implementations (tester, reviewer)"
+    :deliverables [:tester-agent :reviewer-agent]
+    :validation "Agents can generate outputs, pass basic tests"}
+
+   {:phase 3
+    :focus "Loop integration"
+    :deliverables [:outer-loop-integration]
+    :validation "Phases transition correctly, gates enforce"}
+
+   {:phase 4
+    :focus "End-to-end validation"
+    :deliverables [:end-to-end-demonstration]
+    :validation "Full spec → PR flow works"}]
+
+  :dogfooding-notes
+  "miniforge will use its existing capabilities (planner, implementer) to
+   build the missing pieces. This is the ultimate test - can the system
+   extend itself?
+
+   Initial implementation may be done with human oversight, but the goal is
+   to progressively hand off more autonomy to miniforge itself."}
+
+ :constraints
+ {:architecture
+  ["Must follow stratified design (001-stratified-design.mdc)"
+   "Must use Polylith component structure (210-clojure.mdc)"
+   "Components must have interface.clj as public API"
+   "Max 3 layers per file"
+   "Pure functions in Layer 0, I/O in Layer 1"]
+
+  :testing
+  ["All components must have unit tests"
+   "Tests must pass in CI"
+   "Follow existing test conventions"]
+
+  :quality
+  ["Code must pass clj-kondo linting"
+   "Must include docstrings for public functions"
+   "Must maintain provenance in artifact model"]
+
+  :scope
+  ["Focus on core loop completion only"
+   "Defer PR Loop, Fleet Mode, Meta Loop for later"
+   "Design phase (architect agent) can be skipped for MVP"
+   "Observe phase can be deferred"
+   "Use simple, straightforward implementations - no over-engineering"]}
+
+ :success-criteria
+ [{:criterion "Policy component implemented and tested"
+   :validation "Can evaluate gates, track budgets, enforce policies"}
+
+  {:criterion "Heuristic component implemented and tested"
+   :validation "Can store/retrieve prompts and thresholds"}
+
+  {:criterion "Tester agent can generate tests"
+   :validation "Given code + spec, produces working test file"}
+
+  {:criterion "Reviewer agent can review code"
+   :validation "Given code + tests, provides feedback and approval decision"}
+
+  {:criterion "Outer loop integrates all phases"
+   :validation "Can execute plan → implement → verify → review → release"}
+
+  {:criterion "End-to-end test passes"
+   :validation "Simple spec results in code + tests + review + worktree output"}
+
+  {:criterion "Self-bootstrapping"
+   :validation "miniforge can use itself to implement future features"}]
+
+ :risks-and-mitigations
+ [{:risk "Agent prompts may need tuning"
+   :mitigation "Start with simple prompts, iterate based on output quality"
+   :fallback "Human can refine prompts in heuristic store"}
+
+  {:risk "Inner loop may not converge (infinite repair)"
+   :mitigation "Set max iterations (already exists in loop component)"
+   :fallback "Escalate to human after N failures"}
+
+  {:risk "End-to-end complexity too high"
+   :mitigation "Break into phases, validate each incrementally"
+   :fallback "Implement components one at a time with tests"}
+
+  {:risk "LLM token costs for complex tasks"
+   :mitigation "Policy component will track budgets"
+   :fallback "Set conservative limits initially"}]
+
+ :next-steps
+ ["Review this spec with human operator"
+  "Confirm approach and priorities"
+  "Begin Phase 1: Implement policy and heuristic components"
+  "Use miniforge's planner to break down Phase 1 into tasks"
+  "Use miniforge's implementer to generate initial component code"
+  "Human reviews and validates implementation"
+  "Iterate until all phases complete"
+  "Celebrate when miniforge completes its own core loop! 🎉"]}

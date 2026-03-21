@@ -1,0 +1,21 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge/schema {:local/root "../schema"}
+        ai.miniforge/logging {:local/root "../logging"}
+        ai.miniforge/response {:local/root "../response"}  ; Response chains
+        ai.miniforge/fsm {:local/root "../fsm"}            ; State machines
+        ai.miniforge/agent {:local/root "../agent"}
+        ai.miniforge/task {:local/root "../task"}
+        ai.miniforge/loop {:local/root "../loop"}
+        ai.miniforge/artifact {:local/root "../artifact"}
+        ai.miniforge/tool {:local/root "../tool"}
+        ai.miniforge/policy {:local/root "../policy"}      ; Gate evaluation
+        ai.miniforge/heuristic {:local/root "../heuristic"} ; Workflow storage
+        ai.miniforge/phase {:local/root "../phase"}        ; Phase interceptors
+        ai.miniforge/gate {:local/root "../gate"}          ; Gate interceptors
+        babashka/fs {:mvn/version "0.5.22"}
+        babashka/process {:mvn/version "0.5.22"}
+        metosin/malli {:mvn/version "0.16.1"}              ; Schema validation
+        http-kit/http-kit {:mvn/version "2.8.0"}           ; WebSocket client for dashboard connection
+        cheshire/cheshire {:mvn/version "5.13.0"}}         ; JSON for event serialization
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {}}}}

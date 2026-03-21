@@ -22,7 +22,8 @@
    Prepares release artifacts and creates PRs using the release-executor component.
    Agent: :releaser
    Default gates: [:release-ready]"
-  (:require [ai.miniforge.phase.registry :as registry]
+  (:require [ai.miniforge.logging.interface :as log]
+            [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.phase.phase-config :as phase-config]
             [ai.miniforge.release-executor.interface :as release-executor]
             [ai.miniforge.response.interface :as response]))
@@ -55,11 +56,13 @@
   (let [implement-result (get-in ctx [:execution/phase-results :implement :result :output])
         _ (when-not implement-result
             (let [impl-status (get-in ctx [:execution/phase-results :implement :result :status])
-                  impl-keys (keys (get-in ctx [:execution/phase-results :implement :result]))]
-              (binding [*out* *err*]
-                (println "RELEASE ERROR: No code artifact from implement phase."
-                         "implement-status:" impl-status
-                         "implement-result-keys:" (pr-str impl-keys)))
+                  impl-keys (keys (get-in ctx [:execution/phase-results :implement :result]))
+                  logger (or (get-in ctx [:execution/logger])
+                             (log/create-logger {:min-level :error :output :human}))]
+              (log/error logger :release :release/no-implement-artifact
+                         {:data {:implement-status impl-status
+                                 :implement-result-keys (vec impl-keys)
+                                 :phase-results-keys (vec (keys (:execution/phase-results ctx)))}})
               (throw (ex-info "Release phase has no code artifact from implement phase"
                               {:phase :release
                                :implement-status impl-status
@@ -109,21 +112,17 @@
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
 
-        ;; Build workflow state and context — with diagnostic on failure
-        workflow-state (try
-                         (build-workflow-state ctx)
-                         (catch Exception e
-                           (binding [*out* *err*]
-                             (println "RELEASE ERROR:" (ex-message e) (pr-str (ex-data e))))
-                           (throw e)))
+        logger (or (get-in ctx [:execution/logger])
+                   (log/create-logger {:min-level :debug :output :human}))
+
+        ;; Build workflow state and context
+        workflow-state (build-workflow-state ctx)
+        _ (log/debug logger :release :release/workflow-state-built
+                     {:data {:artifact-count (count (:workflow/artifacts workflow-state))
+                             :file-count (count (get-in (first (:workflow/artifacts workflow-state))
+                                                        [:artifact/content :code/files]))}})
         exec-context (build-executor-context ctx config)
         releaser-agent (get config :releaser-agent)
-
-        _ (binding [*out* *err*]
-            (println "RELEASE: workflow-state built OK. Artifacts:"
-                     (count (:workflow/artifacts workflow-state))
-                     "files:" (count (get-in (first (:workflow/artifacts workflow-state))
-                                             [:artifact/content :code/files]))))
         ;; Execute the release phase
         result (try
                  (let [exec-result (release-executor/execute-release-phase

@@ -1,0 +1,175 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+{:spec/title "Finish YC MVP Demo Readiness"
+ :spec/description
+ "Finish the Miniforge MVP for a YC-quality demo as quickly as possible using
+  governed autonomous execution. The target outcome is a deterministic 8-10 min
+  demo that proves Miniforge can: ingest external PR work, run live workflow
+  execution with visible events, apply operator control actions, enforce policy
+  gates, and produce evidence/provenance explaining why changes are safe.
+
+  Use specs/informative/yc-mvp-demo-script.md as the source narrative and
+  acceptance baseline. Prioritize reliability and determinism over broad
+  refactors."
+
+ :spec/intent
+ {:type :feature
+  :scope ["specs/informative/yc-mvp-demo-script.md"
+          "bases/cli/src/ai/miniforge/cli"
+          "components/event-stream"
+          "components/pr-train"
+          "components/pr-lifecycle"
+          "components/web-dashboard"
+          "components/evidence-bundle"
+          "components/workflow"
+          "tests/conformance"
+          "tests/integration"
+          "work"]}
+
+ :spec/constraints
+ ["Optimize for fastest path to a stable MVP demo"
+  "Favor additive, low-risk changes over large rewrites"
+  "Keep existing command/API compatibility where possible"
+  "Every track must end with executable tests or verification commands"
+  "No TODO placeholders in demo path code"
+  "Provide explicit fallback path for live demo failures"
+  "Keep docs and runbook in-repo and versioned"
+  "A single operator must be able to run demo start-to-finish"]
+
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :plan/tasks
+ [{:task/id :build-deterministic-demo-fixtures
+   :task/description
+   "Create deterministic fixtures and reset scripts for repeatable demo runs.
+
+    Deliverables:
+    - scripts/demo/seed_mvp_demo.clj (or bb task) to seed fleet repos, train
+      state, one blocked PR fixture, and workflow spec fixture
+    - scripts/demo/reset_mvp_demo.clj to restore clean state in <2 minutes
+    - tests/fixtures/demo/ with stable sample data
+    - docs/demo/README.md with exact setup commands
+
+    Ensure fixture script is idempotent and safe to rerun."
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :harden-n9-repo-sync-and-train-readiness
+   :task/description
+   "Harden external PR ingestion and train readiness surfaces for demo use.
+
+    Focus areas:
+    - Repo onboarding/discovery/sync error handling
+    - Last sync status and actionable failure messages in fleet UI
+    - Deterministic rendering of readiness and blocking reasons
+    - Multi-repo train flow with one blocked dependency
+
+    Add integration tests covering flaky provider response and partial sync."
+   :task/type :implement
+   :task/dependencies [:build-deterministic-demo-fixtures]}
+
+  {:task/id :stabilize-live-workflow-event-stream
+   :task/description
+   "Ensure live execution always shows clear progress with no perceived stalls.
+
+    Focus areas:
+    - Workflow launch emits required lifecycle events
+    - Web/TUI update paths handle phase, agent, tool, and gate events
+    - Add concise demo-mode output for operator readability
+    - Verify event ordering and visibility in one end-to-end run
+
+    Add or extend integration tests for event sequence coverage."
+   :task/type :implement
+   :task/dependencies [:build-deterministic-demo-fixtures]}
+
+  {:task/id :finish-n8-control-action-demo-surface
+   :task/description
+   "Polish control action flow for pause/resume and auditability in timeline.
+
+    Focus areas:
+    - Clear control state in UI while paused/resumed
+    - Control action events visible in stream/timeline
+    - Authorized action smoke test
+    - Unauthorized action rejection test
+
+    Ensure operator can execute pause/resume during live run without recovery
+    work."
+   :task/type :implement
+   :task/dependencies [:stabilize-live-workflow-event-stream]}
+
+  {:task/id :polish-policy-and-evidence-story
+   :task/description
+   "Make trust narrative crisp: gate decision -> readiness impact -> evidence.
+
+    Focus areas:
+    - Select one deterministic high-signal gate for demo
+    - Guarantee gate result visibly affects readiness/blocking status
+    - Standardize evidence view fields: intent, checks, violations,
+      remediations, promotion justification
+    - Add schema validation preflight in demo path
+
+    Deliver a single evidence artifact that can be opened quickly in demo."
+   :task/type :implement
+   :task/dependencies [:harden-n9-repo-sync-and-train-readiness
+                       :finish-n8-control-action-demo-surface]}
+
+  {:task/id :add-yc-demo-e2e-verification
+   :task/description
+   "Add one end-to-end verification path that exercises the full MVP narrative.
+
+    Must verify:
+    - External PR ingestion and train updates
+    - Live workflow events emitted and rendered
+    - Control action pause/resume works
+    - Policy/gate affects readiness
+    - Evidence bundle exists with required sections
+
+    This can be a high-value integration test plus a deterministic smoke script."
+   :task/type :test
+   :task/dependencies [:polish-policy-and-evidence-story]}
+
+  {:task/id :write-operator-runbook-and-rehearsal-checklist
+   :task/description
+   "Create docs/demo/yc-mvp-runbook.md and docs/demo/yc-mvp-checklist.md.
+
+    Include:
+    - Pre-flight checks
+    - Exact command sequence for 8-10 min flow
+    - Time boxes by segment
+    - Fallback route for provider, UI, or latency failure
+    - Post-demo reset command
+
+    Keep these operator docs short and executable."
+   :task/type :design
+   :task/dependencies [:add-yc-demo-e2e-verification]}
+
+  {:task/id :final-mvp-freeze
+   :task/description
+   "Do final MVP stabilization pass and freeze branch/tag for demo use.
+
+    Requirements:
+    - Run lint + test commands used in demo gate
+    - Run one full dry-run using runbook
+    - Capture final known-good commands and artifact locations
+    - Record final 'go' checklist in docs/demo
+
+    Outcome is a single stable baseline ready for live YC demo."
+   :task/type :release
+   :task/dependencies [:write-operator-runbook-and-rehearsal-checklist]}]}

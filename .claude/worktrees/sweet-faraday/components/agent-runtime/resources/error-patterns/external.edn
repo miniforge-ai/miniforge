@@ -1,0 +1,42 @@
+{:description "Patterns that indicate external service errors"
+ :type :external
+ :vendor "External Service"
+ :patterns
+ [{:regex "ECONNREFUSED"
+   :description "Connection refused"}
+  {:regex "Network error"
+   :description "Network connectivity issue"}
+  {:regex "API rate limit exceeded"
+   :description "API rate limit hit"
+   :rate-limit? true}
+  {:regex "API service unavailable"
+   :description "API temporarily unavailable"}
+  {:regex "Request timeout"
+   :description "Request timed out"}
+  {:regex "502 Bad Gateway"
+   :description "Bad gateway error"}
+  {:regex "503 Service Unavailable"
+   :description "Service unavailable"}
+  {:regex "Connection refused"
+   :description "Connection refused"}
+  {:regex "DNS lookup failed"
+   :description "DNS resolution failure"}
+  {:regex "permission denied|Permission denied|EACCES"
+   :description "File permission error"}
+  {:regex "Codex cannot access session files"
+   :description "Codex session directory permission issue"}
+  {:regex "(?i)you've hit your limit"
+   :description "Claude CLI rate limit reached"
+   :rate-limit? true}
+  {:regex "(?i)rate.?limit"
+   :description "Generic rate limit"
+   :rate-limit? true}
+  {:regex "(?i)quota.?exceeded"
+   :description "API quota exceeded"
+   :rate-limit? true}
+  {:regex "429|Too Many Requests"
+   :description "HTTP 429 Too Many Requests"
+   :rate-limit? true}
+  {:regex "resets \\d+[ap]m|resets in \\d+"
+   :description "Rate limit with reset time indicator"
+   :rate-limit? true}]}

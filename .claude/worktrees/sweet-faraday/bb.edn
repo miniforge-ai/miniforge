@@ -1,0 +1,465 @@
+{:min-bb-version "1.3.0"
+
+ :deps {io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}}
+
+ :paths ["tasks"]
+
+ :tasks
+ {:requires ([babashka.fs :as fs]
+             [babashka.process :as p]
+             [clojure.string :as str])
+
+  :init (do
+          (defn run! [& args]
+            (let [{:keys [exit]} (apply p/sh args)]
+              (when-not (zero? exit)
+                (System/exit exit))))
+
+          (defn run-stream! [& args]
+            (let [{:keys [exit]} (deref (apply p/process {:out :inherit :err :inherit} args))]
+              exit))
+
+          (defn installed? [cmd]
+            (zero? (:exit (p/sh "which" cmd))))
+
+          (defn brew-install [formula]
+            (let [cmd (last (str/split formula (re-pattern "/")))]
+              (if (installed? cmd)
+                (println "  ✓" formula "already installed")
+                (do
+                  (println "  ⬇️ Installing" formula "...")
+                  (p/shell "brew" "install" formula)))))
+
+          (defn brew-upgrade [formula]
+            (println "  ⬆️ Upgrading" formula "...")
+            (p/shell {:continue true} "brew" "upgrade" formula)))
+
+  ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Linting & Formatting
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  lint:clj
+  {:doc  "Lint staged Clojure files with clj-kondo"
+   :requires ([lint])
+   :task (lint/clj-staged)}
+
+  lint:clj:all
+  {:doc  "Lint all Clojure files in the project"
+   :requires ([lint])
+   :task (lint/clj-all)}
+
+  fmt:md
+  {:doc  "Format staged Markdown files (lint --fix)"
+   :requires ([fmt])
+   :task (fmt/md-staged)}
+
+  fmt:md:all
+  {:doc  "Format all Markdown files in the project"
+   :task (do
+           (println "📝 Formatting all Markdown files...")
+           (run! "markdownlint" "--fix" "."))}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Testing
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  test
+  {:doc  "Run changed brick tests in parallel (since main)"
+   :task (let [exit (run-stream! "bb" "scripts/test-changed-bricks.bb")]
+           (when-not (zero? exit)
+             (System/exit exit)))}
+
+  test:poly
+  {:doc  "Run unit (brick) tests via Polylith (full, serial)"
+   :task (do
+           (println "🧪 Running tests via poly test...")
+           (println "Command: clojure -M:poly test")
+           (let [exit (run-stream! "clojure" "-M:poly" "test")]
+             (when-not (zero? exit)
+               (println "❌ Tests failed with exit code:" exit)
+               (System/exit exit))))}
+
+  test:integration
+  {:doc  "Run project-level integration tests"
+   :requires ([test-runner])
+   :task (test-runner/integration)}
+
+  test:mcp
+  {:doc  "Run MCP artifact server tests"
+   :task (do
+           (println "🧪 Running MCP artifact server tests...")
+           (let [exit (run-stream! "bb" "scripts/test-mcp-artifact-server.bb")]
+             (when-not (zero? exit)
+               (println "❌ MCP tests failed with exit code:" exit)
+               (System/exit exit))))}
+
+  test:all
+  {:doc  "Run full suite (unit bricks + project integration tests + MCP)"
+   :task (do
+           (run 'test)
+           (run 'test:mcp)
+           (run 'test:integration))}
+
+  test:conformance
+  {:doc  "Run N1 conformance test suite"
+   :requires ([test-runner])
+   :task (test-runner/conformance)}
+
+  test:graalvm
+  {:doc  "Test GraalVM/Babashka compatibility"
+   :requires ([test-runner])
+   :task (test-runner/graalvm)}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Pre-commit
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  pre-commit
+  {:doc     "Run all pre-commit checks (lint, format, test, graalvm)"
+   :depends [lint:clj fmt:md test test:graalvm]
+   :task    (println "\n✅ ALL PRE-COMMIT CHECKS PASSED\n")}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Building
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  clean
+  {:doc  "Clean all build artifacts"
+   :task (do
+           (println "🧹 Cleaning build artifacts...")
+           (run! "clojure" "-T:build" "clean"))}
+
+  build:script
+  {:doc  "Build BB dev script for a project (uses absolute paths)"
+   :task (let [[project] *command-line-args*]
+           (if project
+             (do
+               (println "🔨 Building BB script for project:" project)
+               (run! "clojure" "-T:build" "bb-script" (str ":project " project)))
+             (println "Usage: bb build:script <project>")))}
+
+  build:cli
+  {:doc  "Build miniforge CLI as distributable uberjar"
+   :requires ([build])
+   :task (build/cli)}
+
+  build:jar
+  {:doc  "Build JVM uberjar for a project"
+   :task (let [[project] *command-line-args*]
+           (if project
+             (do
+               (println "🔨 Building uberjar for project:" project)
+               (run! "clojure" "-T:build" "uberjar" (str ":project " project)))
+             (println "Usage: bb build:jar <project>")))}
+
+  build:all
+  {:doc  "Build all changed projects"
+   :task (do
+           (println "🔨 Building all changed projects...")
+           (run! "clojure" "-T:build" "build-all"))}
+
+  build:tui
+  {:doc  "Build miniforge-tui as JVM uberjar + jlink runtime"
+   :requires ([build])
+   :task (build/tui)}
+
+  install:tui
+  {:doc  "Build and install miniforge-tui to ~/.local/bin"
+   :requires ([install])
+   :task (install/tui)}
+
+  compile
+  {:doc  "Compile all code (syntax check)"
+   :requires ([build])
+   :task (build/compile-all)}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Local Installation (for testing)
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  install:local
+  {:doc  "Build and install CLI to ~/.local/bin/mf (cleans old build first)"
+   :requires ([install])
+   :task (install/local-cli)}
+
+  uninstall:local
+  {:doc  "Remove local installation from ~/.local/bin/mf"
+   :task (let [target (str (System/getProperty "user.home") "/.local/bin/mf")]
+           (if (fs/exists? target)
+             (do
+               (println "🗑️  Removing" target)
+               (fs/delete target)
+               (println "✅ Uninstalled successfully"))
+             (println "✓ Not installed at" target)))}
+
+  test:local
+  {:doc     "Build CLI, install locally, and test"
+   :depends [build:cli install:local]
+   :task    (do
+              (println "\n🧪 Testing local installation...\n")
+              (p/shell "mf" "version")
+              (p/shell "mf" "help")
+              (println "\n✅ Local installation test complete\n"))}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Installers (via Homebrew)
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  install:java
+  {:doc  "Install Java (Temurin 21)"
+   :task (if (installed? "java")
+           (println "  ✓ java already installed")
+           (p/shell "brew" "install" "--cask" "temurin@21"))}
+
+  install:clojure
+  {:doc  "Install Clojure CLI"
+   :task (brew-install "clojure/tools/clojure")}
+
+  install:clj-kondo
+  {:doc  "Install clj-kondo linter"
+   :task (brew-install "borkdude/brew/clj-kondo")}
+
+  install:markdownlint
+  {:doc  "Install markdownlint-cli"
+   :task (if (installed? "markdownlint")
+           (println "  ✓ markdownlint-cli already installed")
+           (p/shell "brew" "install" "markdownlint-cli"))}
+
+  install:poly
+  {:doc  "Install Polylith CLI"
+   :task (brew-install "polyfy/polylith/poly")}
+
+  install:deps
+  {:doc     "Install all required dependencies"
+   :depends [install:java install:clojure install:clj-kondo install:markdownlint install:poly]
+   :task    (println "\n✅ All dependencies installed")}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Upgraders
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  upgrade:clojure
+  {:doc  "Upgrade Clojure CLI"
+   :task (brew-upgrade "clojure/tools/clojure")}
+
+  upgrade:clj-kondo
+  {:doc  "Upgrade clj-kondo linter"
+   :task (brew-upgrade "borkdude/brew/clj-kondo")}
+
+  upgrade:markdownlint
+  {:doc  "Upgrade markdownlint-cli"
+   :task (brew-upgrade "markdownlint-cli")}
+
+  upgrade:poly
+  {:doc  "Upgrade Polylith CLI"
+   :task (brew-upgrade "polyfy/polylith/poly")}
+
+  upgrade:babashka
+  {:doc  "Upgrade Babashka"
+   :task (brew-upgrade "babashka")}
+
+  upgrade:deps
+  {:doc     "Upgrade all dependencies"
+   :depends [upgrade:babashka upgrade:clojure upgrade:clj-kondo upgrade:markdownlint upgrade:poly]
+   :task    (println "\n✅ All dependencies upgraded")}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Bootstrap & Setup
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  setup:hooks
+  {:doc  "Configure git hooks"
+   :task (let [{:keys [exit]} (p/sh "git" "config" "core.hooksPath" ".githooks")]
+           (if (zero? exit)
+             (println "✅ Git hooks configured (.githooks/)")
+             (println "❌ Failed to configure git hooks")))}
+
+  setup:email
+  {:doc  "Verify git email configuration"
+   :task (let [{:keys [out]} (p/sh "git" "config" "user.email")
+               email (str/trim out)]
+           (if (str/ends-with? email "@miniforge.ai")
+             (println "✅ Git email:" email)
+             (do
+               (println "⚠️  Git email not set to @miniforge.ai")
+               (println "   Current:" (if (str/blank? email) "(not set)" email))
+               (println "   Fix with: git config user.email 'yourname@miniforge.ai'"))))}
+
+  bootstrap
+  {:doc     "Full project bootstrap: install deps + configure environment"
+   :depends [install:deps]
+   :task    (do
+              (println "\n🔧 Configuring development environment...\n")
+              (run 'setup:hooks)
+              (run 'setup:email)
+              (println "\n🎉 Bootstrap complete! Run 'bb' to see available tasks.\n"))}
+
+  setup
+  {:doc     "Configure development environment (alias for bootstrap)"
+   :depends [bootstrap]}
+
+  hooks:uninstall
+  {:doc  "Reset git hooks to default location"
+   :task (do
+           (p/sh "git" "config" "--unset" "core.hooksPath")
+           (println "✅ Git hooks reset to default (.git/hooks/)"))}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Artifact Utilities
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  extract:artifact
+  {:doc "Extract files from a code artifact EDN file and write them to disk"
+   :extra-paths ["components/evidence-bundle/src"]
+   :requires ([ai.miniforge.evidence-bundle.extraction :as extraction])
+   :task (if-let [artifact-file (first *command-line-args*)]
+           (let [result (extraction/extract-artifact-from-file artifact-file)]
+             (doseq [r (:results result)]
+               (if (:success r)
+                 (println (case (:action r)
+                           :create "✓ Created:"
+                           :modify "✓ Modified:"
+                           :delete "✓ Deleted:")
+                         (:path r))
+                 (println "✗ Failed:" (:path r) "-" (:error r))))
+             (println)
+             (when-let [summary (:summary result)]
+               (println "Summary:" summary))
+             (println "Files processed:" (:total result)
+                     "(" (:successful result) "successful," (:failed result) "failed)")
+             (when (> (:failed result) 0)
+               (System/exit 1)))
+           (do
+             (println "Usage: bb extract:artifact <artifact-file>")
+             (println)
+             (println "Extract files from an EDN artifact file containing :code/files")
+             (System/exit 1)))}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Dogfooding - Miniforge working on itself
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  dogfood:check
+  {:doc "Check dogfooding prerequisites"
+   :requires ([dogfood])
+   :task (dogfood/check)}
+
+  dogfood:dry-run
+  {:doc "Dry run - show what would be executed"
+   :task (p/shell "bb" "scripts/dogfood-dag.clj" "dogfood-tasks.edn")}
+
+  dogfood
+  {:doc "Run dogfooding session - miniforge works on itself"
+   :task (do
+           (println "🤖 Starting miniforge dogfooding...")
+           (println "📖 See DOGFOODING.md for full guide")
+           (println "\n⚠️  Note: Full execution requires task-1 completion")
+           (println "   (wiring LLM backend into generate.clj)")
+           (p/shell "bb" "dogfood:dry-run"))}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
+  ;; LSP-to-MCP Bridge
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  lsp-mcp-bridge
+  {:doc     "Run LSP-to-MCP bridge (for Claude Code integration)"
+   :extra-paths ["bases/lsp-mcp-bridge/src"
+                 "components/tool-registry/resources"
+                 "components/response/src"]
+   :requires ([ai.miniforge.lsp-mcp-bridge.main :as bridge])
+   :task    (bridge/-main)}
+
+  lsp:status
+  {:doc     "Show installed/available LSP servers"
+   :extra-paths ["bases/lsp-mcp-bridge/src"
+                 "components/tool-registry/resources"
+                 "components/response/src"]
+   :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
+   :task    (tasks/status)}
+
+  lsp:install
+  {:doc     "Install LSP servers (all or specific: bb lsp:install clojure typescript)"
+   :extra-paths ["bases/lsp-mcp-bridge/src"
+                 "components/tool-registry/resources"
+                 "components/response/src"]
+   :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
+   :task    (tasks/install *command-line-args*)}
+
+  lsp:setup
+  {:doc     "Generate MCP config for Claude Code/Desktop and Codex (--claude-code, --claude-desktop, --codex)"
+   :extra-paths ["bases/lsp-mcp-bridge/src"
+                 "components/tool-registry/resources"
+                 "components/response/src"]
+   :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
+   :task    (tasks/setup *command-line-args*)}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
+  ;; CLI Development
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  miniforge
+  {:doc     "Run miniforge CLI in development mode"
+   :extra-paths ["bases/cli/src"
+                 "bases/cli/resources"
+                 "bases/lsp-mcp-bridge/src"
+                 "components/algorithms/src"
+                 "components/schema/src"
+                 "components/schema/resources"
+                 "components/logging/src"
+                 "components/logging/resources"
+                 "components/llm/src"
+                 "components/llm/resources"
+                 "components/tool/src"
+                 "components/tool/resources"
+                 "components/artifact/src"
+                 "components/artifact/resources"
+                 "components/agent/src"
+                 "components/agent/resources"
+                 "components/task/src"
+                 "components/loop/src"
+                 "components/knowledge/src"
+                 "components/knowledge/resources"
+                 "components/policy/src"
+                 "components/heuristic/src"
+                 "components/response/src"
+                 "components/fsm/src"
+                 "components/phase/src"
+                 "components/gate/src"
+                 "components/workflow/src"
+                 "components/workflow/resources"
+                 "components/spec-parser/src"
+                 "components/self-healing/src"
+                 "components/event-stream/src"
+                 "components/event-stream/resources"
+                 "components/dag-executor/src"
+                 "components/dag-executor/resources"
+                 "components/task-executor/src"
+                 "components/pr-lifecycle/src"
+                 "components/release-executor/src"
+                 "components/evidence-bundle/src"
+                 "components/evidence-bundle/resources"
+                 "components/operator/src"
+                 "components/operator/resources"
+                 "components/orchestrator/src"
+                 "components/orchestrator/resources"
+                 "components/reporting/src"
+                 "components/reporting/resources"
+                 "components/observer/src"
+                 "components/tool-registry/src"
+                 "components/tool-registry/resources"
+                 "components/pr-train/src"
+                 "components/repo-dag/src"
+                 "components/policy-pack/src"
+                 "components/policy-pack/resources"
+                 "components/web-dashboard/src"
+                 "components/web-dashboard/resources"
+                 "components/mcp-artifact-server/src"
+                 "components/mcp-artifact-server/resources"]
+   :extra-deps {metosin/malli {:mvn/version "0.16.1"}
+                clj-statecharts/clj-statecharts {:mvn/version "0.1.5"}
+                aero/aero        {:mvn/version "1.1.6"}
+                io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}
+                http-kit/http-kit {:mvn/version "2.8.0"}
+                hiccup/hiccup     {:mvn/version "2.0.0-RC3"}}
+   :requires ([ai.miniforge.cli.main :as cli])
+   :task    (apply cli/-main *command-line-args*)}}}

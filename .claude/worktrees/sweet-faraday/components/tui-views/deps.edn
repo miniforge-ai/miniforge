@@ -1,0 +1,7 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge/pr-train {:local/root "../pr-train"}
+        ai.miniforge/policy-pack {:local/root "../policy-pack"}
+        ai.miniforge/orchestrator {:local/root "../orchestrator"}
+        ai.miniforge/response {:local/root "../response"}
+        ai.miniforge/llm {:local/root "../llm"}}
+ :aliases {:test {:extra-paths ["test"]}}}

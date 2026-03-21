@@ -1,0 +1,116 @@
+;; Reliability Nines — RN-05: Degradation Modes
+;; Tier 2 (Core Reliability) — depends on RN-01, RN-02, RN-03, RN-04
+;; Blocks: RN-07, RN-08
+
+{:spec/title "RN-05: Degradation Mode State Machine"
+ :version "1.0.0"
+ :type :feature
+ :priority :high
+
+ :spec/description
+ "Implement the :nominal → :degraded → :safe-mode state machine defined in
+  N1 §5.5.5. Transitions are triggered by SLO breaches and error budget
+  exhaustion (from RN-04). Each mode constrains system behavior — queue
+  depth, autonomy level, and alert severity.
+
+  Current state: dag_resilience.clj has rate-limit pause (crude degradation).
+  Target state: Formal 3-state machine with event-driven transitions."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/workflow/src/ai/miniforge/workflow"
+          "components/reliability-metrics (extend)"]}
+
+ :normative-refs
+ {:primary "N1 §5.5.5 — Degradation Modes"
+  :secondary ["N3 §3.17 — reliability/degradation-mode-changed event"
+              "N8 §3.4 — Safe-Mode Posture"]}
+
+ :gap-analysis-ref "gap-analysis-reliability-nines.md #4"
+ :dag/id :rn-05
+ :dag/depends-on [:rn-01 :rn-02 :rn-03 :rn-04]
+ :dag/blocks [:rn-07 :rn-08]
+
+ :current-state
+ {:resilience "dag_resilience.clj — rate-limit-error? / handle-rate-limited-batch"
+  :state-machine "No formal degradation states"
+  :completion "5%"}
+
+ :target-state
+ {:states [:nominal :degraded :safe-mode]
+  :transitions
+  [{:from :nominal :to :degraded
+    :trigger "SLO breach for :standard tier or error budget < 50%"}
+   {:from :degraded :to :safe-mode
+    :trigger "Error budget exhausted for :critical tier, or emergency-stop"}
+   {:from :degraded :to :nominal
+    :trigger "All SLOs met for 2 consecutive windows"}
+   {:from :safe-mode :to :degraded
+    :trigger "Manual exit + cooldown period elapsed"}]
+  :mode-behavior
+  {:nominal "Full autonomy, normal queue depth"
+   :degraded "Reduced queue depth, elevated alerting, optional autonomy demotion"
+   :safe-mode "Autonomy → A0, queue new workflows, pause in-flight"}}
+
+ :implementation
+ {:step-1-state-machine
+  {:title "Implement degradation state machine"
+   :files-to-create
+   ["components/reliability-metrics/src/ai/miniforge/reliability_metrics/degradation.clj"]
+   :changes
+   ["Define state atom: {:mode :nominal :since inst :trigger nil}"
+    "transition! function with valid-transition? guard"
+    "current-mode query function"
+    "Wire SLO breach → degraded transition"
+    "Wire error budget exhaustion → safe-mode transition"
+    "Wire recovery → nominal transition"]}
+
+  :step-2-event-emission
+  {:title "Emit degradation mode change events"
+   :changes
+   ["Emit reliability/degradation-mode-changed on every transition"
+    "Include previous mode, new mode, trigger reason"]}
+
+  :step-3-behavior
+  {:title "Enforce mode-dependent behavior"
+   :files-to-modify
+   ["components/workflow/src/ai/miniforge/workflow/dag_resilience.clj"
+    "components/dag-executor/src/ai/miniforge/dag_executor/state.clj"]
+   :changes
+   ["Check current degradation mode before workflow start"
+    "In :degraded: reduce max concurrent workflows"
+    "In :safe-mode: queue new workflows, don't start them"
+    "Integrate with existing rate-limit handling"]}}
+
+ :spec/constraints
+ ["State transitions MUST be atomic (compare-and-swap)"
+  "Mode changes MUST emit events before behavior changes"
+  "Recovery from :safe-mode MUST require manual action"
+  "Recovery from :degraded is automatic when SLOs met"
+  "State persists across restart (durable state)"
+  "Follow Polylith interface-only deps"]
+
+ :testing-strategy
+ {:unit-tests
+  ["Valid transitions: nominal→degraded, degraded→safe-mode, etc."
+   "Invalid transitions rejected (nominal→safe-mode directly)"
+   "Mode query returns current state"
+   "Concurrent transition safety"]
+  :integration-tests
+  ["SLO breach triggers nominal→degraded"
+   "Error budget exhaustion triggers degraded→safe-mode"
+   "Recovery after 2 clean windows"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "3-state machine with valid transitions"
+   :verification "State machine rejects invalid transitions"}
+  {:criterion "Event-driven transitions from SLO/budget signals"
+   :verification "SLO breach → degraded transition fires"}
+  {:criterion "Mode-dependent queue behavior"
+   :verification "safe-mode queues new workflows, doesn't start them"}
+  {:criterion "Manual recovery from safe-mode"
+   :verification "Auto-recovery from safe-mode prevented"}]
+
+ :estimated-effort "3-5 days"
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"}

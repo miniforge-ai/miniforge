@@ -1,0 +1,304 @@
+;; Intelligent Workflow Selection
+
+{:spec/title "Intelligent Workflow Selection from Spec Characteristics"
+ :version "1.0.0"
+ :type :enhancement
+ :priority :high
+
+ :spec/description
+ "Automatically select the appropriate workflow based on spec characteristics
+  instead of requiring users to know which workflow to specify. This eliminates
+  a pit of failure where users must understand workflow types to run their specs.
+
+  Current problem: Specs default to :simple workflow if :spec/workflow-type
+  is not specified, which is rarely appropriate for real work.
+
+  Solution: Analyze spec content and intelligently select the right workflow,
+  with user override option."
+
+ :spec/intent
+ {:type :user-experience-improvement
+  :scope ["Workflow selection automation"
+          "Spec analysis and classification"
+          "Sensible defaults for common task types"
+          "Override mechanism for expert users"]
+
+  :context
+   {:triggering-issue
+    ["User created emojui refactoring spec without :spec/workflow-type"
+     "Spec defaulted to :simple workflow (plan → implement → done)"
+     ":simple is only for testing, not real refactoring work"
+     "User had to know about workflow types to fix this"
+     "This is a pit of failure - easy to fall into, hard to climb out"]
+
+    :current-behavior
+    ["If :spec/workflow-type not specified → defaults to :simple"
+     ":simple is inappropriate for most real work"
+     "Users must know workflow types exist"
+     "Users must understand which workflow to choose"
+     "No guidance or hints provided"]
+
+    :desired-behavior
+    ["Analyze spec characteristics automatically"
+     "Select appropriate workflow based on task type, scope, constraints"
+     "Provide sensible defaults for common patterns"
+     "Allow user override via :spec/workflow-type"
+     "Show selected workflow to user for transparency"]}}
+
+ :workflow-characteristics
+ {:simple-test-v1
+  {:phases 3
+   :max-iterations 20
+   :max-time-minutes 5
+   :max-tokens 20000
+   :gates [:syntax]
+   :review-loops false
+   :best-for ["Testing" "Demos" "Tutorials" "Simple scripts"]
+   :task-types [:test :demo :tutorial]}
+
+  :lean-sdlc-v1
+  {:phases 6
+   :max-iterations 50
+   :max-time-minutes 60
+   :max-tokens 100000
+   :gates [:syntax :lint :test]
+   :review-loops :minimal
+   :best-for ["Small features" "Bug fixes" "Documentation" "Simple refactors"]
+   :task-types [:small-feature :bugfix :docs :simple-refactor]}
+
+  :canonical-sdlc-v1
+  {:phases 10
+   :max-iterations 100
+   :max-time-minutes 120
+   :max-tokens 200000
+   :gates [:syntax :lint :test :policy :review]
+   :review-loops :comprehensive
+   :best-for ["Large features" "Major refactors" "Architecture changes" "Critical code"]
+   :task-types [:feature :major-refactor :architecture-change :refactoring]}}
+
+ :selection-rules
+ [{:rule "Multi-phase implementation plan"
+   :condition "Spec has :implementation-plan with multiple phases/PRs"
+   :indicators [":pr-2, :pr-3, :pr-4..." "Multiple branches" "Dependencies between PRs"]
+   :select :canonical-sdlc-v1
+   :reason "Multi-phase work needs comprehensive review loops and coordination"}
+
+  {:rule "Refactoring with stratification"
+   :condition "Spec type is :refactoring with architectural changes"
+   :indicators [":type :refactoring" "Mentions stratified design" "Breaking up large files"]
+   :select :canonical-sdlc-v1
+   :reason "Refactoring needs careful review and testing at each step"}
+
+  {:rule "Simple task or tutorial"
+   :condition "Spec is for learning, testing, or single-file changes"
+   :indicators [":type :test" ":type :demo" "Single file change" "≤50 lines"]
+   :select :lean-sdlc-v1
+   :reason "Simple work doesn't need heavy process"}
+
+  {:rule "Bug fix"
+   :condition "Spec describes fixing a specific bug"
+   :indicators [":type :bugfix" "Title contains 'fix'" "Single issue focus"]
+   :select :lean-sdlc-v1
+   :reason "Bug fixes benefit from speed, still need tests"}
+
+  {:rule "Documentation"
+   :condition "Spec only modifies documentation files"
+   :indicators [":type :docs" "Only .md files" "README updates"]
+   :select :lean-sdlc-v1
+   :reason "Docs need review but not extensive testing"}
+
+  {:rule "Large feature or architecture change"
+   :condition "Spec describes new feature or system redesign"
+   :indicators [":type :feature" ":type :architecture-change" "Multiple components"]
+   :select :canonical-sdlc-v1
+   :reason "Large changes need comprehensive validation"}
+
+  {:rule "Unknown or ambiguous"
+   :condition "Cannot confidently classify the spec"
+   :select :lean-sdlc-v1
+   :reason "Lean is safer default than simple, can handle most work"}]
+
+ :implementation
+ {:new-namespace
+  {:path "bases/cli/src/ai/miniforge/cli/workflow_selector.clj"
+   :purpose "Intelligent workflow selection based on spec analysis"
+   :size "~300 lines"
+   :layers
+   ["Layer 0: Spec analysis (extract features from spec)"
+    "Layer 1: Rule matching (apply selection rules)"
+    "Layer 2: Workflow selection with reasoning"]
+
+   :functions
+   [{:name "analyze-spec"
+     :signature "(analyze-spec spec)"
+     :returns "{:type keyword :scope keyword :complexity keyword :indicators [...]}"
+     :description "Extract features from spec for classification"}
+
+    {:name "select-workflow"
+     :signature "(select-workflow spec)"
+     :returns "{:workflow-type keyword :workflow-version string :reason string :confidence float}"
+     :description "Select appropriate workflow with reasoning"}
+
+    {:name "explain-selection"
+     :signature "(explain-selection selection)"
+     :returns "string"
+     :description "Generate user-facing explanation of workflow selection"}
+
+    {:name "match-rule"
+     :signature "(match-rule rule spec-analysis)"
+     :returns "{:matches? boolean :score float :matched-indicators [...]}"
+     :description "Check if a selection rule matches the spec"}]}
+
+  :integration-points
+  [{:file "bases/cli/src/ai/miniforge/cli/workflow_runner.clj"
+    :function "run-workflow-from-spec!"
+    :change
+    "Before:
+       workflow-type (or (:spec/workflow-type spec) :simple)
+
+     After:
+       workflow-type (or (:spec/workflow-type spec)
+                         (:workflow-type (workflow-selector/select-workflow spec))
+                         :lean-sdlc-v1)  ; safer fallback than :simple"
+    :also-add
+    "When workflow is auto-selected, print to console:
+       ℹ️  Auto-selected workflow: canonical-sdlc-v1
+           Reason: Multi-phase refactoring with 6 PRs requires comprehensive review
+           Override with :spec/workflow-type in your spec"}]}
+
+ :spec-analysis-features
+ {:from-spec-metadata
+  ["`:type` - :feature, :bugfix, :refactoring, :docs, :test, :demo"
+   "`:title` - keywords like 'fix', 'refactor', 'add', 'implement'"
+   "`:scope` - single file vs multiple components vs system-wide"
+   "`:priority` - :critical vs :normal vs :low"]
+
+  :from-implementation-plan
+  ["Number of phases/PRs planned"
+   "Presence of :dependencies between phases"
+   "Estimated size (`:pr-size`, `:estimated-size`)"
+   "Number of files to create/modify"]
+
+  :from-constraints
+  ["Mentions of 'Rule 720' (PR sizing) → needs multiple PRs"
+   "Mentions of 'Rule 210' (stratification) → architectural work"
+   "Test requirements"
+   "Review requirements"]
+
+  :from-description
+  ["Keywords: 'large', 'complex', 'refactor', 'simple', 'quick'"
+   "Architectural terms: 'layering', 'separation', 'decompose'"
+   "Scale indicators: '743 lines', '5 views', 'multiple repos'"]
+
+  :computed-complexity
+  ["`:low` - Single file, <100 lines, no tests needed"
+   "`:medium` - Multiple files, <400 lines, tests needed"
+   "`:high` - Multiple PRs, >400 lines total, architectural changes"]}
+
+ :user-experience
+ {:auto-selection-message
+  "ℹ️  Workflow Auto-Selected: canonical-sdlc-v1 (v1.0.0)
+
+   Reason: Your spec describes a multi-phase refactoring with 6 dependent PRs
+           and architectural changes. This requires comprehensive review loops
+           and coordination between phases.
+
+   Characteristics detected:
+   • Type: refactoring
+   • Implementation phases: 6 (pr-2 through pr-7)
+   • Estimated total size: ~1800 lines
+   • Dependencies between PRs
+   • Mentions stratified design and layering
+
+   This workflow includes:
+   • 10 phases with review loops
+   • Max 120 minutes execution
+   • Comprehensive gates (syntax, lint, test, policy, review)
+   • Best for: major refactors and architecture changes
+
+   To override, add to your spec:
+   :spec/workflow-type :lean-sdlc-v1  ; or :simple-test-v1"
+
+  :explicit-selection-message
+  "ℹ️  Workflow: canonical-sdlc-v1 (v1.0.0) [user-specified]"
+
+  :fallback-message
+  "ℹ️  Workflow: lean-sdlc-v1 (v1.0.0) [default]
+
+   Note: Could not confidently classify your spec. Using lean-sdlc as a
+         safe default. For better automatic selection, consider adding:
+         • :type field (e.g., :refactoring, :feature, :bugfix)
+         • :implementation-plan with phase breakdown
+
+   Or explicitly specify:
+         :spec/workflow-type :canonical-sdlc-v1  ; for complex work
+         :spec/workflow-type :lean-sdlc-v1       ; for simple work"}
+
+ :testing-strategy
+ {:unit-tests
+  ["Test spec analysis with various spec types"
+   "Test rule matching for each selection rule"
+   "Test workflow selection with known specs"
+   "Test explanation generation"]
+
+  :integration-tests
+  ["Run real specs through selector"
+   "Verify selected workflow matches expectations"
+   "Verify override mechanism works"
+   "Verify explanation messages are helpful"]
+
+  :test-cases
+  [{:spec-type "Multi-phase refactoring (emojui-style)"
+    :expected-workflow :canonical-sdlc-v1
+    :key-indicators ["Multiple PRs" "Dependencies" "Refactoring type"]}
+
+   {:spec-type "Single bug fix"
+    :expected-workflow :lean-sdlc-v1
+    :key-indicators ["Type :bugfix" "Single file" "Small scope"]}
+
+   {:spec-type "New feature with architecture changes"
+    :expected-workflow :canonical-sdlc-v1
+    :key-indicators ["Type :feature" "Architecture mentions" "Large scope"]}
+
+   {:spec-type "Documentation update"
+    :expected-workflow :lean-sdlc-v1
+    :key-indicators ["Type :docs" "Only .md files"]}
+
+   {:spec-type "Test/demo spec"
+    :expected-workflow :lean-sdlc-v1
+    :key-indicators ["Type :test or :demo" "Small scope"]}]}
+
+ :spec/acceptance-criteria
+ [{:criterion "Specs without :spec/workflow-type get intelligent selection"
+   :verification "Run emojui spec without workflow-type, verify canonical-sdlc-v1 selected"}
+
+  {:criterion "User-specified workflow-type is respected"
+   :verification "Spec with explicit :spec/workflow-type uses that workflow"}
+
+  {:criterion "Selection reasoning is clear and helpful"
+   :verification "Auto-selection message explains why and how to override"}
+
+  {:criterion "Selection rules cover common patterns"
+   :verification "Test with bug fix, refactoring, feature, docs specs"}
+
+  {:criterion "Fallback is safer than current default"
+   :verification "Unknown specs get :lean-sdlc-v1, not :simple"}]
+
+ :success-metrics
+ ["Users don't need to know workflow types exist"
+  "Specs 'just work' with appropriate workflow"
+  "Clear transparency when auto-selecting"
+  "Easy override for expert users"
+  "Fewer failed/inappropriate workflow runs"]
+
+ :future-enhancements
+ ["Learn from user overrides (if user changes selection, remember pattern)"
+  "Workflow recommendation in error messages ('try canonical-sdlc-v1 for this')"
+  "Interactive workflow selection wizard for new users"
+  "Validation that selected workflow can handle spec requirements"]
+
+ :notes
+ ["This directly addresses user feedback about pit of failure"
+  "Selection should be conservative - prefer capable workflow over light one"
+  "Transparency is key - always show what was selected and why"
+  "Override must be obvious and easy"]}

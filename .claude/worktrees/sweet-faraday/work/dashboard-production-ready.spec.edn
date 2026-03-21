@@ -1,0 +1,216 @@
+{:spec/title "Build Production-Ready Web Dashboard with High Fidelity"
+ :version "3.0.0"
+ :priority :critical
+ :competitive-context
+ "Other players have entered the market recently. We need to reach production
+  quality before established players catch up. This is our competitive moat -
+  a polished, dense, informative dashboard that combines workflow orchestration,
+  PR fleet management, and AI-powered insights in one unified interface."
+
+ :spec/description
+ "Build a complete, production-ready web dashboard that showcases miniforge's
+  capabilities with professional polish and high information density. This
+  should feel like a mature product that enterprises would trust, not a prototype.
+
+  Key differentiators:
+  - Tableau-inspired dense visualization (show more data, less chrome)
+  - Real-time updates via WebSocket + htmx
+  - PR fleet management across repos (unique to miniforge)
+  - AI-powered risk analysis and insights
+  - Terminal aesthetic that appeals to developers
+  - No build step required (server-side rendering for Homebrew)"
+
+ :spec/intent
+ {:type :feature
+  :scope ["Complete all 8 views (5 N5 + 3 N9 PR views)"
+          "Polished UI with professional design system"
+          "Real-time updates and live metrics"
+          "PR fleet batch operations"
+          "AI chat interface for workflow assistance"
+          "Evidence browser and artifact viewer"
+          "Train dependency visualization"
+          "Responsive, performant, zero bugs"]
+
+  :success-criteria
+  ["Dashboard loads in <500ms"
+   "All views fully functional and interconnected"
+   "Real-time updates work smoothly"
+   "Professional visual design throughout"
+   "Zero linting errors or warnings"
+   "All features from old dashboard preserved + enhanced"
+   "Can demo to investors/customers confidently"
+   "Feels like a $10M product, not an MVP"]}
+
+ :implementation-phases
+ [{:phase 1
+   :title "Complete Core Dashboard Views"
+   :deliverables
+   ["Dashboard Overview with live metrics (view 1)"
+    "PR Fleet with tree view and risk analysis (view 2)"
+    "PR Detail with AI insights and conversation (view 3)"
+    "Real-time data updates via WebSocket"
+    "Professional color palette and typography"
+    "Smooth transitions and interactions"]}
+
+  {:phase 2
+   :title "Workflow Monitoring Excellence"
+   :deliverables
+   ["Workflow List with filters and search (N5 view 1)"
+    "Workflow Detail with phase timeline (N5 view 2)"
+    "Evidence Browser with structured display (N5 view 4)"
+    "Live status updates and progress indicators"
+    "Artifact viewer with syntax highlighting"]}
+
+  {:phase 3
+   :title "Advanced Features & Polish"
+   :deliverables
+   ["Train View with dependency graph (N9 view 3)"
+    "AI Chat interface for assistance"
+    "Batch operations for PRs"
+    "Advanced filtering and search"
+    "Keyboard shortcuts"
+    "Mobile-responsive layouts"
+    "Error states and empty states"
+    "Loading skeletons"
+    "Comprehensive help/tooltips"]}]
+
+ :design-requirements
+ {:visual-design
+  ["Tableau-inspired high information density"
+   "Dark theme with cyan/teal accents"
+   "Monospace fonts (SF Mono, JetBrains Mono)"
+   "Subtle borders and elevation (no heavy shadows)"
+   "Color-coded status badges (🔴🟡🟢)"
+   "Micro-interactions and hover states"
+   "Professional polish (no rough edges)"]
+
+  :layout
+  ["3-column layout: Nav (100px) | Content (flex) | Actions (150px)"
+   "Global header with metrics bar"
+   "Consistent spacing and alignment"
+   "Responsive grid for metric cards"
+   "Scrollable content areas"
+   "Fixed headers for tables"]
+
+  :data-visualization
+  ["SVG charts (pie, bar, sparkline)"
+   "Timeline views for events"
+   "Progress bars and status indicators"
+   "Tree views for hierarchical data"
+   "Kanban boards for DAG visualization"
+   "Real-time updating charts"]}
+
+ :technical-requirements
+ {:stack
+  ["Server: http-kit with WebSocket"
+   "HTML: Hiccup 2.0.0-RC3"
+   "Dynamic: htmx 2.0.0"
+   "JSON: Cheshire (Babashka-compatible)"
+   "Styling: Inline styles + CSS variables"
+   "Icons: Unicode symbols + SVG"]
+
+  :performance
+  ["Server-side rendering for fast initial load"
+   "htmx for partial updates (no full page reloads)"
+   "WebSocket for real-time events"
+   "Efficient data queries (no N+1)"
+   "Lazy loading for large lists"
+   "Debounced search/filter inputs"]
+
+  :code-quality
+  ["All files ≤400 lines (Rule 720)"
+   "Stratified design (≤3 layers, Rule 210)"
+   "Zero linting errors/warnings"
+   "Comprehensive error handling"
+   "Clear component boundaries"
+   "Well-documented functions"
+   "Test coverage for critical paths"]}
+
+ :integration-points
+ {:event-stream
+  ["Subscribe to workflow lifecycle events"
+   "Display real-time status updates"
+   "Show agent output streaming"
+   "Update metrics on event receipt"]
+
+  :pr-lifecycle
+  ["Fetch PRs from GitHub API"
+   "Show PR analysis and risk scores"
+   "Enable conversation resolution"
+   "Support batch approve/merge"]
+
+  :workflow-execution
+  ["List running workflows"
+   "Show phase progress"
+   "Display evidence and artifacts"
+   "Allow workflow control (pause/resume/cancel)"]
+
+  :llm-backends
+  ["Display backend health status"
+   "Show token usage and costs"
+   "Allow backend switching"
+   "Display error rates"]}
+
+ :reference-materials
+ {:specs
+  ["work/web-dashboard-designs.md - Complete UI mockups"
+   "work/web-dashboard-v2.edn - Detailed feature spec"
+   "specs/normative/N5-observability.md - TUI views reference"
+   "specs/normative/N9-pr-lifecycle.md - PR management spec"]
+
+  :existing-code
+  ["components/web-dashboard/src/ai/miniforge/web_dashboard/* - Current impl"
+   "bases/cli/src/ai/miniforge/cli/web/* - Old dashboard (reference)"
+   "components/event-stream/* - Real-time events"
+   "components/pr-lifecycle/* - PR operations"]
+
+  :design-inspiration
+  ["Tableau Public dashboards"
+   "GitHub Projects"
+   "Linear app"
+   "Vercel dashboard"
+   "Railway dashboard"]}
+
+ :competitive-advantage
+ "This dashboard is our differentiation. While others have workflow engines,
+  we have the ONLY agentic SDLC platform with:
+  - Fleet-wide PR management and risk analysis
+  - AI-powered workflow orchestration with real-time visibility
+  - Evidence-based decision support
+  - Zero-build deployment (Homebrew-ready)
+
+  Make it shine. Make it feel expensive. Make it something developers WANT
+  to show their team. This is what separates us from the competition."
+
+ :spec/constraints
+ ["Must work in Babashka (no JVM-only dependencies)"
+  "Server-side rendering only (no build step)"
+  "All files follow Rule 720 (≤400 lines)"
+  "Stratified design (Rule 210)"
+  "Zero breaking changes to existing features"
+  "Maintain backward compatibility"]
+
+ :testing-plan
+ ["Manual testing of all views and interactions"
+  "Test real-time updates with live workflows"
+  "Test with multiple repos and PRs"
+  "Test error states and edge cases"
+  "Performance testing with large datasets"
+  "Cross-browser testing (Chrome, Firefox, Safari)"]
+
+ :deliverables
+ ["Production-ready web dashboard running on http://localhost:8080"
+  "All 8 views fully implemented and polished"
+  "Real-time updates working smoothly"
+  "Professional design system applied throughout"
+  "Comprehensive error handling and empty states"
+  "Documentation for deployment and usage"
+  "Demo-ready for investors and customers"]
+
+ :success-metrics
+ ["Can confidently demo to enterprise customers"
+  "Team members use it daily for workflow monitoring"
+  "Zero critical bugs or visual glitches"
+  "Performance benchmarks met"
+  "Positive feedback from early users"
+  "Competitive feature parity + unique advantages"]}

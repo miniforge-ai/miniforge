@@ -1,0 +1,26 @@
+;; Java Language Server Protocol configuration (Eclipse JDT.LS)
+;; https://github.com/eclipse-jdtls/eclipse.jdt.ls
+
+{:tool/id          :lsp/java
+ :tool/type        :lsp
+ :tool/name        "Eclipse JDT Language Server"
+ :tool/description "Language server for Java providing diagnostics, formatting, refactoring, and code intelligence"
+ :tool/version     "1.0.0"
+
+ :tool/config
+ {:lsp/command        ["jdtls"]
+  :lsp/languages      #{"java"}
+  :lsp/file-patterns  ["**/*.java"]
+  :lsp/capabilities   #{:diagnostics :format :hover :completion
+                        :definition :references :rename
+                        :code-action :document-symbol :workspace-symbol}
+  :lsp/start-mode     :on-demand
+  :lsp/shutdown-after-ms 600000}  ; 10 minutes — JDT.LS is slow to start
+
+ :tool/capabilities  #{:code/diagnostics :code/format :code/hover
+                       :code/completion :code/navigation :code/refactor
+                       :code/symbols}
+
+ :tool/requires      #{:subprocess/spawn}
+ :tool/enabled       true
+ :tool/tags          #{:language-server :java :jvm}}

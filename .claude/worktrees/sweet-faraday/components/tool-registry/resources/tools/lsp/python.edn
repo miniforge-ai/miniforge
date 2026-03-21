@@ -1,0 +1,26 @@
+;; Python Language Server Protocol configuration (Pyright)
+;; https://github.com/microsoft/pyright
+
+{:tool/id          :lsp/python
+ :tool/type        :lsp
+ :tool/name        "Pyright"
+ :tool/description "Fast type checker and language server for Python providing diagnostics, completions, and code intelligence"
+ :tool/version     "1.0.0"
+
+ :tool/config
+ {:lsp/command        ["pyright-langserver" "--stdio"]
+  :lsp/languages      #{"python"}
+  :lsp/file-patterns  ["**/*.py" "**/*.pyi"]
+  :lsp/capabilities   #{:diagnostics :hover :completion
+                        :definition :references :rename
+                        :code-action :document-symbol}
+  :lsp/start-mode     :on-demand
+  :lsp/shutdown-after-ms 300000}
+
+ :tool/capabilities  #{:code/diagnostics :code/hover
+                       :code/completion :code/navigation :code/refactor
+                       :code/symbols}
+
+ :tool/requires      #{:subprocess/spawn}
+ :tool/enabled       true
+ :tool/tags          #{:language-server :python}}

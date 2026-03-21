@@ -1,0 +1,86 @@
+;; Reliability Nines — RN-14: Tool Response Validation
+;; Tier 4 (Execution Contracts) — depends on RN-11
+;; No downstream blocks
+
+{:spec/title "RN-14: Tool Response Validation and Injection Sanitization"
+ :version "1.0.0"
+ :type :feature
+ :priority :medium
+
+ :spec/description
+ "Add output schema validation and injection sanitization to the tool execution
+  boundary per N10 §7.4. Currently tools validate inputs only. Add :tool/returns
+  schema field, validate responses before injection into agent context, and
+  sanitize against prompt injection patterns.
+
+  Current state: FunctionTool validates inputs, no output validation.
+  Target state: Schema validation + sanitization at capsule boundary."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/tool/src/ai/miniforge/tool"
+          "components/tool-registry/src/ai/miniforge/tool_registry"]}
+
+ :normative-refs
+ {:primary "N10 §7.4 — Tool Response Validation"}
+
+ :gap-analysis-ref "gap-analysis-reliability-nines.md #16"
+ :dag/id :rn-14
+ :dag/depends-on [:rn-11]
+ :dag/blocks []
+
+ :implementation
+ {:step-1-schema
+  {:title "Add :tool/returns to tool registry"
+   :files-to-modify
+   ["components/tool-registry/src/ai/miniforge/tool_registry/schema.clj"]
+   :changes
+   ["Add :tool/returns Malli schema field to ToolConfig"
+    "Optional — tools without :tool/returns skip validation"]}
+
+  :step-2-validation
+  {:title "Implement response validation"
+   :files-to-create
+   ["components/tool/src/ai/miniforge/tool/response_validation.clj"]
+   :changes
+   ["validate-response function: check against :tool/returns schema"
+    "sanitize-response function: strip injection patterns"
+    "Malformed response → :failure.class/data-integrity"]}
+
+  :step-3-wire
+  {:title "Wire into tool execution pipeline"
+   :files-to-modify
+   ["components/tool/src/ai/miniforge/tool/core.clj"]
+   :changes
+   ["After tool execution: validate-response if :tool/returns present"
+    "After validation: sanitize-response before returning to agent"
+    "Validation failure: return structured error, don't inject into context"]}}
+
+ :spec/constraints
+ ["Validation is OPTIONAL per tool (:tool/returns not required)"
+  "Sanitization MUST catch prompt injection patterns"
+  "Validation failure MUST NOT crash — return structured error"
+  "Leverage existing knowledge_safety.clj patterns for injection detection"
+  "Follow Polylith interface-only deps"]
+
+ :testing-strategy
+ {:unit-tests
+  ["Schema validation passes for conforming response"
+   "Schema validation fails for non-conforming response"
+   "Injection patterns sanitized"
+   "Missing :tool/returns skips validation"
+   "Malformed response produces :failure.class/data-integrity"]
+  :integration-tests
+  ["Tool with :tool/returns → response validated before agent receives it"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "Response schema validation"
+   :verification "Non-conforming responses rejected with structured error"}
+  {:criterion "Injection sanitization"
+   :verification "Known injection patterns removed from responses"}
+  {:criterion "Backward compatible"
+   :verification "Tools without :tool/returns work unchanged"}]
+
+ :estimated-effort "3-5 days"
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"}
