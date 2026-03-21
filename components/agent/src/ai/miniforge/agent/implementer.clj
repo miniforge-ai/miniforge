@@ -393,12 +393,22 @@
   [response artifact context logger tokens cost-usd]
   (let [content (llm/get-content response)
         parsed (or artifact (parse-code-response content))]
-    (if artifact
-      (log/info logger :implementer :implementer/mcp-artifact-received
-                {:data {:file-count (count (:code/files artifact))}})
-      (log/warn logger :implementer :implementer/mcp-tool-not-called
-                {:data {:content-length (count (or content ""))
-                        :has-code-blocks? (boolean (re-find #"```" (or content "")))}}))
+    (let [tools (get response :tools-called [])]
+      (if artifact
+        (do
+          (log/info logger :implementer :implementer/mcp-artifact-received
+                    {:data {:file-count (count (:code/files artifact))}})
+          (binding [*out* *err*]
+            (println "MCP artifact received:" (count (:code/files artifact)) "files via" (pr-str tools))))
+        (do
+          (log/warn logger :implementer :implementer/mcp-tool-not-called
+                    {:data {:content-length (count (or content ""))
+                            :tools-called tools
+                            :has-code-blocks? (boolean (re-find #"```" (or content "")))}})
+          (binding [*out* *err*]
+            (println "WARNING: MCP tool not called. Tools used:" (pr-str tools)
+                     "| Content length:" (count (or content ""))
+                     "| Has code blocks:" (boolean (re-find #"```" (or content ""))))))))
     (if (= :already-implemented (:status parsed))
       (build-already-implemented-response parsed tokens cost-usd)
       (if-let [code (or parsed (code-from-blocks content))]

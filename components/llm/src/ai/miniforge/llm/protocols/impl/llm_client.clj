@@ -604,9 +604,8 @@
                  :content final-content
                  :timeout timeout-info})
       (log-streaming-result logger timeout-info (count final-content))
-      (when (and logger (seq tools))
-        (log/info logger :system :agent/tools-called
-                  {:data {:tools tools :count (count tools)}}))
+      (binding [*out* *err*]
+        (println "LLM session complete. Tools called:" (pr-str tools)))
       (if (zero? exit-code)
         (cond-> (streaming-success-response final-content exit-code @accumulated-usage @accumulated-cost)
           (seq tools) (assoc :tools-called tools))
