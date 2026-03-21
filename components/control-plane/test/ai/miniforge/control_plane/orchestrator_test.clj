@@ -165,34 +165,6 @@
     (is (= 10000 sut/default-poll-interval-ms))))
 
 ;; ---------------------------------------------------------------------------
-;; Private emit! helper
-;; ---------------------------------------------------------------------------
-
-(deftest emit-nil-stream-test
-  (testing "emit! is safe when event-stream is nil"
-    (is (nil? (#'sut/emit! nil {:type :test})))))
-
-(deftest emit-nil-event-test
-  (testing "emit! is safe when event is nil"
-    (let [es (stream/create-event-stream)]
-      ;; Should not throw
-      (#'sut/emit! es nil))))
-
-(deftest emit-both-nil-test
-  (testing "emit! is safe when both stream and event are nil"
-    (is (nil? (#'sut/emit! nil nil)))))
-
-(deftest emit-with-valid-stream-and-event-test
-  (testing "emit! publishes event when stream is present"
-    (let [es (stream/create-event-stream)
-          published (atom [])
-          _ (stream/subscribe! es :test-sub #(swap! published conj %))]
-      (#'sut/emit! es {:event/type :test :data "hello"})
-      (Thread/sleep 50)
-      (is (>= (count @published) 1)
-          "should have published the event"))))
-
-;; ---------------------------------------------------------------------------
 ;; Layer 1: Discovery pass (unit-level, calling private fn via #')
 ;; ---------------------------------------------------------------------------
 

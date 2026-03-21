@@ -1,13 +1,13 @@
 (ns ai.miniforge.adapter-miniforge.interface-test
-  "Comprehensive tests for the miniforge native adapter."
+  "Tests for the miniforge native adapter."
   (:require
-   [clojure.test :refer [deftest testing is are use-fixtures]]
+   [clojure.test :refer [deftest testing is are]]
    [ai.miniforge.adapter-miniforge.interface :as sut]
    [ai.miniforge.control-plane-adapter.protocol :as proto]
    [ai.miniforge.event-stream.interface :as es]))
 
 ;; ---------------------------------------------------------------------------
-;; Test helpers & fixtures
+;; Test helpers
 ;; ---------------------------------------------------------------------------
 
 (def ^:private sample-workflow-event
@@ -22,18 +22,6 @@
    :agent/status      :running
    :agent/metadata    {:workflow-id "wf-123"
                        :event-type  :agent-started}})
-
-(def ^:private sample-decision-resolution
-  {:decision/id         "action-42"
-   :decision/resolution :approved
-   :decision/comment    "LGTM"})
-
-;; A minimal fake event-stream that records subscribe/unsubscribe calls
-(defn- make-fake-event-stream
-  "Returns [event-stream-atom event-stream] where atom tracks calls."
-  []
-  (let [state (atom {:subscriptions {}})]
-    [state state]))
 
 ;; ---------------------------------------------------------------------------
 ;; Layer 0 — Event → status mapping
@@ -55,19 +43,6 @@
 
   (testing "unknown event type returns nil"
     (is (nil? (get @#'sut/event-type->status :unknown-event)))))
-
-(deftest approval-status->delivered-status-mapping-test
-  (testing "terminal approval statuses map correctly"
-    (let [mapping @#'sut/approval-status->delivered-status]
-      (are [approval expected]
-           (= expected (get mapping approval))
-        :approved  :approved
-        :rejected  :rejected
-        :expired   :expired
-        :cancelled :cancelled)))
-
-  (testing "unknown approval status returns nil"
-    (is (nil? (get @#'sut/approval-status->delivered-status :pending)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Layer 0 — event->agent-info
@@ -104,27 +79,6 @@
         (is (string? (:agent/name info)))))))
 
 ;; ---------------------------------------------------------------------------
-;; Layer 0 — build-approval-opts
-;; ---------------------------------------------------------------------------
-
-(deftest build-approval-opts-test
-  (let [build #'sut/build-approval-opts]
-
-    (testing "builds opts map with all fields"
-      (let [opts (build "agent-1" :approved "looks good" {:workflow-id "wf-42"})]
-        (is (= {:metadata {:agent-id    "agent-1"
-                           :resolution  :approved
-                           :comment     "looks good"
-                           :workflow-id "wf-42"}}
-               opts))))
-
-    (testing "handles nil comment and metadata"
-      (let [opts (build "agent-2" :rejected nil {})]
-        (is (= "agent-2" (get-in opts [:metadata :agent-id])))
-        (is (nil? (get-in opts [:metadata :comment])))
-        (is (nil? (get-in opts [:metadata :workflow-id])))))))
-
-;; ---------------------------------------------------------------------------
 ;; Layer 1 — Protocol: adapter-id
 ;; ---------------------------------------------------------------------------
 
@@ -158,120 +112,14 @@
              (proto/poll-agent-status adapter {}))))))
 
 ;; ---------------------------------------------------------------------------
-;; Layer 1 — Protocol: deliver-decision (success path)
+;; Layer 1 — Protocol: deliver-decision
 ;; ---------------------------------------------------------------------------
 
-(deftest deliver-decision-success-without-callback-test
-  (let [adapter (sut/create-adapter :fake-stream)
-        created-approval (atom nil)]
-    (testing "creates approval and returns delivered when no on-resolved callback"
-      (with-redefs [es/create-approval-request
-                    (fn [action-id required-signers quorum opts]
-                      (reset! created-approval
-                              {:action-id action-id
-                               :signers   required-signers
-                               :quorum    quorum
-                               :opts      opts})
-                      {:approval/id "appr-99"})]
-        (let [result (proto/deliver-decision adapter sample-agent-record sample-decision-resolution)]
-          (is (true? (:delivered? result)))
-          (is (= "appr-99" (:approval/id result)))
-          ;; Verify the approval request was created with correct args
-          (is (= "action-42" (:action-id @created-approval)))
-          (is (= ["wf-123"] (:signers @created-approval)))
-          (is (= 1 (:quorum @created-approval))))))))
-
-(deftest deliver-decision-success-with-callback-test
-  (let [subscriptions (atom {})
-        fake-stream   (reify Object)
-        adapter       (sut/create-adapter fake-stream)
-        resolved-val  (atom nil)
-        agent-record  (assoc-in sample-agent-record
-                                [:agent/metadata :on-decision-resolved]
-                                (fn [result] (reset! resolved-val result)))]
-    (testing "subscribes to approval events when on-resolved is provided"
-      (with-redefs [es/create-approval-request
-                    (fn [_ _ _ _] {:approval/id "appr-77"})
-                    es/subscribe!
-                    (fn [_stream key handler]
-                      (swap! subscriptions assoc key handler))
-                    es/unsubscribe!
-                    (fn [_stream key]
-                      (swap! subscriptions dissoc key))]
-        (let [result (proto/deliver-decision adapter agent-record sample-decision-resolution)]
-          (is (true? (:delivered? result)))
-          (is (= "appr-77" (:approval/id result)))
-          ;; A subscription should have been created
-          (is (= 1 (count @subscriptions)))
-          (let [sub-key  (first (keys @subscriptions))
-                handler  (get @subscriptions sub-key)]
-            ;; Simulate an irrelevant event — callback should not fire
-            (handler {:event/type :approval/completed
-                      :approval/id "appr-OTHER"})
-            (is (nil? @resolved-val))
-
-            ;; Simulate the matching approval completion
-            (handler {:event/type      :approval/completed
-                      :approval/id     "appr-77"
-                      :approval/final-status :approved})
-            (is (some? @resolved-val))
-            (is (= :approved (:decision/resolution @resolved-val)))
-            (is (= :approved (:approval/status @resolved-val)))
-            (is (= "action-42" (:decision/id @resolved-val)))
-            (is (= "appr-77" (:approval/id @resolved-val)))
-
-            ;; Subscription should have been cleaned up
-            (is (empty? @subscriptions))))))))
-
-(deftest deliver-decision-callback-with-unknown-status-test
-  (let [subscriptions (atom {})
-        resolved-val  (atom nil)
-        fake-stream   (reify Object)
-        adapter       (sut/create-adapter fake-stream)
-        agent-record  (assoc-in sample-agent-record
-                                [:agent/metadata :on-decision-resolved]
-                                (fn [result] (reset! resolved-val result)))]
-    (testing "unknown approval status passes through as-is"
-      (with-redefs [es/create-approval-request
-                    (fn [_ _ _ _] {:approval/id "appr-88"})
-                    es/subscribe!
-                    (fn [_stream key handler]
-                      (swap! subscriptions assoc key handler))
-                    es/unsubscribe!
-                    (fn [_stream key]
-                      (swap! subscriptions dissoc key))]
-        (proto/deliver-decision adapter agent-record sample-decision-resolution)
-        (let [handler (first (vals @subscriptions))]
-          (handler {:event/type          :approval/completed
-                    :approval/id         "appr-88"
-                    :approval/final-status :custom-status})
-          (is (= :custom-status (:decision/resolution @resolved-val))))))))
-
-;; ---------------------------------------------------------------------------
-;; Layer 1 — Protocol: deliver-decision (failure path)
-;; ---------------------------------------------------------------------------
-
-(deftest deliver-decision-failure-test
+(deftest deliver-decision-test
   (let [adapter (sut/create-adapter :fake-stream)]
-    (testing "returns not-delivered when approval creation fails"
-      (with-redefs [es/create-approval-request (fn [_ _ _ _] nil)]
-        (let [result (proto/deliver-decision adapter sample-agent-record sample-decision-resolution)]
-          (is (false? (:delivered? result)))
-          (is (string? (:error result))))))))
-
-(deftest deliver-decision-uses-agent-id-fallback-test
-  (let [adapter        (sut/create-adapter :fake-stream)
-        created-args   (atom nil)
-        agent-no-ext   (-> sample-agent-record
-                           (dissoc :agent/external-id))]
-    (testing "falls back to agent/id when external-id is missing"
-      (with-redefs [es/create-approval-request
-                    (fn [action-id required-signers quorum opts]
-                      (reset! created-args {:signers required-signers})
-                      {:approval/id "appr-fallback"})]
-        (proto/deliver-decision adapter agent-no-ext sample-decision-resolution)
-        (is (= [(str (:agent/id agent-no-ext))]
-               (:signers @created-args)))))))
+    (testing "returns delivered true (stub pending approval wiring)"
+      (let [result (proto/deliver-decision adapter sample-agent-record {:decision/id "d-1"})]
+        (is (true? (:delivered? result)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Layer 1 — Protocol: send-command

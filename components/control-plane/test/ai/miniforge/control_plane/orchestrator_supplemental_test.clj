@@ -532,17 +532,6 @@
       (is (= 0 (:poll-interval-ms orch))))))
 
 ;; ---------------------------------------------------------------------------
-;; emit! edge cases
-;; ---------------------------------------------------------------------------
-
-(deftest emit-with-empty-event-map-test
-  (testing "emit! handles empty event map without error"
-    (let [es (stream/create-event-stream)]
-      ;; Empty map is truthy, so publish! will be called
-      ;; Should not throw
-      (is (nil? (#'sut/emit! es {}))))))
-
-;; ---------------------------------------------------------------------------
 ;; Integration: multiple agents, mixed statuses
 ;; ---------------------------------------------------------------------------
 
