@@ -371,14 +371,23 @@
   :cp/by-status-header         "  By Status:"
   :cp/agents-header            "  Agents:"
   :cp/unnamed-agent            "Unnamed"
+  :cp/unknown-fallback         "?"
+  :cp/agent-line               "    {status} {name} [{vendor}]"
   :cp/no-decisions-msg         "No pending decisions. All agents are autonomous."
   :cp/pending-decisions-header "Pending Decisions ({count})"
-  :cp/decision-id-label        "           ID: "
-  :cp/decision-options-label   "           Options: "
+  :cp/decision-line            "  {priority} {summary}"
+  :cp/decision-context-line   "           {context}"
+  :cp/decision-id-label       "           ID: {id}"
+  :cp/decision-options-label  "           Options: {options}"
   :cp/resolve-usage            "Usage: miniforge control-plane resolve <decision-id> <resolution>"
   :cp/resolve-usage-comment    "       --comment \"optional comment\""
   :cp/resolve-success          "Decision resolved: {resolution}"
   :cp/resolve-failed           "Failed to resolve decision."
   :cp/terminate-usage          "Usage: miniforge control-plane terminate <agent-id>"
   :cp/terminate-success        "Agent terminated."
-  :cp/terminate-failed         "Failed to terminate agent."}}
+  :cp/terminate-failed         "Failed to terminate agent."
+
+  ;; control-plane CLI color scheme (keyword values, not strings)
+  :cp/status-colors  {:running :blue :blocked :yellow :failed :red
+                       :unreachable :red :completed :green}
+  :cp/priority-colors {:critical :red :high :yellow :medium :blue :low :white}}}

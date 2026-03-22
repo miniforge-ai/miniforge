@@ -33,22 +33,13 @@
    [ai.miniforge.cli.main.display :as display]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Data-driven mappings
+;; Color mappings (loaded from resource catalog)
 
-(def ^:private status->color
-  "Map of agent status keyword to CLI display color."
-  {:running     :blue
-   :blocked     :yellow
-   :failed      :red
-   :unreachable :red
-   :completed   :green})
+(defn- status->color [status]
+  (get (messages/t :cp/status-colors) status :white))
 
-(def ^:private priority->color
-  "Map of decision priority to CLI display color."
-  {:critical :red
-   :high     :yellow
-   :medium   :blue
-   :low      :white})
+(defn- priority->color [priority]
+  (get (messages/t :cp/priority-colors) priority :white))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Dashboard discovery
@@ -142,15 +133,16 @@
         (let [agents (:agents result)]
           (when (seq agents)
             (println (display/style (messages/t :cp/agents-header) :bold true))
-            (doseq [a agents]
-              (let [status-kw (keyword (get a :agent/status "unknown"))
-                    color (get status->color status-kw :white)]
-                (println (str "    "
-                              (display/style (format "%-12s" (get a :agent/status "?"))
-                                             :foreground color)
-                              " "
-                              (get a :agent/name (messages/t :cp/unnamed-agent))
-                              " [" (get a :agent/vendor "?") "]"))))
+            (let [fallback (messages/t :cp/unknown-fallback)]
+              (doseq [a agents]
+                (let [status-kw (keyword (get a :agent/status "unknown"))
+                      color (status->color status-kw)
+                      status-str (display/style (format "%-12s" (get a :agent/status fallback))
+                                                :foreground color)]
+                  (println (messages/t :cp/agent-line
+                                       {:status status-str
+                                        :name   (get a :agent/name (messages/t :cp/unnamed-agent))
+                                        :vendor (get a :agent/vendor fallback)}))))))
             (println)))))))
 
 (defn decisions-cmd
@@ -167,18 +159,23 @@
               (println (display/style (messages/t :cp/pending-decisions-header {:count (count decisions)})
                                       :foreground :cyan :bold true))
               (println)
-              (doseq [d decisions]
-                (let [priority-kw (keyword (get d :decision/priority "medium"))
-                      color (get priority->color priority-kw :white)]
-                  (println (str "  " (display/style (format "[%-8s]" (str/upper-case (name priority-kw)))
-                                                     :foreground color)
-                                " " (get d :decision/summary "?")))
-                  (when-let [ctx (get d :decision/context)]
-                    (println (str "           " (display/style ctx :foreground :white))))
-                  (when-let [opts (get d :decision/options)]
-                    (println (str (messages/t :cp/decision-options-label) (str/join ", " opts))))
-                  (println (str (messages/t :cp/decision-id-label) (get d :decision/id)))
-                  (println)))))
+              (let [fallback (messages/t :cp/unknown-fallback)]
+                (doseq [d decisions]
+                  (let [priority-kw (keyword (get d :decision/priority "medium"))
+                        color (priority->color priority-kw)
+                        badge (display/style (format "[%-8s]" (str/upper-case (name priority-kw)))
+                                             :foreground color)]
+                    (println (messages/t :cp/decision-line
+                                         {:priority badge
+                                          :summary  (get d :decision/summary fallback)}))
+                    (when-let [ctx (get d :decision/context)]
+                      (println (messages/t :cp/decision-context-line
+                                           {:context (display/style ctx :foreground :white)})))
+                    (when-let [opts (get d :decision/options)]
+                      (println (messages/t :cp/decision-options-label
+                                           {:options (str/join ", " opts)})))
+                    (println (messages/t :cp/decision-id-label {:id (get d :decision/id)}))
+                    (println))))))
           (println))))))
 
 (defn resolve-cmd
