@@ -29,7 +29,8 @@
    Layer 2: Session extraction"
   (:require
    [clojure.java.io :as io]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [ai.miniforge.control-plane.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Filesystem scanning
@@ -119,7 +120,7 @@
     (when (or recently-active? alive?)
       {:agent/vendor :claude-code
        :agent/external-id dir-name
-       :agent/name (str "Claude Code: " dir-name)
+       :agent/name (str (messages/t :adapter/claude-code-prefix) dir-name)
        :agent/capabilities #{:code-generation :code-review :test-writing}
        :agent/metadata (cond-> {:project-dir (.getAbsolutePath project-dir)}
                          lock-pid (assoc :pid lock-pid)

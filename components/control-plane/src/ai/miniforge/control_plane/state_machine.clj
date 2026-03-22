@@ -29,7 +29,8 @@
    Layer 2: Event mapping"
   (:require
    [clojure.edn :as edn]
-   [clojure.java.io :as io]))
+   [clojure.java.io :as io]
+   [ai.miniforge.control-plane.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Profile loading
@@ -51,7 +52,7 @@
   ([path]
    (if-let [resource (io/resource path)]
      (edn/read-string (slurp resource))
-     (throw (ex-info "Control-plane state profile not found"
+     (throw (ex-info (messages/t :state-machine/profile-not-found)
                      {:path path})))))
 
 (def ^:private profile-cache
@@ -105,7 +106,7 @@
    Throws: ExceptionInfo if transition is invalid."
   [profile from-status to-status]
   (when-not (valid-transition? profile from-status to-status)
-    (throw (ex-info "Invalid agent state transition"
+    (throw (ex-info (messages/t :state-machine/invalid-transition)
                     {:from from-status
                      :to to-status
                      :valid-targets (get (:valid-transitions profile)

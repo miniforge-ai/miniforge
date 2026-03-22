@@ -1,6 +1,6 @@
 (ns ai.miniforge.web-dashboard.views.control-plane-test
   "Tests for the Control Plane view — agent cards, decision queue,
-   detail panel, filter toolbar, summary bar, and full page composition."
+   summary bar, and full page composition."
   (:require
    [clojure.test :refer [deftest testing is are]]
    [ai.miniforge.web-dashboard.views.control-plane :as sut]
@@ -97,10 +97,8 @@
       (is (contains-substr? out "Alpha")))
     (testing "Contains data-agent-id attribute"
       (is (contains-substr? out (str id))))
-    (testing "Contains data-status attribute"
-      (is (contains-substr? out "data-status=\"running\"")))
-    (testing "Contains a Details button"
-      (is (contains-substr? out "Details")))))
+    (testing "Contains status class"
+      (is (contains-substr? out "status-running")))))
 
 (deftest agent-card-unnamed-agent
   (testing "nil :agent/name falls back to 'Unnamed Agent'"
@@ -263,10 +261,6 @@
     (testing "Decision queue present with htmx polling"
       (is (contains-substr? out "cp-decision-queue"))
       (is (contains-substr? out "every 3s")))
-    (testing "Detail panel placeholder present"
-      (is (contains-substr? out "cp-detail-panel")))
-    (testing "Filter script included"
-      (is (contains-substr? out "cpFilterAgents")))
     (testing "Agent rendered in grid"
       (is (contains-substr? out "Agent-X")))
     (testing "Decision rendered in queue"

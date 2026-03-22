@@ -25,7 +25,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]))
 
-(def ^:private resource-path "config/orchestrator/messages/en.edn")
+(def ^:private resource-path "config/orchestrator/messages/en-US.edn")
 (def ^:private section-key :orchestrator/messages)
 
 (defn- load-catalog []

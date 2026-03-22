@@ -27,36 +27,57 @@
    Layer 2: Full page view"
   (:require
    [hiccup2.core :refer [html]]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [ai.miniforge.web-dashboard.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Status helpers
+;; Data-driven mappings
 
-(defn- status-class
-  "CSS class for agent status badge."
-  [status]
-  (case status
-    :running      "status-running"
-    :idle         "status-idle"
-    :blocked      "status-blocked"
-    :paused       "status-paused"
-    :completed    "status-completed"
-    :failed       "status-failed"
-    :unreachable  "status-unreachable"
-    :terminated   "status-terminated"
-    :initializing "status-initializing"
-    "status-unknown"))
+(def ^:private status->css
+  "Map of agent status keyword to CSS class."
+  {:running      "status-running"
+   :idle         "status-idle"
+   :blocked      "status-blocked"
+   :paused       "status-paused"
+   :completed    "status-completed"
+   :failed       "status-failed"
+   :unreachable  "status-unreachable"
+   :terminated   "status-terminated"
+   :initializing "status-initializing"})
 
-(defn- vendor-icon
-  "Display icon for vendor."
-  [vendor]
-  (case vendor
-    :claude-code "C"
-    :miniforge   "M"
-    :openai      "O"
-    :cursor      "Cu"
-    :ollama      "L"
-    "?"))
+(def ^:private vendor->icon
+  "Map of vendor keyword to display icon."
+  {:claude-code "C"
+   :miniforge   "M"
+   :openai      "O"
+   :cursor      "Cu"
+   :ollama      "L"})
+
+(def ^:private priority->css
+  "Map of decision priority to CSS class."
+  {:critical "priority-critical"
+   :high     "priority-high"
+   :medium   "priority-medium"
+   :low      "priority-low"})
+
+(def ^:private status->sort-order
+  "Sort priority for agent statuses (lower = first)."
+  {:blocked     0
+   :running     1
+   :idle        2
+   :unreachable 3})
+
+;------------------------------------------------------------------------------ Layer 0
+;; Helpers
+
+(defn- status-class [status]
+  (get status->css status "status-unknown"))
+
+(defn- vendor-icon [vendor]
+  (get vendor->icon vendor "?"))
+
+(defn- priority-class [priority]
+  (get priority->css priority "priority-medium"))
 
 (defn- relative-time
   "Simple relative time string from a Date."
@@ -66,17 +87,9 @@
           secs (quot ms 1000)
           mins (quot secs 60)]
       (cond
-        (< secs 60) (str secs "s ago")
-        (< mins 60) (str mins "m ago")
-        :else (str (quot mins 60) "h ago")))))
-
-(defn- priority-class [priority]
-  (case priority
-    :critical "priority-critical"
-    :high     "priority-high"
-    :medium   "priority-medium"
-    :low      "priority-low"
-    "priority-medium"))
+        (< secs 60) (messages/t :cp/time-seconds-ago {:n secs})
+        (< mins 60) (messages/t :cp/time-minutes-ago {:n mins})
+        :else       (messages/t :cp/time-hours-ago   {:n (quot mins 60)})))))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Agent card fragments
@@ -91,35 +104,36 @@
                          :data-agent-id agent-id}
      [:div.cp-card-header
       [:span.cp-vendor-badge {:title (name vendor)} (vendor-icon vendor)]
-      [:span.cp-agent-name (or (:agent/name agent-record) "Unnamed Agent")]
+      [:span.cp-agent-name (or (:agent/name agent-record) (messages/t :cp/unnamed-agent))]
       [:span.cp-status-badge {:class (status-class status)}
        (name status)]]
      [:div.cp-card-body
       (when-let [task (:agent/task agent-record)]
-        [:div.cp-task [:span.label "Task:"] [:span.value task]])
+        [:div.cp-task [:span.label (messages/t :cp/task-label)] [:span.value task]])
       [:div.cp-heartbeat
-       [:span.label "Last seen:"]
-       [:span.value (or (relative-time (:agent/last-heartbeat agent-record)) "never")]]]
+       [:span.label (messages/t :cp/last-seen-label)]
+       [:span.value (or (relative-time (:agent/last-heartbeat agent-record))
+                        (messages/t :cp/last-seen-never))]]]
      [:div.cp-card-actions
       (when (#{:running :idle} status)
         [:button.btn.btn-xs.btn-ghost
          {:hx-post (str "/api/control-plane/agents/" agent-id "/command")
           :hx-vals "{\"command\":\"pause\"}"
           :hx-swap "none"}
-         "Pause"])
+         (messages/t :cp/btn-pause)])
       (when (= :paused status)
         [:button.btn.btn-xs.btn-ghost
          {:hx-post (str "/api/control-plane/agents/" agent-id "/command")
           :hx-vals "{\"command\":\"resume\"}"
           :hx-swap "none"}
-         "Resume"])
+         (messages/t :cp/btn-resume)])
       (when (not (#{:completed :failed :terminated} status))
         [:button.btn.btn-xs.btn-danger
          {:hx-post (str "/api/control-plane/agents/" agent-id "/command")
           :hx-vals "{\"command\":\"terminate\"}"
           :hx-swap "none"
-          :hx-confirm "Terminate this agent?"}
-         "Kill"])]]))
+          :hx-confirm (messages/t :cp/confirm-terminate)}
+         (messages/t :cp/btn-kill)])]]))
 
 (defn agents-grid-fragment
   "Agent cards grid fragment for htmx updates."
@@ -127,19 +141,14 @@
   (html
    (if (empty? agents)
      [:div.cp-empty-state
-      [:div.empty-icon "🤖"]
-      [:h3 "No Agents Registered"]
-      [:p "Agents will appear here when they register via the API or are discovered by adapters."]
+      [:div.empty-icon "\uD83E\uDD16"]
+      [:h3 (messages/t :cp/no-agents-heading)]
+      [:p (messages/t :cp/no-agents-body)]
       [:div.cp-register-hint
-       [:code "POST /api/control-plane/agents/register"]]]
+       [:code (messages/t :cp/no-agents-hint)]]]
      [:div.cp-agents-grid
       (for [agent (sort-by (fn [a]
-                             [(case (:agent/status a)
-                                :blocked 0
-                                :running 1
-                                :idle 2
-                                :unreachable 3
-                                9)
+                             [(get status->sort-order (:agent/status a) 9)
                               (str (:agent/name a))])
                            agents)]
         (agent-card agent))])))
@@ -178,8 +187,8 @@
           :hx-target "closest .cp-decision-item"
           :hx-swap "outerHTML"}
          [:input.cp-input {:type "text" :name "resolution"
-                           :placeholder "Type your response..."}]
-         [:button.btn.btn-sm.btn-primary {:type "submit"} "Send"]])]]))
+                           :placeholder (messages/t :cp/input-placeholder)}]
+         [:button.btn.btn-sm.btn-primary {:type "submit"} (messages/t :cp/btn-send)]])]]))
 
 (defn decision-queue-fragment
   "Decision queue fragment for htmx updates."
@@ -187,8 +196,8 @@
   (html
    (if (empty? decisions)
      [:div.cp-empty-decisions
-      [:span.check-icon "✓"]
-      [:span "No decisions pending — all agents are autonomous"]]
+      [:span.check-icon "\u2713"]
+      [:span (messages/t :cp/no-decisions)]]
      [:div.cp-decision-queue
       (for [d decisions]
         (decision-item d))])))
@@ -203,17 +212,17 @@
     [:div.cp-summary-bar
      [:div.cp-stat
       [:span.cp-stat-value (str total-agents)]
-      [:span.cp-stat-label "Agents"]]
+      [:span.cp-stat-label (messages/t :cp/stat-agents)]]
      [:div.cp-stat
       [:span.cp-stat-value (str (get by-status :running 0))]
-      [:span.cp-stat-label "Running"]]
+      [:span.cp-stat-label (messages/t :cp/stat-running)]]
      [:div.cp-stat.stat-attention
       [:span.cp-stat-value (str (+ (get by-status :blocked 0)
                                     (get by-status :unreachable 0)))]
-      [:span.cp-stat-label "Need Attention"]]
+      [:span.cp-stat-label (messages/t :cp/stat-attention)]]
      [:div.cp-stat.stat-decisions
       [:span.cp-stat-value (str pending-decisions)]
-      [:span.cp-stat-label "Decisions"]]]))
+      [:span.cp-stat-label (messages/t :cp/stat-decisions)]]]))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Full page content
@@ -223,13 +232,13 @@
   [agents decisions stats]
   [:div.cp-page
    [:div.cp-header
-    [:h2 "Agent Control Plane"]
-    [:p.cp-subtitle "Unified management for all your AI agents"]]
+    [:h2 (messages/t :cp/page-title)]
+    [:p.cp-subtitle (messages/t :cp/page-subtitle)]]
    (summary-bar stats)
    [:div.cp-two-column
     [:div.cp-column-main
      [:div.cp-section
-      [:h3 "Agents"
+      [:h3 (messages/t :cp/section-agents)
        [:span.cp-count (str " (" (count agents) ")")]]
       [:div#cp-agents-grid
        {:hx-get "/api/control-plane/agents-grid"
@@ -238,7 +247,7 @@
        (agents-grid-fragment agents)]]]
     [:div.cp-column-sidebar
      [:div.cp-section
-      [:h3 "Decision Queue"
+      [:h3 (messages/t :cp/section-decisions)
        (when (seq decisions)
          [:span.cp-count.cp-count-attention
           (str " (" (count decisions) ")")])]

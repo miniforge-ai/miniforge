@@ -69,6 +69,13 @@
   (when timestamp
     (- (System/currentTimeMillis) (.getTime timestamp))))
 
+(def ^:private vendor-heartbeat-ms
+  "Recommended heartbeat intervals per vendor (ms)."
+  {:claude-code 15000    ;; local process, fast check
+   :miniforge   10000    ;; native, fastest
+   :openai      60000    ;; API rate limits
+   :cursor      30000})
+
 (defn heartbeat-interval-for-vendor
   "Return the recommended heartbeat interval for a vendor.
 
@@ -77,12 +84,7 @@
 
    Returns: Interval in milliseconds."
   [vendor]
-  (case vendor
-    :claude-code 15000    ;; local process, fast check
-    :miniforge   10000    ;; native, fastest
-    :openai      60000    ;; API rate limits
-    :cursor      30000
-    30000))               ;; default
+  (get vendor-heartbeat-ms vendor 30000))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

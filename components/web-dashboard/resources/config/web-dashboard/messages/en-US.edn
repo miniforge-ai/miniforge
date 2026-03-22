@@ -1,0 +1,66 @@
+{:web-dashboard/messages
+ {;; readiness-state-label
+  :readiness/merge-ready       "Ready"
+  :readiness/ci-failing        "CI Failing"
+  :readiness/changes-requested "Changes Requested"
+  :readiness/merge-conflicts   "Merge Conflicts"
+  :readiness/policy-failing    "Policy Failing"
+  :readiness/dep-blocked       "Dep Blocked"
+  :readiness/needs-review      "Needs Review"
+  :readiness/unknown           "Unknown"
+
+  ;; error-category-label
+  :error-category/auth         "Auth"
+  :error-category/access       "Access"
+  :error-category/not-found    "Not Found"
+  :error-category/rate-limit   "Rate Limit"
+  :error-category/parse        "Parse"
+  :error-category/network      "Network"
+  :error-category/fallback     "Error"
+
+  ;; blocking-reason-line fallback
+  :blocker/fallback-message    "Blocked"
+
+  ;; control-plane — agent card labels
+  :cp/unnamed-agent            "Unnamed Agent"
+  :cp/task-label               "Task:"
+  :cp/last-seen-label          "Last seen:"
+  :cp/last-seen-never          "never"
+  :cp/btn-pause                "Pause"
+  :cp/btn-resume               "Resume"
+  :cp/btn-kill                 "Kill"
+  :cp/confirm-terminate        "Terminate this agent?"
+
+  ;; control-plane — relative time
+  :cp/time-seconds-ago         "{n}s ago"
+  :cp/time-minutes-ago         "{n}m ago"
+  :cp/time-hours-ago           "{n}h ago"
+
+  ;; control-plane — empty states
+  :cp/no-agents-heading        "No Agents Registered"
+  :cp/no-agents-body           "Agents will appear here when they register via the API or are discovered by adapters."
+  :cp/no-agents-hint           "POST /api/control-plane/agents/register"
+  :cp/no-decisions             "No decisions pending — all agents are autonomous"
+
+  ;; control-plane — decision queue
+  :cp/input-placeholder        "Type your response..."
+  :cp/btn-send                 "Send"
+
+  ;; control-plane — summary bar
+  :cp/stat-agents              "Agents"
+  :cp/stat-running             "Running"
+  :cp/stat-attention           "Need Attention"
+  :cp/stat-decisions           "Decisions"
+
+  ;; control-plane — page
+  :cp/page-title               "Agent Control Plane"
+  :cp/page-subtitle            "Unified management for all your AI agents"
+  :cp/section-agents           "Agents"
+  :cp/section-decisions        "Decision Queue"
+
+  ;; control-plane — server errors
+  :cp/error-invalid-json       "Invalid JSON body"
+  :cp/error-invalid-agent-id   "Invalid agent ID"
+  :cp/error-agent-not-found    "Agent not found"
+  :cp/error-invalid-decision-id "Invalid decision ID"
+  :cp/error-decision-not-found "Decision not found or already resolved"}}

@@ -358,4 +358,27 @@
   :workflow-runner/available-chains "\nAvailable Chains:"
   :workflow-runner/chain-steps-label "{steps} step(s)"
   :workflow-runner/list-chains-failed "Failed to list chains: {error}"
-  :workflow-runner/chain-step-completed "chain {chain-id} completed"}}
+  :workflow-runner/chain-step-completed "chain {chain-id} completed"
+
+  ;; control-plane CLI commands
+  :cp/dashboard-not-running    "Dashboard not running."
+  :cp/dashboard-start-hint     "Start it with: miniforge web"
+  :cp/dashboard-try-again      "Then try again."
+  :cp/status-header            "Agent Control Plane"
+  :cp/total-agents-label       "  Total Agents:      {count}"
+  :cp/pending-decisions-label  "  Pending Decisions: {count}"
+  :cp/need-attention-label     "  Need Attention:    {count}"
+  :cp/by-status-header         "  By Status:"
+  :cp/agents-header            "  Agents:"
+  :cp/unnamed-agent            "Unnamed"
+  :cp/no-decisions-msg         "No pending decisions. All agents are autonomous."
+  :cp/pending-decisions-header "Pending Decisions ({count})"
+  :cp/decision-id-label        "           ID: "
+  :cp/decision-options-label   "           Options: "
+  :cp/resolve-usage            "Usage: miniforge control-plane resolve <decision-id> <resolution>"
+  :cp/resolve-usage-comment    "       --comment \"optional comment\""
+  :cp/resolve-success          "Decision resolved: {resolution}"
+  :cp/resolve-failed           "Failed to resolve decision."
+  :cp/terminate-usage          "Usage: miniforge control-plane terminate <agent-id>"
+  :cp/terminate-success        "Agent terminated."
+  :cp/terminate-failed         "Failed to terminate agent."}}

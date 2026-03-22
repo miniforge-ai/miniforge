@@ -26,9 +26,9 @@
    Layer 1: Protocol implementation"
   (:require
    [ai.miniforge.adapter-claude-code.discovery :as discovery]
+   [ai.miniforge.control-plane.messages :as messages]
    [ai.miniforge.control-plane-adapter.protocol :as proto]
-   [clojure.java.io :as io]
-   [clojure.edn :as edn]))
+   [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Decision file-drop directory
@@ -93,20 +93,17 @@
         {:delivered? false :error (ex-message e)})))
 
   (send-command [_ agent-record command]
-    (let [pid (get-in agent-record [:agent/metadata :pid])]
+    (let [pid (get-in agent-record [:agent/metadata :pid])
+          signal-map {:pause "-TSTP" :resume "-CONT" :terminate "-TERM"}]
       (if pid
-        (try
-          (case command
-            :pause     (do (.start (ProcessBuilder. ["kill" "-TSTP" (str pid)]))
-                           {:success? true})
-            :resume    (do (.start (ProcessBuilder. ["kill" "-CONT" (str pid)]))
-                           {:success? true})
-            :terminate (do (.start (ProcessBuilder. ["kill" "-TERM" (str pid)]))
-                           {:success? true})
-            {:success? false :error (str "Unknown command: " command)})
-          (catch Exception e
-            {:success? false :error (ex-message e)}))
-        {:success? false :error "No PID available for this agent"}))))
+        (if-let [signal (get signal-map command)]
+          (try
+            (.start (ProcessBuilder. ["kill" signal (str pid)]))
+            {:success? true}
+            (catch Exception e
+              {:success? false :error (ex-message e)}))
+          {:success? false :error (messages/t :adapter/unknown-command {:command command})})
+        {:success? false :error (messages/t :adapter/no-pid)}))))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Factory

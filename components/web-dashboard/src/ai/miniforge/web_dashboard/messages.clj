@@ -17,7 +17,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]))
 
-(def ^:private resource-path "config/web-dashboard/messages/en.edn")
+(def ^:private resource-path "config/web-dashboard/messages/en-US.edn")
 (def ^:private section-key :web-dashboard/messages)
 
 (defn- load-catalog []

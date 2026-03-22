@@ -25,7 +25,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]))
 
-(def ^:private resource-path "config/repo-index/messages/en.edn")
+(def ^:private resource-path "config/repo-index/messages/en-US.edn")
 (def ^:private section-key :repo-index/messages)
 
 (defn- load-catalog []

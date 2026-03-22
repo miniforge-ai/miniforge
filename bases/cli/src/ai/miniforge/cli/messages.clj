@@ -7,19 +7,22 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Catalog loading
 
-(def default-locale "en")
+(def default-locale "en-US")
 
 (defn- locale-resource
   [locale]
   (str "config/cli/messages/" locale ".edn"))
 
+(defn- lang->locale
+  "Convert POSIX LANG (e.g. 'en_US.UTF-8') to BCP 47 tag (e.g. 'en-US')."
+  [lang]
+  (when-let [base (some-> lang (str/split #"\.") first not-empty)]
+    (str/replace base "_" "-")))
+
 (defn active-locale
   []
   (or (some-> (System/getenv "MINIFORGE_LOCALE") str/trim not-empty)
-      (some-> (System/getenv "LANG")
-              (str/split #"[_.]")
-              first
-              not-empty)
+      (lang->locale (System/getenv "LANG"))
       default-locale))
 
 (defn catalog
