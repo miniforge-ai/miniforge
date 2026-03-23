@@ -66,6 +66,20 @@
 (def chain-completed events/chain-completed)
 (def chain-failed events/chain-failed)
 
+;; OCI container events
+(def container-started events/container-started)
+(def container-completed events/container-completed)
+
+;; Tool supervision events
+(def tool-use-evaluated events/tool-use-evaluated)
+
+;; Control plane events
+(def cp-agent-registered events/cp-agent-registered)
+(def cp-agent-heartbeat events/cp-agent-heartbeat)
+(def cp-agent-state-changed events/cp-agent-state-changed)
+(def cp-decision-created events/cp-decision-created)
+(def cp-decision-resolved events/cp-decision-resolved)
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Listener, control, approval, and callback APIs
 

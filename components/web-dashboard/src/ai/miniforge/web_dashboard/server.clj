@@ -30,9 +30,11 @@
    [ai.miniforge.web-dashboard.server.websocket :as websocket]
    [ai.miniforge.web-dashboard.server.handlers :as handlers]
    [ai.miniforge.web-dashboard.server.archive :as archive-handlers]
+   [ai.miniforge.web-dashboard.server.control-plane :as cp-handlers]
    [ai.miniforge.web-dashboard.watcher :as watcher]
    [ai.miniforge.web-dashboard.archive :as archive]
-   [ai.miniforge.event-stream.interface :as es]))
+   [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.control-plane.interface :as cp]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Discovery file
@@ -104,6 +106,18 @@
           (= uri "/fleet")
           (handlers/handle-fleet state)
 
+          (= uri "/control-plane")
+          (let [registry (get-in @state [:control-plane :registry])
+                decision-manager (get-in @state [:control-plane :decision-manager])
+                agents (cp/list-agents registry)
+                blocked-ids (->> agents (filter #(= :blocked (:agent/status %))) (map :agent/id) set)
+                decisions (cp/pending-decisions decision-manager blocked-ids)
+                by-status (cp/agents-by-status registry)
+                stats {:total-agents (count agents)
+                       :by-status (into {} (map (fn [[k v]] [k (count v)]) by-status))
+                       :pending-decisions (cp/count-pending decision-manager)}]
+            (responses/html-response (views/control-plane-view agents decisions stats)))
+
           (.startsWith uri "/train/")
           (handlers/handle-train-detail state (subs uri 7))
 
@@ -118,6 +132,20 @@
 
           (.startsWith uri "/workflow/")
           (handlers/handle-workflow-detail state (subs uri 10))
+
+          ;; Control plane htmx fragments
+          (= uri "/api/control-plane/agents-grid")
+          (let [registry (get-in @state [:control-plane :registry])
+                agents (cp/list-agents registry)]
+            (responses/html-response (views/agents-grid-fragment agents)))
+
+          (= uri "/api/control-plane/decisions-queue")
+          (let [registry (get-in @state [:control-plane :registry])
+                decision-manager (get-in @state [:control-plane :decision-manager])
+                blocked-ids (->> (cp/list-agents registry {:status :blocked})
+                                 (map :agent/id) set)
+                decisions (cp/pending-decisions decision-manager blocked-ids)]
+            (responses/html-response (views/decision-queue-fragment decisions)))
 
           ;; API endpoints (htmx fragments)
           (= uri "/api/dashboard/workflows")
@@ -248,6 +276,55 @@
               "commands" (handlers/handle-api-workflow-commands-poll state wf-id)
               (responses/not-found-response)))
 
+          ;; Control Plane API endpoints
+          (= uri "/api/control-plane/summary")
+          (cp-handlers/handle-cp-summary state)
+
+          (and (= uri "/api/control-plane/agents/register")
+               (= (:request-method req) :post))
+          (cp-handlers/handle-register-agent state (slurp (:body req)))
+
+          (and (= uri "/api/control-plane/agents")
+               (= (:request-method req) :get))
+          (cp-handlers/handle-list-agents state params)
+
+          (and (= uri "/api/control-plane/decisions")
+               (= (:request-method req) :get))
+          (cp-handlers/handle-list-decisions state params)
+
+          (and (.startsWith uri "/api/control-plane/decisions/")
+               (.endsWith uri "/resolve")
+               (= (:request-method req) :post))
+          (let [rest-uri (subs uri (count "/api/control-plane/decisions/"))
+                decision-id (first (str/split rest-uri #"/" 2))]
+            (cp-handlers/handle-resolve-decision state decision-id (slurp (:body req))))
+
+          (and (.startsWith uri "/api/control-plane/agents/")
+               (.endsWith uri "/heartbeat")
+               (= (:request-method req) :post))
+          (let [rest-uri (subs uri (count "/api/control-plane/agents/"))
+                agent-id (first (str/split rest-uri #"/" 2))]
+            (cp-handlers/handle-agent-heartbeat state agent-id (slurp (:body req))))
+
+          (and (.startsWith uri "/api/control-plane/agents/")
+               (.endsWith uri "/command")
+               (= (:request-method req) :post))
+          (let [rest-uri (subs uri (count "/api/control-plane/agents/"))
+                agent-id (first (str/split rest-uri #"/" 2))]
+            (cp-handlers/handle-agent-command state agent-id (slurp (:body req))))
+
+          (and (.startsWith uri "/api/control-plane/agents/")
+               (= (:request-method req) :get)
+               (not (.contains uri "/heartbeat"))
+               (not (.contains uri "/command")))
+          (let [agent-id (subs uri (count "/api/control-plane/agents/"))]
+            (cp-handlers/handle-get-agent state agent-id))
+
+          (and (.startsWith uri "/api/control-plane/agents/")
+               (= (:request-method req) :delete))
+          (let [agent-id (subs uri (count "/api/control-plane/agents/"))]
+            (cp-handlers/handle-delete-agent state agent-id))
+
           ;; Static files
           (or (.startsWith uri "/css/")
               (.startsWith uri "/js/")
@@ -278,6 +355,10 @@
                                    :pr-train-manager pr-train-manager
                                    :repo-dag-manager repo-dag-manager
                                    :start-time (System/currentTimeMillis)})
+        ;; Initialize control plane in dashboard state
+        _ (swap! state assoc :control-plane
+                 {:registry (cp/create-registry)
+                  :decision-manager (cp/create-decision-manager)})
         handler (create-handler state)
         server (http/run-server handler {:port port :legacy-return-value? false})
         actual-port (http/server-port server)
