@@ -7,6 +7,7 @@
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
+   [ai.miniforge.patterns.interface :as patterns]
    [ai.miniforge.repo-index.messages :as messages]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]
@@ -247,19 +248,16 @@
         lines (take-last 3 (str/split-lines preceding))]
     (some (fn [line]
             (or
-             ;; ### path/to/file.clj or ## path/to/file.clj
-             (second (re-find #"#{1,4}\s+[`*]*([^\s`*]+\.\w{1,6})[`*]*" line))
-             ;; **path/to/file.clj** or `path/to/file.clj`
-             (second (re-find #"[`*]+([^\s`*]+\.\w{1,6})[`*]+" line))
-             ;; File: path/to/file.clj or Path: path/to/file.clj
-             (second (re-find #"(?i)(?:file|path):\s*`?([^\s`]+\.\w{1,6})`?" line))))
+             (second (re-find patterns/md-heading-file-path line))
+             (second (re-find patterns/md-delimited-file-path line))
+             (second (re-find patterns/md-label-file-path line))))
           lines)))
 
 (defn extract-code-blocks
   "Extract code blocks from markdown response and convert to file list.
    Tries to detect file paths from markdown headings before each block."
   [response-content]
-  (let [pattern #"```(?:(\w+)\n)?([^`]+)```"
+  (let [pattern patterns/md-code-block
         matcher (re-matcher pattern response-content)]
     (loop [results [] idx 0]
       (if (.find matcher)

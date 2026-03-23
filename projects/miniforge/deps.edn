@@ -54,7 +54,9 @@
         ;; Web dashboard
         ai.miniforge/web-dashboard {:local/root "../../components/web-dashboard"}
         ;; LSP-to-MCP bridge (separate entry point for Claude Code integration)
-        ai.miniforge/lsp-mcp-bridge {:local/root "../../bases/lsp-mcp-bridge"}}
+        ai.miniforge/lsp-mcp-bridge {:local/root "../../bases/lsp-mcp-bridge"}
+        ai.miniforge/messages {:local/root "../../components/messages"}
+        ai.miniforge/patterns {:local/root "../../components/patterns"}}
 
  :aliases
  {:uberjar

@@ -13,24 +13,11 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.web-dashboard.messages
-  (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]
-            [clojure.string :as str]))
+  "Component-level message catalog for web-dashboard.
+   Delegates to the shared messages component."
+  (:require [ai.miniforge.messages.interface :as messages]))
 
-(def ^:private resource-path "config/web-dashboard/messages/en-US.edn")
-(def ^:private section-key :web-dashboard/messages)
-
-(defn- load-catalog []
-  (when-let [res (io/resource resource-path)]
-    (get (edn/read-string (slurp res)) section-key {})))
-
-(def ^:private catalog (delay (load-catalog)))
-
-(defn t
-  ([k] (t k {}))
-  ([k params]
-   (let [template (get @catalog k (name k))]
-     (reduce-kv (fn [s pk pv]
-                  (str/replace s (str "{" (name pk) "}") (str pv)))
-                template
-                params))))
+(def t
+  "Look up a web-dashboard message by key, with optional param substitution."
+  (messages/create-translator "config/web-dashboard/messages/en-US.edn"
+                              :web-dashboard/messages))

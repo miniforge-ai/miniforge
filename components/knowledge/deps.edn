@@ -2,6 +2,7 @@
  :deps {ai.miniforge/algorithms {:local/root "../algorithms"}
         ai.miniforge/schema {:local/root "../schema"}
         ai.miniforge/logging {:local/root "../logging"}
+        ai.miniforge/messages {:local/root "../messages"}
         metosin/malli {:mvn/version "0.16.4"}
         clj-commons/clj-yaml {:mvn/version "1.0.29"}}
  :aliases {:test {:extra-paths ["test"]

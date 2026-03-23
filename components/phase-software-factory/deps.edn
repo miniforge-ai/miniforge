@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/phase {:local/root "../phase"}
+ :deps {ai.miniforge/messages {:local/root "../messages"}
+        ai.miniforge/phase {:local/root "../phase"}
         ai.miniforge/agent {:local/root "../agent"}
         ai.miniforge/knowledge {:local/root "../knowledge"}
         ai.miniforge/repo-index {:local/root "../repo-index"}
