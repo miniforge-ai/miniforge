@@ -24,6 +24,7 @@
    Default gates: [:release-ready]"
   (:require [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.phase.messages :as messages]
             [ai.miniforge.phase.phase-config :as phase-config]
             [ai.miniforge.release-executor.interface :as release-executor]
             [ai.miniforge.response.interface :as response]))
@@ -63,13 +64,13 @@
                          {:data {:implement-status impl-status
                                  :implement-result-keys (vec impl-keys)
                                  :phase-results-keys (vec (keys (:execution/phase-results ctx)))}})
-              (throw (ex-info "Release phase has no code artifact from implement phase"
+              (throw (ex-info (messages/t :release/no-implement-artifact)
                               {:phase :release
                                :implement-status impl-status
                                :implement-result-keys impl-keys
                                :hint "Implement phase may have failed or produced no output"}))))
         _ (when (and (map? implement-result) (empty? (:code/files implement-result)))
-            (throw (ex-info "Release phase received code artifact with zero files"
+            (throw (ex-info (messages/t :release/zero-files)
                             {:phase :release :artifact-id (:code/id implement-result)})))
         code-artifacts (if-let [artifacts (:artifacts implement-result)]
                          (map (fn [a] {:artifact/type :code
