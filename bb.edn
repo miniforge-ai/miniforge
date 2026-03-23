@@ -475,7 +475,9 @@
                  "components/control-plane/src"
                  "components/control-plane-adapter/src"
                  "components/adapter-claude-code/src"
-                 "components/adapter-miniforge/src"]
+                 "components/adapter-miniforge/src"
+                 "components/messages/src"
+                 "components/patterns/src"]
    :extra-deps {metosin/malli {:mvn/version "0.16.1"}
                 clj-statecharts/clj-statecharts {:mvn/version "0.1.5"}
                 aero/aero        {:mvn/version "1.1.6"}
