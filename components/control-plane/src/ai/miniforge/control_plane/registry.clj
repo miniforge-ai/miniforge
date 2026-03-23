@@ -28,6 +28,7 @@
    Layer 2: Query operations
    Layer 3: Heartbeat updates"
   (:require
+   [ai.miniforge.control-plane.messages :as messages]
    [ai.miniforge.control-plane.state-machine :as sm]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -232,7 +233,7 @@
   (let [profile (sm/get-profile)
         current-status (get-in @registry [:agents agent-id :agent/status])]
     (when-not current-status
-      (throw (ex-info "Agent not found" {:agent/id agent-id})))
+      (throw (ex-info (messages/t :registry/agent-not-found) {:agent/id agent-id})))
     (sm/validate-transition profile current-status new-status)
     (update-agent! registry agent-id {:agent/status new-status})))
 

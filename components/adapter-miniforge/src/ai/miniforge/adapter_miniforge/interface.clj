@@ -28,6 +28,7 @@
    Layer 1: Protocol implementation
    Layer 2: Factory and subscription"
   (:require
+   [ai.miniforge.control-plane.messages :as messages]
    [ai.miniforge.control-plane-adapter.protocol :as proto]
    [ai.miniforge.event-stream.interface :as es]))
 
@@ -51,7 +52,7 @@
   (let [wf-id (:workflow/id event)]
     {:agent/vendor :miniforge
      :agent/external-id (str wf-id)
-     :agent/name (str "Miniforge: " (or (:workflow/name event)
+     :agent/name (str (messages/t :adapter/miniforge-prefix) (or (:workflow/name event)
                                          (:message event)
                                          wf-id))
      :agent/capabilities #{:code-generation :test-writing :code-review}
@@ -84,14 +85,11 @@
 
   (send-command [_ agent-record command]
     (if-let [control-state (:control-state (:agent/metadata agent-record))]
-      (do
-        (case command
-          :pause  (es/pause! control-state)
-          :resume (es/resume! control-state)
-          :cancel (es/cancel! control-state)
-          nil)
+      (let [dispatch {:pause es/pause! :resume es/resume! :cancel es/cancel!}]
+        (when-let [f (get dispatch command)]
+          (f control-state))
         {:success? true})
-      {:success? false :error "No control state available"})))
+      {:success? false :error (messages/t :adapter/no-control-state)})))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Factory and subscription

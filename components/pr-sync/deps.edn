@@ -1,3 +1,4 @@
 {:paths ["src" "resources"]
- :deps {cheshire/cheshire {:mvn/version "5.13.0"}}
+ :deps {ai.miniforge/messages {:local/root "../messages"}
+        cheshire/cheshire {:mvn/version "5.13.0"}}
  :aliases {:test {:extra-paths ["test"]}}}

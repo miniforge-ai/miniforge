@@ -28,6 +28,7 @@
    Layer 3: Command handlers"
   (:require
    [cheshire.core :as json]
+   [ai.miniforge.web-dashboard.messages :as messages]
    [ai.miniforge.web-dashboard.server.responses :as responses]
    [ai.miniforge.control-plane.interface :as cp]))
 
@@ -94,7 +95,7 @@
         :heartbeat_endpoint (str "/api/control-plane/agents/" (:agent/id agent) "/heartbeat")
         :decision_poll_endpoint (str "/api/control-plane/agents/" (:agent/id agent) "/decisions")
         :already_registered (some? existing)}))
-    (error-response 400 "Invalid JSON body")))
+    (error-response 400 (messages/t :cp/error-invalid-json))))
 
 (defn handle-agent-heartbeat
   "POST /api/control-plane/agents/:id/heartbeat
@@ -105,9 +106,9 @@
           decision-manager (get-in @state [:control-plane :decision-manager])
           agent-id (try (java.util.UUID/fromString agent-id-str) (catch Exception _ nil))]
       (if-not agent-id
-        (error-response 400 "Invalid agent ID")
+        (error-response 400 (messages/t :cp/error-invalid-agent-id))
         (if-not (cp/get-agent registry agent-id)
-          (error-response 404 "Agent not found")
+          (error-response 404 (messages/t :cp/error-agent-not-found))
           (let [;; Update heartbeat
                 heartbeat {:status (when (:status body) (keyword (:status body)))
                            :task (:task body)
@@ -141,7 +142,7 @@
              {:ack true
               :decisions_submitted submitted
               :decisions_resolved resolved})))))
-    (error-response 400 "Invalid JSON body")))
+    (error-response 400 (messages/t :cp/error-invalid-json))))
 
 (defn handle-list-agents
   "GET /api/control-plane/agents
@@ -163,14 +164,14 @@
   (let [registry (get-in @state [:control-plane :registry])
         agent-id (try (java.util.UUID/fromString agent-id-str) (catch Exception _ nil))]
     (if-not agent-id
-      (error-response 400 "Invalid agent ID")
+      (error-response 400 (messages/t :cp/error-invalid-agent-id))
       (if-let [agent (cp/get-agent registry agent-id)]
         (let [decision-manager (get-in @state [:control-plane :decision-manager])
               pending (cp/decisions-for-agent decision-manager agent-id {:status :pending})]
           (responses/json-response
            (assoc (agent->json agent)
                   :pending_decisions (mapv decision->json pending))))
-        (error-response 404 "Agent not found")))))
+        (error-response 404 (messages/t :cp/error-agent-not-found))))))
 
 (defn handle-delete-agent
   "DELETE /api/control-plane/agents/:id
@@ -179,10 +180,10 @@
   (let [registry (get-in @state [:control-plane :registry])
         agent-id (try (java.util.UUID/fromString agent-id-str) (catch Exception _ nil))]
     (if-not agent-id
-      (error-response 400 "Invalid agent ID")
+      (error-response 400 (messages/t :cp/error-invalid-agent-id))
       (if-let [removed (cp/deregister-agent! registry agent-id)]
         (responses/json-response {:removed (str (:agent/id removed))})
-        (error-response 404 "Agent not found")))))
+        (error-response 404 (messages/t :cp/error-agent-not-found))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Decision API handlers
@@ -210,7 +211,7 @@
           registry (get-in @state [:control-plane :registry])
           decision-id (try (java.util.UUID/fromString decision-id-str) (catch Exception _ nil))]
       (if-not decision-id
-        (error-response 400 "Invalid decision ID")
+        (error-response 400 (messages/t :cp/error-invalid-decision-id))
         (if-let [resolved (cp/resolve-decision! decision-manager decision-id
                                                  (:resolution body)
                                                  (:comment body))]
@@ -220,8 +221,8 @@
               (cp/transition-agent! registry (:decision/agent-id resolved) :running)
               (catch Exception _))
             (responses/json-response (decision->json resolved)))
-          (error-response 404 "Decision not found or already resolved"))))
-    (error-response 400 "Invalid JSON body")))
+          (error-response 404 (messages/t :cp/error-decision-not-found)))))
+    (error-response 400 (messages/t :cp/error-invalid-json))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Command handlers
@@ -235,22 +236,19 @@
           agent-id (try (java.util.UUID/fromString agent-id-str) (catch Exception _ nil))
           command (keyword (:command body))]
       (if-not agent-id
-        (error-response 400 "Invalid agent ID")
+        (error-response 400 (messages/t :cp/error-invalid-agent-id))
         (if-not (cp/get-agent registry agent-id)
-          (error-response 404 "Agent not found")
-          (do
+          (error-response 404 (messages/t :cp/error-agent-not-found))
+          (let [command->status {:pause :paused :resume :running :terminate :terminated}]
             ;; Apply state transition based on command
             (try
-              (case command
-                :pause     (cp/transition-agent! registry agent-id :paused)
-                :resume    (cp/transition-agent! registry agent-id :running)
-                :terminate (cp/transition-agent! registry agent-id :terminated)
-                nil)
+              (when-let [target-status (get command->status command)]
+                (cp/transition-agent! registry agent-id target-status))
               (catch Exception _))
             (responses/json-response
              {:success true
               :agent (agent->json (cp/get-agent registry agent-id))})))))
-    (error-response 400 "Invalid JSON body")))
+    (error-response 400 (messages/t :cp/error-invalid-json))))
 
 (defn handle-cp-summary
   "GET /api/control-plane/summary

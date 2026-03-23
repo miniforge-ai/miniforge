@@ -1,0 +1,31 @@
+{:control-plane/messages
+ {;; state-machine
+  :state-machine/profile-not-found "Control-plane state profile not found"
+  :state-machine/invalid-transition "Invalid agent state transition"
+
+  ;; registry
+  :registry/agent-not-found "Agent not found"
+
+  ;; adapter — agent name prefixes
+  :adapter/claude-code-prefix "Claude Code: "
+  :adapter/miniforge-prefix   "Miniforge: "
+
+  ;; adapter — errors
+  :adapter/unknown-command      "Unknown command: {command}"
+  :adapter/no-pid               "No PID available for this agent"
+  :adapter/no-control-state     "No control state available"
+
+  ;; vendor display
+  :vendor/claude-code "C"
+  :vendor/miniforge   "M"
+  :vendor/openai      "O"
+  :vendor/cursor      "Cu"
+  :vendor/ollama      "L"
+  :vendor/unknown     "?"
+
+  ;; heartbeat intervals (ms) — used by adapter utilities
+  :heartbeat/claude-code 15000
+  :heartbeat/miniforge   10000
+  :heartbeat/openai      60000
+  :heartbeat/cursor      30000
+  :heartbeat/default     30000}}

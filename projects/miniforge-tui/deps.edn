@@ -52,7 +52,9 @@
         ;; Self-healing
         ai.miniforge/self-healing {:local/root "../../components/self-healing"}
         ;; Spec parsing
-        ai.miniforge/spec-parser {:local/root "../../components/spec-parser"}}
+        ai.miniforge/spec-parser {:local/root "../../components/spec-parser"}
+        ai.miniforge/messages {:local/root "../../components/messages"}
+        ai.miniforge/patterns {:local/root "../../components/patterns"}}
 
  :aliases
  {:uberjar

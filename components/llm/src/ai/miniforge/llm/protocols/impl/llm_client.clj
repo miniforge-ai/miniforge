@@ -79,9 +79,15 @@
                                     (when (= "text" (:type block))
                                       (:text block)))
                                   content-blocks)
+                tool-names (keep (fn [block]
+                                   (when (= "tool_use" (:type block))
+                                     (:name block)))
+                                 content-blocks)
                 text (str/join text-blocks)]
-            (when-not (str/blank? text)
-              {:delta text :done? false}))
+            (if (seq tool-names)
+              {:delta (or text "") :done? false :tool-use true :tool-names tool-names}
+              (when-not (str/blank? text)
+                {:delta text :done? false})))
 
           ;; Legacy format support
           "stream_event"
@@ -95,9 +101,13 @@
                      :output-tokens (:output_tokens usage)}
              :cost-usd (:total_cost_usd data)})
 
-          ;; Tool use events — signal activity without text content
+          ;; Tool use events — capture tool name for diagnostics
           "tool_use"
-          {:delta "" :done? false :tool-use true}
+          (let [tool-name (or (get-in data [:tool :name])
+                              (get-in data [:name])
+                              (:tool_name data))]
+            {:delta "" :done? false :tool-use true
+             :tool-name tool-name})
 
           ;; System and rate_limit_event are known no-ops
           ("system" "rate_limit_event")
@@ -526,7 +536,7 @@
                  :content (:content result)}))
     result))
 
-(defn stream-with-parser [stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost]
+(defn stream-with-parser [stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost accumulated-tools]
   (fn [line]
     (when-let [parsed (stream-parser line)]
       (when-let [usage (:usage parsed)]
@@ -534,8 +544,13 @@
       (when-let [cost (:cost-usd parsed)]
         (reset! accumulated-cost cost))
       (if (or (:tool-use parsed) (:heartbeat parsed))
-        ;; Tool-use and heartbeat events: fire on-chunk without accumulating text
-        (on-chunk (assoc parsed :content @accumulated-content))
+        ;; Tool-use and heartbeat events: track tool names and fire on-chunk
+        (do
+          (when-let [tool-name (:tool-name parsed)]
+            (swap! accumulated-tools conj tool-name))
+          (when-let [tool-names (:tool-names parsed)]
+            (swap! accumulated-tools into tool-names))
+          (on-chunk (assoc parsed :content @accumulated-content)))
         ;; Normal text deltas
         (when-let [delta (:delta parsed)]
           (swap! accumulated-content str delta)
@@ -578,25 +593,31 @@
         full-cmd (into [cmd] args)
         accumulated-content (atom "")
         accumulated-usage (atom nil)
-        accumulated-cost (atom nil)]
+        accumulated-cost (atom nil)
+        accumulated-tools (atom [])]
     (when logger
       (log/debug logger :system :agent/streaming-prompt-sent
                  {:data {:backend backend
                          :prompt-length (count prompt)}}))
     (let [result (stream-exec-fn
                   full-cmd
-                  (stream-with-parser stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost)
+                  (stream-with-parser stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost accumulated-tools)
                   {:progress-monitor progress-monitor})
           exit-code (:exit result)
           timeout-info (:timeout result)
-          final-content @accumulated-content]
+          final-content @accumulated-content
+          tools @accumulated-tools]
       (on-chunk {:delta ""
                  :done? true
                  :content final-content
                  :timeout timeout-info})
       (log-streaming-result logger timeout-info (count final-content))
+      (when (and logger (seq tools))
+        (log/info logger :system :agent/tools-called
+                  {:data {:tools tools :count (count tools)}}))
       (if (zero? exit-code)
-        (streaming-success-response final-content exit-code @accumulated-usage @accumulated-cost)
+        (cond-> (streaming-success-response final-content exit-code @accumulated-usage @accumulated-cost)
+          (seq tools) (assoc :tools-called tools))
         (streaming-error-response final-content exit-code (:err result) timeout-info)))))
 
 (defn complete-stream-impl [client request on-chunk]

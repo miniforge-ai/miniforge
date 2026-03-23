@@ -22,7 +22,9 @@
    Prepares release artifacts and creates PRs using the release-executor component.
    Agent: :releaser
    Default gates: [:release-ready]"
-  (:require [ai.miniforge.phase.registry :as registry]
+  (:require [ai.miniforge.logging.interface :as log]
+            [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.phase.messages :as messages]
             [ai.miniforge.phase.phase-config :as phase-config]
             [ai.miniforge.release-executor.interface :as release-executor]
             [ai.miniforge.response.interface :as response]))
@@ -54,12 +56,21 @@
   ;; Phase results contain the full phase map, so extract :result :output
   (let [implement-result (get-in ctx [:execution/phase-results :implement :result :output])
         _ (when-not implement-result
-            (throw (ex-info "Release phase has no code artifact from implement phase"
-                            {:phase :release
-                             :implement-status (get-in ctx [:execution/phase-results :implement :result :status])
-                             :hint "Implement phase may have failed or produced no output"})))
+            (let [impl-status (get-in ctx [:execution/phase-results :implement :result :status])
+                  impl-keys (keys (get-in ctx [:execution/phase-results :implement :result]))
+                  logger (or (get-in ctx [:execution/logger])
+                             (log/create-logger {:min-level :error :output :human}))]
+              (log/error logger :release :release/no-implement-artifact
+                         {:data {:implement-status impl-status
+                                 :implement-result-keys (vec impl-keys)
+                                 :phase-results-keys (vec (keys (:execution/phase-results ctx)))}})
+              (throw (ex-info (messages/t :release/no-implement-artifact)
+                              {:phase :release
+                               :implement-status impl-status
+                               :implement-result-keys impl-keys
+                               :hint "Implement phase may have failed or produced no output"}))))
         _ (when (and (map? implement-result) (empty? (:code/files implement-result)))
-            (throw (ex-info "Release phase received code artifact with zero files"
+            (throw (ex-info (messages/t :release/zero-files)
                             {:phase :release :artifact-id (:code/id implement-result)})))
         code-artifacts (if-let [artifacts (:artifacts implement-result)]
                          (map (fn [a] {:artifact/type :code
@@ -102,11 +113,17 @@
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
 
+        logger (or (get-in ctx [:execution/logger])
+                   (log/create-logger {:min-level :debug :output :human}))
+
         ;; Build workflow state and context
         workflow-state (build-workflow-state ctx)
+        _ (log/debug logger :release :release/workflow-state-built
+                     {:data {:artifact-count (count (:workflow/artifacts workflow-state))
+                             :file-count (count (get-in (first (:workflow/artifacts workflow-state))
+                                                        [:artifact/content :code/files]))}})
         exec-context (build-executor-context ctx config)
         releaser-agent (get config :releaser-agent)
-
         ;; Execute the release phase
         result (try
                  (let [exec-result (release-executor/execute-release-phase

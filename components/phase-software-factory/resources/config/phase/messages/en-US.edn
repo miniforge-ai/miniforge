@@ -1,0 +1,9 @@
+{:phase/messages
+ {;; Implementation phase
+  :implement/agent-error       "Agent returned error status"
+  :implement/exhausted-retries "Implementation failed after exhausting retry budget"
+  :implement/warn-no-output    "WARNING: implement phase result has no :output — artifact may be nil"
+
+  ;; Release phase
+  :release/no-implement-artifact  "Release phase has no code artifact from implement phase"
+  :release/zero-files             "Release phase received code artifact with zero files"}}

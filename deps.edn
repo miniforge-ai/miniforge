@@ -92,6 +92,15 @@
                        "components/repo-index/resources"
                        "components/context-pack/src"
                        "components/context-pack/resources"
+                       "components/control-plane/src"
+                       "components/control-plane/resources"
+                       "components/control-plane-adapter/src"
+                       "components/adapter-miniforge/src"
+                       "components/adapter-claude-code/src"
+                       "components/messages/src"
+                       "components/messages/resources"
+                       "components/patterns/src"
+                       "components/patterns/resources"
                        "bases/cli/src"
                        "bases/cli/resources"
                        "bases/lsp-mcp-bridge/src"]
@@ -142,6 +151,12 @@
                      ai.miniforge/mcp-artifact-server {:local/root "components/mcp-artifact-server"}
                      ai.miniforge/repo-index {:local/root "components/repo-index"}
                      ai.miniforge/context-pack {:local/root "components/context-pack"}
+                     ai.miniforge/control-plane {:local/root "components/control-plane"}
+                     ai.miniforge/control-plane-adapter {:local/root "components/control-plane-adapter"}
+                     ai.miniforge/adapter-miniforge {:local/root "components/adapter-miniforge"}
+                     ai.miniforge/adapter-claude-code {:local/root "components/adapter-claude-code"}
+                     ai.miniforge/messages {:local/root "components/messages"}
+                     ai.miniforge/patterns {:local/root "components/patterns"}
                      ai.miniforge/cli {:local/root "bases/cli"}}}
 
   :test {:extra-paths ["development/test"
@@ -192,7 +207,11 @@
                        "components/mcp-artifact-server/test"
                        "components/repo-index/test"
                        "components/context-pack/test"
+                       "components/control-plane/test"
+                       "components/adapter-miniforge/test"
                        "components/task-executor/test"
+                       "components/messages/test"
+                       "components/patterns/test"
                        "bases/cli/test"
                        "bases/lsp-mcp-bridge/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
@@ -240,6 +259,10 @@
                       ai.miniforge/mcp-artifact-server {:local/root "components/mcp-artifact-server"}
                       ai.miniforge/repo-index {:local/root "components/repo-index"}
                       ai.miniforge/context-pack {:local/root "components/context-pack"}
+                      ai.miniforge/control-plane {:local/root "components/control-plane"}
+                      ai.miniforge/control-plane-adapter {:local/root "components/control-plane-adapter"}
+                      ai.miniforge/adapter-miniforge {:local/root "components/adapter-miniforge"}
+                      ai.miniforge/adapter-claude-code {:local/root "components/adapter-claude-code"}
                       ai.miniforge/task-executor {:local/root "components/task-executor"}
                       ai.miniforge/lsp-mcp-bridge {:local/root "bases/lsp-mcp-bridge"}}}
 

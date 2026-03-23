@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/tool {:local/root "../tool"}
+        ai.miniforge/patterns {:local/root "../patterns"}
         ai.miniforge/repo-index {:local/root "../repo-index"}
         ai.miniforge/response {:local/root "../response"}}
  :aliases
