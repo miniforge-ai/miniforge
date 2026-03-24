@@ -70,7 +70,10 @@
       (gh-unavailable (.getMessage e)))))
 
 (defn create-branch!
-  "Create a new git branch from main/master.
+  "Create a new git branch for the release.
+
+   Branches from HEAD (not origin/main) so MCP-written files in the working
+   tree are preserved. The PR will target the default branch.
 
    Arguments:
    - worktree-path - Path to git worktree root
@@ -87,30 +90,19 @@
                                str/trim
                                (str/replace #"refs/remotes/origin/" ""))
                            "main")
-          fetch-result (process/shell dir-opts "git" "fetch" "origin" default-branch)]
-
-      (if-not (zero? (:exit fetch-result))
-        (result/shell-failure (str "Failed to fetch: " (:err fetch-result)) {:branch nil})
-        ;; Stash any dirty files (from MCP artifact writes) before branching
-        (let [stash-result (process/shell dir-opts "git" "stash" "push" "-m"
-                                          (str "miniforge-release-" branch-name))
-              stashed? (not (str/includes? (or (:out stash-result) "") "No local changes"))
-              checkout-result (process/shell dir-opts
-                                             "git" "checkout" "-b" branch-name
-                                             (str "origin/" default-branch))
-              ;; Pop the stash back after branching (files will be staged by write-and-stage)
-              _ (when stashed?
-                  (process/shell dir-opts "git" "stash" "pop"))]
-          (if (zero? (:exit checkout-result))
-            (result/shell-success {:branch branch-name :base-branch default-branch})
-            (let [timestamped-name (str branch-name "-" (System/currentTimeMillis))
-                  retry-result (process/shell dir-opts
-                                              "git" "checkout" "-b" timestamped-name
-                                              (str "origin/" default-branch))]
-              (if (zero? (:exit retry-result))
-                (result/shell-success {:branch timestamped-name :base-branch default-branch})
-                (result/shell-failure (str "Failed to create branch: " (:err retry-result))
-                                      {:branch nil})))))))
+          ;; Branch from HEAD to preserve MCP-written files in the working tree
+          checkout-result (process/shell dir-opts
+                                         "git" "checkout" "-b" branch-name)]
+      (if (zero? (:exit checkout-result))
+        (result/shell-success {:branch branch-name :base-branch default-branch})
+        ;; Retry with timestamp suffix if branch name already exists
+        (let [timestamped-name (str branch-name "-" (System/currentTimeMillis))
+              retry-result (process/shell dir-opts
+                                          "git" "checkout" "-b" timestamped-name)]
+          (if (zero? (:exit retry-result))
+            (result/shell-success {:branch timestamped-name :base-branch default-branch})
+            (result/shell-failure (str "Failed to create branch: " (:err retry-result))
+                                  {:branch nil})))))
     (catch Exception e
       (result/shell-failure (.getMessage e) {:branch nil}))))
 

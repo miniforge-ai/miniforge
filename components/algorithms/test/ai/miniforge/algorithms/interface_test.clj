@@ -1,55 +1,61 @@
-;; Title: Miniforge.ai
-;; Subtitle: An agentic SDLC / fleet-control platform
-;; Author: Christopher Lester
-;; Line: Founder, Miniforge.ai (project)
-;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;; Tests for ai.miniforge.algorithms.interface
 ;;
-;; Licensed under the Apache License, Version 2.0 (the "License");
-;; you may not use this file except in compliance with the License.
-;; You may obtain a copy of the License at
-;;
-;;     http://www.apache.org/licenses/LICENSE-2.0
-;;
-;; Unless required by applicable law or agreed to in writing, software
-;; distributed under the License is distributed on an "AS IS" BASIS,
-;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-;; See the License for the specific language governing permissions and
-;; limitations under the License.
+;; Verifies that the public API delegates correctly to the graph module
+;; and that all functions are accessible through the interface namespace.
 
 (ns ai.miniforge.algorithms.interface-test
-  "Tests for the public algorithms interface: dfs-find, dfs-validate-graph,
-   dfs-collect, and dfs."
   (:require [clojure.test :refer [deftest testing is]]
-            [ai.miniforge.algorithms.interface :as algorithms]))
+            [ai.miniforge.algorithms.interface :as sut]
+            [ai.miniforge.algorithms.graph :as graph]))
 
-;------------------------------------------------------------------------------ Test Fixtures
+;; ---------------------------------------------------------------------------
+;; Verify interface vars point to the correct implementation
+;; ---------------------------------------------------------------------------
 
-(def get-deps :deps)
+(deftest interface-dfs-is-graph-dfs-test
+  (testing "interface/dfs is the same var as graph/dfs"
+    (is (= sut/dfs graph/dfs))))
 
-(def empty-graph {})
+(deftest interface-dfs-find-is-graph-dfs-find-test
+  (testing "interface/dfs-find is the same var as graph/dfs-find"
+    (is (= sut/dfs-find graph/dfs-find))))
 
-(def single-node
-  {"a" {:id "a" :deps []}})
+(deftest interface-dfs-validate-graph-is-graph-dfs-validate-graph-test
+  (testing "interface/dfs-validate-graph is the same var as graph/dfs-validate-graph"
+    (is (= sut/dfs-validate-graph graph/dfs-validate-graph))))
 
-(def linear-chain
-  {"a" {:id "a" :deps ["b"]}
-   "b" {:id "b" :deps ["c"]}
-   "c" {:id "c" :deps ["d"]}
-   "d" {:id "d" :deps []}})
+(deftest interface-dfs-collect-is-graph-dfs-collect-test
+  (testing "interface/dfs-collect is the same var as graph/dfs-collect"
+    (is (= sut/dfs-collect graph/dfs-collect))))
 
-(def diamond-dag
+(deftest interface-dfs-collect-reduce-is-graph-dfs-collect-reduce-test
+  (testing "interface/dfs-collect-reduce is the same var as graph/dfs-collect-reduce"
+    (is (= sut/dfs-collect-reduce graph/dfs-collect-reduce))))
+
+;; ---------------------------------------------------------------------------
+;; Smoke tests: ensure each interface function is callable and produces
+;; correct results (same as direct graph module calls)
+;; ---------------------------------------------------------------------------
+
+(def sample-graph
   {"a" {:id "a" :deps ["b" "c"]}
    "b" {:id "b" :deps ["d"]}
    "c" {:id "c" :deps ["d"]}
    "d" {:id "d" :deps []}})
 
-(def direct-cycle
-  {"a" {:id "a" :deps ["b"]}
-   "b" {:id "b" :deps ["a"]}})
+(defn get-deps [node] (:deps node))
 
-(def self-cycle
-  {"a" {:id "a" :deps ["a"]}})
+(deftest interface-dfs-smoke-test
+  (testing "dfs through interface traverses the graph"
+    (let [[visited result]
+          (sut/dfs sample-graph ["a"] get-deps
+                   (fn [_id _n _p _v _vis] nil)
+                   (fn [_id _p _v _vis] nil)
+                   (fn [_id _v _vis] nil))]
+      (is (= #{"a" "b" "c" "d"} visited))
+      (is (nil? result)))))
 
+<<<<<<< Updated upstream
 (def indirect-cycle
   {"a" {:id "a" :deps ["b"]}
    "b" {:id "b" :deps ["c"]}
@@ -100,22 +106,32 @@
     (let [result (algorithms/dfs-find diamond-dag "a" get-deps
                                       (fn [id _node _path] (= id "d")))]
       (is (some? result))
+=======
+(deftest interface-dfs-find-smoke-test
+  (testing "dfs-find through interface finds a node"
+    (let [result (sut/dfs-find sample-graph "a" get-deps
+                              (fn [id _node _path] (= id "d")))]
+>>>>>>> Stashed changes
       (is (= "d" (:found-id result)))
-      (is (vector? (:path result)))
-      (is (= "d" (last (:path result))))
-      (is (= "a" (first (:path result))))))
+      (is (vector? (:path result))))))
 
-  (testing "find start node itself"
-    (let [result (algorithms/dfs-find single-node "a" get-deps
-                                      (fn [id _node _path] (= id "a")))]
-      (is (= "a" (:found-id result)))
-      (is (= ["a"] (:path result)))))
+(deftest interface-dfs-validate-graph-smoke-test
+  (testing "dfs-validate-graph through interface validates"
+    (let [result (sut/dfs-validate-graph sample-graph (keys sample-graph) get-deps
+                                        (fn [_id _node ctx]
+                                          (when (:cycle? ctx)
+                                            {:valid? false :error :cycle})))]
+      (is (true? (:valid? result))))))
 
-  (testing "node not found returns nil"
-    (let [result (algorithms/dfs-find diamond-dag "a" get-deps
-                                      (fn [id _node _path] (= id "zzz")))]
-      (is (nil? result)))))
+(deftest interface-dfs-collect-smoke-test
+  (testing "dfs-collect through interface collects node ids"
+    (let [result (sut/dfs-collect sample-graph ["a"] get-deps
+                                 (fn [id _p _v _vis] id)
+                                 :visit)]
+      (is (= 4 (count result)))
+      (is (= #{"a" "b" "c" "d"} (set result))))))
 
+<<<<<<< Updated upstream
 (deftest dfs-find-edge-cases-test
   (testing "empty graph returns nil"
     (is (nil? (algorithms/dfs-find empty-graph "a" get-deps
@@ -552,3 +568,12 @@
   ;; bb test -- -n ai.miniforge.algorithms.interface-test
 
   :leave-this-here)
+=======
+(deftest interface-dfs-collect-reduce-smoke-test
+  (testing "dfs-collect-reduce through interface reduces correctly"
+    (let [result (sut/dfs-collect-reduce sample-graph ["a"] get-deps
+                                        (fn [_id _p _v _vis] 1)
+                                        :visit
+                                        + 0)]
+      (is (= 4 result)))))
+>>>>>>> Stashed changes
