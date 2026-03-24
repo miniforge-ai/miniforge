@@ -1,15 +1,9 @@
-;; Tests for ai.miniforge.algorithms.graph
-;;
-;; Covers: dfs, dfs-find, dfs-validate-graph, dfs-collect, dfs-collect-reduce
-;; Including edge cases: cycles, missing nodes, empty graphs, single nodes,
-;; diamond dependencies, disconnected components, self-loops, deep graphs.
-
 (ns ai.miniforge.algorithms.graph-test
   (:require [clojure.test :refer [deftest testing is]]
             [ai.miniforge.algorithms.graph :as sut]))
 
 ;; ---------------------------------------------------------------------------
-;; Test fixtures / helper graphs
+;; Test fixtures / graphs
 ;; ---------------------------------------------------------------------------
 
 (def linear-graph
@@ -37,858 +31,1120 @@
    "x" {:id "x" :deps ["y"]}
    "y" {:id "y" :deps []}})
 
+(def missing-dep-graph
+  {"a" {:id "a" :deps ["b" "ghost"]}
+   "b" {:id "b" :deps []}})
+
 (def single-node-graph
   {"a" {:id "a" :deps []}})
 
-(def missing-dep-graph
-  {"a" {:id "a" :deps ["b" "missing"]}
+(def empty-graph {})
+
+(def wide-graph
+  {"root" {:id "root" :deps ["c1" "c2" "c3" "c4"]}
+   "c1"   {:id "c1" :deps []}
+   "c2"   {:id "c2" :deps []}
+   "c3"   {:id "c3" :deps []}
+   "c4"   {:id "c4" :deps []}})
+
+(def deep-graph
+  {"a" {:id "a" :deps ["b"]}
+   "b" {:id "b" :deps ["c"]}
+   "c" {:id "c" :deps ["d"]}
+   "d" {:id "d" :deps ["e"]}
+   "e" {:id "e" :deps []}})
+
+(defn deps-fn [node] (:deps node))
+
+;; ---------------------------------------------------------------------------
+;; Edge case graph fixtures
+;; ---------------------------------------------------------------------------
+
+(def self-loop-with-children-graph
+  "Node that references itself AND has real children."
+  {"a" {:id "a" :deps ["a" "b"]}
    "b" {:id "b" :deps []}})
 
-(defn get-deps [node] (:deps node))
+(def multi-self-loop-graph
+  "Multiple nodes with self-loops."
+  {"a" {:id "a" :deps ["a" "b"]}
+   "b" {:id "b" :deps ["b"]}})
 
-(defn noop-visit [_id _node _path _visited _visiting] nil)
-(defn noop-cycle [_id _path _visited _visiting] nil)
-(defn noop-missing [_id _visited _visiting] nil)
+(def double-diamond-graph
+  "Two diamonds chained: a->b,c->d->e,f->g"
+  {"a" {:id "a" :deps ["b" "c"]}
+   "b" {:id "b" :deps ["d"]}
+   "c" {:id "c" :deps ["d"]}
+   "d" {:id "d" :deps ["e" "f"]}
+   "e" {:id "e" :deps ["g"]}
+   "f" {:id "f" :deps ["g"]}
+   "g" {:id "g" :deps []}})
 
-;; ===========================================================================
-;; dfs tests
-;; ===========================================================================
+(def multi-cycle-graph
+  "Graph with two independent cycles."
+  {"a" {:id "a" :deps ["b"]}
+   "b" {:id "b" :deps ["a" "c"]}
+   "c" {:id "c" :deps ["d"]}
+   "d" {:id "d" :deps ["c"]}})
 
-(deftest dfs-visits-all-reachable-nodes-test
-  (testing "visits all reachable nodes in a simple graph"
-    (let [[visited result] (sut/dfs diamond-graph ["a"] get-deps
-                                    noop-visit noop-cycle noop-missing)]
-      (is (= #{"a" "b" "c" "d"} visited))
+(def fan-in-graph
+  "Many nodes all pointing to a single leaf."
+  {"a" {:id "a" :deps ["z"]}
+   "b" {:id "b" :deps ["z"]}
+   "c" {:id "c" :deps ["z"]}
+   "d" {:id "d" :deps ["z"]}
+   "z" {:id "z" :deps []}})
+
+(def all-missing-deps-graph
+  "Every dependency is missing from the graph."
+  {"a" {:id "a" :deps ["ghost1" "ghost2"]}})
+
+(def mixed-problems-graph
+  "Graph with both cycles and missing nodes."
+  {"a" {:id "a" :deps ["b" "missing1"]}
+   "b" {:id "b" :deps ["c"]}
+   "c" {:id "c" :deps ["a" "missing2"]}})
+
+(defn make-deep-chain
+  "Build a linear chain graph of `n` nodes: n0 -> n1 -> ... -> n(n-1)."
+  [n]
+  (reduce (fn [m i]
+            (let [id (str "n" i)
+                  deps (if (< i (dec n)) [(str "n" (inc i))] [])]
+              (assoc m id {:id id :deps deps})))
+          {}
+          (range n)))
+
+;; ---------------------------------------------------------------------------
+;; dfs — Core traversal
+;; ---------------------------------------------------------------------------
+
+(deftest dfs-simple-linear-traversal
+  (testing "visits all nodes in a linear chain"
+    (let [[visited _] (sut/dfs linear-graph
+                               ["a"]
+                               deps-fn
+                               (fn [_ _ _ _ _] nil)
+                               (fn [_ _ _ _] nil)
+                               (fn [_ _ _] nil))]
+      (is (= #{"a" "b" "c"} visited)))))
+
+(deftest dfs-diamond-traversal
+  (testing "visits all nodes in a diamond graph"
+    (let [[visited _] (sut/dfs diamond-graph
+                               ["a"]
+                               deps-fn
+                               (fn [_ _ _ _ _] nil)
+                               (fn [_ _ _ _] nil)
+                               (fn [_ _ _] nil))]
+      (is (= #{"a" "b" "c" "d"} visited)))))
+
+(deftest dfs-cycle-detection
+  (testing "detects cycle and returns result"
+    (let [[_visited result] (sut/dfs cyclic-graph
+                                     ["a"]
+                                     deps-fn
+                                     (fn [_ _ _ _ _] nil)
+                                     (fn [id path _ _]
+                                       {:cycle-at id :path path})
+                                     (fn [_ _ _] nil))]
+      (is (some? result))
+      (is (= "a" (:cycle-at result))))))
+
+(deftest dfs-missing-node-detection
+  (testing "detects missing nodes"
+    (let [[_visited result] (sut/dfs missing-dep-graph
+                                     ["a"]
+                                     deps-fn
+                                     (fn [_ _ _ _ _] nil)
+                                     (fn [_ _ _ _] nil)
+                                     (fn [id _ _] {:missing id}))]
+      (is (= {:missing "ghost"} result)))))
+
+(deftest dfs-on-visit-halt
+  (testing "halts when on-visit returns non-nil"
+    (let [[_ result] (sut/dfs diamond-graph
+                              ["a"]
+                              deps-fn
+                              (fn [id _ _ _ _]
+                                (when (= id "b") :found-b))
+                              (fn [_ _ _ _] nil)
+                              (fn [_ _ _] nil))]
+      (is (= :found-b result)))))
+
+(deftest dfs-single-id-not-collection
+  (testing "accepts a single start-id, not just a collection"
+    (let [[visited _] (sut/dfs linear-graph
+                               "a"
+                               deps-fn
+                               (fn [_ _ _ _ _] nil)
+                               (fn [_ _ _ _] nil)
+                               (fn [_ _ _] nil))]
+      (is (= #{"a" "b" "c"} visited)))))
+
+(deftest dfs-self-loop-cycle
+  (testing "self-loop is detected as cycle"
+    (let [[_ result] (sut/dfs self-cycle-graph
+                              ["a"]
+                              deps-fn
+                              (fn [_ _ _ _ _] nil)
+                              (fn [id path _ _]
+                                {:self-loop id :path path})
+                              (fn [_ _ _] nil))]
+      (is (= "a" (:self-loop result))))))
+
+(deftest dfs-disconnected-two-starts
+  (testing "visits both components when started from both roots"
+    (let [[visited _] (sut/dfs disconnected-graph
+                               ["a" "x"]
+                               deps-fn
+                               (fn [_ _ _ _ _] nil)
+                               (fn [_ _ _ _] nil)
+                               (fn [_ _ _] nil))]
+      (is (= #{"a" "b" "x" "y"} visited)))))
+
+(deftest dfs-empty-graph-empty-starts
+  (testing "empty graph with empty start-ids returns empty visited"
+    (let [[visited result] (sut/dfs empty-graph
+                                    []
+                                    deps-fn
+                                    (fn [_ _ _ _ _] nil)
+                                    (fn [_ _ _ _] nil)
+                                    (fn [_ _ _] nil))]
+      (is (= #{} visited))
       (is (nil? result)))))
 
-(deftest dfs-detects-cycle-test
-  (testing "detects cycle and returns cycle info"
-    (let [[_visited result]
-          (sut/dfs cyclic-graph ["a"] get-deps
-                   noop-visit
-                   (fn [node-id path _visited _visiting]
-                     {:cycle-node node-id :path path})
-                   noop-missing)]
-      (is (some? result))
-      (is (= "a" (:cycle-node result))))))
+(deftest dfs-path-tracking
+  (testing "path accumulates parent chain during traversal"
+    (let [paths (atom [])
+          [_ _] (sut/dfs linear-graph
+                         ["a"]
+                         deps-fn
+                         (fn [id _node path _ _]
+                           (swap! paths conj {:id id :path path})
+                           nil)
+                         (fn [_ _ _ _] nil)
+                         (fn [_ _ _] nil))]
+      (is (= [{:id "a" :path []}
+              {:id "b" :path ["a"]}
+              {:id "c" :path ["a" "b"]}]
+             @paths)))))
 
-(deftest dfs-detects-missing-test
-  (testing "detects missing node and returns missing info"
-    (let [[_visited result]
-          (sut/dfs missing-dep-graph ["a"] get-deps
-                   noop-visit
-                   noop-cycle
-                   (fn [node-id _visited _visiting]
-                     {:missing node-id}))]
-      (is (some? result))
-      (is (= "missing" (:missing result))))))
+(deftest dfs-start-node-not-in-graph
+  (testing "starting from a node not in the graph triggers on-missing"
+    (let [[visited result] (sut/dfs linear-graph
+                                    ["nonexistent"]
+                                    deps-fn
+                                    (fn [_ _ _ _ _] nil)
+                                    (fn [_ _ _ _] nil)
+                                    (fn [id _ _] {:missing id}))]
+      (is (= #{} visited))
+      (is (= {:missing "nonexistent"} result)))))
 
-(deftest dfs-on-visit-halt-test
-  (testing "on-visit can halt early by returning a value"
-    (let [[_visited result]
-          (sut/dfs diamond-graph ["a"] get-deps
-                   (fn [node-id _node _path _visited _visiting]
-                     (when (= node-id "b") {:halted-at "b"}))
-                   noop-cycle noop-missing)]
-      (is (= {:halted-at "b"} result)))))
-
-(deftest dfs-visited-set-grows-test
-  (testing "visited set grows as traversal proceeds"
-    (let [visited-sizes (atom [])
-          [_visited _result]
-          (sut/dfs linear-graph ["a"] get-deps
-                   (fn [_id _node _path visited _visiting]
-                     (swap! visited-sizes conj (count visited))
-                     nil)
-                   noop-cycle noop-missing)]
-      ;; As we visit a, b, c in order, visited is #{} then #{a} then #{a,b}
-      ;; on-visit sees the visited set BEFORE the current node is added
-      (is (= [0 0 0] @visited-sizes)))))
-
-(deftest dfs-multiple-start-nodes-test
-  (testing "multiple start nodes visit all components"
-    (let [[visited result] (sut/dfs disconnected-graph ["a" "x"] get-deps
-                                    noop-visit noop-cycle noop-missing)]
-      (is (= #{"a" "b" "x" "y"} visited))
-      (is (nil? result)))))
-
-(deftest dfs-single-start-id-not-coll-test
-  (testing "single start-id (not wrapped in collection) works"
-    (let [[visited result] (sut/dfs linear-graph "a" get-deps
-                                    noop-visit noop-cycle noop-missing)]
+(deftest dfs-start-node-not-in-graph-nil-on-missing
+  (testing "starting from missing node with nil on-missing continues"
+    (let [[visited result] (sut/dfs linear-graph
+                                    ["nonexistent" "a"]
+                                    deps-fn
+                                    (fn [_ _ _ _ _] nil)
+                                    (fn [_ _ _ _] nil)
+                                    (fn [_ _ _] nil))]
       (is (= #{"a" "b" "c"} visited))
       (is (nil? result)))))
 
-(deftest dfs-self-cycle-test
-  (testing "self-referential node triggers cycle detection"
-    (let [[_visited result]
-          (sut/dfs self-cycle-graph ["a"] get-deps
-                   noop-visit
-                   (fn [node-id _path _v _vis] {:self-cycle node-id})
-                   noop-missing)]
-      (is (= {:self-cycle "a"} result)))))
-
-(deftest dfs-diamond-shared-dep-visited-once-test
-  (testing "shared dependency in diamond is visited exactly once"
+(deftest dfs-visited-shared-across-start-nodes
+  (testing "visited set is shared across multiple start nodes"
     (let [visit-count (atom 0)
-          [_visited _result]
-          (sut/dfs diamond-graph ["a"] get-deps
-                   (fn [node-id _node _path _v _vis]
-                     (when (= node-id "d")
-                       (swap! visit-count inc))
-                     nil)
-                   noop-cycle noop-missing)]
+          [visited _] (sut/dfs diamond-graph
+                               ["a" "b" "d"]
+                               deps-fn
+                               (fn [_ _ _ _ _]
+                                 (swap! visit-count inc)
+                                 nil)
+                               (fn [_ _ _ _] nil)
+                               (fn [_ _ _] nil))]
+      (is (= #{"a" "b" "c" "d"} visited))
+      ;; b and d are already visited after processing "a", so only 4 visits total
+      (is (= 4 @visit-count)))))
+
+(deftest dfs-cycle-path-includes-cycle-node
+  (testing "cycle path includes the cycle-forming node"
+    (let [[_ result] (sut/dfs cyclic-graph
+                              ["a"]
+                              deps-fn
+                              (fn [_ _ _ _ _] nil)
+                              (fn [id path _ _] {:id id :path path})
+                              (fn [_ _ _] nil))]
+      ;; path should be ["a" "b" "c" "a"] — full trail including the repeated node
+      (is (= "a" (last (:path result))))
+      (is (= "a" (first (:path result)))))))
+
+(deftest dfs-halt-prevents-further-traversal
+  (testing "halting on first visit prevents visiting deeper nodes"
+    (let [visited-ids (atom #{})
+          [_ result] (sut/dfs linear-graph
+                              ["a"]
+                              deps-fn
+                              (fn [id _ _ _ _]
+                                (swap! visited-ids conj id)
+                                (when (= id "a") :halt-at-a))
+                              (fn [_ _ _ _] nil)
+                              (fn [_ _ _] nil))]
+      (is (= :halt-at-a result))
+      ;; Only "a" was visited before halt
+      (is (= #{"a"} @visited-ids)))))
+
+(deftest dfs-on-cycle-halt-stops-traversal
+  (testing "halting from on-cycle prevents further traversal"
+    (let [[_ result] (sut/dfs multi-cycle-graph
+                              ["a"]
+                              deps-fn
+                              (fn [_ _ _ _ _] nil)
+                              (fn [id path _ _]
+                                {:halted-cycle id :path path})
+                              (fn [_ _ _] nil))]
+      ;; Should halt at first cycle encountered
+      (is (some? result))
+      (is (contains? result :halted-cycle)))))
+
+(deftest dfs-multiple-missing-deps-halts-at-first
+  (testing "graph with all missing deps halts at first missing"
+    (let [[_ result] (sut/dfs all-missing-deps-graph
+                              ["a"]
+                              deps-fn
+                              (fn [_ _ _ _ _] nil)
+                              (fn [_ _ _ _] nil)
+                              (fn [id _ _] {:missing id}))]
+      ;; Halts at first missing dep
+      (is (= {:missing "ghost1"} result)))))
+
+(deftest dfs-fan-in-graph-visits-shared-node-once
+  (testing "shared dependency is visited only once even with multiple parents"
+    (let [visit-count (atom 0)
+          [visited _] (sut/dfs fan-in-graph
+                               ["a" "b" "c" "d"]
+                               deps-fn
+                               (fn [id _ _ _ _]
+                                 (when (= id "z")
+                                   (swap! visit-count inc))
+                                 nil)
+                               (fn [_ _ _ _] nil)
+                               (fn [_ _ _] nil))]
+      (is (= #{"a" "b" "c" "d" "z"} visited))
       (is (= 1 @visit-count)))))
 
-(deftest dfs-path-tracks-ancestry-test
-  (testing "path parameter correctly tracks the ancestry chain"
-    (let [paths (atom {})
-          [_visited _result]
-          (sut/dfs linear-graph ["a"] get-deps
-                   (fn [node-id _node path _v _vis]
-                     (swap! paths assoc node-id (vec path))
-                     nil)
-                   noop-cycle noop-missing)]
-      (is (= [] (get @paths "a")))
-      (is (= ["a"] (get @paths "b")))
-      (is (= ["a" "b"] (get @paths "c"))))))
+(deftest dfs-visiting-set-reset-between-start-nodes
+  (testing "visiting set resets for each top-level start node"
+    ;; If start nodes share structure but are independent starts,
+    ;; the visiting set (cycle detection) should reset.
+    ;; This means a node visited in start-1's subtree won't appear
+    ;; as 'currently visiting' in start-2's subtree.
+    (let [cycle-detected (atom false)
+          [visited _] (sut/dfs linear-graph
+                               ["a" "b"]
+                               deps-fn
+                               (fn [_ _ _ _ _] nil)
+                               (fn [_ _ _ _]
+                                 (reset! cycle-detected true)
+                                 nil)
+                               (fn [_ _ _] nil))]
+      (is (= #{"a" "b" "c"} visited))
+      (is (false? @cycle-detected)))))
 
-(deftest dfs-visiting-set-contains-ancestors-test
-  (testing "visiting set contains current ancestry during traversal"
-    (let [visiting-snapshots (atom {})
-          [_visited _result]
-          (sut/dfs linear-graph ["a"] get-deps
-                   (fn [node-id _node _path _v visiting]
-                     (swap! visiting-snapshots assoc node-id visiting)
-                     nil)
-                   noop-cycle noop-missing)]
-      ;; When visiting "c", the visiting set should contain "a" and "b"
-      (is (contains? (get @visiting-snapshots "c") "a"))
-      (is (contains? (get @visiting-snapshots "c") "b")))))
+(deftest dfs-returns-visited-even-on-halt
+  (testing "visited set returned reflects nodes visited before halt"
+    (let [[visited result] (sut/dfs deep-graph
+                                    ["a"]
+                                    deps-fn
+                                    (fn [id _ _ _ _]
+                                      (when (= id "c") :halt))
+                                    (fn [_ _ _ _] nil)
+                                    (fn [_ _ _] nil))]
+      (is (= :halt result))
+      ;; "a" visits "b" which visits "c" — halt. "a" and "b" not yet in visited
+      ;; because they haven't finished their dep processing
+      (is (not (contains? visited "d")))
+      (is (not (contains? visited "e"))))))
 
-(deftest dfs-cycle-path-includes-cycle-node-test
-  (testing "cycle path includes the cycling node at the end"
-    (let [[_visited result]
-          (sut/dfs cyclic-graph ["a"] get-deps
-                   noop-visit
-                   (fn [node-id path _v _vis]
-                     {:path path})
-                   noop-missing)]
-      ;; path passed to on-cycle-fn is (conj path node-id)
-      (is (= "a" (last (:path result)))))))
+;; ---------------------------------------------------------------------------
+;; dfs-find
+;; ---------------------------------------------------------------------------
 
-;; ===========================================================================
-;; dfs-find tests
-;; ===========================================================================
+(deftest dfs-find-in-linear-graph
+  (testing "finds target in linear graph"
+    (let [result (sut/dfs-find linear-graph "a" deps-fn
+                              (fn [id _ _] (= id "c")))]
+      (is (= {:found-id "c" :path ["a" "b" "c"]} result)))))
 
-(deftest dfs-find-returns-match-test
-  (testing "returns found-id and path when predicate matches"
-    (let [result (sut/dfs-find diamond-graph "a" get-deps
-                              (fn [id _node _path] (= id "d")))]
-      (is (= "d" (:found-id result)))
-      (is (= ["a" "b" "d"] (:path result))))))
-
-(deftest dfs-find-returns-nil-when-not-found-test
-  (testing "returns nil when no node matches"
-    (let [result (sut/dfs-find diamond-graph "a" get-deps
-                              (fn [id _node _path] (= id "z")))]
+(deftest dfs-find-not-found
+  (testing "returns nil when target not in graph"
+    (let [result (sut/dfs-find linear-graph "a" deps-fn
+                              (fn [id _ _] (= id "z")))]
       (is (nil? result)))))
 
-(deftest dfs-find-returns-start-node-test
-  (testing "can find the start node itself"
-    (let [result (sut/dfs-find linear-graph "a" get-deps
-                              (fn [id _node _path] (= id "a")))]
-      (is (= "a" (:found-id result))))))
+(deftest dfs-find-root-matches
+  (testing "finds the root node itself"
+    (let [result (sut/dfs-find linear-graph "a" deps-fn
+                              (fn [id _ _] (= id "a")))]
+      (is (= {:found-id "a" :path ["a"]} result)))))
 
-(deftest dfs-find-ignores-cycles-test
-  (testing "dfs-find does not hang on cycles"
-    (let [result (sut/dfs-find cyclic-graph "a" get-deps
-                              (fn [id _node _path] (= id "nonexistent")))]
+(deftest dfs-find-diamond-first-path
+  (testing "finds node via first path in diamond graph"
+    (let [result (sut/dfs-find diamond-graph "a" deps-fn
+                              (fn [id _ _] (= id "d")))]
+      (is (= {:found-id "d" :path ["a" "b" "d"]} result)))))
+
+(deftest dfs-find-with-cycle
+  (testing "find works in cyclic graph without hanging"
+    (let [result (sut/dfs-find cyclic-graph "a" deps-fn
+                              (fn [id _ _] (= id "c")))]
+      (is (= {:found-id "c" :path ["a" "b" "c"]} result)))))
+
+(deftest dfs-find-with-missing-deps
+  (testing "find works when graph has missing deps"
+    (let [result (sut/dfs-find missing-dep-graph "a" deps-fn
+                              (fn [id _ _] (= id "b")))]
+      (is (= {:found-id "b" :path ["a" "b"]} result)))))
+
+(deftest dfs-find-in-empty-graph
+  (testing "find in empty graph from nonexistent start returns nil"
+    (let [result (sut/dfs-find empty-graph "a" deps-fn
+                              (fn [_ _ _] true))]
       (is (nil? result)))))
 
-(deftest dfs-find-ignores-missing-nodes-test
-  (testing "dfs-find skips missing nodes without error"
-    (let [result (sut/dfs-find missing-dep-graph "a" get-deps
-                              (fn [id _node _path] (= id "b")))]
-      (is (= "b" (:found-id result))))))
+(deftest dfs-find-in-single-node-graph
+  (testing "find single node when it matches"
+    (let [result (sut/dfs-find single-node-graph "a" deps-fn
+                              (fn [id _ _] (= id "a")))]
+      (is (= {:found-id "a" :path ["a"]} result)))))
 
-(deftest dfs-find-uses-node-data-test
+(deftest dfs-find-in-single-node-no-match
+  (testing "find returns nil when single node doesn't match"
+    (let [result (sut/dfs-find single-node-graph "a" deps-fn
+                              (fn [id _ _] (= id "z")))]
+      (is (nil? result)))))
+
+(deftest dfs-find-predicate-uses-node-data
   (testing "predicate can inspect node data"
-    (let [graph {"a" {:id "a" :deps ["b" "c"] :color :red}
-                 "b" {:id "b" :deps [] :color :blue}
-                 "c" {:id "c" :deps [] :color :green}}
-          result (sut/dfs-find graph "a" get-deps
-                              (fn [_id node _path] (= :green (:color node))))]
-      (is (= "c" (:found-id result))))))
+    (let [graph {"a" {:id "a" :deps ["b"] :role :admin}
+                 "b" {:id "b" :deps [] :role :user}}
+          result (sut/dfs-find graph "a"
+                              (fn [node] (:deps node))
+                              (fn [_id node _path] (= :user (:role node))))]
+      (is (= {:found-id "b" :path ["a" "b"]} result)))))
 
-(deftest dfs-find-uses-path-test
-  (testing "predicate can use path for decisions"
-    (let [result (sut/dfs-find linear-graph "a" get-deps
-                              (fn [_id _node path] (= 2 (count path))))]
-      ;; "c" has path ["a" "b"] (length 2) when visited
-      (is (= "c" (:found-id result))))))
+(deftest dfs-find-predicate-uses-path
+  (testing "predicate can use path for depth-based search"
+    (let [result (sut/dfs-find deep-graph "a" deps-fn
+                              (fn [_id _node path] (= 3 (count path))))]
+      ;; path has 3 elements means we're at depth 3: ["a" "b" "c"]
+      ;; and we're visiting "d"
+      (is (= "d" (:found-id result))))))
 
-(deftest dfs-find-empty-graph-test
-  (testing "dfs-find on completely empty graph returns nil"
-    (let [result (sut/dfs-find {} "nonexistent" get-deps
-                              (fn [_id _node _path] true))]
+(deftest dfs-find-cycle-does-not-infinite-loop
+  (testing "find with target not reachable in cyclic graph returns nil"
+    (let [result (sut/dfs-find cyclic-graph "a" deps-fn
+                              (fn [id _ _] (= id "nonexistent")))]
       (is (nil? result)))))
 
-;; ===========================================================================
-;; dfs-validate-graph tests
-;; ===========================================================================
+(deftest dfs-find-self-loop-graph
+  (testing "find works with self-looping nodes"
+    (let [result (sut/dfs-find self-loop-with-children-graph "a" deps-fn
+                              (fn [id _ _] (= id "b")))]
+      (is (= {:found-id "b" :path ["a" "b"]} result)))))
 
-(deftest dfs-validate-graph-valid-test
-  (testing "valid graph returns {:valid? true}"
-    (let [result (sut/dfs-validate-graph diamond-graph (keys diamond-graph) get-deps
-                                        (fn [_id _node ctx]
-                                          (when (:cycle? ctx)
-                                            {:valid? false :error :cycle})))]
+;; ---------------------------------------------------------------------------
+;; dfs-validate-graph
+;; ---------------------------------------------------------------------------
+
+(defn cycle-validator [_id _node context]
+  (when (:cycle? context)
+    {:valid? false :error "Cycle detected" :path (:path context)}))
+
+(defn missing-validator [id _node context]
+  (when (:missing? context)
+    {:valid? false :error (str "Missing node: " id)}))
+
+(defn strict-validator [id _node context]
+  (or (cycle-validator id nil context)
+      (missing-validator id nil context)))
+
+(deftest dfs-validate-acyclic-graph
+  (testing "acyclic graph passes validation"
+    (let [result (sut/dfs-validate-graph diamond-graph (keys diamond-graph)
+                                        deps-fn cycle-validator)]
       (is (true? (:valid? result))))))
 
-(deftest dfs-validate-graph-cycle-test
-  (testing "cyclic graph returns validation error"
-    (let [result (sut/dfs-validate-graph cyclic-graph ["a"] get-deps
-                                        (fn [id _node ctx]
-                                          (when (:cycle? ctx)
-                                            {:valid? false :error :cycle :node id})))]
+(deftest dfs-validate-cyclic-graph
+  (testing "cyclic graph fails validation"
+    (let [result (sut/dfs-validate-graph cyclic-graph (keys cyclic-graph)
+                                        deps-fn cycle-validator)]
+      (is (false? (:valid? result)))
+      (is (= "Cycle detected" (:error result))))))
+
+(deftest dfs-validate-missing-node
+  (testing "missing dependency fails validation"
+    (let [result (sut/dfs-validate-graph missing-dep-graph ["a"]
+                                        deps-fn missing-validator)]
+      (is (false? (:valid? result)))
+      (is (= "Missing node: ghost" (:error result))))))
+
+(deftest dfs-validate-empty-graph
+  (testing "empty graph with no start nodes is valid"
+    (let [result (sut/dfs-validate-graph empty-graph []
+                                        deps-fn strict-validator)]
+      (is (true? (:valid? result))))))
+
+(deftest dfs-validate-self-loop-detected
+  (testing "self-loop is caught as cycle"
+    (let [result (sut/dfs-validate-graph self-cycle-graph ["a"]
+                                        deps-fn cycle-validator)]
       (is (false? (:valid? result))))))
 
-(deftest dfs-validate-graph-missing-test
-  (testing "graph with missing deps returns validation error"
-    (let [result (sut/dfs-validate-graph missing-dep-graph ["a"] get-deps
-                                        (fn [id _node ctx]
-                                          (when (:missing? ctx)
-                                            {:valid? false :error :missing :node id})))]
-      (is (false? (:valid? result)))
-      (is (= "missing" (:node result))))))
+(deftest dfs-validate-disconnected-valid
+  (testing "disconnected acyclic graph is valid"
+    (let [result (sut/dfs-validate-graph disconnected-graph ["a" "x"]
+                                        deps-fn strict-validator)]
+      (is (true? (:valid? result))))))
 
-(deftest dfs-validate-graph-empty-test
-  (testing "empty graph with no starts is valid"
-    (let [result (sut/dfs-validate-graph {} [] get-deps
-                                        (fn [_id _node ctx]
-                                          (cond
-                                            (:cycle? ctx) {:valid? false :error :cycle}
-                                            (:missing? ctx) {:valid? false :error :missing})))]
-      (is (true? (:valid? result)))
-      (is (= {} (:graph result))))))
-
-(deftest dfs-validate-graph-self-cycle-test
-  (testing "detects self-referential cycles"
-    (let [result (sut/dfs-validate-graph self-cycle-graph ["a"] get-deps
-                                        (fn [id _node ctx]
-                                          (when (:cycle? ctx)
-                                            {:valid? false :error :self-cycle :node id})))]
-      (is (false? (:valid? result)))
-      (is (= "a" (:node result))))))
-
-(deftest dfs-validate-graph-returns-graph-when-valid-test
+(deftest dfs-validate-returns-graph-on-valid
   (testing "valid result includes the original graph"
-    (let [result (sut/dfs-validate-graph diamond-graph (keys diamond-graph) get-deps
-                                        (fn [_id _node _ctx] nil))]
-      (is (true? (:valid? result)))
+    (let [result (sut/dfs-validate-graph diamond-graph (keys diamond-graph)
+                                        deps-fn strict-validator)]
       (is (= diamond-graph (:graph result))))))
 
-(deftest dfs-validate-graph-cycle-path-provided-test
-  (testing "cycle validation context includes the path"
-    (let [result (sut/dfs-validate-graph cyclic-graph ["a"] get-deps
-                                        (fn [_id _node ctx]
-                                          (when (:cycle? ctx)
-                                            {:valid? false :path (:path ctx)})))]
-      (is (false? (:valid? result)))
+(deftest dfs-validate-strict-catches-cycle-and-missing
+  (testing "strict validator catches first problem in mixed graph"
+    (let [result (sut/dfs-validate-graph mixed-problems-graph ["a"]
+                                        deps-fn strict-validator)]
+      (is (false? (:valid? result))))))
+
+(deftest dfs-validate-noop-validator-always-valid
+  (testing "validator that always returns nil makes any graph valid"
+    (let [noop-validator (fn [_ _ _] nil)
+          result (sut/dfs-validate-graph cyclic-graph (keys cyclic-graph)
+                                        deps-fn noop-validator)]
+      (is (true? (:valid? result))))))
+
+(deftest dfs-validate-cycle-path-is-provided
+  (testing "cycle validator receives the path to the cycle"
+    (let [result (sut/dfs-validate-graph cyclic-graph ["a"]
+                                        deps-fn cycle-validator)]
       (is (vector? (:path result)))
       (is (pos? (count (:path result)))))))
 
-(deftest dfs-validate-graph-tolerant-validator-test
-  (testing "validator that returns nil for all events means graph is valid"
-    (let [result (sut/dfs-validate-graph cyclic-graph ["a"] get-deps
-                                        (fn [_id _node _ctx] nil))]
+(deftest dfs-validate-single-node-no-deps
+  (testing "single node with no deps is valid"
+    (let [result (sut/dfs-validate-graph single-node-graph ["a"]
+                                        deps-fn strict-validator)]
+      (is (true? (:valid? result))))))
+
+(deftest dfs-validate-fan-in-valid
+  (testing "fan-in graph (many parents, one child) is valid"
+    (let [result (sut/dfs-validate-graph fan-in-graph (keys fan-in-graph)
+                                        deps-fn strict-validator)]
       (is (true? (:valid? result))))))
 
 ;; ---------------------------------------------------------------------------
-;; dfs-collect - :visit (pre-order)
+;; dfs-collect — :visit mode
 ;; ---------------------------------------------------------------------------
 
-(deftest dfs-collect-pre-order-test
-  (testing "collects node ids in pre-order (parent before children)"
-    (let [result (sut/dfs-collect linear-graph ["a"] get-deps
+(deftest dfs-collect-visit-pre-order
+  (testing "collects visited node ids in pre-order"
+    (let [result (sut/dfs-collect diamond-graph ["a"] deps-fn
                                  (fn [id _path _v _vis] id)
                                  :visit)]
-      (is (= ["a" "b" "c"] result)))))
-
-(deftest dfs-collect-visit-diamond-test
-  (testing "collects diamond graph with :visit, shared node visited once"
-    (let [result (sut/dfs-collect diamond-graph ["a"] get-deps
-                                 (fn [id _path _v _vis] id)
-                                 :visit)]
-      (is (= 4 (count result)))
+      (is (vector? result))
+      ;; "a" is visited first
       (is (= "a" (first result)))
-      ;; "d" appears exactly once
-      (is (= 1 (count (filter #(= "d" %) result)))))))
+      (is (= #{"a" "b" "c" "d"} (set result))))))
 
-(deftest dfs-collect-nil-values-ignored-test
+(deftest dfs-collect-visit-nil-values-excluded
   (testing "nil return values from collect-fn are not accumulated"
-    (let [result (sut/dfs-collect diamond-graph ["a"] get-deps
-                                 (fn [id _p _v _vis]
+    (let [result (sut/dfs-collect diamond-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis]
                                    (when (= id "d") "found-d"))
                                  :visit)]
       (is (= ["found-d"] result)))))
 
-(deftest dfs-collect-empty-graph-test
-  (testing "returns empty vector for empty graph"
-    (let [result (sut/dfs-collect {} ["a"] get-deps
-                                 (fn [id _p _v _vis] id)
+;; ---------------------------------------------------------------------------
+;; dfs-collect — :cycle mode
+;; ---------------------------------------------------------------------------
+
+(deftest dfs-collect-cycle-events
+  (testing "collects cycle events when :cycle mode is used"
+    (let [result (sut/dfs-collect cyclic-graph ["a"] deps-fn
+                                 (fn [id path _v _vis]
+                                   {:cycle-at id :path path})
+                                 :cycle)]
+      (is (= 1 (count result)))
+      (is (= "a" (:cycle-at (first result)))))))
+
+(deftest dfs-collect-cycle-on-acyclic-graph
+  (testing "no cycle events on acyclic graph"
+    (let [result (sut/dfs-collect diamond-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :cycle)]
+      (is (empty? result)))))
+
+(deftest dfs-collect-multi-cycle-graph
+  (testing "collects cycle event from graph with multiple cycles"
+    (let [result (sut/dfs-collect multi-cycle-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :cycle)]
+      ;; At minimum one cycle should be detected
+      (is (pos? (count result))))))
+
+;; ---------------------------------------------------------------------------
+;; dfs-collect — :missing mode
+;; ---------------------------------------------------------------------------
+
+(deftest dfs-collect-missing-events
+  (testing "collects missing node events"
+    (let [result (sut/dfs-collect missing-dep-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :missing)]
+      (is (= ["ghost"] result)))))
+
+(deftest dfs-collect-no-missing-on-complete-graph
+  (testing "no missing events on a complete graph"
+    (let [result (sut/dfs-collect diamond-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :missing)]
+      (is (empty? result)))))
+
+(deftest dfs-collect-all-missing-deps
+  (testing "collects all missing deps when none halt traversal"
+    (let [result (sut/dfs-collect all-missing-deps-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :missing)]
+      (is (= #{"ghost1" "ghost2"} (set result))))))
+
+;; ---------------------------------------------------------------------------
+;; dfs-collect — :all mode
+;; ---------------------------------------------------------------------------
+
+(deftest dfs-collect-all-events
+  (testing ":all collects visit, cycle, and missing events"
+    (let [graph {"a" {:id "a" :deps ["b" "c" "ghost"]}
+                 "b" {:id "b" :deps ["a"]}  ;; cycle back to a
+                 "c" {:id "c" :deps []}}
+          result (sut/dfs-collect graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :all)]
+      ;; Should have visits for a, b, c + cycle for a + missing for ghost
+      (is (>= (count result) 4))
+      ;; "a" appears at least twice (visit + cycle)
+      (is (>= (count (filter #(= "a" %) result)) 2)))))
+
+(deftest dfs-collect-all-on-clean-graph
+  (testing ":all on clean acyclic graph only collects visit events"
+    (let [result (sut/dfs-collect diamond-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :all)]
+      (is (= #{"a" "b" "c" "d"} (set result)))
+      (is (= 4 (count result))))))
+
+;; ---------------------------------------------------------------------------
+;; dfs-collect — Edge cases
+;; ---------------------------------------------------------------------------
+
+(deftest dfs-collect-empty-graph
+  (testing "collecting from empty graph returns empty vector"
+    (let [result (sut/dfs-collect empty-graph [] deps-fn
+                                 (fn [id _ _ _] id)
                                  :visit)]
       (is (= [] result)))))
 
-;; ---------------------------------------------------------------------------
-;; dfs-collect - :pre mode (alias for :visit)
-;; ---------------------------------------------------------------------------
-
-(deftest dfs-collect-pre-mode-linear-test
-  (testing ":pre collects in same order as :visit (parent before children)"
-    (let [result (sut/dfs-collect linear-graph ["a"] get-deps
-                                 (fn [id _path _v _vis] id)
-                                 :pre)]
-      (is (= ["a" "b" "c"] result)))))
-
-(deftest dfs-collect-pre-mode-diamond-test
-  (testing ":pre collects diamond graph same as :visit"
-    (let [pre-result (sut/dfs-collect diamond-graph ["a"] get-deps
-                                     (fn [id _path _v _vis] id)
-                                     :pre)
-          visit-result (sut/dfs-collect diamond-graph ["a"] get-deps
-                                       (fn [id _path _v _vis] id)
-                                       :visit)]
-      (is (= pre-result visit-result)))))
-
-(deftest dfs-collect-pre-mode-empty-graph-test
-  (testing ":pre on empty graph returns empty vector"
-    (let [result (sut/dfs-collect {} [] get-deps
-                                 (fn [id _p _v _vis] id)
-                                 :pre)]
-      (is (= [] result)))))
-
-(deftest dfs-collect-pre-mode-single-node-test
-  (testing ":pre on single node graph collects exactly one"
-    (let [result (sut/dfs-collect single-node-graph ["a"] get-deps
-                                 (fn [id _p _v _vis] id)
-                                 :pre)]
+(deftest dfs-collect-single-node
+  (testing "collecting from single node graph"
+    (let [result (sut/dfs-collect single-node-graph ["a"] deps-fn
+                                 (fn [id _ _ _] id)
+                                 :visit)]
       (is (= ["a"] result)))))
 
-(deftest dfs-collect-pre-mode-collects-matching-criteria-test
-  (testing ":pre collects only nodes matching criteria"
-    (let [result (sut/dfs-collect diamond-graph ["a"] get-deps
-                                 (fn [id _p _v _vis]
-                                   (when (#{"b" "d"} id) id))
-                                 :pre)]
-      (is (= ["b" "d"] result)))))
-
-;; ---------------------------------------------------------------------------
-;; dfs-collect - :post mode (post-order)
-;; ---------------------------------------------------------------------------
-
-(deftest dfs-collect-post-linear-test
-  (testing ":post collects in post-order (children before parents)"
-    (let [result (sut/dfs-collect linear-graph ["a"] get-deps
-                                 (fn [id _path _v _vis] id)
-                                 :post)]
-      (is (= ["c" "b" "a"] result)))))
-
-(deftest dfs-collect-post-diamond-test
-  (testing ":post collects diamond graph in post-order"
-    (let [result (sut/dfs-collect diamond-graph ["a"] get-deps
-                                 (fn [id _path _v _vis] id)
-                                 :post)]
-      ;; "d" must come before "b" and "c", all before "a"
-      (let [idx (zipmap result (range))]
-        (is (< (idx "d") (idx "b")))
-        (is (< (idx "d") (idx "c")))
-        (is (< (idx "b") (idx "a")))
-        (is (< (idx "c") (idx "a"))))
-      ;; All 4 nodes collected exactly once
-      (is (= 4 (count result)))
-      (is (= #{"a" "b" "c" "d"} (set result))))))
-
-(deftest dfs-collect-post-single-node-test
-  (testing ":post on single node collects exactly one"
-    (let [result (sut/dfs-collect single-node-graph ["a"] get-deps
-                                 (fn [id _p _v _vis] id)
-                                 :post)]
-      (is (= ["a"] result)))))
-
-(deftest dfs-collect-post-empty-graph-test
-  (testing ":post on empty graph returns empty vector"
-    (let [result (sut/dfs-collect {} [] get-deps
-                                 (fn [id _p _v _vis] id)
-                                 :post)]
-      (is (= [] result)))))
-
-(deftest dfs-collect-post-empty-graph-missing-start-test
-  (testing ":post on empty graph with start id returns empty (missing nodes skipped)"
-    (let [result (sut/dfs-collect {} ["ghost"] get-deps
-                                 (fn [id _p _v _vis] id)
-                                 :post)]
-      (is (= [] result)))))
-
-(deftest dfs-collect-post-disconnected-test
-  (testing ":post collects both components when both started"
-    (let [result (sut/dfs-collect disconnected-graph ["a" "x"] get-deps
-                                 (fn [id _p _v _vis] id)
-                                 :post)]
-      (is (= 4 (count result)))
-      (is (= #{"a" "b" "x" "y"} (set result)))
-      ;; Children before parents in each component
-      (let [idx (zipmap result (range))]
-        (is (< (idx "b") (idx "a")))
-        (is (< (idx "y") (idx "x")))))))
-
-(deftest dfs-collect-post-with-cycle-test
-  (testing ":post on cyclic graph collects nodes without infinite loop"
-    (let [result (sut/dfs-collect cyclic-graph ["a"] get-deps
-                                 (fn [id _p _v _vis] id)
-                                 :post)]
-      ;; All three nodes collected, each once
-      (is (= 3 (count result)))
-      (is (= #{"a" "b" "c"} (set result))))))
-
-(deftest dfs-collect-post-self-loop-test
-  (testing ":post on self-loop graph collects the node"
-    (let [result (sut/dfs-collect self-cycle-graph ["a"] get-deps
-                                 (fn [id _p _v _vis] id)
-                                 :post)]
-      (is (= ["a"] result)))))
-
-(deftest dfs-collect-post-nil-values-ignored-test
-  (testing ":post ignores nil return values from collect-fn"
-    (let [result (sut/dfs-collect diamond-graph ["a"] get-deps
-                                 (fn [id _p _v _vis]
-                                   (when (= id "d") "leaf"))
-                                 :post)]
-      (is (= ["leaf"] result)))))
-
-(deftest dfs-collect-post-collects-matching-criteria-test
-  (testing ":post collects only nodes matching criteria, in post-order"
-    (let [result (sut/dfs-collect diamond-graph ["a"] get-deps
-                                 (fn [id _p _v _vis]
-                                   (when (#{"b" "d"} id) id))
-                                 :post)]
-      ;; d before b in post-order
-      (is (= ["d" "b"] result)))))
-
-(deftest dfs-collect-pre-vs-post-order-test
-  (testing ":pre and :post produce reversed order for linear graph"
-    (let [pre  (sut/dfs-collect linear-graph ["a"] get-deps
-                               (fn [id _p _v _vis] id)
-                               :pre)
-          post (sut/dfs-collect linear-graph ["a"] get-deps
-                               (fn [id _p _v _vis] id)
-                               :post)]
-      (is (= (reverse pre) post)))))
-
-;; ---------------------------------------------------------------------------
-;; dfs-collect - :cycle events
-;; ---------------------------------------------------------------------------
-
-(deftest dfs-collect-cycles-test
-  (testing "collects cycle information"
-    (let [result (sut/dfs-collect cyclic-graph ["a"] get-deps
-                                 (fn [id path _v _vis] {:node id :path path})
-                                 :cycle)]
-      (is (= 1 (count result)))
-      (is (= "a" (:node (first result)))))))
-
-(deftest dfs-collect-no-cycles-test
-  (testing "returns empty when no cycles exist"
-    (let [result (sut/dfs-collect diamond-graph ["a"] get-deps
-                                 (fn [id path _v _vis] {:node id :path path})
-                                 :cycle)]
-      (is (= [] result)))))
-
-;; ---------------------------------------------------------------------------
-;; dfs-collect - :missing events
-;; ---------------------------------------------------------------------------
-
-(deftest dfs-collect-missing-test
-  (testing "collects missing node ids"
-    (let [result (sut/dfs-collect missing-dep-graph ["a"] get-deps
-                                 (fn [id _path _v _vis] id)
-                                 :missing)]
-      (is (= ["missing"] result)))))
-
-(deftest dfs-collect-missing-multiple-test
-  (testing "collects multiple missing node ids"
-    (let [graph {"a" {:id "a" :deps ["ghost1" "ghost2" "b"]}
-                 "b" {:id "b" :deps ["ghost3"]}}
-          result (sut/dfs-collect graph ["a"] get-deps
-                                 (fn [id _path _v _vis] id)
-                                 :missing)]
-      (is (= 3 (count result)))
-      (is (= #{"ghost1" "ghost2" "ghost3"} (set result))))))
-
-;; ---------------------------------------------------------------------------
-;; dfs-collect - :all events
-;; ---------------------------------------------------------------------------
-
-(deftest dfs-collect-all-events-test
-  (testing "collects visits, cycles, and missing nodes"
-    (let [graph {"a" {:id "a" :deps ["b" "c" "missing"]}
-                 "b" {:id "b" :deps ["a"]}  ;; cycle
-                 "c" {:id "c" :deps []}}
-          result (sut/dfs-collect graph ["a"] get-deps
-                                 (fn [id _path _v _vis] id)
-                                 :all)]
-      ;; Should collect visits for a, b, c + cycle for a + missing for "missing"
-      (is (pos? (count result)))
-      ;; a appears as visit and as cycle back-edge
-      (is (some #(= "a" %) result))
-      (is (some #(= "missing" %) result)))))
-
-(deftest dfs-collect-all-on-acyclic-graph-test
-  (testing ":all on acyclic graph with no missing collects only visits"
-    (let [result (sut/dfs-collect diamond-graph ["a"] get-deps
-                                 (fn [id _path _v _vis] id)
-                                 :all)]
-      (is (= 4 (count result)))
-      (is (= #{"a" "b" "c" "d"} (set result))))))
-
-;; ---------------------------------------------------------------------------
-;; dfs-collect - multiple start nodes
-;; ---------------------------------------------------------------------------
-
-(deftest dfs-collect-multiple-starts-test
-  (testing "collects from disconnected components via multiple starts"
-    (let [result (sut/dfs-collect disconnected-graph ["a" "x"] get-deps
-                                 (fn [id _p _v _vis] id)
+(deftest dfs-collect-multiple-start-ids
+  (testing "collects across multiple disconnected components"
+    (let [result (sut/dfs-collect disconnected-graph ["a" "x"] deps-fn
+                                 (fn [id _ _ _] id)
                                  :visit)]
       (is (= #{"a" "b" "x" "y"} (set result)))
       (is (= 4 (count result))))))
 
-(deftest dfs-collect-single-start-not-coll-test
-  (testing "dfs-collect handles single start-id not wrapped in collection (via dfs)"
-    (let [result (sut/dfs-collect linear-graph "a" get-deps
-                                 (fn [id _p _v _vis] id)
+(deftest dfs-collect-wide-graph
+  (testing "collects all children of a wide graph"
+    (let [result (sut/dfs-collect wide-graph ["root"] deps-fn
+                                 (fn [id _ _ _] id)
                                  :visit)]
-      (is (= ["a" "b" "c"] result)))))
+      (is (= #{"root" "c1" "c2" "c3" "c4"} (set result))))))
 
-(deftest dfs-collect-overlapping-starts-test
-  (testing "overlapping start nodes don't cause duplicate visits"
-    (let [result (sut/dfs-collect diamond-graph ["a" "b" "d"] get-deps
-                                 (fn [id _p _v _vis] id)
+(deftest dfs-collect-disconnected-single-start-only-reachable
+  (testing "collect from one component does not include the other"
+    (let [result (sut/dfs-collect disconnected-graph ["a"] deps-fn
+                                 (fn [id _ _ _] id)
                                  :visit)]
-      ;; Each node collected at most once
-      (is (= (count result) (count (set result))))
-      (is (= #{"a" "b" "c" "d"} (set result))))))
+      (is (= ["a" "b"] result))
+      (is (not (contains? (set result) "x")))
+      (is (not (contains? (set result) "y"))))))
 
-;; ===========================================================================
-;; dfs-collect-reduce tests
-;; ===========================================================================
+(deftest dfs-collect-self-loop-cycle-events
+  (testing "self-loop generates exactly one cycle event"
+    (let [result (sut/dfs-collect self-cycle-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis]
+                                   {:cycle-node id})
+                                 :cycle)]
+      (is (= 1 (count result)))
+      (is (= {:cycle-node "a"} (first result))))))
 
-(deftest dfs-collect-reduce-count-nodes-test
-  (testing "counts visited nodes using + reducer"
-    (let [result (sut/dfs-collect-reduce diamond-graph ["a"] get-deps
-                                        (fn [_id _p _v _vis] 1)
-                                        :visit
-                                        + 0)]
-      (is (= 4 result)))))
-
-(deftest dfs-collect-reduce-into-set-test
-  (testing "collects node ids into a set using conj reducer"
-    (let [result (sut/dfs-collect-reduce diamond-graph ["a"] get-deps
-                                        (fn [id _p _v _vis] id)
-                                        :visit
-                                        conj #{})]
-      (is (= #{"a" "b" "c" "d"} result)))))
-
-(deftest dfs-collect-reduce-sum-values-test
-  (testing "sums numeric values extracted from nodes"
-    (let [graph {"a" {:id "a" :deps ["b" "c"] :weight 10}
-                 "b" {:id "b" :deps [] :weight 20}
-                 "c" {:id "c" :deps [] :weight 30}}
-          result (sut/dfs-collect-reduce graph ["a"] get-deps
-                                        (fn [id _p _v _vis]
-                                          (:weight (get graph id)))
-                                        :visit
-                                        + 0)]
-      (is (= 60 result)))))
-
-(deftest dfs-collect-reduce-string-concat-test
-  (testing "concatenates node ids with custom reducer"
-    (let [result (sut/dfs-collect-reduce linear-graph ["a"] get-deps
-                                        (fn [id _p _v _vis] id)
-                                        :visit
-                                        (fn [acc v] (str acc (when (seq acc) "->") v))
-                                        "")]
-      (is (= "a->b->c" result)))))
-
-(deftest dfs-collect-reduce-empty-graph-test
-  (testing "returns init value for empty graph"
-    (let [result (sut/dfs-collect-reduce {} [] get-deps
-                                        (fn [id _p _v _vis] id)
-                                        :visit
-                                        + 0)]
-      (is (= 0 result)))))
-
-(deftest dfs-collect-reduce-with-pre-mode-test
-  (testing "works with :pre mode"
-    (let [result (sut/dfs-collect-reduce linear-graph ["a"] get-deps
-                                        (fn [id _p _v _vis] id)
-                                        :pre
-                                        conj [])]
-      (is (= ["a" "b" "c"] result)))))
-
-(deftest dfs-collect-reduce-with-post-mode-test
-  (testing "works with :post mode"
-    (let [result (sut/dfs-collect-reduce linear-graph ["a"] get-deps
-                                        (fn [id _p _v _vis] id)
-                                        :post
-                                        conj [])]
-      (is (= ["c" "b" "a"] result)))))
-
-(deftest dfs-collect-reduce-with-cycle-mode-test
-  (testing "reduces cycle events"
-    (let [result (sut/dfs-collect-reduce cyclic-graph ["a"] get-deps
-                                        (fn [_id _p _v _vis] 1)
-                                        :cycle
-                                        + 0)]
-      (is (= 1 result)))))
-
-(deftest dfs-collect-reduce-nil-values-filtered-test
-  (testing "nil values from collect-fn are filtered before reducing"
-    (let [result (sut/dfs-collect-reduce diamond-graph ["a"] get-deps
-                                        (fn [id _p _v _vis]
-                                          (when (= id "d") 100))
-                                        :visit
-                                        + 0)]
-      (is (= 100 result)))))
-
-(deftest dfs-collect-reduce-max-depth-test
-  (testing "finds max depth using custom reducer"
-    (let [result (sut/dfs-collect-reduce diamond-graph ["a"] get-deps
-                                        (fn [_id path _v _vis]
-                                          (count path))
-                                        :visit
-                                        max 0)]
-      ;; a=0, b=1, d=2, c=1 -> max is 2
-      (is (= 2 result)))))
-
-(deftest dfs-collect-reduce-build-map-test
-  (testing "builds a map from node ids to depths using reduce"
-    (let [result (sut/dfs-collect-reduce linear-graph ["a"] get-deps
-                                        (fn [id path _v _vis]
-                                          [id (count path)])
-                                        :visit
-                                        (fn [acc [k v]] (assoc acc k v))
-                                        {})]
-      (is (= {"a" 0 "b" 1 "c" 2} result)))))
-
-(deftest dfs-collect-reduce-with-missing-mode-test
-  (testing "reduces missing events"
-    (let [result (sut/dfs-collect-reduce missing-dep-graph ["a"] get-deps
-                                        (fn [id _p _v _vis] id)
-                                        :missing
-                                        conj [])]
-      (is (= ["missing"] result)))))
-
-(deftest dfs-collect-reduce-with-all-mode-test
-  (testing "reduces all events"
-    (let [graph {"a" {:id "a" :deps ["b" "missing"]}
-                 "b" {:id "b" :deps ["a"]}}  ;; cycle
-          result (sut/dfs-collect-reduce graph ["a"] get-deps
-                                        (fn [id _p _v _vis] id)
-                                        :all
-                                        conj [])]
-      ;; visits a, b + cycle a + missing "missing"
-      (is (pos? (count result)))
-      (is (some #(= "missing" %) result)))))
-
-;; ===========================================================================
-;; Edge case tests: empty graph, single node, disconnected, self-loops,
-;; diamond patterns, very deep graphs
-;; ===========================================================================
-
-;; ---------------------------------------------------------------------------
-;; Edge case: Empty graph (no nodes)
-;; ---------------------------------------------------------------------------
-
-(deftest dfs-empty-graph-no-nodes-test
-  (testing "empty graph with no start nodes returns empty visited set"
-    (let [[visited result] (sut/dfs {} [] get-deps
-                                    noop-visit noop-cycle noop-missing)]
-      (is (= #{} visited))
-      (is (nil? result)))))
-
-(deftest dfs-find-empty-graph-no-nodes-test
-  (testing "dfs-find on completely empty graph returns nil"
-    (let [result (sut/dfs-find {} "nonexistent" get-deps
-                              (fn [_id _node _path] true))]
-      (is (nil? result)))))
-
-(deftest dfs-validate-empty-graph-no-nodes-test
-  (testing "dfs-validate-graph with empty graph and no starts is valid"
-    (let [result (sut/dfs-validate-graph {} [] get-deps
-                                        (fn [_id _node ctx]
-                                          (cond
-                                            (:cycle? ctx) {:valid? false :error :cycle}
-                                            (:missing? ctx) {:valid? false :error :missing})))]
-      (is (true? (:valid? result)))
-      (is (= {} (:graph result))))))
-
-(deftest dfs-collect-empty-graph-no-nodes-test
-  (testing "dfs-collect on empty graph with no starts returns empty"
-    (let [result (sut/dfs-collect {} [] get-deps
-                                 (fn [id _p _v _vis] id)
-                                 :visit)]
-      (is (= [] result)))))
-
-(deftest dfs-collect-empty-graph-missing-start-test
-  (testing "dfs-collect on empty graph with start id collects nothing on :visit"
-    (let [result (sut/dfs-collect {} ["ghost"] get-deps
-                                 (fn [id _p _v _vis] id)
-                                 :visit)]
-      (is (= [] result)))))
-
-(deftest dfs-collect-empty-graph-missing-event-test
-  (testing "dfs-collect on empty graph with start id fires missing event"
-    (let [result (sut/dfs-collect {} ["ghost"] get-deps
-                                 (fn [id _p _v _vis] id)
-                                 :missing)]
-      (is (= ["ghost"] result)))))
-
-;; ---------------------------------------------------------------------------
-;; Edge case: Single node, no edges
-;; ---------------------------------------------------------------------------
-
-(deftest dfs-single-node-no-edges-test
-  (testing "dfs on single node with no deps"
-    (let [[visited result] (sut/dfs single-node-graph ["a"] get-deps
-                                    noop-visit noop-cycle noop-missing)]
-      (is (= #{"a"} visited))
-      (is (nil? result)))))
-
-(deftest dfs-find-single-node-no-edges-test
-  (testing "dfs-find on single node"
-    (let [result (sut/dfs-find single-node-graph "a" get-deps
-                              (fn [id _node _path] (= id "a")))]
-      (is (= {:found-id "a" :path ["a"]} result)))))
-
-(deftest dfs-single-node-no-edges-validate-test
-  (testing "single node graph with no edges validates as valid"
-    (let [result (sut/dfs-validate-graph single-node-graph ["a"] get-deps
-                                        (fn [_id _node ctx]
-                                          (when (:cycle? ctx)
-                                            {:valid? false :error :cycle})))]
-      (is (true? (:valid? result))))))
-
-(deftest dfs-single-node-no-edges-collect-test
-  (testing "dfs-collect on single node collects exactly one node"
-    (let [result (sut/dfs-collect single-node-graph ["a"] get-deps
-                                 (fn [id _p _v _vis] id)
+(deftest dfs-collect-self-loop-visit-still-collects
+  (testing "self-loop node is still collected as a visit"
+    (let [result (sut/dfs-collect self-cycle-graph ["a"] deps-fn
+                                 (fn [id _ _ _] id)
                                  :visit)]
       (is (= ["a"] result)))))
 
-(deftest dfs-single-node-no-edges-no-cycles-test
-  (testing "single node with no edges produces no cycle events"
-    (let [result (sut/dfs-collect single-node-graph ["a"] get-deps
-                                 (fn [id _p _v _vis] id)
+(deftest dfs-collect-multi-self-loop-cycles
+  (testing "multiple self-loop nodes each generate cycle events"
+    (let [result (sut/dfs-collect multi-self-loop-graph ["a"] deps-fn
+                                 (fn [id _ _ _] id)
                                  :cycle)]
-      (is (= [] result)))))
-
-(deftest dfs-single-node-no-edges-no-missing-test
-  (testing "single node with no edges produces no missing events"
-    (let [result (sut/dfs-collect single-node-graph ["a"] get-deps
-                                 (fn [id _p _v _vis] id)
-                                 :missing)]
-      (is (= [] result)))))
-
-(deftest dfs-single-node-path-is-just-node-test
-  (testing "path to a single node with no deps is just the node itself"
-    (let [paths (atom {})
-          [_visited _result]
-          (sut/dfs single-node-graph ["a"] get-deps
-                   (fn [node-id _node path _v _vis]
-                     (swap! paths assoc node-id path)
-                     nil)
-                   noop-cycle noop-missing)]
-      (is (= [] (get @paths "a"))))))
-
-;; ---------------------------------------------------------------------------
-;; Edge case: Disconnected components (only reachable nodes visited)
-;; ---------------------------------------------------------------------------
-
-(deftest dfs-disconnected-only-reachable-visited-test
-  (testing "starting from one component does not visit the other component"
-    (let [[visited result] (sut/dfs disconnected-graph ["a"] get-deps
-                                    noop-visit noop-cycle noop-missing)]
-      (is (= #{"a" "b"} visited))
-      (is (not (contains? visited "x")))
-      (is (not (contains? visited "y")))
-      (is (nil? result)))))
-
-(deftest dfs-disconnected-second-component-only-test
-  (testing "starting from second component does not visit the first"
-    (let [[visited result] (sut/dfs disconnected-graph ["x"] get-deps
-                                    noop-visit noop-cycle noop-missing)]
-      (is (= #{"x" "y"} visited))
-      (is (not (contains? visited "a")))
-      (is (not (contains? visited "b")))
-      (is (nil? result)))))
-
-(deftest dfs-find-disconnected-only-reachable-test
-  (testing "dfs-find from component A cannot find nodes in component B"
-    (let [result (sut/dfs-find disconnected-graph "a" get-deps
-                              (fn [id _node _path] (= id "x")))]
-      (is (nil? result)))))
-
-(deftest dfs-collect-disconnected-only-reachable-test
-  (testing "dfs-collect starting from one component only collects reachable nodes"
-    (let [result (sut/dfs-collect disconnected-graph ["a"] get-deps
-                                 (fn [id _p _v _vis] id)
-                                 :visit)]
       (is (= #{"a" "b"} (set result)))
-      (is (not (some #(= "x" %) result)))
-      (is (not (some #(= "y" %) result))))))
+      (is (= 2 (count result))))))
 
-(deftest dfs-validate-disconnected-partial-start-test
-  (testing "validate from one component is valid even though other component is unreachable"
-    (let [result (sut/dfs-validate-graph disconnected-graph ["a"] get-deps
-                                        (fn [_id _node ctx]
-                                          (when (:cycle? ctx)
-                                            {:valid? false :error :cycle})))]
-      (is (true? (:valid? result))))))
+(deftest dfs-collect-double-diamond-visit-order
+  (testing "double-diamond collects all 7 nodes in visit mode"
+    (let [result (sut/dfs-collect double-diamond-graph ["a"] deps-fn
+                                 (fn [id _ _ _] id)
+                                 :visit)]
+      (is (= 7 (count result)))
+      (is (= #{"a" "b" "c" "d" "e" "f" "g"} (set result)))
+      ;; root is visited first
+      (is (= "a" (first result))))))
 
-(deftest dfs-disconnected-three-components-test
-  (testing "three disconnected components, only two started, third is unreachable"
-    (let [graph {"a" {:id "a" :deps ["b"]}
-                 "b" {:id "b" :deps []}
-                 "x" {:id "x" :deps ["y"]}
-                 "y" {:id "y" :deps []}
-                 "p" {:id "p" :deps ["q"]}
-                 "q" {:id "q" :deps []}}
-          [visited result] (sut/dfs graph ["a" "x"] get-deps
-                                    noop-visit noop-cycle noop-missing)]
-      (is (= #{"a" "b" "x" "y"} visited))
-      (is (not (contains? visited "p")))
-      (is (not (contains? visited "q")))
-      (is (nil? result)))))
+(deftest dfs-collect-deep-chain-visit-order
+  (testing "deep chain collects in order n0, n1, ..., n99"
+    (let [graph (make-deep-chain 100)
+          result (sut/dfs-collect graph ["n0"] deps-fn
+                                 (fn [id _ _ _] id)
+                                 :visit)]
+      (is (= 100 (count result)))
+      (is (= "n0" (first result)))
+      (is (= "n99" (last result))))))
+
+(deftest dfs-collect-duplicate-start-ids
+  (testing "duplicate start IDs don't cause duplicate visits"
+    (let [result (sut/dfs-collect single-node-graph ["a" "a" "a"] deps-fn
+                                 (fn [id _ _ _] id)
+                                 :visit)]
+      (is (= ["a"] result)))))
+
+(deftest dfs-collect-collect-fn-receives-path
+  (testing "collect-fn receives accurate path information"
+    (let [result (sut/dfs-collect linear-graph ["a"] deps-fn
+                                 (fn [id path _v _vis]
+                                   {:id id :depth (count path)})
+                                 :visit)]
+      (is (= [{:id "a" :depth 0}
+              {:id "b" :depth 1}
+              {:id "c" :depth 2}]
+             result)))))
 
 ;; ---------------------------------------------------------------------------
-;; Edge case: Self-loops
+;; dfs-collect — :pre mode (alias for :visit)
 ;; ---------------------------------------------------------------------------
 
-(deftest dfs-self-loop-visit-still-happens-test
-  (testing "node with self-loop is visited once, then cycle detected"
-    (let [visit-count (atom 0)
-          cycle-count (atom 0)
-          [visited _result]
-          (sut/dfs self-cycle-graph ["a"] get-deps
-                   (fn [_id _node _path _v _vis]
-                     (swap! visit-count inc)
-                     nil)
-                   (fn [_id _path _v _vis]
-                     (swap! cycle-count inc)
-                     nil)
-                   noop-missing)]
-      (is (= 1 @visit-count))
-      (is (= 1 @cycle-count))
-      (is (= #{"a"} visited)))))
+(deftest dfs-collect-pre-mode-collects-matching-nodes
+  (testing ":pre collects nodes matching criteria (same as :visit)"
+    (let [result (sut/dfs-collect diamond-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :pre)]
+      (is (vector? result))
+      (is (= "a" (first result)))
+      (is (= #{"a" "b" "c" "d"} (set result))))))
+
+(deftest dfs-collect-pre-mode-linear-graph-order
+  (testing ":pre mode visits nodes in pre-order (parent before children)"
+    (let [result (sut/dfs-collect linear-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :pre)]
+      (is (= ["a" "b" "c"] result)))))
+
+(deftest dfs-collect-pre-mode-diamond-pre-order
+  (testing ":pre mode on diamond graph matches :visit exactly"
+    (let [pre-result (sut/dfs-collect diamond-graph ["a"] deps-fn
+                                     (fn [id _path _v _vis] id)
+                                     :pre)
+          visit-result (sut/dfs-collect diamond-graph ["a"] deps-fn
+                                       (fn [id _path _v _vis] id)
+                                       :visit)]
+      (is (= pre-result visit-result)))))
+
+(deftest dfs-collect-pre-mode-nil-values-excluded
+  (testing ":pre mode excludes nil return values from collect-fn"
+    (let [result (sut/dfs-collect diamond-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis]
+                                   (when (not= id "a") id))
+                                 :pre)]
+      (is (= #{"b" "c" "d"} (set result)))
+      (is (not (contains? (set result) "a"))))))
+
+(deftest dfs-collect-pre-mode-empty-graph
+  (testing ":pre mode on empty graph returns empty vector"
+    (let [result (sut/dfs-collect empty-graph [] deps-fn
+                                 (fn [id _ _ _] id)
+                                 :pre)]
+      (is (= [] result)))))
+
+(deftest dfs-collect-pre-mode-single-node
+  (testing ":pre mode on single node graph"
+    (let [result (sut/dfs-collect single-node-graph ["a"] deps-fn
+                                 (fn [id _ _ _] id)
+                                 :pre)]
+      (is (= ["a"] result)))))
+
+;; ---------------------------------------------------------------------------
+;; dfs-collect — :post mode (post-order traversal)
+;; ---------------------------------------------------------------------------
+
+(deftest dfs-collect-post-mode-linear-graph
+  (testing ":post collects leaves before parents in linear graph"
+    (let [result (sut/dfs-collect linear-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :post)]
+      (is (= ["c" "b" "a"] result)))))
+
+(deftest dfs-collect-post-mode-diamond-graph
+  (testing ":post collects children before parents in diamond graph"
+    (let [result (sut/dfs-collect diamond-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :post)]
+      ;; d must come before b and c, all must come before a
+      (is (= #{"a" "b" "c" "d"} (set result)))
+      (is (= "a" (last result)))
+      (let [idx (into {} (map-indexed (fn [i v] [v i]) result))]
+        (is (< (idx "d") (idx "b")) "d before b")
+        (is (< (idx "d") (idx "c")) "d before c (via post-order, d visited via b first)")
+        (is (< (idx "b") (idx "a")) "b before a")
+        (is (< (idx "c") (idx "a")) "c before a")))))
+
+(deftest dfs-collect-post-mode-single-node
+  (testing ":post on single node graph"
+    (let [result (sut/dfs-collect single-node-graph ["a"] deps-fn
+                                 (fn [id _ _ _] id)
+                                 :post)]
+      (is (= ["a"] result)))))
+
+(deftest dfs-collect-post-mode-empty-graph
+  (testing ":post on empty graph returns empty vector"
+    (let [result (sut/dfs-collect empty-graph [] deps-fn
+                                 (fn [id _ _ _] id)
+                                 :post)]
+      (is (= [] result)))))
+
+(deftest dfs-collect-post-mode-wide-graph
+  (testing ":post on wide graph collects all children before root"
+    (let [result (sut/dfs-collect wide-graph ["root"] deps-fn
+                                 (fn [id _ _ _] id)
+                                 :post)]
+      (is (= "root" (last result)))
+      (is (= #{"root" "c1" "c2" "c3" "c4"} (set result))))))
+
+(deftest dfs-collect-post-mode-deep-chain
+  (testing ":post on deep chain is reverse of :pre"
+    (let [result (sut/dfs-collect deep-graph ["a"] deps-fn
+                                 (fn [id _ _ _] id)
+                                 :post)]
+      (is (= ["e" "d" "c" "b" "a"] result)))))
+
+(deftest dfs-collect-post-mode-nil-values-excluded
+  (testing ":post mode excludes nil values from collect-fn"
+    (let [result (sut/dfs-collect diamond-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis]
+                                   (when (not= id "d") id))
+                                 :post)]
+      (is (not (contains? (set result) "d")))
+      (is (= #{"a" "b" "c"} (set result))))))
+
+(deftest dfs-collect-post-mode-skips-cycles
+  (testing ":post mode handles cycles without infinite loop"
+    (let [result (sut/dfs-collect cyclic-graph ["a"] deps-fn
+                                 (fn [id _ _ _] id)
+                                 :post)]
+      ;; All nodes visited, cycle back-edge is simply skipped
+      (is (= #{"a" "b" "c"} (set result)))
+      ;; Post-order: c before b before a
+      (is (= ["c" "b" "a"] result)))))
+
+(deftest dfs-collect-post-mode-skips-missing
+  (testing ":post mode skips missing nodes"
+    (let [result (sut/dfs-collect missing-dep-graph ["a"] deps-fn
+                                 (fn [id _ _ _] id)
+                                 :post)]
+      ;; "ghost" is missing so not collected; b and a are collected post-order
+      (is (= #{"a" "b"} (set result)))
+      (is (not (contains? (set result) "ghost"))))))
+
+(deftest dfs-collect-post-mode-disconnected-multiple-starts
+  (testing ":post mode works across disconnected components"
+    (let [result (sut/dfs-collect disconnected-graph ["a" "x"] deps-fn
+                                 (fn [id _ _ _] id)
+                                 :post)]
+      (is (= #{"a" "b" "x" "y"} (set result)))
+      (is (= 4 (count result))))))
+
+(deftest dfs-collect-post-vs-pre-different-order
+  (testing ":post and :pre produce different orderings"
+    (let [pre-result  (sut/dfs-collect linear-graph ["a"] deps-fn
+                                      (fn [id _ _ _] id)
+                                      :pre)
+          post-result (sut/dfs-collect linear-graph ["a"] deps-fn
+                                      (fn [id _ _ _] id)
+                                      :post)]
+      (is (= (reverse pre-result) post-result)))))
+
+(deftest dfs-collect-post-mode-double-diamond
+  (testing ":post on double-diamond respects dependency ordering"
+    (let [result (sut/dfs-collect double-diamond-graph ["a"] deps-fn
+                                 (fn [id _ _ _] id)
+                                 :post)]
+      (is (= 7 (count result)))
+      (is (= "a" (last result)))
+      (let [idx (into {} (map-indexed (fn [i v] [v i]) result))]
+        ;; g must come before e and f
+        (is (< (idx "g") (idx "e")))
+        (is (< (idx "g") (idx "f")))
+        ;; d must come before a
+        (is (< (idx "d") (idx "a")))))))
+
+;; ---------------------------------------------------------------------------
+;; dfs-collect — Custom reduce function
+;; ---------------------------------------------------------------------------
+
+(deftest dfs-collect-custom-reduce-into-set
+  (testing "custom reduce with conj into a set"
+    (let [result (sut/dfs-collect diamond-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :pre conj #{})]
+      (is (set? result))
+      (is (= #{"a" "b" "c" "d"} result)))))
+
+(deftest dfs-collect-custom-reduce-counting
+  (testing "custom reduce that counts visited nodes"
+    (let [result (sut/dfs-collect diamond-graph ["a"] deps-fn
+                                 (fn [_id _path _v _vis] 1)
+                                 :pre + 0)]
+      (is (= 4 result)))))
+
+(deftest dfs-collect-custom-reduce-string-concat
+  (testing "custom reduce that concatenates node ids"
+    (let [result (sut/dfs-collect linear-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :pre str "")]
+      (is (= "abc" result)))))
+
+(deftest dfs-collect-custom-reduce-max-depth
+  (testing "custom reduce to find maximum depth"
+    (let [result (sut/dfs-collect deep-graph ["a"] deps-fn
+                                 (fn [_id path _v _vis] (count path))
+                                 :pre max 0)]
+      ;; a has path len 0, b has 1, c has 2, d has 3, e has 4
+      (is (= 4 result)))))
+
+(deftest dfs-collect-custom-reduce-into-map
+  (testing "custom reduce that builds a map of node-id to depth"
+    (let [result (sut/dfs-collect linear-graph ["a"] deps-fn
+                                 (fn [id path _v _vis] [id (count path)])
+                                 :pre
+                                 (fn [acc [k v]] (assoc acc k v))
+                                 {})]
+      (is (= {"a" 0 "b" 1 "c" 2} result)))))
+
+(deftest dfs-collect-custom-reduce-empty-graph
+  (testing "custom reduce on empty graph returns init value"
+    (let [result (sut/dfs-collect empty-graph [] deps-fn
+                                 (fn [id _ _ _] id)
+                                 :pre + 0)]
+      (is (= 0 result)))))
+
+(deftest dfs-collect-custom-reduce-with-post-mode
+  (testing "custom reduce works with :post mode"
+    (let [result (sut/dfs-collect linear-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :post conj #{})]
+      (is (set? result))
+      (is (= #{"a" "b" "c"} result)))))
+
+(deftest dfs-collect-custom-reduce-post-mode-counting
+  (testing "custom reduce counting with :post mode"
+    (let [result (sut/dfs-collect diamond-graph ["a"] deps-fn
+                                 (fn [_id _path _v _vis] 1)
+                                 :post + 0)]
+      (is (= 4 result)))))
+
+(deftest dfs-collect-default-arity-matches-explicit
+  (testing "5-arity defaults to conj and [] (same as explicit 7-arity)"
+    (let [default-result  (sut/dfs-collect diamond-graph ["a"] deps-fn
+                                          (fn [id _ _ _] id)
+                                          :visit)
+          explicit-result (sut/dfs-collect diamond-graph ["a"] deps-fn
+                                          (fn [id _ _ _] id)
+                                          :visit conj [])]
+      (is (= default-result explicit-result)))))
+
+(deftest dfs-collect-custom-reduce-cycle-counting
+  (testing "custom reduce counting cycles"
+    (let [result (sut/dfs-collect multi-cycle-graph ["a"] deps-fn
+                                 (fn [_id _path _v _vis] 1)
+                                 :cycle + 0)]
+      (is (pos? result)))))
+
+(deftest dfs-collect-custom-reduce-post-string-concat
+  (testing "post-order string concatenation produces reverse order"
+    (let [result (sut/dfs-collect linear-graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :post str "")]
+      (is (= "cba" result)))))
+
+;; ---------------------------------------------------------------------------
+;; Integration-style: rich comment examples as regression tests
+;; ---------------------------------------------------------------------------
+
+(deftest rich-comment-find-example
+  (testing "example from rich comment block: find node d"
+    (let [graph {"a" {:id "a" :deps ["b" "c"]}
+                 "b" {:id "b" :deps ["d"]}
+                 "c" {:id "c" :deps ["d"]}
+                 "d" {:id "d" :deps []}}
+          result (sut/dfs-find graph "a" deps-fn
+                              (fn [id _node _path] (= id "d")))]
+      (is (= {:found-id "d" :path ["a" "b" "d"]} result)))))
+
+(deftest rich-comment-validate-example
+  (testing "example from rich comment block: validate acyclic graph"
+    (let [graph {"a" {:id "a" :deps ["b" "c"]}
+                 "b" {:id "b" :deps ["d"]}
+                 "c" {:id "c" :deps ["d"]}
+                 "d" {:id "d" :deps []}}
+          result (sut/dfs-validate-graph graph (keys graph) deps-fn
+                                        (fn [_id _node context]
+                                          (when (:cycle? context)
+                                            {:valid? false :error "Cycle detected"})))]
+      (is (= {:valid? true :graph graph} result)))))
+
+(deftest rich-comment-collect-visit-example
+  (testing "example from rich comment block: collect visited nodes"
+    (let [graph {"a" {:id "a" :deps ["b" "c"]}
+                 "b" {:id "b" :deps ["d"]}
+                 "c" {:id "c" :deps ["d"]}
+                 "d" {:id "d" :deps []}}
+          result (sut/dfs-collect graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :visit)]
+      ;; Exact order from comment: ["a" "b" "d" "c"]
+      (is (= ["a" "b" "d" "c"] result)))))
+
+(deftest rich-comment-collect-post-example
+  (testing "example from rich comment block: collect post-order"
+    (let [graph {"a" {:id "a" :deps ["b" "c"]}
+                 "b" {:id "b" :deps ["d"]}
+                 "c" {:id "c" :deps ["d"]}
+                 "d" {:id "d" :deps []}}
+          result (sut/dfs-collect graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :post)]
+      (is (= ["d" "b" "c" "a"] result)))))
+
+(deftest rich-comment-collect-into-set-example
+  (testing "example from rich comment block: collect into set"
+    (let [graph {"a" {:id "a" :deps ["b" "c"]}
+                 "b" {:id "b" :deps ["d"]}
+                 "c" {:id "c" :deps ["d"]}
+                 "d" {:id "d" :deps []}}
+          result (sut/dfs-collect graph ["a"] deps-fn
+                                 (fn [id _path _v _vis] id)
+                                 :pre conj #{})]
+      (is (= #{"a" "b" "c" "d"} result)))))
+
+;; ---------------------------------------------------------------------------
+;; Invariant / property-style tests
+;; ---------------------------------------------------------------------------
+
+(deftest invariant-visited-count-equals-reachable-nodes
+  (testing "visited set size equals number of reachable nodes"
+    (doseq [[label graph starts expected-count]
+            [["linear" linear-graph ["a"] 3]
+             ["diamond" diamond-graph ["a"] 4]
+             ["single" single-node-graph ["a"] 1]
+             ["wide" wide-graph ["root"] 5]
+             ["deep" deep-graph ["a"] 5]
+             ["disconnected-both" disconnected-graph ["a" "x"] 4]
+             ["disconnected-one" disconnected-graph ["a"] 2]]]
+      (testing label
+        (let [[visited _] (sut/dfs graph starts deps-fn
+                                   (fn [_ _ _ _ _] nil)
+                                   (fn [_ _ _ _] nil)
+                                   (fn [_ _ _] nil))]
+          (is (= expected-count (count visited))))))))
+
+(deftest invariant-pre-and-post-collect-same-set
+  (testing ":pre and :post collect the same set of nodes on acyclic graphs"
+    (doseq [[label graph starts]
+            [["linear" linear-graph ["a"]]
+             ["diamond" diamond-graph ["a"]]
+             ["wide" wide-graph ["root"]]
+             ["deep" deep-graph ["a"]]
+             ["double-diamond" double-diamond-graph ["a"]]]]
+      (testing label
+        (let [pre-result  (sut/dfs-collect graph starts deps-fn
+                                          (fn [id _ _ _] id) :pre)
+              post-result (sut/dfs-collect graph starts deps-fn
+                                          (fn [id _ _ _] id) :post)]
+          (is (= (set pre-result) (set post-result))))))))
+
+(deftest invariant-post-order-children-before-parents
+  (testing "in post-order, every dependency appears before its parent"
+    (doseq [[label graph starts]
+            [["linear" linear-graph ["a"]]
+             ["diamond" diamond-graph ["a"]]
+             ["deep" deep-graph ["a"]]
+             ["double-diamond" double-diamond-graph ["a"]]]]
+      (testing label
+        (let [result (sut/dfs-collect graph starts deps-fn
+                                     (fn [id _ _ _] id) :post)
+              idx (into {} (map-indexed (fn [i v] [v i]) result))]
+          (doseq [[node-id node] graph
+                  :when (contains? idx node-id)
+                  dep (deps-fn node)
+                  :when (contains? idx dep)]
+            (is (< (idx dep) (idx node-id))
+                (str dep " should appear before " node-id " in post-order"))))))))
+
+(deftest invariant-dfs-find-path-is-valid
+  (testing "the path returned by dfs-find represents a valid walk in the graph"
+    (let [graph double-diamond-graph
+          result (sut/dfs-find graph "a" deps-fn
+                              (fn [id _ _] (= id "g")))]
+      (is (some? result))
+      ;; Each consecutive pair in path should be parent -> child
+      (let [path (:path result)]
+        (doseq [[parent child] (partition 2 1 path)]
+          (let [parent-node (get graph parent)]
+            (is (some? parent-node)
+                (str "parent " parent " should exist in graph"))
+            (is (some #{child} (deps-fn parent-node))
+                (str child " should be a dep of " parent))))))))
+
+(deftest invariant-collect-visit-count-matches-visited-set
+  (testing "number of :visit collected items matches visited set size"
+    (doseq [[label graph starts]
+            [["diamond" diamond-graph ["a"]]
+             ["wide" wide-graph ["root"]]
+             ["disconnected" disconnected-graph ["a" "x"]]]]
+      (testing label
+        (let [[visited _] (sut/dfs graph starts deps-fn
+                                   (fn [_ _ _ _ _] nil)
+                                   (fn [_ _ _ _] nil)
+                                   (fn [_ _ _] nil))
+              collected (sut/dfs-collect graph starts deps-fn
+                                        (fn [id _ _ _] id) :visit)]
+          (is (= (count visited) (count collected))))))))
