@@ -102,12 +102,15 @@
   [ctx config]
   {:worktree-path (or (get-in ctx [:execution/worktree-path])
                       (get-in ctx [:worktree-path])
-                      (get-in config [:worktree-path]))
+                      (get-in config [:worktree-path])
+                      (get-in ctx [:execution/opts :worktree-path])
+                      (System/getProperty "user.dir"))
    :logger (get-in ctx [:execution/logger])
    :llm-backend (get-in ctx [:execution/llm-backend])
    :artifact-store (get-in ctx [:execution/artifact-store])
-   ;; Allow disabling PR creation via config
-   :create-pr? (get config :create-pr? true)})
+   ;; Allow disabling PR creation via config or execution opts
+   :create-pr? (or (get-in ctx [:execution/opts :create-pr?])
+                   (get config :create-pr? true))})
 
 (defn enter-release
   "Execute release phase.
