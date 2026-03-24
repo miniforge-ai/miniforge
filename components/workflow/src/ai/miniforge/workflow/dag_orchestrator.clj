@@ -221,7 +221,10 @@
     (:executor context)         (assoc :executor (:executor context))
     (:environment-id context)   (assoc :environment-id (:environment-id context))
     (:sandbox-workdir context)  (assoc :sandbox-workdir (:sandbox-workdir context))
-    (:worktree-path context)    (assoc :worktree-path (:worktree-path context))))
+    ;; Worktree path: try direct context, then execution/opts, then fall back to cwd
+    true (assoc :worktree-path (or (:worktree-path context)
+                                   (get-in context [:execution/opts :worktree-path])
+                                   (System/getProperty "user.dir")))))
 
 ;--- Layer 1: Mini-Workflow Execution
 
