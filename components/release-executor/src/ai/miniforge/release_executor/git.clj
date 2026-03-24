@@ -91,9 +91,16 @@
 
       (if-not (zero? (:exit fetch-result))
         (result/shell-failure (str "Failed to fetch: " (:err fetch-result)) {:branch nil})
-        (let [checkout-result (process/shell dir-opts
+        ;; Stash any dirty files (from MCP artifact writes) before branching
+        (let [stash-result (process/shell dir-opts "git" "stash" "push" "-m"
+                                          (str "miniforge-release-" branch-name))
+              stashed? (not (str/includes? (or (:out stash-result) "") "No local changes"))
+              checkout-result (process/shell dir-opts
                                              "git" "checkout" "-b" branch-name
-                                             (str "origin/" default-branch))]
+                                             (str "origin/" default-branch))
+              ;; Pop the stash back after branching (files will be staged by write-and-stage)
+              _ (when stashed?
+                  (process/shell dir-opts "git" "stash" "pop"))]
           (if (zero? (:exit checkout-result))
             (result/shell-success {:branch branch-name :base-branch default-branch})
             (let [timestamped-name (str branch-name "-" (System/currentTimeMillis))
