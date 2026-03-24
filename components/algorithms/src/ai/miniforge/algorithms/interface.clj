@@ -49,9 +49,3 @@
 
    See ai.miniforge.algorithms.graph/dfs-collect for full documentation."
   graph/dfs-collect)
-
-(def dfs-collect-reduce
-  "Like dfs-collect, but reduces collected values with a custom function.
-
-   See ai.miniforge.algorithms.graph/dfs-collect-reduce for full documentation."
-  graph/dfs-collect-reduce)
