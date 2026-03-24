@@ -231,15 +231,22 @@
 (defn extract-sub-workflow-error
   "Extract the most informative error message from a failed sub-workflow result.
    Digs into phase results to find rate limit messages and other details
-   that may not appear in the top-level execution errors."
+   that may not appear in the top-level execution errors.
+   Prioritizes rate-limit messages so the DAG orchestrator can detect them."
   [result]
-  (or (-> result :execution/errors first :message)
-      ;; Check phase result error messages (where rate limit text lives)
-      (->> (vals (:execution/phase-results result))
-           (keep #(get-in % [:error :message]))
-           (filter not-empty)
-           first)
-      "Sub-workflow failed"))
+  (let [execution-error (-> result :execution/errors first :message)
+        ;; Scan all phase error messages for rate limit indicators
+        phase-errors (->> (vals (:execution/phase-results result))
+                          (keep #(get-in % [:error :message]))
+                          (filter not-empty))
+        rate-limit-msg (first (filter #(re-find #"(?i)rate.?limit|429|hit your limit|quota.?exceeded"
+                                                (str %))
+                                      (cons execution-error phase-errors)))]
+    ;; Prioritize rate limit messages so DAG can detect and pause
+    (or rate-limit-msg
+        execution-error
+        (first phase-errors)
+        "Sub-workflow failed")))
 
 (defn extract-pr-info-from-result
   "Extract PR info from a sub-workflow result if the release phase produced one."
