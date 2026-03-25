@@ -257,6 +257,11 @@
   [messages]
   (some parse-reset-instant messages))
 
+(defn- wait-decision
+  "Build a rate-limit wait decision map for checkpoint scenarios."
+  [tier reset-instant wait-ms reason]
+  {:waited? false :tier tier :reset-at reset-instant :wait-ms wait-ms :reason reason})
+
 (defn wait-for-reset!
   "Decide how to handle a rate limit reset based on wait duration.
 
@@ -288,12 +293,9 @@
                             :wait-ms wait-ms
                             :wait-minutes wait-minutes
                             :action "checkpoint-and-schedule-resume"}})
-          {:waited? false
-           :tier :medium
-           :reset-at reset-instant
-           :wait-ms wait-ms
-           :reason (format "Rate limit resets in %.0f minutes — checkpointing and scheduling resume"
-                           wait-minutes)})
+          (wait-decision :medium reset-instant wait-ms
+                         (format "Rate limit resets in %.0f minutes — checkpointing and scheduling resume"
+                                 wait-minutes)))
 
       ;; Long wait (> 2hrs) — checkpoint, require manual resume
       :else
@@ -302,12 +304,9 @@
                             :wait-ms wait-ms
                             :wait-minutes wait-minutes
                             :action "checkpoint-and-wind-down"}})
-          {:waited? false
-           :tier :long
-           :reset-at reset-instant
-           :wait-ms wait-ms
-           :reason (format "Rate limit resets in %.0f minutes — checkpointing for manual resume"
-                           wait-minutes)}))))
+          (wait-decision :long reset-instant wait-ms
+                         (format "Rate limit resets in %.0f minutes — checkpointing for manual resume"
+                                 wait-minutes))))))
 
 (defn- try-wait-for-reset
   "Strategy 1: Wait for a known reset time.
@@ -321,25 +320,25 @@
     (let [msgs (extract-rate-limit-messages results rate-limited-ids)
           reset-instant (find-reset-instant msgs)]
       (when reset-instant
-        (let [{:keys [waited? tier] :as wait-result} (wait-for-reset! reset-instant logger)]
+        (let [{:keys [waited? tier reset-at wait-ms reason]} (wait-for-reset! reset-instant logger)]
           (cond
             ;; Short wait succeeded — continue immediately
             waited?
-            {:action :continue :waited-ms (:wait-ms wait-result)}
+            {:action :continue :waited-ms wait-ms}
 
             ;; Medium wait — checkpoint and schedule auto-resume
             (= :medium tier)
             {:action :checkpoint-and-resume
-             :reset-at (:reset-at wait-result)
-             :wait-ms (:wait-ms wait-result)
-             :reason (:reason wait-result)}
+             :reset-at reset-at
+             :wait-ms wait-ms
+             :reason reason}
 
             ;; Long wait — checkpoint and stop
             (= :long tier)
             {:action :checkpoint-and-stop
-             :reset-at (:reset-at wait-result)
-             :wait-ms (:wait-ms wait-result)
-             :reason (:reason wait-result)}))))))
+             :reset-at reset-at
+             :wait-ms wait-ms
+             :reason reason}))))))
 
 (defn- try-backend-failover
   "Strategy 2: Switch to an alternative backend.

@@ -1,0 +1,73 @@
+{:spec/title "Agent Rule Selection Visibility — Evidence Bundle Integration"
+ :spec/description
+ "When inject-knowledge selects zettels/rules for an agent's context, log which
+  rules were selected and include them in the evidence bundle. This closes the
+  observability gap: we can see what the agent produced but not what rules
+  influenced its behavior.
+
+  The evidence bundle already has a schema for policies applied. Wire
+  inject-knowledge to record its selections, and include them in the
+  per-phase evidence."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/knowledge/src/ai/miniforge/knowledge/store.clj"
+          "components/evidence-bundle/src/ai/miniforge/evidence_bundle/"
+          "components/phase-software-factory/src/ai/miniforge/phase/implement.clj"]}
+
+ :spec/constraints
+ ["inject-knowledge must return both the formatted prompt AND a manifest of selected rules"
+  "Manifest includes: zettel ID, title, role match score, tags matched"
+  "Evidence bundle records the manifest per agent invocation"
+  "No performance regression — rule logging must be lightweight"
+  "Existing callers of inject-knowledge must not break (backwards compatible)"
+  "Pre-commit hooks must pass"]
+
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :plan/tasks
+ [{:task/id :return-rule-manifest
+   :task/description
+   "Modify inject-knowledge in store.clj to return a manifest alongside the
+    zettels. Add a new function inject-knowledge-with-manifest that returns
+    {:zettels [...] :manifest [{:id :title :role :tags-matched :score}]}
+    Keep inject-knowledge backwards-compatible (returns zettels only).
+    Read source: components/knowledge/src/ai/miniforge/knowledge/store.clj"
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :wire-manifest-to-evidence
+   :task/description
+   "Wire the rule manifest into the evidence bundle:
+    - Add :evidence/rules-applied to the evidence schema
+    - In implement phase (and other agent-invoking phases), capture the
+      manifest and store it in the phase result
+    - Evidence bundle collector picks it up from phase results
+    Read source: components/evidence-bundle/src/ai/miniforge/evidence_bundle/schema.clj
+    Read source: components/evidence-bundle/src/ai/miniforge/evidence_bundle/collector.clj
+    Read source: components/phase-software-factory/src/ai/miniforge/phase/implement.clj"
+   :task/type :implement
+   :task/dependencies [:return-rule-manifest]}
+
+  {:task/id :log-rule-selection
+   :task/description
+   "Add structured logging when rules are selected for an agent:
+    - Log at :debug level: which rules matched, scores, total count
+    - Log at :info level: summary (N rules from K categories for agent :role)
+    - Use existing logging.interface patterns
+    Read source: components/knowledge/src/ai/miniforge/knowledge/store.clj
+    Read source: components/logging/src/ai/miniforge/logging/"
+   :task/type :implement
+   :task/dependencies [:return-rule-manifest]}
+
+  {:task/id :test-rule-visibility
+   :task/description
+   "Test the rule selection visibility:
+    - inject-knowledge-with-manifest returns both zettels and manifest
+    - Manifest has expected shape (id, title, role, tags-matched)
+    - Evidence bundle includes rules-applied after workflow run
+    - Backwards compatibility: inject-knowledge still works unchanged
+    Read source: components/knowledge/test/"
+   :task/type :test
+   :task/dependencies [:wire-manifest-to-evidence :log-rule-selection]}]}

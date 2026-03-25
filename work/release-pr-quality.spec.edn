@@ -1,0 +1,61 @@
+{:spec/title "Release Phase — PR Description and PR Doc Generation"
+ :spec/description
+ "The release phase creates PRs with empty descriptions and no PR doc.
+  Extend the release pipeline to:
+  1. Generate a concise PR title (< 70 chars) from the task description
+  2. Generate a structured PR body (summary, changes, test plan)
+  3. Generate a PR doc in docs/pull-requests/ with the standard format
+  All without requiring a releaser LLM agent — use deterministic templates
+  enriched with data from the workflow (files changed, tests run, review results)."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/release-executor/src/ai/miniforge/release_executor/metadata.clj"
+          "components/release-executor/src/ai/miniforge/release_executor/core.clj"
+          "docs/pull-requests/"]}
+
+ :spec/constraints
+ ["PR title must be < 70 characters"
+  "PR body must include ## Summary, ## Changes, ## Test plan sections"
+  "PR doc must follow existing format in docs/pull-requests/"
+  "Must work without LLM (deterministic fallback) but use LLM when available"
+  "PR doc filename: YYYY-MM-DD-<slug>.md"
+  "Pre-commit hooks must pass"]
+
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :plan/tasks
+ [{:task/id :improve-fallback-metadata
+   :task/description
+   "Improve fallback-release-metadata in metadata.clj:
+    - Generate concise title (truncate task description to 70 chars, smart split)
+    - Generate structured PR body with ## Summary, ## Changes (file list),
+      ## Test plan sections
+    - Use workflow data: file paths from code artifacts, gate results,
+      review summary if available
+    Read source: components/release-executor/src/ai/miniforge/release_executor/metadata.clj"
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :add-pr-doc-generation
+   :task/description
+   "Add a new step to the release pipeline that generates a PR doc file:
+    - step-generate-pr-doc between step-create-pr and step-build-artifact
+    - Writes to docs/pull-requests/YYYY-MM-DD-<slug>.md
+    - Include: title, summary, files changed, test results, review decision
+    - Commit the doc as part of the release commit (before push)
+    Read source: components/release-executor/src/ai/miniforge/release_executor/core.clj
+    Read examples: docs/pull-requests/ (any recent file for format)"
+   :task/type :implement
+   :task/dependencies [:improve-fallback-metadata]}
+
+  {:task/id :test-pr-quality
+   :task/description
+   "Add tests for PR description and doc generation:
+    - Test fallback metadata produces valid title/body
+    - Test PR doc generation creates correct file with expected sections
+    - Test integration: metadata flows through to gh pr create
+    Read source: components/release-executor/test/"
+   :task/type :test
+   :task/dependencies [:add-pr-doc-generation]}]}

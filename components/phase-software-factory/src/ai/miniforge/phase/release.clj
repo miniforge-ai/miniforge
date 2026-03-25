@@ -48,6 +48,43 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
+(defn- log-already-implemented!
+  "Log when implement phase reports work already done."
+  [ctx impl-status]
+  (when (= :already-implemented impl-status)
+    (let [logger (or (get-in ctx [:execution/logger])
+                     (log/create-logger {:min-level :info :output :human}))]
+      (log/info logger :release :release/skipped-already-implemented
+                {:data {:summary (get-in ctx [:execution/phase-results :implement :result :summary])}}))))
+
+(defn- assert-implement-artifact!
+  "Throw when implement phase produced no artifact (and status is not :already-implemented)."
+  [ctx impl-status implement-result]
+  (when (and (not= :already-implemented impl-status) (not implement-result))
+    (let [impl-keys (keys (get-in ctx [:execution/phase-results :implement :result]))
+          phase-results-keys (vec (keys (:execution/phase-results ctx)))
+          logger (or (get-in ctx [:execution/logger])
+                     (log/create-logger {:min-level :error :output :human}))]
+      (log/error logger :release :release/no-implement-artifact
+                 {:data {:implement-status impl-status
+                         :implement-result-keys (vec impl-keys)
+                         :phase-results-keys phase-results-keys}})
+      (throw (ex-info (messages/t :release/no-implement-artifact)
+                      {:phase :release
+                       :implement-status impl-status
+                       :implement-result-keys impl-keys
+                       :hint "Implement phase may have failed or produced no output"})))))
+
+(defn- assert-has-files!
+  "Throw when implement result has zero code files."
+  [impl-status implement-result]
+  (when (and implement-result
+             (map? implement-result)
+             (not= :already-implemented impl-status)
+             (empty? (:code/files implement-result)))
+    (throw (ex-info (messages/t :release/zero-files)
+                    {:phase :release :artifact-id (:code/id implement-result)}))))
+
 (defn build-workflow-state
   "Build workflow state from phase context for the release executor."
   [ctx]
@@ -55,47 +92,24 @@
   ;; This is the canonical location where workflow runner stores phase outputs
   ;; Phase results contain the full phase map, so extract :result :output
   (let [impl-status (get-in ctx [:execution/phase-results :implement :result :status])
-        implement-result (get-in ctx [:execution/phase-results :implement :result :output])
-        ;; Handle :already-implemented — nothing to release, not an error
-        _ (when (= :already-implemented impl-status)
-            (let [logger (or (get-in ctx [:execution/logger])
-                             (log/create-logger {:min-level :info :output :human}))]
-              (log/info logger :release :release/skipped-already-implemented
-                        {:data {:summary (get-in ctx [:execution/phase-results :implement :result :summary])}})))
-        _ (when (and (not= :already-implemented impl-status) (not implement-result))
-            (let [impl-keys (keys (get-in ctx [:execution/phase-results :implement :result]))
-                  phase-results-keys (vec (keys (:execution/phase-results ctx)))
-                  logger (or (get-in ctx [:execution/logger])
-                             (log/create-logger {:min-level :error :output :human}))]
-              (log/error logger :release :release/no-implement-artifact
-                         {:data {:implement-status impl-status
-                                 :implement-result-keys (vec impl-keys)
-                                 :phase-results-keys phase-results-keys}})
-              (throw (ex-info (messages/t :release/no-implement-artifact)
-                              {:phase :release
-                               :implement-status impl-status
-                               :implement-result-keys impl-keys
-                               :hint "Implement phase may have failed or produced no output"}))))
-        _ (when (and implement-result
-                     (map? implement-result)
-                     (not= :already-implemented impl-status)
-                     (empty? (:code/files implement-result)))
-            (throw (ex-info (messages/t :release/zero-files)
-                            {:phase :release :artifact-id (:code/id implement-result)})))
-        code-artifacts (if-let [artifacts (:artifacts implement-result)]
-                         (map (fn [a] {:artifact/type :code
-                                       :artifact/content a})
-                              artifacts)
-                         ;; Fallback: wrap result directly
-                         [{:artifact/type :code
-                           :artifact/content implement-result}])
-        input (get-in ctx [:execution/input])]
-    {:workflow/id (or (get-in ctx [:execution/id]) (random-uuid))
-     :workflow/phase :release
-     :workflow/spec {:spec/description (or (:description input)
-                                           (:title input)
-                                           "implement changes")}
-     :workflow/artifacts code-artifacts}))
+        implement-result (get-in ctx [:execution/phase-results :implement :result :output])]
+    (log-already-implemented! ctx impl-status)
+    (assert-implement-artifact! ctx impl-status implement-result)
+    (assert-has-files! impl-status implement-result)
+    (let [code-artifacts (if-let [artifacts (:artifacts implement-result)]
+                           (map (fn [a] {:artifact/type :code
+                                         :artifact/content a})
+                                artifacts)
+                           ;; Fallback: wrap result directly
+                           [{:artifact/type :code
+                             :artifact/content implement-result}])
+          input (get-in ctx [:execution/input])]
+      {:workflow/id (or (get-in ctx [:execution/id]) (random-uuid))
+       :workflow/phase :release
+       :workflow/spec {:spec/description (or (:description input)
+                                             (:title input)
+                                             "implement changes")}
+       :workflow/artifacts code-artifacts})))
 
 (defn build-executor-context
   "Build context for the release executor from phase context."
