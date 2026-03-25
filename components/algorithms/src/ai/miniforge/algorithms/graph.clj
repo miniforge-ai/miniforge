@@ -262,28 +262,24 @@
                  start-ids))
        @acc)
      ;; Pre-order and other modes: collect during traversal events.
-     (let [collected (atom init)]
+     (let [collected (atom init)
+           maybe-collect (fn [active? node-id path visited visiting]
+                           (when active?
+                             (when-let [value (collect-fn node-id path visited visiting)]
+                               (swap! collected reduce-fn value)))
+                           nil)]
        (dfs graph
             start-ids
             get-deps-fn
-            ;; on-visit
             (fn [node-id _node path visited visiting]
-              (when (collect-on-visit? collect-on)
-                (when-let [value (collect-fn node-id path visited visiting)]
-                  (swap! collected reduce-fn value)))
-              nil)  ; Continue traversal
-            ;; on-cycle
+              (maybe-collect (collect-on-visit? collect-on)
+                             node-id path visited visiting))
             (fn [node-id path visited visiting]
-              (when (or (= collect-on :all) (= collect-on :cycle))
-                (when-let [value (collect-fn node-id path visited visiting)]
-                  (swap! collected reduce-fn value)))
-              nil)  ; Continue traversal
-            ;; on-missing
+              (maybe-collect (or (= collect-on :all) (= collect-on :cycle))
+                             node-id path visited visiting))
             (fn [node-id visited visiting]
-              (when (or (= collect-on :all) (= collect-on :missing))
-                (when-let [value (collect-fn node-id [] visited visiting)]
-                  (swap! collected reduce-fn value)))
-              nil))  ; Continue traversal
+              (maybe-collect (or (= collect-on :all) (= collect-on :missing))
+                             node-id [] visited visiting)))
        @collected))))
 
 ;------------------------------------------------------------------------------ Rich Comment
