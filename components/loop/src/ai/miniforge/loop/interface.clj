@@ -190,6 +190,13 @@
   [loop-state context]
   (escalation/handle-escalation loop-state context))
 
+(defn create-escalation-checkpoint
+  "Create a canonical checkpoint for an inner-loop escalation."
+  ([loop-state]
+   (escalation/create-escalation-checkpoint loop-state))
+  ([loop-state opts]
+   (escalation/create-escalation-checkpoint loop-state opts)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Gates API
 

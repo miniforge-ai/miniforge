@@ -6,7 +6,8 @@
    Layer 1: User interaction functions
    Layer 2: Escalation integration with inner loop"
   (:require
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [ai.miniforge.decision.interface :as decision]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Prompt formatting (pure functions)
@@ -130,6 +131,24 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Inner loop integration
 
+(defn create-escalation-checkpoint
+  "Create a canonical checkpoint for an inner-loop escalation."
+  [loop-state & [opts]]
+  (decision/create-loop-escalation-checkpoint loop-state (or opts {})))
+
+(defn- result->response
+  [result]
+  (case (:action result)
+    :continue {:type :approve-with-constraints
+               :value (:hints result)
+               :authority-role :human}
+    :abort {:type :reject
+            :value :abort
+            :rationale (:reason result)
+            :authority-role (if (:reason result) :system :human)}
+    {:type :defer
+     :authority-role :human}))
+
 (defn handle-escalation
   "Handle escalation in inner loop.
    Called when loop reaches :escalated state.
@@ -142,15 +161,30 @@
    {:escalated true :action :abort} or
    {:escalated true :action :continue :hints string}"
   [loop-state context]
-  (let [escalation-fn (:escalation-fn context)]
+  (let [escalation-fn (:escalation-fn context)
+        checkpoint (create-escalation-checkpoint loop-state (:decision/checkpoint-opts context))
+        episode (decision/create-episode checkpoint)]
     (if escalation-fn
       ;; Escalation function available
       (let [result (escalation-fn loop-state :prompt-fn (:prompt-fn context))]
-        (assoc result :escalated true))
+        (let [resolved-checkpoint (decision/resolve-checkpoint checkpoint
+                                                               (result->response result))
+              updated-episode (decision/update-episode episode resolved-checkpoint)]
+          (assoc result
+                 :escalated true
+                 :decision/checkpoint resolved-checkpoint
+                 :decision/episode updated-episode)))
       ;; No escalation function, default to abort
-      {:escalated true
-       :action :abort
-       :reason "No escalation function provided"})))
+      (let [result {:action :abort
+                    :reason "No escalation function provided"}
+            resolved-checkpoint (decision/resolve-checkpoint checkpoint
+                                                             (result->response result))
+            updated-episode (decision/update-episode episode resolved-checkpoint)]
+        {:escalated true
+         :action :abort
+         :reason "No escalation function provided"
+         :decision/checkpoint resolved-checkpoint
+         :decision/episode updated-episode}))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

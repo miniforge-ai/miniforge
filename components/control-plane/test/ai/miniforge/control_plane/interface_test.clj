@@ -163,6 +163,10 @@
         (is (uuid? (:decision/id d)))
         (is (= :pending (:decision/status d)))
         (is (= :high (:decision/priority d)))
+        (is (= :control-plane-agent
+               (get-in d [:decision/checkpoint :source :kind])))
+        (is (= :pending
+               (get-in d [:decision/episode :episode/status])))
         (cp/submit-decision! mgr d)
 
         (testing "Get decision"
@@ -176,7 +180,11 @@
             (is (= :resolved (:decision/status resolved)))
             (is (= "yes" (:decision/resolution resolved)))
             (is (= "Ship it" (:decision/comment resolved)))
-            (is (some? (:decision/resolved-at resolved)))))
+            (is (some? (:decision/resolved-at resolved)))
+            (is (= :resolved
+                   (get-in resolved [:decision/checkpoint :checkpoint/status])))
+            (is (= :approve
+                   (get-in resolved [:decision/episode :supervision :type])))))
 
         (testing "Cannot resolve again"
           (is (nil? (cp/resolve-decision! mgr (:decision/id d) "no"))))

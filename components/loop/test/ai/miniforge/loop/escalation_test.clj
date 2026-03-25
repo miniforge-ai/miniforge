@@ -110,12 +110,18 @@
                                                {:escalation-fn mock-escalation})]
       (is (:escalated result))
       (is (= :continue (:action result)))
-      (is (= "hint" (:hints result)))))
+      (is (= "hint" (:hints result)))
+      (is (= :resolved
+             (get-in result [:decision/checkpoint :checkpoint/status])))
+      (is (= :approve-with-constraints
+             (get-in result [:decision/episode :supervision :type])))))
 
   (testing "defaults to abort when no escalation function"
     (let [result (escalation/handle-escalation mock-loop-state {})]
       (is (:escalated result))
-      (is (= :abort (:action result)))))
+      (is (= :abort (:action result)))
+      (is (= :system
+             (get-in result [:decision/episode :supervision :authority-role])))))
 
   (testing "passes custom prompt-fn through"
     (let [custom-prompt (fn [_] {:type :hints :content "custom"})
@@ -127,6 +133,14 @@
                                                 :prompt-fn custom-prompt})]
       (is (= :continue (:action result)))
       (is (= "custom" (:hints result))))))
+
+(deftest create-escalation-checkpoint-test
+  (testing "creates canonical checkpoint data from loop state"
+    (let [checkpoint (escalation/create-escalation-checkpoint mock-loop-state)]
+      (is (= :loop-escalation (get-in checkpoint [:source :kind])))
+      (is (= :repair-escalation
+             (get-in checkpoint [:proposal :decision-class])))
+      (is (= 5 (get-in checkpoint [:context :loop/iteration]))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -30,7 +30,9 @@
    [ai.miniforge.control-plane.registry :as registry]
    [ai.miniforge.control-plane.decision-queue :as dq]
    [ai.miniforge.control-plane.heartbeat :as heartbeat]
-   [ai.miniforge.control-plane-adapter.protocol :as adapter]))
+   [ai.miniforge.control-plane-adapter.protocol :as adapter]
+   [ai.miniforge.event-stream.interface.events :as events]
+   [ai.miniforge.event-stream.interface.stream :as stream]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Orchestrator state
@@ -42,6 +44,47 @@
 (def ^:const default-poll-interval-ms
   "How often to poll agent status."
   10000)
+
+(defn- publish-event!
+  [event-stream event]
+  (when (and event-stream event)
+    (stream/publish! event-stream event)))
+
+(defn- normalize-status-update
+  [status-update]
+  (cond-> {}
+    (or (:status status-update) (:agent/status status-update))
+    (assoc :status (or (:status status-update) (:agent/status status-update)))
+
+    (or (:task status-update) (:agent/task status-update))
+    (assoc :task (or (:task status-update) (:agent/task status-update)))
+
+    (or (:metrics status-update) (:agent/metrics status-update))
+    (assoc :metrics (or (:metrics status-update) (:agent/metrics status-update)))))
+
+(defn- normalize-decision-opts
+  [opts]
+  (cond-> {}
+    (or (:type opts) (:decision/type opts))
+    (assoc :type (or (:type opts) (:decision/type opts)))
+
+    (or (:priority opts) (:decision/priority opts))
+    (assoc :priority (or (:priority opts) (:decision/priority opts)))
+
+    (or (:context opts) (:decision/context opts))
+    (assoc :context (or (:context opts) (:decision/context opts)))
+
+    (or (:options opts) (:decision/options opts))
+    (assoc :options (or (:options opts) (:decision/options opts)))
+
+    (or (:deadline opts) (:decision/deadline opts))
+    (assoc :deadline (or (:deadline opts) (:decision/deadline opts)))
+
+    (or (:tags opts) (:decision/tags opts))
+    (assoc :tags (or (:tags opts) (:decision/tags opts)))
+
+    (or (:agent-confidence opts) (:decision/agent-confidence opts))
+    (assoc :agent-confidence (or (:agent-confidence opts) (:decision/agent-confidence opts)))))
 
 (defn create-orchestrator
   "Create a control plane orchestrator.
@@ -65,6 +108,8 @@
   {:registry (or (:registry opts) (registry/create-registry))
    :decision-manager (or (:decision-manager opts) (dq/create-decision-manager))
    :adapters (vec (or (:adapters opts) []))
+   :event-stream (:event-stream opts)
+   :workflow-id (or (:workflow-id opts) (random-uuid))
    :discovery-interval-ms (get opts :discovery-interval-ms default-discovery-interval-ms)
    :poll-interval-ms (get opts :poll-interval-ms default-poll-interval-ms)
    :on-agent-discovered (get opts :on-agent-discovered (fn [_]))
@@ -79,7 +124,7 @@
 (defn- run-discovery-pass
   "Run one discovery pass across all adapters.
    Registers any newly discovered agents."
-  [{:keys [registry adapters on-agent-discovered]}]
+  [{:keys [registry adapters on-agent-discovered event-stream workflow-id]}]
   (doseq [adapter adapters]
     (try
       (let [discovered (adapter/discover-agents
@@ -89,12 +134,20 @@
                 existing (registry/get-agent-by-external-id registry ext-id)]
             (when-not existing
               (let [registered (registry/register-agent! registry agent-info)]
-                (on-agent-discovered registered))))))
+                (on-agent-discovered registered)
+                (when (and event-stream workflow-id)
+                  (publish-event! event-stream
+                                  (events/cp-agent-registered
+                                   event-stream
+                                   workflow-id
+                                   (:agent/id registered)
+                                   (:agent/vendor registered)
+                                   {:name (:agent/name registered)}))))))))
       (catch Exception _e nil))))
 
 (defn- run-poll-pass
   "Run one status poll pass for all non-terminal agents."
-  [{:keys [registry adapters]}]
+  [{:keys [registry adapters event-stream workflow-id]}]
   (let [agents (registry/list-agents registry)
         by-vendor (group-by :agent/vendor agents)
         adapter-map (into {} (map (fn [a]
@@ -107,7 +160,24 @@
             (try
               (when-let [status-update (adapter/poll-agent-status
                                         adapter agent-record)]
-                (registry/record-heartbeat! registry (:agent/id agent-record) status-update))
+                (let [old-status (:agent/status agent-record)
+                      normalized-update (normalize-status-update status-update)
+                      updated-agent (registry/record-heartbeat! registry
+                                                               (:agent/id agent-record)
+                                                               normalized-update)
+                      new-status (:agent/status updated-agent)]
+                  (when (and workflow-id
+                             event-stream
+                             new-status
+                             (not= new-status :initializing)
+                             (not= old-status new-status))
+                    (publish-event! event-stream
+                                    (events/cp-agent-state-changed
+                                     event-stream
+                                     workflow-id
+                                     (:agent/id agent-record)
+                                     old-status
+                                     new-status)))))
               (catch Exception _e nil))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -176,14 +246,25 @@
 
    Returns: The submitted decision."
   [orchestrator agent-id summary & [opts]]
-  (let [{:keys [registry decision-manager on-decision-created]} orchestrator
-        decision (dq/create-decision agent-id summary opts)]
+  (let [{:keys [registry decision-manager on-decision-created
+                event-stream workflow-id]} orchestrator
+        normalized-opts (normalize-decision-opts (or opts {}))
+        decision (dq/create-decision agent-id summary normalized-opts)]
     (dq/submit-decision! decision-manager decision)
     ;; Try to transition agent to blocked (may fail if already terminal)
     (try
       (registry/transition-agent! registry agent-id :blocked)
       (catch Exception _))
     (on-decision-created decision)
+    (when (and event-stream workflow-id)
+      (publish-event! event-stream
+                      (events/cp-decision-created
+                       event-stream
+                       workflow-id
+                       agent-id
+                       (:decision/id decision)
+                       summary
+                       (:decision/priority decision))))
     decision))
 
 (defn resolve-and-deliver!
@@ -197,7 +278,7 @@
 
    Returns: {:resolved decision :delivered? bool}"
   [orchestrator decision-id resolution & [comment]]
-  (let [{:keys [registry decision-manager adapters]} orchestrator
+  (let [{:keys [registry decision-manager adapters event-stream workflow-id]} orchestrator
         resolved (dq/resolve-decision! decision-manager decision-id resolution comment)]
     (when resolved
       (let [agent-id (:decision/agent-id resolved)
@@ -213,6 +294,13 @@
         (try
           (registry/transition-agent! registry agent-id :running)
           (catch Exception _))
+        (when (and event-stream workflow-id)
+          (publish-event! event-stream
+                          (events/cp-decision-resolved
+                           event-stream
+                           workflow-id
+                           decision-id
+                           resolution)))
         {:resolved resolved
          :delivered? (get delivery :delivered? false)}))))
 
