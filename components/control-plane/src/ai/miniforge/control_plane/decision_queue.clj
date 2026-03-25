@@ -29,7 +29,9 @@
    Layer 0: Decision creation
    Layer 1: Decision resolution and status
    Layer 2: Queue manager (atom-backed store)
-   Layer 3: Priority sorting and queries")
+   Layer 3: Priority sorting and queries"
+  (:require
+   [ai.miniforge.decision.interface :as decision]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Decision creation
@@ -64,7 +66,10 @@
                        :priority :high
                        :options [\"yes\" \"no\" \"defer\"]})"
   [agent-id summary & [opts]]
-  (let [now (java.util.Date.)]
+  (let [now (java.util.Date.)
+        checkpoint (or (:checkpoint opts)
+                       (decision/create-control-plane-checkpoint agent-id summary opts))
+        episode (decision/create-episode checkpoint)]
     (cond-> {:decision/id (random-uuid)
              :decision/agent-id agent-id
              :decision/type (get opts :type :choice)
@@ -72,6 +77,8 @@
              :decision/status :pending
              :decision/summary summary
              :decision/created-at now
+             :decision/checkpoint checkpoint
+             :decision/episode episode
              :decision/resolution nil
              :decision/comment nil
              :decision/resolved-at nil}
@@ -93,6 +100,16 @@
   [decision]
   (= :resolved (:decision/status decision)))
 
+(defn- resolved-decision-record
+  [decision resolution comment checkpoint episode]
+  (cond-> (assoc decision
+                 :decision/status :resolved
+                 :decision/resolution resolution
+                 :decision/resolved-at (java.util.Date.)
+                 :decision/checkpoint checkpoint
+                 :decision/episode episode)
+    (some? comment) (assoc :decision/comment comment)))
+
 (defn expired?
   "Check if a decision has expired past its deadline."
   [decision]
@@ -109,13 +126,14 @@
    - resolution - The human's choice (string or keyword)
    - comment    - Optional comment string
 
-   Returns: Updated decision record with :resolved status."
+  Returns: Updated decision record with :resolved status."
   [decision resolution & [comment]]
-  (assoc decision
-         :decision/status :resolved
-         :decision/resolution resolution
-         :decision/comment comment
-         :decision/resolved-at (java.util.Date.)))
+  (let [response (decision/decision-response (:decision/type decision)
+                                             resolution
+                                             comment)
+        checkpoint (decision/resolve-checkpoint (:decision/checkpoint decision) response)
+        episode (decision/update-episode (:decision/episode decision) checkpoint)]
+    (resolved-decision-record decision resolution comment checkpoint episode)))
 
 (defn expire-decision
   "Mark a decision as expired."

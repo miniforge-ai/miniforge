@@ -26,6 +26,7 @@
                        "components/task/resources"
                        "components/task-executor/src"
                        "components/task-executor/resources"
+                       "components/decision/src"
                        "components/loop/src"
                        "components/loop/resources"
                        "components/knowledge/src"
@@ -116,6 +117,7 @@
                       ai.miniforge/agent-runtime {:local/root "components/agent-runtime"}
                       ai.miniforge/task {:local/root "components/task"}
                       ai.miniforge/task-executor {:local/root "components/task-executor"}
+                      ai.miniforge/decision {:local/root "components/decision"}
                       ai.miniforge/loop {:local/root "components/loop"}
                       ai.miniforge/knowledge {:local/root "components/knowledge"}
                       ai.miniforge/policy {:local/root "components/policy"}
@@ -172,6 +174,7 @@
                        "components/agent/test"
                        "components/agent-runtime/test"
                        "components/task/test"
+                       "components/decision/test"
                        "components/loop/test"
                        "components/knowledge/test"
                        "components/policy/test"
@@ -224,6 +227,7 @@
                       ai.miniforge/agent {:local/root "components/agent"}
                       ai.miniforge/agent-runtime {:local/root "components/agent-runtime"}
                       ai.miniforge/task {:local/root "components/task"}
+                      ai.miniforge/decision {:local/root "components/decision"}
                       ai.miniforge/loop {:local/root "components/loop"}
                       ai.miniforge/knowledge {:local/root "components/knowledge"}
                       ai.miniforge/policy {:local/root "components/policy"}

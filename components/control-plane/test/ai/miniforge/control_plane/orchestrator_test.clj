@@ -329,8 +329,8 @@
           adapter (make-mock-adapter
                    {:poll-agent-status
                     (fn [_agent-record]
-                      {:agent/status :running
-                       :agent/task "working on stuff"})})
+                      {:status :running
+                       :task "working on stuff"})})
           orch (sut/create-orchestrator
                 (base-orchestrator-opts
                  {:registry reg :adapters [adapter]}))]
@@ -351,7 +351,7 @@
           _ (registry/transition-agent! reg (:agent/id agent-rec) :completed)
           adapter (make-mock-adapter
                    {:poll-agent-status
-                    (fn [_] (swap! poll-count inc) {:agent/status :completed})})
+                    (fn [_] (swap! poll-count inc) {:status :completed})})
           orch (sut/create-orchestrator
                 (base-orchestrator-opts
                  {:registry reg :adapters [adapter]}))]
@@ -371,7 +371,7 @@
           _ (registry/transition-agent! reg (:agent/id agent-rec) :failed)
           adapter (make-mock-adapter
                    {:poll-agent-status
-                    (fn [_] (swap! poll-count inc) {:agent/status :failed})})
+                    (fn [_] (swap! poll-count inc) {:status :failed})})
           orch (sut/create-orchestrator
                 (base-orchestrator-opts
                  {:registry reg :adapters [adapter]}))]
@@ -443,7 +443,7 @@
           ;; Agent starts as :initializing, poll returns :running
           adapter (make-mock-adapter
                    {:poll-agent-status
-                    (fn [_] {:agent/status :running})})
+                    (fn [_] {:status :running})})
           orch (sut/create-orchestrator
                 (base-orchestrator-opts
                  {:registry reg
@@ -468,7 +468,7 @@
           ;; Agent starts as :initializing, poll returns :initializing (same)
           adapter (make-mock-adapter
                    {:poll-agent-status
-                    (fn [_] {:agent/status :initializing})})
+                    (fn [_] {:status :initializing})})
           orch (sut/create-orchestrator
                 (base-orchestrator-opts
                  {:registry reg
@@ -492,12 +492,12 @@
               {:adapter-id :vendor-1
                :poll-agent-status (fn [agent-rec]
                                     (swap! poll-log conj [:vendor-1 (:agent/name agent-rec)])
-                                    {:agent/status :running})})
+                                    {:status :running})})
           a2 (make-mock-adapter
               {:adapter-id :vendor-2
                :poll-agent-status (fn [agent-rec]
                                     (swap! poll-log conj [:vendor-2 (:agent/name agent-rec)])
-                                    {:agent/status :running})})
+                                    {:status :running})})
           orch (sut/create-orchestrator
                 (base-orchestrator-opts
                  {:registry reg :adapters [a1 a2]}))]
@@ -515,7 +515,7 @@
              {:agent/external-id "ext-orphan" :agent/name "Orphan Agent" :agent/vendor :unknown-vendor})
           adapter (make-mock-adapter
                    {:adapter-id :other-vendor
-                    :poll-agent-status (fn [_] (swap! poll-count inc) {:agent/status :running})})
+                    :poll-agent-status (fn [_] (swap! poll-count inc) {:status :running})})
           orch (sut/create-orchestrator
                 (base-orchestrator-opts
                  {:registry reg :adapters [adapter]}))]
@@ -652,9 +652,9 @@
                  {:registry reg :decision-manager dm}))
           decision (sut/submit-decision-from-agent!
                     orch (:agent/id agent-rec) "Choose deploy target"
-                    {:decision/type :choice
-                     :decision/priority :high
-                     :decision/options ["staging" "production"]})]
+                    {:type :choice
+                     :priority :high
+                     :options ["staging" "production"]})]
       (is (= :high (:decision/priority decision)))
       (is (= :choice (:decision/type decision))))))
 
@@ -901,7 +901,7 @@
           deliver-log (atom [])
           adapter (make-mock-adapter
                    {:discover-agents (fn [_] [agent-info])
-                    :poll-agent-status (fn [_] {:agent/status :running})
+                    :poll-agent-status (fn [_] {:status :running})
                     :deliver-decision (fn [_ d]
                                        (swap! deliver-log conj d)
                                        {:delivered? true})})
@@ -949,7 +949,7 @@
                       :agent/vendor :test-adapter}
           adapter (make-mock-adapter
                    {:discover-agents (fn [_] [agent-info])
-                    :poll-agent-status (fn [_] {:agent/status :running})
+                    :poll-agent-status (fn [_] {:status :running})
                     :deliver-decision (fn [_ _] {:delivered? true})})
           orch (sut/create-orchestrator
                 (base-orchestrator-opts
