@@ -1,9 +1,11 @@
 (ns ai.miniforge.decision.spec
   "Malli schemas for canonical decision checkpoints and episodes.
    Layer 0: Enums and registry
-   Layer 1: Checkpoint and episode schemas"
+   Layer 1: Checkpoint and episode schemas
+   Layer 2: Validation helpers"
   (:require
-   [malli.core :as m]))
+   [malli.core :as m]
+   [malli.error :as me]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Enums and registry
@@ -97,6 +99,26 @@
    [:critical-paths {:optional true} [:vector :id/string]]
    [:requires-owner-review? {:optional true} boolean?]])
 
+(def ControlPlaneContext
+  "Context for control-plane decision checkpoints."
+  [:map {:registry registry}
+   [:context/text {:optional true} :id/string]
+   [:context/deadline {:optional true} :common/timestamp]
+   [:context/tags {:optional true} [:set keyword?]]])
+
+(def LoopEscalationContext
+  "Context for loop escalation checkpoints."
+  [:map {:registry registry}
+   [:loop/iteration int?]
+   [:loop/state keyword?]
+   [:loop/termination [:map [:reason keyword?]]]
+   [:task/type {:optional true} keyword?]
+   [:error-count int?]])
+
+(def DecisionContext
+  "Known context shapes for decision checkpoints."
+  [:or ControlPlaneContext LoopEscalationContext])
+
 (def DecisionResponse
   "Schema for the structured supervision response."
   [:map {:registry registry}
@@ -119,7 +141,7 @@
    [:proposal DecisionProposal]
    [:uncertainty {:optional true} DecisionUncertainty]
    [:risk {:optional true} DecisionRisk]
-   [:context {:optional true} [:map-of keyword? any?]]
+   [:context {:optional true} DecisionContext]
    [:response {:optional true} DecisionResponse]])
 
 (def DecisionEpisode
@@ -148,3 +170,24 @@
                           :summary "Choose one"}})
 
   :leave-this-here)
+
+(defn valid?
+  "Returns true if value validates against schema."
+  [schema value]
+  (m/validate schema value))
+
+(defn explain
+  "Returns a humanized explanation for schema failures."
+  [schema value]
+  (some-> (m/explain schema value)
+          me/humanize))
+
+(defn validate
+  "Returns value if valid, otherwise throws."
+  [schema value]
+  (if (valid? schema value)
+    value
+    (throw (ex-info "Decision schema validation failed"
+                    {:schema schema
+                     :value value
+                     :errors (explain schema value)}))))

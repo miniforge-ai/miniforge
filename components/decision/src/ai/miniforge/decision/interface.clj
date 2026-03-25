@@ -1,8 +1,6 @@
 (ns ai.miniforge.decision.interface
   "Public API for canonical decision checkpoints and episodes."
   (:require
-   [malli.core :as m]
-   [malli.error :as me]
    [ai.miniforge.decision.spec :as spec]
    [ai.miniforge.decision.core :as core]))
 
@@ -18,24 +16,16 @@
 (def episode-statuses spec/episode-statuses)
 (def response-types spec/response-types)
 (def risk-tiers spec/risk-tiers)
+(def ControlPlaneContext spec/ControlPlaneContext)
+(def LoopEscalationContext spec/LoopEscalationContext)
+(def DecisionContext spec/DecisionContext)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Validation helpers
 
-(defn valid?
-  "Returns true if value validates against schema."
-  [schema value]
-  (m/validate schema value))
-
-(defn validate
-  "Returns value if valid, otherwise throws."
-  [schema value]
-  (if (m/validate schema value)
-    value
-    (throw (ex-info "Decision schema validation failed"
-                    {:schema schema
-                     :value value
-                     :errors (me/humanize (m/explain schema value))}))))
+(def valid? spec/valid?)
+(def explain spec/explain)
+(def validate spec/validate)
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public constructors
@@ -77,6 +67,12 @@
   [loop-state opts]
   (validate DecisionCheckpoint
             (core/create-loop-escalation-checkpoint loop-state opts)))
+
+(defn decision-response
+  "Create a structured supervision response."
+  [decision-type resolution & [rationale]]
+  (validate spec/DecisionResponse
+            (core/decision-response decision-type resolution rationale)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

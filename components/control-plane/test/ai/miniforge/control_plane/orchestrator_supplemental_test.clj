@@ -111,7 +111,7 @@
               :agent/vendor :test-adapter})
           adapter (make-mock-adapter
                    {:poll-agent-status
-                    (fn [_] {:agent/task "doing things"})})
+                    (fn [_] {:task "doing things"})})
           orch (sut/create-orchestrator
                 (base-opts {:registry reg :adapters [adapter]}))]
       ;; new-status will be nil, so (not= old-status nil) might be true
@@ -136,7 +136,7 @@
           ;; Agent starts as :unknown (default), poll returns :running
           adapter (make-mock-adapter
                    {:poll-agent-status
-                    (fn [_] {:agent/status :running})})
+                    (fn [_] {:status :running})})
           orch (sut/create-orchestrator
                 (base-opts {:registry reg
                             :adapters [adapter]
@@ -433,7 +433,7 @@
           adapter (make-mock-adapter
                    {:poll-agent-status
                     (fn [_] (swap! poll-count inc)
-                      {:agent/status :blocked})})
+                      {:status :blocked})})
           orch (sut/create-orchestrator
                 (base-opts {:registry reg :adapters [adapter]}))]
       (#'sut/run-poll-pass orch)
@@ -453,7 +453,7 @@
           adapter (make-mock-adapter
                    {:poll-agent-status
                     (fn [_] (swap! poll-count inc)
-                      {:agent/status :idle})})
+                      {:status :idle})})
           orch (sut/create-orchestrator
                 (base-opts {:registry reg :adapters [adapter]}))]
       (#'sut/run-poll-pass orch)
@@ -561,7 +561,7 @@
                    {:poll-agent-status
                     (fn [agent-rec]
                       (swap! poll-log conj (:agent/name agent-rec))
-                      {:agent/status (:agent/status agent-rec)})})
+                      {:status (:agent/status agent-rec)})})
           orch (sut/create-orchestrator
                 (base-opts {:registry reg :adapters [adapter]}))]
       (#'sut/run-poll-pass orch)

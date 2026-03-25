@@ -28,6 +28,46 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Core DFS traversal
 
+(declare dfs-traverse)
+
+(defn- dfs-traverse-deps
+  [graph node-id deps path visited visiting get-deps-fn on-visit-fn on-cycle-fn on-missing-fn]
+  (loop [remaining-deps deps
+         current-visited visited
+         current-result nil]
+    (if (or current-result (empty? remaining-deps))
+      [(conj current-visited node-id) current-result]
+      (let [[next-visited next-result]
+            (dfs-traverse graph
+                          (first remaining-deps)
+                          (conj path node-id)
+                          current-visited
+                          visiting
+                          get-deps-fn
+                          on-visit-fn
+                          on-cycle-fn
+                          on-missing-fn)]
+        (recur (rest remaining-deps)
+               next-visited
+               next-result)))))
+
+(defn- dfs-visit-node
+  [graph node-id path visited visiting get-deps-fn on-visit-fn on-cycle-fn on-missing-fn]
+  (if-let [node (get graph node-id)]
+    (if-let [result (on-visit-fn node-id node path visited visiting)]
+      [visited result]
+      (dfs-traverse-deps graph
+                         node-id
+                         (get-deps-fn node)
+                         path
+                         visited
+                         (conj visiting node-id)
+                         get-deps-fn
+                         on-visit-fn
+                         on-cycle-fn
+                         on-missing-fn))
+    [visited (on-missing-fn node-id visited visiting)]))
+
 (defn- dfs-traverse
   [graph node-id path visited visiting get-deps-fn on-visit-fn on-cycle-fn on-missing-fn]
   (cond
@@ -42,37 +82,15 @@
 
     ;; Visit this node
     :else
-    (let [node (get graph node-id)]
-      (if-not node
-        ;; Node not in graph
-        (let [result (on-missing-fn node-id visited visiting)]
-          [visited result])
-        ;; Process node
-        (let [result (on-visit-fn node-id node path visited visiting)]
-          (if result
-            ;; Halt with result
-            [visited result]
-            ;; Continue with dependencies
-            (let [deps (get-deps-fn node)
-                  visiting' (conj visiting node-id)]
-              (loop [remaining-deps deps
-                     current-visited visited
-                     current-result nil]
-                (if (or current-result (empty? remaining-deps))
-                  [(conj current-visited node-id) current-result]
-                  (let [[next-visited next-result]
-                        (dfs-traverse graph
-                                      (first remaining-deps)
-                                      (conj path node-id)
-                                      current-visited
-                                      visiting'
-                                      get-deps-fn
-                                      on-visit-fn
-                                      on-cycle-fn
-                                      on-missing-fn)]
-                    (recur (rest remaining-deps)
-                           next-visited
-                           next-result)))))))))))
+    (dfs-visit-node graph
+                    node-id
+                    path
+                    visited
+                    visiting
+                    get-deps-fn
+                    on-visit-fn
+                    on-cycle-fn
+                    on-missing-fn)))
 
 (defn dfs
   "Simple canonical depth-first search traversal.

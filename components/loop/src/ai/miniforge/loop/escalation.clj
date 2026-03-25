@@ -139,15 +139,28 @@
 (defn- result->response
   [result]
   (case (:action result)
-    :continue {:type :approve-with-constraints
-               :value (:hints result)
-               :authority-role :human}
+    :continue (decision/decision-response :input (:hints result))
     :abort {:type :reject
             :value :abort
             :rationale (:reason result)
             :authority-role (if (:reason result) :system :human)}
     {:type :defer
      :authority-role :human}))
+
+(defn- escalated-result
+  [result checkpoint episode]
+  (assoc result
+         :escalated true
+         :decision/checkpoint checkpoint
+         :decision/episode episode))
+
+(defn- abort-escalation
+  [reason checkpoint episode]
+  {:escalated true
+   :action :abort
+   :reason reason
+   :decision/checkpoint checkpoint
+   :decision/episode episode})
 
 (defn handle-escalation
   "Handle escalation in inner loop.
@@ -170,21 +183,16 @@
         (let [resolved-checkpoint (decision/resolve-checkpoint checkpoint
                                                                (result->response result))
               updated-episode (decision/update-episode episode resolved-checkpoint)]
-          (assoc result
-                 :escalated true
-                 :decision/checkpoint resolved-checkpoint
-                 :decision/episode updated-episode)))
+          (escalated-result result resolved-checkpoint updated-episode)))
       ;; No escalation function, default to abort
       (let [result {:action :abort
                     :reason "No escalation function provided"}
             resolved-checkpoint (decision/resolve-checkpoint checkpoint
                                                              (result->response result))
             updated-episode (decision/update-episode episode resolved-checkpoint)]
-        {:escalated true
-         :action :abort
-         :reason "No escalation function provided"
-         :decision/checkpoint resolved-checkpoint
-         :decision/episode updated-episode}))))
+        (abort-escalation "No escalation function provided"
+                          resolved-checkpoint
+                          updated-episode)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

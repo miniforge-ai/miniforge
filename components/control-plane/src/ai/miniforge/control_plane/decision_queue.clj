@@ -100,6 +100,16 @@
   [decision]
   (= :resolved (:decision/status decision)))
 
+(defn- resolved-decision-record
+  [decision resolution comment checkpoint episode]
+  (cond-> (assoc decision
+                 :decision/status :resolved
+                 :decision/resolution resolution
+                 :decision/resolved-at (java.util.Date.)
+                 :decision/checkpoint checkpoint
+                 :decision/episode episode)
+    (some? comment) (assoc :decision/comment comment)))
+
 (defn expired?
   "Check if a decision has expired past its deadline."
   [decision]
@@ -118,24 +128,12 @@
 
   Returns: Updated decision record with :resolved status."
   [decision resolution & [comment]]
-  (let [response (cond-> {:type (case (:decision/type decision)
-                                  :approval :approve
-                                  :choice :choose-option
-                                  :input :approve-with-constraints
-                                  :confirmation :approve
-                                  :approve)
-                          :value resolution
-                          :authority-role :human}
-                   comment (assoc :rationale comment))
+  (let [response (decision/decision-response (:decision/type decision)
+                                             resolution
+                                             comment)
         checkpoint (decision/resolve-checkpoint (:decision/checkpoint decision) response)
         episode (decision/update-episode (:decision/episode decision) checkpoint)]
-    (assoc decision
-           :decision/status :resolved
-           :decision/resolution resolution
-           :decision/comment comment
-           :decision/resolved-at (java.util.Date.)
-           :decision/checkpoint checkpoint
-           :decision/episode episode)))
+    (resolved-decision-record decision resolution comment checkpoint episode)))
 
 (defn expire-decision
   "Mark a decision as expired."

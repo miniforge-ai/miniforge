@@ -50,42 +50,6 @@
   (when (and event-stream event)
     (stream/publish! event-stream event)))
 
-(defn- normalize-status-update
-  [status-update]
-  (cond-> {}
-    (or (:status status-update) (:agent/status status-update))
-    (assoc :status (or (:status status-update) (:agent/status status-update)))
-
-    (or (:task status-update) (:agent/task status-update))
-    (assoc :task (or (:task status-update) (:agent/task status-update)))
-
-    (or (:metrics status-update) (:agent/metrics status-update))
-    (assoc :metrics (or (:metrics status-update) (:agent/metrics status-update)))))
-
-(defn- normalize-decision-opts
-  [opts]
-  (cond-> {}
-    (or (:type opts) (:decision/type opts))
-    (assoc :type (or (:type opts) (:decision/type opts)))
-
-    (or (:priority opts) (:decision/priority opts))
-    (assoc :priority (or (:priority opts) (:decision/priority opts)))
-
-    (or (:context opts) (:decision/context opts))
-    (assoc :context (or (:context opts) (:decision/context opts)))
-
-    (or (:options opts) (:decision/options opts))
-    (assoc :options (or (:options opts) (:decision/options opts)))
-
-    (or (:deadline opts) (:decision/deadline opts))
-    (assoc :deadline (or (:deadline opts) (:decision/deadline opts)))
-
-    (or (:tags opts) (:decision/tags opts))
-    (assoc :tags (or (:tags opts) (:decision/tags opts)))
-
-    (or (:agent-confidence opts) (:decision/agent-confidence opts))
-    (assoc :agent-confidence (or (:agent-confidence opts) (:decision/agent-confidence opts)))))
-
 (defn create-orchestrator
   "Create a control plane orchestrator.
 
@@ -160,11 +124,15 @@
             (try
               (when-let [status-update (adapter/poll-agent-status
                                         adapter agent-record)]
-                (let [old-status (:agent/status agent-record)
-                      normalized-update (normalize-status-update status-update)
+                (let [{:keys [status task metrics]} status-update
+                      old-status (:agent/status agent-record)
+                      heartbeat (cond-> {}
+                                  status (assoc :status status)
+                                  task (assoc :task task)
+                                  metrics (assoc :metrics metrics))
                       updated-agent (registry/record-heartbeat! registry
                                                                (:agent/id agent-record)
-                                                               normalized-update)
+                                                               heartbeat)
                       new-status (:agent/status updated-agent)]
                   (when (and workflow-id
                              event-stream
@@ -248,8 +216,7 @@
   [orchestrator agent-id summary & [opts]]
   (let [{:keys [registry decision-manager on-decision-created
                 event-stream workflow-id]} orchestrator
-        normalized-opts (normalize-decision-opts (or opts {}))
-        decision (dq/create-decision agent-id summary normalized-opts)]
+        decision (dq/create-decision agent-id summary opts)]
     (dq/submit-decision! decision-manager decision)
     ;; Try to transition agent to blocked (may fail if already terminal)
     (try
