@@ -352,11 +352,10 @@
         synthesized-implement-result
         {:name :implement
          :status :completed
-         :result {:status :success
-                  :output {:code/id (random-uuid)
-                           :code/files all-files
-                           :artifacts artifacts}
-                  :metrics (:metrics dag-result)}}
+         :result (response/success {:code/id (random-uuid)
+                                    :code/files all-files
+                                    :artifacts artifacts}
+                                   {:metrics (:metrics dag-result)})}
         ctx-with-dag (-> ctx
                          (update :execution/artifacts into artifacts)
                          (assoc :execution/dag-result dag-result)
