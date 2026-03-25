@@ -54,22 +54,32 @@
   ;; Read implement result from execution phase results (not :phases)
   ;; This is the canonical location where workflow runner stores phase outputs
   ;; Phase results contain the full phase map, so extract :result :output
-  (let [implement-result (get-in ctx [:execution/phase-results :implement :result :output])
-        _ (when-not implement-result
-            (let [impl-status (get-in ctx [:execution/phase-results :implement :result :status])
-                  impl-keys (keys (get-in ctx [:execution/phase-results :implement :result]))
+  (let [impl-status (get-in ctx [:execution/phase-results :implement :result :status])
+        implement-result (get-in ctx [:execution/phase-results :implement :result :output])
+        ;; Handle :already-implemented — nothing to release, not an error
+        _ (when (= :already-implemented impl-status)
+            (let [logger (or (get-in ctx [:execution/logger])
+                             (log/create-logger {:min-level :info :output :human}))]
+              (log/info logger :release :release/skipped-already-implemented
+                        {:data {:summary (get-in ctx [:execution/phase-results :implement :result :summary])}})))
+        _ (when (and (not= :already-implemented impl-status) (not implement-result))
+            (let [impl-keys (keys (get-in ctx [:execution/phase-results :implement :result]))
+                  phase-results-keys (vec (keys (:execution/phase-results ctx)))
                   logger (or (get-in ctx [:execution/logger])
                              (log/create-logger {:min-level :error :output :human}))]
               (log/error logger :release :release/no-implement-artifact
                          {:data {:implement-status impl-status
                                  :implement-result-keys (vec impl-keys)
-                                 :phase-results-keys (vec (keys (:execution/phase-results ctx)))}})
+                                 :phase-results-keys phase-results-keys}})
               (throw (ex-info (messages/t :release/no-implement-artifact)
                               {:phase :release
                                :implement-status impl-status
                                :implement-result-keys impl-keys
                                :hint "Implement phase may have failed or produced no output"}))))
-        _ (when (and (map? implement-result) (empty? (:code/files implement-result)))
+        _ (when (and implement-result
+                     (map? implement-result)
+                     (not= :already-implemented impl-status)
+                     (empty? (:code/files implement-result)))
             (throw (ex-info (messages/t :release/zero-files)
                             {:phase :release :artifact-id (:code/id implement-result)})))
         code-artifacts (if-let [artifacts (:artifacts implement-result)]
@@ -92,12 +102,15 @@
   [ctx config]
   {:worktree-path (or (get-in ctx [:execution/worktree-path])
                       (get-in ctx [:worktree-path])
-                      (get-in config [:worktree-path]))
+                      (get-in config [:worktree-path])
+                      (get-in ctx [:execution/opts :worktree-path])
+                      (System/getProperty "user.dir"))
    :logger (get-in ctx [:execution/logger])
    :llm-backend (get-in ctx [:execution/llm-backend])
    :artifact-store (get-in ctx [:execution/artifact-store])
-   ;; Allow disabling PR creation via config
-   :create-pr? (get config :create-pr? true)})
+   ;; Allow disabling PR creation via config or execution opts
+   :create-pr? (or (get-in ctx [:execution/opts :create-pr?])
+                   (get config :create-pr? true))})
 
 (defn enter-release
   "Execute release phase.
@@ -112,12 +125,24 @@
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
+        impl-status (get-in ctx [:execution/phase-results :implement :result :status])
 
         logger (or (get-in ctx [:execution/logger])
-                   (log/create-logger {:min-level :debug :output :human}))
-
-        ;; Build workflow state and context
-        workflow-state (build-workflow-state ctx)
+                   (log/create-logger {:min-level :debug :output :human}))]
+    ;; Short-circuit: nothing to release for already-implemented tasks
+    (if (= :already-implemented impl-status)
+      (-> ctx
+          (assoc-in [:phase :name] :release)
+          (assoc-in [:phase :gates] gates)
+          (assoc-in [:phase :budget] budget)
+          (assoc-in [:phase :started-at] start-time)
+          (assoc-in [:phase :status] :completed)
+          (assoc-in [:phase :result]
+                    {:status :success
+                     :output {:skipped true :reason :already-implemented}
+                     :metrics {:tokens 0 :duration-ms 0 :cost-usd 0.0}}))
+      (let [;; Build workflow state and context
+            workflow-state (build-workflow-state ctx)
         _ (log/debug logger :release :release/workflow-state-built
                      {:data {:artifact-count (count (:workflow/artifacts workflow-state))
                              :file-count (count (get-in (first (:workflow/artifacts workflow-state))
@@ -163,7 +188,7 @@
         (assoc-in [:phase :result] result)
         ;; Store PR info at top level for easy access
         (cond-> (= :success (:status result))
-          (assoc-in [:workflow/pr-info] (get-in (:output result) [:workflow/pr-info]))))))
+          (assoc-in [:workflow/pr-info] (get-in (:output result) [:workflow/pr-info]))))))))
 
 (defn leave-release
   "Post-processing for release phase.

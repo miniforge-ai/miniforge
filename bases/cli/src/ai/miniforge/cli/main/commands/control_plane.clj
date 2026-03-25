@@ -143,7 +143,7 @@
                                        {:status status-str
                                         :name   (get a :agent/name (messages/t :cp/unnamed-agent))
                                         :vendor (get a :agent/vendor fallback)}))))))
-            (println)))))))
+            (println))))))
 
 (defn decisions-cmd
   "Show pending decisions."

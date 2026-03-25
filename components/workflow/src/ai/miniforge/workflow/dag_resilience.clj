@@ -119,9 +119,16 @@
            (.plus (java.time.Instant/now) duration))
          (catch Exception _ nil))))))
 
-(def ^:private max-rate-limit-wait-ms
-  "Maximum time to wait for a rate limit reset (30 minutes)."
+(def ^:private short-wait-threshold-ms
+  "Maximum time to wait in-process for a rate limit reset (30 minutes).
+   Below this: sleep and auto-resume. Above this: checkpoint and wind down."
   (* 30 60 1000))
+
+(def ^:private medium-wait-threshold-ms
+  "Maximum time for a scheduled resume (2 hours).
+   Between short and medium: checkpoint, wind down, schedule auto-resume.
+   Above this: checkpoint, wind down, require manual resume."
+  (* 2 60 60 1000))
 
 (defn millis-until-reset
   "Calculate milliseconds until a reset instant. Returns 0 if already past."
@@ -251,39 +258,88 @@
   (some parse-reset-instant messages))
 
 (defn wait-for-reset!
-  "Sleep until rate limit resets, if the wait is within the cap.
-   Returns {:waited? true :wait-ms N} or {:waited? false :reason ...}."
+  "Decide how to handle a rate limit reset based on wait duration.
+
+   Returns one of:
+   - {:waited? true :wait-ms N}           — slept in-process, ready to continue
+   - {:waited? false :tier :medium ...}   — too long to sleep, checkpoint and schedule resume
+   - {:waited? false :tier :long ...}     — way too long, checkpoint and require manual resume"
   [reset-instant logger]
-  (let [wait-ms (millis-until-reset reset-instant)]
+  (let [wait-ms (millis-until-reset reset-instant)
+        wait-minutes (/ wait-ms 60000.0)]
     (cond
+      ;; Already past — continue immediately
       (<= wait-ms 0)
       {:waited? true :wait-ms 0}
 
-      (<= wait-ms max-rate-limit-wait-ms)
-      (do (log/info logger :dag-resilience :rate-limit/waiting
+      ;; Short wait (< 30min) — sleep in-process
+      (<= wait-ms short-wait-threshold-ms)
+      (do (log/info logger :dag-resilience :rate-limit/waiting-short
                     {:data {:reset-at (str reset-instant)
                             :wait-ms wait-ms
-                            :wait-minutes (/ wait-ms 60000.0)}})
+                            :wait-minutes wait-minutes}})
           (Thread/sleep wait-ms)
           {:waited? true :wait-ms wait-ms})
 
+      ;; Medium wait (30min - 2hrs) — checkpoint, schedule auto-resume
+      (<= wait-ms medium-wait-threshold-ms)
+      (do (log/info logger :dag-resilience :rate-limit/checkpoint-medium
+                    {:data {:reset-at (str reset-instant)
+                            :wait-ms wait-ms
+                            :wait-minutes wait-minutes
+                            :action "checkpoint-and-schedule-resume"}})
+          {:waited? false
+           :tier :medium
+           :reset-at reset-instant
+           :wait-ms wait-ms
+           :reason (format "Rate limit resets in %.0f minutes — checkpointing and scheduling resume"
+                           wait-minutes)})
+
+      ;; Long wait (> 2hrs) — checkpoint, require manual resume
       :else
-      {:waited? false
-       :reason (str "Reset time too far away: "
-                    (long (/ wait-ms 60000)) " minutes (max "
-                    (long (/ max-rate-limit-wait-ms 60000)) ")")})))
+      (do (log/info logger :dag-resilience :rate-limit/checkpoint-long
+                    {:data {:reset-at (str reset-instant)
+                            :wait-ms wait-ms
+                            :wait-minutes wait-minutes
+                            :action "checkpoint-and-wind-down"}})
+          {:waited? false
+           :tier :long
+           :reset-at reset-instant
+           :wait-ms wait-ms
+           :reason (format "Rate limit resets in %.0f minutes — checkpointing for manual resume"
+                           wait-minutes)}))))
 
 (defn- try-wait-for-reset
   "Strategy 1: Wait for a known reset time.
-   Returns {:action :continue ...} on success, nil to fall through."
+
+   Short waits (< 30min): sleep in-process, return {:action :continue}.
+   Medium waits (30min-2hrs): return {:action :checkpoint-and-resume} with reset time.
+   Long waits (> 2hrs): return {:action :checkpoint-and-stop} with reset time.
+   Unknown reset time: return nil to fall through to next strategy."
   [results rate-limited-ids logger]
   (when results
     (let [msgs (extract-rate-limit-messages results rate-limited-ids)
           reset-instant (find-reset-instant msgs)]
       (when reset-instant
-        (let [{:keys [waited?] :as wait-result} (wait-for-reset! reset-instant logger)]
-          (when waited?
-            {:action :continue :waited-ms (:wait-ms wait-result)}))))))
+        (let [{:keys [waited? tier] :as wait-result} (wait-for-reset! reset-instant logger)]
+          (cond
+            ;; Short wait succeeded — continue immediately
+            waited?
+            {:action :continue :waited-ms (:wait-ms wait-result)}
+
+            ;; Medium wait — checkpoint and schedule auto-resume
+            (= :medium tier)
+            {:action :checkpoint-and-resume
+             :reset-at (:reset-at wait-result)
+             :wait-ms (:wait-ms wait-result)
+             :reason (:reason wait-result)}
+
+            ;; Long wait — checkpoint and stop
+            (= :long tier)
+            {:action :checkpoint-and-stop
+             :reset-at (:reset-at wait-result)
+             :wait-ms (:wait-ms wait-result)
+             :reason (:reason wait-result)}))))))
 
 (defn- try-backend-failover
   "Strategy 2: Switch to an alternative backend.
@@ -325,21 +381,39 @@
 (defn handle-rate-limited-batch
   "Orchestrate the failover decision for a rate-limited batch.
 
-   Runs a strategy chain:
-   1. Wait for known reset time (if within 30 minutes)
-   2. Switch to an alternative backend (if configured)
-   3. Pause with reason
+   Runs a tiered strategy chain:
+   1. Short wait (< 30min): sleep in-process, auto-continue
+   2. Backend failover: switch to alternative LLM backend
+   3. Medium wait (30min-2hrs): checkpoint, schedule auto-resume
+   4. Long wait (> 2hrs): checkpoint, wind down for manual resume
+   5. Unknown reset time: pause with reason
 
-   Returns {:action :continue ...} or {:action :pause :reason \"...\"}."
+   Returns:
+   - {:action :continue ...}              — ready to retry immediately
+   - {:action :checkpoint-and-resume ...}  — wind down, resume later
+   - {:action :checkpoint-and-stop ...}    — wind down, manual resume needed
+   - {:action :pause :reason \"...\"}       — stop, no resume info"
   ([context rate-limited-ids completed-ids logger]
    (handle-rate-limited-batch context rate-limited-ids completed-ids logger nil))
   ([context rate-limited-ids completed-ids logger results]
    (log/info logger :dag-resilience :rate-limit/detected
              {:data {:rate-limited-count (count rate-limited-ids)
                      :completed-count (count completed-ids)}})
-   (or (try-wait-for-reset results rate-limited-ids logger)
-       (try-backend-failover context logger)
-       (pause-with-reason context))))
+   (let [wait-decision (try-wait-for-reset results rate-limited-ids logger)]
+     (cond
+       ;; Short wait succeeded or medium/long tier returned
+       (= :continue (:action wait-decision))
+       wait-decision
+
+       ;; Medium/long wait — try backend failover first, fall back to checkpoint
+       (#{:checkpoint-and-resume :checkpoint-and-stop} (:action wait-decision))
+       (or (try-backend-failover context logger)
+           wait-decision)
+
+       ;; No reset time found — try failover, then generic pause
+       :else
+       (or (try-backend-failover context logger)
+           (pause-with-reason context))))))
 
 ;--- Layer 3: Resume — Reconstruct from Event File
 

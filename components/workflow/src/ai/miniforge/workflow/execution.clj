@@ -339,11 +339,29 @@
 
 (defn apply-dag-success
   "Apply a successful DAG result to the execution context.
-   Merges artifacts and advances past the implement phase."
+   Merges artifacts, synthesizes an :implement phase result so downstream
+   phases (release) can find the code artifact, and advances past implement."
   [ctx dag-result pipeline transition-to-completed-fn]
-  (let [ctx-with-dag (-> ctx
-                         (update :execution/artifacts into (:artifacts dag-result))
-                         (assoc :execution/dag-result dag-result))
+  (let [artifacts (:artifacts dag-result)
+        ;; Collect all :code/files across DAG task artifacts
+        all-files (vec (mapcat #(get % :code/files []) artifacts))
+        ;; Synthesize the implement phase result that release.clj expects
+        ;; at [:execution/phase-results :implement :result :output].
+        ;; Release checks for :artifacts key first (multi-artifact path),
+        ;; falling back to wrapping the output directly.
+        synthesized-implement-result
+        {:name :implement
+         :status :completed
+         :result {:status :success
+                  :output {:code/id (random-uuid)
+                           :code/files all-files
+                           :artifacts artifacts}
+                  :metrics (:metrics dag-result)}}
+        ctx-with-dag (-> ctx
+                         (update :execution/artifacts into artifacts)
+                         (assoc :execution/dag-result dag-result)
+                         (assoc-in [:execution/phase-results :implement]
+                                   synthesized-implement-result))
         post-impl-idx (index-after-phase pipeline :implement)]
     (if (and post-impl-idx (< post-impl-idx (count pipeline)))
       (assoc ctx-with-dag :execution/phase-index post-impl-idx)

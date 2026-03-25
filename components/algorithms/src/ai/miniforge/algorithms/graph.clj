@@ -97,7 +97,7 @@
                                                            (conj path node-id)
                                                            v
                                                            visiting')]
-                                (recur (rest remaining-deps) v' result')))))))))))]
+                                (recur (rest remaining-deps) v' result'))))))))))]
 
       ;; Process all start nodes
       (loop [remaining-starts start-ids
@@ -180,10 +180,15 @@
       result
       {:valid? true :graph graph})))
 
+(defn- collect-on-visit?
+  "Returns true if the given collect-on mode should collect on visit events."
+  [collect-on]
+  (or (= collect-on :all) (= collect-on :visit) (= collect-on :pre)))
+
 (defn dfs-collect
   "Collect all values from DFS traversal where collect-fn returns non-nil.
 
-  Uses a functional approach (no atoms) by accumulating results during traversal.
+  Supports pre-order and post-order collection, and custom reduce functions.
 
   Arguments:
   - graph        - Map of node-id -> node
@@ -191,40 +196,91 @@
   - get-deps-fn  - Function (node) -> [dependency-ids]
   - collect-fn   - Function (node-id path visited visiting) -> value or nil
                    Called on each event (visit/cycle/missing). Return value to collect.
-  - collect-on   - Keyword indicating when to collect: :visit, :cycle, :missing, or :all
+  - collect-on   - Keyword indicating when to collect:
+                   :visit or :pre - pre-order (collect before visiting children)
+                   :post          - post-order (collect after visiting children)
+                   :cycle         - collect on cycle detection
+                   :missing       - collect on missing nodes
+                   :all           - collect on all visit events (pre-order)
+  - reduce-fn    - (optional) Binary function (accumulator, value) -> accumulator.
+                   Defaults to conj.
+  - init         - (optional) Initial accumulator value. Defaults to [].
 
-  Returns vector of all collected non-nil values.
+  Returns the accumulated result (vector by default, or custom accumulator).
 
-  Example:
-    ;; Collect all cycles
-    (dfs-collect graph (keys graph)
-                 (fn [node] (:deps node))
-                 (fn [id path _v _vis] {:cycle path})
-                 :cycle)"
-  [graph start-ids get-deps-fn collect-fn collect-on]
-  (let [collected (atom [])]
-    (dfs graph
-         start-ids
-         get-deps-fn
-         ;; on-visit
-         (fn [node-id _node path visited visiting]
-           (when (or (= collect-on :all) (= collect-on :visit))
-             (when-let [value (collect-fn node-id path visited visiting)]
-               (swap! collected conj value)))
-           nil)  ; Continue traversal
-         ;; on-cycle
-         (fn [node-id path visited visiting]
-           (when (or (= collect-on :all) (= collect-on :cycle))
-             (when-let [value (collect-fn node-id path visited visiting)]
-               (swap! collected conj value)))
-           nil)  ; Continue traversal
-         ;; on-missing
-         (fn [node-id visited visiting]
-           (when (or (= collect-on :all) (= collect-on :missing))
-             (when-let [value (collect-fn node-id [] visited visiting)]
-               (swap! collected conj value)))
-           nil))  ; Continue traversal
-    @collected))
+  Examples:
+    ;; Collect all visited node ids (pre-order)
+    (dfs-collect graph [\"a\"] deps-fn (fn [id _ _ _] id) :pre)
+
+    ;; Collect in post-order (children before parents)
+    (dfs-collect graph [\"a\"] deps-fn (fn [id _ _ _] id) :post)
+
+    ;; Count visited nodes with custom reduce
+    (dfs-collect graph [\"a\"] deps-fn (fn [_ _ _ _] 1) :pre + 0)
+
+    ;; Collect into a set
+    (dfs-collect graph [\"a\"] deps-fn (fn [id _ _ _] id) :pre conj #{})"
+  ([graph start-ids get-deps-fn collect-fn collect-on]
+   (dfs-collect graph start-ids get-deps-fn collect-fn collect-on conj []))
+  ([graph start-ids get-deps-fn collect-fn collect-on reduce-fn init]
+   (if (= collect-on :post)
+     ;; Post-order: collect after all children have been visited.
+     ;; We use a custom DFS that accumulates post-order results.
+     (let [start-ids (if (coll? start-ids) start-ids [start-ids])
+           acc (volatile! init)]
+       (letfn [(traverse [node-id path visited visiting]
+                 (cond
+                   (contains? visited node-id)
+                   visited
+
+                   (contains? visiting node-id)
+                   ;; Cycle - skip for post-order
+                   visited
+
+                   :else
+                   (let [node (get graph node-id)]
+                     (if-not node
+                       ;; Missing node - skip for post-order
+                       visited
+                       ;; Visit children first, then collect this node
+                       (let [deps (get-deps-fn node)
+                             visiting' (conj visiting node-id)
+                             visited' (reduce (fn [v dep-id]
+                                                (traverse dep-id
+                                                          (conj path node-id)
+                                                          v
+                                                          visiting'))
+                                              visited
+                                              deps)]
+                         ;; Post-order: collect after children
+                         (when-let [value (collect-fn node-id path visited' visiting)]
+                           (vswap! acc reduce-fn value))
+                         (conj visited' node-id))))))]
+         (reduce (fn [visited start-id]
+                   (traverse start-id [] visited #{}))
+                 #{}
+                 start-ids))
+       @acc)
+     ;; Pre-order and other modes: collect during traversal events.
+     (let [collected (atom init)
+           maybe-collect (fn [active? node-id path visited visiting]
+                           (when active?
+                             (when-let [value (collect-fn node-id path visited visiting)]
+                               (swap! collected reduce-fn value)))
+                           nil)]
+       (dfs graph
+            start-ids
+            get-deps-fn
+            (fn [node-id _node path visited visiting]
+              (maybe-collect (collect-on-visit? collect-on)
+                             node-id path visited visiting))
+            (fn [node-id path visited visiting]
+              (maybe-collect (or (= collect-on :all) (= collect-on :cycle))
+                             node-id path visited visiting))
+            (fn [node-id visited visiting]
+              (maybe-collect (or (= collect-on :all) (= collect-on :missing))
+                             node-id [] visited visiting)))
+       @collected))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
@@ -249,11 +305,25 @@
                           {:valid? false :error "Cycle detected"})))
   ;; => {:valid? true :graph {...}}
 
-  ;; Collect all visited nodes
+  ;; Collect all visited nodes (pre-order)
   (dfs-collect graph ["a"]
                (fn [node] (:deps node))
                (fn [id _path _v _vis] id)
                :visit)
   ;; => ["a" "b" "d" "c"]
+
+  ;; Collect in post-order (children before parents)
+  (dfs-collect graph ["a"]
+               (fn [node] (:deps node))
+               (fn [id _path _v _vis] id)
+               :post)
+  ;; => ["d" "b" "c" "a"]
+
+  ;; Count nodes with custom reduce
+  (dfs-collect graph ["a"]
+               (fn [node] (:deps node))
+               (fn [_ _ _ _] 1)
+               :pre + 0)
+  ;; => 4
 
   :leave-this-here)

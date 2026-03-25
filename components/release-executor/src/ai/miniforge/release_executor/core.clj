@@ -271,15 +271,26 @@
                 {:data {:worktree-path (:worktree-path initial-state)
                         :create-pr? (:create-pr? initial-state)}}))
 
-    (-> initial-state
-        step-validate-inputs
-        step-check-gh-auth
-        step-generate-metadata
-        step-create-branch
-        step-write-and-stage
-        step-commit
-        step-push
-        step-create-pr
-        step-build-artifact
-        step-save-artifact
-        pipeline->result)))
+    (let [result (-> initial-state
+                     step-validate-inputs
+                     step-check-gh-auth
+                     step-generate-metadata
+                     step-create-branch
+                     step-write-and-stage
+                     step-commit
+                     step-push
+                     step-create-pr
+                     step-build-artifact
+                     step-save-artifact)]
+      (when (failed? result)
+        (spit "/tmp/miniforge-release-executor-debug.edn"
+              (str (pr-str {:failure (:failure result)
+                            :worktree-path (:worktree-path initial-state)
+                            :code-artifact-count (count (:code-artifacts initial-state))
+                            :file-count (count (mapcat :code/files (:code-artifacts initial-state)))
+                            :create-pr? (:create-pr? initial-state)
+                            :has-releaser? (boolean (:releaser initial-state))
+                            :timestamp (java.util.Date.)})
+                   "\n")
+              :append true))
+      (pipeline->result result))))

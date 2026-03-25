@@ -6,4 +6,5 @@
 
   ;; Release phase
   :release/no-implement-artifact  "Release phase has no code artifact from implement phase"
-  :release/zero-files             "Release phase received code artifact with zero files"}}
+  :release/zero-files             "Release phase received code artifact with zero files"
+  :release/skipped-already-implemented "Release skipped — task was already implemented"}}

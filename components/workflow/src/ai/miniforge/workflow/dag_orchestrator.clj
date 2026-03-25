@@ -221,22 +221,32 @@
     (:executor context)         (assoc :executor (:executor context))
     (:environment-id context)   (assoc :environment-id (:environment-id context))
     (:sandbox-workdir context)  (assoc :sandbox-workdir (:sandbox-workdir context))
-    (:worktree-path context)    (assoc :worktree-path (:worktree-path context))))
+    ;; Worktree path: try direct context, then execution/opts, then fall back to cwd
+    true (assoc :worktree-path (or (:worktree-path context)
+                                   (get-in context [:execution/opts :worktree-path])
+                                   (System/getProperty "user.dir")))))
 
 ;--- Layer 1: Mini-Workflow Execution
 
 (defn extract-sub-workflow-error
   "Extract the most informative error message from a failed sub-workflow result.
    Digs into phase results to find rate limit messages and other details
-   that may not appear in the top-level execution errors."
+   that may not appear in the top-level execution errors.
+   Prioritizes rate-limit messages so the DAG orchestrator can detect them."
   [result]
-  (or (-> result :execution/errors first :message)
-      ;; Check phase result error messages (where rate limit text lives)
-      (->> (vals (:execution/phase-results result))
-           (keep #(get-in % [:error :message]))
-           (filter not-empty)
-           first)
-      "Sub-workflow failed"))
+  (let [execution-error (-> result :execution/errors first :message)
+        ;; Scan all phase error messages for rate limit indicators
+        phase-errors (->> (vals (:execution/phase-results result))
+                          (keep #(get-in % [:error :message]))
+                          (filter not-empty))
+        rate-limit-msg (first (filter #(re-find #"(?i)rate.?limit|429|hit your limit|quota.?exceeded"
+                                                (str %))
+                                      (cons execution-error phase-errors)))]
+    ;; Prioritize rate limit messages so DAG can detect and pause
+    (or rate-limit-msg
+        execution-error
+        (first phase-errors)
+        "Sub-workflow failed")))
 
 (defn extract-pr-info-from-result
   "Extract PR info from a sub-workflow result if the release phase produced one."
@@ -372,17 +382,50 @@
 
 (defn handle-rate-limit-in-batch
   "Handle rate-limited tasks in a batch. Returns either:
-   - {:action :continue :new-backend X} to re-queue tasks
-   - {:action :continue :waited-ms N} to retry after waiting for reset
-   - {:action :pause :result <paused-map>} to stop execution"
+   - {:action :continue ...} to re-queue tasks (short wait or backend switch)
+   - {:action :pause :result <paused-map>} to checkpoint and stop execution
+
+   For medium waits (30min-2hrs), emits a :dag/paused event with :reset-at
+   so external schedulers can auto-resume. For long waits (>2hrs), emits
+   the same event but flags it as requiring manual resume."
   [context rate-limited-ids new-completed failed-ids all-results batch-results
    event-stream workflow-id logger]
   (let [decision (resilience/handle-rate-limited-batch
                   context rate-limited-ids new-completed logger batch-results)]
     (if (= :continue (:action decision))
       decision
-      (let [{:keys [artifacts]} (aggregate-results all-results)]
-        (resilience/emit-dag-paused! event-stream workflow-id new-completed (:reason decision))
+      (let [{:keys [artifacts]} (aggregate-results all-results)
+            reset-at (:reset-at decision)
+            auto-resume? (= :checkpoint-and-resume (:action decision))]
+        ;; Emit enriched pause event with reset time for scheduler
+        (resilience/emit-dag-paused! event-stream workflow-id new-completed
+                                     (:reason decision))
+        ;; Also emit a resume-hint event if we know when the rate limit clears
+        (when (and event-stream reset-at)
+          (try
+            (let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
+              (publish! event-stream
+                        {:event/type :dag/resume-hint
+                         :event/timestamp (str (java.time.Instant/now))
+                         :workflow/id workflow-id
+                         :dag/reset-at (str reset-at)
+                         :dag/auto-resume? auto-resume?
+                         :dag/completed-task-ids (vec new-completed)
+                         :dag/wait-ms (:wait-ms decision)}))
+            (catch Exception _ nil)))
+        ;; Log actionable info for the user
+        (when logger
+          (if auto-resume?
+            (log/info logger :dag-orchestrator :dag/checkpoint-for-resume
+                      {:data {:reset-at (str reset-at)
+                              :wait-minutes (long (/ (:wait-ms decision 0) 60000))
+                              :completed-tasks (count new-completed)
+                              :message "Workflow checkpointed. Resume with: miniforge run --resume <workflow-id>"}})
+            (log/info logger :dag-orchestrator :dag/checkpoint-for-manual-resume
+                      {:data {:reset-at (str reset-at)
+                              :wait-minutes (long (/ (:wait-ms decision 0) 60000))
+                              :completed-tasks (count new-completed)
+                              :message "Rate limit too far out. Resume manually when ready."}})))
         {:action :pause
          :result (dag-execution-paused (count new-completed) (count failed-ids)
                                        artifacts (:reason decision))}))))
