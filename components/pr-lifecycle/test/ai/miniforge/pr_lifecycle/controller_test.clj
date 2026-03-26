@@ -2,6 +2,7 @@
   "Unit tests for the PR lifecycle controller state machine.
 
    Tests controller creation, state initialization, configuration,
+   state machine transitions, invalid transition rejection,
    fix iteration enforcement, history tracking, and the extracted
    PR creation step functions."
   (:require
@@ -103,6 +104,236 @@
       (is (= bus (:event-bus @ctrl)))
       (is (= gen-fn (:generate-fn @ctrl))))))
 
+;------------------------------------------------------------------------------ Config Validation
+
+(deftest create-controller-nil-worktree-path-test
+  (testing "Controller accepts nil worktree-path (stored as nil in config)"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task)]
+      (is (nil? (get-in @ctrl [:config :worktree-path])))
+      (is (= :pending (:status @ctrl))))))
+
+(deftest create-controller-merge-policy-validation-test
+  (testing "Custom merge policy is stored verbatim without defaults merging"
+    (let [partial-policy {:method :rebase}
+          ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp"
+                 :merge-policy partial-policy)]
+      (is (= partial-policy (get-in @ctrl [:config :merge-policy])))
+      (is (nil? (get-in @ctrl [:config :merge-policy :require-ci-green?]))
+          "Partial policy should not be merged with defaults"))))
+
+(deftest create-controller-zero-max-iterations-test
+  (testing "Controller allows zero max-fix-iterations"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp"
+                 :max-fix-iterations 0)]
+      (is (= 0 (get-in @ctrl [:config :max-fix-iterations]))))))
+
+(deftest create-controller-config-keys-complete-test
+  (testing "Config map contains exactly the expected keys"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")]
+      (is (= #{:worktree-path :merge-policy :max-fix-iterations
+               :ci-poll-interval-ms :review-poll-interval-ms
+               :auto-resolve-comments}
+             (set (keys (:config @ctrl))))))))
+
+;------------------------------------------------------------------------------ State Machine Transitions via update-status!
+
+(deftest update-status-returns-new-status-test
+  (testing "update-status! returns the new status value"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")]
+      (is (= :creating-pr (controller/update-status! ctrl :creating-pr))))))
+
+(deftest update-status-updates-timestamp-test
+  (testing "update-status! updates the :updated-at timestamp"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")
+          before-ts (:updated-at @ctrl)]
+      ;; Small sleep to ensure timestamp differs
+      (Thread/sleep 5)
+      (controller/update-status! ctrl :monitoring-ci)
+      (let [after-ts (:updated-at @ctrl)]
+        (is (not= before-ts after-ts))
+        (is (.after ^java.util.Date after-ts ^java.util.Date before-ts))))))
+
+(deftest state-machine-full-happy-path-test
+  (testing "State transitions through the full happy path: pending -> creating-pr -> monitoring-ci -> monitoring-review -> ready-to-merge -> merging -> merged"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")]
+      (is (= :pending (:status @ctrl)))
+
+      (controller/update-status! ctrl :creating-pr)
+      (is (= :creating-pr (:status @ctrl)))
+
+      (controller/update-status! ctrl :monitoring-ci)
+      (is (= :monitoring-ci (:status @ctrl)))
+
+      (controller/update-status! ctrl :monitoring-review)
+      (is (= :monitoring-review (:status @ctrl)))
+
+      (controller/update-status! ctrl :ready-to-merge)
+      (is (= :ready-to-merge (:status @ctrl)))
+
+      ;; The controller uses :merging internally via attempt-merge!
+      (controller/update-status! ctrl :merged)
+      (is (= :merged (:status @ctrl))))))
+
+(deftest state-machine-ci-failure-fix-loop-test
+  (testing "State transitions through CI failure/fix loop: pending -> creating-pr -> monitoring-ci -> fixing -> monitoring-ci -> monitoring-review -> merged"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")]
+      (is (= :pending (:status @ctrl)))
+
+      (controller/update-status! ctrl :creating-pr)
+      (is (= :creating-pr (:status @ctrl)))
+
+      (controller/update-status! ctrl :monitoring-ci)
+      (is (= :monitoring-ci (:status @ctrl)))
+
+      ;; CI failure triggers fix
+      (controller/update-status! ctrl :fixing)
+      (is (= :fixing (:status @ctrl)))
+
+      ;; Fix pushed, back to CI monitoring
+      (controller/update-status! ctrl :monitoring-ci)
+      (is (= :monitoring-ci (:status @ctrl)))
+
+      ;; CI passes, move to review
+      (controller/update-status! ctrl :monitoring-review)
+      (is (= :monitoring-review (:status @ctrl)))
+
+      ;; Review approved, merge
+      (controller/update-status! ctrl :ready-to-merge)
+      (is (= :ready-to-merge (:status @ctrl)))
+
+      (controller/update-status! ctrl :merged)
+      (is (= :merged (:status @ctrl))))))
+
+(deftest state-machine-review-changes-requested-loop-test
+  (testing "State transitions through review changes requested loop"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")]
+      (controller/update-status! ctrl :creating-pr)
+      (controller/update-status! ctrl :monitoring-ci)
+      (controller/update-status! ctrl :monitoring-review)
+
+      ;; Reviewer requests changes -> fix loop
+      (controller/update-status! ctrl :fixing)
+      (is (= :fixing (:status @ctrl)))
+
+      ;; Fix pushed, re-run CI
+      (controller/update-status! ctrl :monitoring-ci)
+      (is (= :monitoring-ci (:status @ctrl)))
+
+      ;; CI passes, back to review
+      (controller/update-status! ctrl :monitoring-review)
+      (is (= :monitoring-review (:status @ctrl)))
+
+      ;; Approved this time
+      (controller/update-status! ctrl :ready-to-merge)
+      (controller/update-status! ctrl :merged)
+      (is (= :merged (:status @ctrl))))))
+
+(deftest state-machine-failure-terminal-test
+  (testing ":failed is a terminal state - controller records failure"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")]
+      (controller/update-status! ctrl :monitoring-ci)
+      (controller/update-status! ctrl :failed)
+      (is (= :failed (:status @ctrl))))))
+
+;------------------------------------------------------------------------------ Invalid / Unexpected State Transitions
+;;
+;; NOTE: The current controller uses a simple atom and does not enforce
+;; state transition guards. These tests document that arbitrary status
+;; values are stored as-is (they are NOT rejected). This is important
+;; for understanding the controller's current contract and for detecting
+;; regressions if transition guards are added in the future.
+
+(deftest invalid-status-value-stored-as-is-test
+  (testing "Controller stores arbitrary status values (no guard)"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")]
+      ;; An invalid status keyword is stored without rejection
+      (controller/update-status! ctrl :bogus-status)
+      (is (= :bogus-status (:status @ctrl))
+          "Controller currently accepts any keyword as status"))))
+
+(deftest backward-transition-not-rejected-test
+  (testing "Backward transitions are not rejected (no guard)"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")]
+      (controller/update-status! ctrl :monitoring-ci)
+      (controller/update-status! ctrl :pending)
+      (is (= :pending (:status @ctrl))
+          "Controller allows going back to :pending from :monitoring-ci"))))
+
+(deftest transition-from-terminal-state-not-rejected-test
+  (testing "Transitioning from :merged (terminal) is not rejected (no guard)"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")]
+      (controller/update-status! ctrl :merged)
+      (controller/update-status! ctrl :monitoring-ci)
+      (is (= :monitoring-ci (:status @ctrl))
+          "Controller allows transition away from terminal :merged state"))))
+
+(deftest transition-from-failed-state-not-rejected-test
+  (testing "Transitioning from :failed (terminal) is not rejected (no guard)"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")]
+      (controller/update-status! ctrl :failed)
+      (controller/update-status! ctrl :creating-pr)
+      (is (= :creating-pr (:status @ctrl))
+          "Controller allows transition away from terminal :failed state"))))
+
+;------------------------------------------------------------------------------ add-history! Function
+
+(deftest add-history-appends-event-test
+  (testing "add-history! appends an event with type, data, and timestamp"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")]
+      (controller/add-history! ctrl :pr-created {:pr-id 42})
+      (is (= 1 (count (:history @ctrl))))
+      (let [event (first (:history @ctrl))]
+        (is (= :pr-created (:type event)))
+        (is (= {:pr-id 42} (:data event)))
+        (is (inst? (:timestamp event)))))))
+
+(deftest add-history-returns-nil-test
+  (testing "add-history! returns nil"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")]
+      (is (nil? (controller/add-history! ctrl :test-event {}))))))
+
+(deftest add-history-preserves-order-test
+  (testing "add-history! preserves chronological order"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")]
+      (controller/add-history! ctrl :first {:n 1})
+      (controller/add-history! ctrl :second {:n 2})
+      (controller/add-history! ctrl :third {:n 3})
+      (is (= [:first :second :third]
+             (mapv :type (:history @ctrl)))))))
+
 ;------------------------------------------------------------------------------ Fix Iteration Enforcement
 
 (deftest handle-ci-failure-max-iterations-test
@@ -163,6 +394,29 @@
         (controller/handle-ci-failure! ctrl "logs")
         (catch clojure.lang.ExceptionInfo _e nil))
       (is (= :failed (:status @ctrl))))))
+
+(deftest handle-ci-failure-records-history-on-max-exceeded-test
+  (testing "handle-ci-failure! records :max-fix-iterations-exceeded in history"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp"
+                 :max-fix-iterations 2)]
+      (swap! ctrl assoc :fix-iterations 2)
+      (try
+        (controller/handle-ci-failure! ctrl "logs")
+        (catch clojure.lang.ExceptionInfo _e nil))
+      (is (some #(= :max-fix-iterations-exceeded (:type %)) (:history @ctrl))))))
+
+(deftest handle-ci-failure-zero-max-iterations-test
+  (testing "handle-ci-failure! immediately throws when max-fix-iterations is 0"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp"
+                 :max-fix-iterations 0)]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Max fix iterations exceeded"
+            (controller/handle-ci-failure! ctrl "logs"))))))
 
 ;------------------------------------------------------------------------------ State Manipulation (via atom)
 
