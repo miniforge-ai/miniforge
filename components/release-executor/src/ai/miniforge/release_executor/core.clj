@@ -129,6 +129,51 @@
                      :failure {:type :write-stage-failed :errors (:errors result)}
                      :write-metrics (:metrics result)))))))))
 
+(defn step-validate-diff
+  "Validate staged diff is not destructive before committing.
+   Rejects changes that delete more tests than they add or that empty files."
+  [state]
+  (if (or (failed? state) (:sandbox? state))
+    state
+    (let [{:keys [worktree-path logger]} state
+          diff-stats (git/diff-stats worktree-path)
+          test-counts (git/count-test-defs worktree-path)]
+      (cond
+        ;; Net-negative test count — agent deleted existing tests
+        (and test-counts
+             (> (:removed test-counts) 0)
+             (> (:removed test-counts) (:added test-counts)))
+        (do
+          (when logger
+            (log/error logger :release-executor :diff/net-negative-tests
+                       {:data {:added (:added test-counts)
+                               :removed (:removed test-counts)}}))
+          (fail state :destructive-diff
+                (str "Diff removes more tests than it adds ("
+                     (:removed test-counts) " removed, "
+                     (:added test-counts) " added)")))
+
+        ;; Deletions vastly outweigh additions (> 3:1 ratio, min 20 lines)
+        (and diff-stats
+             (> (:deletions diff-stats) 20)
+             (> (:deletions diff-stats) (* 3 (max 1 (:additions diff-stats)))))
+        (do
+          (when logger
+            (log/warn logger :release-executor :diff/heavily-destructive
+                      {:data {:additions (:additions diff-stats)
+                              :deletions (:deletions diff-stats)}}))
+          (fail state :destructive-diff
+                (str "Diff is heavily destructive ("
+                     (:deletions diff-stats) " deletions vs "
+                     (:additions diff-stats) " additions)")))
+
+        :else
+        (do
+          (when logger
+            (log/debug logger :release-executor :diff/validated
+                       {:data (merge {} diff-stats test-counts)}))
+          state)))))
+
 (defn step-commit [state]
   (if (failed? state)
     state
@@ -277,6 +322,7 @@
                      step-generate-metadata
                      step-create-branch
                      step-write-and-stage
+                     step-validate-diff
                      step-commit
                      step-push
                      step-create-pr

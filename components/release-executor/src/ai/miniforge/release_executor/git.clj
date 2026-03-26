@@ -106,6 +106,43 @@
     (catch Exception e
       (result/shell-failure (.getMessage e) {:branch nil}))))
 
+(defn diff-stats
+  "Get line-level diff stats for staged changes.
+
+   Returns {:additions N :deletions N :files N} or nil on error."
+  [worktree-path]
+  (try
+    (let [result (process/shell
+                  {:dir (str worktree-path) :out :string :err :string :continue true}
+                  "git" "diff" "--cached" "--numstat")]
+      (when (zero? (:exit result))
+        (let [lines (str/split-lines (str/trim (:out result "")))
+              parsed (keep (fn [line]
+                             (when-let [[_ adds dels] (re-matches #"(\d+)\t(\d+)\t.*" line)]
+                               {:additions (parse-long adds)
+                                :deletions (parse-long dels)}))
+                           lines)]
+          {:additions (reduce + 0 (map :additions parsed))
+           :deletions (reduce + 0 (map :deletions parsed))
+           :files (count parsed)})))
+    (catch Exception _ nil)))
+
+(defn count-test-defs
+  "Count deftest forms in staged changes.
+
+   Returns {:added N :removed N} or nil on error."
+  [worktree-path]
+  (try
+    (let [result (process/shell
+                  {:dir (str worktree-path) :out :string :err :string :continue true}
+                  "git" "diff" "--cached" "-U0")]
+      (when (zero? (:exit result))
+        (let [diff-text (:out result "")
+              added (count (re-seq #"(?m)^\+.*\(deftest " diff-text))
+              removed (count (re-seq #"(?m)^-.*\(deftest " diff-text))]
+          {:added added :removed removed})))
+    (catch Exception _ nil)))
+
 (defn commit-changes!
   "Commit staged changes with the given message.
 
