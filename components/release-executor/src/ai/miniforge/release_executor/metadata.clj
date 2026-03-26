@@ -91,6 +91,8 @@
                   (str/replace #"\n.*" "")        ;; first line only
                   (str/replace #"\s*-\s.*" "")    ;; strip bullet points
                   (str/replace #"\s*Read source:.*" "") ;; strip "Read source:" hints
+                  (str/replace #":\s*$" "")        ;; strip trailing colons
+                  (str/replace #"^Create \S+\.\w+ with " "Add ") ;; "Create foo.clj with" → "Add"
                   str/trim)]
     (if (<= (count clean) max-len)
       clean
@@ -122,7 +124,8 @@
     {:release/branch-name branch
      :release/commit-message title
      :release/pr-title title
-     :release/pr-body body}))
+     :release/pr-body body
+     :release/pr-description body}))
 
 (defn generate-release-metadata
   "Generate release metadata using releaser agent, falling back to deterministic
