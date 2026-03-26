@@ -2,10 +2,11 @@
   "Unit tests for review monitoring.
 
    Tests review status computation, comment tracking, review decision
-   parsing, and monitor lifecycle. Does NOT test gh CLI calls."
+   parsing, monitor lifecycle, and mocked gh CLI interactions."
   (:require
    [clojure.test :refer [deftest testing is are]]
-   [ai.miniforge.pr-lifecycle.review-monitor :as review]))
+   [ai.miniforge.pr-lifecycle.review-monitor :as review]
+   [ai.miniforge.dag-executor.interface :as dag]))
 
 ;------------------------------------------------------------------------------ Review States
 
@@ -38,6 +39,11 @@
   (testing "Decision parsing is case-insensitive"
     (is (= :approved (review/parse-review-decision "approved")))
     (is (= :changes-requested (review/parse-review-decision "changes_requested")))))
+
+(deftest parse-review-decision-unknown-value-test
+  (testing "Unrecognized decision defaults to :pending"
+    (is (= :pending (review/parse-review-decision "SOMETHING_ELSE")))
+    (is (= :pending (review/parse-review-decision "dismissed")))))
 
 ;------------------------------------------------------------------------------ Review Status Computation
 
@@ -88,6 +94,119 @@
       (is (= :pending (:status result)))
       (is (= 0 (:approval-count result))))))
 
+;------------------------------------------------------------------------------ Multiple Reviewer Handling
+
+(deftest compute-review-status-three-reviewers-mixed-test
+  (testing "Three reviewers with mixed states"
+    (let [reviews [{:author "alice" :state "APPROVED"}
+                   {:author "bob" :state "CHANGES_REQUESTED"}
+                   {:author "charlie" :state "APPROVED"}]
+          result (review/compute-review-status reviews 2)]
+      ;; changes-requested from bob takes precedence
+      (is (= :changes-requested (:status result)))
+      (is (= ["bob"] (:changes-requested-by result)))
+      ;; alice and charlie approved, bob did not cancel theirs
+      (is (= 2 (:approval-count result)))
+      (is (contains? (set (:approvers result)) "alice"))
+      (is (contains? (set (:approvers result)) "charlie")))))
+
+(deftest compute-review-status-multiple-changes-requested-test
+  (testing "Multiple reviewers requesting changes"
+    (let [reviews [{:author "alice" :state "CHANGES_REQUESTED"}
+                   {:author "bob" :state "CHANGES_REQUESTED"}
+                   {:author "charlie" :state "APPROVED"}]
+          result (review/compute-review-status reviews 1)]
+      (is (= :changes-requested (:status result)))
+      (is (= 2 (count (:changes-requested-by result))))
+      (is (= #{"alice" "bob"} (set (:changes-requested-by result)))))))
+
+(deftest compute-review-status-all-approved-high-threshold-test
+  (testing "All reviewers approved with high approval threshold"
+    (let [reviews [{:author "alice" :state "APPROVED"}
+                   {:author "bob" :state "APPROVED"}
+                   {:author "charlie" :state "APPROVED"}
+                   {:author "dave" :state "APPROVED"}]
+          result (review/compute-review-status reviews 3)]
+      (is (= :approved (:status result)))
+      (is (= 4 (:approval-count result)))
+      (is (= 3 (:required-approvals result))))))
+
+(deftest compute-review-status-reviewer-approves-then-requests-changes-test
+  (testing "Reviewer who first approved then requested changes"
+    (let [reviews [{:author "alice" :state "APPROVED"}
+                   {:author "bob" :state "APPROVED"}
+                   {:author "bob" :state "CHANGES_REQUESTED"}]
+          result (review/compute-review-status reviews 1)]
+      ;; bob's changes-requested cancels their approval
+      (is (= :changes-requested (:status result)))
+      (is (= 1 (:approval-count result)))
+      (is (contains? (set (:approvers result)) "alice"))
+      (is (not (contains? (set (:approvers result)) "bob"))))))
+
+(deftest compute-review-status-only-one-of-many-approved-test
+  (testing "One approval when three are required yields pending"
+    (let [reviews [{:author "alice" :state "APPROVED"}]
+          result (review/compute-review-status reviews 3)]
+      (is (= :pending (:status result)))
+      (is (= 1 (:approval-count result)))
+      (is (= 3 (:required-approvals result))))))
+
+;------------------------------------------------------------------------------ Review State Transitions
+
+(deftest review-state-transition-pending-to-approved-test
+  (testing "Transition from pending to approved when approvals met"
+    (let [pending-result (review/compute-review-status [] 1)
+          approved-result (review/compute-review-status
+                           [{:author "alice" :state "APPROVED"}] 1)]
+      (is (= :pending (:status pending-result)))
+      (is (= :approved (:status approved-result))))))
+
+(deftest review-state-transition-pending-to-changes-requested-test
+  (testing "Transition from pending to changes-requested"
+    (let [pending-result (review/compute-review-status [] 1)
+          changes-result (review/compute-review-status
+                           [{:author "bob" :state "CHANGES_REQUESTED"}] 1)]
+      (is (= :pending (:status pending-result)))
+      (is (= :changes-requested (:status changes-result))))))
+
+(deftest review-state-transition-changes-requested-to-approved-test
+  (testing "Transition from changes-requested to approved after new approval"
+    (let [;; Initially bob requests changes
+          cr-result (review/compute-review-status
+                      [{:author "bob" :state "CHANGES_REQUESTED"}] 1)
+          ;; Then alice approves (bob's request still present but alice is a new approver)
+          approved-result (review/compute-review-status
+                            [{:author "bob" :state "CHANGES_REQUESTED"}
+                             {:author "alice" :state "APPROVED"}] 1)]
+      (is (= :changes-requested (:status cr-result)))
+      ;; Still changes-requested because changes_requested takes precedence
+      (is (= :changes-requested (:status approved-result))))))
+
+(deftest review-state-transition-approved-to-changes-requested-test
+  (testing "Transition from approved back to changes-requested"
+    (let [approved-result (review/compute-review-status
+                            [{:author "alice" :state "APPROVED"}] 1)
+          reverted-result (review/compute-review-status
+                            [{:author "alice" :state "APPROVED"}
+                             {:author "bob" :state "CHANGES_REQUESTED"}] 1)]
+      (is (= :approved (:status approved-result)))
+      (is (= :changes-requested (:status reverted-result))))))
+
+(deftest review-state-transition-incremental-approvals-test
+  (testing "Progressive accumulation of approvals"
+    (let [one-of-three (review/compute-review-status
+                         [{:author "alice" :state "APPROVED"}] 3)
+          two-of-three (review/compute-review-status
+                         [{:author "alice" :state "APPROVED"}
+                          {:author "bob" :state "APPROVED"}] 3)
+          three-of-three (review/compute-review-status
+                           [{:author "alice" :state "APPROVED"}
+                            {:author "bob" :state "APPROVED"}
+                            {:author "charlie" :state "APPROVED"}] 3)]
+      (is (= :pending (:status one-of-three)))
+      (is (= :pending (:status two-of-three)))
+      (is (= :approved (:status three-of-three))))))
+
 ;------------------------------------------------------------------------------ Review Comment Extraction
 
 (deftest extract-review-comments-test
@@ -104,6 +223,27 @@
   (testing "No CHANGES_REQUESTED reviews yields empty comments"
     (let [reviews [{:state "APPROVED" :comments [{:body "OK"}]}]]
       (is (empty? (review/extract-review-comments reviews))))))
+
+(deftest extract-review-comments-multiple-reviewers-test
+  (testing "Extracts comments from multiple CHANGES_REQUESTED reviews"
+    (let [reviews [{:state "CHANGES_REQUESTED"
+                    :comments [{:body "Fix naming" :author "alice" :path "src/a.clj" :line 5}
+                               {:body "Add docstring" :author "alice" :path "src/a.clj" :line 10}]}
+                   {:state "CHANGES_REQUESTED"
+                    :comments [{:body "Refactor this" :author "bob" :path "src/b.clj" :line 20}]}
+                   {:state "APPROVED"
+                    :comments [{:body "Nice work" :author "charlie"}]}]
+          comments (review/extract-review-comments reviews)]
+      (is (= 3 (count comments)))
+      (is (= #{"alice" "bob"} (set (map :author comments)))))))
+
+(deftest extract-review-comments-preserves-path-and-line-test
+  (testing "Extracted comments preserve file path and line info"
+    (let [reviews [{:state "CHANGES_REQUESTED"
+                    :comments [{:body "Fix" :author "alice" :path "src/core.clj" :line 42}]}]
+          comments (review/extract-review-comments reviews)]
+      (is (= "src/core.clj" (:path (first comments))))
+      (is (= 42 (:line (first comments)))))))
 
 ;------------------------------------------------------------------------------ Comment Tracking
 
@@ -151,6 +291,16 @@
         (is (= 2 (count result)))
         (is (= #{2 3} (set (map :id result))))))))
 
+(deftest track-multiple-unique-comments-test
+  (testing "Multiple unique comments are all tracked"
+    (let [tracker (review/create-comment-tracker)
+          comments (mapv (fn [i] {:id i :body (str "Comment " i) :author "alice"})
+                         (range 1 6))]
+      (doseq [c comments]
+        (is (true? (review/track-comment! tracker c))))
+      (is (= 5 (count (:comments @tracker))))
+      (is (= 5 (count (:seen-ids @tracker)))))))
+
 ;------------------------------------------------------------------------------ Monitor Creation
 
 (deftest create-review-monitor-test
@@ -186,3 +336,123 @@
       (swap! monitor assoc :running? true)
       (review/stop-review-monitor monitor)
       (is (false? (:running? @monitor))))))
+
+;------------------------------------------------------------------------------ Mocked gh CLI: run-gh-command
+
+(deftest run-gh-command-success-test
+  (testing "Successful gh command returns dag/ok with trimmed output"
+    (with-redefs [babashka.process/shell
+                  (fn [& _args]
+                    {:exit 0 :out "  some output\n" :err ""})]
+      (let [result (review/run-gh-command ["gh" "pr" "view" "42"] "/tmp/repo")]
+        (is (dag/ok? result))
+        (is (= "some output" (:output (:data result))))))))
+
+(deftest run-gh-command-failure-test
+  (testing "Failed gh command returns dag/err with error message"
+    (with-redefs [babashka.process/shell
+                  (fn [& _args]
+                    {:exit 1 :out "" :err "not found\n"})]
+      (let [result (review/run-gh-command ["gh" "pr" "view" "999"] "/tmp/repo")]
+        (is (dag/err? result))))))
+
+(deftest run-gh-command-exception-test
+  (testing "Exception during gh command returns dag/err"
+    (with-redefs [babashka.process/shell
+                  (fn [& _args]
+                    (throw (Exception. "Connection refused")))]
+      (let [result (review/run-gh-command ["gh" "pr" "view" "42"] "/tmp/repo")]
+        (is (dag/err? result))))))
+
+;------------------------------------------------------------------------------ Mocked gh CLI: get-pr-reviews
+
+(deftest get-pr-reviews-success-test
+  (testing "get-pr-reviews returns raw JSON output on success"
+    (let [json-output "{\"reviews\":[],\"reviewDecision\":\"APPROVED\"}"]
+      (with-redefs [babashka.process/shell
+                    (fn [& _args]
+                      {:exit 0 :out json-output :err ""})]
+        (let [result (review/get-pr-reviews "/tmp/repo" 42)]
+          (is (dag/ok? result))
+          (is (= json-output (:raw (:data result)))))))))
+
+(deftest get-pr-reviews-failure-test
+  (testing "get-pr-reviews propagates error on failure"
+    (with-redefs [babashka.process/shell
+                  (fn [& _args]
+                    {:exit 1 :out "" :err "Could not resolve to a PullRequest"})]
+      (let [result (review/get-pr-reviews "/tmp/repo" 999)]
+        (is (dag/err? result))))))
+
+;------------------------------------------------------------------------------ Mocked gh CLI: get-pr-comments
+
+(deftest get-pr-comments-success-test
+  (testing "get-pr-comments returns raw JSON output on success"
+    (let [json-output "{\"comments\":[{\"body\":\"LGTM\"}]}"]
+      (with-redefs [babashka.process/shell
+                    (fn [& _args]
+                      {:exit 0 :out json-output :err ""})]
+        (let [result (review/get-pr-comments "/tmp/repo" 42)]
+          (is (dag/ok? result))
+          (is (= json-output (:raw (:data result)))))))))
+
+(deftest get-pr-comments-failure-test
+  (testing "get-pr-comments propagates error on failure"
+    (with-redefs [babashka.process/shell
+                  (fn [& _args]
+                    {:exit 1 :out "" :err "auth required"})]
+      (let [result (review/get-pr-comments "/tmp/repo" 42)]
+        (is (dag/err? result))))))
+
+;------------------------------------------------------------------------------ Mocked poll-review-status
+
+(deftest poll-review-status-with-mock-success-test
+  (testing "poll-review-status updates monitor state on successful poll"
+    (with-redefs [review/get-pr-reviews
+                  (fn [_path _pr]
+                    (dag/ok {:raw "{}"})) 
+                  review/get-pr-comments
+                  (fn [_path _pr]
+                    (dag/ok {:raw "{}"}))]
+      (let [monitor (review/create-review-monitor
+                      (random-uuid) (random-uuid) (random-uuid)
+                      42 "/tmp/repo")]
+        (is (= :pending (:status @monitor)))
+        (let [result (review/poll-review-status monitor nil)]
+          ;; Status is computed (defaults to :pending with no reviews parsed)
+          (is (some? (:status result)))
+          ;; Poll count incremented
+          (is (= 1 (:polls @monitor)))
+          ;; Last poll timestamp set
+          (is (some? (:last-poll @monitor))))))))
+
+(deftest poll-review-status-with-mock-failure-test
+  (testing "poll-review-status returns :unknown on gh failure"
+    (with-redefs [review/get-pr-reviews
+                  (fn [_path _pr]
+                    (dag/err :gh-command-failed "not found"))
+                  review/get-pr-comments
+                  (fn [_path _pr]
+                    (dag/ok {:raw "{}"}))]
+      (let [monitor (review/create-review-monitor
+                      (random-uuid) (random-uuid) (random-uuid)
+                      42 "/tmp/repo")]
+        (let [result (review/poll-review-status monitor nil)]
+          (is (= :unknown (:status result)))
+          (is (some? (:error result))))))))
+
+(deftest poll-review-status-increments-poll-count-test
+  (testing "Each poll increments the poll counter"
+    (with-redefs [review/get-pr-reviews
+                  (fn [_path _pr]
+                    (dag/ok {:raw "{}"}))
+                  review/get-pr-comments
+                  (fn [_path _pr]
+                    (dag/ok {:raw "{}"}))]
+      (let [monitor (review/create-review-monitor
+                      (random-uuid) (random-uuid) (random-uuid)
+                      42 "/tmp/repo")]
+        (review/poll-review-status monitor nil)
+        (review/poll-review-status monitor nil)
+        (review/poll-review-status monitor nil)
+        (is (= 3 (:polls @monitor)))))))
