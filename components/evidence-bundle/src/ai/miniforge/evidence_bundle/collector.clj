@@ -73,6 +73,32 @@
   [workflow-state]
   (vec (or (:workflow/tool-invocations workflow-state) [])))
 
+;------------------------------------------------------------------------------ Layer 1.5
+;; Rules Applied Evidence
+
+(defn- build-rule-applied-entry
+  "Normalize a manifest entry into the expected rule-applied shape.
+   Ensures all fields have valid defaults and annotates with phase name."
+  [entry phase-name]
+  {:id (or (:id entry) (random-uuid))
+   :title (get entry :title "unknown")
+   :role (get entry :role :unknown)
+   :tags-matched (vec (get entry :tags-matched []))
+   :score (double (get entry :score 0.0))
+   :phase (get entry :phase phase-name)})
+
+(defn collect-rules-applied
+  "Collect rules-applied evidence from phase results.
+   Each phase that captured a rules-manifest has its entries normalized
+   and annotated with the phase name.
+   Returns empty vector when no phases have a rules manifest."
+  [workflow-state]
+  (let [phases (get workflow-state :workflow/phases {})]
+    (vec (mapcat (fn [[phase-name phase-data]]
+                   (when-let [manifest (:rules-manifest phase-data)]
+                     (mapv #(build-rule-applied-entry % phase-name) manifest)))
+                 phases))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Policy Check Evidence
 
@@ -256,6 +282,7 @@
         pack-promotions (collect-pack-promotions workflow-state)
         outcome (build-outcome-evidence workflow-state)
         tool-invocations (collect-tool-invocations workflow-state)
+        rules-applied (collect-rules-applied workflow-state)
         supervision-decisions (collect-supervision-decisions event-stream workflow-id)
         control-actions (collect-control-actions event-stream workflow-id)
 
@@ -292,6 +319,8 @@
                  (assoc :evidence/supervision-decisions supervision-decisions)
                  (seq control-actions)
                  (assoc :evidence/control-actions control-actions)
+                 (seq rules-applied)
+                 (assoc :evidence/rules-applied rules-applied)
                  semantic-validation
                  (assoc :evidence/semantic-validation semantic-validation))
 

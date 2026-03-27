@@ -27,6 +27,7 @@
             [ai.miniforge.phase.agent-behavior :as agent-beh]
             [ai.miniforge.phase.messages :as messages]
             [ai.miniforge.phase.phase-config :as phase-config]
+            [ai.miniforge.phase.knowledge-helpers :as kb-helpers]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.context-pack.interface :as context-pack]
             [ai.miniforge.context-pack.factory :as ctx-factory]
@@ -135,7 +136,8 @@
     (assoc :task/knowledge-context kb-context)))
 
 (defn build-implement-task
-  "Build the task map for the implementer agent from execution context."
+  "Build the task map for the implementer agent from execution context.
+   Returns {:task task-map :rules-manifest manifest-or-nil}."
   [ctx]
   (let [input (get-in ctx [:execution/input])
         plan-result (get-in ctx [:execution/phase-results :plan :result :output])
@@ -148,8 +150,8 @@
         behavior-addendum (agent-beh/load-and-filter-behaviors
                             :implement {:task {:task/intent (:intent input)}})
         review-feedback (resolve-review-feedback ctx)
-        kb-context (knowledge/inject-and-format
-                    (:knowledge-store ctx) :implementer (get input :tags []))
+        {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
+                                       (:knowledge-store ctx) :implementer (get input :tags []))
         base-task (assoc-optional-task-fields
                     {:task/id (random-uuid)
                      :task/type :implement
@@ -160,12 +162,14 @@
                      :task/plan plan-result
                      :task/existing-files existing-files
                      :task/behavior-addendum behavior-addendum}
-                    pack-ctx kb-context)]
-    (cond-> base-task
-      verify-failure
-      (assoc :task/verify-failures (build-verify-failures verify-failure))
-      review-feedback
-      (assoc :task/review-feedback review-feedback))))
+                    pack-ctx formatted)
+        task (cond-> base-task
+               verify-failure
+               (assoc :task/verify-failures (build-verify-failures verify-failure))
+               review-feedback
+               (assoc :task/review-feedback review-feedback))]
+    {:task task
+     :rules-manifest manifest}))
 
 (defn create-streaming-callback
   "Create a streaming callback for agent output if event-stream is available."
@@ -200,7 +204,7 @@
         logger (or (get-in ctx [:execution/logger])
                    (log/create-logger {:min-level :info :output :human}))
         implementer-agent (agent/create-implementer {:logger logger})
-        task (build-implement-task ctx)
+        {:keys [task rules-manifest]} (build-implement-task ctx)
         ;; Cache loaded files and context pack for subsequent retries
         ctx (cond-> ctx
               (not (get-in ctx [:execution/cached-files]))
@@ -226,7 +230,8 @@
         (assoc-in [:phase :budget] budget)
         (assoc-in [:phase :started-at] start-time)
         (assoc-in [:phase :status] :running)
-        (assoc-in [:phase :result] result))))
+        (assoc-in [:phase :result] result)
+        (assoc-in [:phase :rules-manifest] rules-manifest))))
 
 (def ^:private rate-limit-pattern
   "Lightweight rate limit detection for the phase level.

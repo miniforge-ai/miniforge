@@ -24,8 +24,8 @@
    Default gates: [:plan-complete]"
   (:require [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.phase.phase-config :as phase-config]
+            [ai.miniforge.phase.knowledge-helpers :as kb-helpers]
             [ai.miniforge.agent.interface :as agent]
-            [ai.miniforge.knowledge.interface :as knowledge]
             [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -72,21 +72,24 @@
 ;; Plan from LLM agent (normal path)
 
 (defn build-planner-task
-  "Build the task map to pass to the planner agent."
+  "Build the task map to pass to the planner agent.
+   Returns {:task task-map :rules-manifest manifest-or-nil}."
   [input explore-result knowledge-store]
   (let [existing-files (:exploration/files explore-result)
-        kb-context (knowledge/inject-and-format
-                    knowledge-store :planner (get input :tags []))]
-    (cond-> {:task/id (random-uuid)
-             :task/type :plan
-             :task/description (:description input)
-             :task/title (:title input)
-             :task/intent (:intent input)
-             :task/constraints (:constraints input)}
-      (seq existing-files)
-      (assoc :task/existing-files existing-files)
-      kb-context
-      (assoc :task/knowledge-context kb-context))))
+        {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
+                                       knowledge-store :planner (get input :tags []))
+        task (cond-> {:task/id (random-uuid)
+                      :task/type :plan
+                      :task/description (:description input)
+                      :task/title (:title input)
+                      :task/intent (:intent input)
+                      :task/constraints (:constraints input)}
+               (seq existing-files)
+               (assoc :task/existing-files existing-files)
+               formatted
+               (assoc :task/knowledge-context formatted))]
+    {:task task
+     :rules-manifest manifest}))
 
 (defn create-streaming-callback
   "Create a streaming callback for agent output, if event-stream is available."
@@ -98,17 +101,19 @@
                  {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)}))))
 
 (defn plan-from-agent
-  "Invoke the planner agent to generate a plan via LLM."
+  "Invoke the planner agent to generate a plan via LLM.
+   Returns {:result agent-result :rules-manifest manifest-or-nil}."
   [ctx input]
   (let [explore-result (get-in ctx [:execution/phase-results :explore :result :output])
-        task (build-planner-task input explore-result (:knowledge-store ctx))
+        {:keys [task rules-manifest]} (build-planner-task input explore-result (:knowledge-store ctx))
         on-chunk (create-streaming-callback ctx)
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
         planner-agent (agent/create-planner {})]
-    (try
-      (agent/invoke planner-agent task agent-ctx)
-      (catch Exception e
-        (response/failure e)))))
+    {:result (try
+               (agent/invoke planner-agent task agent-ctx)
+               (catch Exception e
+                 (response/failure e)))
+     :rules-manifest rules-manifest}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
@@ -127,10 +132,13 @@
         start-time (System/currentTimeMillis)
         input (get-in ctx [:execution/input])
         spec-tasks (:plan/tasks input)
-        result (if spec-tasks
-                 (plan-from-spec-tasks input spec-tasks)
-                 (plan-from-agent ctx input))]
-    (build-phase-context ctx gates budget start-time result)))
+        {:keys [result rules-manifest]}
+        (if spec-tasks
+          {:result (plan-from-spec-tasks input spec-tasks)
+           :rules-manifest nil}
+          (plan-from-agent ctx input))]
+    (-> (build-phase-context ctx gates budget start-time result)
+        (assoc-in [:phase :rules-manifest] rules-manifest))))
 
 (defn leave-plan
   "Post-processing for planning phase.

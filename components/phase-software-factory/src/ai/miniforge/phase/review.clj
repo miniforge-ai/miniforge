@@ -24,6 +24,7 @@
    Default gates: [:review-approved :quality-check]"
   (:require [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.phase.phase-config :as phase-config]
+            [ai.miniforge.phase.knowledge-helpers :as kb-helpers]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.knowledge.interface :as knowledge]
             [ai.miniforge.response.interface :as response]))
@@ -51,20 +52,27 @@
                  {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)}))))
 
 (defn- build-review-task
-  "Build the task map for the reviewer agent from execution context."
+  "Build the task map for the reviewer agent from execution context.
+   Returns {:task task-map :rules-manifest manifest-or-nil}."
   [ctx]
   (let [input (get-in ctx [:execution/input])
         implement-result (get-in ctx [:execution/phase-results :implement :result :output])
-        verify-result (get-in ctx [:execution/phase-results :verify :result :output])]
-    {:task/id (random-uuid)
-     :task/type :review
-     :task/description (:description input)
-     :task/title (:title input)
-     :task/intent (:intent input)
-     :task/constraints (:constraints input)
-     :task/artifact (or (:artifact implement-result)
-                        implement-result)
-     :task/tests verify-result}))
+        verify-result (get-in ctx [:execution/phase-results :verify :result :output])
+        {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
+                                       (:knowledge-store ctx) :reviewer (get input :tags []))
+        task (cond-> {:task/id (random-uuid)
+                      :task/type :review
+                      :task/description (:description input)
+                      :task/title (:title input)
+                      :task/intent (:intent input)
+                      :task/constraints (:constraints input)
+                      :task/artifact (or (:artifact implement-result)
+                                         implement-result)
+                      :task/tests verify-result}
+               formatted
+               (assoc :task/knowledge-context formatted))]
+    {:task task
+     :rules-manifest manifest}))
 
 (defn enter-review
   "Execute review phase.
@@ -76,7 +84,7 @@
         start-time (System/currentTimeMillis)
         reviewer-agent (agent/create-reviewer
                         (select-keys ctx [:llm-backend]))
-        task (build-review-task ctx)
+        {:keys [task rules-manifest]} (build-review-task ctx)
         on-chunk (create-streaming-callback ctx :review)
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
         result (try
@@ -91,7 +99,8 @@
         (assoc-in [:phase :budget] budget)
         (assoc-in [:phase :started-at] start-time)
         (assoc-in [:phase :status] :running)
-        (assoc-in [:phase :result] result))))
+        (assoc-in [:phase :result] result)
+        (assoc-in [:phase :rules-manifest] rules-manifest))))
 
 (defn leave-review
   "Post-processing for review phase.
