@@ -298,12 +298,20 @@
                                "Include complete test code, not placeholders.")]
           (if llm-client
             ;; Use the real LLM with artifact session for MCP tool support
-            (let [{:keys [llm-result artifact]}
+            (let [{:keys [llm-result artifact context-misses]}
                   (artifact-session/with-artifact-session [session]
+                    ;; Write context cache so MCP tools can serve from it
+                    (let [files-map (into {} (map (fn [f] [(:path f) (:content f)])
+                                                  (:code/files code-artifact)))]
+                      (artifact-session/write-context-cache! session files-map))
                     (let [budget-usd (budget/resolve-cost-budget-usd :tester config context)
                           max-turns (get @tester-prompt-data :prompt/max-turns 10)
                           mcp-opts {:mcp-config (:mcp-config-path session)
                                     :mcp-allowed-tools (:mcp-allowed-tools session)
+                                    ;; Block built-in exploration tools — agents use
+                                    ;; context_read/context_grep/context_glob MCP tools
+                                    ;; instead, which read through the context cache.
+                                    :disallowed-tools ["Read" "Grep" "Glob" "WebSearch" "WebFetch" "LS"]
                                     :supervision (:supervision session)
                                     :budget-usd budget-usd
                                     :max-turns max-turns}]
@@ -315,6 +323,10 @@
                   response llm-result
                   tokens (get response :tokens 0)
                   cost-usd (get response :cost-usd)]
+              (when (seq context-misses)
+                (log/info logger :tester :tester/context-cache-misses
+                          {:data {:miss-count (count context-misses)
+                                  :misses context-misses}}))
               (log/info logger :tester :tester/llm-called
                         {:data {:success (llm/success? response)
                                 :tokens tokens

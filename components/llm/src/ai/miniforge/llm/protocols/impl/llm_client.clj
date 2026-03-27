@@ -181,7 +181,7 @@
             :requires-cli? true
             :api-key-var "ANTHROPIC_API_KEY"
             :stream-parser parse-claude-stream-line
-            :args-fn (fn [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools supervision budget-usd max-turns]}]
+            :args-fn (fn [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools disallowed-tools supervision budget-usd max-turns]}]
                        (let [budget (or budget-usd
                                         (when max-tokens default-claude-cli-budget-usd))]
                          (cond-> ["-p"]
@@ -189,6 +189,7 @@
                            streaming?                   (conj "--verbose")
                            mcp-config                   (into ["--mcp-config" mcp-config])
                            (seq mcp-allowed-tools)      (into ["--allowedTools" (str/join "," mcp-allowed-tools)])
+                           (seq disallowed-tools)       (into ["--disallowedTools" (str/join "," disallowed-tools)])
                            (:settings-path supervision) (into ["--settings" (:settings-path supervision)])
                            system                       (into ["--system-prompt" system])
                            budget                       (into ["--max-budget-usd" (str budget)])

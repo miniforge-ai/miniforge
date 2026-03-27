@@ -408,9 +408,15 @@
 
 (defn- invoke-with-llm
   "Invoke the implementer via the LLM backend."
-  [llm-client user-prompt effective-system-prompt config context on-chunk logger]
-  (let [{:keys [llm-result artifact]}
+  [llm-client user-prompt effective-system-prompt config context on-chunk logger
+   existing-files]
+  (let [{:keys [llm-result artifact context-misses]}
         (artifact-session/with-artifact-session [session]
+          ;; Write context cache so MCP tools can serve from it
+          (when (seq existing-files)
+            (let [files-map (into {} (map (fn [f] [(:path f) (:content f)])
+                                          existing-files))]
+              (artifact-session/write-context-cache! session files-map)))
           (let [budget-usd (budget/resolve-cost-budget-usd :implementer config context)
                 max-turns (get @implementer-prompt-data :prompt/max-turns 10)
                 mcp-opts {:mcp-config (:mcp-config-path session)
@@ -426,6 +432,10 @@
         response llm-result
         tokens (get response :tokens 0)
         cost-usd (get response :cost-usd)]
+    (when (seq context-misses)
+      (log/info logger :implementer :implementer/context-cache-misses
+                {:data {:miss-count (count context-misses)
+                        :misses context-misses}}))
     (log/info logger :implementer :implementer/llm-called
               {:data {:success (llm/success? response)
                       :tokens tokens
@@ -470,7 +480,8 @@
               user-prompt (build-user-prompt task-text input)]
           (if llm-client
             (invoke-with-llm llm-client user-prompt effective-system-prompt
-                             config context on-chunk logger)
+                             config context on-chunk logger
+                             (:task/existing-files input))
             (response/error (messages/t :error/no-llm-backend)))))
 
       :validate-fn validate-code-artifact

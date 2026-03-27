@@ -121,7 +121,10 @@
   ["submit_code_artifact"
    "submit_plan"
    "submit_test_artifact"
-   "submit_release_artifact"])
+   "submit_release_artifact"
+   "context_read"
+   "context_grep"
+   "context_glob"])
 
 (defn write-codex-mcp-config!
   "Write or update .codex/config.toml with [mcp_servers.artifact] block.
@@ -227,6 +230,23 @@
                          :task-context (:task-context session)
                          :phase (:phase session)})))
 
+(defn write-context-cache!
+  "Write context cache EDN to the session directory.
+
+   The MCP artifact server loads this on startup and uses it as
+   a read-through cache for context_read/context_grep/context_glob tools.
+
+   Arguments:
+   - session - Session map from create-session!
+   - files   - Map of {relative-path content-string}
+
+   Returns: session (for threading)"
+  [session files]
+  (when (seq files)
+    (let [path (str (:dir session) "/context-cache.edn")]
+      (spit path (pr-str {:files files}))))
+  session)
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Artifact reading
 
@@ -309,6 +329,24 @@
                      "—" (ex-message e)))
           nil)))))
 
+(defn read-context-misses
+  "Read context cache misses from the session directory.
+
+   The MCP server writes context-misses.edn on exit with records of
+   every cache miss (files the agent needed but weren't pre-loaded).
+
+   Returns: vector of miss records, or nil if no misses file."
+  [session]
+  (let [path (str (:dir session) "/context-misses.edn")
+        f (io/file path)]
+    (when (.exists f)
+      (try
+        (edn/read-string (slurp f))
+        (catch Exception e
+          (binding [*out* *err*]
+            (println "WARN: failed to parse context misses:" (ex-message e)))
+          nil)))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; High-level session helpers
 
@@ -369,10 +407,11 @@
   "Execute body with an artifact session, returning the artifact if found.
 
    Binds `session` in the body. After body completes, reads the artifact
-   file. Cleans up the temp directory regardless of outcome.
+   file and any context cache misses. Cleans up the temp directory regardless.
 
    Usage:
      (with-artifact-session [session]
+       (artifact-session/write-context-cache! session files-map)
        (call-llm ... {:mcp-config (:mcp-config-path session)}))"
   [[session-sym] & body]
   `(let [session# (-> (create-session!) write-mcp-config!)
@@ -380,7 +419,8 @@
      (try
        (let [result# (do ~@body)]
          {:llm-result result#
-          :artifact (read-artifact session#)})
+          :artifact (read-artifact session#)
+          :context-misses (read-context-misses session#)})
        (finally
          (cleanup-session! session#)))))
 
