@@ -381,6 +381,10 @@
    zettels and a manifest describing why each was selected. The manifest
    enables observability into which rules influenced agent behavior.
 
+   Logs rule selection at two levels:
+   - :debug — individual matched rules with scores and total count
+   - :info  — summary (N rules from K categories for agent :role)
+
    Arguments:
    - store      - Knowledge store
    - agent-role - Agent role keyword (:planner, :implementer, :tester, etc.)
@@ -405,7 +409,28 @@
         manifest-entries (mapv #(compute-manifest-entry
                                   % agent-role all-tags
                                   dewey-prefixes query-types)
-                               zettels)]
+                               zettels)
+        logger          (:logger store)]
+    ;; Structured logging for rule selection observability
+    (when logger
+      (log/debug logger :knowledge :knowledge/rules-selected
+                 {:data {:agent-role   agent-role
+                         :total-count  (count manifest-entries)
+                         :rules        (mapv (fn [entry]
+                                               {:id           (:id entry)
+                                                :title        (:title entry)
+                                                :score        (:score entry)
+                                                :tags-matched (:tags-matched entry)})
+                                             manifest-entries)}})
+      (let [categories (into #{} (keep :zettel/type) zettels)]
+        (log/info logger :knowledge :knowledge/rules-injected
+                  {:message (str (count manifest-entries) " rules from "
+                                 (count categories) " categories for agent :"
+                                 (name agent-role))
+                   :data {:agent-role     agent-role
+                          :rule-count     (count manifest-entries)
+                          :categories     (vec (sort-by name categories))
+                          :category-count (count categories)}})))
     {:zettels  zettels
      :manifest manifest-entries}))
 
