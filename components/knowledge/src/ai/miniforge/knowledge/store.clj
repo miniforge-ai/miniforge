@@ -343,6 +343,79 @@
   (get default-agent-manifests role
        {:agent-role role :types [:rule] :max-zettels 10}))
 
+(def ^:private manifest-score-weights
+  "Weights for computing manifest entry relevance scores.
+   Each weight controls how much a particular match type contributes
+   to the total score used for ranking and observability."
+  {:tag-match   1.0   ; per matching tag
+   :dewey-match 1.0   ; dewey classification prefix match
+   :type-match  0.5}) ; zettel type match
+
+(defn- compute-manifest-entry
+  "Compute a manifest entry for a zettel matched during knowledge injection.
+
+   Scores each zettel based on how well it matches the query criteria
+   using weights from `manifest-score-weights`.
+
+   Returns map with :id, :title, :role, :tags-matched, and :score."
+  [zettel agent-role query-tags dewey-prefixes query-types]
+  (let [zettel-tags   (set (get zettel :zettel/tags []))
+        zettel-dewey  (:zettel/dewey zettel)
+        zettel-type   (:zettel/type zettel)
+        tags-matched  (vec (filter zettel-tags query-tags))
+        tag-score     (* (double (count tags-matched))
+                         (:tag-match manifest-score-weights))
+        dewey-score   (if (and zettel-dewey
+                               (seq dewey-prefixes)
+                               (some #(str/starts-with? zettel-dewey %) dewey-prefixes))
+                        (:dewey-match manifest-score-weights)
+                        0.0)
+        type-score    (if (and (seq query-types)
+                               (contains? (set query-types) zettel-type))
+                        (:type-match manifest-score-weights)
+                        0.0)
+        total-score   (+ tag-score dewey-score type-score)]
+    {:id           (:zettel/id zettel)
+     :title        (:zettel/title zettel)
+     :role         agent-role
+     :tags-matched tags-matched
+     :score        total-score}))
+
+(defn inject-knowledge-with-manifest
+  "Retrieve relevant knowledge for an agent with a selection manifest.
+
+   Like inject-knowledge, but returns a map containing both the matched
+   zettels and a manifest describing why each was selected. The manifest
+   enables observability into which rules influenced agent behavior.
+
+   Arguments:
+   - store      - Knowledge store
+   - agent-role - Agent role keyword (:planner, :implementer, :tester, etc.)
+   - context    - Optional map with :task-type, :tags, etc.
+
+   Returns:
+   {:zettels  [zettel...]
+    :manifest [{:id uuid, :title string, :role keyword,
+                :tags-matched [keyword...], :score number}]}"
+  [store agent-role & [context]]
+  (let [agent-manifest  (get-agent-manifest agent-role)
+        base-query      {:dewey-prefixes (:dewey-prefixes agent-manifest)
+                         :include-types  (:types agent-manifest)
+                         :limit          (:max-zettels agent-manifest)}
+        context-tags    (get context :tags [])
+        manifest-tags   (get agent-manifest :tags [])
+        all-tags        (vec (distinct (concat manifest-tags context-tags)))
+        combined-query  (assoc base-query :tags all-tags)
+        zettels         (query store combined-query)
+        dewey-prefixes  (get agent-manifest :dewey-prefixes [])
+        query-types     (get agent-manifest :types [])
+        manifest-entries (mapv #(compute-manifest-entry
+                                  % agent-role all-tags
+                                  dewey-prefixes query-types)
+                               zettels)]
+    {:zettels  zettels
+     :manifest manifest-entries}))
+
 (defn inject-knowledge
   "Retrieve relevant knowledge for an agent based on role and context.
 
@@ -351,18 +424,11 @@
    - agent-role - Agent role keyword
    - context    - Optional map with :task-type, :tags, etc.
 
-   Returns vector of zettels relevant to the agent."
+   Returns vector of zettels relevant to the agent.
+
+   See also: inject-knowledge-with-manifest for zettels + selection manifest."
   [store agent-role & [context]]
-  (let [manifest (get-agent-manifest agent-role)
-        base-query {:dewey-prefixes (:dewey-prefixes manifest)
-                    :include-types (:types manifest)
-                    :limit (:max-zettels manifest)}
-        ;; Merge any context-specific tags
-        context-tags (or (:tags context) [])
-        manifest-tags (or (:tags manifest) [])
-        combined-query (assoc base-query
-                              :tags (distinct (concat manifest-tags context-tags)))]
-    (query store combined-query)))
+  (:zettels (inject-knowledge-with-manifest store agent-role context)))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Prompt formatting
@@ -421,5 +487,9 @@
 
   ;; Inject knowledge for implementer
   (inject-knowledge store :implementer)
+
+  ;; Inject knowledge with manifest for observability
+  (inject-knowledge-with-manifest store :implementer)
+  ;; => {:zettels [...] :manifest [{:id #uuid "..." :title "..." :role :implementer ...}]}
 
   :leave-this-here)

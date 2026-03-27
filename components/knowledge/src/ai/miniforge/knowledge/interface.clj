@@ -212,8 +212,28 @@
    - agent-role - Agent role keyword (:planner, :implementer, :tester, etc.)
    - context    - Optional map with :task-type, :tags, etc.
 
-   Returns vector of zettels relevant to the agent."
+   Returns vector of zettels relevant to the agent.
+
+   See also: inject-knowledge-with-manifest for zettels + selection manifest."
   store/inject-knowledge)
+
+(def inject-knowledge-with-manifest
+  "Retrieve relevant knowledge for an agent with a selection manifest.
+
+   Like inject-knowledge, but returns a map containing both the matched
+   zettels and a manifest describing why each was selected. The manifest
+   enables observability into which rules influenced agent behavior.
+
+   Arguments:
+   - store      - Knowledge store
+   - agent-role - Agent role keyword (:planner, :implementer, :tester, etc.)
+   - context    - Optional map with :task-type, :tags, etc.
+
+   Returns:
+   {:zettels  [zettel...]
+    :manifest [{:id uuid, :title string, :role keyword,
+                :tags-matched [keyword...], :score number}]}"
+  store/inject-knowledge-with-manifest)
 
 (def format-for-prompt
   "Format a collection of zettels as a markdown knowledge block for LLM context.
@@ -507,6 +527,10 @@
 
   ;; Inject knowledge for an implementer agent
   (inject-knowledge store :implementer {:tags [:namespace]})
+
+  ;; Inject with manifest for observability
+  (inject-knowledge-with-manifest store :implementer {:tags [:namespace]})
+  ;; => {:zettels [...] :manifest [{:id ... :title ... :role :implementer ...}]}
 
   ;; Capture a learning from inner loop
   (capture-inner-loop-learning store

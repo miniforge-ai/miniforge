@@ -113,26 +113,29 @@ You must output a structured test artifact as a Clojure map:
     - No shared mutable state between tests
     - Use fixtures for setup/teardown
 
-## Preferred Output Method
+## REQUIRED Output Method — MCP Tool
 
-If the `submit_test_artifact` MCP tool is available, you MUST use it to submit your tests.
+You MUST submit your tests by calling the `submit_test_artifact` MCP tool.
+This is your PRIMARY deliverable — if you do not call this tool, your work is lost.
+
 Call `submit_test_artifact` with:
-- `files`: array of objects with `path` and `content`
+- `files`: array of objects with `path` and `content` (complete test namespaces)
 - `summary`: description of test coverage
 - `type`: \"unit\", \"integration\", \"property\", \"e2e\", or \"acceptance\" (optional)
 - `framework`: testing framework used, e.g. \"clojure.test\" (optional)
 - `coverage`: object with `lines`, `branches`, `functions` percentages (optional)
 
-Do NOT output raw EDN text when the MCP tool is available.
+CRITICAL RULES:
+1. You MUST call `submit_test_artifact` exactly once before finishing
+2. Do NOT output raw EDN text — use the tool
+3. Do NOT use the Write tool to write test files — use `submit_test_artifact`
+4. If you write tests as text without calling the tool, they will be discarded
 
-If the tool is NOT available, output your tests as Clojure code blocks in markdown.
-Each code block should contain a complete test namespace starting with `(ns ...`.
+## Context
 
-## Important: Use only the context provided
-
-All code context you need is in this prompt (the code artifact to test).
-File exploration tools are not available — generate your tests directly
-from the provided code and submit via MCP tool.
+All code you need to test is provided below in this prompt.
+You may use Read/Grep tools to look up additional test patterns or dependencies
+if needed, but generate your tests primarily from the provided code.
 
 Remember: Good tests are documentation. They show how the code is intended to be used
 and what behavior is expected. Make tests readable and maintainable."}

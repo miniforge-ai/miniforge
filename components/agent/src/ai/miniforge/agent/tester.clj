@@ -293,7 +293,8 @@
                                (when (seq acceptance-criteria)
                                  (str "\n\nAcceptance criteria to verify:\n"
                                       (str/join "\n" (map #(str "- " %) acceptance-criteria))))
-                               "\n\nOutput your tests as a Clojure map following the format in your system prompt. "
+                               "\n\nSubmit your tests by calling the `submit_test_artifact` MCP tool. "
+                               "Do NOT output tests as text — you MUST use the tool. "
                                "Include complete test code, not placeholders.")]
           (if llm-client
             ;; Use the real LLM with artifact session for MCP tool support
