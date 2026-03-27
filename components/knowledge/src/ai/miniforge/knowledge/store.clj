@@ -343,29 +343,36 @@
   (get default-agent-manifests role
        {:agent-role role :types [:rule] :max-zettels 10}))
 
+(def ^:private manifest-score-weights
+  "Weights for computing manifest entry relevance scores.
+   Each weight controls how much a particular match type contributes
+   to the total score used for ranking and observability."
+  {:tag-match   1.0   ; per matching tag
+   :dewey-match 1.0   ; dewey classification prefix match
+   :type-match  0.5}) ; zettel type match
+
 (defn- compute-manifest-entry
   "Compute a manifest entry for a zettel matched during knowledge injection.
 
-   Scores each zettel based on how well it matches the query criteria:
-   - +1.0 per matching tag
-   - +1.0 for dewey prefix match
-   - +0.5 for type match
+   Scores each zettel based on how well it matches the query criteria
+   using weights from `manifest-score-weights`.
 
    Returns map with :id, :title, :role, :tags-matched, and :score."
   [zettel agent-role query-tags dewey-prefixes query-types]
-  (let [zettel-tags   (set (or (:zettel/tags zettel) []))
+  (let [zettel-tags   (set (get zettel :zettel/tags []))
         zettel-dewey  (:zettel/dewey zettel)
         zettel-type   (:zettel/type zettel)
         tags-matched  (vec (filter zettel-tags query-tags))
-        tag-score     (double (count tags-matched))
+        tag-score     (* (double (count tags-matched))
+                         (:tag-match manifest-score-weights))
         dewey-score   (if (and zettel-dewey
                                (seq dewey-prefixes)
                                (some #(str/starts-with? zettel-dewey %) dewey-prefixes))
-                        1.0
+                        (:dewey-match manifest-score-weights)
                         0.0)
         type-score    (if (and (seq query-types)
                                (contains? (set query-types) zettel-type))
-                        0.5
+                        (:type-match manifest-score-weights)
                         0.0)
         total-score   (+ tag-score dewey-score type-score)]
     {:id           (:zettel/id zettel)
@@ -399,13 +406,13 @@
         base-query      {:dewey-prefixes (:dewey-prefixes agent-manifest)
                          :include-types  (:types agent-manifest)
                          :limit          (:max-zettels agent-manifest)}
-        context-tags    (or (:tags context) [])
-        manifest-tags   (or (:tags agent-manifest) [])
+        context-tags    (get context :tags [])
+        manifest-tags   (get agent-manifest :tags [])
         all-tags        (vec (distinct (concat manifest-tags context-tags)))
         combined-query  (assoc base-query :tags all-tags)
         zettels         (query store combined-query)
-        dewey-prefixes  (or (:dewey-prefixes agent-manifest) [])
-        query-types     (or (:types agent-manifest) [])
+        dewey-prefixes  (get agent-manifest :dewey-prefixes [])
+        query-types     (get agent-manifest :types [])
         manifest-entries (mapv #(compute-manifest-entry
                                   % agent-role all-tags
                                   dewey-prefixes query-types)
