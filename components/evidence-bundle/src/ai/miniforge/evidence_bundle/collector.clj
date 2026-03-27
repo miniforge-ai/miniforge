@@ -81,11 +81,11 @@
    Ensures all fields have valid defaults and annotates with phase name."
   [entry phase-name]
   {:id (or (:id entry) (random-uuid))
-   :title (or (:title entry) "unknown")
-   :role (or (:role entry) :unknown)
-   :tags-matched (vec (or (:tags-matched entry) []))
-   :score (double (or (:score entry) 0.0))
-   :phase (or (:phase entry) phase-name)})
+   :title (get entry :title "unknown")
+   :role (get entry :role :unknown)
+   :tags-matched (vec (get entry :tags-matched []))
+   :score (double (get entry :score 0.0))
+   :phase (get entry :phase phase-name)})
 
 (defn collect-rules-applied
   "Collect rules-applied evidence from phase results.
