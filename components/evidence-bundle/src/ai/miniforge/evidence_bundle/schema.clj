@@ -138,6 +138,21 @@
    (optional-key :compliance/retention-policy) keyword?
    (optional-key :compliance/auditor-notes) string?})
 
+;------------------------------------------------------------------------------ Layer 5a
+;; Rule Applied Schema
+
+(def rule-applied-schema
+  "Schema for a single rule-applied entry in the evidence bundle.
+   Captures which knowledge base rules were injected into agent context.
+   Keys match the manifest shape returned by knowledge store's
+   compute-manifest-entry, with :phase added by the collector."
+  {:id uuid?
+   :title string?
+   :role keyword?
+   :tags-matched vector?
+   :score number?
+   :phase keyword?})
+
 ;------------------------------------------------------------------------------ Layer 6
 ;; Evidence Bundle Schema
 
@@ -173,6 +188,9 @@
 
    ;; Control Action Evidence
    (optional-key :evidence/control-actions) vector?
+
+   ;; Rules Applied (knowledge base rules injected into agents)
+   (optional-key :evidence/rules-applied) vector?
 
    ;; Outcome
    :evidence/outcome map?
