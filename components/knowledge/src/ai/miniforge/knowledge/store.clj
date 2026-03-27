@@ -343,6 +343,72 @@
   (get default-agent-manifests role
        {:agent-role role :types [:rule] :max-zettels 10}))
 
+(defn- compute-manifest-entry
+  "Compute a manifest entry for a zettel matched during knowledge injection.
+
+   Scores each zettel based on how well it matches the query criteria:
+   - +1.0 per matching tag
+   - +1.0 for dewey prefix match
+   - +0.5 for type match
+
+   Returns map with :id, :title, :role, :tags-matched, and :score."
+  [zettel agent-role query-tags dewey-prefixes query-types]
+  (let [zettel-tags   (set (or (:zettel/tags zettel) []))
+        zettel-dewey  (:zettel/dewey zettel)
+        zettel-type   (:zettel/type zettel)
+        tags-matched  (vec (filter zettel-tags query-tags))
+        tag-score     (double (count tags-matched))
+        dewey-score   (if (and zettel-dewey
+                               (seq dewey-prefixes)
+                               (some #(str/starts-with? zettel-dewey %) dewey-prefixes))
+                        1.0
+                        0.0)
+        type-score    (if (and (seq query-types)
+                               (contains? (set query-types) zettel-type))
+                        0.5
+                        0.0)
+        total-score   (+ tag-score dewey-score type-score)]
+    {:id           (:zettel/id zettel)
+     :title        (:zettel/title zettel)
+     :role         agent-role
+     :tags-matched tags-matched
+     :score        total-score}))
+
+(defn inject-knowledge-with-manifest
+  "Retrieve relevant knowledge for an agent with a selection manifest.
+
+   Like inject-knowledge, but returns a map containing both the matched
+   zettels and a manifest describing why each was selected. The manifest
+   enables observability into which rules influenced agent behavior.
+
+   Arguments:
+   - store      - Knowledge store
+   - agent-role - Agent role keyword (:planner, :implementer, :tester, etc.)
+   - context    - Optional map with :task-type, :tags, etc.
+
+   Returns:
+   {:zettels  [zettel...]
+    :manifest [{:id uuid, :title string, :role keyword,
+                :tags-matched [keyword...], :score number}]}"
+  [store agent-role & [context]]
+  (let [agent-manifest  (get-agent-manifest agent-role)
+        base-query      {:dewey-prefixes (:dewey-prefixes agent-manifest)
+                         :include-types  (:types agent-manifest)
+                         :limit          (:max-zettels agent-manifest)}
+        context-tags    (or (:tags context) [])
+        manifest-tags   (or (:tags agent-manifest) [])
+        all-tags        (vec (distinct (concat manifest-tags context-tags)))
+        combined-query  (assoc base-query :tags all-tags)
+        zettels         (query store combined-query)
+        dewey-prefixes  (or (:dewey-prefixes agent-manifest) [])
+        query-types     (or (:types agent-manifest) [])
+        manifest-entries (mapv #(compute-manifest-entry
+                                  % agent-role all-tags
+                                  dewey-prefixes query-types)
+                               zettels)]
+    {:zettels  zettels
+     :manifest manifest-entries}))
+
 (defn inject-knowledge
   "Retrieve relevant knowledge for an agent based on role and context.
 
@@ -351,18 +417,11 @@
    - agent-role - Agent role keyword
    - context    - Optional map with :task-type, :tags, etc.
 
-   Returns vector of zettels relevant to the agent."
+   Returns vector of zettels relevant to the agent.
+
+   See also: inject-knowledge-with-manifest for zettels + selection manifest."
   [store agent-role & [context]]
-  (let [manifest (get-agent-manifest agent-role)
-        base-query {:dewey-prefixes (:dewey-prefixes manifest)
-                    :include-types (:types manifest)
-                    :limit (:max-zettels manifest)}
-        ;; Merge any context-specific tags
-        context-tags (or (:tags context) [])
-        manifest-tags (or (:tags manifest) [])
-        combined-query (assoc base-query
-                              :tags (distinct (concat manifest-tags context-tags)))]
-    (query store combined-query)))
+  (:zettels (inject-knowledge-with-manifest store agent-role context)))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Prompt formatting
@@ -421,5 +480,9 @@
 
   ;; Inject knowledge for implementer
   (inject-knowledge store :implementer)
+
+  ;; Inject knowledge with manifest for observability
+  (inject-knowledge-with-manifest store :implementer)
+  ;; => {:zettels [...] :manifest [{:id #uuid "..." :title "..." :role :implementer ...}]}
 
   :leave-this-here)
