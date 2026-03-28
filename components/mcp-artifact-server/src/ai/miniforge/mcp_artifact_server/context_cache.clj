@@ -7,7 +7,8 @@
 
    Layer 0: Pure helpers (token estimation, line slicing, glob matching, grep)
    Layer 1: Stateful cache operations and tool handler functions"
-  (:require [clojure.edn :as edn]
+  (:require [ai.miniforge.mcp-artifact-server.messages :as msg]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]))
@@ -130,10 +131,10 @@
         (let [data (edn/read-string (slurp f))]
           (swap! cache-state assoc :files (get data :files {}))
           (binding [*out* *err*]
-            (println "Context cache loaded:" (count (:files data)) "files")))
+            (println (msg/t :cache/loaded {:count (count (:files data))}))))
         (catch Exception e
           (binding [*out* *err*]
-            (println "WARN: failed to load context cache:" (ex-message e))))))))
+            (println (msg/t :cache/load-failed {:error (ex-message e)}))))))))
 
 (defn flush-misses!
   "Write accumulated cache misses to context-misses.edn in artifact-dir."
@@ -143,7 +144,7 @@
       (let [path (str artifact-dir "/context-misses.edn")]
         (spit path (pr-str misses))
         (binding [*out* *err*]
-          (println "Context misses written:" (count misses) "misses to" path))))))
+          (println (msg/t :cache/misses-written {:count (count misses) :path path})))))))
 
 (defn- record-miss!
   "Record a cache miss for meta-loop learning."
@@ -199,12 +200,12 @@
 
 (defn- grep-response
   "Build MCP response from grep results. Returns formatted matches or
-   'No matches found.' when empty."
+   a no-matches message when empty."
   [results]
   (text-response
     (if (seq results)
       (format-grep-results results)
-      "No matches found.")))
+      (msg/t :context/no-grep-matches))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Grep helpers: file selection and fallback
@@ -286,7 +287,7 @@
         content (read-through path)]
     (if content
       (text-response (apply-offset-limit content offset limit))
-      (error-response (str "Error reading " path ": file not found or unreadable")))))
+      (error-response (msg/t :context/read-error {:path path})))))
 
 (defn handle-context-grep
   "Handler for context_grep MCP tool."
@@ -303,4 +304,4 @@
     (text-response
       (if (seq matches)
         (str/join "\n" matches)
-        "No files matched the pattern."))))
+        (msg/t :context/no-glob-matches)))))

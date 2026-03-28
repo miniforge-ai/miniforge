@@ -5,7 +5,8 @@
    `mcp-artifact-server/tool-registry.edn` on the classpath. Builder functions
    are registered separately via `register-builder!`, enabling extensibility
    without modifying the config file."
-  (:require [clojure.edn :as edn]
+  (:require [ai.miniforge.mcp-artifact-server.messages :as msg]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]))
 
@@ -210,7 +211,7 @@
   "Resolve a builder keyword to its function."
   [builder-key]
   (or (get @builder-registry* builder-key)
-      (throw (ex-info (str "No builder registered for: " builder-key)
+      (throw (ex-info (msg/t :tool/no-builder {:key builder-key})
                       {:builder builder-key
                        :registered (keys @builder-registry*)}))))
 
@@ -231,7 +232,7 @@
   "Resolve a handler keyword to its function."
   [handler-key]
   (or (get @handler-registry* handler-key)
-      (throw (ex-info (str "No handler registered for: " handler-key)
+      (throw (ex-info (msg/t :tool/no-handler {:key handler-key})
                       {:handler handler-key
                        :registered (keys @handler-registry*)}))))
 
@@ -296,14 +297,12 @@
   (let [registry (tool-registry)
         {:keys [required-params builder handler]} (get registry tool-name)]
     (when-not (or builder handler)
-      (throw (ex-info (str "Unknown tool: " tool-name) {:code -32601})))
+      (throw (ex-info (msg/t :tool/unknown {:tool-name tool-name}) {:code -32601})))
     (validate-required-params required-params arguments)
     (if handler
-      (let [handle-fn (resolve-handler handler)]
-        (handle-fn arguments))
-      (let [build-fn (resolve-builder builder)
-            {:keys [artifact message]} (build-fn arguments)
+      ((-> handler resolve-handler) arguments)
+      (let [{:keys [artifact message]} ((resolve-builder builder) arguments)
             path (write-artifact-fn artifact)]
         (binding [*out* *err*]
-          (println "Artifact written:" path))
+          (println (msg/t :tool/artifact-written {:path path})))
         {:content [{:type "text" :text message}]}))))
