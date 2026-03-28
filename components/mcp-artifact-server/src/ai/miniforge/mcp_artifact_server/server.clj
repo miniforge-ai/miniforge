@@ -1,7 +1,8 @@
 (ns ai.miniforge.mcp-artifact-server.server
   "Main MCP JSON-RPC 2.0 stdin/stdout loop.
    Babashka-compatible."
-  (:require [ai.miniforge.mcp-artifact-server.protocol :as protocol]
+  (:require [ai.miniforge.mcp-artifact-server.context-cache :as context-cache]
+            [ai.miniforge.mcp-artifact-server.protocol :as protocol]
             [ai.miniforge.mcp-artifact-server.tools :as tools]
             [clojure.string :as str]))
 
@@ -98,15 +99,33 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Main loop
 
+(defn- register-context-handlers!
+  "Register context-cache tool handlers in the tool handler registry."
+  []
+  (tools/register-handler! :context-read  context-cache/handle-context-read)
+  (tools/register-handler! :context-grep  context-cache/handle-context-grep)
+  (tools/register-handler! :context-glob  context-cache/handle-context-glob))
+
 (defn run-server
   "Run the MCP server loop, reading JSON-RPC messages from stdin.
+
+   Lifecycle:
+   1. Load context cache from artifact-dir (if present)
+   2. Register context-cache tool handlers
+   3. Process JSON-RPC messages until stdin closes
+   4. Flush accumulated cache misses to artifact-dir
 
    Arguments:
    - artifact-dir — directory path for artifact persistence"
   [artifact-dir]
   (log-stderr "miniforge-artifact MCP server started, artifact-dir:" artifact-dir)
-  (let [reader (java.io.BufferedReader. (java.io.InputStreamReader. System/in "UTF-8"))]
-    (loop []
-      (when-let [line (.readLine reader)]
-        (process-line line artifact-dir)
-        (recur)))))
+  (context-cache/load-cache! artifact-dir)
+  (register-context-handlers!)
+  (try
+    (let [reader (java.io.BufferedReader. (java.io.InputStreamReader. System/in "UTF-8"))]
+      (loop []
+        (when-let [line (.readLine reader)]
+          (process-line line artifact-dir)
+          (recur))))
+    (finally
+      (context-cache/flush-misses! artifact-dir))))

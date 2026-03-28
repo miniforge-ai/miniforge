@@ -5,7 +5,7 @@
    - start-server: Run the MCP server (blocking stdin/stdout loop)
    - handle-tool-call: Direct tool invocation for in-process testing
    - tool-definitions: List of registered MCP tool definitions
-   - register-tool! / register-builder!: Extensibility points"
+   - register-tool! / register-builder! / register-handler!: Extensibility points"
   (:require [ai.miniforge.mcp-artifact-server.server :as server]
             [ai.miniforge.mcp-artifact-server.tools :as tools]))
 
@@ -54,3 +54,7 @@
 (def register-builder!
   "Register an artifact builder function. See tools/register-builder! for details."
   tools/register-builder!)
+
+(def register-handler!
+  "Register a direct handler function (no artifact). See tools/register-handler!."
+  tools/register-handler!)

@@ -4,6 +4,7 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [ai.miniforge.mcp-artifact-server.interface :as mcp]
+            [ai.miniforge.mcp-artifact-server.tools :as tools]
             [ai.miniforge.mcp-artifact-server.protocol :as protocol]))
 
 ;------------------------------------------------------------------------------ Helpers
@@ -135,11 +136,28 @@
 ;------------------------------------------------------------------------------ Tool definitions tests
 
 (deftest tool-definitions-test
-  (testing "registry has 4 tools"
-    (is (= 4 (count (mcp/tool-definitions)))))
+  (testing "registry has at least 7 tools (4 artifact + 3 context)"
+    (is (>= (count (mcp/tool-definitions)) 7)))
 
   (testing "each tool has required fields"
     (doseq [tool (mcp/tool-definitions)]
       (is (string? (:name tool)))
       (is (string? (:description tool)))
-      (is (map? (:inputSchema tool))))))
+      (is (map? (:inputSchema tool)))))
+
+  (testing "context tools are present"
+    (let [names (set (map :name (mcp/tool-definitions)))]
+      (is (contains? names "context_read"))
+      (is (contains? names "context_grep"))
+      (is (contains? names "context_glob")))))
+
+(deftest handler-dispatch-test
+  (testing "handler tools dispatch without writing artifacts"
+    (tools/register-handler! :test-echo
+      (fn [params] {:content [{:type "text" :text (get params "msg")}]}))
+    (tools/register-tool! "test_echo"
+      {:handler :test-echo
+       :tool-def {:name "test_echo" :description "echo" :inputSchema {:type "object"}}
+       :required-params {}})
+    (let [result (mcp/handle-tool-call "test_echo" {"msg" "hello"} "/tmp/unused")]
+      (is (= "hello" (get-in result [:content 0 :text]))))))
