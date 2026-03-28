@@ -215,6 +215,27 @@
                        :registered (keys @builder-registry*)}))))
 
 ;------------------------------------------------------------------------------ Layer 1
+;; Extensible handler registry (for tools that don't produce artifacts)
+
+(defonce handler-registry*
+  (atom {}))
+
+(defn register-handler!
+  "Register a direct handler function for a tool (no artifact production).
+   handler-key is a keyword matching the :handler field in tool-registry.edn.
+   handler-fn takes params map, returns {:content [{:type \"text\" :text ...}]}."
+  [handler-key handler-fn]
+  (swap! handler-registry* assoc handler-key handler-fn))
+
+(defn resolve-handler
+  "Resolve a handler keyword to its function."
+  [handler-key]
+  (or (get @handler-registry* handler-key)
+      (throw (ex-info (str "No handler registered for: " handler-key)
+                      {:handler handler-key
+                       :registered (keys @handler-registry*)}))))
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Configuration loading
 
 (defn load-registry-config
@@ -260,6 +281,10 @@
 (defn handle-tool-call
   "Handle an MCP tools/call request.
 
+   Supports two dispatch paths:
+   - :builder tools — produce an artifact, persist via write-artifact-fn
+   - :handler tools — return {:content [...]} directly (no artifact)
+
    Arguments:
    - tool-name — string name of the tool
    - arguments — map of tool arguments
@@ -269,13 +294,16 @@
    Throws on unknown tool or validation failure."
   [tool-name arguments write-artifact-fn]
   (let [registry (tool-registry)
-        {:keys [required-params builder]} (get registry tool-name)]
-    (when-not builder
+        {:keys [required-params builder handler]} (get registry tool-name)]
+    (when-not (or builder handler)
       (throw (ex-info (str "Unknown tool: " tool-name) {:code -32601})))
     (validate-required-params required-params arguments)
-    (let [build-fn (resolve-builder builder)
-          {:keys [artifact message]} (build-fn arguments)
-          path (write-artifact-fn artifact)]
-      (binding [*out* *err*]
-        (println "Artifact written:" path))
-      {:content [{:type "text" :text message}]})))
+    (if handler
+      (let [handle-fn (resolve-handler handler)]
+        (handle-fn arguments))
+      (let [build-fn (resolve-builder builder)
+            {:keys [artifact message]} (build-fn arguments)
+            path (write-artifact-fn artifact)]
+        (binding [*out* *err*]
+          (println "Artifact written:" path))
+        {:content [{:type "text" :text message}]}))))

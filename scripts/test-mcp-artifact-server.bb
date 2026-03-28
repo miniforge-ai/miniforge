@@ -118,11 +118,14 @@
   (let [resp (send-request! proc (rpc-request 2 "tools/list" {}))
         tools (get-in resp [:result :tools])
         tool-names (set (map :name tools))]
-    (assert= "returns 4 tools" 4 (count tools))
+    (assert= "returns 7 tools" 7 (count tools))
     (assert-true "has submit_code_artifact" (contains? tool-names "submit_code_artifact"))
     (assert-true "has submit_plan" (contains? tool-names "submit_plan"))
     (assert-true "has submit_test_artifact" (contains? tool-names "submit_test_artifact"))
     (assert-true "has submit_release_artifact" (contains? tool-names "submit_release_artifact"))
+    (assert-true "has context_read" (contains? tool-names "context_read"))
+    (assert-true "has context_grep" (contains? tool-names "context_grep"))
+    (assert-true "has context_glob" (contains? tool-names "context_glob"))
     ;; Check input schemas exist
     (doseq [tool tools]
       (assert-true (str (:name tool) " has inputSchema") (map? (:inputSchema tool))))))
