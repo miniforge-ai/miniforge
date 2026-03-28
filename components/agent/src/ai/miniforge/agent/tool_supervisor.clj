@@ -89,7 +89,10 @@
     ("mcp__artifact__submit_code_artifact"
      "mcp__artifact__submit_plan"
      "mcp__artifact__submit_test_artifact"
-     "mcp__artifact__submit_release_artifact")
+     "mcp__artifact__submit_release_artifact"
+     "mcp__artifact__context_read"
+     "mcp__artifact__context_grep"
+     "mcp__artifact__context_glob")
     {:decision "allow"}
 
     ;; Write tools: allow (inner agent needs to generate code)
@@ -113,7 +116,10 @@
                "mcp__artifact__submit_code_artifact"
                "mcp__artifact__submit_plan"
                "mcp__artifact__submit_test_artifact"
-               "mcp__artifact__submit_release_artifact"}
+               "mcp__artifact__submit_release_artifact"
+               "mcp__artifact__context_read"
+               "mcp__artifact__context_grep"
+               "mcp__artifact__context_glob"}
              tool-name))
 
 (defn evaluate-with-meta

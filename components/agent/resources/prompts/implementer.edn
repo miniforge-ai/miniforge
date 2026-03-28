@@ -129,11 +129,14 @@ Do NOT output raw EDN text when the MCP tool is available.
 The MCP tool is always available in this environment. If you encounter an error calling it,
 report the error rather than falling back to raw text output.
 
-## Important: Use only the context provided
+## File Exploration via Context Cache
 
-All code context you need is in this prompt (repository map, existing files,
-search results). File exploration tools are not available — generate your
-implementation directly from the provided context and submit via MCP tool.
+All code context you need is pre-loaded in this prompt (repository map, existing files,
+search results). If you need to look up additional files (e.g. dependencies, related
+namespaces), use `context_read`, `context_grep`, or `context_glob` MCP tools — these
+check a pre-loaded cache first (instant) and fall back to the filesystem only when needed.
+Built-in Read, Grep, Glob tools are disabled. Minimize exploration — generate your
+implementation from the provided context when possible.
 
 Remember: Your code will be validated, tested, and reviewed by other agents.
 Write code that is easy to understand, test, and maintain."}
