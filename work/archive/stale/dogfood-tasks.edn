@@ -1,0 +1,15 @@
+{:dag-id "miniforge-dogfood-2026-02-06"
+ :description "Miniforge working on itself - dogfooding tasks"
+ :repo "github.com:miniforge-ai/miniforge.git"
+ :base-branch "feat/dag-orchestration"
+
+ :tasks
+ [{:task/id "task-2-integration-tests"
+   :task/deps #{}
+   :branch "feat/task-executor-integration-tests"
+   :description "Add integration tests for task-executor runner and orchestrator"
+   :files ["components/task-executor/test/ai/miniforge/task_executor/runner_test.clj"
+           "components/task-executor/test/ai/miniforge/task_executor/orchestrator_test.clj"]
+   :acceptance-criteria "Comprehensive integration tests for runner.clj and orchestrator.clj with proper mocking. Tests should verify: (1) Runner executes task through full lifecycle (acquire resources, generate code, run PR lifecycle, update metrics, cleanup), (2) Orchestrator handles concurrent execution with execute-task-fn futures, (3) Failure cascading to dependent tasks, (4) Resource cleanup in finally blocks, (5) All tests pass with bb test."
+   :context "The task-executor component integrates DAG scheduler with PR lifecycle. runner.clj executes individual tasks through their lifecycle. orchestrator.clj provides execute-task-fn callback and manages concurrent futures. Need integration tests with mocked dependencies (dag/*, pr/*, executor, logger, llm-backend). See existing bridge_test.clj for mocking patterns. Mock Logger must implement ai.miniforge.logging.core/Logger protocol with log*, with-context*, get-context, get-config methods."
+   :design-rules "Use with-redefs for mocking DAG and PR lifecycle functions. Create mock fixtures for executor, logger, llm-backend. Mock Logger should be a reify implementing ai.miniforge.logging.core/Logger protocol, NOT just a function. Test with real atoms for run-atom state. Verify state transitions in run-atom. Use deref with timeout for futures. Test both success and error paths. Ensure cleanup happens even on errors."}]}
