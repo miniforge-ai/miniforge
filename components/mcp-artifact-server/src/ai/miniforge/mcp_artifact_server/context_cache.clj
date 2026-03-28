@@ -170,91 +170,137 @@
   (:files @cache-state))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Tool handler functions
+;; Read-through cache: resolve content from cache or filesystem
 
-(defn handle-context-read
-  "Handler for context_read MCP tool.
-   Cache hit → return content. Miss → read from filesystem, cache, record miss."
-  [params]
-  (let [path   (get params "path")
-        offset (get params "offset")
-        limit  (get params "limit")
-        cached (cache-get path)]
-    (if cached
-      {:content [{:type "text" :text (apply-offset-limit cached offset limit)}]}
+(defn- read-through
+  "Resolve file content: cache hit returns instantly, miss reads from disk,
+   caches the content, and records the miss. Returns content string or nil."
+  [path]
+  (or (cache-get path)
       (try
-        (let [content (slurp path)
-              tokens  (estimate-tokens content)]
+        (let [content (slurp path)]
           (cache-put! path content)
-          (record-miss! "context_read" {:path path} tokens)
-          {:content [{:type "text" :text (apply-offset-limit content offset limit)}]})
-        (catch Exception e
-          {:content [{:type "text"
-                      :text (str "Error reading " path ": " (ex-message e))}]
-           :isError true})))))
+          (record-miss! "context_read" {:path path} (estimate-tokens content))
+          content)
+        (catch Exception _ nil))))
 
-(defn handle-context-grep
-  "Handler for context_grep MCP tool.
-   Searches cached files first, falls back to ripgrep on cache miss."
-  [params]
-  (let [pattern-str (get params "pattern")
-        target-path (get params "path")
-        glob-filter (get params "glob")
-        files       (cached-files)
-        files-to-search (cond
-                          target-path
-                          (if-let [content (get files target-path)]
-                            {target-path content}
-                            {})
+;------------------------------------------------------------------------------ Layer 1
+;; MCP response helpers
 
-                          glob-filter
-                          (into {} (filter (fn [[p _]] (glob-matches? glob-filter p)) files))
+(defn- text-response
+  "Wrap a string in the MCP tool response shape."
+  [text]
+  {:content [{:type "text" :text text}]})
 
-                          :else files)
-        cache-results (->> files-to-search
-                           (mapcat (fn [[path content]]
-                                     (grep-file path content pattern-str)))
-                           vec)]
+(defn- error-response
+  "Wrap an error message in the MCP tool error shape."
+  [text]
+  {:content [{:type "text" :text text}] :isError true})
+
+(defn- grep-response
+  "Build MCP response from grep results. Returns formatted matches or
+   'No matches found.' when empty."
+  [results]
+  (text-response
+    (if (seq results)
+      (format-grep-results results)
+      "No matches found.")))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Grep helpers: file selection and fallback
+
+(defn filter-cached-files
+  "Select which cached files to search based on path or glob filter.
+   Returns a {path → content} map."
+  [files target-path glob-filter]
+  (cond
+    target-path  (select-keys files [target-path])
+    glob-filter  (into {} (filter (fn [[p _]] (glob-matches? glob-filter p))) files)
+    :else        files))
+
+(defn- search-cached-files
+  "Grep across a map of {path → content} for a pattern.
+   Returns a flat vector of grep result maps."
+  [files-map pattern-str]
+  (into [] (mapcat (fn [[path content]] (grep-file path content pattern-str))) files-map))
+
+(defn- cache-new-files!
+  "Cache files discovered by shell grep that aren't already cached.
+   Records a miss for each newly cached file."
+  [results pattern-str known-files]
+  (doseq [path (distinct (map :path results))
+          :when (not (contains? known-files path))]
+    (try
+      (let [content (slurp path)]
+        (cache-put! path content)
+        (record-miss! "context_grep" {:path path :pattern pattern-str}
+                      (estimate-tokens content)))
+      (catch Exception _ nil))))
+
+(defn- grep-with-fallback
+  "Search cached files first. On cache miss, fall back to ripgrep,
+   cache any newly discovered files, and record misses."
+  [pattern-str target-path glob-filter]
+  (let [files         (cached-files)
+        searchable    (filter-cached-files files target-path glob-filter)
+        cache-results (search-cached-files searchable pattern-str)]
     (if (seq cache-results)
-      {:content [{:type "text" :text (format-grep-results cache-results)}]}
-      (let [rg-results (shell-grep pattern-str (or target-path glob-filter))]
-        (when (seq rg-results)
-          (let [paths (distinct (map :path rg-results))]
-            (doseq [p paths]
-              (when-not (get files p)
-                (try
-                  (let [content (slurp p)]
-                    (cache-put! p content)
-                    (record-miss! "context_grep" {:path p :pattern pattern-str}
-                                  (estimate-tokens content)))
-                  (catch Exception _ nil))))))
-        (when (empty? rg-results)
-          (record-miss! "context_grep"
-                        {:pattern pattern-str :path target-path :glob glob-filter :hit false}
-                        0))
-        {:content [{:type "text"
-                    :text (if (seq rg-results)
-                            (format-grep-results rg-results)
-                            "No matches found.")}]}))))
+      cache-results
+      (let [rg-results (or (shell-grep pattern-str (or target-path glob-filter)) [])]
+        (if (seq rg-results)
+          (do (cache-new-files! rg-results pattern-str files)
+              rg-results)
+          (do (record-miss! "context_grep"
+                            {:pattern pattern-str :path target-path
+                             :glob glob-filter :hit false}
+                            0)
+              []))))))
 
-(defn handle-context-glob
-  "Handler for context_glob MCP tool.
-   Matches cached paths first, unions with filesystem glob results."
-  [params]
-  (let [pattern       (get params "pattern")
-        files         (cached-files)
-        cache-matches (->> (keys files)
-                           (filter #(glob-matches? pattern %))
-                           sort
-                           vec)
+;------------------------------------------------------------------------------ Layer 1
+;; Glob helpers
+
+(defn- glob-with-union
+  "Match cached paths, union with filesystem glob, record misses for
+   files found only on disk. Returns a sequence of matched paths."
+  [pattern]
+  (let [files         (cached-files)
+        cache-matches (sort (filter #(glob-matches? pattern %) (keys files)))
         fs-matches    (or (shell-glob pattern) [])
         cache-set     (set cache-matches)
-        new-from-fs   (remove cache-set fs-matches)
-        all-matches   (concat cache-matches new-from-fs)]
+        new-from-fs   (remove cache-set fs-matches)]
     (when (seq new-from-fs)
       (record-miss! "context_glob"
                     {:pattern pattern :fs-only-count (count new-from-fs)}
                     0))
-    (if (seq all-matches)
-      {:content [{:type "text" :text (str/join "\n" all-matches)}]}
-      {:content [{:type "text" :text "No files matched the pattern."}]})))
+    (concat cache-matches new-from-fs)))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Tool handler functions (compose Layer 0 + Layer 1)
+
+(defn handle-context-read
+  "Handler for context_read MCP tool."
+  [params]
+  (let [path    (get params "path")
+        offset  (get params "offset")
+        limit   (get params "limit")
+        content (read-through path)]
+    (if content
+      (text-response (apply-offset-limit content offset limit))
+      (error-response (str "Error reading " path ": file not found or unreadable")))))
+
+(defn handle-context-grep
+  "Handler for context_grep MCP tool."
+  [params]
+  (grep-response
+    (grep-with-fallback (get params "pattern")
+                        (get params "path")
+                        (get params "glob"))))
+
+(defn handle-context-glob
+  "Handler for context_glob MCP tool."
+  [params]
+  (let [matches (glob-with-union (get params "pattern"))]
+    (text-response
+      (if (seq matches)
+        (str/join "\n" matches)
+        "No files matched the pattern."))))
