@@ -32,11 +32,15 @@
    Options:
    - :port - Port to listen on (default 7878)
    - :event-stream - Event stream atom for subscribing to workflow events
+   - :auth - Optional login config, e.g. {:users [{:username \"admin\" :password \"secret\"}]}
 
    Returns: server handle (use with stop!)
 
    Example:
-     (def server (start! {:port 7878 :event-stream my-stream}))"
+     (def server (start! {:port 7878
+                          :event-stream my-stream
+                          :auth {:users [{:username \"admin\"
+                                          :password \"secret\"}]}}))"
   [opts]
   (server/start-server! opts))
 
