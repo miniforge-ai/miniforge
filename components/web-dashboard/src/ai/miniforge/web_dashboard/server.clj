@@ -25,6 +25,7 @@
    [cheshire.core :as json]
    [ai.miniforge.web-dashboard.state :as state]
    [ai.miniforge.web-dashboard.views :as views]
+   [ai.miniforge.web-dashboard.server.auth :as auth]
    [ai.miniforge.web-dashboard.server.responses :as responses]
    [ai.miniforge.web-dashboard.server.filters :as filters]
    [ai.miniforge.web-dashboard.server.websocket :as websocket]
@@ -74,9 +75,27 @@
         events-ws-handler (websocket/create-events-ws-handler state workflow-connections)]
     (fn [req]
       (let [uri (:uri req)
+            auth-state (:auth @state)
             params (merge (filters/query-string->params (:query-string req))
-                          (:params req))]
+                          (:params req))
+            req (assoc req :params params)]
         (cond
+          ;; Login/logout
+          (and (= uri "/login") (= (:request-method req) :get))
+          (auth/handle-login-page auth-state req)
+
+          (and (= uri "/login") (= (:request-method req) :post))
+          (auth/handle-login-submit auth-state req)
+
+          (and (= uri "/logout") (= (:request-method req) :post))
+          (auth/handle-logout auth-state req)
+
+          ;; Auth gate for browser-facing routes
+          (and (auth/enabled? auth-state)
+               (not (auth/public-request? req))
+               (nil? (auth/current-session auth-state req)))
+          (auth/unauthorized-response auth-state req)
+
           ;; WebSocket for UI clients
           (= uri "/ws")
           (ws-handler req)
@@ -345,13 +364,15 @@
    - :port - Port to listen on (default 7878)
    - :event-stream - Event stream atom for subscribing to workflow events
    - :pr-train-manager - PR train manager instance
-   - :repo-dag-manager - Repo DAG manager instance"
-  [{:keys [port event-stream pr-train-manager repo-dag-manager]
+   - :repo-dag-manager - Repo DAG manager instance
+   - :auth - Optional dashboard auth config"
+  [{:keys [port event-stream pr-train-manager repo-dag-manager auth]
     :or {port 7878}}]
   (let [;; Create dashboard-local event stream with NO file sinks to prevent write-back loop.
         ;; The watcher reads from ~/.miniforge/events/ and publishes to this in-memory-only stream.
         dashboard-event-stream (or event-stream (es/create-event-stream {:sinks []}))
         state (state/create-state {:event-stream dashboard-event-stream
+                                   :auth (auth/build-auth-state auth)
                                    :pr-train-manager pr-train-manager
                                    :repo-dag-manager repo-dag-manager
                                    :start-time (System/currentTimeMillis)})
