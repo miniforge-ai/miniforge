@@ -615,7 +615,7 @@
                                     :gates-failed (:failed counts)
                                     :llm? false})
 
-              (build-review-result review counts duration 0))))
+              (build-review-result review counts duration 0)))))
 
       :validate-fn validate-review-artifact
 
