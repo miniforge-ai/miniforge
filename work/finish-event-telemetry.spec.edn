@@ -18,7 +18,7 @@
    zero events), missing streaming callbacks (agent output never reaches subscribers),
    WebSocket envelope mismatch (browser drops events), no browser-side refresh wiring,
    and no event query API for historical data."
- :spec/intent {:type :implement
+ :spec/intent {:type :feature
           :scope ["components/phase/src"
                   "components/web-dashboard/src"
                   "components/web-dashboard/resources/public/js"]}

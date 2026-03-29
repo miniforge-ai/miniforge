@@ -8,8 +8,9 @@
 
 (def ^:private default-agent-models
   "Fallback model defaults when user config does not specify agent defaults."
-  {:thinking "claude-opus-4-6"
+  {:thinking "gpt-5.4"
    :execution "claude-sonnet-4-6"})
+
 
 (def ^:private thinking-roles
   "Roles that default to the higher-reasoning model tier."
@@ -41,6 +42,27 @@
    explicitly overridden."
   [role config]
   (update config :model #(or % (default-model-for-role role))))
+
+
+(defn resolve-llm-client-for-role
+  "Resolve or create an LLM client appropriate for an agent role.
+   If the role's default model uses a different backend than the provided client,
+   creates a new client with the correct backend.
+
+   Arguments:
+     role           - Agent role keyword (:planner, :implementer, etc.)
+     provided-client - The shared LLM client from workflow context (may be nil)"
+  [role provided-client]
+  (let [model-id (default-model-for-role role)
+        backend-for-model (requiring-resolve 'ai.miniforge.llm.interface/backend-for-model)
+        needed-backend (backend-for-model model-id)]
+    (if (or (nil? provided-client)
+            (= needed-backend :claude)) ;; shared client is typically :claude
+      provided-client
+      ;; Model needs a different backend — create a new client
+      (let [create-client (requiring-resolve 'ai.miniforge.llm.interface/create-client)]
+        (create-client {:backend needed-backend})))))
+
 
 (comment
   (default-model-for-role :planner)

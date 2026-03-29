@@ -288,7 +288,8 @@
 
       :invoke-fn
       (fn [context input]
-        (let [llm-client (or (:llm-backend opts) (:llm-backend context))
+        (let [llm-client (model/resolve-llm-client-for-role
+                          :planner (or (:llm-backend opts) (:llm-backend context)))
               on-chunk (:on-chunk context)
               spec-text (spec->text input)
               existing-files (:task/existing-files input)
@@ -311,10 +312,12 @@
             (let [{:keys [llm-result artifact]}
                   (artifact-session/with-artifact-session [session]
                     (let [budget-usd (budget/resolve-cost-budget-usd :planner config context)
-                          mcp-opts {:mcp-config (:mcp-config-path session)
+                          mcp-opts {:model (model/default-model-for-role :planner)
+                                    :mcp-config (:mcp-config-path session)
                                     :mcp-allowed-tools (:mcp-allowed-tools session)
                                     :supervision (:supervision session)
-                                    :budget-usd budget-usd}]
+                                    :budget-usd budget-usd
+                                    :max-turns 25}]
                       (if on-chunk
                         (llm/chat-stream llm-client user-prompt on-chunk
                                          (merge {:system @planner-system-prompt} mcp-opts))

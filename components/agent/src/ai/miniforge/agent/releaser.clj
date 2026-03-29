@@ -216,7 +216,8 @@
                           mcp-opts {:mcp-config (:mcp-config-path session)
                                     :mcp-allowed-tools (:mcp-allowed-tools session)
                                     :supervision (:supervision session)
-                                    :budget-usd budget-usd}]
+                                    :budget-usd budget-usd
+                                    :max-turns 15}]
                       (if on-chunk
                         (llm/chat-stream llm-client user-prompt on-chunk
                                          (merge {:system @releaser-system-prompt} mcp-opts))
