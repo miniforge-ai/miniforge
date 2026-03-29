@@ -33,7 +33,8 @@
       :error   (fn [ctx ex] -> ctx) ; Error handling/repair}"
   (:require
    [ai.miniforge.phase.loader :as loader]
-   [ai.miniforge.phase.registry :as registry]))
+   [ai.miniforge.phase.registry :as registry]
+   [ai.miniforge.phase.telemetry :as telemetry]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Re-export registry functions
@@ -112,6 +113,10 @@
 (def retrying?
   "Check if a result map indicates retry."
   registry/retrying?)
+
+(def create-streaming-callback
+  "Create a phase-scoped streaming callback when an event stream is available."
+  telemetry/create-streaming-callback)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pipeline construction

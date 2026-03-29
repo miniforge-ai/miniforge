@@ -22,7 +22,8 @@
    Creates implementation plans from specifications.
    Agent: :planner
    Default gates: [:plan-complete]"
-  (:require [ai.miniforge.phase.registry :as registry]
+  (:require [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.phase.phase-config :as phase-config]
             [ai.miniforge.phase.knowledge-helpers :as kb-helpers]
             [ai.miniforge.agent.interface :as agent]
@@ -94,11 +95,7 @@
 (defn create-streaming-callback
   "Create a streaming callback for agent output, if event-stream is available."
   [ctx]
-  (when-let [es (:event-stream ctx)]
-    (when-let [create-cb (requiring-resolve
-                           'ai.miniforge.event-stream.interface/create-streaming-callback)]
-      (create-cb es (:execution/id ctx) :plan
-                 {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)}))))
+  (phase/create-streaming-callback ctx :plan))
 
 (defn plan-from-agent
   "Invoke the planner agent to generate a plan via LLM.

@@ -6,6 +6,7 @@
    [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.java.io :as io]
    [babashka.fs :as fs]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.phase.release :as release]
    [ai.miniforge.phase.registry :as registry]
    [ai.miniforge.release-executor.interface :as release-executor]))
@@ -250,6 +251,29 @@
               "PR URL should be captured")
           (is (= "feature/test-123" (:branch pr-info))
               "Branch name should be captured"))))))
+
+(deftest release-propagates-streaming-callback-test
+  (testing "release phase passes event-stream-backed on-chunk callback to the executor"
+    (let [stream (es/create-event-stream {:sinks []})]
+      (with-redefs [release-executor/execute-release-phase
+                    (fn [_workflow-state exec-context _opts]
+                      (is (fn? (:on-chunk exec-context))
+                          "Release executor should receive an on-chunk callback")
+                      ((:on-chunk exec-context) {:delta "release chunk" :done? false})
+                      {:success? true
+                       :artifacts [{:artifact/id (random-uuid)
+                                    :artifact/type :release
+                                    :artifact/content {:files-written 1}}]
+                       :metrics {:files-written 1}})]
+        (let [ctx (assoc (create-base-context) :event-stream stream)
+              ctx-with-config (assoc ctx :phase-config {:phase :release})
+              interceptor (registry/get-phase-interceptor {:phase :release})
+              result ((:enter interceptor) ctx-with-config)
+              chunk-events (es/get-events stream {:event-type :agent/chunk})]
+          (is (= :success (get-in result [:phase :result :status])))
+          (is (= 1 (count chunk-events)))
+          (is (= "release chunk" (:chunk/delta (first chunk-events))))
+          (is (= :release (:agent/id (first chunk-events)))))))))
 
 ;------------------------------------------------------------------------------ Layer 2: Interceptor Leave Tests
 

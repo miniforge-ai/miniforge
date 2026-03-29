@@ -22,7 +22,8 @@
    Generates code artifacts from plans.
    Agent: :implementer
    Default gates: [:syntax :lint]"
-  (:require [ai.miniforge.phase.registry :as registry]
+  (:require [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.phase.file-context :as file-ctx]
             [ai.miniforge.phase.agent-behavior :as agent-beh]
             [ai.miniforge.phase.messages :as messages]
@@ -174,11 +175,7 @@
 (defn create-streaming-callback
   "Create a streaming callback for agent output if event-stream is available."
   [ctx]
-  (when-let [es (:event-stream ctx)]
-    (when-let [create-cb (requiring-resolve
-                           'ai.miniforge.event-stream.interface/create-streaming-callback)]
-      (create-cb es (:execution/id ctx) :implement
-                 {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)}))))
+  (phase/create-streaming-callback ctx :implement))
 
 (defn collect-peer-advice
   "Collect peer messages for the implementer agent if a message router is available."
