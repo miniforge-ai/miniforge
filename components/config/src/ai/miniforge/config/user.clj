@@ -19,73 +19,31 @@
   "Default location for user config file."
   (str (fs/home) "/.miniforge/config.edn"))
 
+(def ^:private default-config-resource-path
+  "Primary resource path for shipped user config defaults."
+  "config/default-user-config.edn")
+
+(def ^:private fallback-config-resource-path
+  "Fallback resource path when the primary config cannot be loaded."
+  "config/default-user-config-fallback.edn")
+
+(defn- read-config-resource
+  "Read an EDN config resource, returning nil on missing resource or parse failure."
+  [resource-path]
+  (when-let [resource (io/resource resource-path)]
+    (try
+      (edn/read-string (slurp resource))
+      (catch Exception _e
+        nil))))
+
 (defn load-default-config
   "Load default configuration from resources.
 
-   Returns: Default config map or hardcoded fallback"
+   Returns: Default config map or resource-backed fallback."
   []
-  (if-let [resource (io/resource "config/default-user-config.edn")]
-    (try
-      (:config (edn/read-string (slurp resource)))
-      (catch Exception _e
-        ;; Fallback if resource loading fails
-        {:llm {:backend :codex
-               :model "gpt-5.2-codex"
-               :timeout-ms 300000
-               :line-timeout-ms 60000
-               :max-tokens 4000}
-         :workflow {:max-iterations 50
-                    :max-tokens 150000
-                    :failure-strategy :retry}
-         :artifacts {:dir (str (fs/home) "/.miniforge/artifacts")}
-         :meta-loop {:enabled true
-                     :max-convergence-iterations 10
-                     :convergence-threshold 0.95}
-         :agents {:default-models {:thinking "gpt-5.4"
-                                   :execution "gpt-5.2-codex"}}
-         :model-selection {:enabled true
-                           :strategy :automatic
-                           :cost-limit-per-task 0.10
-                           :prefer-speed false
-                           :allow-downgrade true
-                           :require-local false}
-         :self-healing {:enabled true
-                        :workaround-auto-apply true
-                        :backend-auto-switch true
-                        :backend-health-threshold 0.90
-                        :backend-switch-cooldown-ms 1800000
-                        :allowed-failover-backends [:codex]}
-         :dashboard {:port 7878
-                     :auto-open false}}))
-    ;; Fallback if resource not found
-    {:llm {:backend :codex
-           :model "gpt-5.2-codex"
-           :timeout-ms 300000
-           :line-timeout-ms 60000
-           :max-tokens 4000}
-     :workflow {:max-iterations 50
-                :max-tokens 150000
-                :failure-strategy :retry}
-     :artifacts {:dir (str (fs/home) "/.miniforge/artifacts")}
-     :meta-loop {:enabled true
-                 :max-convergence-iterations 10
-                 :convergence-threshold 0.95}
-     :agents {:default-models {:thinking "gpt-5.4"
-                               :execution "gpt-5.2-codex"}}
-     :model-selection {:enabled true
-                       :strategy :automatic
-                       :cost-limit-per-task 0.10
-                       :prefer-speed false
-                       :allow-downgrade true
-                       :require-local false}
-     :self-healing {:enabled true
-                    :workaround-auto-apply true
-                    :backend-auto-switch true
-                    :backend-health-threshold 0.90
-                    :backend-switch-cooldown-ms 1800000
-                    :allowed-failover-backends [:codex]}
-     :dashboard {:port 7878
-                 :auto-open false}}))
+  (or (some-> (read-config-resource default-config-resource-path) :config)
+      (some-> (read-config-resource fallback-config-resource-path) :config)
+      {}))
 
 (def default-config
   "Default configuration values loaded from resources/config/default-user-config.edn"

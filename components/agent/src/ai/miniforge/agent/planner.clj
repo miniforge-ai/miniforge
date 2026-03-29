@@ -289,7 +289,7 @@
       :invoke-fn
       (fn [context input]
         (let [llm-client (model/resolve-llm-client-for-role
-                          :planner (or (:llm-backend opts) (:llm-backend context)))
+                          :planner (get opts :llm-backend (:llm-backend context)))
               on-chunk (:on-chunk context)
               spec-text (spec->text input)
               existing-files (:task/existing-files input)

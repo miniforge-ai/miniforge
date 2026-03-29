@@ -281,7 +281,7 @@
       (fn [context input]
         (let [llm-client (model/resolve-llm-client-for-role
                           :tester
-                          (or (:llm-backend opts) (:llm-backend context)))
+                          (get opts :llm-backend (:llm-backend context)))
               on-chunk (:on-chunk context)
               ;; Input can be a code artifact or a map with :code and :spec
               code-artifact (or (:code input) input)

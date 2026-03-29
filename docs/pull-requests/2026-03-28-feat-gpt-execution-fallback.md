@@ -27,9 +27,10 @@ None.
 - Updated agent model policy so execution roles default to `gpt-5.2-codex` and thinking defaults to `gpt-5.4`.
 - Wired execution-role agents to resolve a backend-specific client when the shared workflow client is on the wrong backend.
 - Changed shipped config defaults so `:llm.backend` is `:codex`, execution model defaults to GPT, and self-healing allows `[:codex]` failover.
+- Moved backend metadata and config fallback defaults into shipped EDN resources instead of hardcoding them in Clojure namespaces.
 - Updated phase model hints so plan/implement/verify/review align with GPT-backed execution.
 - Updated dogfood utilities to use configured backend selection instead of assuming Claude and to accept Codex/OpenAI availability in prerequisite checks.
-- Added focused tests for role-based backend resolution and default config policy.
+- Added focused tests for role-based backend resolution, default config policy, fallback-resource loading, and resource-backed backend defaults.
 
 ## Strata Affected
 - `ai.miniforge.llm.interface` and `ai.miniforge.llm.protocols.records.llm-client` - default backend policy and backend introspection
