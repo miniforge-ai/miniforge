@@ -53,36 +53,26 @@
     :else value))
 
 (defn normalize-workflow-event
-  "Normalize workflow events arriving over JSON transport."
+  "Normalize workflow events arriving over JSON transport.
+   Coalesces legacy camelCase/unqualified keys to qualified namespaced keys
+   and ensures type/UUID fields have the right runtime types."
   [event]
-  (let [workflow-id (or (:workflow/id event) (:workflow-id event))
-        timestamp (or (:event/timestamp event) (:timestamp event))
-        phase (or (:workflow/phase event) (:phase event))
-        status (or (:workflow/status event) (:status event))]
+  (let [workflow-id (or (get event :workflow/id) (get event :workflow-id))
+        timestamp   (or (get event :event/timestamp) (get event :timestamp))
+        phase       (or (get event :workflow/phase) (get event :phase))
+        status      (or (get event :workflow/status) (get event :status))
+        spec        (or (get event :workflow/spec) (get event :workflow-spec))]
     (cond-> event
-      (:event/type event)
-      (update :event/type maybe-keyword)
-
-      workflow-id
-      (assoc :workflow/id (maybe-uuid workflow-id))
-
-      timestamp
-      (assoc :event/timestamp timestamp)
-
-      phase
-      (assoc :workflow/phase (maybe-keyword phase))
-
-      status
-      (assoc :workflow/status (maybe-keyword status))
-
-      (or (:workflow/spec event) (:workflow-spec event))
-      (assoc :workflow/spec (or (:workflow/spec event) (:workflow-spec event)))
-
-      true
-      (dissoc :workflow-id :timestamp :phase :status :workflow-spec))))
+      (get event :event/type)   (update :event/type maybe-keyword)
+      workflow-id               (assoc :workflow/id (maybe-uuid workflow-id))
+      timestamp                 (assoc :event/timestamp timestamp)
+      phase                     (assoc :workflow/phase (maybe-keyword phase))
+      status                    (assoc :workflow/status (maybe-keyword status))
+      spec                      (assoc :workflow/spec spec)
+      true                      (dissoc :workflow-id :timestamp :phase :status :workflow-spec))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Subscribe/unsubscribe
+;; WebSocket operations — subscribe, unsubscribe, message dispatch
 
 (defn subscribe-client!
   "Subscribe WebSocket client to event stream."
@@ -116,7 +106,6 @@
         (catch Exception e
           (println "Error unsubscribing from event stream:" (ex-message e)))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Message handling
 
 (defn handle-ws-message
@@ -167,7 +156,7 @@
     (catch Exception e
       (println "Error parsing workflow event:" (ex-message e)))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 2
 ;; Handler constructors
 
 (defn create-ws-handler

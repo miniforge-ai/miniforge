@@ -100,83 +100,84 @@
       [])))
 
 (defn dedupe-events
-  "Deduplicate live + historical events by event-id, falling back to stable fields."
+  "Deduplicate live + historical events by event-id, falling back to a
+   composite key of stable fields when no id is present."
   [events]
   (->> events
        (reduce (fn [acc event]
-                 (let [event-key (or (:event/id event)
-                                     [(:event/type event)
-                                      (some-> (wf-id event) str)
-                                      (event-ts event)
-                                      (:event/sequence-number event)
-                                      (:message event)])]
+                 (let [event-key (get event :event/id
+                                      [(get event :event/type)
+                                       (some-> (wf-id event) str)
+                                       (event-ts event)
+                                       (get event :event/sequence-number)
+                                       (get event :message)])]
                    (assoc acc event-key event)))
                {})
        vals
        vec))
 
 (defn wf-name-from-started
+  "Extract a display name for a workflow from its started event."
   [started id]
-  (or (get-in started [:workflow/spec :spec/title])
-      (get-in started [:workflow/spec :title])
-      (get-in started [:workflow/spec :name])
-      (get-in started [:workflow-spec :title])
-      (get-in started [:workflow-spec :name])
-      (get-in started [:spec :title])
-      (get-in started [:spec :name])
-      (str "Workflow " (subs (str id) 0 (min 8 (count (str id)))))))
+  (let [spec (or (get started :workflow/spec)
+                 (get started :workflow-spec)
+                 (get started :spec))]
+    (or (get spec :spec/title)
+        (get spec :title)
+        (get spec :name)
+        (str "Workflow " (subs (str id) 0 (min 8 (count (str id))))))))
+
+(defn event-phase
+  "Extract the phase from an event, accepting both qualified and legacy keys."
+  [event]
+  (or (get event :workflow/phase) (get event :phase)))
 
 (defn wf-phase
+  "Derive the current phase of a workflow from its events."
   [events started]
-  (or (:workflow/phase started)
-      (:phase started)
+  (or (event-phase started)
       (some->> events
                (filter #(#{:workflow/phase-started :workflow/phase-completed}
                           (:event/type %)))
                (sort-by #(ts-epoch-ms (event-ts %)))
                last
-               ((fn [event] (or (:workflow/phase event) (:phase event)))))
+               event-phase)
       "unknown"))
 
 (defn wf-status
+  "Derive a workflow status keyword from terminal events and staleness."
   [completed failed last-event-ts]
   (cond
-    failed :failed
-    completed (case (or (:workflow/status completed) (:status completed))
-                :success :completed
-                :completed :completed
-                :failure :failed
-                :failed :failed
-                :cancelled :failed
-                :completed)
-    :else (let [stale-threshold-ms (* 10 60 1000)
-                last-ts (normalize-ts last-event-ts)
-                now (System/currentTimeMillis)]
-            (if (and last-ts (> (- now (.getTime ^java.util.Date last-ts))
-                                stale-threshold-ms))
-              :stale
-              :running))))
+    failed     :failed
+    completed  (let [status (or (:workflow/status completed) (:status completed))]
+                 (if (#{:success :completed} status) :completed :failed))
+    :else      (let [last-ts (normalize-ts last-event-ts)]
+                 (if (and last-ts
+                          (> (- (System/currentTimeMillis) (.getTime ^java.util.Date last-ts))
+                             (* 10 60 1000)))
+                   :stale
+                   :running))))
 
 (defn workflow-metrics
-  "Aggregate workflow metrics from terminal and phase completion events."
+  "Aggregate workflow metrics from terminal and phase completion events.
+   Prefers values on the :workflow/completed event; falls back to summing
+   individual phase completion events."
   [events]
   (let [terminal (->> events
                       (filter #(= :workflow/completed (:event/type %)))
                       (sort-by #(ts-epoch-ms (event-ts %)))
                       last)
-        phase-completions (filter #(= :workflow/phase-completed (:event/type %)) events)
-        total-tokens (reduce + 0 (keep :phase/tokens phase-completions))
-        total-cost-usd (reduce + 0 (keep :phase/cost-usd phase-completions))
-        total-duration-ms (reduce + 0 (keep :phase/duration-ms phase-completions))]
+        phases (filter #(= :workflow/phase-completed (:event/type %)) events)
+        total-tokens      (reduce + 0 (keep :phase/tokens phases))
+        total-cost-usd    (reduce + 0 (keep :phase/cost-usd phases))
+        total-duration-ms (reduce + 0 (keep :phase/duration-ms phases))
+        tokens      (or (get terminal :workflow/tokens)      (when (pos? total-tokens) total-tokens))
+        cost-usd    (or (get terminal :workflow/cost-usd)    (when (pos? total-cost-usd) total-cost-usd))
+        duration-ms (or (get terminal :workflow/duration-ms) (when (pos? total-duration-ms) total-duration-ms))]
     (cond-> {}
-      (or (some? (:workflow/tokens terminal)) (pos? total-tokens))
-      (assoc :tokens (or (:workflow/tokens terminal) total-tokens))
-
-      (or (some? (:workflow/cost-usd terminal)) (pos? total-cost-usd))
-      (assoc :cost-usd (or (:workflow/cost-usd terminal) total-cost-usd))
-
-      (or (some? (:workflow/duration-ms terminal)) (pos? total-duration-ms))
-      (assoc :duration-ms (or (:workflow/duration-ms terminal) total-duration-ms)))))
+      tokens      (assoc :tokens tokens)
+      cost-usd    (assoc :cost-usd cost-usd)
+      duration-ms (assoc :duration-ms duration-ms))))
 
 (defn workflow-output-preview
   "Build a short preview from the latest streaming chunks."
@@ -305,7 +306,7 @@
             result))))))
 
 (defn get-workflow-detail
-  "Get workflow detail."
+  "Get workflow detail by string id."
   [state id]
   (let [workflows (get-workflows state)]
     (or (first (filter #(= (str (:id %)) id) workflows))
