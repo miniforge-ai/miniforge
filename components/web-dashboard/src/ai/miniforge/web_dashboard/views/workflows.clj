@@ -56,13 +56,24 @@
     (format "$%.4f" (double cost-usd))))
 
 (defn event-message
-  "Pick the most useful event message for rendering."
+  "Return the best human-readable message string for an event, or nil.
+
+  The event schema uses different fields depending on event type:
+  - :agent/chunk events carry streaming text in :chunk/delta (not :event/message).
+    We trim whitespace and return nil for blank deltas so the UI skips empty chunks.
+  - All other events use :event/message (canonical field) or the legacy :message
+    key that predates the namespaced schema — both are checked to handle old events
+    already persisted to disk.
+  - :workflow/failed events additionally carry a :workflow/failure-reason that has
+    no corresponding :event/message entry; we surface it with a translated prefix."
   [evt]
   (if (= :agent/chunk (:event/type evt))
+    ;; Streaming chunks: text lives in :chunk/delta, not :event/message
     (some-> (:chunk/delta evt) str/trim not-empty)
-    (or (:message evt)
-        (:event/message evt)
+    (or (:message evt)                          ; legacy un-namespaced key (older persisted events)
+        (:event/message evt)                    ; canonical namespaced key
         (when-let [reason (:workflow/failure-reason evt)]
+          ;; failure events don't set :event/message — surface reason with i18n prefix
           (str (msg/t :metric/failure-prefix) reason)))))
 
 (defn- coalesce-metric
@@ -110,43 +121,106 @@
   [status]
   (msg/t (keyword "workflow.status" (name (or status :unknown)))))
 
+(defn- workflow-empty-state
+  "Empty-state placeholder shown when there are no workflow runs."
+  []
+  [:div.empty-state
+   [:div.empty-icon "⚙️"]
+   [:h3 (msg/t :workflow/none-heading)]
+   [:p (msg/t :workflow/none-body)]
+   [:code.empty-code "miniforge workflow run examples/workflows/simple.edn"]
+   [:p.empty-hint (msg/t :workflow/none-hint)]])
+
+(defn- workflow-card-summary
+  "The [:summary ...] element for a single workflow card."
+  [wf status]
+  [:summary.workflow-card-summary
+   [:span.wf-status-dot (c/status-dot status)]
+   [:span.wf-name (:name wf)]
+   [:span.wf-badge {:class (str "badge-" (name status))}
+    (status-label status)]
+   [:span.wf-phase (or (some-> (:phase wf) name) (msg/t :time/none))]
+   [:div.wf-progress-inline
+    [:div.wf-progress-track
+     [:div.wf-progress-fill
+      {:style (str "width:" (get wf :progress 0) "%")}]]]
+   [:span.wf-time (format-time (:started-at wf))]
+   [:span.wf-expand-icon "▸"]])
+
+(defn- workflow-card
+  "One full [:details ...] card for a single workflow."
+  [wf]
+  (let [wf-id  (str (:id wf))
+        status (get wf :status :unknown)]
+    [:details.workflow-card
+     {:id                wf-id
+      :data-workflow-id  wf-id
+      :hx-get            (str "/api/workflow/" wf-id "/panel")
+      :hx-trigger        "toggle once"
+      :hx-target         (str "#wf-panel-" wf-id)
+      :hx-swap           "innerHTML"}
+     (workflow-card-summary wf status)
+     [:div.workflow-card-body
+      {:id               (str "wf-panel-" wf-id)
+       :data-workflow-id wf-id}]]))
+
 (defn workflow-list-fragment
   "Workflow list fragment — expandable cards."
   [workflows]
   (html
    (if (empty? workflows)
-     [:div.empty-state
-      [:div.empty-icon "⚙️"]
-      [:h3 (msg/t :workflow/none-heading)]
-      [:p (msg/t :workflow/none-body)]
-      [:code.empty-code "miniforge workflow run examples/workflows/simple.edn"]
-      [:p.empty-hint (msg/t :workflow/none-hint)]]
-     [:div.workflow-card-list
-      (for [wf workflows]
-        (let [wf-id  (str (:id wf))
-              status (get wf :status :unknown)]
-          [:details.workflow-card
-           {:id                wf-id
-            :data-workflow-id  wf-id
-            :hx-get            (str "/api/workflow/" wf-id "/panel")
-            :hx-trigger        "toggle once"
-            :hx-target         (str "#wf-panel-" wf-id)
-            :hx-swap           "innerHTML"}
-           [:summary.workflow-card-summary
-            [:span.wf-status-dot (c/status-dot status)]
-            [:span.wf-name (:name wf)]
-            [:span.wf-badge {:class (str "badge-" (name status))}
-             (status-label status)]
-            [:span.wf-phase (or (some-> (:phase wf) name) (msg/t :time/none))]
-            [:div.wf-progress-inline
-             [:div.wf-progress-track
-              [:div.wf-progress-fill
-               {:style (str "width:" (get wf :progress 0) "%")}]]]
-            [:span.wf-time (format-time (:started-at wf))]
-            [:span.wf-expand-icon "▸"]]
-           [:div.workflow-card-body
-            {:id               (str "wf-panel-" wf-id)
-             :data-workflow-id wf-id}]]))])))
+     (workflow-empty-state)
+     [:div.workflow-card-list (map workflow-card workflows)])))
+
+(defn- workflow-metric-fields
+  "Return a seq of [css-class label value-string] tuples for non-nil metric fields.
+   Used by workflow-panel-meta to render each metric span generically."
+  [workflow]
+  (cond-> []
+    (get-in workflow [:metrics :tokens])
+    (conj [:workflow-tokens "Tokens: " (str (get-in workflow [:metrics :tokens]))])
+
+    (format-duration-ms (get-in workflow [:metrics :duration-ms]))
+    (conj [:workflow-duration "Duration: " (format-duration-ms (get-in workflow [:metrics :duration-ms]))])
+
+    (format-cost (get-in workflow [:metrics :cost-usd]))
+    (conj [:workflow-cost "Cost: " (format-cost (get-in workflow [:metrics :cost-usd]))])
+
+    (:started-at workflow)
+    (conj [:workflow-started "Started: " (format-time (:started-at workflow))])))
+
+(defn- workflow-panel-controls
+  "Pause/resume/stop buttons — only rendered for running workflows."
+  [workflow-id]
+  [:div.workflow-panel-controls
+   [:button.btn.btn-sm
+    {:onclick (str "window.miniforge.postWorkflowCommand('" workflow-id "','pause')")
+     :title "Pause"}
+    "Pause"]
+   [:button.btn.btn-sm
+    {:onclick (str "window.miniforge.postWorkflowCommand('" workflow-id "','resume')")
+     :title "Resume"}
+    "Resume"]
+   [:button.btn.btn-sm.btn-danger
+    {:onclick (str "window.miniforge.postWorkflowCommand('" workflow-id "','stop')")
+     :title "Stop"}
+    "Stop"]])
+
+(defn- workflow-panel-meta
+  "Meta row: status badge, phase, progress, and any available metric fields."
+  [workflow]
+  [:div.workflow-panel-meta
+   [:span (c/badge (name (get workflow :status :unknown))
+                   {:variant (case (:status workflow)
+                               :completed :success
+                               :running   :info
+                               :failed    :error
+                               :stale     :warning
+                               :neutral)})]
+   [:span.workflow-phase    (str "Phase: "    (get workflow :phase (msg/t :time/none)))]
+   [:span.workflow-progress (str "Progress: " (get workflow :progress 0) "%")]
+   (for [[css-class label value] (workflow-metric-fields workflow)]
+     [:span {:class (name css-class)} (str label value)])])
 
 (defn workflow-detail-panel
   "Inline detail panel loaded on card expand."
@@ -154,25 +228,7 @@
   (html
    [:div.workflow-panel
     {:data-workflow-id (str (:id workflow))}
-    ;; Meta row
-    [:div.workflow-panel-meta
-     [:span (c/badge (name (get workflow :status :unknown))
-                     {:variant (case (:status workflow)
-                                 :completed :success
-                                 :running   :info
-                                 :failed    :error
-                                 :stale     :warning
-                                 :neutral)})]
-     [:span.workflow-phase    (str "Phase: "    (get workflow :phase (msg/t :time/none)))]
-     [:span.workflow-progress (str "Progress: " (get workflow :progress 0) "%")]
-     (when-let [tokens (get-in workflow [:metrics :tokens])]
-       [:span.workflow-tokens (str "Tokens: " tokens)])
-     (when-let [duration (format-duration-ms (get-in workflow [:metrics :duration-ms]))]
-       [:span.workflow-duration (str "Duration: " duration)])
-     (when-let [cost (format-cost (get-in workflow [:metrics :cost-usd]))]
-       [:span.workflow-cost (str "Cost: " cost)])
-     (when (:started-at workflow)
-       [:span.workflow-started (str "Started: " (format-time (:started-at workflow)))])]
+    (workflow-panel-meta workflow)
 
     (when-let [preview (:latest-output workflow)]
       [:div.workflow-panel-output
@@ -181,19 +237,7 @@
 
     ;; Controls — only for running workflows
     (when (= :running (:status workflow))
-      [:div.workflow-panel-controls
-       [:button.btn.btn-sm
-        {:onclick (str "window.miniforge.postWorkflowCommand('" (:id workflow) "','pause')")
-         :title "Pause"}
-        "Pause"]
-       [:button.btn.btn-sm
-        {:onclick (str "window.miniforge.postWorkflowCommand('" (:id workflow) "','resume')")
-         :title "Resume"}
-        "Resume"]
-       [:button.btn.btn-sm.btn-danger
-        {:onclick (str "window.miniforge.postWorkflowCommand('" (:id workflow) "','stop')")
-         :title "Stop"}
-        "Stop"]])
+      (workflow-panel-controls (:id workflow)))
 
     ;; Event timeline
     [:div.workflow-panel-events

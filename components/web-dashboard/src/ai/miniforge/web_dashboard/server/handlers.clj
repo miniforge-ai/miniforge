@@ -46,6 +46,13 @@
     (update raw :body json/generate-string)))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Constants
+
+(def ^:private workflow-detail-event-limit
+  "Maximum number of events to load per workflow detail view or panel."
+  200)
+
+;------------------------------------------------------------------------------ Layer 0
 ;; Filter helpers
 
 (defn maybe-apply-filters
@@ -159,7 +166,7 @@
   (let [workflow (state/get-workflow-detail state workflow-id)
         wid (try (parse-uuid workflow-id) (catch Exception _ nil))
         events (if wid
-                 (state/get-events state {:workflow-id wid :limit 200})
+                 (state/get-events state {:workflow-id wid :limit workflow-detail-event-limit})
                  [])]
     (responses/html-response (views/workflow-detail-view workflow events))))
 
@@ -308,7 +315,7 @@
   (let [wid (try (parse-uuid workflow-id) (catch Exception _ nil))]
     (if wid
       (responses/html-response (views/workflow-events-fragment
-                                (state/get-events state {:workflow-id wid :limit 200})))
+                                (state/get-events state {:workflow-id wid :limit workflow-detail-event-limit})))
       (responses/html-response [:div.empty-state [:p "Invalid workflow ID"]]))))
 
 (defn handle-api-workflow-panel
@@ -317,7 +324,7 @@
   (let [workflow (state/get-workflow-detail state workflow-id)
         wid (try (parse-uuid workflow-id) (catch Exception _ nil))
         events (if wid
-                 (state/get-events state {:workflow-id wid :limit 200})
+                 (state/get-events state {:workflow-id wid :limit workflow-detail-event-limit})
                  [])]
     (responses/html-response (views/workflow-detail-panel workflow events))))
 
