@@ -109,7 +109,7 @@ function applyFilters() {
   console.log('Active filters:', Array.from(activeFilters.entries()));
 
   // Trigger kanban board update
-  document.body.dispatchEvent(new CustomEvent('refresh'));
+  dispatchRefresh();
 }
 
 // Post workflow command via HTTP (GraalVM-safe, no WebSocket needed)
@@ -131,7 +131,78 @@ function postWorkflowCommand(workflowId, command) {
 }
 
 function dispatchRefresh() {
+  if (window.htmx && typeof window.htmx.trigger === 'function') {
+    window.htmx.trigger(document.body, 'refresh');
+  }
   document.body.dispatchEvent(new CustomEvent('refresh'));
+}
+
+let refreshTimer = null;
+const workflowRefreshTimers = new Map();
+
+function scheduleRefresh(delay = 150) {
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+  }
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    dispatchRefresh();
+  }, delay);
+}
+
+function normalizeWorkflowId(event) {
+  return event && (
+    event['workflow/id']
+    || event.workflow_id
+    || event.workflowId
+    || event['workflow-id']
+  );
+}
+
+function escapeSelectorValue(value) {
+  if (window.CSS && typeof window.CSS.escape === 'function') {
+    return window.CSS.escape(String(value));
+  }
+
+  return String(value).replace(/(["\\.#:[\]])/g, '\\$1');
+}
+
+function refreshTarget(url, selector) {
+  if (!window.htmx || typeof window.htmx.ajax !== 'function') {
+    return;
+  }
+
+  const target = document.querySelector(selector);
+  if (!target) {
+    return;
+  }
+
+  window.htmx.ajax('GET', url, { target: target, swap: 'innerHTML' });
+}
+
+function scheduleWorkflowRefresh(workflowId, delay = 200) {
+  if (!workflowId) {
+    scheduleRefresh(delay);
+    return;
+  }
+
+  const key = String(workflowId);
+  if (workflowRefreshTimers.has(key)) {
+    clearTimeout(workflowRefreshTimers.get(key));
+  }
+
+  workflowRefreshTimers.set(key, setTimeout(() => {
+    workflowRefreshTimers.delete(key);
+
+    const panelSelector = `#wf-panel-${escapeSelectorValue(key)}`;
+    const detailSelector = `#workflow-detail-panel[data-workflow-id="${key}"]`;
+    const eventsSelector = `#wf-events-${escapeSelectorValue(key)}`;
+
+    refreshTarget(`/api/workflow/${encodeURIComponent(key)}/panel`, panelSelector);
+    refreshTarget(`/api/workflow/${encodeURIComponent(key)}/panel`, detailSelector);
+    refreshTarget(`/api/workflow/${encodeURIComponent(key)}/events`, eventsSelector);
+    scheduleRefresh(0);
+  }, delay));
 }
 
 function postJson(url) {
@@ -303,7 +374,7 @@ function scheduleReconnect() {
 }
 
 function updateConnectionStatus(status) {
-  const statusDot = document.querySelector('.status-dot');
+  const statusDot = document.getElementById('ws-indicator');
   if (statusDot) {
     statusDot.className = 'status-dot';
     statusDot.classList.add(status);
@@ -322,7 +393,13 @@ function updateConnectionStatus(status) {
 }
 
 function handleWebSocketMessage(data) {
-  switch (data.type) {
+  if (data && (data['event/type'] || data.event_type)) {
+    handleWorkflowEvent(data);
+    return;
+  }
+
+  const type = data && data.type;
+  switch (type) {
     case 'init':
       console.log('WebSocket connected, SSR data is current');
       // No refresh needed — page already has server-rendered data
@@ -330,15 +407,15 @@ function handleWebSocketMessage(data) {
 
     case 'state':
       console.log('State update:', data.data);
-      document.body.dispatchEvent(new CustomEvent('refresh'));
+      scheduleRefresh();
       break;
 
     case 'event':
-      handleWorkflowEvent(data.data);
+      handleWorkflowEvent(data.data || data.event || data.payload);
       break;
 
     default:
-      console.log('Unknown message type:', data.type);
+      console.log('Unknown message type:', type, data);
   }
 }
 
@@ -374,6 +451,7 @@ function handleWorkflowEvent(event) {
   if (!event) return;
 
   const eventType = event['event/type'] || event.event_type;
+  const workflowId = normalizeWorkflowId(event);
 
   switch (eventType) {
     case 'workflow/started':
@@ -401,14 +479,16 @@ function handleWorkflowEvent(event) {
 
     // agent/chunk events are high-frequency — don't toast, just refresh
     case 'agent/chunk':
+      scheduleWorkflowRefresh(workflowId, 150);
       break;
 
     default:
       break;
   }
 
-  // Trigger htmx refresh for all data-bound sections
-  document.body.dispatchEvent(new CustomEvent('refresh'));
+  if (eventType !== 'agent/chunk') {
+    scheduleWorkflowRefresh(workflowId, 75);
+  }
 }
 
 // Initialize WebSocket on page load

@@ -159,7 +159,7 @@
   (let [workflow (state/get-workflow-detail state workflow-id)
         wid (try (parse-uuid workflow-id) (catch Exception _ nil))
         events (if wid
-                 (state/get-events state {:workflow-id wid :limit 50})
+                 (state/get-events state {:workflow-id wid :limit 200})
                  [])]
     (responses/html-response (views/workflow-detail-view workflow events))))
 
@@ -308,7 +308,7 @@
   (let [wid (try (parse-uuid workflow-id) (catch Exception _ nil))]
     (if wid
       (responses/html-response (views/workflow-events-fragment
-                                (state/get-events state {:workflow-id wid :limit 50})))
+                                (state/get-events state {:workflow-id wid :limit 200})))
       (responses/html-response [:div.empty-state [:p "Invalid workflow ID"]]))))
 
 (defn handle-api-workflow-panel
@@ -317,7 +317,7 @@
   (let [workflow (state/get-workflow-detail state workflow-id)
         wid (try (parse-uuid workflow-id) (catch Exception _ nil))
         events (if wid
-                 (state/get-events state {:workflow-id wid :limit 50})
+                 (state/get-events state {:workflow-id wid :limit 200})
                  [])]
     (responses/html-response (views/workflow-detail-panel workflow events))))
 
