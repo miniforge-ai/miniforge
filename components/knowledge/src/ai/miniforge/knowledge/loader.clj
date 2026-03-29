@@ -238,7 +238,7 @@
    (initialize-knowledge-store! knowledge-store {}))
 
   ([knowledge-store opts]
-   (let [rules-dir (get opts :rules-dir ".cursor/rules")
+   (let [rules-dir (get opts :rules-dir ".standards")
          project-root (get opts :project-root ".")
          skip-rules? (get opts :skip-rules? false)
          skip-docs? (get opts :skip-docs? false)
@@ -275,7 +275,7 @@
   (def test-store (store/create-store))
 
   ;; Load just rules
-  (load-rules-from-directory test-store ".cursor/rules")
+  (load-rules-from-directory test-store ".standards")
 
   ;; Load just docs
   (load-project-docs test-store ".")

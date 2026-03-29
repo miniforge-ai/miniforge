@@ -1,0 +1,3 @@
+[submodule ".standards"]
+	path = .standards
+	url = git@github.com:miniforge-ai/miniforge-standards.git
