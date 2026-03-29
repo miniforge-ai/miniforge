@@ -63,4 +63,30 @@
   :cp/error-invalid-agent-id   "Invalid agent ID"
   :cp/error-agent-not-found    "Agent not found"
   :cp/error-invalid-decision-id "Invalid decision ID"
-  :cp/error-decision-not-found "Decision not found or already resolved"}}
+  :cp/error-decision-not-found "Decision not found or already resolved"
+
+  ;; workflow status labels
+  :workflow.status/running     "Running"
+  :workflow.status/completed   "Completed"
+  :workflow.status/failed      "Failed"
+  :workflow.status/stale       "Stale"
+  :workflow.status/unknown     "Unknown"
+
+  ;; workflow — empty state
+  :workflow/none-heading       "No Workflows Yet"
+  :workflow/none-body          "Workflows will appear here when you run a workflow"
+  :workflow/none-hint          "Try running a workflow to see real-time progress tracking."
+
+  ;; workflow — time display
+  :time/none                   "—"
+  :time/format                 "HH:mm:ss"
+
+  ;; workflow — event metrics
+  :metric/outcome-prefix       "outcome "
+  :metric/tokens-suffix        " tokens"
+  :metric/failure-prefix       "Failure: "
+
+  ;; workflow — duration units
+  :duration/ms-suffix          "ms"
+  :duration/s-suffix           "s"
+  :duration/min-suffix         "m"}}

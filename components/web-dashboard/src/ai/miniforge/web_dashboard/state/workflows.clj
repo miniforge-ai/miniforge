@@ -26,6 +26,22 @@
   "Default event archive directory shared by the CLI and dashboard."
   (str (System/getProperty "user.home") "/.miniforge/events"))
 
+(def stale-threshold-ms
+  "Workflows with no events for this long are considered stale (10 minutes)."
+  (* 10 60 1000))
+
+(def max-recent-workflows
+  "Maximum number of recent workflows returned from the live stream."
+  50)
+
+(def phase-lifecycle-types
+  "Event types that carry phase classification data."
+  #{:workflow/phase-started :workflow/phase-completed})
+
+(def terminal-statuses
+  "Workflow statuses that indicate no further execution."
+  #{:completed :failed :stale})
+
 (defn normalize-ts
   "Normalize timestamp inputs to java.util.Date for UI rendering."
   [ts]
@@ -137,26 +153,47 @@
   [events started]
   (or (event-phase started)
       (some->> events
-               (filter #(#{:workflow/phase-started :workflow/phase-completed}
-                          (:event/type %)))
+               (filter (comp phase-lifecycle-types :event/type))
                (sort-by #(ts-epoch-ms (event-ts %)))
                last
                event-phase)
-      "unknown"))
+      :unknown))
 
 (defn wf-status
   "Derive a workflow status keyword from terminal events and staleness."
   [completed failed last-event-ts]
   (cond
     failed     :failed
-    completed  (let [status (or (:workflow/status completed) (:status completed))]
+    completed  (let [status (get completed :workflow/status (get completed :status))]
                  (if (#{:success :completed} status) :completed :failed))
     :else      (let [last-ts (normalize-ts last-event-ts)]
                  (if (and last-ts
                           (> (- (System/currentTimeMillis) (.getTime ^java.util.Date last-ts))
-                             (* 10 60 1000)))
+                             stale-threshold-ms))
                    :stale
                    :running))))
+
+(defn workflow-progress
+  "Progress percentage for a workflow: 100 when terminal, 50 while running."
+  [status]
+  (if (terminal-statuses status) 100 50))
+
+(defn workflow-recency
+  "Epoch millis of the most recent workflow activity, for sorting newest-first."
+  [wf]
+  (or (some-> (:updated-at wf) .getTime)
+      (some-> (:started-at wf) .getTime)
+      0))
+
+(defn first-event
+  "Return the first event of event-type from events."
+  [event-type events]
+  (->> events (filter #(= event-type (:event/type %))) first))
+
+(defn last-event
+  "Return the last event of event-type from events."
+  [event-type events]
+  (->> events (filter #(= event-type (:event/type %))) last))
 
 (defn workflow-metrics
   "Aggregate workflow metrics from terminal and phase completion events.
@@ -218,28 +255,43 @@
   [workflow-id]
   (if workflow-id
     (read-event-file (workflow-event-file workflow-id))
-    (let [events-dir (io/file events-dir-path)]
+    (let [edn-file? #(str/ends-with? (.getName ^java.io.File %) ".edn")
+          events-dir (io/file events-dir-path)]
       (if (.isDirectory events-dir)
-        (->> (.listFiles events-dir)
-             (filter #(str/ends-with? (.getName ^java.io.File %) ".edn"))
+        (->> events-dir
+             .listFiles
+             (filter edn-file?)
              (mapcat read-event-file)
              vec)
         []))))
 
+(defn- matches-workflow? [workflow-id event]
+  (or (nil? workflow-id) (workflow-id= workflow-id event)))
+
+(defn- matches-event-type? [event-type event]
+  (or (nil? event-type) (= event-type (:event/type event))))
+
+(defn- matches-since? [since-inst event]
+  (or (nil? since-inst)
+      (when-let [evt-inst (->instant (event-ts event))]
+        (not (.isBefore evt-inst since-inst)))))
+
 (defn filter-events
-  "Filter and sort events newest-first."
+  "Filter and sort events newest-first.
+
+   Options:
+   - :workflow-id  Filter by workflow UUID or string id
+   - :event-type   Filter by event type keyword
+   - :since        Filter events after this timestamp
+   - :limit        Max events to return (default 100)"
   [events {:keys [workflow-id event-type since limit] :or {limit 100}}]
   (let [since-inst (when since (->instant since))]
     (->> events
          dedupe-events
          (filter (fn [event]
-                   (and (or (nil? workflow-id)
-                            (workflow-id= workflow-id event))
-                        (or (nil? event-type)
-                            (= event-type (:event/type event)))
-                        (or (nil? since-inst)
-                            (when-let [evt-inst (->instant (event-ts event))]
-                              (not (.isBefore evt-inst since-inst)))))))
+                   (and (matches-workflow? workflow-id event)
+                        (matches-event-type? event-type event)
+                        (matches-since? since-inst event))))
          (sort-by #(ts-epoch-ms (event-ts %)) >)
          (take limit)
          vec)))
@@ -257,47 +309,32 @@
         (if (and cached (< (- now (:time cached)) ttl-ms))
           (:value cached)
           (let [result (try
-                         (let [events (live-stream-events state)
+                         (let [events        (live-stream-events state)
                                grouped-events (group-by wf-id (filter (comp some? wf-id) events))
-                               workflows (map (fn [[id wf-events]]
-                                                (let [wf-events (->> wf-events
-                                                                     (sort-by #(ts-epoch-ms (event-ts %)))
-                                                                     vec)
-                                                      started (first (filter #(= :workflow/started (:event/type %))
-                                                                             wf-events))
-                                                      completed (last (filter #(= :workflow/completed (:event/type %))
-                                                                              wf-events))
-                                                      failed (last (filter #(= :workflow/failed (:event/type %))
-                                                                           wf-events))
-                                                      started-ts (event-ts started)
-                                                      completed-ts (event-ts completed)
-                                                      last-event-ts (some-> wf-events last event-ts)
-                                                      status (wf-status completed failed last-event-ts)
-                                                      metrics (workflow-metrics wf-events)
-                                                      output-preview (workflow-output-preview wf-events)]
-                                                  (cond-> {:id id
-                                                           :name (wf-name-from-started started id)
-                                                           :status status
-                                                           :phase (wf-phase wf-events started)
-                                                           :progress (if (#{:completed :failed :stale} status)
-                                                                       100
-                                                                       50)
-                                                           :started-at (normalize-ts started-ts)
-                                                           :updated-at (normalize-ts last-event-ts)
-                                                           :completed-at (normalize-ts completed-ts)
-                                                           :event-count (count wf-events)
-                                                           :evidence-bundle-id (:workflow/evidence-bundle-id completed)
-                                                           :metrics metrics}
-                                                    output-preview
-                                                    (assoc :latest-output output-preview))))
-                                              grouped-events)]
+                               workflows     (map (fn [[id wf-events]]
+                                                    (let [wf-events  (->> wf-events (sort-by #(ts-epoch-ms (event-ts %))) vec)
+                                                          started    (first-event :workflow/started   wf-events)
+                                                          completed  (last-event  :workflow/completed wf-events)
+                                                          failed     (last-event  :workflow/failed    wf-events)
+                                                          status     (wf-status completed failed (some-> wf-events last event-ts))
+                                                          metrics    (workflow-metrics wf-events)
+                                                          output-preview (workflow-output-preview wf-events)]
+                                                      (cond-> {:id          id
+                                                               :name        (wf-name-from-started started id)
+                                                               :status      status
+                                                               :phase       (wf-phase wf-events started)
+                                                               :progress    (workflow-progress status)
+                                                               :started-at  (normalize-ts (event-ts started))
+                                                               :updated-at  (normalize-ts (some-> wf-events last event-ts))
+                                                               :completed-at (normalize-ts (event-ts completed))
+                                                               :event-count (count wf-events)
+                                                               :evidence-bundle-id (:workflow/evidence-bundle-id completed)
+                                                               :metrics     metrics}
+                                                        output-preview (assoc :latest-output output-preview))))
+                                                  grouped-events)]
                            (->> workflows
-                                (sort-by (fn [workflow]
-                                           (or (some-> (:updated-at workflow) .getTime)
-                                               (some-> (:started-at workflow) .getTime)
-                                               0))
-                                         >)
-                                (take 50)
+                                (sort-by workflow-recency >)
+                                (take max-recent-workflows)
                                 vec))
                          (catch Exception e
                            (println "Error getting workflows:" (ex-message e))

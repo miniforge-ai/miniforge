@@ -17,7 +17,12 @@
   (:require
    [clojure.string :as str]
    [hiccup2.core :refer [html]]
-   [ai.miniforge.web-dashboard.components :as c]))
+   [ai.miniforge.web-dashboard.components :as c]
+   [ai.miniforge.web-dashboard.messages :as msg]))
+
+;; Duration thresholds — not locale-dependent (math, not translation)
+(def ^:private ms-per-second 1000)
+(def ^:private ms-per-minute 60000)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Workflow fragments
@@ -32,16 +37,18 @@
                               (catch Exception _ nil))
                :else nil)]
     (if date
-      (str (.format (java.text.SimpleDateFormat. "HH:mm:ss") date))
-      "—")))
+      (.format (java.text.SimpleDateFormat. (msg/t :time/format)) date)
+      (msg/t :time/none))))
 
 (defn format-duration-ms
   [duration-ms]
   (when (number? duration-ms)
     (cond
-      (< duration-ms 1000) (str duration-ms "ms")
-      (< duration-ms 60000) (format "%.1fs" (/ duration-ms 1000.0))
-      :else (format "%.1fm" (/ duration-ms 60000.0)))))
+      (< duration-ms ms-per-second) (str duration-ms (msg/t :duration/ms-suffix))
+      (< duration-ms ms-per-minute) (format "%.1f%s" (/ duration-ms (double ms-per-second))
+                                            (msg/t :duration/s-suffix))
+      :else                         (format "%.1f%s" (/ duration-ms (double ms-per-minute))
+                                            (msg/t :duration/min-suffix)))))
 
 (defn format-cost
   [cost-usd]
@@ -51,30 +58,29 @@
 (defn event-message
   "Pick the most useful event message for rendering."
   [evt]
-  (let [evt-type (:event/type evt)]
-    (cond
-      (= :agent/chunk evt-type)
-      (some-> (:chunk/delta evt) str/trim not-empty)
+  (if (= :agent/chunk (:event/type evt))
+    (some-> (:chunk/delta evt) str/trim not-empty)
+    (or (:message evt)
+        (:event/message evt)
+        (when-let [reason (:workflow/failure-reason evt)]
+          (str (msg/t :metric/failure-prefix) reason)))))
 
-      :else
-      (or (:message evt)
-          (:event/message evt)
-          (when-let [reason (:workflow/failure-reason evt)]
-            (str "Failure: " reason))))))
+(defn- coalesce-metric
+  "Return the first non-nil metric value across phase and workflow namespaces."
+  [evt phase-key wf-key]
+  (or (get evt phase-key) (get evt wf-key)))
 
 (defn event-metric-items
-  "Render compact per-event metrics."
+  "Render compact per-event metrics as a seq of display strings."
   [evt]
-  (keep identity
-        [(when-let [outcome (:phase/outcome evt)]
-           (str "outcome " (name outcome)))
-         (when-let [duration (format-duration-ms (or (:phase/duration-ms evt)
-                                                     (:workflow/duration-ms evt)))]
-           duration)
-         (when-let [tokens (or (:phase/tokens evt) (:workflow/tokens evt))]
-           (str tokens " tokens"))
-         (when-let [cost (format-cost (or (:phase/cost-usd evt) (:workflow/cost-usd evt)))]
-           cost)]))
+  (let [duration-ms (coalesce-metric evt :phase/duration-ms :workflow/duration-ms)
+        tokens      (coalesce-metric evt :phase/tokens      :workflow/tokens)
+        cost-usd    (coalesce-metric evt :phase/cost-usd    :workflow/cost-usd)]
+    (cond-> []
+      (:phase/outcome evt) (conj (str (msg/t :metric/outcome-prefix) (name (:phase/outcome evt))))
+      duration-ms          (conj (format-duration-ms duration-ms))
+      tokens               (conj (str tokens (msg/t :metric/tokens-suffix)))
+      cost-usd             (conj (format-cost cost-usd)))))
 
 (defn workflow-events-fragment
   "Event list fragment for htmx updates."
@@ -84,10 +90,10 @@
      [:div.empty-state [:p "No events yet"]]
      [:div.event-list
       (for [evt (take 200 events)]
-        (let [evt-type (get evt :event/type "unknown")
-              evt-ts (:event/timestamp evt)
-              evt-phase (or (:workflow/phase evt) (:phase evt))
-              type-name (if (keyword? evt-type) (name evt-type) (str evt-type))
+        (let [evt-type    (get evt :event/type "unknown")
+              evt-ts      (:event/timestamp evt)
+              evt-phase   (or (:workflow/phase evt) (:phase evt))
+              type-name   (if (keyword? evt-type) (name evt-type) (str evt-type))
               metric-items (event-metric-items evt)]
           [:div.event-item {:class (str "event-" (str/replace type-name #"/" "-"))}
            [:span.event-time (format-time evt-ts)]
@@ -102,12 +108,7 @@
 (defn status-label
   "Human-readable status label."
   [status]
-  (case status
-    :running "Running"
-    :completed "Completed"
-    :failed "Failed"
-    :stale "Stale"
-    "Unknown"))
+  (msg/t (keyword "workflow.status" (name (or status :unknown)))))
 
 (defn workflow-list-fragment
   "Workflow list fragment — expandable cards."
@@ -115,28 +116,28 @@
   (html
    (if (empty? workflows)
      [:div.empty-state
-     [:div.empty-icon "⚙️"]
-     [:h3 "No Workflows Yet"]
-      [:p "Workflows will appear here when you run: "]
+      [:div.empty-icon "⚙️"]
+      [:h3 (msg/t :workflow/none-heading)]
+      [:p (msg/t :workflow/none-body)]
       [:code.empty-code "miniforge workflow run examples/workflows/simple.edn"]
-      [:p.empty-hint "Try running a workflow to see real-time progress tracking."]]
+      [:p.empty-hint (msg/t :workflow/none-hint)]]
      [:div.workflow-card-list
       (for [wf workflows]
-        (let [wf-id (str (:id wf))
+        (let [wf-id  (str (:id wf))
               status (get wf :status :unknown)]
           [:details.workflow-card
-           {:id (str "wf-" wf-id)
-            :data-workflow-id wf-id
-            :hx-get (str "/api/workflow/" wf-id "/panel")
-            :hx-trigger "toggle once"
-            :hx-target (str "#wf-panel-" wf-id)
-            :hx-swap "innerHTML"}
+           {:id                wf-id
+            :data-workflow-id  wf-id
+            :hx-get            (str "/api/workflow/" wf-id "/panel")
+            :hx-trigger        "toggle once"
+            :hx-target         (str "#wf-panel-" wf-id)
+            :hx-swap           "innerHTML"}
            [:summary.workflow-card-summary
             [:span.wf-status-dot (c/status-dot status)]
             [:span.wf-name (:name wf)]
             [:span.wf-badge {:class (str "badge-" (name status))}
              (status-label status)]
-            [:span.wf-phase (or (some-> (:phase wf) name) "—")]
+            [:span.wf-phase (or (some-> (:phase wf) name) (msg/t :time/none))]
             [:div.wf-progress-inline
              [:div.wf-progress-track
               [:div.wf-progress-fill
@@ -144,7 +145,7 @@
             [:span.wf-time (format-time (:started-at wf))]
             [:span.wf-expand-icon "▸"]]
            [:div.workflow-card-body
-            {:id (str "wf-panel-" wf-id)
+            {:id               (str "wf-panel-" wf-id)
              :data-workflow-id wf-id}]]))])))
 
 (defn workflow-detail-panel
@@ -158,11 +159,11 @@
      [:span (c/badge (name (get workflow :status :unknown))
                      {:variant (case (:status workflow)
                                  :completed :success
-                                 :running :info
-                                 :failed :error
-                                 :stale :warning
+                                 :running   :info
+                                 :failed    :error
+                                 :stale     :warning
                                  :neutral)})]
-     [:span.workflow-phase (str "Phase: " (get workflow :phase "—"))]
+     [:span.workflow-phase    (str "Phase: "    (get workflow :phase (msg/t :time/none)))]
      [:span.workflow-progress (str "Progress: " (get workflow :progress 0) "%")]
      (when-let [tokens (get-in workflow [:metrics :tokens])]
        [:span.workflow-tokens (str "Tokens: " tokens)])
@@ -197,11 +198,11 @@
     ;; Event timeline
     [:div.workflow-panel-events
      [:h4.section-title "Event Timeline"]
-     [:div {:id (str "wf-events-" (:id workflow))
+     [:div {:id               (str "wf-events-" (:id workflow))
             :data-workflow-id (str (:id workflow))
-            :hx-get (str "/api/workflow/" (:id workflow) "/events")
-            :hx-trigger "refresh from:body, every 5s"
-            :hx-swap "innerHTML"}
+            :hx-get           (str "/api/workflow/" (:id workflow) "/events")
+            :hx-trigger       "refresh from:body, every 5s"
+            :hx-swap          "innerHTML"}
       (workflow-events-fragment events)]]]))
 
 ;------------------------------------------------------------------------------ Layer 1
