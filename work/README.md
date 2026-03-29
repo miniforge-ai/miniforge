@@ -1,6 +1,6 @@
 # work/
 
-> These work specs drive **Miniforge SDLC** development — they are consumed by the Miniforge autonomous factory to plan
+> These work specs drive **Miniforge SDLC** development -- they are consumed by the Miniforge autonomous factory to plan
 and execute development tasks.
 
 This directory contains **ephemeral workflow specifications and task definitions**
@@ -25,87 +25,79 @@ DAG task definitions for parallel execution:
 
 - Dogfooding task lists
 - Multi-task development sessions
-- GitLab/GitHub integration work
 
-**Example:** `dogfood-tasks.edn`
+**Example:** `rn-00-reliability-nines-dag.edn`
 
 ## What Does NOT Go Here
 
-- **Design specifications** → `specs/informative/`
-- **Normative requirements** → `specs/normative/`
-- **PR documentation** → `docs/prs/` or `docs/pull-requests/`
-- **Completed specs** → `specs/archived/`
+- **Design specifications** -> `specs/informative/`
+- **Normative requirements** -> `specs/normative/`
+- **PR documentation** -> `docs/prs/` or `docs/pull-requests/`
+- **Completed specs** -> `work/archive/done/`
 
 ## Lifecycle
 
 ```text
 work/                    # Active work inputs
-  ├── my-feature.spec.edn  → Execute with: miniforge run work/my-feature.spec.edn
-  └── tasks.edn            → Execute with: bb dogfood --dag work/tasks.edn
-       ↓
+  |-- my-feature.spec.edn  -> Execute with: miniforge run work/my-feature.spec.edn
+       |
 [Miniforge executes work]
-       ↓
-specs/archived/          # Completed work archived
-  └── my-feature.spec.edn
+       |
+work/archive/done/       # Completed work archived
+  |-- my-feature.spec.edn
 ```
 
-## Tracked vs. Gitignored
+## Archive
 
-**Tracked** (committed to repo):
+Specs are archived into subdirectories when they are no longer active:
 
-- Workflow specs for ongoing work (`.spec.edn`)
-- Task definitions for repeatable dogfooding
-- Specs that document discovered bugs
+- `archive/done/` -- Work completed and merged
+- `archive/stale/` -- Specs with outdated assumptions, tech stack, or framing
 
-**Gitignored** (local-only):
+## Current Specs
 
-- `work/dogfood-tasks*.edn` - One-time dogfooding sessions
-- `work/dogfood-session-*.edn` - Session-specific state
-- `work/*-local.spec.edn` - Personal experiments
-- `work/*-wip.edn` - Work in progress
+### Ready to Run
+| Spec | Description | Priority |
+|------|-------------|----------|
+| `finish-event-telemetry.spec.edn` | Wire phase events in verify/review/release | High |
+| `fix-artifact-persistence.spec.edn` | Fix artifact persistence bugs | High |
+| `release-pr-quality.spec.edn` | Structured PR body templates | High |
+| `pr-comment-monitoring.spec.edn` | Autonomous PR comment monitoring | Medium |
+| `wire-self-repair-chain.spec.edn` | Connect self-healing to workflow execution | Medium |
+| `control-plane-completion.spec.edn` | Finish control plane integration | Medium |
+| `dashboard-production-ready.spec.edn` | Dashboard polish and production-readiness | Medium |
+| `tool-registry-phase4-6.spec.edn` | Tool registry dashboard + CLI + agent integration | Medium |
+| `configurable-spec-types.spec.edn` | Policy-pack spec type configuration | Low |
+| `tui-decomposition-workflow.spec.edn` | TUI decompose command | Low |
+| `tui-react-renderer.spec.edn` | Virtual widget tree + direct-write renderer | Low |
+| `workflow-redesign-use-case-targeted.spec.edn` | Use-case specific workflow definitions | Low |
 
-## Directory Structure
+### Reliability Nines Series (rn-*)
+16 interconnected specs for reliability engineering:
+| Spec | Description |
+|------|-------------|
+| `rn-00-reliability-nines-dag.edn` | DAG orchestration for the series |
+| `rn-01` through `rn-16` | Failure taxonomy, workflow tiers, events, SLI/SLO, degradation, evidence, autonomy, safe-mode, trust, validation, tool semantics, compensation, success predicates, tool response validation, evaluation pipeline, index quality |
 
-```text
-work/
-├── README.md                           # This file
-├── fix-artifact-persistence.spec.edn   # Bug fix spec (tracked)
-├── tool-registry-phase4-6.spec.edn     # Feature spec (tracked)
-├── decompose-test-files.spec.edn       # Refactoring spec (tracked)
-├── gitlab-support-tasks.edn            # GitLab integration tasks (tracked)
-└── dogfood-tasks.edn                   # Dogfooding session (gitignored)
-```
+### Not Started
+| Spec | Description |
+|------|-------------|
+| `gitlab-support.spec.edn` | Git provider abstraction + GitLab adapter |
+| `gitlab-support-tasks.spec.edn` | Task breakdown for GitLab support |
 
 ## Usage
 
 ### Run a workflow spec
 
 ```bash
-miniforge run work/fix-artifact-persistence.spec.edn
-```
-
-### Execute DAG tasks
-
-```bash
-bb dogfood --dag work/dogfood-tasks.edn
+bb miniforge run work/finish-event-telemetry.spec.edn
 ```
 
 ### Archive completed work
 
 ```bash
-git mv work/completed-feature.spec.edn specs/archived/
+git mv work/completed-feature.spec.edn work/archive/done/
 ```
-
-## Relationship to Other Directories
-
-| Directory              | Purpose                          | Tracked? |
-|------------------------|----------------------------------|----------|
-| `work/`                | Active work inputs               | Selective |
-| `specs/normative/`     | N1-N6 requirements (MUST/SHALL)  | Yes      |
-| `specs/informative/`   | Design docs & guidance           | Yes      |
-| `specs/archived/`      | Completed workflow specs         | Yes      |
-| `docs/prs/`            | PR documentation artifacts       | Yes      |
-| `docs/checkpoints/`    | Development snapshots            | No       |
 
 ---
 
