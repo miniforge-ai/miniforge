@@ -424,6 +424,38 @@
     :else
     llm-decision))
 
+;------------------------------------------------------------------------------ Layer 4b
+;; Phase lifecycle telemetry
+
+(defn enter-review
+  "Emit a phase-started telemetry event when entering the review phase.
+
+   Called at the very beginning of a review invocation to mark phase entry.
+   `data` is a map of contextual information about the review about to begin
+   (e.g. :artifact-id, :gate-count, :llm?).
+
+   Example:
+     (enter-review logger {:artifact-id artifact-id
+                           :gate-count (count gates)
+                           :llm? (boolean llm-client)})"
+  [logger data]
+  (log/info logger :reviewer :reviewer/phase-started {:data data}))
+
+(defn leave-review
+  "Emit a phase-completed telemetry event when leaving the review phase.
+
+   Called just before returning from a review invocation to mark phase exit.
+   `data` must include :review/decision; additional fields (e.g. :duration-ms,
+   :gates-passed, :gates-failed) are recommended for observability.
+
+   Example:
+     (leave-review logger {:review/decision :approved
+                           :duration-ms 120
+                           :gates-passed 3
+                           :gates-failed 0})"
+  [logger data]
+  (log/info logger :reviewer :reviewer/phase-completed {:data data}))
+
 ;------------------------------------------------------------------------------ Layer 5
 ;; Agent creation
 
@@ -471,6 +503,11 @@
               on-chunk (:on-chunk context)
               [artifact artifact-id] (extract-artifact-and-id input)
               start-time (System/currentTimeMillis)]
+
+          ;; Phase lifecycle: mark review entry
+          (enter-review logger {:artifact-id artifact-id
+                                :gate-count (count gates)
+                                :llm? (boolean llm-client)})
 
           (log/info logger :reviewer :reviewer/review-start
                     {:data {:artifact-id artifact-id
@@ -546,6 +583,13 @@
                                   :llm-issues (count llm-issues)
                                   :duration-ms duration}})
 
+                ;; Phase lifecycle: mark review exit with decision
+                (leave-review logger {:review/decision final-decision
+                                      :duration-ms duration
+                                      :gates-passed (:passed counts)
+                                      :gates-failed (:failed counts)
+                                      :llm? true})
+
                 (build-review-result review counts duration tokens :cost-usd cost-usd)))
 
             ;; No LLM — gate-only fallback
@@ -562,7 +606,14 @@
                                 :duration-ms duration
                                 :mode :gate-only}})
 
-              (build-review-result review counts duration 0)))))
+              ;; Phase lifecycle: mark review exit with decision
+              (leave-review logger {:review/decision decision
+                                    :duration-ms duration
+                                    :gates-passed (:passed counts)
+                                    :gates-failed (:failed counts)
+                                    :llm? false})
+
+              (build-review-result review counts duration 0))))
 
       :validate-fn validate-review-artifact
 
