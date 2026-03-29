@@ -2,7 +2,7 @@
   "Meta-Meta Loop Runner.
 
    This namespace provides functions to execute miniforge workflows
-   using the real Claude CLI backend, enabling miniforge to work on
+   using the configured real LLM backend, enabling miniforge to work on
    improving itself (dogfooding).
 
    The meta-meta loop (human operator) uses this to:
@@ -10,6 +10,7 @@
    2. Monitor progress through logging and artifacts
    3. Intervene when the meta-loop cannot self-correct"
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.orchestrator.interface :as orch]
    [ai.miniforge.knowledge.interface :as knowledge]
@@ -87,8 +88,10 @@
         _ (fs/create-dirs a-store-dir)
         a-store (artifact/create-store {:dir a-store-dir})
 
-        ;; Create LLM client with real Claude CLI
-        llm-client (llm/create-client {:backend :claude :logger logger})
+        ;; Create LLM client using configured backend so dogfooding can
+        ;; continue when one provider is rate limited.
+        llm-backend (get-in (config/load-merged-config) [:llm :backend] :codex)
+        llm-client (llm/create-client {:backend llm-backend :logger logger})
 
         ;; Create operator if requested
         op (when with-operator?
@@ -101,6 +104,7 @@
 
     {:orchestrator orchestrator
      :llm-client llm-client
+     :llm-backend llm-backend
      :knowledge-store k-store
      :artifact-store a-store
      :operator op

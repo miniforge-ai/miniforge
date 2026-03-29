@@ -9,7 +9,7 @@
 (def ^:private default-agent-models
   "Fallback model defaults when user config does not specify agent defaults."
   {:thinking "gpt-5.4"
-   :execution "claude-sonnet-4-6"})
+   :execution "gpt-5.2-codex"})
 
 
 (def ^:private thinking-roles
@@ -26,16 +26,13 @@
                     (get-in cfg [:llm :model])
                     (:execution default-agent-models))}))
 
-(def ^:private configured-agent-models
-  "Memoized agent default models from merged config."
-  (delay (load-configured-agent-models)))
-
 (defn default-model-for-role
   "Return the configured default model id for an agent role."
   [role]
-  (if (thinking-roles role)
-    (:thinking @configured-agent-models)
-    (:execution @configured-agent-models)))
+  (let [{:keys [thinking execution]} (load-configured-agent-models)]
+    (if (thinking-roles role)
+      thinking
+      execution)))
 
 (defn apply-default-model
   "Ensure a config map carries the configured default model for a role unless
@@ -55,13 +52,19 @@
   [role provided-client]
   (let [model-id (default-model-for-role role)
         backend-for-model (requiring-resolve 'ai.miniforge.llm.interface/backend-for-model)
-        needed-backend (backend-for-model model-id)]
-    (if (or (nil? provided-client)
-            (= needed-backend :claude)) ;; shared client is typically :claude
+        client-backend (requiring-resolve 'ai.miniforge.llm.interface/client-backend)
+        create-client (requiring-resolve 'ai.miniforge.llm.interface/create-client)
+        needed-backend (backend-for-model model-id)
+        current-backend (client-backend provided-client)]
+    (cond
+      (nil? provided-client)
+      nil
+
+      (= current-backend needed-backend)
       provided-client
-      ;; Model needs a different backend — create a new client
-      (let [create-client (requiring-resolve 'ai.miniforge.llm.interface/create-client)]
-        (create-client {:backend needed-backend})))))
+
+      :else
+      (create-client {:backend needed-backend}))))
 
 
 (comment

@@ -5,69 +5,35 @@
   (:require
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.resource-config :as resource-config]
    [babashka.process :as process]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Backend specifications
 
+(def ^:private backend-config-resource
+  "Classpath resource path for backend metadata and defaults."
+  "config/cli/backends.edn")
+
+(def ^:private backend-config
+  (resource-config/merged-resource-config
+   backend-config-resource
+   nil
+   {:backend/defaults {:current :codex}
+    :backend/specs {}}))
+
 (def backend-specs
-  {:claude
-   {:provider "Anthropic"
-    :description "Claude via Anthropic CLI"
-    :command "claude"
-    :installation "npm install -g @anthropic-ai/claude-cli"
-    :api-key-var "ANTHROPIC_API_KEY"
-    :models ["claude-sonnet-4-20250514" "claude-opus-4-20250514" "claude-haiku-4-20250514"]
-    :check-type :cli}
+  (:backend/specs backend-config))
 
-   :codex
-   {:provider "Codex"
-    :description "Codex via Codex CLI"
-    :command "codex"
-    :installation "Install from https://codex.dev"
-    :api-key-var nil
-    :models ["gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.2" "gpt-5.1-codex-max"]
-    :check-type :cli
-    :docs-url "https://codex.dev"}
+(def ^:private backend-defaults
+  (:backend/defaults backend-config))
 
-   :openai
-   {:provider "OpenAI"
-    :description "OpenAI GPT-4 via API"
-    :command nil
-    :installation "Set OPENAI_API_KEY environment variable"
-    :api-key-var "OPENAI_API_KEY"
-    :models ["gpt-4-turbo" "gpt-4" "gpt-3.5-turbo"]
-    :check-type :api-key
-    :docs-url "https://platform.openai.com/api-keys"}
-
-   :cursor
-   {:provider "Cursor"
-    :description "Cursor AI via CLI"
-    :command "cursor-cli"
-    :installation "Install from https://cursor.sh"
-    :api-key-var nil
-    :models ["cursor-default"]
-    :check-type :cli
-    :docs-url "https://cursor.sh"}
-
-   :ollama
-   {:provider "Ollama"
-    :description "Local models via Ollama"
-    :command "ollama"
-    :installation "brew install ollama"
-    :api-key-var nil
-    :models ["codellama" "llama2" "mistral"]
-    :check-type :cli
-    :docs-url "https://ollama.ai"}
-
-   :echo
-   {:provider "Test"
-    :description "Echo backend for testing (no actual LLM)"
-    :command "echo"
-    :installation "Built-in"
-    :api-key-var nil
-    :models ["echo"]
-    :check-type :builtin}})
+(defn- availability-status
+  "Build a standard backend availability status map."
+  [available status message]
+  {:available available
+   :status status
+   :message message})
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Status checking
@@ -99,32 +65,20 @@
         {:keys [check-type command api-key-var]} spec]
     (case check-type
       :builtin
-      {:available true
-       :status :available
-       :message "Built-in (always available)"}
+      (availability-status true :available "Built-in (always available)")
 
       :cli
       (if (check-command-available? command)
-        {:available true
-         :status :available
-         :message (str command " CLI found")}
-        {:available false
-         :status :not-installed
-         :message (str command " not found on PATH")})
+        (availability-status true :available (str command " CLI found"))
+        (availability-status false :not-installed (str command " not found on PATH")))
 
       :api-key
       (if (check-api-key-set? api-key-var)
-        {:available true
-         :status :available
-         :message (str api-key-var " is set")}
-        {:available false
-         :status :needs-key
-         :message (str "Needs " api-key-var)})
+        (availability-status true :available (str api-key-var " is set"))
+        (availability-status false :needs-key (str "Needs " api-key-var)))
 
       ;; Unknown check type
-      {:available false
-       :status :unknown
-       :message "Unknown backend type"})))
+      (availability-status false :unknown "Unknown backend type"))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Backend information
@@ -150,7 +104,7 @@
   (or (:backend (:llm config))
       (when-let [env-backend (System/getenv "MINIFORGE_LLM_BACKEND")]
         (keyword env-backend))
-      :claude))
+      (get backend-defaults :current :codex)))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Display helpers

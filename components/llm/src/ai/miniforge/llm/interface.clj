@@ -26,11 +26,11 @@
   "Create a new LLM client using a CLI backend.
 
    Options:
-   - :backend - Backend keyword (:claude, :cursor, :echo) - default :claude
+   - :backend - Backend keyword (:codex, :claude, :cursor, :echo) - default :codex
    - :logger  - Optional logger for request/response logging
 
    Example:
-     (create-client)                    ; uses claude CLI
+     (create-client)                    ; uses codex CLI
      (create-client {:backend :cursor}) ; uses cursor CLI
      (create-client {:backend :claude :logger my-logger})"
   ([] (records/create-client))
@@ -39,14 +39,22 @@
 (defn backend-for-model
   "Look up the backend keyword for a model-id string.
    Returns :claude, :codex, :gemini, :ollama, etc. based on the model catalog.
-   Falls back to :claude for unknown models."
+   Falls back to :codex for unknown models."
   [model-id]
   (or (->> registry/model-registry
            vals
            (filter #(= (:model-id %) model-id))
            first
            :backend)
-      :claude))
+      :codex))
+
+(defn client-backend
+  "Return the backend keyword configured for an LLM client."
+  [client]
+  (when client
+    (-> client
+        p/get-config
+        :backend)))
 
 (defn create-client-for-model
   "Create a new LLM client using the appropriate backend for a model-id.

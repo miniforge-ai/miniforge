@@ -24,16 +24,16 @@
   "Create a new LLM client using a CLI backend.
 
    Options:
-   - :backend - Backend keyword (:claude, :cursor, :echo) - default :claude
+   - :backend - Backend keyword (:codex, :claude, :cursor, :echo) - default :codex
    - :logger  - Optional logger for request/response logging
    - :exec-fn - Optional execution function override (for testing)
 
    Example:
-     (create-client)  ; uses claude CLI
+     (create-client)  ; uses codex CLI
      (create-client {:backend :cursor})
      (create-client {:backend :claude :logger my-logger})"
   ([] (create-client {}))
-  ([{:keys [backend logger exec-fn] :or {backend :claude}}]
+  ([{:keys [backend logger exec-fn] :or {backend :codex}}]
    (when-not (contains? impl/backends backend)
      (throw (ex-info (str "Unknown backend: " backend)
                      {:backend backend

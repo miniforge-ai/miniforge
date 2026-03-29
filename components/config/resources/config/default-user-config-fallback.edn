@@ -1,4 +1,4 @@
-{:description "Default user configuration for MiniForge Core"
+{:description "Fallback default user configuration for MiniForge Core"
  :config
  {:llm {:backend :codex
         :model "gpt-5.2-codex"
@@ -9,7 +9,7 @@
              :max-tokens 150000
              :failure-strategy :retry}
   :artifacts {:dir "~/.miniforge/artifacts"}
- :meta-loop {:enabled true
+  :meta-loop {:enabled true
               :max-convergence-iterations 10
               :convergence-threshold 0.95}
   :agents {:default-models {:thinking "gpt-5.4"
@@ -27,15 +27,5 @@
                  :backend-switch-cooldown-ms 1800000
                  :allowed-failover-backends [:codex]
                  :max-cost-per-workflow nil}
-  :governance {:readiness {}
-               :risk {}
-               :tiers {}
-               :knowledge-safety {}}
-  :observability {:event-sinks [:file]
-                  :log-sinks [:file]
-                  :rotation {:max-size-mb 10
-                             :retention-days 7}
-                  :fleet {:url nil
-                          :api-key nil
-                          :batch-size 50
-                          :flush-interval-ms 10000}}}}
+  :dashboard {:port 7878
+              :auto-open false}}}

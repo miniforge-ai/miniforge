@@ -499,7 +499,9 @@
 
       :invoke-fn
       (fn [context input]
-        (let [llm-client (or (:llm-backend opts) (:llm-backend context))
+        (let [llm-client (model/resolve-llm-client-for-role
+                          :reviewer
+                          (get opts :llm-backend (:llm-backend context)))
               on-chunk (:on-chunk context)
               [artifact artifact-id] (extract-artifact-and-id input)
               start-time (System/currentTimeMillis)]
