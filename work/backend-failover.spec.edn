@@ -1,0 +1,222 @@
+;; =============================================================================
+;; Spec: Backend Failover on Rate Limits
+;; =============================================================================
+;;
+;; Goal: When an LLM backend returns a rate-limit error, automatically retry
+;; the same call with the next available backend from
+;; :self-healing :allowed-failover-backends in config.
+;;
+;; Current state: The health-tracking and cooldown infrastructure exists
+;; (backend_health.clj, integration.clj) but three gaps prevent it from working:
+;;
+;;   1. RATE LIMIT NOT RECOGNIZED — workaround_detector.clj has no pattern for
+;;      rate-limit errors, so they fall through as "Unknown error" and no switch
+;;      is triggered.
+;;
+;;   2. HARDCODED FALLBACK ORDER — select-best-backend uses a fixed
+;;      [:anthropic :openai :codex :ollama :google] list instead of reading
+;;      :self-healing :allowed-failover-backends from the merged config.
+;;
+;;   3. NO CALL-LEVEL RETRY — execute-with-health-tracking retries the same
+;;      operation with the same backend after a workaround. It never creates a
+;;      new LLM client for an alternative backend and retries with that.
+
+{:spec/title "Backend failover on rate limits"
+ :spec/description
+ "Wire the existing backend-health infrastructure to actually failover at the
+  LLM call level. When any backend returns a rate-limit error, detect it,
+  mark the backend as cooling down, select the next allowed backend from config,
+  create a new client for it, and retry the call transparently. Config drives
+  which backends are eligible and in what order."
+
+ :spec/intent {:type :fix
+               :scope ["components/self-healing/src"
+                       "components/llm/src"]}
+
+ :spec/constraints
+ ["Do NOT change the backend-health storage format (backward compatible)"
+  "Do NOT change the LLM protocol/interface — failover is a wrapper concern"
+  "Failover must be transparent to callers of llm/chat and llm/chat-stream"
+  "Rate limit detection must cover Claude (HTTP 429 / :rate-limit-error) and Codex (usage limit message)"
+  "If all allowed backends are in cooldown, propagate the original error — do not loop"]
+
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :tasks
+
+ ;; ── Task 1 ──────────────────────────────────────────────────────────────────
+ [{:task/id :detect-rate-limit
+   :task/title "Recognize rate-limit errors in workaround-detector"
+   :task/phase :implement
+   :task/description
+   "Add rate-limit patterns to workaround_detector.clj so they are classified
+    as `:rate-limit` anomalies instead of falling through as unknown errors.
+
+    Patterns to match (case-insensitive substring or regex):
+    - Claude / Anthropic: message contains 'rate_limit_exceeded' or
+      'rate limit' or ex-data :status 429 or :type :rate_limit_error
+    - Codex / OpenAI: message contains 'usage limit' or 'rate limit' or
+      'quota exceeded' or 'try again' with a time reference
+
+    Add a new workaround entry (or detection branch) in workaround_detector.clj:
+
+      {:pattern :rate-limit
+       :matches-fn (fn [e] (rate-limit-error? e))
+       :action :backend-failover   ; signals the integration layer to switch
+       :retry? true}
+
+    The detector should return :action :backend-failover so integration.clj
+    knows to do a backend switch rather than a prompt workaround.
+
+    Files to modify:
+    - components/self-healing/src/ai/miniforge/self_healing/workaround_detector.clj
+
+    Acceptance:
+    - (rate-limit-error? (ex-info 'rate_limit_exceeded' {})) => true
+    - (rate-limit-error? (ex-info 'You've hit your usage limit ...' {})) => true
+    - (detect-and-apply-workaround rate-limit-ex) returns :action :backend-failover"
+
+   :task/constraints
+   ["Detection must be a pure predicate — no side effects"
+    "Match on both ex-message and ex-data :status / :type fields"]}
+
+  ;; ── Task 2 ──────────────────────────────────────────────────────────────────
+  {:task/id :config-driven-fallback-order
+   :task/title "Read allowed-failover-backends from config in select-best-backend"
+   :task/phase :implement
+   :task/description
+   "select-best-backend in backend_health.clj currently filters against a
+    hardcoded :fallback-order in the health file. Change it to accept an
+    explicit allowed-backends seq and filter against that instead.
+
+    BEFORE:
+      (defn select-best-backend [current-backend threshold cooldown-ms]
+        (let [health (load-health)
+              fallback-order (:fallback-order health)  ; hardcoded
+              ...]
+          (first (filter ... fallback-order))))
+
+    AFTER:
+      (defn select-best-backend
+        [current-backend allowed-backends threshold cooldown-ms]
+        (first (filter (fn [b]
+                          (and (not= b current-key)
+                               (not (in-cooldown? b cooldown-ms))
+                               (if-let [rate (get-backend-success-rate b)]
+                                 (>= rate threshold)
+                                 true)))
+                       allowed-backends)))
+
+    The caller (integration.clj) reads :self-healing :allowed-failover-backends
+    from the merged config and passes it in.
+
+    Files to modify:
+    - components/self-healing/src/ai/miniforge/self_healing/backend_health.clj
+    - components/self-healing/src/ai/miniforge/self_healing/integration.clj
+
+    In integration.clj, update get-self-healing-config to also extract
+    :allowed-failover-backends from the :self-healing config key.
+
+    Acceptance:
+    - select-best-backend skips backends not in the allowed list
+    - When allowed-failover-backends is [:codex], only :codex is tried
+    - When allowed-failover-backends is [:claude :codex], both are tried in order"
+
+   :task/constraints
+   ["Keep the 2-arity and 3-arity overloads for backward compat; add 4-arity"
+    "Default allowed-backends when nil = [:claude :codex :openai] (the sensible trio)"]}
+
+  ;; ── Task 3 ──────────────────────────────────────────────────────────────────
+  {:task/id :call-level-retry
+   :task/title "Retry LLM call with fallback backend on rate-limit detection"
+   :task/phase :implement
+   :task/description
+   "Wire tasks 1 and 2 together in execute-with-health-tracking so that when a
+    rate-limit error is detected, it selects the next backend, creates a client
+    for it, and retries the operation-fn with the new client.
+
+    The operation-fn currently takes no args. To support backend switching,
+    change the contract so callers pass a client-factory fn and the operation-fn
+    receives the client:
+
+      (execute-with-health-tracking context client-factory-fn operation-fn)
+
+    Where:
+    - client-factory-fn :: backend-keyword -> llm-client
+    - operation-fn :: llm-client -> result
+
+    OR (simpler, less invasive): add a separate wrapper:
+
+      (with-backend-failover context llm-client operation-fn)
+
+    that catches rate-limit errors and retries operation-fn with a new client
+    produced by (create-client {:backend fallback-backend}).
+
+    The simpler wrapper approach is preferred to avoid changing every caller of
+    execute-with-health-tracking.
+
+    In llm/interface.clj or the phase code, wrap llm/chat and llm/chat-stream
+    calls with with-backend-failover when a context with event-stream or
+    self-healing config is present.
+
+    Sequence on rate-limit error:
+    1. Detect rate-limit (task 1)
+    2. Call trigger-backend-switch! (sets cooldown on failed backend)
+    3. Select next backend from allowed list (task 2)
+    4. Create new client: (create-client {:backend next-backend})
+    5. Retry operation-fn with new client
+    6. On success: record call success for new backend, return result
+    7. On retry also failing: propagate error (no infinite loop)
+
+    Files to modify:
+    - components/self-healing/src/ai/miniforge/self_healing/integration.clj
+      - Add with-backend-failover fn
+    - components/llm/src/ai/miniforge/llm/interface.clj
+      - Wrap chat / chat-stream with failover when self-healing config present
+
+    Acceptance:
+    - When Codex returns rate-limit, Claude is tried automatically
+    - When Claude returns rate-limit, Codex is tried (if in allowed list)
+    - Cooldown is recorded so the failed backend is not tried again for cooldown-ms
+    - If all backends exhausted, original error is re-thrown"
+
+   :task/constraints
+   ["Do not busy-loop — at most one retry per call (try 2 backends total)"
+    "Log the switch: log/warn :self-healing :backend-failover {:from :codex :to :claude}"
+    "The wrapper must work for both chat and chat-stream"]}
+
+  ;; ── Task 4 ──────────────────────────────────────────────────────────────────
+  {:task/id :tests
+   :task/title "Unit tests for rate-limit detection and failover"
+   :task/phase :verify
+   :task/description
+   "Add tests covering the three new behaviors.
+
+    Test 1 — Rate-limit detection:
+    - (rate-limit-error? claude-rate-limit-ex) => true
+    - (rate-limit-error? codex-usage-limit-ex) => true
+    - (rate-limit-error? (ex-info 'Syntax error' {})) => false
+
+    Test 2 — Config-driven fallback selection:
+    - Given current=:codex, allowed=[:claude :codex], no cooldowns → selects :claude
+    - Given current=:codex, allowed=[:codex], no cooldowns → nil (nothing else allowed)
+    - Given current=:codex, allowed=[:claude :codex], :claude in cooldown → nil
+
+    Test 3 — with-backend-failover:
+    - First call throws rate-limit, second call (new backend) succeeds → returns result
+    - Both calls throw rate-limit → re-throws original error
+    - No rate-limit thrown → operation-fn called once, returns normally
+
+    Files to create/modify:
+    - components/self-healing/test/ai/miniforge/self_healing/failover_test.clj
+
+    Acceptance:
+    - All tests pass
+    - Tests use in-memory stubs, no real LLM calls"}]
+
+ :dependencies
+ {:detect-rate-limit    []
+  :config-driven-fallback-order []
+  :call-level-retry     [:detect-rate-limit :config-driven-fallback-order]
+  :tests                [:call-level-retry]}}
