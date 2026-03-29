@@ -1,4 +1,5 @@
 ---
+dewey: "220"
 description: Python + Poetry rules
 globs:
   - "**/*.py"

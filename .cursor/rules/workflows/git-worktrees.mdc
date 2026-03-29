@@ -1,4 +1,5 @@
 ---
+dewey: "725"
 title: Git Worktrees for Parallel Workflows
 category: workflows
 tags: [git, worktrees, parallel, isolation, miniforge-architecture]

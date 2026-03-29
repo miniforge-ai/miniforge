@@ -26,67 +26,26 @@
          (filter #(.isFile %))
          (filter #(str/ends-with? (.getName %) ".mdc")))))
 
-(defn extract-dewey-from-filename
-  "Extract Dewey code from a single filename segment.
-   Examples:
-     '210-clojure.mdc'          -> '210'
-     '001-stratified-design.mdc' -> '001'
-     '000-foundations/'          -> '000'
-     'readme.mdc'               -> nil"
-  [filename]
-  (when-let [match (re-find #"^(\d{3})-" filename)]
-    (second match)))
-
-(defn extract-dewey-from-path
-  "Extract Dewey code from a relative path, preferring the directory-level
-   Dewey code over the file-level code.
-
-   Agent manifests use hundred-level prefixes (e.g. '200' for all language
-   rules). Files within `200-languages/` have names like `210-clojure.mdc`,
-   whose three-digit dewey is '210' — which does NOT start-with '200'.
-   Using the directory dewey ('200') keeps manifest prefix matching correct.
-
-   Examples:
-     '200-languages/210-clojure.mdc'       -> '200'
-     '000-foundations/010-simple-made-easy.mdc' -> '000'
-     '700-workflows/710-git-branch.mdc'    -> '700'
-     '210-clojure.mdc'                     -> '210'  (root file, no dir)"
-  [relative-path]
-  (let [parts (str/split relative-path #"/")]
-    (if (> (count parts) 1)
-      (extract-dewey-from-filename (first parts))
-      (extract-dewey-from-filename (last parts)))))
-
 (defn extract-tags-from-path
   "Extract tags from file path relative to rules root.
+   Uses slug-only path segments — no numeric prefix required.
    Examples:
-     '000-foundations/001-stratified-design.mdc' -> [:foundations :architecture]
-     '200-languages/210-clojure.mdc' -> [:languages :clojure]
-     '000-index.mdc' -> [:index]"
+     'foundations/stratified-design.mdc' -> [:foundations :stratified-design]
+     'languages/clojure.mdc'             -> [:languages :clojure]
+     'index.mdc'                         -> [:index]"
   [relative-path]
-  (let [parts (str/split relative-path #"/")
-        dir-part (when (> (count parts) 1) (first parts))
-        file-part (last parts)
-
-        ;; Extract tag from directory (e.g., "000-foundations" -> "foundations")
-        dir-tag (when dir-part
-                  (when-let [match (re-find #"^\d{3}-(.+)$" dir-part)]
-                    (keyword (second match))))
-
-        ;; Extract tag from filename (e.g., "210-clojure.mdc" -> "clojure")
-        file-tag (when-let [match (re-find #"^\d{3}-(.+)\.mdc$" file-part)]
-                   (keyword (second match)))]
-
-    (vec (remove nil? [dir-tag file-tag]))))
+  (->> (str/split relative-path #"/")
+       (map #(str/replace % #"\.mdc$" ""))
+       (map keyword)
+       vec))
 
 (defn generate-title-from-filename
-  "Generate a human-readable title from a filename.
+  "Generate a human-readable title from a slug filename.
    Examples:
-     '210-clojure.mdc' -> 'Clojure'
-     'readme.mdc' -> 'Readme'"
+     'clojure.mdc'          -> 'Clojure'
+     'stratified-design.mdc' -> 'Stratified design'"
   [filename]
   (-> filename
-      (str/replace #"^\d{3}-" "")
       (str/replace #"\.mdc$" "")
       (str/replace #"-" " ")
       str/capitalize))
@@ -111,9 +70,8 @@
                 (:body parsed)
                 content)  ;; No frontmatter = entire file is body
 
-          ;; Extract metadata — use directory dewey so manifest hundred-level
-          ;; prefixes ("200") match file-level codes ("210", "220", etc.)
-          dewey (extract-dewey-from-path relative-path)
+          ;; Dewey from frontmatter is authoritative; path is never consulted
+          dewey (get frontmatter :dewey)
           tags (extract-tags-from-path relative-path)
           uid (str/replace filename #"\.mdc$" "")
           title (or (:description frontmatter)

@@ -1,4 +1,5 @@
 ---
+dewey: "810"
 description: Enforce Miniforge.ai header and copyright on published content
 globs: **/*.{md,mdx,html}
 ---

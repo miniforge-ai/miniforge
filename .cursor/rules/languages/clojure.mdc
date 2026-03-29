@@ -1,4 +1,5 @@
 ---
+dewey: "210"
 description: Clojure Polylith + per-file stratified design
 globs:
   - "components/**/src/**/*.clj"
