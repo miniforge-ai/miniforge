@@ -18,8 +18,8 @@
   (app-config/config-path))
 
 (def default-config
-  {:llm {:backend :claude
-         :model "claude-sonnet-4-20250514"
+  {:llm {:backend :codex
+         :model "gpt-5.2-codex"
          :timeout-ms 300000
          :line-timeout-ms 60000
          :max-tokens 4000}
@@ -342,7 +342,7 @@
   [config workflow-override]
   (or workflow-override
       (get-in config [:llm :backend])
-      :claude))
+      :codex))
 
 (defn get-llm-timeout
   "Get LLM timeout from config."

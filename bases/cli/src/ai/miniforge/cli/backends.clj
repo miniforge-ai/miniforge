@@ -150,7 +150,7 @@
   (or (:backend (:llm config))
       (when-let [env-backend (System/getenv "MINIFORGE_LLM_BACKEND")]
         (keyword env-backend))
-      :claude))
+      :codex))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Display helpers

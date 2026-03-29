@@ -29,8 +29,8 @@
       (:config (edn/read-string (slurp resource)))
       (catch Exception _e
         ;; Fallback if resource loading fails
-        {:llm {:backend :claude
-               :model "claude-sonnet-4-6"
+        {:llm {:backend :codex
+               :model "gpt-5.2-codex"
                :timeout-ms 300000
                :line-timeout-ms 60000
                :max-tokens 4000}
@@ -41,8 +41,8 @@
          :meta-loop {:enabled true
                      :max-convergence-iterations 10
                      :convergence-threshold 0.95}
-         :agents {:default-models {:thinking "claude-opus-4-6"
-                                   :execution "claude-sonnet-4-6"}}
+         :agents {:default-models {:thinking "gpt-5.4"
+                                   :execution "gpt-5.2-codex"}}
          :model-selection {:enabled true
                            :strategy :automatic
                            :cost-limit-per-task 0.10
@@ -53,12 +53,13 @@
                         :workaround-auto-apply true
                         :backend-auto-switch true
                         :backend-health-threshold 0.90
-                        :backend-switch-cooldown-ms 1800000}
+                        :backend-switch-cooldown-ms 1800000
+                        :allowed-failover-backends [:codex]}
          :dashboard {:port 7878
                      :auto-open false}}))
     ;; Fallback if resource not found
-    {:llm {:backend :claude
-           :model "claude-sonnet-4-6"
+    {:llm {:backend :codex
+           :model "gpt-5.2-codex"
            :timeout-ms 300000
            :line-timeout-ms 60000
            :max-tokens 4000}
@@ -69,21 +70,22 @@
      :meta-loop {:enabled true
                  :max-convergence-iterations 10
                  :convergence-threshold 0.95}
-     :agents {:default-models {:thinking "claude-opus-4-6"
-                               :execution "claude-sonnet-4-6"}}
+     :agents {:default-models {:thinking "gpt-5.4"
+                               :execution "gpt-5.2-codex"}}
      :model-selection {:enabled true
                        :strategy :automatic
                        :cost-limit-per-task 0.10
                        :prefer-speed false
                        :allow-downgrade true
                        :require-local false}
-         :self-healing {:enabled true
-                        :workaround-auto-apply true
-                        :backend-auto-switch true
-                        :backend-health-threshold 0.90
-                        :backend-switch-cooldown-ms 1800000}
-         :dashboard {:port 7878
-                     :auto-open false}}))
+     :self-healing {:enabled true
+                    :workaround-auto-apply true
+                    :backend-auto-switch true
+                    :backend-health-threshold 0.90
+                    :backend-switch-cooldown-ms 1800000
+                    :allowed-failover-backends [:codex]}
+     :dashboard {:port 7878
+                 :auto-open false}}))
 
 (def default-config
   "Default configuration values loaded from resources/config/default-user-config.edn"
