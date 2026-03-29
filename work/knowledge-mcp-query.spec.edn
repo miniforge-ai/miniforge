@@ -1,0 +1,299 @@
+;; =============================================================================
+;; Spec: Agent-Driven Rule Query via MCP Tool (lookup_policy)
+;; =============================================================================
+;;
+;; Prerequisite: policy-pack-extensibility.spec.edn must be complete.
+;; Rules must be in policy packs before this spec can expose them.
+;;
+;; Goal: Give agents an MCP tool — lookup_policy — that lets them query the
+;; policy pack registry on demand, before or during a task. Replace the current
+;; best-guess pre-injection model with a precision query model.
+;;
+;; Current injection model (after policy-pack-extensibility.spec):
+;;
+;;   Phase starts → always-inject? rules pre-injected → agent runs with static context
+;;
+;;   Problems:
+;;   - We still guess what an agent needs based on phase
+;;   - Injecting all language rules for every :implement phase is noisy for
+;;     an agent writing Python when only Clojure rules exist
+;;   - No observability: we cannot see which rules were actually used vs ignored
+;;   - Agents cannot discover rules for unfamiliar territory mid-task
+;;
+;; Target model (this spec):
+;;
+;;   Phase starts → baseline always-inject? rules + meta-instruction to query →
+;;   agent runs → before/during coding calls lookup_policy("Clojure Polylith") →
+;;   gets exactly the relevant rules back → applies them
+;;
+;;   The two mechanisms are complementary:
+;;   - :rule/always-inject? true  → pre-inject (universal baseline rules)
+;;   - :rule/always-inject? false → available for on-demand query only
+;;
+;; Design: lookup_policy as an MCP tool
+;;
+;;   The knowledge store (knowledge component) already supports querying by
+;;   tags, dewey prefix, and text. Policy packs already have get-rules-for-context.
+;;   This spec wires both into a single MCP tool available in all agent tool sets.
+;;
+;;   Tool signature:
+;;     lookup_policy(query: string, context?: {phase, language, framework}) -> rules[]
+;;
+;;   The tool searches:
+;;   1. Policy pack registry — by :rule/category and :rule/title text match
+;;   2. Knowledge store zettels — by text and tag search (if populated)
+;;   Returns: array of {id, title, content} — compact enough to fit in a single
+;;   tool response without blowing the context window.
+;;
+;;   Observability benefit: every lookup_policy call is a tool invocation in the
+;;   event stream. We can see exactly which rules each agent consulted, per task.
+
+{:spec/title "Agent-driven rule query via lookup_policy MCP tool"
+ :spec/description
+ "Implement a lookup_policy MCP tool backed by the policy-pack registry and
+  knowledge store. Register it in all phase agent tool sets. Update baseline
+  injection to pre-inject only always-inject? rules plus a meta-instruction
+  directing agents to call lookup_policy before language/framework-specific
+  work. Add observability for which rules are queried per agent invocation."
+
+ :spec/intent {:type   :feature
+               :scope  ["components/knowledge/src"
+                        "components/phase/src"
+                        "components/agent/src"]}
+
+ :spec/constraints
+ ["lookup_policy must return results in a single tool response — no pagination for v1"
+  "Result content must be compact: title + content only, no schema metadata"
+  "The tool must be available in implementer, reviewer, planner, verifier agents"
+  "Pre-injection of always-inject? rules is NOT removed — this spec adds query, not replaces injection"
+  "Do not require agents to call lookup_policy — it is available, not mandatory"
+  "Tool response must be valid even when no rules match (return empty array, not error)"]
+
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :tasks
+
+ ;; ── Task 1 ──────────────────────────────────────────────────────────────────
+ [{:task/id    :policy-query-fn
+   :task/title "Add query-rules fn to policy-pack interface"
+   :task/phase :implement
+   :task/description
+   "Add a query-rules function to the policy-pack component that searches the
+    pack registry by text query and optional context filters.
+
+    Function signature:
+      (query-rules registry query-str opts) -> [{:id :title :content} ...]
+
+    Where:
+    - registry      PolicyPackRegistry (from policy-pack/create-registry)
+    - query-str     Free-text search string (e.g., 'Clojure map access')
+    - opts          Optional map:
+                    :phases    #{:implement ...}  filter by applicable phases
+                    :category  string             filter by :rule/category prefix
+                    :limit     integer            max results (default 10)
+
+    Search logic:
+    1. Collect all rules from all registered packs (respecting :pack/trust-level)
+    2. Filter by :rule/applies-to :phases if opts :phases is provided
+    3. Filter by :rule/category starts-with opts :category if provided
+    4. Score remaining rules by text relevance against query-str:
+       - Title match (exact word match > substring) → highest score
+       - Category match → medium score
+       - Knowledge-content match (substring) → lower score
+    5. Sort by score desc, take :limit results
+    6. Return [{:id :rule/id :title :rule/title :content :rule/knowledge-content}]
+       omitting entries where :rule/knowledge-content is nil
+
+    Files to create/modify:
+    - components/policy-pack/src/ai/miniforge/policy_pack/query.clj  (new)
+    - components/policy-pack/src/ai/miniforge/policy_pack/interface.clj
+      Add: (def query-rules query/query-rules)
+    - components/policy-pack/src/ai/miniforge/policy_pack/interface/registry.clj
+      If get-rules-for-context can be reused as the base, extend it
+
+    Acceptance:
+    - Given a registry with a Clojure rule, (query-rules reg 'clojure map') returns it
+    - Given no matching rules, returns []
+    - :limit 2 returns at most 2 results
+    - :phases #{:implement} excludes rules applicable only to :review"
+
+   :task/constraints
+   ["Pure function — no I/O, no side effects"
+    "Text matching does not need to be sophisticated for v1 — simple substring/word matching is fine"
+    "Do not load packs inside query-rules — registry is passed in (caller owns loading)"]}
+
+  ;; ── Task 2 ──────────────────────────────────────────────────────────────────
+  {:task/id    :lookup-policy-tool
+   :task/title "Implement lookup_policy as an agent-callable tool"
+   :task/phase :implement
+   :task/description
+   "Implement the lookup_policy tool handler in the agent component so agents
+    can call it as a standard tool invocation.
+
+    Tool definition (for tool registration):
+      {:tool/name        'lookup_policy'
+       :tool/description 'Search the engineering standards and policy rules for
+                          guidance on a specific topic. Call this before writing
+                          code in a language or framework you are not certain
+                          about, or when you need to verify a specific convention.'
+       :tool/input-schema
+       {:type 'object'
+        :properties
+        {:query       {:type 'string' :description 'Topic or question to search for'}
+         :phase       {:type 'string' :description 'Current phase (implement/review/plan/verify)' :optional true}
+         :category    {:type 'string' :description 'Dewey category prefix, e.g. 200 for language rules' :optional true}}
+        :required ['query']}}
+
+    Tool handler (in agent tool dispatch):
+    1. Read 'query', 'phase', 'category' from tool input
+    2. Load or reference the shared policy-pack registry from context
+    3. Call (policy-pack/query-rules registry query {:phases phase-set :category category})
+    4. Format results as a markdown string:
+         ## Policy Rules: <query>
+         ### <title>
+         <content>
+         ---
+    5. Return formatted string as the tool result
+
+    Registry availability:
+    - The registry is built at phase startup and stored in ctx[:policy-pack-registry]
+    - agent-behavior.clj already loads packs — extend it to also create and store
+      a registry in ctx so it is available to the tool handler
+
+    Files to create/modify:
+    - components/agent/src/ai/miniforge/agent/tools/policy.clj  (new tool handler)
+    - components/phase/src/ai/miniforge/phase/agent-behavior.clj
+      Build and store PolicyPackRegistry in ctx[:policy-pack-registry]
+    - components/agent/src/ai/miniforge/agent/tool_registry.clj (or equivalent)
+      Register lookup_policy in tool sets for implementer, reviewer, planner, verifier
+
+    Acceptance:
+    - An agent calling lookup_policy with query='Clojure Polylith' receives relevant rules
+    - The tool result is formatted markdown, not raw EDN
+    - Calling with a query that matches nothing returns 'No policy rules found for: <query>'
+    - The tool appears in the tool list shown to agents at phase start"
+
+   :task/constraints
+   ["Tool handler must not throw — catch all exceptions, return error message as tool result"
+    "Registry is read-only from the tool — agents cannot register or modify packs"
+    "Do not re-load packs on every tool call — use the registry already in ctx"]}
+
+  ;; ── Task 3 ──────────────────────────────────────────────────────────────────
+  {:task/id    :update-baseline-injection
+   :task/title "Update baseline injection: pre-inject only always-inject? rules + meta-instruction"
+   :task/phase :implement
+   :task/description
+   "Reduce pre-injection noise. Currently agent-behavior.clj (after
+    policy-pack-extensibility.spec) injects ALL always-inject? rules by phase.
+    After this task, pre-injection continues for always-inject? rules, and a
+    meta-instruction is appended telling agents about lookup_policy.
+
+    The meta-instruction to append to the system prompt (after injected rules):
+
+      ## Policy Query Tool
+      You have access to a `lookup_policy` tool that searches the engineering
+      standards database. Before writing code in a specific language or
+      framework, call `lookup_policy` with a relevant query to retrieve the
+      applicable conventions. Examples:
+        lookup_policy('Clojure Polylith component structure')
+        lookup_policy('Python Poetry dependency management')
+        lookup_policy('git branch naming')
+
+    The meta-instruction is only added when the lookup_policy tool is available
+    in the current agent's tool set (i.e., not added to agents that don't have
+    the tool).
+
+    No reduction in always-inject? rules — those remain as-is. This task only
+    adds the meta-instruction.
+
+    Files to modify:
+    - components/phase/src/ai/miniforge/phase/agent-behavior.clj
+
+    Acceptance:
+    - System prompt for :implement phase contains the 'Policy Query Tool' section
+    - System prompt for an agent without lookup_policy in its tools does NOT contain it
+    - Existing always-inject? rules are still present in the system prompt"
+
+   :task/constraints
+   ["Do not make the meta-instruction agent-model-specific — it should work for all backends"
+    "Keep the meta-instruction short — it should not exceed 150 tokens"]}
+
+  ;; ── Task 4 ──────────────────────────────────────────────────────────────────
+  {:task/id    :rule-query-observability
+   :task/title "Emit rule-query events to the event stream"
+   :task/phase :implement
+   :task/description
+   "Emit an event each time lookup_policy is called, so we can observe which
+    rules agents actually consult per task.
+
+    Event to emit after each lookup_policy call:
+      {:event/type    :agent/rule-query
+       :workflow/id   <from ctx>
+       :agent/id      <agent id>
+       :phase/name    <current phase>
+       :query/text    <the query string>
+       :query/results <count of rules returned>
+       :query/rule-ids [<list of :rule/id keywords returned>]}
+
+    Emit via the standard event stream (same as other agent tool events).
+
+    This event enables:
+    - Answering 'which rules did the implementer consult on this PR?'
+    - Identifying rules that are never queried (candidates for removal)
+    - Identifying topics agents frequently query for (candidates for always-inject?)
+
+    Files to modify:
+    - components/agent/src/ai/miniforge/agent/tools/policy.clj
+      Emit the event after building the result, before returning it
+    - components/event-stream/src/ai/miniforge/event_stream/interface/events.clj
+      Register :agent/rule-query event type if there is a registry
+
+    Acceptance:
+    - Each lookup_policy call produces exactly one :agent/rule-query event
+    - Event contains the query text and result rule ids
+    - Zero results still emits the event (with :query/results 0)"
+
+   :task/constraints
+   ["Event emission must not block or throw — use try/catch, emit best-effort"
+    "Do not include :rule/knowledge-content in the event — too large; ids only"]}
+
+  ;; ── Task 5 ──────────────────────────────────────────────────────────────────
+  {:task/id    :tests
+   :task/title "Tests for query-rules, tool handler, and observability"
+   :task/phase :verify
+   :task/description
+   "Tests covering all new behavior.
+
+    Test 1 — query-rules (policy-pack):
+    - Registry with Clojure rule, query 'clojure' returns the rule
+    - Registry with Clojure rule, phase filter #{:review}, query 'clojure' returns it
+    - Registry with Clojure rule, phase filter #{:plan}, query 'clojure' returns [] if not applicable
+    - Empty registry returns [] for any query
+
+    Test 2 — lookup_policy tool handler:
+    - Calling the handler with a matching query returns markdown string with rule title
+    - Calling with no matches returns 'No policy rules found...' string
+    - Handler does not throw when registry is absent from ctx
+
+    Test 3 — Observability:
+    - lookup_policy call with 2 matching rules emits :agent/rule-query event
+      with :query/results 2 and :query/rule-ids containing both ids
+    - Event is emitted even when 0 results
+
+    Files to create:
+    - components/policy-pack/test/ai/miniforge/policy_pack/query_test.clj
+    - components/agent/test/ai/miniforge/agent/tools/policy_test.clj
+
+    Acceptance:
+    - All tests pass under bb test"
+
+   :task/constraints
+   ["Use in-memory registries and mock event streams — no filesystem or LLM calls"]}]
+
+ :dependencies
+ {:policy-query-fn           []
+  :lookup-policy-tool        [:policy-query-fn]
+  :update-baseline-injection [:lookup-policy-tool]
+  :rule-query-observability  [:lookup-policy-tool]
+  :tests                     [:lookup-policy-tool :rule-query-observability]}}
