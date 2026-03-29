@@ -1,4 +1,5 @@
 ---
+dewey: "210"
 description: Clojure Polylith + per-file stratified design
 globs:
   - "components/**/src/**/*.clj"
@@ -101,6 +102,31 @@ When a file exceeds 3 layers:
    - Example: `agent/executor.clj`, `agent/factory.clj`, `agent/memory.clj`
 4. **Update interface.clj** to import and forward to new namespaces
 5. **Keep each new file** to ≤ 3 layers
+
+## Map access patterns (ALWAYS)
+
+- **Prefer `(get m k default)` over `(or (:k m) default)`**
+
+  ```clojure
+  ;; BAD — silently returns default for any falsy value (false, 0, "")
+  (or (:timeout opts) 5000)
+
+  ;; GOOD — explicit default, survives falsy values
+  (get opts :timeout 5000)
+  ```
+
+- The `(or (:k m) fallback)` form is only acceptable when choosing between two
+  **different keys** in the same map (canonical vs. legacy field), never when
+  `fallback` is a computed or literal default:
+
+  ```clojure
+  ;; Acceptable — picking between two key names for the same semantic field
+  (or (get event :workflow/id) (get event :workflow-id))
+
+  ;; BAD — use get with default instead
+  (or (:workflow/id event) "unknown")          ; → (get event :workflow/id "unknown")
+  (or (:tokens result) total-tokens)           ; → (get result :tokens total-tokens)
+  ```
 
 ## Agent behavior
 

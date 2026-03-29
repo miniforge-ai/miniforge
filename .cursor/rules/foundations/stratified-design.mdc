@@ -1,4 +1,5 @@
 ---
+dewey: "001"
 description: Stratified Design — enforce one-way dependencies and clear data flow
 alwaysApply: true
 ---

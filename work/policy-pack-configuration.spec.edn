@@ -1,0 +1,314 @@
+;; =============================================================================
+;; Spec: Per-Repo and Per-Org Policy Pack Configuration
+;; =============================================================================
+;;
+;; Prerequisite: policy-pack-extensibility.spec.edn must be complete.
+;;
+;; Goal: Let teams configure which policy packs are active for a given
+;; repository or organization, without touching product code.
+;;
+;; Problem:
+;;   The current pack loading is hardcoded:
+;;   1. Load classpath builtin packs (miniforge-builtin.pack.edn)
+;;   2. Load user packs from ~/.miniforge/packs/
+;;
+;;   There is no way to:
+;;   - Add org-shared packs to all repos without touching every developer's ~/.miniforge/
+;;   - Disable the miniforge-standards pack for an org that has its own standards
+;;   - Commit repo-specific policy packs to a repository
+;;   - Specify different packs for different repos in the same org
+;;
+;; Design: Tiered configuration via .miniforge/config.edn
+;;
+;;   Priority (highest to lowest):
+;;   1. Repo-level:  .miniforge/config.edn  (committed or gitignored; per-repo overrides)
+;;   2. User-level:  ~/.miniforge/config.edn (per-developer preferences)
+;;   3. Product:     classpath defaults
+;;
+;;   The repo-level config is the new addition. It follows the same structure
+;;   as the user config. The phase loading (agent-behavior.clj) reads a merged
+;;   config that includes the repo-level layer.
+;;
+;;   New :policy-packs section in config:
+;;
+;;   :policy-packs
+;;   {;; Directories to scan for additional packs.
+;;    ;; Relative paths are resolved against the working directory (repo root).
+;;    ;; Always includes ~/.miniforge/packs/ and .miniforge/packs/ automatically.
+;;    :extra-search-paths []
+;;
+;;    ;; Pack IDs to skip, even if found in search paths or builtins.
+;;    ;; Use this to exclude miniforge-standards for orgs with their own standards.
+;;    :disabled-pack-ids []
+;;
+;;    ;; Whether to load the product-shipped miniforge-standards pack (when it exists).
+;;    ;; Default: true. Set to false to suppress it entirely.
+;;    :include-miniforge-standards? true}
+;;
+;; Examples:
+;;
+;;   Org with proprietary standards (suppress miniforge-standards):
+;;   .miniforge/config.edn:
+;;   {:policy-packs {:disabled-pack-ids [:miniforge/standards]}}
+;;
+;;   Repo with additional domain rules (fintech compliance pack):
+;;   .miniforge/config.edn:
+;;   {:policy-packs {:extra-search-paths [".miniforge/packs"]}}
+;;   .miniforge/packs/fintech-compliance.pack.edn: (committed)
+;;
+;;   Org-wide packs via shared network path:
+;;   ~/.miniforge/config.edn:
+;;   {:policy-packs {:extra-search-paths ["/shared/eng-packs"]}}
+;;
+;; What is NOT in scope for this spec:
+;;   - Remote pack registries (URL-based pack loading) — future spec
+;;   - Pack version pinning across repos — future spec
+;;   - Pack signing / authenticity verification — trust model already handles this
+
+{:spec/title "Per-repo and per-org policy pack configuration"
+ :spec/description
+ "Add a :policy-packs section to the miniforge config schema. Add repo-level
+  config loading (.miniforge/config.edn). Update agent-behavior.clj to use
+  the merged config when discovering packs: always include ~/.miniforge/packs/
+  and the classpath builtins, also scan .miniforge/packs/ and any
+  :extra-search-paths, and skip :disabled-pack-ids."
+
+ :spec/intent {:type  :feature
+               :scope ["components/config/src"
+                       "components/phase/src"
+                       "resources/config"]}
+
+ :spec/constraints
+ ["Repo-level config wins over user-level: later tiers override earlier ones"
+  "No breaking change to existing ~/.miniforge/packs/ loading — it always runs"
+  ".miniforge/packs/ is auto-scanned when present — no explicit config required"
+  "disabled-pack-ids filter applies to ALL loaded packs including builtins"
+  "An absent .miniforge/config.edn is not an error — silently treated as {}"
+  "agent-behavior.clj must remain fail-safe — exceptions cannot bubble up to the agent"]
+
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :tasks
+
+ ;; ── Task 1 ──────────────────────────────────────────────────────────────────
+ [{:task/id    :config-schema
+   :task/title "Add :policy-packs section to config schema and defaults"
+   :task/phase :implement
+   :task/description
+   "Add the :policy-packs key to the default user config and to the config
+    component.
+
+    1. Update resources/config/default-user-config.edn:
+
+       :policy-packs
+       {:extra-search-paths    []
+        :disabled-pack-ids     []
+        :include-miniforge-standards? true}
+
+    2. No schema validation file is needed — the config system uses
+       merge-with and does not have a hard schema. The defaults serve
+       as the canonical spec.
+
+    Files to modify:
+    - resources/config/default-user-config.edn
+      Add the :policy-packs section after :governance
+
+    Acceptance:
+    - (get-in (config/load-default-config) [:policy-packs :disabled-pack-ids]) => []
+    - (get-in (config/load-default-config) [:policy-packs :include-miniforge-standards?]) => true"
+
+   :task/constraints
+   ["Keep the section structure flat — no nested maps inside :policy-packs for v1"
+    "Use [] not #{} for lists — EDN sets require #{ } syntax which is unfamiliar to users"]}
+
+  ;; ── Task 2 ──────────────────────────────────────────────────────────────────
+  {:task/id    :repo-level-config
+   :task/title "Add repo-level config loading to config/user.clj"
+   :task/phase :implement
+   :task/description
+   "Add support for reading a repo-local .miniforge/config.edn as an
+    additional config tier that overrides the user config.
+
+    New function: load-repo-config
+      Reads .miniforge/config.edn relative to the current working directory
+      (System/getProperty 'user.dir'). Returns nil when absent or unreadable.
+
+      (defn load-repo-config
+        ([] (load-repo-config (str (System/getProperty 'user.dir') '/.miniforge/config.edn')))
+        ([path] (read-edn-file path)))
+
+    New function: load-merged-config-with-repo
+      Like load-merged-config but includes the repo layer.
+
+      (defn load-merged-config-with-repo
+        ([] (load-merged-config-with-repo
+              default-user-config-path
+              (str (System/getProperty 'user.dir') '/.miniforge/config.edn')))
+        ([user-config-path repo-config-path]
+         (let [user-config (load-user-config user-config-path)
+               repo-config (load-repo-config repo-config-path)]
+           (merge-configs default-config user-config repo-config))))
+
+    The merge-configs fn already uses merge-with for nested maps, so this
+    composes correctly. Note: merge-configs filters nil args before merging.
+    Update merge-configs (or add a helper) to accept nil args gracefully:
+
+      (defn merge-configs
+        [& configs]
+        (let [configs (remove nil? configs)
+              base (apply merge-with
+                          (fn [v1 v2] (if (map? v1) (merge v1 v2) v2))
+                          configs)]
+          (apply-env-overrides base)))
+
+    Files to modify:
+    - components/config/src/ai/miniforge/config/user.clj
+      Add load-repo-config and load-merged-config-with-repo
+      Update merge-configs to handle nil args
+
+    Acceptance:
+    - Given a .miniforge/config.edn {:policy-packs {:disabled-pack-ids [:foo/bar]}}
+      load-merged-config-with-repo returns a config with :foo/bar in disabled-pack-ids
+    - Given no .miniforge/config.edn, load-merged-config-with-repo returns same as load-merged-config
+    - merge-configs with nil args does not throw"
+
+   :task/constraints
+   ["Do not change the existing load-merged-config signature — it remains user+env only"
+    "Repo config path is NOT configurable from the repo config itself (no bootstrap problem)"]}
+
+  ;; ── Task 3 ──────────────────────────────────────────────────────────────────
+  {:task/id    :pack-discovery
+   :task/title "Update agent-behavior.clj to use config-driven pack discovery"
+   :task/phase :implement
+   :task/description
+   "Replace the hardcoded ~/.miniforge/packs/ scan in load-user-pack-rules
+    with a config-driven version that respects :policy-packs config.
+
+    New function: resolve-pack-search-paths
+      Given the merged config map, return the ordered list of directories
+      to scan for packs.
+
+      Always includes (in order):
+      1. ~/.miniforge/packs/         (user packs — always first)
+      2. .miniforge/packs/           (repo packs — always second, if directory exists)
+      3. Each path in :extra-search-paths (in order, if directory exists)
+
+      (defn resolve-pack-search-paths [config]
+        (let [home      (System/getProperty 'user.home')
+              cwd       (System/getProperty 'user.dir')
+              user-dir  (str home '/.miniforge/packs')
+              repo-dir  (str cwd '/.miniforge/packs')
+              extra     (get-in config [:policy-packs :extra-search-paths] [])]
+          (->> (concat [user-dir repo-dir] extra)
+               (map io/file)
+               (filter #(.isDirectory %))
+               (map str)
+               vec)))
+
+    New function: load-configured-pack-rules
+      Load rules from all configured search paths, applying :disabled-pack-ids.
+
+      (defn load-configured-pack-rules [config]
+        (try
+          (let [search-paths    (resolve-pack-search-paths config)
+                disabled-ids    (set (get-in config [:policy-packs :disabled-pack-ids] []))
+                load-all        (requiring-resolve 'ai.miniforge.policy-pack.interface/load-all-packs)]
+            (if load-all
+              (->> search-paths
+                   (mapcat #(-> (load-all %) :loaded))
+                   (remove #(contains? disabled-ids (:pack/id %)))
+                   (mapcat :pack/rules)
+                   vec)
+              []))
+          (catch Exception _ [])))
+
+    Update load-and-filter-behaviors to:
+    1. Call (config/load-merged-config-with-repo) to get the merged config
+    2. Filter builtin packs by :disabled-pack-ids and :include-miniforge-standards?
+    3. Use load-configured-pack-rules instead of load-user-pack-rules
+
+      (defn load-and-filter-behaviors [phase context]
+        (try
+          (let [config         (config/load-merged-config-with-repo)
+                disabled-ids   (set (get-in config [:policy-packs :disabled-pack-ids] []))
+                include-std?   (get-in config [:policy-packs :include-miniforge-standards?] true)
+                builtin-rules  (cond-> (load-builtin-rules)
+                                 ;; Remove disabled builtins
+                                 (seq disabled-ids) (->> (remove #(disabled-ids (:pack/id %))))
+                                 ;; Remove standards if opted out
+                                 (not include-std?)
+                                 (->> (remove #(= :miniforge/standards (:pack/id %)))))
+                user-rules     (load-configured-pack-rules config)
+                all-rules      (into (vec builtin-rules) user-rules)
+                ...]))
+
+    Note: The builtin packs (classpath) do not have a :pack/id at the rule level.
+    :include-miniforge-standards? filters the entire pack by comparing the pack-level
+    :pack/id, not rule-level IDs. load-builtin-rules returns raw rules without pack
+    metadata. The spec for policy-pack-extensibility will move this to a proper pack
+    structure. For this task, :include-miniforge-standards? only applies to the
+    miniforge-standards.pack.edn added in that spec, not the existing builtin rules.
+
+    Files to modify:
+    - components/phase/src/ai/miniforge/phase/agent_behavior.clj
+      Add require for config/user ns
+      Add resolve-pack-search-paths, load-configured-pack-rules
+      Update load-and-filter-behaviors
+
+    Acceptance:
+    - With {:policy-packs {:disabled-pack-ids [:my/pack]}} in config,
+      rules from :my/pack are excluded
+    - With {:policy-packs {:extra-search-paths ['/team/packs']}} in config,
+      packs in /team/packs/ are loaded
+    - With no config changes, behavior is identical to current (backwards-compatible)
+    - load-and-filter-behaviors never throws even when config file is malformed"
+
+   :task/constraints
+   ["Do not add config/user as a hard component dependency — use requiring-resolve"
+    "Keep load-user-pack-rules for backwards compatibility in the comment block"
+    "extra-search-paths are absolute or cwd-relative — do not resolve against home"]}
+
+  ;; ── Task 4 ──────────────────────────────────────────────────────────────────
+  {:task/id    :tests
+   :task/title "Tests for repo-level config and config-driven pack discovery"
+   :task/phase :verify
+   :task/description
+   "Tests for the new config loading and pack discovery behavior.
+
+    Test 1 — merge-configs with nil:
+    - (merge-configs nil {:a 1}) => {:a 1}
+    - (merge-configs {:a 1} nil) => {:a 1}
+
+    Test 2 — load-merged-config-with-repo:
+    - With tmp repo config {:policy-packs {:disabled-pack-ids [:foo]}}:
+      result has :foo in :disabled-pack-ids
+    - Without repo config: result matches load-merged-config output
+
+    Test 3 — resolve-pack-search-paths:
+    - With no extra-search-paths and no directories present: returns []
+    - With a real tmpdir as extra-search-paths: returns [tmpdir]
+    - With .miniforge/packs/ as a real dir in cwd: includes it
+
+    Test 4 — load-configured-pack-rules:
+    - Given two search paths each containing a valid pack, both packs' rules returned
+    - Given disabled-pack-ids containing one pack's id, that pack's rules excluded
+    - Given no search paths with real directories, returns []
+
+    Files to create:
+    - components/config/test/ai/miniforge/config/user_defaults_test.clj
+      (file already exists per git status — add new test cases there)
+    - components/phase/test/ai/miniforge/phase/agent_behavior_test.clj (new)
+
+    Acceptance:
+    - All tests pass under bb test"
+
+   :task/constraints
+   ["Use tmp directories for filesystem tests — do not depend on real ~/.miniforge/"
+    "Mock requiring-resolve in tests where needed to avoid loading policy-pack component"]}]
+
+ :dependencies
+ {:config-schema   []
+  :repo-level-config [:config-schema]
+  :pack-discovery    [:repo-level-config]
+  :tests             [:repo-level-config :pack-discovery]}}

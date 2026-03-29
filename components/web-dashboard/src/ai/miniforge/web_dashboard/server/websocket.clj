@@ -15,12 +15,64 @@
 (ns ai.miniforge.web-dashboard.server.websocket
   "WebSocket handling and real-time event streaming."
   (:require
-   [org.httpkit.server :as http]
    [cheshire.core :as json]
+   [clojure.string :as str]
+   [org.httpkit.server :as http]
    [ai.miniforge.web-dashboard.state :as state]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Subscribe/unsubscribe
+;; Event normalization and envelopes
+
+(defn ws-event-envelope
+  "Build a browser-friendly event wrapper while preserving the raw event payload."
+  [event]
+  {:type "event"
+   :event-type (some-> (:event/type event) str (str/replace #"^:" ""))
+   :workflow-id (some-> (:workflow/id event) str)
+   :data event
+   :event event})
+
+(defn maybe-uuid
+  "Parse UUID strings when possible, preserving non-UUID identifiers."
+  [value]
+  (cond
+    (instance? java.util.UUID value) value
+    (string? value) (try
+                      (parse-uuid value)
+                      (catch Exception _
+                        value))
+    :else value))
+
+(defn maybe-keyword
+  "Normalize string-ish values to keywords."
+  [value]
+  (cond
+    (keyword? value) value
+    (string? value) (keyword value)
+    (symbol? value) (keyword (name value))
+    :else value))
+
+(defn normalize-workflow-event
+  "Normalize workflow events arriving over JSON transport.
+   Coalesces legacy camelCase/unqualified keys to qualified namespaced keys
+   and ensures type/UUID fields have the right runtime types."
+  [event]
+  (let [workflow-id (or (get event :workflow/id) (get event :workflow-id))
+        timestamp   (or (get event :event/timestamp) (get event :timestamp))
+        phase       (or (get event :workflow/phase) (get event :phase))
+        status      (or (get event :workflow/status) (get event :status))
+        spec        (or (get event :workflow/spec) (get event :workflow-spec))]
+    (cond-> event
+      (get event :event/type)   (update :event/type maybe-keyword)
+      workflow-id               (assoc :workflow/id (maybe-uuid workflow-id))
+      timestamp                 (assoc :event/timestamp timestamp)
+      phase                     (assoc :workflow/phase (maybe-keyword phase))
+      status                    (assoc :workflow/status (maybe-keyword status))
+      spec                      (assoc :workflow/spec spec)
+      true                      (dissoc :workflow-id :timestamp :phase :status :workflow-spec))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; WebSocket operations — subscribe, unsubscribe, message dispatch
 
 (defn subscribe-client!
   "Subscribe WebSocket client to event stream."
@@ -34,7 +86,8 @@
               (subscribe! event-stream subscriber-id
                           (fn [event]
                             (try
-                              (http/send! ch (json/generate-string {:type :event :data event}))
+                              (http/send! ch (json/generate-string
+                                              (ws-event-envelope event)))
                               (catch Exception e
                                 (println "Error sending event to WebSocket:" (ex-message e)))))))))
         (catch Exception e
@@ -53,7 +106,6 @@
         (catch Exception e
           (println "Error unsubscribing from event stream:" (ex-message e)))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Message handling
 
 (defn handle-ws-message
@@ -63,9 +115,9 @@
     (let [msg (json/parse-string data true)]
       (cond
         ;; UI refresh request
-        (= :refresh (:action msg))
+        (= :refresh (maybe-keyword (:action msg)))
         (http/send! ch (json/generate-string
-                       {:type :state
+                       {:type "state"
                         :data (state/get-dashboard-state state)}))
 
         ;; Control plane command - forward to workflows
@@ -80,37 +132,18 @@
 
         ;; Unknown message
         :else
-        (http/send! ch (json/generate-string {:error "Unknown action"}))))
+        (http/send! ch (json/generate-string {:type "error"
+                                              :error "Unknown action"}))))
     (catch Exception e
       (println "Error handling WebSocket message:" (ex-message e)))))
 
 (defn handle-workflow-event
   "Handle incoming event from workflow process.
-   Publishes event to dashboard's event stream."
+  Publishes event to dashboard's event stream."
   [state data]
   (try
     (let [event (json/parse-string data true)
-          ;; JSON roundtrip turns keyword values into symbols — re-keywordize critical fields
-          event (cond-> event
-                  (:event/type event) (update :event/type #(if (keyword? %) % (keyword (str %)))))
-          normalized-event (cond-> event
-                             (or (:workflow/id event) (:workflow-id event))
-                             (assoc :workflow/id (str (or (:workflow/id event) (:workflow-id event))))
-
-                             (or (:event/timestamp event) (:timestamp event))
-                             (assoc :event/timestamp (or (:event/timestamp event) (:timestamp event)))
-
-                             (or (:workflow/phase event) (:phase event))
-                             (assoc :workflow/phase (let [p (or (:workflow/phase event) (:phase event))]
-                                                     (if (keyword? p) p (keyword (str p)))))
-
-                             (or (:workflow/status event) (:status event))
-                             (assoc :workflow/status (let [s (or (:workflow/status event) (:status event))]
-                                                      (if (keyword? s) s (keyword (str s)))))
-
-                             (or (:workflow/spec event) (:workflow-spec event))
-                             (assoc :workflow/spec (or (:workflow/spec event) (:workflow-spec event))))
-          normalized-event (dissoc normalized-event :workflow-id :timestamp :phase :status :workflow-spec)]
+          normalized-event (normalize-workflow-event event)]
       ;; Publish event to dashboard's event stream
       (when-let [es (:event-stream @state)]
         (try
@@ -139,7 +172,7 @@
                           (subscribe-client! (:event-stream @state) ch)
                           ;; Lightweight ack — page already has SSR'd data
                           (http/send! ch (json/generate-string
-                                          {:type :init :status :connected})))
+                                          {:type "init" :status "connected"})))
 
                         :on-close
                         (fn [ch _status]

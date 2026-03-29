@@ -1,4 +1,5 @@
 ---
+dewey: "320"
 description: K8s/Kustomize/ArgoCD conventions
 globs:
   - "k8s/**/*.yaml"

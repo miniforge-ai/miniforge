@@ -1,4 +1,5 @@
 ---
+dewey: "020"
 description: Follow normative specs (N1-N6) for all implementation and maintain spec governance
 globs: specs/**/*.md
 ---

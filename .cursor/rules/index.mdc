@@ -1,0 +1,106 @@
+---
+dewey: "000"
+description: Master index of all rules — consult when searching for applicable rules
+alwaysApply: false
+---
+
+# Rules Catalog (Dewey-style)
+
+## Classification System
+
+Uses Dewey Decimal principles: hierarchical, numeric, extensible.
+Dewey codes live in frontmatter (`dewey: "NNN"`), not filenames or paths.
+
+| Range | Category | Description |
+|-------|----------|-------------|
+| 000-099 | Foundations | Architecture, design philosophy, core principles |
+| 100-199 | Tools | Linters, formatters, build tools |
+| 200-299 | Languages | Language-specific conventions |
+| 300-399 | Frameworks | Platform & framework rules |
+| 400-499 | Testing | Testing standards & quality |
+| 500-599 | Operations | CI/CD, monitoring, security |
+| 600-699 | Documentation | Docs standards |
+| 700-799 | Workflows | Git, PR, release processes |
+| 800-899 | Project | Reserved for project-specific |
+| 900-999 | Meta | Templates, indexes, deprecated |
+
+## Directory Structure
+
+```zsh
+.cursor/rules/
+├── index.mdc                       # This catalog (dewey: "000")
+├── foundations/
+│   ├── stratified-design.mdc       # dewey: "001"
+│   ├── simple-made-easy.mdc        # dewey: "010"
+│   └── specification-standards.mdc # dewey: "020"
+├── languages/
+│   ├── clojure.mdc                 # dewey: "210"
+│   └── python.mdc                  # dewey: "220"
+├── frameworks/
+│   ├── polylith.mdc                # dewey: "300"
+│   └── kubernetes.mdc              # dewey: "320"
+├── workflows/
+│   ├── git-branch-management.mdc   # dewey: "710"
+│   ├── pre-commit-discipline.mdc   # dewey: "715"
+│   ├── git-worktrees.mdc           # dewey: "720"
+│   ├── pr-documentation.mdc        # dewey: "721"
+│   ├── pr-layering.mdc             # dewey: "722"
+│   └── datever.mdc                 # dewey: "730"
+├── project/
+│   └── header-copyright.mdc        # dewey: "810"
+└── meta/
+    └── rule-format.mdc             # dewey: "900"
+```
+
+## Current Rules
+
+### foundations/
+
+| Dewey | File | Description |
+|-------|------|-------------|
+| 001 | `stratified-design` | One-way DAG dependencies, layered architecture |
+| 010 | `simple-made-easy` | Simplicity over familiarity, uncomplected artifacts |
+| 020 | `specification-standards` | Normative specs (N1-N6), spec governance, conformance |
+
+### languages/
+
+| Dewey | File | Description |
+|-------|------|-------------|
+| 210 | `clojure` | Polylith + per-file stratified design, map access patterns |
+| 220 | `python` | Poetry, functional Python |
+
+### frameworks/
+
+| Dewey | File | Description |
+|-------|------|-------------|
+| 300 | `polylith` | Polylith workspace conventions |
+| 320 | `kubernetes` | K8s/Kustomize/ArgoCD conventions |
+
+### workflows/
+
+| Dewey | File | Description |
+|-------|------|-------------|
+| 710 | `git-branch-management` | Branch from main, single-purpose PRs |
+| 715 | `pre-commit-discipline` | Never bypass hooks without investigation; fix root causes |
+| 720 | `git-worktrees` | Parallel workflows with worktrees, operator multi-loop |
+| 721 | `pr-documentation` | Living PR docs in `docs/pull-requests/` |
+| 722 | `pr-layering` | Keep PR diffs focused; split unrelated concerns |
+| 730 | `datever` | Date-based versioning strategy |
+
+### project/
+
+| Dewey | File | Description |
+|-------|------|-------------|
+| 810 | `header-copyright` | Miniforge.ai header + copyright ownership |
+
+### meta/
+
+| Dewey | File | Description |
+|-------|------|-------------|
+| 900 | `rule-format` | Rule creation template & Dewey classification |
+
+## Adding Rules
+
+1. Find the appropriate Dewey category above
+2. Create `<category>/<slug>.mdc` with `dewey: "NNN"` in frontmatter
+3. Update this index

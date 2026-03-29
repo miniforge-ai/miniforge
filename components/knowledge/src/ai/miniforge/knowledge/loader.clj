@@ -26,46 +26,26 @@
          (filter #(.isFile %))
          (filter #(str/ends-with? (.getName %) ".mdc")))))
 
-(defn extract-dewey-from-filename
-  "Extract Dewey code from filename.
-   Examples:
-     '210-clojure.mdc' -> '210'
-     '001-stratified-design.mdc' -> '001'
-     'readme.mdc' -> nil"
-  [filename]
-  (when-let [match (re-find #"^(\d{3})-" filename)]
-    (second match)))
-
 (defn extract-tags-from-path
   "Extract tags from file path relative to rules root.
+   Uses slug-only path segments — no numeric prefix required.
    Examples:
-     '000-foundations/001-stratified-design.mdc' -> [:foundations :architecture]
-     '200-languages/210-clojure.mdc' -> [:languages :clojure]
-     '000-index.mdc' -> [:index]"
+     'foundations/stratified-design.mdc' -> [:foundations :stratified-design]
+     'languages/clojure.mdc'             -> [:languages :clojure]
+     'index.mdc'                         -> [:index]"
   [relative-path]
-  (let [parts (str/split relative-path #"/")
-        dir-part (when (> (count parts) 1) (first parts))
-        file-part (last parts)
-
-        ;; Extract tag from directory (e.g., "000-foundations" -> "foundations")
-        dir-tag (when dir-part
-                  (when-let [match (re-find #"^\d{3}-(.+)$" dir-part)]
-                    (keyword (second match))))
-
-        ;; Extract tag from filename (e.g., "210-clojure.mdc" -> "clojure")
-        file-tag (when-let [match (re-find #"^\d{3}-(.+)\.mdc$" file-part)]
-                   (keyword (second match)))]
-
-    (vec (remove nil? [dir-tag file-tag]))))
+  (->> (str/split relative-path #"/")
+       (map #(str/replace % #"\.mdc$" ""))
+       (map keyword)
+       vec))
 
 (defn generate-title-from-filename
-  "Generate a human-readable title from a filename.
+  "Generate a human-readable title from a slug filename.
    Examples:
-     '210-clojure.mdc' -> 'Clojure'
-     'readme.mdc' -> 'Readme'"
+     'clojure.mdc'          -> 'Clojure'
+     'stratified-design.mdc' -> 'Stratified design'"
   [filename]
   (-> filename
-      (str/replace #"^\d{3}-" "")
       (str/replace #"\.mdc$" "")
       (str/replace #"-" " ")
       str/capitalize))
@@ -90,8 +70,8 @@
                 (:body parsed)
                 content)  ;; No frontmatter = entire file is body
 
-          ;; Extract metadata
-          dewey (extract-dewey-from-filename filename)
+          ;; Dewey from frontmatter is authoritative; path is never consulted
+          dewey (get frontmatter :dewey)
           tags (extract-tags-from-path relative-path)
           uid (str/replace filename #"\.mdc$" "")
           title (or (:description frontmatter)
@@ -258,7 +238,7 @@
    (initialize-knowledge-store! knowledge-store {}))
 
   ([knowledge-store opts]
-   (let [rules-dir (get opts :rules-dir ".cursor/rules")
+   (let [rules-dir (get opts :rules-dir ".standards")
          project-root (get opts :project-root ".")
          skip-rules? (get opts :skip-rules? false)
          skip-docs? (get opts :skip-docs? false)
@@ -295,7 +275,7 @@
   (def test-store (store/create-store))
 
   ;; Load just rules
-  (load-rules-from-directory test-store ".cursor/rules")
+  (load-rules-from-directory test-store ".standards")
 
   ;; Load just docs
   (load-project-docs test-store ".")

@@ -23,6 +23,7 @@
    Agent: :releaser
    Default gates: [:release-ready]"
   (:require [ai.miniforge.logging.interface :as log]
+            [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.phase.messages :as messages]
             [ai.miniforge.phase.phase-config :as phase-config]
@@ -114,17 +115,20 @@
 (defn build-executor-context
   "Build context for the release executor from phase context."
   [ctx config]
-  {:worktree-path (or (get-in ctx [:execution/worktree-path])
-                      (get-in ctx [:worktree-path])
-                      (get-in config [:worktree-path])
-                      (get-in ctx [:execution/opts :worktree-path])
-                      (System/getProperty "user.dir"))
-   :logger (get-in ctx [:execution/logger])
-   :llm-backend (get-in ctx [:execution/llm-backend])
-   :artifact-store (get-in ctx [:execution/artifact-store])
-   ;; Allow disabling PR creation via config or execution opts
-   :create-pr? (or (get-in ctx [:execution/opts :create-pr?])
-                   (get config :create-pr? true))})
+  (let [on-chunk (phase/create-streaming-callback ctx :release)]
+    (cond-> {:worktree-path (or (get-in ctx [:execution/worktree-path])
+                                (get-in ctx [:worktree-path])
+                                (get-in config [:worktree-path])
+                                (get-in ctx [:execution/opts :worktree-path])
+                                (System/getProperty "user.dir"))
+             :logger (get-in ctx [:execution/logger])
+             :llm-backend (get-in ctx [:execution/llm-backend])
+             :artifact-store (get-in ctx [:execution/artifact-store])
+             :event-stream (:event-stream ctx)
+             ;; Allow disabling PR creation via config or execution opts
+             :create-pr? (or (get-in ctx [:execution/opts :create-pr?])
+                             (get config :create-pr? true))}
+      on-chunk (assoc :on-chunk on-chunk))))
 
 (defn enter-release
   "Execute release phase.

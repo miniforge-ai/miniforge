@@ -1,6 +1,7 @@
 ---
+dewey: "900"
 description: Use ALWAYS when asked to CREATE A RULE or UPDATE A RULE or taught a lesson from the user that should be retained as a new rule for Cursor
-globs: .cursor/rules/*.mdc
+globs: .cursor/rules/**/*.mdc
 ---
 # LLM Rules Format
 
@@ -8,6 +9,7 @@ globs: .cursor/rules/*.mdc
 
 ```mdc
 ---
+dewey: "NNN"
 description: ACTION when TRIGGER to OUTCOME
 globs: *.mdc
 ---
@@ -38,78 +40,33 @@ Invalid concise example with explanation
 
 - Root: `.cursor/rules/`
 - Extension: `.mdc`
-- Structure: `<category-folder>/<NNN-name>.mdc`
+- Structure: `<category-slug>/<rule-slug>.mdc`
+- Dewey code: in frontmatter (`dewey: "NNN"`), not in the filename or path
 
 ```zsh
 .cursor/rules/
-├── 000-index.mdc           # Master catalog (root level)
-├── 000-foundations/        # Core principles
-├── 100-tools/              # Dev environment
-├── 200-languages/          # Language rules
-├── 300-frameworks/         # Platform rules
-├── 400-testing/            # Quality standards
-├── 500-operations/         # CI/CD, monitoring
-├── 600-documentation/      # Doc standards
-├── 700-workflows/          # Process rules
-├── 800-project/            # Project-specific
-└── 900-meta/               # Templates
+├── index.mdc           # Master catalog (dewey: "000")
+├── foundations/        # dewey 000-099
+├── languages/          # dewey 200-299
+├── frameworks/         # dewey 300-399
+├── workflows/          # dewey 700-799
+├── project/            # dewey 800-899
+└── meta/               # dewey 900-999
 ```
 
-### Naming Convention (Dewey-style)
-
-Format: `NNN-kebab-name.mdc` where NNN follows Dewey Decimal principles:
+### Dewey Ranges
 
 ```
 000-099  Foundations & Core Principles
-         000       Index/catalog
-         001-009   Architecture patterns
-         010-019   Design philosophy
-         020-029   Code organization
-         
 100-199  Development Environment & Tools
-         110-119   Linters & formatters
-         120-129   Build tools
-         130-139   Version control tools
-         
 200-299  Languages
-         210-219   Clojure
-         220-229   Python
-         230-239   JavaScript/TypeScript
-         240-249   Go
-         250-259   Rust
-         
 300-399  Frameworks & Platforms
-         310-319   Web frameworks
-         320-329   Kubernetes/Containers
-         330-339   Cloud platforms (AWS, GCP, Azure)
-         340-349   Databases
-         
 400-499  Testing & Quality
-         410-419   Unit testing
-         420-429   Integration testing
-         430-439   E2E testing
-         440-449   Code review
-         
 500-599  Operations & Infrastructure
-         510-519   CI/CD
-         520-529   Monitoring & observability
-         530-539   Security
-         
 600-699  Documentation
-         610-619   API documentation
-         620-629   Architecture docs
-         
 700-799  Workflows & Processes
-         710-719   Git workflows
-         720-729   PR workflows
-         730-739   Release workflows
-         
 800-899  Project-Specific
-         Reserved for repo-specific rules
-         
 900-999  Meta & Templates
-         900-909   Rule templates
-         990-999   Deprecated/archive
 ```
 
 Private rules: `_name.mdc` (underscore prefix)

@@ -1,4 +1,5 @@
 ---
+dewey: "730"
 description: DateVer versioning convention
 globs:
   - "build.clj"

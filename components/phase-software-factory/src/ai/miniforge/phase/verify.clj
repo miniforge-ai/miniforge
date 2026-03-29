@@ -22,7 +22,8 @@
    Generates and runs tests for code artifacts.
    Agent: :tester
    Default gates: [:tests-pass :coverage]"
-  (:require [ai.miniforge.phase.registry :as registry]
+  (:require [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.phase.phase-config :as phase-config]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.task.interface :as task]
@@ -146,11 +147,7 @@
         task (task/verify-task code-artifact input)
 
         ;; Create streaming callback for agent output
-        on-chunk (when-let [es (:event-stream ctx)]
-                   (when-let [create-cb (requiring-resolve
-                                         'ai.miniforge.event-stream.interface/create-streaming-callback)]
-                     (create-cb es (:execution/id ctx) :verify
-                                {:print? (not (:quiet ctx)) :quiet? (:quiet ctx)})))
+        on-chunk (phase/create-streaming-callback ctx :verify)
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
 
         ;; Invoke agent

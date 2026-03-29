@@ -1,0 +1,336 @@
+;; =============================================================================
+;; Spec: Policy Pack as the Sole Extensibility Point for Rules
+;; =============================================================================
+;;
+;; Goal: Replace the .standards/-directory special case in the knowledge loader
+;; with the policy-pack system as the only mechanism for injecting rules into
+;; agent context. The product ships a pre-compiled standards pack; organizations
+;; can supply additional packs without touching Dewey or MDC files.
+;;
+;; Current state (the problem):
+;;
+;;   .standards/*.mdc ──[runtime: loader.clj reads files, parses YAML frontmatter,
+;;                        creates zettels, injects via hardcoded agent manifests]──►
+;;   agent prompt context
+;;
+;;   Two separate systems (knowledge store + policy-pack) with overlapping purpose.
+;;   The product knows about .mdc files, YAML frontmatter, and Dewey codes.
+;;   Agent manifests in store.clj hardcode which Dewey prefixes each role gets.
+;;   None of that belongs in the product.
+;;
+;; Target state:
+;;
+;;   .standards/*.mdc ──[bb standards:pack — build-time ETL, not runtime]──►
+;;   components/phase/resources/packs/miniforge-standards.pack.edn
+;;                  └──[policy-pack/load-all-packs — same as every other pack]──►
+;;   agent prompt context
+;;
+;;   The pack is committed to the repo. At runtime the product loads it from the
+;;   classpath like any other pack. Dewey is an internal detail of the source
+;;   format; it never appears in the product. An org supplies their own pack
+;;   under ~/.miniforge/packs/ and it works identically.
+;;
+;; Relationship to the next spec (knowledge-mcp-query):
+;;
+;;   This spec makes policy packs the backing store.
+;;   The next spec exposes that store via a lookup_policy MCP tool so agents can
+;;   query on-demand instead of relying solely on pre-injection.
+
+{:spec/title "Policy pack as the sole extensibility point for rules"
+ :spec/description
+ "Remove the .standards/ special-case loader path. Add :rule/knowledge-content
+  and :rule/always-inject? to the policy-pack rule schema. Write a bb ETL task
+  that compiles .standards/*.mdc files to a miniforge-standards.pack.edn.
+  Wire agent-behavior.clj to pre-inject always-inject rules from all loaded
+  packs. Remove the hardcoded Dewey-to-agent-manifest mapping in store.clj."
+
+ :spec/intent {:type   :refactor
+               :scope  ["components/policy-pack/src"
+                        "components/knowledge/src"
+                        "components/phase/src"
+                        "components/phase/resources/packs"
+                        "bb.edn"]}
+
+ :spec/constraints
+ ["Do NOT change the policy-pack loading path (~/.miniforge/packs/) — user packs still work"
+  "The compiled pack file is committed to the repo; .standards/ is not required at runtime"
+  "Existing :rule/agent-behavior field and builtin pack are not removed — only extended"
+  "Phase behavior must be identical before and after (same rules in agent context)"
+  "The knowledge store (zettels) may remain as a caching layer if needed; removing it is out of scope"]
+
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :tasks
+
+ ;; ── Task 1 ──────────────────────────────────────────────────────────────────
+ [{:task/id    :extend-rule-schema
+   :task/title "Add :rule/knowledge-content and :rule/always-inject? to Rule schema"
+   :task/phase :implement
+   :task/description
+   "Add two optional fields to the Rule schema in
+    components/policy-pack/src/ai/miniforge/policy_pack/schema.clj:
+
+    1. :rule/knowledge-content (optional string)
+       Full text content of the rule — the MDC body — for injection into agent
+       prompts as reference material. Distinct from :rule/agent-behavior (which
+       is a short behavioral directive); :rule/knowledge-content is the detailed
+       explanation an agent can read for context.
+
+    2. :rule/always-inject? (optional boolean, default false)
+       When true, this rule is pre-injected into every agent prompt for the
+       applicable phases without the agent needing to query. Use for baseline
+       rules that apply unconditionally (e.g., pre-commit discipline, copyright
+       header). When false, the rule is available for on-demand query (the next
+       spec) but not pre-injected.
+
+    The existing :rule/applies-to :phases field already handles agent-role
+    filtering — no new field needed. The Dewey code is NOT added to the schema;
+    it is an ETL-time concern.
+
+    Files to modify:
+    - components/policy-pack/src/ai/miniforge/policy_pack/schema.clj
+      Add both fields to the Rule map schema (optional, after :rule/agent-behavior)
+    - components/policy-pack/src/ai/miniforge/policy_pack/interface/schema.clj
+      No change needed (re-exports Rule from schema.clj automatically)
+
+    Schema after change (relevant excerpt):
+      [:rule/agent-behavior    {:optional true} string?]
+      [:rule/knowledge-content {:optional true} string?]
+      [:rule/always-inject?    {:optional true} boolean?]
+
+    Acceptance:
+    - valid-rule? accepts a rule with :rule/knowledge-content and :rule/always-inject? true
+    - valid-rule? accepts a rule without those fields (backwards-compatible)
+    - valid-rule? rejects :rule/knowledge-content set to a non-string"
+
+   :task/constraints
+   ["Backwards-compatible — existing valid rules remain valid"
+    "Do not add :rule/dewey or any Dewey-related field — Dewey is source-format only"]}
+
+  ;; ── Task 2 ──────────────────────────────────────────────────────────────────
+  {:task/id    :wire-knowledge-injection
+   :task/title "Pre-inject :rule/knowledge-content from always-inject? rules in agent-behavior.clj"
+   :task/phase :implement
+   :task/description
+   "Update components/phase/src/ai/miniforge/phase/agent-behavior.clj to
+    extract and pre-inject :rule/knowledge-content from rules where
+    :rule/always-inject? is true and the rule's :rule/applies-to :phases
+    includes the current phase.
+
+    Current behavior:
+    - load-all-packs loads builtin + user packs
+    - Extracts :rule/agent-behavior strings → prepends to system prompt
+
+    New behavior (additive — do not remove existing logic):
+    - After extracting :rule/agent-behavior, also collect rules where
+      :rule/always-inject? is true and applicable phase matches
+    - Format their :rule/knowledge-content as a 'Reference Rules' section
+      appended to the system prompt (below :rule/agent-behavior directives)
+
+    Suggested format for the injected section:
+      ## Reference Rules
+      ### <:rule/title>
+      <:rule/knowledge-content>
+      ---
+
+    Only inject rules where :rule/knowledge-content is non-nil/non-blank.
+    If no knowledge-content rules are applicable, omit the section entirely.
+
+    Files to modify:
+    - components/phase/src/ai/miniforge/phase/agent-behavior.clj
+
+    Acceptance:
+    - A pack with :rule/always-inject? true and :rule/knowledge-content 'Use X'
+      results in 'Use X' appearing in the assembled system prompt for that phase
+    - A pack with :rule/always-inject? false does NOT inject the content
+    - A rule with :rule/always-inject? true but no :rule/knowledge-content does
+      not add a 'Reference Rules' section"
+
+   :task/constraints
+   ["Do not remove or change the :rule/agent-behavior injection path"
+    "Phase filtering uses :rule/applies-to :phases — respect it"
+    "Empty :rule/knowledge-content (blank string) should not inject"]}
+
+  ;; ── Task 3 ──────────────────────────────────────────────────────────────────
+  {:task/id    :etl-task
+   :task/title "Write bb standards:pack ETL task"
+   :task/phase :implement
+   :task/description
+   "Add a Babashka task `standards:pack` to bb.edn that reads .standards/**/*.mdc
+    and writes components/phase/resources/packs/miniforge-standards.pack.edn.
+
+    The task is the ONLY place in the codebase that knows about Dewey codes and
+    MDC format. The product never reads these files at runtime.
+
+    ETL steps for each .mdc file:
+    1. Parse YAML frontmatter (dewey, description, alwaysApply, globs)
+    2. The remaining body text becomes :rule/knowledge-content
+    3. Derive :rule/id from file slug (e.g., 'languages/clojure' → :languages/clojure)
+    4. Use :description frontmatter as :rule/title; fallback to slug
+    5. Map dewey code → applicable phases:
+         000-099  → #{:plan :implement :review :verify :release}  (foundations, all phases)
+         200-299  → #{:implement :review}                          (language rules)
+         300-399  → #{:implement :review :plan}                    (framework rules)
+         700-799  → #{:plan :implement :review :verify :release}  (workflow rules)
+         800-899  → #{:implement :review}                          (project rules)
+         900-999  → #{}                                            (meta, not injected)
+       Unmapped dewey → #{:implement :review} (safe default)
+    6. Set :rule/always-inject? from frontmatter alwaysApply (default false)
+    7. Set :rule/severity :info and :rule/enforcement {:action :warn} as defaults
+       (knowledge rules are advisory, not blocking)
+    8. Set :rule/category to the dewey code (for future query filtering)
+    9. Set :rule/detection {:type :custom} (no automated violation detection)
+
+    Output pack structure:
+      {:pack/id          :miniforge/standards
+       :pack/name        'Miniforge Engineering Standards'
+       :pack/version     '<date-based, e.g. 2026.03>'
+       :pack/description 'Shared engineering standards compiled from miniforge-standards'
+       :pack/trust-level :trusted
+       :pack/categories  ['foundations' 'languages' 'frameworks' 'workflows' 'project']
+       :pack/rules       [... one entry per .mdc file ...]}
+
+    Also support a --check flag (or separate `standards:pack-check` task) that
+    verifies the committed pack is in sync with .standards/ content. Returns
+    non-zero if out of sync. Suitable for CI.
+
+    Files to create/modify:
+    - bb.edn: add :standards/pack and :standards/pack-check tasks
+    - tasks/standards_pack.clj (or inline in bb.edn if small enough): ETL logic
+
+    The .standards/ submodule must be populated (git submodule update --init)
+    before running this task. The task should print a clear error if .standards/
+    is missing rather than silently producing an empty pack.
+
+    Acceptance:
+    - bb standards:pack produces a valid miniforge-standards.pack.edn
+    - The pack passes policy-pack/valid-pack? validation
+    - Each .mdc file produces exactly one rule entry
+    - bb standards:pack-check exits 0 when pack matches .standards/ content
+    - bb standards:pack-check exits 1 with a diff summary when out of sync"
+
+   :task/constraints
+   ["Dewey-to-phases mapping lives ONLY in this task — never imported by product code"
+    "The task is idempotent — running it twice produces the same output"
+    "Output is deterministic (sorted by rule id) so git diff is clean"
+    "Do not fail on a single unparseable .mdc file — log a warning, continue"]}
+
+  ;; ── Task 4 ──────────────────────────────────────────────────────────────────
+  {:task/id    :remove-standards-loader-path
+   :task/title "Remove .standards/ directory loading from knowledge loader"
+   :task/phase :implement
+   :task/description
+   "Update components/knowledge/src/ai/miniforge/knowledge/loader.clj to
+    remove the .standards/ directory as a source of zettels. The knowledge
+    store is now populated (if still needed) from the compiled pack, not from
+    raw .mdc files.
+
+    Changes:
+    1. Remove the default :rules-dir '.standards' from initialize-knowledge-store!
+       Option A (preferred): Remove initialize-knowledge-store! call from
+         development/src/ai/miniforge/meta_runner.clj entirely, since rule
+         injection now goes through agent-behavior.clj + policy packs.
+       Option B (if knowledge store still needed for other callers): Change
+         :rules-dir default to nil; when nil, skip loading from filesystem.
+
+    2. Remove extract-tags-from-path, generate-title-from-filename, and
+       load-mdc-file from loader.clj if they have no other callers. The ETL
+       task (bb standards:pack) handles this logic; it does not belong in
+       the product's runtime.
+
+    3. If the knowledge store has no callers after Option A, leave it in place
+       but do not use it — it will be the backing store for the MCP query tool
+       in the next spec. Add a comment: 'Knowledge store is populated by the
+       MCP lookup_policy tool in the knowledge-mcp-query spec.'
+
+    Files to modify:
+    - components/knowledge/src/ai/miniforge/knowledge/loader.clj
+    - development/src/ai/miniforge/meta_runner.clj (if Option A)
+
+    Acceptance:
+    - Removing .standards/ submodule content does not break startup or phase execution
+    - Agent context still contains the correct rules (now from the compiled pack)
+    - No runtime FileNotFoundException for .standards/ when submodule is not populated"
+
+   :task/constraints
+   ["Do not delete the knowledge component — it is needed for the MCP query spec"
+    "Do not delete load-project-docs — agents.md and claude.md loading is still useful"]}
+
+  ;; ── Task 5 ──────────────────────────────────────────────────────────────────
+  {:task/id    :generate-initial-pack
+   :task/title "Run ETL and commit miniforge-standards.pack.edn"
+   :task/phase :implement
+   :task/description
+   "Run `bb standards:pack` (task 3) to generate the initial compiled pack.
+    Commit the result to the repo.
+
+    Steps:
+    1. Ensure .standards/ submodule is populated:
+         git submodule update --init
+    2. Run the ETL:
+         bb standards:pack
+    3. Verify the generated pack passes validation:
+         (policy-pack/valid-pack? (edn/read-string (slurp 'components/phase/resources/packs/miniforge-standards.pack.edn')))
+    4. Confirm agent-behavior.clj picks it up at runtime (startup log should show
+       pack loaded: ':miniforge/standards vN rules')
+    5. Stage and commit the pack file
+
+    Files to create:
+    - components/phase/resources/packs/miniforge-standards.pack.edn
+
+    Acceptance:
+    - File exists and is valid EDN
+    - (policy-pack/valid-pack? ...) returns true
+    - Running `bb standards:pack-check` exits 0 immediately after this task"
+
+   :task/constraints
+   ["Commit the pack file directly — do not .gitignore it"
+    "The .standards/ submodule is NOT required to be populated in CI after this task"]}
+
+  ;; ── Task 6 ──────────────────────────────────────────────────────────────────
+  {:task/id    :tests
+   :task/title "Tests for schema extension, ETL output, and agent injection"
+   :task/phase :verify
+   :task/description
+   "Add tests covering the three behavior changes.
+
+    Test 1 — Schema extension (policy-pack):
+    - A rule with :rule/knowledge-content 'foo' and :rule/always-inject? true passes valid-rule?
+    - A rule with :rule/knowledge-content 42 (non-string) fails valid-rule?
+    - Existing valid rules (without new fields) still pass valid-rule?
+
+    Test 2 — Agent-behavior injection (phase):
+    - Given a pack with one rule {:rule/always-inject? true
+                                  :rule/knowledge-content 'Always do X'
+                                  :rule/applies-to {:phases #{:implement}}}
+      the assembled system prompt for :implement phase contains 'Always do X'
+    - Given the same rule with :rule/always-inject? false, 'Always do X' is absent
+    - Given a rule applicable to :review only, it does not inject into :implement prompt
+
+    Test 3 — ETL task (bb test or unit test):
+    - Given a minimal .mdc file with dewey '210' and alwaysApply false,
+      the produced rule has :rule/applies-to {:phases #{:implement :review}}
+      and :rule/always-inject? false
+    - Given alwaysApply true in frontmatter, :rule/always-inject? is true in output
+    - Given dewey '001', phases include all five phases
+
+    Files to create/modify:
+    - components/policy-pack/test/ai/miniforge/policy_pack/schema_test.clj
+    - components/phase/test/ai/miniforge/phase/agent_behavior_test.clj
+    - tasks/standards_pack_test.clj (or inline test in bb.edn)
+
+    Acceptance:
+    - All tests pass under bb test"
+
+   :task/constraints
+   ["ETL tests use in-memory fixture .mdc content — do not depend on .standards/ submodule"
+    "Agent injection tests use in-memory pack fixtures — no filesystem reads"]}]
+
+ :dependencies
+ {:extend-rule-schema           []
+  :wire-knowledge-injection     [:extend-rule-schema]
+  :etl-task                     [:extend-rule-schema]
+  :remove-standards-loader-path [:wire-knowledge-injection :etl-task]
+  :generate-initial-pack        [:etl-task :remove-standards-loader-path]
+  :tests                        [:wire-knowledge-injection :etl-task]}}

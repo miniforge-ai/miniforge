@@ -1,4 +1,5 @@
 ---
+dewey: "310"
 description: Apply Polylith architecture conventions for component organization and test placement
 globs:
   - components/**/*.clj
