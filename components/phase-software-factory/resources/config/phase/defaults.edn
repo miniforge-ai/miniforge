@@ -6,7 +6,7 @@
    :budget {:tokens 30000
             :iterations 8
             :time-seconds 600}
-   :model-hint :gpt-5.2-codex}
+   :model-hint :sonnet}
 
   ;; Verify phase defaults.
   :verify
@@ -15,7 +15,7 @@
    :budget {:tokens 15000
             :iterations 3
             :time-seconds 300}
-   :model-hint :gpt-5.2-codex}
+   :model-hint :sonnet}
 
   ;; Review phase defaults.
   :review
@@ -24,7 +24,7 @@
    :budget {:tokens 20000
             :iterations 2
             :time-seconds 180}
-   :model-hint :gpt-5.2-codex}
+   :model-hint :sonnet}
 
   ;; Plan phase defaults.
   :plan
