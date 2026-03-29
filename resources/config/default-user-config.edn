@@ -12,8 +12,9 @@
  :meta-loop {:enabled true
               :max-convergence-iterations 10
               :convergence-threshold 0.95}
-  :agents {:default-models {:thinking "gpt-5.4"
-                            :execution "gpt-5.2-codex"}}
+  :agents {:default-models {:thinking   "gpt-5.4"
+                            :execution  "claude-sonnet-4-6"
+                            :escalation "claude-opus-4-6"}}
   :model-selection {:enabled true
                     :strategy :automatic
                     :cost-limit-per-task 0.10
@@ -25,7 +26,7 @@
                  :backend-auto-switch true
                  :backend-health-threshold 0.90
                  :backend-switch-cooldown-ms 1800000
-                 :allowed-failover-backends [:codex]
+                 :allowed-failover-backends [:claude :codex]
                  :max-cost-per-workflow nil}
   :governance {:readiness {}
                :risk {}
