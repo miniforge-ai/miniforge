@@ -36,6 +36,24 @@
   ([] (records/create-client))
   ([opts] (records/create-client opts)))
 
+(defn backend-for-model
+  "Look up the backend keyword for a model-id string.
+   Returns :claude, :codex, :gemini, :ollama, etc. based on the model catalog.
+   Falls back to :claude for unknown models."
+  [model-id]
+  (or (->> registry/model-registry
+           vals
+           (filter #(= (:model-id %) model-id))
+           first
+           :backend)
+      :claude))
+
+(defn create-client-for-model
+  "Create a new LLM client using the appropriate backend for a model-id.
+   Looks up the model in the catalog to determine backend."
+  [model-id]
+  (create-client {:backend (backend-for-model model-id)}))
+
 (defn mock-client
   "Create a mock client for testing.
 
@@ -154,6 +172,11 @@
   "Extract error details from a failed response."
   [response]
   (:error response))
+
+(defn rate-limited?
+  "Check if a response indicates the provider rate-limited the request."
+  [response]
+  (= :anomalies.agent/rate-limited (:anomaly response)))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Progress Monitoring

@@ -10,7 +10,7 @@
   (testing "returns canonical role budgets"
     (is (= {:tokens 100000 :cost-usd 5.0}
            (budget/role-budget :planner)))
-    (is (= {:tokens 50000 :cost-usd 2.5}
+    (is (= {:tokens 100000 :cost-usd 5.0}
            (budget/role-budget :implementer))))
 
   (testing "maps specialized role aliases to canonical role budgets"
@@ -18,7 +18,7 @@
            (budget/role-budget :releaser))))
 
   (testing "falls back to implementer budget for unknown roles"
-    (is (= {:tokens 50000 :cost-usd 2.5}
+    (is (= {:tokens 100000 :cost-usd 5.0}
            (budget/role-budget :unknown-role)))))
 
 (deftest resolve-cost-budget-usd-test
@@ -45,7 +45,7 @@
            (budget/resolve-cost-budget-usd :releaser {} {}))))
 
   (testing "falls back to implementer budget for unknown roles"
-    (is (= 2.5
+    (is (= 5.0
            (budget/resolve-cost-budget-usd :unknown-role {} {})))))
 
 (deftest apply-default-budget-test

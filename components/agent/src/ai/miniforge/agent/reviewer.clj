@@ -483,10 +483,10 @@
                   response (if on-chunk
                              (llm/chat-stream llm-client user-prompt on-chunk
                                               {:system @reviewer-system-prompt
-                                               :max-turns 10})
+                                               :max-turns 20})
                              (llm/chat llm-client user-prompt
                                        {:system @reviewer-system-prompt
-                                        :max-turns 10}))
+                                        :max-turns 20}))
                   tokens (get response :tokens 0)
                   cost-usd (get response :cost-usd)]
 

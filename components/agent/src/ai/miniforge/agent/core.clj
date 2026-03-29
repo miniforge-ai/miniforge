@@ -39,8 +39,8 @@
 
    :implementer {:model (model/default-model-for-role :implementer)
                  :temperature 0.3
-                 :max-tokens 8000
-                 :budget {:tokens 50000 :cost-usd 2.5}}
+                 :max-tokens 16000
+                 :budget {:tokens 100000 :cost-usd 5.0}}
 
    :tester      {:model (model/default-model-for-role :tester)
                  :temperature 0.2

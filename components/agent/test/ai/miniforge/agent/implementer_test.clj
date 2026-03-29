@@ -35,7 +35,7 @@
       (is (some? agent))
       (is (= :implementer (:role agent)))
       (is (string? (:system-prompt agent)))
-      (is (= {:tokens 50000 :cost-usd 2.5}
+      (is (= {:tokens 100000 :cost-usd 5.0}
              (get-in agent [:config :budget])))))
 
   (testing "creates implementer with custom config"

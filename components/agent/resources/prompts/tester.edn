@@ -113,12 +113,12 @@ You must output a structured test artifact as a Clojure map:
     - No shared mutable state between tests
     - Use fixtures for setup/teardown
 
-## REQUIRED Output Method — MCP Tool
+## CRITICAL: Submit Your Tests via MCP Tool
 
-You MUST submit your tests by calling the `submit_test_artifact` MCP tool.
+You MUST call the `mcp__artifact__submit_test_artifact` tool to submit your tests.
 This is your PRIMARY deliverable — if you do not call this tool, your work is lost.
 
-Call `submit_test_artifact` with:
+Call `mcp__artifact__submit_test_artifact` with:
 - `files`: array of objects with `path` and `content` (complete test namespaces)
 - `summary`: description of test coverage
 - `type`: \"unit\", \"integration\", \"property\", \"e2e\", or \"acceptance\" (optional)
@@ -126,11 +126,11 @@ Call `submit_test_artifact` with:
 - `coverage`: object with `lines`, `branches`, `functions` percentages (optional)
 
 CRITICAL RULES:
-1. You MUST call `submit_test_artifact` exactly once before finishing
+1. You MUST call `mcp__artifact__submit_test_artifact` exactly once before finishing
 2. Do NOT output raw EDN text — use the tool
-3. Do NOT use the Write tool to write test files — use `submit_test_artifact`
+3. Do NOT use the Write tool to write test files — use `mcp__artifact__submit_test_artifact`
 4. If you write tests as text without calling the tool, they will be discarded
-5. Use `context_read`, `context_grep`, `context_glob` MCP tools if you need to explore files.
+5. Use `mcp__artifact__context_read`, `mcp__artifact__context_grep`, `mcp__artifact__context_glob` if you need to explore files.
    These serve from a pre-loaded cache (instant) and fall back to filesystem only when needed.
    Built-in Read, Grep, Glob tools are disabled.
 6. Go directly to generating tests and calling the MCP tool — minimize exploration
@@ -138,12 +138,12 @@ CRITICAL RULES:
 ## Context
 
 All code you need to test is provided below in this prompt AND pre-loaded in the
-context cache. If you need to look up additional files (e.g. dependencies, related
-namespaces), use `context_read`, `context_grep`, or `context_glob` — these check
+context cache. If you need additional files, use `mcp__artifact__context_read`,
+`mcp__artifact__context_grep`, or `mcp__artifact__context_glob` — these check
 the cache first (instant) and fall back to the filesystem only when needed.
 
-Generate your tests from the provided code, then call `submit_test_artifact`.
-This is your only deliverable.
+Generate your tests from the provided code, then call `mcp__artifact__submit_test_artifact`.
+Your LAST action before finishing MUST be calling `mcp__artifact__submit_test_artifact`.
 
 Remember: Good tests are documentation. They show how the code is intended to be used
 and what behavior is expected. Make tests readable and maintainable."}

@@ -102,20 +102,28 @@ work is needed, proceed with normal plan generation.
 9. **Review Points**: Include :review tasks at natural checkpoints, especially after
    significant implementation milestones.
 
-## Preferred Output Method
+## CRITICAL: Submit Your Plan via MCP Tool
 
-If the `submit_plan` MCP tool is available, you MUST use it to submit your plan.
-Call `submit_plan` with:
+You MUST call the `mcp__artifact__submit_plan` tool to submit your plan.
+This is your primary output mechanism. Do NOT output plans as raw text — they will be lost.
+
+Call `mcp__artifact__submit_plan` with:
 - `name`: short descriptive name for the plan
 - `tasks`: array of task objects with `description`, `type` (\"implement\", \"test\", \"review\", \"design\", \"deploy\", \"configure\"), and optionally `dependencies` (array of task indexes), `acceptance_criteria`, `estimated_effort`
 - `complexity`: \"low\", \"medium\", or \"high\" (optional)
 - `risks`: array of risk strings (optional)
 - `assumptions`: array of assumption strings (optional)
 
-Do NOT output raw EDN text when the MCP tool is available.
+The tool is ALWAYS available. If you encounter an error, report the error.
+Do NOT fall back to raw text output under any circumstances.
 
-The MCP tool is always available in this environment. If you encounter an error calling it,
-report the error rather than falling back to raw text output.
+If you need to explore the codebase, use these MCP tools (they check a pre-loaded cache first):
+- `mcp__artifact__context_read` — read a file by path
+- `mcp__artifact__context_grep` — search file contents by regex
+- `mcp__artifact__context_glob` — find files by glob pattern
+
+Limit file reads to what's necessary, then submit your plan.
+Your LAST action before finishing MUST be calling `mcp__artifact__submit_plan`.
 
 Remember: A good plan enables parallel execution where possible while respecting
 necessary dependencies. Optimize for clarity and testability."}

@@ -269,18 +269,33 @@
                                                    ctx/transition-to-completed
                                                    ctx/transition-to-failed)
                           (monitoring/clear-transient-state))
-            ;; Exponential backoff when phase is retrying
-            retrying? (= (:execution/phase-index phase-ctx)
-                         (:execution/phase-index context))
-            retry-count (get-in phase-ctx [:phase :iterations] 1)]
-        (when (and retrying? (> retry-count 1))
-          (let [backoff-ms (min 30000 (long (* 1000 (Math/pow 2 (dec retry-count)))))]
-            (Thread/sleep backoff-ms)))
-        (let [event-stream (get-in phase-ctx [:execution/opts :event-stream])
-              switch-result (check-backend-health-at-boundary! event-stream phase-ctx)]
-          (if switch-result
-            (assoc phase-ctx :self-healing/backend-switch switch-result)
-            phase-ctx))))))
+            ;; Check if phase failed due to rate limiting — if so, stop retrying
+            ;; and bubble the error up to the DAG orchestrator's resilience module
+            current-phase (:execution/current-phase phase-ctx)
+            phase-result (get-in phase-ctx [:execution/phase-results current-phase])
+            phase-error-msg (get-in phase-result [:error :message] "")
+            rate-limited? (boolean
+                           (re-find #"(?i)rate.?limit|429|hit your limit|quota.?exceeded"
+                                    (str phase-error-msg)))]
+        (if rate-limited?
+          ;; Stop retrying immediately — let the DAG orchestrator handle the wait/pause
+          (-> phase-ctx
+              (assoc :execution/status :failed)
+              (update :execution/errors conj
+                      {:type :rate-limited
+                       :message phase-error-msg}))
+          ;; Normal path: exponential backoff when phase is retrying
+          (let [retrying? (= (:execution/phase-index phase-ctx)
+                             (:execution/phase-index context))
+                retry-count (get-in phase-ctx [:phase :iterations] 1)]
+            (when (and retrying? (> retry-count 1))
+              (let [backoff-ms (min 30000 (long (* 1000 (Math/pow 2 (dec retry-count)))))]
+                (Thread/sleep backoff-ms)))
+            (let [event-stream (get-in phase-ctx [:execution/opts :event-stream])
+                  switch-result (check-backend-health-at-boundary! event-stream phase-ctx)]
+              (if switch-result
+                (assoc phase-ctx :self-healing/backend-switch switch-result)
+                phase-ctx))))))))
 
 ;------------------------------------------------------------------------------ Layer 1.5: Output extraction
 
