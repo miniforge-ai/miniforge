@@ -272,7 +272,7 @@
           :hx-target "#filter-modal-container"
           :hx-swap "innerHTML"
           :title "Add pane-local filter"}
-         "Filter"]]]]
+         (msg/t :action/filter)]]]]
      ;; Refresh on WebSocket push, skip if any card is expanded (preserves open state)
      [:div#workflows-content
       {:hx-get "/api/workflows"
@@ -304,7 +304,7 @@
   "Detailed workflow view for direct URL access. Redirects to workflows page."
   [layout workflow events]
   (if (:error workflow)
-    (layout "Error" [:div.error (:error workflow)])
+    (layout (msg/t :status/error) [:div.error (:error workflow)])
     (layout (str "Workflow: " (:name workflow))
      [:div.workflow-detail
       [:div.workflow-header

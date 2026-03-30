@@ -15,7 +15,8 @@
 (ns ai.miniforge.web-dashboard.views.dag
   "DAG kanban board views for workflow task visualization."
   (:require
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [ai.miniforge.web-dashboard.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Filter modal (shared across panes)
@@ -184,14 +185,14 @@
         "This pane only")]
      [:button.filter-modal-close
       {:onclick "this.parentElement.parentElement.parentElement.remove()"
-       :title "Close"}
+       :title (msg/t :action/close)}
       "×"]]
     [:div.filter-modal-body
      (filter-modal-body-fragment filters facets scope)]
     [:div.filter-modal-footer
      [:button.btn.btn-sm.btn-ghost
       {:onclick "this.parentElement.parentElement.parentElement.remove()"}
-      "Done"]]]])
+      (msg/t :action/done)]]]])
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; DAG kanban view
@@ -214,7 +215,7 @@
                  :hx-target "#filter-modal-container"
                  :hx-swap "innerHTML"
                  :title "Add pane-local filter"}
-                "Filter"]]]]]
+                (msg/t :action/filter)]]]]]
            [:div.kanban-board
             (for [status [:blocked :ready :running :done]]
               [:div.kanban-column {:class (name status)}

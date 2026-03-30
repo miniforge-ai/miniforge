@@ -177,7 +177,7 @@
        [:thead
         [:tr
          [:th "Train Name"]
-         [:th "Status"]
+         [:th (messages/t :table/status-header)]
          [:th "PRs"]
          [:th "Ready"]
          [:th "Blocked"]
@@ -256,7 +256,7 @@
          :hx-target "#filter-modal-container"
          :hx-swap "innerHTML"
          :title "Add pane-local filter"}
-        "Filter"]]]]
+        (messages/t :action/filter)]]]]
     [:div#trains-section
      {:hx-get "/api/trains"
       :hx-trigger "refresh from:body, every 5s"
@@ -271,7 +271,7 @@
   "Detailed view of a single PR train."
   [layout train]
   (if (:error train)
-    (layout "Error" [:div.error (:error train)])
+    (layout (messages/t :status/error) [:div.error (:error train)])
     (layout (str "Train: " (:train/name train))
      [:div.train-detail
       [:div.train-detail-header

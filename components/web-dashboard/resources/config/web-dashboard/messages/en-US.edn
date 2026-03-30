@@ -89,4 +89,17 @@
   ;; workflow — duration units
   :duration/ms-suffix          "ms"
   :duration/s-suffix           "s"
-  :duration/min-suffix         "m"}}
+  :duration/min-suffix         "m"
+
+  ;; shared UI actions
+  :action/filter               "Filter"
+  :action/delete               "Delete"
+  :action/close                "Close"
+  :action/done                 "Done"
+
+  ;; generic status/error labels
+  :status/error                "Error"
+  :status/failed-label         "Failed"
+
+  ;; table headers
+  :table/status-header         "Status"}}
