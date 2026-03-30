@@ -41,6 +41,14 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; MDC parsing — frontmatter and body extraction
 
+(defn- strip-quotes
+  "Strip surrounding single or double quotes from a string."
+  [s]
+  (cond
+    (and (str/starts-with? s "\"") (str/ends-with? s "\"")) (subs s 1 (dec (count s)))
+    (and (str/starts-with? s "'")  (str/ends-with? s "'"))  (subs s 1 (dec (count s)))
+    :else s))
+
 (defn- parse-inline-array
   "Parse a JSON/YAML-style inline array string: [\"a\", \"b\", c].
 
@@ -57,17 +65,7 @@
     (if (str/blank? inner)
       []
       (->> (str/split inner #",")
-           (mapv (fn [item]
-                   (let [trimmed (str/trim item)]
-                     (cond
-                       ;; Double-quoted
-                       (and (str/starts-with? trimmed "\"") (str/ends-with? trimmed "\""))
-                       (subs trimmed 1 (dec (count trimmed)))
-                       ;; Single-quoted
-                       (and (str/starts-with? trimmed "'") (str/ends-with? trimmed "'"))
-                       (subs trimmed 1 (dec (count trimmed)))
-                       ;; Bare value
-                       :else trimmed))))))))
+           (mapv (comp strip-quotes str/trim))))))
 
 (defn- parse-frontmatter-value
   "Parse a single YAML-like frontmatter value string into a Clojure value.
@@ -76,19 +74,41 @@
   [raw]
   (let [v (str/trim raw)]
     (cond
-      (= v "true")  true
-      (= v "false") false
-      ;; Double-quoted string
-      (and (str/starts-with? v "\"") (str/ends-with? v "\""))
-      (subs v 1 (dec (count v)))
-      ;; Single-quoted string
-      (and (str/starts-with? v "'") (str/ends-with? v "'"))
-      (subs v 1 (dec (count v)))
-      ;; Inline array
-      (str/starts-with? v "[")
-      (parse-inline-array v)
-      ;; Bare string
-      :else v)))
+      (= v "true")               true
+      (= v "false")              false
+      (str/starts-with? v "[")   (parse-inline-array v)
+      :else                      (strip-quotes v))))
+
+(defn- parse-list-item
+  "Parse a '- <value>' frontmatter list line to its string value."
+  [trimmed]
+  (strip-quotes (str/trim (subs trimmed 2))))
+
+(defn- parse-kv-line
+  "Parse a 'key: value' frontmatter line.
+   Returns [new-current-key updated-acc]."
+  [trimmed acc]
+  (let [idx (str/index-of trimmed ":")
+        k   (str/trim (subs trimmed 0 idx))
+        v   (str/trim (subs trimmed (inc idx)))]
+    (if (str/blank? v)
+      [k (assoc acc k [])]
+      [nil (assoc acc k (parse-frontmatter-value v))])))
+
+(defn- process-frontmatter-line
+  "Process one frontmatter line. Returns [current-key acc]."
+  [trimmed current-key acc]
+  (cond
+    (str/blank? trimmed)
+    [current-key acc]
+
+    (and current-key (str/starts-with? trimmed "- "))
+    [current-key (update acc current-key (fnil conj []) (parse-list-item trimmed))]
+
+    (str/includes? trimmed ":")
+    (parse-kv-line trimmed acc)
+
+    :else [current-key acc]))
 
 (defn- parse-frontmatter
   "Parse YAML-like frontmatter text into a string-keyed map.
@@ -104,50 +124,13 @@
   [frontmatter-str]
   (if (str/blank? frontmatter-str)
     {}
-    (let [lines (str/split-lines frontmatter-str)]
-      (loop [remaining lines
-             current-key nil
-             acc {}]
-        (if (empty? remaining)
-          acc
-          (let [line (first remaining)
-                trimmed (str/trim line)]
-            (cond
-              ;; Blank line — skip
-              (str/blank? trimmed)
-              (recur (rest remaining) current-key acc)
-
-              ;; Multi-line list item under current key
-              (and current-key (str/starts-with? trimmed "- "))
-              (let [item-raw (str/trim (subs trimmed 2))
-                    item (cond
-                           (and (str/starts-with? item-raw "\"")
-                                (str/ends-with? item-raw "\""))
-                           (subs item-raw 1 (dec (count item-raw)))
-
-                           (and (str/starts-with? item-raw "'")
-                                (str/ends-with? item-raw "'"))
-                           (subs item-raw 1 (dec (count item-raw)))
-
-                           :else item-raw)]
-                (recur (rest remaining) current-key
-                       (update acc current-key (fnil conj []) item)))
-
-              ;; Key: value pair
-              (str/includes? trimmed ":")
-              (let [idx (str/index-of trimmed ":")
-                    k (str/trim (subs trimmed 0 idx))
-                    v (str/trim (subs trimmed (inc idx)))]
-                (if (str/blank? v)
-                  ;; Value on subsequent lines (multi-line list)
-                  (recur (rest remaining) k (assoc acc k []))
-                  ;; Value on same line
-                  (recur (rest remaining) nil
-                         (assoc acc k (parse-frontmatter-value v)))))
-
-              ;; Unrecognized line — skip
-              :else
-              (recur (rest remaining) current-key acc))))))))
+    (loop [[line & remaining] (str/split-lines frontmatter-str)
+           current-key nil
+           acc {}]
+      (if (nil? line)
+        acc
+        (let [[current-key' acc'] (process-frontmatter-line (str/trim line) current-key acc)]
+          (recur remaining current-key' acc'))))))
 
 (defn split-frontmatter
   "Split MDC content into frontmatter string and body string.
@@ -341,46 +324,39 @@
     (when-not (str/blank? content)
       content)))
 
+(defn- condense-bullets
+  "Keep first 3 bullets from lines, hard-truncating to target-length."
+  [lines target-length]
+  (let [bullets (filterv #(re-matches #"^\s*[-*]\s+.*" %) lines)
+        result  (str/trim (str/join "\n" (take 3 bullets)))]
+    (if (<= (count result) target-length)
+      result
+      (subs result 0 target-length))))
+
+(defn- condense-prose
+  "Keep complete sentences up to target-length, falling back to hard truncation."
+  [text target-length]
+  (let [single-line (str/replace text #"\n+" " ")
+        condensed   (reduce (fn [acc s]
+                              (let [candidate (if (str/blank? acc) s (str acc " " s))]
+                                (if (> (count candidate) target-length) (reduced acc) candidate)))
+                            ""
+                            (str/split single-line #"(?<=[.!?])\s+"))]
+    (if (str/blank? condensed)
+      (subs text 0 (min (count text) target-length))
+      condensed)))
+
 (defn- condense-to-length
   "Condense text to approximately target-length characters.
-
-   For bullet lists: keeps the first 3 bullets.
-   For prose: keeps complete sentences up to the limit.
-   Falls back to hard truncation if no natural break found.
-
-   Arguments:
-   - text          - Source text
-   - target-length - Maximum character count
-
-   Returns:
-   - Condensed string."
+   Bullet lists: keeps first 3 bullets. Prose: keeps complete sentences."
   [text target-length]
   (if (<= (count text) target-length)
     text
-    (let [lines (str/split-lines text)
-          bullet-lines (filterv #(re-matches #"^\s*[-*]\s+.*" %) lines)]
-      (if (>= (count bullet-lines) 2)
-        ;; Bullet list — take first 3 bullets
-        (let [result (str/trim (str/join "\n" (take 3 bullet-lines)))]
-          (if (<= (count result) target-length)
-            result
-            (subs result 0 target-length)))
-        ;; Prose — split on sentence boundaries
-        (let [single-line (str/replace text #"\n+" " ")
-              sentences (str/split single-line #"(?<=[.!?])\s+")
-              condensed (reduce
-                         (fn [acc sentence]
-                           (let [candidate (if (str/blank? acc)
-                                            sentence
-                                            (str acc " " sentence))]
-                             (if (> (count candidate) target-length)
-                               (reduced acc)
-                               candidate)))
-                         ""
-                         sentences)]
-          (if (str/blank? condensed)
-            (subs text 0 (min (count text) target-length))
-            condensed))))))
+    (let [lines   (str/split-lines text)
+          bullets (filterv #(re-matches #"^\s*[-*]\s+.*" %) lines)]
+      (if (>= (count bullets) 2)
+        (condense-bullets lines target-length)
+        (condense-prose text target-length)))))
 
 (defn extract-agent-behavior
   "Extract a concise agent behavior directive from an MDC body.
