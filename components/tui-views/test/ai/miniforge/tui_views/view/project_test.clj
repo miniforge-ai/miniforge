@@ -2,7 +2,8 @@
   "Unit tests for extracted helper functions in project.clj."
   (:require
    [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.tui-views.view.project :as sut]))
+   [ai.miniforge.tui-views.view.project :as sut]
+   [ai.miniforge.tui-views.view.project.trees :as trees]))
 
 ;; ============================================================================
 ;; readiness-state
@@ -583,3 +584,33 @@
     (let [row (pr-row-with-size 0 0)]
       (is (= "—" (:ready row)))
       (is (= [0 180 80] (:ready-fg row))))))
+
+;; ============================================================================
+;; clean-agent-content
+;; ============================================================================
+
+(deftest clean-agent-content-unescapes-newlines
+  (testing "literal \\n becomes real newline, splitting into multiple lines"
+    (let [lines (trees/clean-agent-content "line one\\nline two\\nline three")]
+      (is (= ["line one" "line two" "line three"] (vec lines))))))
+
+(deftest clean-agent-content-filters-sse-events
+  (testing "JSON SSE event lines are removed"
+    (let [content "Review complete\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":100}}\nDone"
+          lines (trees/clean-agent-content content)]
+      (is (= ["Review complete" "Done"] (vec lines))))))
+
+(deftest clean-agent-content-strips-markdown-links
+  (testing "markdown [text](url) links become plain text"
+    (let [lines (trees/clean-agent-content "See [foo.clj](/path/to/foo.clj#L42) for details")]
+      (is (= ["See foo.clj for details"] (vec lines))))))
+
+(deftest clean-agent-content-nil-safe
+  (testing "nil content returns a sequence with one empty string"
+    (is (= [""] (vec (trees/clean-agent-content nil))))))
+
+(deftest clean-agent-content-combined
+  (testing "unescapes, filters SSE, and strips links together"
+    (let [content "Issue 1: missing test\\n{\"type\":\"turn.completed\"}\nSee [foo.clj](/foo.clj) for context"
+          lines (trees/clean-agent-content content)]
+      (is (= ["Issue 1: missing test" "See foo.clj for context"] (vec lines))))))

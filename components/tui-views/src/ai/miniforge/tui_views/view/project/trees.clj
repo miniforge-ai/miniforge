@@ -494,6 +494,18 @@
                :depth 0 :expandable? false})
             phases))))
 
+(defn clean-agent-content
+  "Clean raw agent content for display:
+   - Unescape literal \\n sequences to real newlines
+   - Remove JSON SSE event lines (lines starting with '{\"type\":')
+   - Strip markdown link syntax [text](url) → text"
+  [content]
+  (->> (-> (or content "")
+           (str/replace "\\n" "\n"))
+       str/split-lines
+       (remove #(str/starts-with? (str/trim %) "{\"type\":"))
+       (map #(str/replace % #"\[([^\]]+)\]\([^)]+\)" "$1"))))
+
 (defn project-chat-messages
   "Project chat messages as tree nodes for the agent panel.
    Shows conversation history with role-based styling and numbered actions.
@@ -513,7 +525,7 @@
                         (fn [{:keys [role content]}]
                           (let [prefix (if (= :user role) "You" "Agent")
                                 fg     (if (= :user role) status-info status-pass)
-                                lines  (str/split-lines (or content ""))]
+                                lines  (clean-agent-content content)]
                             (into [(tree-node (str prefix ":") 0 false fg)]
                                   (mapcat (fn [line]
                                             (mapv #(tree-node (str "  " %) 1)
