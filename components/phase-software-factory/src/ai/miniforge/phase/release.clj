@@ -22,7 +22,10 @@
    Prepares release artifacts and creates PRs using the release-executor component.
    Agent: :releaser
    Default gates: [:release-ready]"
-  (:require [ai.miniforge.logging.interface :as log]
+  (:require [clojure.java.io :as io]
+            [clojure.java.shell :as shell]
+            [clojure.string :as str]
+            [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.phase.messages :as messages]
@@ -76,40 +79,63 @@
                        :implement-result-keys impl-keys
                        :hint "Implement phase may have failed or produced no output"})))))
 
-(defn- assert-has-files!
-  "Throw when implement result has zero code files."
-  [impl-status implement-result]
-  (when (and implement-result
-             (map? implement-result)
-             (not= :already-implemented impl-status)
-             (empty? (:code/files implement-result)))
-    (throw (ex-info (messages/t :release/zero-files)
-                    {:phase :release :artifact-id (:code/id implement-result)}))))
+(defn- ctx-worktree-path
+  "Resolve the working directory from phase context."
+  [ctx]
+  (or (get-in ctx [:execution/worktree-path])
+      (get-in ctx [:worktree-path])
+      (get-in ctx [:execution/opts :worktree-path])
+      (System/getProperty "user.dir")))
+
+(defn- git-dirty-files
+  "Scan git working tree for new/modified/deleted files; return as :code/files entries.
+   Used as fallback when the implement phase wrote files directly to disk
+   (design docs, specs, UX assets, etc.) rather than returning them in a
+   :code/files artifact."
+  [root-path]
+  (try
+    (let [{:keys [out]} (shell/sh "git" "status" "--porcelain" "-uall" :dir root-path)
+          lines (->> (str/split-lines (or out "")) (remove str/blank?))]
+      (->> lines
+           (keep (fn [line]
+                   (let [xy   (subs line 0 2)
+                         path (str/trim (subs line 3))
+                         file (io/file root-path path)]
+                     (cond
+                       (str/includes? xy "D") {:path path :content "" :action :delete}
+                       (.isFile file)         {:path path
+                                               :content (slurp file)
+                                               :action (if (str/starts-with? (str/trim xy) "?")
+                                                         :create
+                                                         :modify)}))))
+           vec))
+    (catch Exception _ [])))
 
 (defn build-workflow-state
-  "Build workflow state from phase context for the release executor."
+  "Build workflow state from phase context for the release executor.
+
+   Accepts any artifact shape from the implement phase:
+   - :code/files present → use them directly (standard code path)
+   - no :code/files       → fall back to git working tree (design docs, specs, etc.)"
   [ctx]
-  ;; Read implement result from execution phase results (not :phases)
-  ;; This is the canonical location where workflow runner stores phase outputs
-  ;; Phase results contain the full phase map, so extract :result :output
-  (let [impl-status (get-in ctx [:execution/phase-results :implement :result :status])
+  (let [impl-status      (get-in ctx [:execution/phase-results :implement :result :status])
         implement-result (get-in ctx [:execution/phase-results :implement :result :output])]
     (log-already-implemented! ctx impl-status)
     (assert-implement-artifact! ctx impl-status implement-result)
-    (assert-has-files! impl-status implement-result)
-    (let [code-artifacts (if-let [artifacts (:artifacts implement-result)]
-                           (map (fn [a] {:artifact/type :code
-                                         :artifact/content a})
-                                artifacts)
-                           ;; Fallback: wrap result directly
-                           [{:artifact/type :code
-                             :artifact/content implement-result}])
-          input (get-in ctx [:execution/input])]
-      {:workflow/id (or (get-in ctx [:execution/id]) (random-uuid))
-       :workflow/phase :release
-       :workflow/spec {:spec/description (or (:description input)
-                                             (:title input)
-                                             "implement changes")}
+    (let [explicit-files (not-empty (:code/files implement-result))
+          files          (or explicit-files
+                             (not-empty (git-dirty-files (ctx-worktree-path ctx)))
+                             (throw (ex-info (messages/t :release/zero-files)
+                                             {:phase :release
+                                              :artifact-id (:code/id implement-result)})))
+          code-artifacts [{:artifact/type    :code
+                           :artifact/content (assoc implement-result :code/files files)}]
+          input          (get-in ctx [:execution/input])]
+      {:workflow/id       (or (get-in ctx [:execution/id]) (random-uuid))
+       :workflow/phase    :release
+       :workflow/spec     {:spec/description (or (:description input)
+                                                 (:title input)
+                                                 "implement changes")}
        :workflow/artifacts code-artifacts})))
 
 (defn build-executor-context
