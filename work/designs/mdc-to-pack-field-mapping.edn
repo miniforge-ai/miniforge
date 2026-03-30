@@ -1,0 +1,634 @@
+;; =============================================================================
+;; Design: .mdc Frontmatter → Pack Rule Field Mapping
+;; =============================================================================
+;;
+;; Authoritative specification for how .standards/*.mdc files are compiled into
+;; policy pack rules by the ETL task (bb standards:pack).
+;;
+;; This document lives in the repo as a design artifact. No runtime code reads
+;; it; it exists to drive and verify the ETL implementation (Task 3 of
+;; policy-pack-extensibility.spec.edn).
+;;
+;; The ETL is the ONLY place in the codebase that knows about Dewey codes,
+;; MDC format, and YAML frontmatter. After compilation, the product works
+;; exclusively with pack rule maps.
+;;
+;; Related:
+;;   work/policy-pack-extensibility.spec.edn  — parent spec (tasks 1–6)
+;;   components/policy-pack/src/.../schema.clj — Rule schema (target format)
+;;   .standards/                                — source .mdc files (input)
+;;
+;; Date: 2026-03-29
+;; Status: approved
+
+{:design/title  "MDC-to-Pack Rule Field Mapping"
+ :design/status :approved
+ :design/date   "2026-03-29"
+ :design/spec   "work/policy-pack-extensibility.spec.edn"
+
+ ;; ═══════════════════════════════════════════════════════════════════════════
+ ;; Section 1: Field-by-Field Mapping
+ ;; ═══════════════════════════════════════════════════════════════════════════
+ ;;
+ ;; Each entry maps one source field (MDC frontmatter or body) to one or more
+ ;; target fields in the compiled rule map.
+ ;;
+ ;; Legend:
+ ;;   :source      — where the value comes from in the .mdc file
+ ;;   :target      — the key(s) in the output rule map
+ ;;   :transform   — how to convert source → target
+ ;;   :default     — value when source is absent or empty
+ ;;   :required?   — whether the source field must be present
+
+ :mapping/fields
+ [{;; ── 1. Rule identity ────────────────────────────────────────────────────
+   :name       "Rule ID"
+   :source     :filename-slug
+   :target     :rule/id
+   :transform  "Strip .mdc extension from filename (not full path).
+                Prefix with :std/ namespace.
+                e.g. stratified-design.mdc → :std/stratified-design
+                     clojure.mdc           → :std/clojure
+                     pre-commit-discipline.mdc → :std/pre-commit-discipline
+                Directory path is NOT included in the id.
+                All filenames in .standards/ MUST be unique across directories."
+   :required?  true
+   :examples   {"foundations/stratified-design.mdc" :std/stratified-design
+                "languages/clojure.mdc"             :std/clojure
+                "workflows/pre-commit-discipline.mdc" :std/pre-commit-discipline
+                "testing/standards.mdc"              :std/standards
+                "index.mdc"                          :std/index}}
+
+  {;; ── 2. Rule title ──────────────────────────────────────────────────────
+   :name       "Rule Title"
+   :source     [:frontmatter "description"]
+   :target     :rule/title
+   :transform  "Use the description: frontmatter value verbatim.
+                Fallback to a title derived from the filename slug
+                (replace hyphens with spaces, title-case)."
+   :default    :derive-from-slug
+   :required?  false
+   :examples   {"Stratified Design — enforce one-way dependencies and clear data flow"
+                "Stratified Design — enforce one-way dependencies and clear data flow"
+
+                nil  ; missing description, slug is 'code-quality'
+                "Code Quality"}}
+
+  {;; ── 3. Rule description ────────────────────────────────────────────────
+   :name       "Rule Description"
+   :source     [:derived]
+   :target     :rule/description
+   :transform  "Generated from title and category.
+                Format: 'Engineering standard (<category>): <title>'
+                This field is required by the Rule schema but not directly
+                present in MDC frontmatter."
+   :default    :generated
+   :required?  false
+   :examples   {[:title "Stratified Design — enforce one-way dependencies"
+                 :category "001"]
+                "Engineering standard (001): Stratified Design — enforce one-way dependencies"}}
+
+  {;; ── 4. Category (from Dewey) ───────────────────────────────────────────
+   :name       "Category"
+   :source     [:frontmatter "dewey"]
+   :target     :rule/category
+   :transform  "Use the dewey: frontmatter value as-is (string).
+                The Dewey code is preserved as the category for future
+                query filtering but is NOT used by runtime product code
+                for any logic. The ETL uses it to derive :phases (see
+                Section 2) but that derivation stays in the ETL."
+   :default    "000"
+   :required?  true
+   :examples   {"001" "001"
+                "210" "210"
+                "715" "715"}}
+
+  {;; ── 5. Always-inject flag ──────────────────────────────────────────────
+   :name       "Always Inject"
+   :source     [:frontmatter "alwaysApply"]
+   :target     :rule/always-inject?
+   :transform  "When alwaysApply: true  → :rule/always-inject? true
+                When alwaysApply: false → omit :rule/always-inject? entirely
+                When alwaysApply absent → omit :rule/always-inject? entirely
+
+                Rationale: The schema field is [:optional true], so omitting
+                it is cleaner than setting false. Consumers check with
+                (:rule/always-inject? rule) which returns nil (falsy) when
+                absent — correct behavior."
+   :default    :omit
+   :required?  false
+   :examples   {true  {:rule/always-inject? true}
+                false {}   ; key omitted from rule map
+                nil   {}}} ; key omitted from rule map
+
+  {;; ── 6. Knowledge content (full body) ───────────────────────────────────
+   :name       "Knowledge Content"
+   :source     :mdc-body
+   :target     :rule/knowledge-content
+   :transform  "Everything after the closing --- of the YAML frontmatter.
+                Preserve markdown formatting, headings, code blocks, etc.
+                Trim leading/trailing whitespace.
+                Do NOT strip ## Agent behavior section — it remains in the
+                full knowledge content. :rule/agent-behavior gets a condensed
+                extract (see field 7), but the full text stays here.
+
+                If the body is empty or whitespace-only after trimming,
+                set :rule/knowledge-content to nil (omit from rule map)."
+   :default    nil
+   :required?  false
+   :examples   {"# Stratified Design (ALWAYS)\n\nUse a single-direction DAG..."
+                "# Stratified Design (ALWAYS)\n\nUse a single-direction DAG..."}}
+
+  {;; ── 7. Agent behavior (extracted summary) ──────────────────────────────
+   :name       "Agent Behavior"
+   :source     [:mdc-body "## Agent behavior"]
+   :target     :rule/agent-behavior
+   :transform  "Extract a condensed behavioral directive for prompt injection.
+
+                Priority 1: If the body contains a '## Agent behavior' section
+                (case-insensitive heading match), extract its content (everything
+                from the heading to the next ## heading or end-of-file).
+                Condense to a single-paragraph summary if longer than ~500 chars.
+
+                Priority 2: If no '## Agent behavior' section exists, use the
+                first non-heading paragraph of the body as the behavior summary.
+
+                The result should be a concise directive suitable for injection
+                into a numbered list in the system prompt (see agent-behavior.clj
+                format-behavior-addendum). Aim for 1–3 sentences.
+
+                If no meaningful content can be extracted, omit the field."
+   :default    nil
+   :required?  false
+   :examples
+   {;; Has ## Agent behavior section
+    "## Agent behavior\n\n- Before writing code, output a stratified plan.\n- Detect upward imports."
+    "Before writing code, output a stratified plan with modules, strata, and allowed dependencies. When editing existing code, detect and call out any upward import or cross-strata leakage."
+
+    ;; No ## Agent behavior section — use first paragraph
+    "# Code Quality (ALWAYS)\n\nEvery function must read as a pipeline: data enters, transforms, exits."
+    "Every function must read as a pipeline: data enters, transforms, exits."}}
+
+  {;; ── 8. Applicability (phases from Dewey + optional globs) ──────────────
+   :name       "Applies-To"
+   :source     [:frontmatter "dewey" "globs"]
+   :target     :rule/applies-to
+   :transform  "Build a RuleApplicability map with two possible sub-fields:
+
+                :phases — derived from Dewey range (see Section 2 mapping table).
+                          For alwaysApply: true rules, phases determine WHICH
+                          agent roles receive the knowledge, not whether it is
+                          injected (always-inject? handles that).
+
+                :file-globs — if globs: frontmatter is present, include as a
+                              vector of glob strings. Optional; most rules
+                              do not have globs.
+
+                The :phases set is always populated (even for alwaysApply rules)
+                so that agent-behavior.clj can filter by phase."
+   :default    {:phases #{:implement :review}}
+   :required?  true
+   :examples
+   [;; dewey "001" (foundations) + alwaysApply true
+    {:phases #{:plan :implement :review :verify :release}}
+
+    ;; dewey "210" (languages) + globs from frontmatter
+    {:phases     #{:implement :review}
+     :file-globs ["components/**/src/**/*.clj"
+                  "components/**/src/**/*.cljc"
+                  "bases/**/src/**/*.clj"]}
+
+    ;; dewey "900" (meta) — not injected into any phase
+    {:phases #{}}]}
+
+  {;; ── 9. Severity (constant) ─────────────────────────────────────────────
+   :name       "Severity"
+   :source     :constant
+   :target     :rule/severity
+   :transform  "Always :info for compiled knowledge rules.
+                These rules carry reference knowledge, not violation detection.
+                They are advisory, never blocking."
+   :default    :info
+   :required?  true}
+
+  {;; ── 10. Detection (constant) ───────────────────────────────────────────
+   :name       "Detection"
+   :source     :constant
+   :target     :rule/detection
+   :transform  "Always {:type :custom} for compiled knowledge rules.
+                No automated violation detection — these rules are
+                knowledge-bearing, not violation-detecting."
+   :default    {:type :custom}
+   :required?  true}
+
+  {;; ── 11. Enforcement (constant) ─────────────────────────────────────────
+   :name       "Enforcement"
+   :source     :constant
+   :target     :rule/enforcement
+   :transform  "Always {:action :audit :message <generated>}.
+                The message is derived from the rule title:
+                'Standard: <title>'
+                Audit action = log-only, never blocks."
+   :default    {:action :audit :message "Standard: <title>"}
+   :required?  true
+   :examples
+   {{:title "Stratified Design — enforce one-way dependencies"}
+    {:action  :audit
+     :message "Standard: Stratified Design — enforce one-way dependencies"}}}]
+
+ ;; ═══════════════════════════════════════════════════════════════════════════
+ ;; Section 2: Dewey Range → Applicable Phases
+ ;; ═══════════════════════════════════════════════════════════════════════════
+ ;;
+ ;; This mapping preserves the current Dewey-based selection behavior where
+ ;; different agent roles (plan, implement, review, verify, release) receive
+ ;; different subsets of rules based on their Dewey classification.
+ ;;
+ ;; This mapping lives ONLY in the ETL task. The product never sees Dewey
+ ;; codes or this table. After compilation, phases are plain keyword sets.
+
+ :mapping/dewey-to-phases
+ {;; Foundations: core principles apply to every phase
+  ;; Stratified design, simple-made-easy, code quality, validation boundaries,
+  ;; result handling, specification standards, localization
+  [0 99]   {:phases #{:plan :implement :review :verify :release}
+            :label  "Foundations & Core Principles"}
+
+  ;; Tools: linters, formatters, build tools — implement and review
+  [100 199] {:phases #{:implement :review}
+             :label  "Development Environment & Tools"}
+
+  ;; Languages: language-specific conventions — implement and review
+  ;; Clojure, Python — agents writing/reviewing code need these
+  [200 299] {:phases #{:implement :review}
+             :label  "Languages"}
+
+  ;; Frameworks: platform rules — plan (architecture), implement, review
+  ;; Polylith, Kubernetes — planner needs to know framework constraints
+  [300 399] {:phases #{:plan :implement :review}
+             :label  "Frameworks & Platforms"}
+
+  ;; Testing: test standards apply when implementing tests AND verifying
+  ;; Testing standards, factory functions — both writers and verifiers
+  [400 499] {:phases #{:implement :verify}
+             :label  "Testing & Quality"}
+
+  ;; Operations: CI/CD, monitoring, security — implement and review
+  [500 599] {:phases #{:implement :review}
+             :label  "Operations & Infrastructure"}
+
+  ;; Documentation: doc standards — implement and review
+  [600 699] {:phases #{:implement :review}
+             :label  "Documentation"}
+
+  ;; Workflows: git, PR, release processes — all phases
+  ;; Pre-commit discipline, branch management, PR layering — everyone
+  [700 799] {:phases #{:plan :implement :review :verify :release}
+             :label  "Workflows & Processes"}
+
+  ;; Project-specific: project overrides — implement and review
+  ;; Copyright header, project conventions
+  [800 899] {:phases #{:implement :review}
+             :label  "Project-Specific"}
+
+  ;; Meta: templates, indexes — never injected
+  ;; Rule format, index — authoring aids, not agent guidance
+  [900 999] {:phases #{}
+             :label  "Meta & Templates (not injected)"}}
+
+ ;; Fallback for dewey codes outside defined ranges or unparseable
+ :mapping/dewey-default-phases #{:implement :review}
+
+ ;; ═══════════════════════════════════════════════════════════════════════════
+ ;; Section 3: Rule ID Derivation
+ ;; ═══════════════════════════════════════════════════════════════════════════
+
+ :mapping/id-derivation
+ {:namespace    "std"
+  :separator    "/"
+  :slug-source  :filename-without-extension
+  :algorithm    "1. Take filename: 'stratified-design.mdc'
+                 2. Strip .mdc extension: 'stratified-design'
+                 3. Prefix with :std/ namespace: :std/stratified-design
+
+                 Directory path is NOT part of the id. All .mdc filenames
+                 in .standards/ MUST be unique across subdirectories.
+                 The ETL MUST fail with a clear error if duplicate slugs
+                 are detected."
+
+  :complete-inventory
+  {"foundations/stratified-design.mdc"       :std/stratified-design
+   "foundations/simple-made-easy.mdc"        :std/simple-made-easy
+   "foundations/code-quality.mdc"            :std/code-quality
+   "foundations/result-handling.mdc"         :std/result-handling
+   "foundations/validation-boundaries.mdc"   :std/validation-boundaries
+   "foundations/specification-standards.mdc" :std/specification-standards
+   "foundations/localization.mdc"            :std/localization
+   "languages/clojure.mdc"                  :std/clojure
+   "languages/python.mdc"                   :std/python
+   "frameworks/polylith.mdc"                :std/polylith
+   "frameworks/kubernetes.mdc"              :std/kubernetes
+   "testing/standards.mdc"                  :std/standards
+   "workflows/git-branch-management.mdc"    :std/git-branch-management
+   "workflows/pre-commit-discipline.mdc"    :std/pre-commit-discipline
+   "workflows/git-worktrees.mdc"            :std/git-worktrees
+   "workflows/pr-documentation.mdc"         :std/pr-documentation
+   "workflows/pr-layering.mdc"              :std/pr-layering
+   "workflows/datever.mdc"                  :std/datever
+   "project/header-copyright.mdc"           :std/header-copyright
+   "meta/rule-format.mdc"                   :std/rule-format
+   "index.mdc"                              :std/index}}
+
+ ;; ═══════════════════════════════════════════════════════════════════════════
+ ;; Section 4: Agent Behavior Extraction Algorithm
+ ;; ═══════════════════════════════════════════════════════════════════════════
+
+ :mapping/agent-behavior-extraction
+ {:algorithm
+  "1. Scan body for a heading matching /^## Agent behavior/i
+   2. IF found:
+      a. Extract content from that heading to the next ## heading or EOF
+      b. Strip the heading line itself
+      c. Strip leading/trailing whitespace
+      d. If result > 500 chars, condense:
+         - Keep only the first 2-3 bullet points or sentences
+         - Ensure the summary is a self-contained directive
+      e. Collapse multiple newlines to single newlines
+      f. Result is the :rule/agent-behavior string
+   3. IF NOT found:
+      a. Skip any # level-1 heading at the top of body
+      b. Take the first non-empty paragraph (text between blank lines)
+      c. Trim to ~500 chars if longer
+      d. Result is the :rule/agent-behavior string
+   4. IF result is empty or whitespace-only → omit :rule/agent-behavior"
+
+  :condensation-target-length 500
+
+  :examples
+  [;; Example A: Has ## Agent behavior section
+   {:source-file "foundations/stratified-design.mdc"
+    :section-found? true
+    :raw-section
+    "## Agent behavior\n\n- Before writing code for a feature, output:\n  - A short stratified plan (modules, their stratum, and allowed dependencies).\n  - The ports/interfaces to be introduced or reused.\n- When editing existing code:\n  - Detect and call out any \"upward\" import or cross-strata leakage.\n  - If a cycle is present, propose a minimal refactor (move interface \"down,\" split module, or add adapter)."
+    :extracted-behavior
+    "Before writing code, output a short stratified plan listing modules, their stratum, and allowed dependencies, plus ports/interfaces to introduce or reuse. When editing existing code, detect and call out any upward import or cross-strata leakage and propose a minimal refactor if a cycle is present."}
+
+   ;; Example B: Has ## Agent behavior section (clojure.mdc)
+   {:source-file "languages/clojure.mdc"
+    :section-found? true
+    :extracted-behavior
+    "When creating or editing a namespace: insert/maintain Layer 0/1/2 headings in monotonic order, keep pure helpers in Layer 0, propose a split if you cross 3 layers. Ensure the last top-level form is a (comment …) block. For cross-component calls, target .interface namespaces."}
+
+   ;; Example C: No ## Agent behavior section
+   {:source-file "workflows/datever.mdc"
+    :section-found? false
+    :first-paragraph-used true
+    :extracted-behavior
+    "Use date-based versioning (YYYY.MM.DD) for all releases. Patch releases append a dot-separated counter."}]}
+
+ ;; ═══════════════════════════════════════════════════════════════════════════
+ ;; Section 5: Constant/Default Fields
+ ;; ═══════════════════════════════════════════════════════════════════════════
+ ;;
+ ;; These fields have the same value for ALL compiled knowledge rules.
+ ;; They distinguish knowledge rules from violation-detecting rules.
+
+ :mapping/constants
+ {:rule/severity    :info
+  :rule/detection   {:type :custom}
+  :rule/enforcement {:action  :audit
+                     :message "Standard: <:rule/title>"}
+  ;; Not set (left for author/external packs):
+  ;; :rule/version, :rule/author, :rule/references, :rule/examples
+  }
+
+ ;; ═══════════════════════════════════════════════════════════════════════════
+ ;; Section 6: Worked Example — Complete Transformation
+ ;; ═══════════════════════════════════════════════════════════════════════════
+
+ :mapping/worked-examples
+ [;; ── Example A: alwaysApply foundation rule ──────────────────────────────
+  {:source-file "foundations/stratified-design.mdc"
+   :source-frontmatter
+   {:dewey       "001"
+    :description "Stratified Design — enforce one-way dependencies and clear data flow"
+    :alwaysApply true}
+   :source-body "# Stratified Design (ALWAYS)\n\nUse a single-direction DAG...\n\n## Agent behavior\n\n- Before writing code..."
+
+   :compiled-rule
+   {:rule/id                :std/stratified-design
+    :rule/title             "Stratified Design — enforce one-way dependencies and clear data flow"
+    :rule/description       "Engineering standard (001): Stratified Design — enforce one-way dependencies and clear data flow"
+    :rule/severity          :info
+    :rule/category          "001"
+    :rule/always-inject?    true
+    :rule/applies-to        {:phases #{:plan :implement :review :verify :release}}
+    :rule/detection         {:type :custom}
+    :rule/enforcement       {:action  :audit
+                             :message "Standard: Stratified Design — enforce one-way dependencies and clear data flow"}
+    :rule/agent-behavior    "Before writing code, output a short stratified plan listing modules, their stratum, and allowed dependencies, plus ports/interfaces to introduce or reuse. When editing existing code, detect and call out any upward import or cross-strata leakage and propose a minimal refactor if a cycle is present."
+    :rule/knowledge-content "# Stratified Design (ALWAYS)\n\nUse a single-direction DAG...<full body text>"}}
+
+  ;; ── Example B: non-alwaysApply language rule with globs ─────────────────
+  {:source-file "languages/clojure.mdc"
+   :source-frontmatter
+   {:dewey       "210"
+    :description "Clojure Polylith + per-file stratified design"
+    :globs       ["components/**/src/**/*.clj"
+                  "components/**/src/**/*.cljc"
+                  "bases/**/src/**/*.clj"
+                  "bases/**/src/**/*.cljc"
+                  "projects/**/src/**/*.clj"
+                  "projects/**/src/**/*.cljc"]}
+
+   :compiled-rule
+   {:rule/id                :std/clojure
+    :rule/title             "Clojure Polylith + per-file stratified design"
+    :rule/description       "Engineering standard (210): Clojure Polylith + per-file stratified design"
+    :rule/severity          :info
+    :rule/category          "210"
+    ;; :rule/always-inject? omitted (alwaysApply absent → not injected automatically)
+    :rule/applies-to        {:phases     #{:implement :review}
+                             :file-globs ["components/**/src/**/*.clj"
+                                          "components/**/src/**/*.cljc"
+                                          "bases/**/src/**/*.clj"
+                                          "bases/**/src/**/*.cljc"
+                                          "projects/**/src/**/*.clj"
+                                          "projects/**/src/**/*.cljc"]}
+    :rule/detection         {:type :custom}
+    :rule/enforcement       {:action  :audit
+                             :message "Standard: Clojure Polylith + per-file stratified design"}
+    :rule/agent-behavior    "When creating or editing a namespace: insert/maintain Layer 0/1/2 headings in monotonic order, keep pure helpers in Layer 0, propose a split if you cross 3 layers. Ensure the last top-level form is a (comment …) block. For cross-component calls, target .interface namespaces."
+    :rule/knowledge-content "# Clojure style guidelines\n\n## Polylith architecture (ALWAYS)...<full body text>"}}
+
+  ;; ── Example C: meta rule (not injected into any phase) ─────────────────
+  {:source-file "meta/rule-format.mdc"
+   :source-frontmatter
+   {:dewey       "900"
+    :description "Use ALWAYS when asked to CREATE A RULE or UPDATE A RULE..."
+    :globs       [".cursor/rules/**/*.mdc"]}
+
+   :compiled-rule
+   {:rule/id                :std/rule-format
+    :rule/title             "Use ALWAYS when asked to CREATE A RULE or UPDATE A RULE..."
+    :rule/description       "Engineering standard (900): Use ALWAYS when asked to CREATE A RULE or UPDATE A RULE..."
+    :rule/severity          :info
+    :rule/category          "900"
+    ;; :rule/always-inject? omitted
+    :rule/applies-to        {:phases     #{}  ;; meta — never auto-injected
+                             :file-globs [".cursor/rules/**/*.mdc"]}
+    :rule/detection         {:type :custom}
+    :rule/enforcement       {:action  :audit
+                             :message "Standard: Use ALWAYS when asked to CREATE A RULE or UPDATE A RULE..."}
+    :rule/agent-behavior    nil  ;; or omitted — no concise behavior for meta rules
+    :rule/knowledge-content "# LLM Rules Format\n\n## Core Structure...<full body text>"}}
+
+  ;; ── Example D: alwaysApply testing rule ─────────────────────────────────
+  {:source-file "testing/standards.mdc"
+   :source-frontmatter
+   {:dewey       "400"
+    :description "Testing standards — factory functions, same code quality as production, no duplication"
+    :alwaysApply true}
+
+   :compiled-rule
+   {:rule/id                :std/standards
+    :rule/title             "Testing standards — factory functions, same code quality as production, no duplication"
+    :rule/description       "Engineering standard (400): Testing standards — factory functions, same code quality as production, no duplication"
+    :rule/severity          :info
+    :rule/category          "400"
+    :rule/always-inject?    true
+    :rule/applies-to        {:phases #{:implement :verify}}
+    :rule/detection         {:type :custom}
+    :rule/enforcement       {:action  :audit
+                             :message "Standard: Testing standards — factory functions, same code quality as production, no duplication"}
+    :rule/agent-behavior    "<extracted from ## Agent behavior or first paragraph>"
+    :rule/knowledge-content "# Testing Standards (ALWAYS)\n\n**Test code is production code.**...<full body text>"}}]
+
+ ;; ═══════════════════════════════════════════════════════════════════════════
+ ;; Section 7: Edge Cases & Validation Rules
+ ;; ═══════════════════════════════════════════════════════════════════════════
+
+ :mapping/edge-cases
+ [{:case        "Missing dewey frontmatter"
+   :resolution  "Log warning, default to dewey '000', phases #{:implement :review}"
+   :severity    :warn}
+
+  {:case        "Missing description frontmatter"
+   :resolution  "Derive title from filename slug: hyphens → spaces, title-case.
+                 E.g. 'pre-commit-discipline' → 'Pre Commit Discipline'"
+   :severity    :info}
+
+  {:case        "Empty .mdc body (frontmatter only)"
+   :resolution  "Omit :rule/knowledge-content (nil). Omit :rule/agent-behavior.
+                 Rule is still valid but carries no content — effectively a stub."
+   :severity    :warn}
+
+  {:case        "Unparseable YAML frontmatter"
+   :resolution  "Log warning with filename and parse error. Skip the file entirely.
+                 Do NOT fail the entire ETL — other files should still compile."
+   :severity    :warn}
+
+  {:case        "Duplicate filename slugs across directories"
+   :resolution  "Fail the ETL with a clear error listing the conflicting files.
+                 This is a hard error — rule IDs must be unique."
+   :severity    :error}
+
+  {:case        "alwaysApply: true + dewey 900 (meta)"
+   :resolution  "Respect alwaysApply — set :rule/always-inject? true.
+                 But phases will be #{} (meta range), so the rule will not be
+                 injected into any phase. Effectively a no-op. Log a warning:
+                 'Rule <id> is always-inject but has no applicable phases.'"
+   :severity    :warn}
+
+  {:case        "globs field is a string instead of a list"
+   :resolution  "Wrap in a vector: (if (string? globs) [globs] globs)"
+   :severity    :info}
+
+  {:case        "Body contains only headings (no paragraphs)"
+   :resolution  "Set :rule/agent-behavior to nil (omit).
+                 Set :rule/knowledge-content to the heading-only body."
+   :severity    :info}
+
+  {:case        "index.mdc (master catalog)"
+   :resolution  "Compiled like any other .mdc file. Rule ID :std/index.
+                 dewey '000' → phases #{:plan :implement :review :verify :release}.
+                 Typically NOT alwaysApply, so available for on-demand query only."
+   :severity    :info}]
+
+ ;; ═══════════════════════════════════════════════════════════════════════════
+ ;; Section 8: Schema Impact Summary
+ ;; ═══════════════════════════════════════════════════════════════════════════
+ ;;
+ ;; Two new optional fields added to the Rule schema
+ ;; (components/policy-pack/src/ai/miniforge/policy_pack/schema.clj):
+ ;;
+ ;;   [:rule/knowledge-content {:optional true} string?]
+ ;;   [:rule/always-inject?    {:optional true} boolean?]
+ ;;
+ ;; Placement: after :rule/agent-behavior in the Rule map schema.
+ ;; Backwards-compatible — existing valid rules remain valid.
+
+ :mapping/schema-additions
+ [{:field       :rule/knowledge-content
+   :schema      [:optional true]
+   :type        'string?
+   :description "Full text content of the rule for injection into agent prompts
+                 as reference material. Distinct from :rule/agent-behavior (short
+                 behavioral directive). This is the detailed explanation."
+   :source      "MDC body text after YAML frontmatter"}
+
+  {:field       :rule/always-inject?
+   :schema      [:optional true]
+   :type        'boolean?
+   :description "When true, pre-injected into every agent prompt for applicable
+                 phases. When false/omitted, available for on-demand query only."
+   :source      "alwaysApply frontmatter field"}]
+
+ ;; ═══════════════════════════════════════════════════════════════════════════
+ ;; Section 9: Output Pack Structure
+ ;; ═══════════════════════════════════════════════════════════════════════════
+
+ :mapping/output-pack-template
+ {:pack/id          "miniforge/standards"
+  :pack/name        "Miniforge Engineering Standards"
+  :pack/version     "<YYYY.MM computed from build date>"
+  :pack/description "Shared engineering standards compiled from .standards/ MDC files"
+  :pack/author      "miniforge.ai"
+  :pack/license     "Apache-2.0"
+  :pack/trust-level :trusted
+  :pack/authority   :authority/instruction
+  :pack/categories  [{:category/id   "foundations"
+                      :category/name "Foundations & Core Principles"
+                      :category/rules [:std/stratified-design
+                                       :std/simple-made-easy
+                                       :std/code-quality
+                                       :std/result-handling
+                                       :std/validation-boundaries
+                                       :std/specification-standards
+                                       :std/localization]}
+                     {:category/id   "languages"
+                      :category/name "Languages"
+                      :category/rules [:std/clojure :std/python]}
+                     {:category/id   "frameworks"
+                      :category/name "Frameworks & Platforms"
+                      :category/rules [:std/polylith :std/kubernetes]}
+                     {:category/id   "testing"
+                      :category/name "Testing & Quality"
+                      :category/rules [:std/standards]}
+                     {:category/id   "workflows"
+                      :category/name "Workflows & Processes"
+                      :category/rules [:std/git-branch-management
+                                       :std/pre-commit-discipline
+                                       :std/git-worktrees
+                                       :std/pr-documentation
+                                       :std/pr-layering
+                                       :std/datever]}
+                     {:category/id   "project"
+                      :category/name "Project-Specific"
+                      :category/rules [:std/header-copyright]}
+                     {:category/id   "meta"
+                      :category/name "Meta & Templates"
+                      :category/rules [:std/rule-format :std/index]}]
+  :pack/rules       ["<compiled rules — one per .mdc file, sorted by :rule/id>"]
+  :pack/created-at  "#inst <ETL run timestamp>"
+  :pack/updated-at  "#inst <ETL run timestamp>"}}

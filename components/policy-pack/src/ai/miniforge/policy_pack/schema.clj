@@ -165,6 +165,17 @@
    ;; Agent guidance (critical for correct interpretation)
    [:rule/agent-behavior {:optional true} string?]
 
+   ;; Knowledge content — full rule text for reference material injection.
+   ;; Distinct from :rule/agent-behavior (concise directive). This is the
+   ;; detailed explanation extracted from the MDC body.
+   [:rule/knowledge-content {:optional true} string?]
+
+   ;; Always-inject flag — when true, rule is pre-injected into every agent
+   ;; prompt for applicable phases (phase-only gating, bypasses file-glob and
+   ;; task-type context matching). When false/omitted, available for on-demand
+   ;; query or full-context matching only.
+   [:rule/always-inject? {:optional true} boolean?]
+
    ;; What happens when violated
    [:rule/enforcement RuleEnforcementConfig]
 
@@ -337,6 +348,21 @@
                      :pattern "^-\\s*import\\s*\\{"}
     :rule/enforcement {:action :hard-halt
                        :message "Cannot remove import blocks"}})
+  ;; => true
+
+  ;; Validate a knowledge rule with new fields
+  (valid-rule?
+   {:rule/id :std/stratified-design
+    :rule/title "Stratified Design"
+    :rule/description "Engineering standard (001): Stratified Design"
+    :rule/severity :info
+    :rule/category "001"
+    :rule/applies-to {:phases #{:plan :implement :review :verify :release}}
+    :rule/detection {:type :custom}
+    :rule/enforcement {:action :audit :message "Standard: Stratified Design"}
+    :rule/agent-behavior "Before writing code, output a stratified plan."
+    :rule/knowledge-content "# Stratified Design\n\nFull body text..."
+    :rule/always-inject? true})
   ;; => true
 
   ;; Validate a pack
