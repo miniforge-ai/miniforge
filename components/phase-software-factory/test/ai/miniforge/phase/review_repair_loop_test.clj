@@ -125,7 +125,7 @@
                                          :review {:result {:output {:review/decision :changes-requested
                                                                      :review/feedback [{:severity :blocking
                                                                                          :description "Missing require"}]}}}}}
-          task (build-implement-task ctx)]
+          {:keys [task]} (build-implement-task ctx)]
       (is (= [{:severity :blocking :description "Missing require"}]
              (:task/review-feedback task))
           "Task should include review feedback from context"))))
@@ -135,6 +135,6 @@
     (let [build-implement-task #'ai.miniforge.phase.implement/build-implement-task
           ctx {:execution/input {:description "Build widget"}
                :execution/phase-results {:plan {:result {:output nil}}}}
-          task (build-implement-task ctx)]
+          {:keys [task]} (build-implement-task ctx)]
       (is (nil? (:task/review-feedback task))
           "Task should not have review feedback when none in context"))))
