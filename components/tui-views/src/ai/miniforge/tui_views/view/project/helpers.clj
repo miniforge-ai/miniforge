@@ -292,21 +292,25 @@
         .toLocalDate)
     (catch Exception _ nil)))
 
+(defn- days-ago-bucket
+  "Map a days-ago integer to a temporal bucket keyword."
+  [days-ago]
+  (cond
+    (zero? days-ago)  :today
+    (= 1 days-ago)    :yesterday
+    (<= days-ago 7)   :this-week
+    (<= days-ago 30)  :this-month
+    :else             :older))
+
 (defn temporal-bucket
   "Classify a workflow's started-at into a temporal group.
    Accepts pre-computed `today` to avoid repeated LocalDate/now calls."
   [wf ^LocalDate today]
-  (if-let [started (:started-at wf)]
-    (if-let [wf-date (to-local-date started)]
-      (let [days-ago (.between ChronoUnit/DAYS wf-date today)]
-        (cond
-          (zero? days-ago)  :today
-          (= 1 days-ago)    :yesterday
-          (<= days-ago 7)   :this-week
-          (<= days-ago 30)  :this-month
-          :else             :older))
-      :unknown)
-    :unknown))
+  (or (some-> (:started-at wf)
+              (to-local-date)
+              (.between ChronoUnit/DAYS ^LocalDate today)
+              (days-ago-bucket))
+      :unknown))
 
 (def ^:private bucket-labels
   {:today "Today" :yesterday "Yesterday" :this-week "This Week"
@@ -471,6 +475,49 @@
      :auto-fixable?   (boolean (some :auto-fixable? violations))
      :large?          (> changes 500)}))
 
+;; Layer 0 — recommendation branch helpers (called by derive-recommendation)
+
+(defn- policy-violation-recommendation
+  "Recommendation when policy violations are present."
+  [{:keys [auto-fixable?]}]
+  (if auto-fixable?
+    (recommend-action :remediate "Auto-fixable policy violations")
+    (recommend-action :review "Policy violations need review")))
+
+(defn- policy-failed-recommendation []
+  (recommend-action :do-not-merge "Policy evaluation failed"))
+
+(defn- policy-unknown-ready-recommendation []
+  (recommend-action :evaluate "Policy not yet evaluated"))
+
+(defn- hard-blocker-recommendation
+  "Recommendation for hard-blocker states (CI failing, changes requested, etc.)."
+  [state]
+  (case state
+    :ci-failing        (recommend-action :do-not-merge "CI failing")
+    :changes-requested (recommend-action :do-not-merge "Changes requested by reviewer")
+    :behind-main       (recommend-action :do-not-merge "Branch behind main — rebase required")
+    :draft             (recommend-action :do-not-merge "Draft PR — not ready for merge")
+    nil))
+
+(defn- soft-blocker-recommendation
+  "Recommendation for soft-blocker states (review needed, large PR)."
+  [{:keys [large? state]}]
+  (cond
+    (and large? (#{:needs-review :open} state)) (recommend-action :decompose "Large PR — consider splitting")
+    (= :needs-review state)                     (recommend-action :review "Awaiting review")
+    :else                                       nil))
+
+(defn- ready-recommendation
+  "Recommendation when the PR is ready — gated by risk and policy."
+  [{:keys [risk-level policy-pass? policy-unknown?]}]
+  (cond
+    (= :unevaluated risk-level)                  (recommend-action :evaluate "Risk not yet assessed")
+    (#{:medium :high :critical} risk-level)      (recommend-action :approve (str "Ready but " (name risk-level) " risk"))
+    (and (= :low risk-level) (true? policy-pass?)) (recommend-action :merge "All gates green, low risk")
+    policy-unknown?                              (recommend-action :evaluate "Policy not yet evaluated")
+    :else                                        nil))
+
 (defn derive-recommendation
   "Derive recommended next action from enriched PR data.
    Returns {:action kw :label str :reason str}.
@@ -493,58 +540,15 @@
    5. Elevated risk -> human approval
    6. All clear -> merge"
   [pr]
-  (let [{:keys [ready? state risk-level policy-pass? policy-unknown?
-                has-violations? auto-fixable? large?]} (extract-pr-signals pr)]
-    (cond
-      ;; Policy violations — actionable
-      (and has-violations? auto-fixable?)
-      (recommend-action :remediate "Auto-fixable policy violations")
-
-      (and has-violations? (not auto-fixable?))
-      (recommend-action :review "Policy violations need review")
-
-      (and (not policy-unknown?) (false? policy-pass?))
-      (recommend-action :do-not-merge "Policy evaluation failed")
-
-      ;; Policy unknown but otherwise ready — evaluate first
-      (and policy-unknown? ready?)
-      (recommend-action :evaluate "Policy not yet evaluated")
-
-      ;; Hard blockers — do not merge
-      (= :ci-failing state)
-      (recommend-action :do-not-merge "CI failing")
-
-      (= :changes-requested state)
-      (recommend-action :do-not-merge "Changes requested by reviewer")
-
-      (= :behind-main state)
-      (recommend-action :do-not-merge "Branch behind main — rebase required")
-
-      (= :draft state)
-      (recommend-action :do-not-merge "Draft PR — not ready for merge")
-
-      ;; Soft blockers — review/decompose
-      (and large? (#{:needs-review :open} state))
-      (recommend-action :decompose "Large PR — consider splitting")
-
-      (= :needs-review state)
-      (recommend-action :review "Awaiting review")
-
-      ;; Ready — risk-gated merge
-      (and ready? (= :unevaluated risk-level))
-      (recommend-action :evaluate "Risk not yet assessed")
-
-      (and ready? (#{:medium :high :critical} risk-level))
-      (recommend-action :approve (str "Ready but " (name risk-level) " risk"))
-
-      (and ready? (= :low risk-level) (true? policy-pass?))
-      (recommend-action :merge "All gates green, low risk")
-
-      (and ready? policy-unknown?)
-      (recommend-action :evaluate "Policy not yet evaluated")
-
-      :else
-      (recommend-action :wait "Awaiting signals"))))
+  (let [{:keys [ready? state policy-pass? policy-unknown?
+                has-violations?] :as signals} (extract-pr-signals pr)]
+    (or (when has-violations?                              (policy-violation-recommendation signals))
+        (when (and (not policy-unknown?) (false? policy-pass?)) (policy-failed-recommendation))
+        (when (and policy-unknown? ready?)                 (policy-unknown-ready-recommendation))
+        (hard-blocker-recommendation state)
+        (soft-blocker-recommendation signals)
+        (when ready?                                       (ready-recommendation signals))
+        (recommend-action :wait "Awaiting signals"))))
 
 ;------------------------------------------------------------------------------ Layer 1b
 ;; Enrichment resolution
