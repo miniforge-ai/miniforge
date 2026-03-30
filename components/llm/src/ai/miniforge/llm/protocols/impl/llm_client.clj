@@ -31,11 +31,11 @@
   ([content]
    (llm-success content nil))
   ([content {:keys [usage exit-code]}]
-   (let [usage (or usage {:input-tokens nil :output-tokens nil})]
+   (let [usage (or usage {:input-tokens 0 :output-tokens 0})]
      (cond-> {:success true
               :content content
               :usage usage
-              :tokens (+ (or (:input-tokens usage) 0) (or (:output-tokens usage) 0))}
+              :tokens (+ (get usage :input-tokens 0) (get usage :output-tokens 0))}
        (some? exit-code) (assoc :exit-code exit-code)))))
 
 (defn llm-error
