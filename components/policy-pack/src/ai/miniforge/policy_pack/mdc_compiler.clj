@@ -34,6 +34,7 @@
      components/policy-pack/src/.../schema.clj  — Rule schema (target format)
      .standards/                                 — source .mdc files (input)"
   (:require
+   [ai.miniforge.policy-pack.schema :as schema]
    [clojure.java.io :as io]
    [clojure.string :as str]))
 
@@ -474,12 +475,11 @@
                  agent-behavior
                  (assoc :rule/agent-behavior agent-behavior))]
 
-      {:success? true :rule rule})
+      (schema/success :rule rule {}))
 
     (catch Exception e
-      {:success? false
-       :error    (.getMessage e)
-       :filename filename})))
+      (merge (schema/failure :rule (.getMessage e))
+             {:filename filename}))))
 
 ;; ── Category builder ────────────────────────────────────────────────────────
 
@@ -546,8 +546,7 @@
   [standards-dir]
   (let [dir (io/file standards-dir)]
     (if-not (.isDirectory dir)
-      {:success? false
-       :errors   [(str "Standards directory not found: " standards-dir)]}
+      (schema/failure-with-errors :pack [(str "Standards directory not found: " standards-dir)])
 
       (let [mdc-files (->> (file-seq dir)
                            (filter #(.isFile %))
@@ -558,7 +557,7 @@
             dup-errors (validate-no-duplicate-slugs mdc-files)]
 
         (if dup-errors
-          {:success? false :errors dup-errors}
+          (schema/failure-with-errors :pack dup-errors)
 
           (let [results (mapv (fn [f]
                                (let [content (slurp f)
@@ -567,8 +566,8 @@
                                         :source-path (str f))))
                              mdc-files)
 
-                successes (filterv :success? results)
-                failures  (filterv (complement :success?) results)
+                successes (filterv schema/succeeded? results)
+                failures  (filterv (complement schema/succeeded?) results)
                 rules     (mapv :rule successes)
                 sorted-rules (vec (sort-by (comp str :rule/id) rules))
 
@@ -602,11 +601,9 @@
                                  sorted-rules)
                            (conj "Some always-inject rules have no applicable phases (Dewey 900 meta range)"))]
 
-            {:success?       true
-             :pack           pack
-             :warnings       warnings
-             :compiled-count (count successes)
-             :failed-count   (count failures)}))))));
+            (schema/success :pack pack {:warnings       warnings
+                                        :compiled-count (count successes)
+                                        :failed-count   (count failures)})))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
