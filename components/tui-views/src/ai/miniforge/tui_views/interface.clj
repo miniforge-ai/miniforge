@@ -566,9 +566,9 @@
   (let [train-mgr (pr-train/create-manager)
         app (tui/create-app
              {:init   (fn []
-                        (persistence-pr/load-all-into-model
-                         (model/init-model)
-                         {:limit (:load-limit opts 100)}))
+                        (-> (model/init-model)
+                            (persistence/load-workflows-into-model {:limit (:load-limit opts 100)})
+                            (persistence-pr/load-all-into-model    {:limit (:load-limit opts 100)})))
               :update update/update-model
               :view   view/root-view
               :screen (:screen opts)
