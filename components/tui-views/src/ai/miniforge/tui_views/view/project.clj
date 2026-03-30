@@ -269,14 +269,26 @@
       :cards (mapv (fn [wf] {:label (:name wf) :status (get wf :status :success)}) done)}]))
 
 (defn project-agent-output
-  "Project agent output text as a single-row data vector for a text widget."
+  "Project agent output as tree nodes for the agent output panel.
+   Splits and cleans raw agent content for readable display.
+   Uses :_panel-cols (injected by interpreter) for word-wrapping."
   [model]
   (let [detail (:detail model)
         agent (:current-agent detail)
-        output (get detail :agent-output "")]
-    [{:label (if agent
-               (str "[" (name (get agent :type :agent)) "] " output)
-               (if (seq output) output "No agent output"))}]))
+        output (get detail :agent-output "")
+        panel-cols (get model :_panel-cols 80)
+        wrap-width (max 20 (- panel-cols 4))]
+    (if (empty? output)
+      [(trees/tree-node "No agent output" 0 false trees/status-info)]
+      (let [agent-name (when agent (name (get agent :agent :agent)))
+            header (when agent-name
+                     [(trees/tree-node (str "[" agent-name "]") 0 false trees/status-warning)])
+            lines (trees/clean-agent-content output)]
+        (into (or header [])
+              (mapcat (fn [line]
+                        (mapv #(trees/tree-node % 0)
+                              (helpers/wrap-text line wrap-width)))
+                      lines))))))
 
 (def ^:private browse-sayings
   ["Rummaging through repos..."
