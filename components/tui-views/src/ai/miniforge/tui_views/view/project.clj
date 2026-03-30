@@ -276,7 +276,7 @@
   (let [detail (:detail model)
         agent (:current-agent detail)
         output (get detail :agent-output "")
-        panel-cols (or (:_panel-cols model) 80)
+        panel-cols (get model :_panel-cols 80)
         wrap-width (max 20 (- panel-cols 4))]
     (if (empty? output)
       [(trees/tree-node "No agent output" 0 false trees/status-info)]
