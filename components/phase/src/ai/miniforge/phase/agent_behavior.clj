@@ -21,10 +21,15 @@
 
    Bridges policy-pack rules and agent prompts. Uses requiring-resolve for
    the policy-pack dependency (same soft-dependency pattern as event-stream).
-   Loads built-in rules from a classpath EDN resource.
+   Loads built-in rules and standards rules from classpath EDN resources.
+
+   Always-inject semantics:
+   Rules with :rule/always-inject? true bypass file-glob and task-type
+   context matching — they are injected whenever the phase matches.
+   Rules without always-inject? require full applicability matching.
 
    Layer 0: Behavior extraction and formatting
-   Layer 1: Rule loading (built-in + user packs)
+   Layer 1: Rule loading (built-in + standards + user packs)
    Layer 2: Full pipeline"
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -62,21 +67,35 @@
               (str/join "\n"))
          "\n")))
 
+;------------------------------------------------------------------------------ Layer 0
+;; Phase filtering helpers
+
+(defn- rule-matches-phase?
+  "Check if a rule applies to the given phase.
+   Rules with nil or empty phases match all phases."
+  [rule phase]
+  (let [phases (get-in rule [:rule/applies-to :phases])]
+    (or (nil? phases)
+        (empty? phases)
+        (contains? phases phase))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Rule loading
 
-(defn load-builtin-rules
-  "Load built-in rules from the classpath EDN resource.
+(defn- load-pack-rules-from-resource
+  "Load rules from a classpath EDN pack resource.
 
-   Reads packs/miniforge-builtin.pack.edn from the classpath,
-   parses with edn/read-string, and extracts :pack/rules.
-   Normalizes :phases vectors to sets (matching the loader pattern).
+   Reads the given resource path, parses with edn/read-string,
+   extracts :pack/rules, and normalizes :phases vectors to sets.
+
+   Arguments:
+   - resource-path - Classpath resource path (e.g. \"packs/miniforge-builtin.pack.edn\")
 
    Returns:
-   - Vector of rules, or empty vector on failure"
-  []
+   - Vector of rules, or empty vector on failure."
+  [resource-path]
   (try
-    (if-let [resource (io/resource "packs/miniforge-builtin.pack.edn")]
+    (if-let [resource (io/resource resource-path)]
       (let [pack (edn/read-string (slurp resource))
             rules (:pack/rules pack [])]
         ;; Normalize :phases vectors to sets for filter-applicable-rules compatibility
@@ -88,6 +107,30 @@
       [])
     (catch Exception _
       [])))
+
+(defn load-builtin-rules
+  "Load built-in rules from the classpath EDN resource.
+
+   Reads packs/miniforge-builtin.pack.edn from the classpath,
+   parses with edn/read-string, and extracts :pack/rules.
+   Normalizes :phases vectors to sets (matching the loader pattern).
+
+   Returns:
+   - Vector of rules, or empty vector on failure"
+  []
+  (load-pack-rules-from-resource "packs/miniforge-builtin.pack.edn"))
+
+(defn load-standards-rules
+  "Load engineering standards rules from the classpath EDN resource.
+
+   Reads packs/miniforge-standards.pack.edn from the classpath.
+   These rules are compiled from .standards/*.mdc files by the ETL
+   (bb standards:pack) and placed on the classpath at build time.
+
+   Returns:
+   - Vector of rules, or empty vector if pack not yet compiled."
+  []
+  (load-pack-rules-from-resource "packs/miniforge-standards.pack.edn"))
 
 (defn load-user-pack-rules
   "Load rules from user packs in ~/.miniforge/packs/ via requiring-resolve.
@@ -117,9 +160,12 @@
   "Full pipeline: load rules, filter by phase, extract and format behaviors.
 
    1. Load built-in rules from classpath EDN resource
-   2. Optionally load user packs from ~/.miniforge/packs/
-   3. Combine all rules, filter by phase
-   4. Extract behaviors and format as prompt addendum
+   2. Load standards rules from classpath EDN resource
+   3. Optionally load user packs from ~/.miniforge/packs/
+   4. Split rules by :rule/always-inject? flag
+   5. Always-inject rules: phase-only filtering (bypass file-glob/task-type)
+   6. Other rules: full context filtering via filter-applicable-rules
+   7. Extract :rule/agent-behavior strings and format as prompt addendum
 
    Arguments:
    - phase - Keyword phase (e.g. :implement)
@@ -129,20 +175,33 @@
    - Formatted string addendum or nil. Fail-safe (catches all exceptions)."
   [phase context]
   (try
-    (let [builtin-rules (load-builtin-rules)
-          user-rules (load-user-pack-rules)
-          all-rules (into builtin-rules user-rules)
-          ;; Use requiring-resolve for filter-applicable-rules (soft dep on policy-pack)
-          filtered (if-let [filter-fn (requiring-resolve
-                                        'ai.miniforge.policy-pack.core/filter-applicable-rules)]
-                     (filter-fn all-rules (assoc context :phase phase))
-                     ;; Fallback: manual phase filtering
-                     (filterv (fn [rule]
-                                (let [phases (get-in rule [:rule/applies-to :phases])]
-                                  (or (nil? phases)
-                                      (empty? phases)
-                                      (contains? phases phase))))
-                              all-rules))
+    (let [builtin-rules   (load-builtin-rules)
+          standards-rules (load-standards-rules)
+          user-rules      (load-user-pack-rules)
+          all-rules       (-> builtin-rules
+                              (into standards-rules)
+                              (into user-rules))
+
+          ;; Split: always-inject rules bypass context filtering
+          {always-inject true, context-gated false}
+          (group-by #(boolean (:rule/always-inject? %)) all-rules)
+
+          ;; Always-inject rules: phase-only gating
+          ;; These represent alwaysApply: true standards — they are injected
+          ;; whenever the phase matches, regardless of file globs or task type.
+          always-matched (filterv #(rule-matches-phase? % phase)
+                                  (or always-inject []))
+
+          ;; Other rules: full context filtering
+          other-matched (if-let [filter-fn (requiring-resolve
+                                            'ai.miniforge.policy-pack.core/filter-applicable-rules)]
+                          (filter-fn (or context-gated [])
+                                     (assoc context :phase phase))
+                          ;; Fallback: manual phase filtering
+                          (filterv #(rule-matches-phase? % phase)
+                                   (or context-gated [])))
+
+          filtered  (into always-matched other-matched)
           behaviors (extract-agent-behaviors filtered)]
       (format-behavior-addendum behaviors))
     (catch Exception _
@@ -152,6 +211,9 @@
 (comment
   ;; Load built-in rules
   (load-builtin-rules)
+
+  ;; Load standards rules
+  (load-standards-rules)
 
   ;; Full pipeline for :implement phase
   (load-and-filter-behaviors :implement {:task {:task/intent {:intent/type :implement}}})
@@ -164,5 +226,14 @@
 
   ;; Format as prompt addendum
   (format-behavior-addendum ["Check existing files" "Validate inputs"])
+
+  ;; Always-inject rule example
+  (let [rule {:rule/id :std/stratified-design
+              :rule/always-inject? true
+              :rule/agent-behavior "Output a stratified plan before writing code."
+              :rule/applies-to {:phases #{:plan :implement :review :verify :release}}}]
+    ;; This rule is injected for :implement phase (always-inject + phase matches)
+    (rule-matches-phase? rule :implement))
+  ;; => true
 
   :leave-this-here)
