@@ -73,7 +73,7 @@
                                     :phase/tokens 42
                                     :phase/duration-ms 3000
                                     :phase/outcome :success))
-      (let [workflow (first (sut/get-workflows state))]
+      (let [workflow (->> (sut/get-workflows state) (filter #(= wf-id (:id %))) first)]
         (is (= wf-id (:id workflow)))
         (is (= :review (:phase workflow)))
         (is (= "Checking issues..." (:latest-output workflow)))

@@ -300,7 +300,9 @@
 ;; Data fetchers
 
 (def get-workflows
-  "Get workflows from the live event stream (cached 5s)."
+  "Get workflows from live event stream + disk archive (cached 5s).
+   Merging both sources ensures workflows running in a separate process
+   (e.g. bb miniforge run) are visible in the dashboard."
   (let [ttl-ms 5000
         cache (atom {})]
     (fn [state]
@@ -309,7 +311,14 @@
         (if (and cached (< (- now (:time cached)) ttl-ms))
           (:value cached)
           (let [result (try
-                         (let [events        (live-stream-events state)
+                         (let [live-events   (live-stream-events state)
+                               live-wf-ids   (into #{} (keep wf-id live-events))
+                               ;; Only load disk events for workflows not already in the
+                               ;; live stream — avoids contaminating tests and prevents
+                               ;; duplicate events for in-process workflows.
+                               disk-events   (->> (historical-events nil)
+                                                  (remove #(live-wf-ids (wf-id %))))
+                               events        (into live-events disk-events)
                                grouped-events (group-by wf-id (filter (comp some? wf-id) events))
                                workflows     (map (fn [[id wf-events]]
                                                     (let [wf-events  (->> wf-events (sort-by #(ts-epoch-ms (event-ts %))) vec)

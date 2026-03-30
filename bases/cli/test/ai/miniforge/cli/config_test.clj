@@ -39,9 +39,9 @@
     (let [cfg {:llm {:backend :anthropic}}]
       (is (= :anthropic (config/get-llm-backend cfg nil)))))
 
-  (testing "get-llm-backend returns :claude as default"
-    (is (= :claude (config/get-llm-backend {} nil)))
-    (is (= :claude (config/get-llm-backend {:llm {}} nil)))))
+  (testing "get-llm-backend returns :codex as default"
+    (is (= :codex (config/get-llm-backend {} nil)))
+    (is (= :codex (config/get-llm-backend {:llm {}} nil)))))
 
 (deftest get-llm-timeout-test
   (testing "get-llm-timeout returns config value"
