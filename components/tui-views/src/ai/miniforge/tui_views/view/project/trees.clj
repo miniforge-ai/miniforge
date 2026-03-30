@@ -460,18 +460,50 @@
       (not linked-wf)
       (conj (tree-node "Workflow: not linked" 0)))))
 
-(defn project-evidence-tree
-  "Build evidence tree nodes."
-  [model]
-  (let [detail (:detail model)
-        evidence (:evidence detail)
-        phases (:phases detail)]
+(defn- aggregate-evidence-nodes
+  "Build evidence summary nodes across all workflows for the top-level view."
+  [workflows]
+  (if (empty? workflows)
+    [{:label "No workflows loaded" :depth 0 :expandable? false}]
     (into []
-      (concat
-       (intent-nodes evidence)
-       (phase-nodes phases)
-       (validation-nodes evidence)
-       (policy-evidence-nodes evidence)))))
+      (mapcat (fn [wf]
+                (let [gate-results (get wf :gate-results [])
+                      total  (count gate-results)
+                      passed (count (filter :passed? gate-results))
+                      status (:status wf)
+                      phase  (:phase wf)
+                      gates-str (if (zero? total)
+                                  "no gates recorded"
+                                  (str passed "/" total " gates passed"))
+                      row-fg (case status
+                               (:success :completed) status-pass
+                               :running              status-info
+                               :failed               status-fail
+                               nil)]
+                  [{:label (str (helpers/status-char status) " " (:name wf "?"))
+                    :depth 0 :expandable? false :fg row-fg}
+                   {:label (str "  " gates-str
+                                (when phase (str " \u2502 " (name phase))))
+                    :depth 1 :expandable? false}]))
+              workflows))))
+
+(defn project-evidence-tree
+  "Build evidence tree nodes.
+   When a workflow is selected (leaf context), shows that workflow's evidence detail.
+   At the top-level aggregate view (no workflow selected), shows a summary across all workflows."
+  [model]
+  (let [workflow-id (get-in model [:detail :workflow-id])]
+    (if workflow-id
+      (let [detail   (:detail model)
+            evidence (:evidence detail)
+            phases   (:phases detail)]
+        (into []
+          (concat
+           (intent-nodes evidence)
+           (phase-nodes phases)
+           (validation-nodes evidence)
+           (policy-evidence-nodes evidence))))
+      (aggregate-evidence-nodes (get model :workflows [])))))
 
 (defn project-phase-tree
   "Project workflow phases as tree nodes for the detail view."

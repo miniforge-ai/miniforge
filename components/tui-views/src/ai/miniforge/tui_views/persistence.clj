@@ -521,7 +521,8 @@
    :progress (:progress wf)
    :started-at (:started-at wf)
    :duration-ms (:duration-ms wf)
-   :error (:error wf)})
+   :error (:error wf)
+   :gate-results (get wf :gate-results [])})
 
 (defn read-index
   "Read the workflow index from disk. Returns map of {workflow-id -> entry}."
