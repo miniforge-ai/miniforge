@@ -8,6 +8,7 @@
    [clojure.string :as str]
    [malli.core :as m]
    [malli.error :as me]
+   [ai.miniforge.dag-primitives.interface :as dag]
    [ai.miniforge.repo-dag.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -83,43 +84,19 @@
   "Perform topological sort using Kahn's algorithm.
    Returns {:success true :order [...]} or {:success false :error :cycle-detected :cycle-nodes #{...}}"
   [dag]
-  (let [nodes (repo-names dag)
-        edges (:dag/edges dag)
-        ;; Build in-degree map: count of incoming edges per node
-        in-degree (reduce (fn [acc edge]
-                            (update acc (:edge/to edge) (fnil inc 0)))
-                          (zipmap nodes (repeat 0))
-                          edges)
-        ;; Build adjacency list: map from node to list of nodes it points to
-        adj (reduce (fn [acc edge]
-                      (update acc (:edge/from edge) (fnil conj []) (:edge/to edge)))
-                    {}
-                    edges)
-        ;; Find initial set of nodes with no incoming edges
-        initial-queue (filterv #(zero? (get in-degree %)) nodes)]
-    ;; Kahn's algorithm loop
-    (loop [queue (into clojure.lang.PersistentQueue/EMPTY initial-queue)
-           in-deg in-degree
-           result []]
-      (if (empty? queue)
-        ;; Check if all nodes were processed
-        (if (= (count result) (count nodes))
-          {:success true :order result}
-          ;; Cycle detected - find nodes not in result
-          (let [remaining (set/difference nodes (set result))]
-            {:success false
-             :error :cycle-detected
-             :cycle-nodes remaining}))
-        ;; Process next node
-        (let [node (peek queue)
-              neighbors (get adj node [])
-              ;; Update in-degrees for neighbors
-              new-in-deg (reduce #(update %1 %2 dec) in-deg neighbors)
-              ;; Find newly ready neighbors (in-degree becomes 0)
-              ready-neighbors (filterv #(zero? (get new-in-deg %)) neighbors)]
-          (recur (into (pop queue) ready-neighbors)
-                 new-in-deg
-                 (conj result node)))))))
+  (let [;; Use insertion order from :dag/repos for deterministic tie-breaking.
+        node-order (mapv :repo/name (:dag/repos dag))
+        edges      (:dag/edges dag)
+        dep-map    (reduce (fn [m edge]
+                             (update m (:edge/to edge) (fnil conj #{}) (:edge/from edge)))
+                           (zipmap node-order (repeat #{}))
+                           edges)
+        result     (dag/topological-sort dep-map node-order)]
+    (if (dag/ok? result)
+      {:success true :order (:data result)}
+      {:success     false
+       :error       :cycle-detected
+       :cycle-nodes (get-in result [:error :cycle-nodes])})))
 
 (defn find-cycle-nodes
   "Find nodes involved in a cycle. Returns nil if no cycle."
