@@ -360,7 +360,7 @@
    :project/train-prs      (helpers/memoize-by project-train-prs
                              (fn [m] (get-in m [:detail :selected-train])))
    :project/evidence-tree  (helpers/memoize-by trees/project-evidence-tree
-                             (fn [m] (:detail m)))
+                             (fn [m] [(:detail m) (:workflows m)]))
    :project/artifacts      (helpers/memoize-by project-artifacts
                              (fn [m] (get-in m [:detail :artifacts])))
    :project/kanban-columns (helpers/memoize-by project-kanban-columns

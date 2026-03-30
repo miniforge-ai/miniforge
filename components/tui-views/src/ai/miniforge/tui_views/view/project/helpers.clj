@@ -68,7 +68,14 @@
 
 (defn status-char [status]
   (case status
-    :running "●" :success "✓" :failed "✗" :blocked "◐" :archived "⊘" "○"))
+    :running   "●"
+    :success   "✓"
+    :completed "✓"
+    :failed    "✗"
+    :blocked   "◐"
+    :stale     "⊘"
+    :archived  "⊘"
+    "○"))
 
 (defn format-progress-bar [pct width]
   (let [pct (or pct 0)

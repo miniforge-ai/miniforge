@@ -114,7 +114,7 @@
 
 (defn make-workflow
   "Create a workflow summary map for the model."
-  [{:keys [id name status phase progress started-at]}]
+  [{:keys [id name status phase progress started-at gate-results]}]
   {:id           id
    :name         (or name (str "workflow-" (subs (str id) 0 8)))
    :status       (or status :pending)
@@ -122,7 +122,7 @@
    :progress     (or progress 0)
    :started-at   started-at
    :agents       {}
-   :gate-results []})
+   :gate-results (or gate-results [])})
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Repo manager helpers

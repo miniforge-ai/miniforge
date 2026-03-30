@@ -86,10 +86,25 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; View switches
 
+(def detail-defaults
+  "Default values for workflow drill-down state. Mirrors model/init-model :detail."
+  {:workflow-id    nil
+   :phases         []
+   :current-agent  nil
+   :agent-output   ""
+   :evidence       nil
+   :artifacts      []
+   :expanded-nodes #{}
+   :focused-pane   0
+   :selected-pr    nil
+   :pr-readiness   nil
+   :pr-risk        nil
+   :selected-train nil})
+
 (defn switch-view
-  "Switch to a top-level view, resetting navigation state."
+  "Switch to a top-level view, resetting navigation and detail state."
   [model view-key]
   (-> model
       (merge selection-defaults filter-defaults)
       (assoc :view view-key)
-      (assoc-in [:detail :workflow-id] nil)))
+      (assoc :detail detail-defaults)))
