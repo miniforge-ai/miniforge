@@ -13,7 +13,9 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.web-dashboard.views.evidence
-  "Evidence artifacts view for audit trails.")
+  "Evidence artifacts view for audit trails."
+  (:require
+   [ai.miniforge.web-dashboard.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Evidence fragments
@@ -93,7 +95,7 @@
          :hx-target "#filter-modal-container"
          :hx-swap "innerHTML"
          :title "Add pane-local filter"}
-        "Filter"]]]]
+        (msg/t :action/filter)]]]]
     [:div#evidence-content
      {:hx-get "/api/evidence/list"
       :hx-trigger "refresh from:body, every 10s"

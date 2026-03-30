@@ -2,7 +2,8 @@
   "Archived workflow list and detail views."
   (:require
    [hiccup2.core :refer [html]]
-   [ai.miniforge.web-dashboard.components :as c]))
+   [ai.miniforge.web-dashboard.components :as c]
+   [ai.miniforge.web-dashboard.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure helpers
@@ -35,7 +36,7 @@
   (case status
     :running   "Running"
     :completed "Completed"
-    :failed    "Failed"
+    :failed    (msg/t :status/failed-label)
     :stale     "Stale"
     "Unknown"))
 
@@ -81,4 +82,4 @@
               :hx-confirm "Delete this archived workflow?"
               :hx-target (str "#arch-" wf-id)
               :hx-swap "outerHTML"}
-             "Delete"]]]))])))
+             (msg/t :action/delete)]]]))])))
