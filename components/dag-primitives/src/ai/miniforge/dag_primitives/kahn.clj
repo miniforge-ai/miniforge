@@ -1,9 +1,33 @@
 (ns ai.miniforge.dag-primitives.kahn
   "Generic Kahn's algorithm for topological sort.
    Operates on a plain dependency map — no domain types."
-  (:require [clojure.set :as set]))
+  (:require [clojure.set :as set]
+            [ai.miniforge.dag-primitives.graph  :as graph]
+            [ai.miniforge.dag-primitives.result :as result]))
 
 ;;------------------------------------------------------------------------------ Layer 0
+;; Queue construction
+
+(defn- initial-queue
+  "Seed the ready queue with all nodes that have no predecessors,
+   preserving the caller-supplied tie-breaking order."
+  [in-degree ordered-nodes]
+  (into clojure.lang.PersistentQueue/EMPTY
+        (filter #(zero? (get in-degree %)) ordered-nodes)))
+
+;;------------------------------------------------------------------------------ Layer 1
+;; Kahn step
+
+(defn- process-node
+  "Remove node from the queue, decrement in-degrees for its successors,
+   and enqueue any successor whose in-degree just reached zero."
+  [adj in-degree queue result node]
+  (let [succs   (get adj node #{})
+        new-deg (reduce #(update %1 %2 dec) in-degree succs)
+        ready   (filter #(zero? (get new-deg %)) succs)]
+    [(into (pop queue) ready) new-deg (conj result node)]))
+
+;;------------------------------------------------------------------------------ Layer 2
 ;; Topological sort
 
 (defn topological-sort
@@ -19,37 +43,23 @@
      Providing an explicit ordered-nodes makes tie-breaking deterministic.
 
    Returns:
-     {:ok? true  :data [node-ids in topological order]}
-     {:ok? false :error {:code :cycle-detected :cycle-nodes #{...}}}"
+     (result/ok  [node-ids in topological order])
+     (result/err :cycle-detected message {:cycle-nodes #{...}})"
   ([dep-map]
    (topological-sort dep-map (keys dep-map)))
   ([dep-map ordered-nodes]
-   (let [all-nodes  (set (keys dep-map))
-         ;; Build forward adjacency: predecessor → #{successors}
-         adj        (reduce (fn [a [node preds]]
-                               (reduce (fn [a2 pred] (update a2 pred (fnil conj #{}) node))
-                                       a
-                                       preds))
-                             (zipmap all-nodes (repeat #{}))
-                             dep-map)
-         ;; in-degree: number of unsatisfied predecessors per node
-         in-degree  (reduce-kv (fn [m node preds] (assoc m node (count preds)))
-                                {}
-                                dep-map)]
-     (loop [queue  (into clojure.lang.PersistentQueue/EMPTY
-                         (filter #(zero? (get in-degree %)) ordered-nodes))
+   (let [all-nodes (set (keys dep-map))
+         adj       (graph/successors-of dep-map)
+         in-degree (graph/predecessor-counts dep-map)]
+     (loop [queue  (initial-queue in-degree ordered-nodes)
             in-deg in-degree
             result []]
        (if (empty? queue)
          (if (= (count result) (count all-nodes))
-           {:ok? true :data result}
-           (let [remaining (set/difference all-nodes (set result))]
-             {:ok? false :error {:code :cycle-detected :cycle-nodes remaining}}))
-         (let [node        (peek queue)
-               neighbors   (get adj node #{})
-               new-deg     (reduce #(update %1 %2 dec) in-deg neighbors)
-               ;; Enqueue newly-ready neighbors in ordered-nodes order for stability
-               newly-ready (filter #(zero? (get new-deg %)) neighbors)]
-           (recur (into (pop queue) newly-ready)
-                  new-deg
-                  (conj result node))))))))
+           (result/ok result)
+           (result/err :cycle-detected
+                       "Dependency cycle detected"
+                       {:cycle-nodes (set/difference all-nodes (set result))}))
+         (let [node                     (peek queue)
+               [queue' in-deg' result'] (process-node adj in-deg queue result node)]
+           (recur queue' in-deg' result')))))))

@@ -45,14 +45,14 @@
     (let [result (dp/topological-sort {:a #{:c} :b #{:a} :c #{:b}})]
       (is (dp/err? result))
       (is (= :cycle-detected (get-in result [:error :code])))
-      (is (= #{:a :b :c} (get-in result [:error :cycle-nodes]))))))
+      (is (= #{:a :b :c} (get-in result [:error :data :cycle-nodes]))))))
 
 (deftest topological-sort-partial-cycle
   (testing "Cycle in part of graph; acyclic nodes still processed"
     (let [result (dp/topological-sort {:root #{} :a #{:b} :b #{:a}})]
       (is (dp/err? result))
       (is (= :cycle-detected (get-in result [:error :code])))
-      (is (= #{:a :b} (get-in result [:error :cycle-nodes]))))))
+      (is (= #{:a :b} (get-in result [:error :data :cycle-nodes]))))))
 
 ;;------------------------------------------------------------------------------ Result monad
 

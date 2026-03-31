@@ -96,7 +96,7 @@
       {:success true :order (:data result)}
       {:success     false
        :error       :cycle-detected
-       :cycle-nodes (get-in result [:error :cycle-nodes])})))
+       :cycle-nodes (get-in result [:error :data :cycle-nodes])})))
 
 (defn find-cycle-nodes
   "Find nodes involved in a cycle. Returns nil if no cycle."
