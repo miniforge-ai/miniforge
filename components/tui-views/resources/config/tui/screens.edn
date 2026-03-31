@@ -34,7 +34,8 @@
                {:key :progress-str :header "Progress" :width 20}
                {:key :agent-msg :header "Agent" :width 16}]
      :selectable? true
-     :selection-col? true}
+     :selection-col? true
+     :empty-msg "  No workflows yet.  Start one with:  mf workflow run <spec.edn>"}
     {:type :node/footer
      :segments
      {:normal "j/k:nav  Enter:detail  Space:select  Shift+↑↓:range  1-0:views  /:search  ::cmd  q:quit"
