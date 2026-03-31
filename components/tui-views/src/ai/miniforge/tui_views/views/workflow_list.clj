@@ -163,8 +163,9 @@
 
 (defn render-table [workflows selected active-chain [cols rows]]
   (if (empty? workflows)
-    (layout/text [cols rows] "  No active workflows. Waiting for events..."
-                 {:fg :default})
+    (layout/text [cols rows]
+                 "  No workflows yet.  Start one with:  mf workflow run <spec.edn>"
+                 {:fg palette/status-info})
     (let [grouped (group-workflows workflows)
           visible-count (max 0 (- rows 2))
           mapped-selected (grouped-selected-row grouped selected)
