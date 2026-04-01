@@ -1,0 +1,41 @@
+;; Standard Deployment Workflow v1.0.0 (Interceptor-based)
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; Full deployment: provision infrastructure -> deploy application -> validate.
+;; Pulumi for provisioning, Kustomize for K8s deployment.
+;;
+;; Policy gates check Pulumi preview before apply.
+;; Evidence bundle captured at every phase boundary.
+
+{:workflow/id :standard-deploy
+ :workflow/version "1.0.0"
+ :workflow/name "Standard GCP Deployment"
+ :workflow/description "Pulumi provision -> Kustomize deploy -> Validate"
+
+ :workflow/pipeline
+ [;; Infrastructure provisioning via Pulumi
+  ;; Gates: policy-pack checks preview for destructive/unsafe operations
+  {:phase :provision
+   :gates [:policy-pack :provision-validated]
+   :budget {:tokens 0 :iterations 3 :time-seconds 900}
+   :on-fail :provision}
+
+  ;; Application deployment via Kustomize
+  ;; Gates: verify all pods are healthy after rollout
+  {:phase :deploy
+   :gates [:deploy-healthy]
+   :budget {:tokens 0 :iterations 3 :time-seconds 300}
+   :on-fail :deploy}
+
+  ;; Post-deploy validation
+  ;; Gates: health endpoints respond, smoke tests pass
+  {:phase :validate
+   :gates [:health-check]
+   :on-fail :deploy}
+
+  ;; Terminal
+  {:phase :done}]
+
+ :workflow/config
+ {:max-iterations 15
+  :failure-strategy :rollback}}
