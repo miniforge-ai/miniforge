@@ -11,7 +11,8 @@
    [ai.miniforge.tui-engine.interface.layout :as layout]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.transition :as transition]
-   [ai.miniforge.tui-views.view :as view]))
+   [ai.miniforge.tui-views.view :as view])
+  (:import [java.util Date]))
 
 (def ^:private size [80 24])
 
@@ -57,3 +58,24 @@
           wf-list-line   (render-first-line (transition/switch-view base :workflow-list))]
       (is (not= pr-fleet-line wf-list-line)
           (str "pr-fleet and workflow-list have identical tab bars:\n" pr-fleet-line)))))
+
+(deftest workflow-list-renders-dated-workflows-without-throwing
+  ;; Regression: temporal-bucket used (some-> wf-date (.between ChronoUnit/DAYS today))
+  ;; which called wf-date.between(ChronoUnit.DAYS, today) — LocalDate has no such method.
+  ;; This crashed the render on every keystroke when real workflows had :started-at set.
+  (testing "workflow-list with :started-at dates renders without exception"
+    (let [now (Date.)
+          m (-> (model/init-model)
+                (assoc :workflows [{:id "wf1" :name "Running now"  :status :running  :started-at now}
+                                   {:id "wf2" :name "Done today"   :status :success  :started-at now}
+                                   {:id "wf3" :name "No date"      :status :pending  :started-at nil}])
+                (transition/switch-view :workflow-list))
+          rendered (str/join "\n" (layout/buf->strings (view/root-view m size)))]
+      ;; Header section "Today" must appear (confirms grouping ran without throwing)
+      (is (str/includes? rendered "Today")
+          (str "Expected 'Today' bucket header, got:\n" rendered))
+      ;; Both dated workflows must appear by name
+      (is (str/includes? rendered "Running now")
+          "Expected 'Running now' workflow in rendered output")
+      (is (str/includes? rendered "Done today")
+          "Expected 'Done today' workflow in rendered output"))))
