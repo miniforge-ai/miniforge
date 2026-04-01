@@ -18,7 +18,6 @@
    [ai.miniforge.pr-lifecycle.classifier :as classifier]
    [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix-loop]
-   [ai.miniforge.pr-lifecycle.github :as github]
    [ai.miniforge.pr-lifecycle.monitor-budget :as budget]
    [ai.miniforge.pr-lifecycle.monitor-events :as mevents]
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]))
