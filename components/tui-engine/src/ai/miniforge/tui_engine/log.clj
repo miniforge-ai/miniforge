@@ -57,6 +57,24 @@
       (.mkdirs d))))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
+;; Log level
+
+(def ^:private level-order {:debug 0 :info 1 :warn 2 :error 3})
+
+(def ^:private log-level
+  "Current minimum log level. Settable at runtime via set-level!."
+  (atom :info))
+
+(defn set-level!
+  "Set the minimum log level. Accepts :debug :info :warn :error."
+  [level]
+  (when (contains? level-order level)
+    (reset! log-level level)))
+
+(defn- enabled? [level]
+  (>= (get level-order level 0) (get level-order @log-level 1)))
+
+;; ─────────────────────────────────────────────────────────────────────────────
 ;; Core write
 
 (defn- format-exception [^Throwable e]
@@ -68,36 +86,36 @@
                       (str/join "\n    "))]
       (str "\n  " msg "\n    " frames))))
 
-(defn- write-line! [level msg ^Throwable e]
-  (try
-    (ensure-log-dir!)
-    (let [ts  (.format fmt (Instant/now))
-          ex  (format-exception e)
-          line (str ts " " level " " msg (or ex "") "\n")]
-      (with-open [w (BufferedWriter. (FileWriter. ^String log-path true))]
-        (.write w ^String line)))
-    (catch Throwable _)))
+(defn- write-line! [level label msg ^Throwable e]
+  (when (enabled? level)
+    (try
+      (ensure-log-dir!)
+      (let [ts  (.format fmt (Instant/now))
+            ex  (format-exception e)
+            line (str ts " " label " " msg (or ex "") "\n")]
+        (with-open [w (BufferedWriter. (FileWriter. ^String log-path true))]
+          (.write w ^String line)))
+      (catch Throwable _))))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Public API
 
 (defn error
   "Log an error, optionally with an exception."
-  ([msg] (write-line! "ERROR" msg nil))
-  ([msg ^Throwable e] (write-line! "ERROR" msg e)))
+  ([msg] (write-line! :error "ERROR" msg nil))
+  ([msg ^Throwable e] (write-line! :error "ERROR" msg e)))
 
 (defn warn
   "Log a warning."
-  ([msg] (write-line! "WARN " msg nil))
-  ([msg ^Throwable e] (write-line! "WARN " msg e)))
+  ([msg] (write-line! :warn "WARN " msg nil))
+  ([msg ^Throwable e] (write-line! :warn "WARN " msg e)))
 
 (defn info
   "Log an informational message."
   [msg]
-  (write-line! "INFO " msg nil))
+  (write-line! :info "INFO " msg nil))
 
 (defn debug
-  "Log a debug message. No-op unless the tui.debug system property is set."
+  "Log a debug message. No-op unless log level is :debug."
   [msg]
-  (when (System/getProperty "tui.debug")
-    (write-line! "DEBUG" msg nil)))
+  (write-line! :debug "DEBUG" msg nil))

@@ -33,6 +33,7 @@
    [ai.miniforge.tui-engine.runtime :as runtime]
    [ai.miniforge.tui-engine.screen :as screen]
    [ai.miniforge.tui-engine.input :as input]
+   [ai.miniforge.tui-engine.log :as log]
    [ai.miniforge.tui-engine.style :as style]))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
@@ -82,6 +83,14 @@
   "Get the current application model (read-only snapshot)."
   [app]
   (runtime/get-model app))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Logging
+
+(def set-log-level!
+  "Set the minimum log level for the TUI engine. Accepts :debug :info :warn :error.
+   Useful for enabling debug logging at startup via CLI flag or runtime command."
+  log/set-level!)
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Re-exports for convenience
