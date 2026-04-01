@@ -28,7 +28,6 @@
    - add-watch on model-ref triggers rendering after every state transition
    - Rendering is serialized via a lock to prevent concurrent screen writes"
   (:require
-   [clojure.string :as str]
    [ai.miniforge.tui-engine.log :as log]
    [ai.miniforge.tui-engine.screen :as screen]
    [ai.miniforge.tui-engine.layout :as layout]))
