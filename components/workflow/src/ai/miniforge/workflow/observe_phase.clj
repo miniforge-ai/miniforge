@@ -1,0 +1,160 @@
+(ns ai.miniforge.workflow.observe-phase
+  "N2 Observe phase: autonomous PR monitoring after release.
+
+   Wires the PR monitor loop into the workflow execution pipeline.
+   After the Release phase creates a PR, the Observe phase starts
+   the monitor loop and runs until the PR is merged, abandoned,
+   or budget exhausted.
+
+   This is the N2 §7 implementation. The Observe phase is the final
+   phase of the standard SDLC workflow: plan → implement → verify →
+   review → release → observe."
+  (:require [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.response.interface :as response]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Defaults
+
+(def default-config
+  "Default Observe phase configuration.
+   Agent is nil because this phase is pure orchestration — it delegates
+   to the PR monitor loop which internally uses generate-fn for fixes."
+  {:agent nil
+   :gates []
+   :budget {:tokens 0
+            :iterations 1
+            :time-seconds 259200}}) ; 72 hours default
+
+;; Register defaults on load
+(registry/register-phase-defaults! :observe default-config)
+
+;------------------------------------------------------------------------------ Layer 1
+;; Interceptor implementation
+
+(defn enter-observe
+  "Execute the Observe phase.
+
+   Reads PR info from context (set by Release phase), creates and runs
+   the PR monitor loop until a terminal condition is reached:
+   - All PRs merged
+   - Budget exhausted (human escalation emitted)
+   - PRs closed externally
+   - No open PRs remain
+
+   Uses requiring-resolve to avoid circular component dependencies."
+  [ctx]
+  (let [pr-infos (or (get-in ctx [:execution/dag-pr-infos])
+                     ;; Single PR from release phase
+                     (when-let [pr-info (get-in ctx [:execution/phase-results :release :pr-info])]
+                       [pr-info]))
+        start-time (System/currentTimeMillis)]
+
+    (if (empty? pr-infos)
+      ;; No PRs to observe — skip phase
+      (-> ctx
+          (assoc-in [:phase :name] :observe)
+          (assoc-in [:phase :status] :completed)
+          (assoc-in [:phase :result]
+                    (response/success {:observe/status :skipped
+                                       :observe/reason "No PRs to observe"})))
+
+      ;; Resolve monitor-loop at runtime to avoid circular deps
+      (let [create-monitor (requiring-resolve
+                            'ai.miniforge.pr-lifecycle.monitor-loop/create-monitor)
+            run-monitor-loop (requiring-resolve
+                              'ai.miniforge.pr-lifecycle.monitor-loop/run-monitor-loop)
+
+            logger (get-in ctx [:execution/logger])
+            worktree-path (or (get-in ctx [:execution/worktree-path])
+                              (get-in ctx [:worktree-path]))
+            generate-fn (get-in ctx [:execution/generate-fn])
+            event-bus (get-in ctx [:execution/event-bus])
+            self-author (or (get-in ctx [:execution/self-author])
+                            (get-in ctx [:config :github/self-author])
+                            "miniforge[bot]")
+
+            monitor-config {:worktree-path worktree-path
+                            :self-author self-author
+                            :generate-fn generate-fn
+                            :event-bus event-bus
+                            :logger logger
+                            :poll-interval-ms
+                            (get-in ctx [:config :pr-monitor/poll-interval-ms] 60000)
+                            :max-fix-attempts-per-comment
+                            (get-in ctx [:config :pr-monitor/max-fix-attempts-per-comment] 3)
+                            :max-total-fix-attempts-per-pr
+                            (get-in ctx [:config :pr-monitor/max-total-fix-attempts-per-pr] 10)
+                            :abandon-after-hours
+                            (get-in ctx [:config :pr-monitor/abandon-after-hours] 72)}
+
+            monitor (create-monitor monitor-config)
+            evidence (run-monitor-loop monitor self-author)
+
+            result-data {:observe/status :completed
+                         :observe/evidence evidence
+                         :observe/prs-monitored (count pr-infos)
+                         :observe/duration-hours (:duration-hours evidence)
+                         :observe/comments-received (:comments-received evidence)
+                         :observe/comments-addressed (:comments-addressed evidence)
+                         :observe/fixes-pushed (count (:fixes-pushed evidence))
+                         :observe/questions-answered (count (:questions-answered evidence))}]
+
+        (-> ctx
+            (assoc-in [:phase :name] :observe)
+            (assoc-in [:phase :started-at] start-time)
+            (assoc-in [:phase :status] :completed)
+            (assoc-in [:phase :result] (response/success result-data))
+            (assoc :execution/pr-lifecycle-evidence evidence))))))
+
+(defn leave-observe
+  "Post-processing for Observe phase. Records evidence and duration metrics."
+  [ctx]
+  (let [start-time (get-in ctx [:phase :started-at] (System/currentTimeMillis))
+        end-time (System/currentTimeMillis)
+        duration-ms (- end-time start-time)]
+    (-> ctx
+        (assoc-in [:phase :ended-at] end-time)
+        (assoc-in [:phase :duration-ms] duration-ms)
+        (assoc-in [:metrics :observe :duration-ms] duration-ms)
+        (update-in [:execution :phases-completed] (fnil conj []) :observe)
+        (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
+
+(defn error-observe
+  "Handle Observe phase errors."
+  [ctx ex]
+  (-> ctx
+      (assoc-in [:phase :status] :failed)
+      (assoc-in [:phase :error] {:message (ex-message ex)
+                                  :data (ex-data ex)})))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Registry method
+
+(defmethod registry/get-phase-interceptor :observe
+  [config]
+  (let [merged (registry/merge-with-defaults config)]
+    {:name ::observe
+     :config merged
+     :enter (fn [ctx]
+              (enter-observe (assoc ctx :phase-config merged)))
+     :leave leave-observe
+     :error error-observe}))
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  ;; Get interceptor
+  (registry/get-phase-interceptor {:phase :observe})
+
+  ;; Check defaults
+  (registry/phase-defaults :observe)
+
+  ;; Typical execution context keys the Observe phase reads:
+  ;; :execution/dag-pr-infos — vector of PR info maps from Release phase
+  ;; :execution/logger — structured logger
+  ;; :execution/worktree-path — git repo path
+  ;; :execution/generate-fn — LLM generation function
+  ;; :execution/event-bus — PR lifecycle event bus
+  ;; :execution/self-author — miniforge's GitHub login
+  ;; :config :pr-monitor/* — monitor config overrides
+
+  :leave-this-here)
