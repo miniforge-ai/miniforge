@@ -224,7 +224,31 @@
                 (update/update-model [:input {:key :key/d2 :char \2}]))] ;; evidence
       (is (util/view-is? m :evidence))
       (let [m2 (update/update-model m [:input {:key :key/d3 :char \3}])]
-        (is (util/view-is? m2 :artifact-browser))))))
+        (is (util/view-is? m2 :artifact-browser)))))
+)
+
+(deftest train-view-navigation-test
+  (testing "Tab from :train-view (single-pane detail) escapes to top-level cycling"
+    ;; Regression: train-view has pane-count=1, so cycle-pane was a visual no-op.
+    ;; Tab should fall through to cycle-top-level-view, landing on :pr-fleet.
+    (let [m (-> (util/fresh-model)
+                (assoc :view :train-view)
+                (update/update-model [:input :key/tab]))]
+      (is (util/view-is? m :pr-fleet))))
+
+  (testing "Number key 2 from :train-view uses top-level views, reaching :workflow-list"
+    ;; Regression: current-level-views returned detail-views for any detail view,
+    ;; so '2' from :train-view went to :pr-detail instead of :workflow-list.
+    (let [m (-> (util/fresh-model)
+                (assoc :view :train-view)
+                (update/update-model [:input {:key :key/d2 :char \2}]))]
+      (is (util/view-is? m :workflow-list))))
+
+  (testing "Number key 1 from :train-view reaches :pr-fleet"
+    (let [m (-> (util/fresh-model)
+                (assoc :view :train-view)
+                (update/update-model [:input {:key :key/d1 :char \1}]))]
+      (is (util/view-is? m :pr-fleet)))))
 
 (deftest repo-manager-actions-test
   (testing "b opens remote browse mode and triggers browse side-effect"
@@ -458,6 +482,21 @@
       ;; workflow-detail is in detail-views, so cycle-pane is called
       (is (util/view-is? m :workflow-detail))
       (is (= 1 (get-in m [:detail :focused-pane])))))
+
+  (testing "Tab from :train-view (single-pane detail) escapes to top-level cycling"
+    ;; Regression: train-view has pane-count=1, so cycle-pane was a no-op.
+    ;; Tab should fall through to cycle-top-level-view, landing on :pr-fleet.
+    (let [m (-> (util/fresh-model)
+                (assoc :view :train-view)
+                (update/update-model [:input :key/tab]))]
+      (is (util/view-is? m :pr-fleet))))
+
+  (testing "Shift+Tab from :train-view escapes to top-level cycling in reverse"
+    (let [m (-> (util/fresh-model)
+                (assoc :view :train-view)
+                (update/update-model [:input :key/shift-tab]))]
+      ;; reverse from :train-view (not in top-level-views) wraps to last top-level
+      (is (some #{(:view m)} model/top-level-views))))
 
   (testing "Tab in workflow-list cycles to next top-level view (evidence)"
     (let [m (-> (util/fresh-model)

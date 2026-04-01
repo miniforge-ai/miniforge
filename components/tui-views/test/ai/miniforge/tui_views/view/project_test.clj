@@ -3,7 +3,11 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.tui-views.view.project :as sut]
-   [ai.miniforge.tui-views.view.project.trees :as trees]))
+   [ai.miniforge.tui-views.view.project.helpers :as helpers]
+   [ai.miniforge.tui-views.view.project.trees :as trees])
+  (:import
+   [java.time LocalDate ZoneId]
+   [java.util Date]))
 
 ;; ============================================================================
 ;; readiness-state
@@ -614,3 +618,67 @@
     (let [content "Issue 1: missing test\\n{\"type\":\"turn.completed\"}\nSee [foo.clj](/foo.clj) for context"
           lines (trees/clean-agent-content content)]
       (is (= ["Issue 1: missing test" "See foo.clj for context"] (vec lines))))))
+
+;; ============================================================================
+;; temporal-bucket — regression for wrong some-> / .between call order
+;; (Bug: some-> threaded wf-date as receiver of .between, but LocalDate has no
+;;  2-arg between method. Correct call: ChronoUnit/DAYS.between(start, end).)
+;; ============================================================================
+
+(defn- date-days-ago
+  "Return a java.util.Date for N days before today (midnight local time)."
+  [n]
+  (-> (LocalDate/now)
+      (.minusDays n)
+      (.atStartOfDay (ZoneId/systemDefault))
+      .toInstant
+      Date/from))
+
+(deftest temporal-bucket-today
+  (testing "workflow started today → :today"
+    (is (= :today
+           (helpers/temporal-bucket {:started-at (date-days-ago 0)}
+                                    (LocalDate/now))))))
+
+(deftest temporal-bucket-yesterday
+  (testing "workflow started 1 day ago → :yesterday"
+    (is (= :yesterday
+           (helpers/temporal-bucket {:started-at (date-days-ago 1)}
+                                    (LocalDate/now))))))
+
+(deftest temporal-bucket-this-week
+  (testing "workflow started 3 days ago → :this-week"
+    (is (= :this-week
+           (helpers/temporal-bucket {:started-at (date-days-ago 3)}
+                                    (LocalDate/now))))))
+
+(deftest temporal-bucket-this-month
+  (testing "workflow started 15 days ago → :this-month"
+    (is (= :this-month
+           (helpers/temporal-bucket {:started-at (date-days-ago 15)}
+                                    (LocalDate/now))))))
+
+(deftest temporal-bucket-older
+  (testing "workflow started 60 days ago → :older"
+    (is (= :older
+           (helpers/temporal-bucket {:started-at (date-days-ago 60)}
+                                    (LocalDate/now))))))
+
+(deftest temporal-bucket-nil-started-at
+  (testing "nil started-at → :unknown (no exception)"
+    (is (= :unknown
+           (helpers/temporal-bucket {:started-at nil} (LocalDate/now))))))
+
+(deftest temporal-bucket-missing-started-at
+  (testing "missing started-at key → :unknown (no exception)"
+    (is (= :unknown
+           (helpers/temporal-bucket {} (LocalDate/now))))))
+
+(deftest group-workflows-with-headers-dated
+  (testing "dated workflows produce bucket headers without throwing"
+    (let [wfs [{:id "wf1" :name "Today wf"  :status :running :started-at (date-days-ago 0)}
+               {:id "wf2" :name "Old wf"    :status :success :started-at (date-days-ago 40)}]
+          [rows mapped-idx] (helpers/group-workflows-with-headers wfs 0)]
+      (is (some :_header? rows)   "Expected at least one header row")
+      (is (= 2 (count (remove :_header? rows))) "Both workflows appear as non-header rows")
+      (is (number? mapped-idx)    "mapped-idx is a number"))))

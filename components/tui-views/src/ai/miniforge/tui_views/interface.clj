@@ -561,8 +561,13 @@
 (defn start-standalone-tui!
   "Start the TUI in standalone monitoring mode.
    Discovers and tail-follows workflow event files from ~/.miniforge/events/.
-   Does not require an in-memory event stream."
+   Does not require an in-memory event stream.
+
+   opts:
+   - :debug - when true, sets log level to :debug before starting"
   [& [opts]]
+  (when (:debug opts)
+    (tui/set-log-level! :debug))
   (let [train-mgr (pr-train/create-manager)
         app (tui/create-app
              {:init   (fn []

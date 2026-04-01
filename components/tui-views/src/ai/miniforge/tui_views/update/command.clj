@@ -79,6 +79,16 @@
                  (str "Unknown theme: " args
                       " | Available: " names-str)))))))
 
+(def log-levels #{"debug" "info" "warn" "error"})
+
+(defn cmd-log [model args]
+  (let [level-str (some-> args str/trim str/lower-case)]
+    (if (log-levels level-str)
+      (do (engine/set-log-level! (keyword level-str))
+          (assoc model :flash-message (str "Log level: " level-str)))
+      (assoc model :flash-message
+             (str "Log levels: " (str/join ", " (sort log-levels)))))))
+
 ;------------------------------------------------------------------------------ Layer 1b
 ;; Fleet management commands
 
@@ -448,6 +458,8 @@
                                             (map name)
                                             sort
                                             vec))}
+   "log"         {:handler cmd-log         :help "Set log level (e.g. :log debug)"
+                  :completions (fn [_] (vec (sort log-levels)))}
    "archive"     {:handler cmd-archive     :help "Archive selected workflows (or :archive all-done)"}
    "sort"        {:handler cmd-sort       :help "Sort workflows (name, date, status, progress)"
                   :completions (fn [_] (vec (keys sort-fields)))}

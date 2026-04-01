@@ -313,11 +313,9 @@
   "Classify a workflow's started-at into a temporal group.
    Accepts pre-computed `today` to avoid repeated LocalDate/now calls."
   [wf ^LocalDate today]
-  (or (some-> (:started-at wf)
-              (to-local-date)
-              (.between ChronoUnit/DAYS ^LocalDate today)
-              (days-ago-bucket))
-      :unknown))
+  (if-let [wf-date (some-> (:started-at wf) to-local-date)]
+    (days-ago-bucket (.between ChronoUnit/DAYS wf-date today))
+    :unknown))
 
 (def ^:private bucket-labels
   {:today "Today" :yesterday "Yesterday" :this-week "This Week"

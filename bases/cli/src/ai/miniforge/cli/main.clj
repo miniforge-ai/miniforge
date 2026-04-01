@@ -289,7 +289,8 @@
            :open {:coerce :boolean :alias :o}}}
 
    {:cmds ["tui"]
-    :fn tui-cmd}
+    :fn tui-cmd
+    :spec {:debug {:coerce :boolean :alias :d :default false}}}
 
    ;; Workflow commands
    {:cmds ["workflow" "run"]

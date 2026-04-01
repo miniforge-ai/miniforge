@@ -97,7 +97,7 @@
     (.clear screen))
 
   (refresh! [_]
-    (.refresh screen Screen$RefreshType/DELTA))
+    (.refresh screen Screen$RefreshType/COMPLETE))
 
   (poll-input [_]
     (when-let [key (.pollInput screen)]

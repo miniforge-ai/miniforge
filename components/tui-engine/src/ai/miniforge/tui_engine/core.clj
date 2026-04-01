@@ -28,6 +28,7 @@
    - add-watch on model-ref triggers rendering after every state transition
    - Rendering is serialized via a lock to prevent concurrent screen writes"
   (:require
+   [ai.miniforge.tui-engine.log :as log]
    [ai.miniforge.tui-engine.screen :as screen]
    [ai.miniforge.tui-engine.layout :as layout]))
 
@@ -105,6 +106,26 @@
                   (paint-screen! screen prev-buffer new-buffer))]
     (dosync (ref-set buffer-ref painted))))
 
+(defn paint-error-banner!
+  "Paint a one-line error banner on the bottom row of the screen.
+   Used when the normal render pipeline throws — keeps the TUI alive
+   and visible rather than silently freezing or exiting.
+   Safe to call from any thread; wrapped in try/catch."
+  [screen ^Throwable e]
+  (try
+    (let [[cols rows] (screen/get-size screen)
+          row (max 0 (dec rows))
+          msg (str " RENDER ERROR: "
+                   (some-> e .getClass .getSimpleName)
+                   ": "
+                   (or (.getMessage e) "unknown"))
+          truncated (if (> (count msg) cols)
+                      (str (subs msg 0 (max 0 (- cols 1))) "…")
+                      (str msg (apply str (repeat (- cols (count msg)) \space))))]
+      (screen/put-string! screen 0 row truncated :white :red false)
+      (screen/refresh! screen))
+    (catch Exception _)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; App state structure
 
@@ -155,7 +176,9 @@
                (fn [_key _ref _old-model new-model]
                  (try
                    (do-render! app-state new-model)
-                   (catch Exception _))))
+                   (catch Exception e
+                     (log/error (str "render failed view=" (:view new-model)) e)
+                     (paint-error-banner! scr e)))))
     (atom app-state)))
 
 ;------------------------------------------------------------------------------ Layer 2

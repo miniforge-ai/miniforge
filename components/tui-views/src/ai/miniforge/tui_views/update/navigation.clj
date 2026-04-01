@@ -293,13 +293,16 @@
   "Return views for the current abstraction level (max 10 keys per level).
    - Top-level aggregate: model/top-level-views
    - Workflow detail context: workflow sub-views
-   - Other detail views: model/detail-views"
+   - Multi-pane detail views: model/detail-views
+   - Single-pane detail views (e.g. :train-view): top-level-views
+     so that number keys escape back to the aggregate level."
   [model]
   (cond
     (in-detail-subview? model)
     workflow-subviews
 
-    (some #{(:view model)} model/detail-views)
+    (and (some #{(:view model)} model/detail-views)
+         (> (pane/pane-count (:view model)) 1))
     model/detail-views
 
     :else

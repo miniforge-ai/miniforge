@@ -35,6 +35,7 @@
    [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update.navigation :as nav]
+   [ai.miniforge.tui-views.update.pane :as pane]
    [ai.miniforge.tui-views.update.events :as events]
    [ai.miniforge.tui-views.update.mode :as mode]
    [ai.miniforge.tui-views.update.command :as command]
@@ -261,16 +262,18 @@
 (defn handle-cycle-tab [model]
   (cond
     (nav/in-detail-subview? model)                (nav/cycle-detail-subview model)
-    (some #{(:view model)} model/detail-views)    (nav/cycle-pane model)
+    (and (some #{(:view model)} model/detail-views)
+         (> (pane/pane-count (:view model)) 1))   (nav/cycle-pane model)
     (some #{(:view model)} model/top-level-views) (nav/cycle-top-level-view model)
-    :else                                         model))
+    :else                                          (nav/cycle-top-level-view model)))
 
 (defn handle-cycle-tab-reverse [model]
   (cond
     (nav/in-detail-subview? model)                (nav/cycle-detail-subview-reverse model)
-    (some #{(:view model)} model/detail-views)    (nav/cycle-pane-reverse model)
+    (and (some #{(:view model)} model/detail-views)
+         (> (pane/pane-count (:view model)) 1))   (nav/cycle-pane-reverse model)
     (some #{(:view model)} model/top-level-views) (nav/cycle-top-level-view-reverse model)
-    :else                                         model))
+    :else                                          (nav/cycle-top-level-view-reverse model)))
 
 (defn handle-add-or-select-all [model]
   (cond

@@ -104,7 +104,7 @@
 
 (defn render-table-widget
   "Render a table widget from spec."
-  [model theme [cols rows] {:keys [data-fn columns selectable? selection-col?]}]
+  [model theme [cols rows] {:keys [data-fn columns selectable? selection-col? empty-msg]}]
   (let [project-fn (project/get-projection data-fn)
         data-raw (project-fn model)
         ;; Use mapped selection from metadata if available (e.g. temporal grouping)
@@ -128,8 +128,9 @@
                         show-sel? (conj {:key :sel :header "   " :width 3})
                         true (into (resolve-columns columns cols sel-w)))]
     (if (empty? data)
-      (layout/text [cols rows] "  No data available."
-                   {:fg (get theme :fg :default)})
+      (layout/text [cols rows]
+                   (or empty-msg "  No data available.")
+                   {:fg (if empty-msg palette/status-info (get theme :fg :default))})
       (let [visible-count (max 0 (- rows 2))
             sel (or selected 0)
             offset (if (<= (inc sel) visible-count) 0
