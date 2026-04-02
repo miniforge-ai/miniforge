@@ -14,6 +14,7 @@
 
 (ns ai.miniforge.pr-lifecycle.monitor-state-test
   (:require
+   [ai.miniforge.pr-lifecycle.monitor-budget :as budget]
    [ai.miniforge.pr-lifecycle.monitor-state :as sut]
    [clojure.test :refer [deftest is testing]]))
 
@@ -28,7 +29,7 @@
     (let [monitor (atom {:config {} :budgets {}})
           persisted {:pr-number 42 :limits {} :comment-attempts {} :total-attempts 0
                      :started-at (java.util.Date.) :questions-answered 0 :fixes-pushed 0}]
-      (with-redefs [ai.miniforge.pr-lifecycle.monitor-budget/load-budget
+      (with-redefs [budget/load-budget
                     (fn [pr-number]
                       (when (= 42 pr-number) persisted))]
         (is (= persisted (#'sut/load-budget-from-disk! monitor 42)))
