@@ -1,0 +1,60 @@
+{:deploy/evidence-types
+ {:evidence/pulumi-preview
+  {:description "Full pulumi preview --json output"
+   :phase :provision
+   :captured :after-preview
+   :format :json}
+
+  :evidence/pulumi-outputs
+  {:description "Stack outputs JSON (non-secret infrastructure values)"
+   :phase :provision
+   :captured :after-up
+   :format :json}
+
+  :evidence/resolved-config
+  {:description "Resolved non-secret config values from config store"
+   :phase :deploy
+   :captured :after-resolution
+   :format :edn}
+
+  :evidence/rendered-manifests
+  {:description "kustomize build output (actual K8s YAML applied)"
+   :phase :deploy
+   :captured :before-apply
+   :format :yaml}
+
+  :evidence/image-digests
+  {:description "Container image SHA256 digests for all deployed images"
+   :phase :deploy
+   :captured :before-apply
+   :format :edn}
+
+  :evidence/policy-results
+  {:description "Policy gate evaluation results (passed/blocked/warnings)"
+   :phase :provision
+   :captured :after-gate
+   :format :edn}
+
+  :evidence/approvals
+  {:description "Approval decisions and approver identity"
+   :phase :provision
+   :captured :after-approval
+   :format :edn}
+
+  :evidence/environment-metadata
+  {:description "Target environment: GCP project, GKE cluster, namespace, region"
+   :phase :all
+   :captured :workflow-start
+   :format :edn}
+
+  :evidence/validation-results
+  {:description "Health check and smoke test results"
+   :phase :validate
+   :captured :after-validation
+   :format :edn}
+
+  :evidence/rollback-info
+  {:description "Previous deployment revision and image tags"
+   :phase :deploy
+   :captured :before-deploy
+   :format :edn}}}
