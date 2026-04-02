@@ -110,7 +110,8 @@
      :artifact-path artifact-path
      :pre-session-snapshot (try
                              (file-artifacts/snapshot-working-dir working-dir)
-                             (catch Exception _ nil))}))
+                             (catch Exception _
+                               (file-artifacts/empty-snapshot)))}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; MCP config generation

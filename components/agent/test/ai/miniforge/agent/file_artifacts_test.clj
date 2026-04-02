@@ -94,6 +94,13 @@
                     (fn [_] pre)]
         (is (nil? (sut/collect-written-files pre "/tmp/work"))))))
 
+  (testing "returns nil when the working tree cannot be snapshotted"
+    (let [pre (make-snapshot)]
+      (with-redefs [ai.miniforge.agent.file-artifacts/snapshot-working-dir
+                    (fn [_]
+                      (throw (ex-info "git unavailable" {})))]
+        (is (nil? (sut/collect-written-files pre "/tmp/work"))))))
+
   (testing "merges optional artifact manifest metadata"
     (let [dir (temp-dir)
           pre (make-snapshot)]

@@ -54,7 +54,7 @@
       (modified? status) {:bucket :modified :path path}
       :else nil)))
 
-(defn- empty-snapshot
+(defn empty-snapshot
   "Return an empty working tree snapshot."
   []
   {:untracked #{}
@@ -153,9 +153,12 @@
    the session started."
   [pre-snapshot working-dir]
   (when pre-snapshot
-    (->> (snapshot-working-dir working-dir)
-         (changed-paths pre-snapshot)
-         (synthetic-artifact working-dir))))
+    (try
+      (->> (snapshot-working-dir working-dir)
+           (changed-paths pre-snapshot)
+           (synthetic-artifact working-dir))
+      (catch Exception _
+        nil))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
