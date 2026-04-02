@@ -2,6 +2,7 @@
  {:provision/preview-starting    "Starting Pulumi preview"
   :provision/preview-complete    "Pulumi preview complete"
   :provision/preview-failed      "Pulumi preview failed"
+  :provision/invalid-config      "Provision configuration invalid: {error}"
   :provision/apply-starting      "Applying infrastructure changes"
   :provision/apply-complete      "Infrastructure provisioning complete"
   :provision/apply-failed        "Infrastructure apply failed"
