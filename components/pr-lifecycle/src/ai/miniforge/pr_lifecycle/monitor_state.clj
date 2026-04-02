@@ -22,21 +22,15 @@
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.pr-lifecycle.monitor-budget :as budget]
+   [ai.miniforge.pr-lifecycle.monitor-config :as config]
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Configuration
+;; Configuration + state
 
 (def default-config
-  "Default PR monitor loop configuration."
-  {:poll-interval-ms 60000
-   :self-author nil
-   :max-fix-attempts-per-comment 3
-   :max-total-fix-attempts-per-pr 10
-   :abandon-after-hours 72})
-
-;------------------------------------------------------------------------------ Layer 0
-;; Monitor state
+  "Default PR monitor loop configuration loaded from shared EDN."
+  (config/monitor-defaults))
 
 (defn create-monitor
   "Create a PR monitor loop state atom from config."
@@ -57,6 +51,8 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Shared helpers
 
+(declare load-budget-from-disk!)
+
 (defn emit!
   "Publish an event to the configured event bus when present."
   [monitor event]
@@ -68,18 +64,22 @@
   "Get an existing budget for a PR, loading from disk when available."
   [monitor pr-number]
   (or (get-in @monitor [:budgets pr-number])
-      (let [persisted (budget/load-budget pr-number)]
-        (if persisted
-          (do (swap! monitor assoc-in [:budgets pr-number] persisted)
-              persisted)
-          (let [config (:config @monitor)
-                created (budget/create-budget
+      (or (load-budget-from-disk! monitor pr-number)
+          (let [created (budget/create-budget
                          pr-number
-                         (select-keys config [:max-fix-attempts-per-comment
-                                              :max-total-fix-attempts-per-pr
-                                              :abandon-after-hours]))]
+                         (select-keys (:config @monitor)
+                                      [:max-fix-attempts-per-comment
+                                       :max-total-fix-attempts-per-pr
+                                       :abandon-after-hours]))]
             (swap! monitor assoc-in [:budgets pr-number] created)
-            created)))))
+            created))))
+
+(defn load-budget-from-disk!
+  "Load a persisted budget into monitor state when it exists."
+  [monitor pr-number]
+  (when-let [persisted (budget/load-budget pr-number)]
+    (swap! monitor assoc-in [:budgets pr-number] persisted)
+    persisted))
 
 (defn update-budget!
   "Persist the latest budget state for a PR."
@@ -95,4 +95,3 @@
       (log/info logger :pr-monitor :loop/started
                 {:message (str "PR monitor loop started for author: " author)
                  :data {:poll-interval-ms poll-interval-ms}}))))
-
