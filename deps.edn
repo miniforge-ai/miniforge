@@ -52,6 +52,8 @@
                        "components/workflow-software-factory/resources"
                        "components/phase-deployment/src"
                        "components/phase-deployment/resources"
+                       "components/workflow-deployment/resources"
+                       "components/workflow-chain-deployment/resources"
                        "components/release-executor/src"
                        "components/release-executor/resources"
                        "components/operator/src"
@@ -163,6 +165,8 @@
                      ai.miniforge/messages {:local/root "components/messages"}
                      ai.miniforge/patterns {:local/root "components/patterns"}
                      ai.miniforge/phase-deployment {:local/root "components/phase-deployment"}
+                     ai.miniforge/workflow-deployment {:local/root "components/workflow-deployment"}
+                     ai.miniforge/workflow-chain-deployment {:local/root "components/workflow-chain-deployment"}
                      ai.miniforge/cli {:local/root "bases/cli"}}}
 
   :test {:extra-paths ["development/test"
@@ -221,6 +225,8 @@
                        "components/messages/test"
                        "components/patterns/test"
                        "components/phase-deployment/test"
+                       "components/workflow-deployment/resources"
+                       "components/workflow-chain-deployment/resources"
                        "bases/cli/test"
                        "bases/lsp-mcp-bridge/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
@@ -273,8 +279,10 @@
                       ai.miniforge/control-plane-adapter {:local/root "components/control-plane-adapter"}
                       ai.miniforge/adapter-miniforge {:local/root "components/adapter-miniforge"}
                       ai.miniforge/adapter-claude-code {:local/root "components/adapter-claude-code"}
-                      ai.miniforge/phase-deployment {:local/root "components/phase-deployment"}
                       ai.miniforge/task-executor {:local/root "components/task-executor"}
+                      ai.miniforge/phase-deployment {:local/root "components/phase-deployment"}
+                      ai.miniforge/workflow-deployment {:local/root "components/workflow-deployment"}
+                      ai.miniforge/workflow-chain-deployment {:local/root "components/workflow-chain-deployment"}
                       ai.miniforge/lsp-mcp-bridge {:local/root "bases/lsp-mcp-bridge"}}}
 
   :conformance {:extra-paths ["development/test"

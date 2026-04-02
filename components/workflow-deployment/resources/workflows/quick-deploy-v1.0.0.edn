@@ -1,0 +1,26 @@
+;; Quick Deploy Workflow v1.0.0 (Interceptor-based)
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; Deploy only — infrastructure already provisioned.
+;; Skips provisioning, goes straight to Kustomize deploy + validation.
+
+{:workflow/id :quick-deploy
+ :workflow/version "1.0.0"
+ :workflow/name "Quick Deploy"
+ :workflow/description "Deploy and validate (infra already provisioned)"
+
+ :workflow/pipeline
+ [{:phase :deploy
+   :gates [:deploy-healthy]
+   :budget {:tokens 0 :iterations 3 :time-seconds 300}
+   :on-fail :deploy}
+
+  {:phase :validate
+   :gates [:health-check]
+   :on-fail :deploy}
+
+  {:phase :done}]
+
+ :workflow/config
+ {:max-iterations 10
+  :failure-strategy :rollback}}
