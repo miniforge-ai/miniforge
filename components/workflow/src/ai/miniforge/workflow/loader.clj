@@ -87,15 +87,20 @@
 
 (defn find-latest-versioned-resource
   "Scan classpath for the highest versioned workflow file matching workflow-id.
-   Looks for workflows/<workflow-id>-v*.edn files and returns the path with
-   the highest version number. Works inside uberjars."
+   Supports two naming conventions:
+   - <workflow-id>-v<semver>.edn  (e.g. standard-sdlc-v2.0.0.edn for :standard-sdlc)
+   - <workflow-id>.<semver>.edn   (e.g. lean-sdlc-v1.0.0.edn for :lean-sdlc-v1)
+   Returns the classpath-relative path for the highest-sorted match."
   [workflow-id]
-  (let [prefix (str (name workflow-id) "-v")
-        candidates (->> (list-resource-names "workflows")
-                        (filter #(str/ends-with? % ".edn"))
-                        (filter #(str/starts-with? % prefix))
-                        sort
-                        reverse)]
+  (let [id-str       (name workflow-id)
+        prefix-dash  (str id-str "-v")
+        prefix-dot   (str id-str ".")
+        candidates   (->> (list-resource-names "workflows")
+                          (filter #(str/ends-with? % ".edn"))
+                          (filter #(or (str/starts-with? % prefix-dash)
+                                       (str/starts-with? % prefix-dot)))
+                          sort
+                          reverse)]
     (when-let [filename (first candidates)]
       (str "workflows/" filename))))
 
