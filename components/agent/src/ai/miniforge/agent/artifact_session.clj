@@ -10,6 +10,7 @@
    Layer 2: Artifact reading
    Layer 3: High-level session macro"
   (:require
+   [ai.miniforge.agent.file-artifacts :as file-artifacts]
    [cheshire.core :as json]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -98,14 +99,19 @@
    Returns:
    - {:dir <path>, :mcp-config-path <path>, :artifact-path <path>}"
   []
-  (let [dir (str (Files/createTempDirectory
+  (let [working-dir (System/getProperty "user.dir")
+        dir (str (Files/createTempDirectory
                   "miniforge-artifact-"
                   (into-array FileAttribute [])))
         config-path (str dir "/mcp-config.json")
         artifact-path (str dir "/artifact.edn")]
     {:dir dir
      :mcp-config-path config-path
-     :artifact-path artifact-path}))
+     :artifact-path artifact-path
+     :pre-session-snapshot (try
+                             (file-artifacts/snapshot-working-dir working-dir)
+                             (catch Exception _
+                               (file-artifacts/empty-snapshot)))}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; MCP config generation
@@ -420,7 +426,8 @@
        (let [result# (do ~@body)]
          {:llm-result result#
           :artifact (read-artifact session#)
-          :context-misses (read-context-misses session#)})
+          :context-misses (read-context-misses session#)
+          :pre-session-snapshot (:pre-session-snapshot session#)})
        (finally
          (cleanup-session! session#)))))
 
