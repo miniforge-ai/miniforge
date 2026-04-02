@@ -52,4 +52,15 @@
   :policy/resource-count-limit
   "Creating {creates} resources (limit: {limit})"
   :policy/gke-node-limit
-  "Creating {node-pools} node pools (limit: {limit})"}}
+  "Creating {node-pools} node pools (limit: {limit})"
+
+  :shell/command-timeout
+  "Command timed out after {timeout-ms}ms"
+  :shell/command-failed-exit
+  "Command failed with exit code {exit-code}"
+  :shell/execution-failed
+  "Execution failed: {error}"
+  :shell/kustomize-build-failed
+  "kustomize build failed: {error}"
+  :shell/kubectl-apply-failed
+  "kubectl apply failed"}}
