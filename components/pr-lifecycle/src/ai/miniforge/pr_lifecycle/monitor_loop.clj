@@ -132,7 +132,7 @@
         (actionable-comments classified)))
 
 (defn- completed-cycle-result
-  [pr-number new-comments classified results]
+  [new-comments classified results]
   (let [classified-stats (:stats classified)]
     (cycle-result {:processed (count results)
                    :results results
@@ -164,7 +164,7 @@
                                                   {:new-comments (count new-comments)
                                                    :classified-stats (:stats classified)
                                                    :actions-taken (count results)}))
-            (completed-cycle-result pr-number new-comments classified results)))))))
+            (completed-cycle-result new-comments classified results)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Loop lifecycle
