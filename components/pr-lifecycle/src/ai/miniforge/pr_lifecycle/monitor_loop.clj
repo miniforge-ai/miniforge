@@ -99,56 +99,60 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Loop lifecycle
 
+(defn- step-monitor-loop!
+  [monitor author]
+  (let [{:keys [poll-interval-ms logger worktree-path]} (:config @monitor)]
+    (when (:running? @monitor)
+      (let [pr-result (poller/poll-open-prs worktree-path author)]
+        (cond
+          (dag/err? pr-result)
+          (do
+            (when logger
+              (log/warn logger :pr-monitor :loop/poll-prs-failed
+                        {:message "Failed to poll open PRs — retrying"
+                         :data {:error (:error pr-result)}}))
+            (Thread/sleep poll-interval-ms)
+            (step-monitor-loop! monitor author))
+
+          (empty? (:prs (:data pr-result)))
+          (do
+            (when logger
+              (log/info logger :pr-monitor :loop/no-open-prs
+                        {:message "No open PRs found — stopping monitor loop"}))
+            (swap! monitor assoc :running? false))
+
+          :else
+          (let [prs (:prs (:data pr-result))]
+            (doseq [pr prs]
+              (when (:running? @monitor)
+                (try
+                  (let [cycle-result (run-cycle monitor pr)]
+                    (when (and (:stopped? cycle-result) logger)
+                      (log/info logger :pr-monitor :loop/pr-budget-stopped
+                                {:message (str "PR #" (:pr/number pr)
+                                               " stopped: "
+                                               (:stop-reason cycle-result))})))
+                  (catch Exception e
+                    (when logger
+                      (log/error logger :pr-monitor :loop/cycle-error
+                                 {:message "Error in monitor cycle"
+                                  :data {:pr-number (:pr/number pr)
+                                         :error (.getMessage e)}})))))
+            (swap! monitor (fn [state-map]
+                             (-> state-map
+                                 (update :cycles inc)
+                                 (assoc :last-cycle-at (java.util.Date.)))))
+            (when (:running? @monitor)
+              (Thread/sleep poll-interval-ms)
+              (step-monitor-loop! monitor author)))))))))
+
 (defn run-monitor-loop
   "Run the PR monitor loop continuously until stopped."
   [monitor author]
-  (let [{:keys [poll-interval-ms logger worktree-path]} (:config @monitor)]
+  (let [{:keys [logger]} (:config @monitor)]
     (swap! monitor assoc :running? true :started-at (java.util.Date.))
     (state/log-loop-start! monitor author)
-    (loop []
-      (when (:running? @monitor)
-        (let [pr-result (poller/poll-open-prs worktree-path author)]
-          (cond
-            (dag/err? pr-result)
-            (do
-              (when logger
-                (log/warn logger :pr-monitor :loop/poll-prs-failed
-                          {:message "Failed to poll open PRs — retrying"
-                           :data {:error (:error pr-result)}}))
-              (Thread/sleep poll-interval-ms)
-              (recur))
-
-            (empty? (:prs (:data pr-result)))
-            (do
-              (when logger
-                (log/info logger :pr-monitor :loop/no-open-prs
-                          {:message "No open PRs found — stopping monitor loop"}))
-              (swap! monitor assoc :running? false))
-
-            :else
-            (let [prs (:prs (:data pr-result))]
-              (doseq [pr prs]
-                (when (:running? @monitor)
-                  (try
-                    (let [cycle-result (run-cycle monitor pr)]
-                      (when (and (:stopped? cycle-result) logger)
-                        (log/info logger :pr-monitor :loop/pr-budget-stopped
-                                  {:message (str "PR #" (:pr/number pr)
-                                                 " stopped: "
-                                                 (:stop-reason cycle-result))})))
-                    (catch Exception e
-                      (when logger
-                        (log/error logger :pr-monitor :loop/cycle-error
-                                   {:message "Error in monitor cycle"
-                                    :data {:pr-number (:pr/number pr)
-                                           :error (.getMessage e)}})))))
-              (swap! monitor (fn [state-map]
-                               (-> state-map
-                                   (update :cycles inc)
-                                   (assoc :last-cycle-at (java.util.Date.)))))
-              (when (:running? @monitor)
-                (Thread/sleep poll-interval-ms)
-                (recur))))))))
+    (step-monitor-loop! monitor author)
     (when logger
       (log/info logger :pr-monitor :loop/stopped
                 {:message "PR monitor loop stopped"
