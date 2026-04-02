@@ -120,9 +120,11 @@
         logger      (get-logger ctx)
         ;; Extract provision-specific config from workflow input
         input       (get-in ctx [:execution/input])
-        stack-dir   (or (:stack-dir input) (:stack-dir config))
-        stack       (or (:stack input) (:stack config) "dev")
-        gcp-project (or (:gcp-project input) (:gcp-project config))
+        stack-dir   (or (get input :stack-dir) (get config :stack-dir))
+        stack       (if-some [value (or (get input :stack) (get config :stack))]
+                      value
+                      "dev")
+        gcp-project (or (get input :gcp-project) (get config :gcp-project))
         env         (cond-> {}
                       gcp-project (assoc "GOOGLE_PROJECT" gcp-project))]
 
