@@ -17,32 +17,53 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.phase.deploy.deploy
-  "Deploy phase interceptor.
-
-   Deploys application to Kubernetes via Kustomize:
-   1. kustomize build → captures rendered manifests
-   2. kubectl apply → applies manifests
-   3. kubectl rollout status → waits for rollout completion
-   4. Captures pod/service state as evidence
-
-   Agent: none (CLI tool execution, no LLM)
-   Default gates: [:deploy-healthy]"
+  "Deploy phase interceptor."
   (:require [ai.miniforge.logging.interface :as log]
+            [ai.miniforge.phase.deploy.defaults :as defaults]
             [ai.miniforge.phase.deploy.evidence :as evidence]
+            [ai.miniforge.phase.deploy.messages :as msg]
             [ai.miniforge.phase.deploy.shell :as shell]
             [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Defaults
+;; Defaults + schemas
 
 (def default-config
-  "Phase defaults — overridable via workflow EDN."
-  {:gates  [:deploy-healthy]
-   :budget {:tokens 0 :iterations 3 :time-seconds 300}
-   :agent  nil})
+  "Deploy phase defaults loaded from EDN."
+  (defaults/phase-defaults :deploy))
 
-(registry/register-phase-defaults! :deploy default-config)
+(def DeployRunConfig
+  [:map
+   [:phase-config map?]
+   [:kustomize-dir :string]
+   [:namespace :string]
+   [:app-label :string]
+   [:deployment-name :string]
+   [:context {:optional true} [:maybe :string]]])
+
+(def RollbackInfo
+  [:map
+   [:revision {:optional true} [:maybe :string]]
+   [:image {:optional true} [:maybe :string]]
+   [:replicas {:optional true} [:maybe int?]]])
+
+(def PodSummary
+  [:map
+   [:name {:optional true} [:maybe :string]]
+   [:phase {:optional true} [:maybe :string]]
+   [:ready? :boolean]
+   [:images [:vector :string]]])
+
+(def PodState
+  [:map
+   [:pod-count nat-int?]
+   [:ready-count nat-int?]
+   [:pods [:vector PodSummary]]])
+
+(defn- validate!
+  [result-schema value]
+  (schema/validate result-schema value))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Shared helpers
@@ -62,21 +83,65 @@
       (assoc-in [:phase :started-at] start-time)
       (assoc-in [:phase :result] result-map)))
 
-;; State capture helpers
+(defn- merged-phase-config
+  [ctx phase-kw]
+  (registry/merge-with-defaults
+   (assoc (or (get-in ctx [:phase-config]) {}) :phase phase-kw)))
+
+(defn- resolve-deploy-config
+  [ctx]
+  (let [phase-config  (merged-phase-config ctx :deploy)
+        input         (or (get-in ctx [:execution/input]) {})
+        prev-outputs  (or (get-in ctx [:execution/phase-results :provision :result :outputs]) {})
+        app-label     (get input :app-label
+                           (get phase-config :app-label "ixi"))
+        deploy-config {:phase-config    phase-config
+                       :kustomize-dir   (or (get input :kustomize-dir)
+                                            (get phase-config :kustomize-dir))
+                       :namespace       (get input :namespace
+                                             (get phase-config :namespace "default"))
+                       :context         (or (get input :context)
+                                            (get phase-config :context)
+                                            (get prev-outputs :gke_context))
+                       :app-label       app-label
+                       :deployment-name (get input :deployment-name
+                                             (get phase-config :deployment-name app-label))}]
+    (validate! DeployRunConfig deploy-config)))
+
+(defn- pod-ready?
+  [pod]
+  (every? :ready (get-in pod [:status :containerStatuses] [])))
+
+(defn- pod-summary
+  [pod]
+  {:name   (get-in pod [:metadata :name])
+   :phase  (get-in pod [:status :phase])
+   :ready? (pod-ready? pod)
+   :images (into [] (map :image) (get-in pod [:spec :containers] []))})
+
+(defn- build-pod-state
+  [pods]
+  (let [summaries (into [] (map pod-summary) pods)]
+    (validate!
+     PodState
+     {:pod-count   (count summaries)
+      :ready-count (count (filter :ready? summaries))
+      :pods        summaries})))
 
 (defn- capture-current-state
   "Capture current deployment state for rollback evidence."
-  [deployment-name namespace context _logger]
+  [deployment-name namespace context]
   (let [result (shell/kubectl! "get"
                                :namespace namespace
                                :context context
                                :output "json"
                                :extra-args ["deployment" deployment-name])]
     (when (schema/succeeded? result)
-      (let [parsed (:parsed result)]
-        {:revision  (get-in parsed [:metadata :annotations "deployment.kubernetes.io/revision"])
-         :image     (get-in parsed [:spec :template :spec :containers 0 :image])
-         :replicas  (get-in parsed [:status :readyReplicas])}))))
+      (validate!
+       RollbackInfo
+       {:revision (get-in result [:parsed :metadata :annotations "deployment.kubernetes.io/revision"])
+        :image    (get-in result [:parsed :spec :template :spec :containers 0 :image])
+        :replicas (get-in result [:parsed :status :readyReplicas])}))))
 
 (defn- capture-pod-state
   "Capture post-deploy pod state for evidence and gate checking."
@@ -85,150 +150,142 @@
                                         :namespace namespace
                                         :context context)]
     (when (schema/succeeded? result)
-      (let [pods (get-in result [:parsed :items] [])]
-        {:pod-count    (count pods)
-         :ready-count  (count (filter (fn [pod]
-                                        (every? :ready
-                                                (get-in pod [:status :containerStatuses] [])))
-                                      pods))
-         :pods         (mapv (fn [pod]
-                               {:name   (get-in pod [:metadata :name])
-                                :phase  (get-in pod [:status :phase])
-                                :ready? (every? :ready
-                                                (get-in pod [:status :containerStatuses] []))
-                                :images (mapv :image
-                                              (get-in pod [:spec :containers] []))})
-                             pods)}))))
+      (build-pod-state (get-in result [:parsed :items] [])))))
+
+(defn- rollout-metrics
+  [start-time pod-state]
+  {:duration-ms (- (System/currentTimeMillis) start-time)
+   :pod-count   (:pod-count pod-state)
+   :ready-count (:ready-count pod-state)})
+
+(defn- add-deploy-evidence
+  [ctx rollback-evidence manifest-evidence image-evidence]
+  (cond-> ctx
+    rollback-evidence (evidence/add-evidence-to-ctx rollback-evidence)
+    true (evidence/add-evidence-to-ctx manifest-evidence)
+    true (evidence/add-evidence-to-ctx image-evidence)))
+
+(defn- store-apply-failure
+  [ctx start-time logger result]
+  (log/error logger :deploy :deploy/apply-failed
+             {:data {:error (:error result)
+                     :build-stderr (get-in result [:build-result :stderr])
+                     :apply-stderr (get-in result [:apply-result :stderr])}})
+  (failed-enter ctx start-time
+                {:status  :error
+                 :error   (or (get result :error)
+                              (get-in result [:apply-result :stderr]))
+                 :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}}))
+
+(defn- store-rollout-failure
+  [ctx start-time logger rollout-result manifest-evidence image-evidence]
+  (log/error logger :deploy :deploy/rollout-failed
+             {:data {:stderr (:stderr rollout-result)}})
+  (-> (failed-enter ctx start-time
+                    {:status  :rollout-failed
+                     :error   (:stderr rollout-result)
+                     :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}})
+      (evidence/add-evidence-to-ctx manifest-evidence)
+      (evidence/add-evidence-to-ctx image-evidence)))
+
+(defn- store-successful-deploy
+  [ctx start-time config rollback-evidence manifest-evidence image-evidence image-digests pod-state logger]
+  (let [metrics (rollout-metrics start-time pod-state)]
+    (log/info logger :deploy :deploy/complete
+              {:data metrics})
+    (-> ctx
+        (assoc-in [:phase :name] :deploy)
+        (assoc-in [:phase :gates] (get-in config [:phase-config :gates]))
+        (assoc-in [:phase :budget] (get-in config [:phase-config :budget]))
+        (assoc-in [:phase :started-at] start-time)
+        (assoc-in [:phase :status] :completed)
+        (assoc-in [:phase :result]
+                  {:status   :success
+                   :output   {:pod-state pod-state
+                              :images    image-digests}
+                   :artifact {:content   pod-state
+                              :type      :deployment-state
+                              :app-label (:app-label config)
+                              :namespace (:namespace config)}
+                   :metrics  metrics})
+        (add-deploy-evidence rollback-evidence manifest-evidence image-evidence))))
+
+(defn- invalid-config-result
+  [ctx start-time ex]
+  (failed-enter ctx start-time
+                {:status :error
+                 :error  (msg/t :deploy/invalid-config
+                                {:error (ex-message ex)})}))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Phase interceptors + registration
 
 (defn enter-deploy
-  "Execute deployment: build manifests → apply → wait for rollout.
-
-   Reads deployment config from execution input:
-     :kustomize-dir  - Directory containing kustomization.yaml
-     :namespace      - Target K8s namespace
-     :context        - K8s context name (for multi-cluster)
-     :app-label      - App label for pod selection
-     :deployment-name - Deployment name for rollout status"
+  "Execute deployment: build manifests, apply them, and wait for rollout."
   [ctx]
-  (let [config      (registry/merge-with-defaults (get-in ctx [:phase-config]) :deploy)
-        start-time  (System/currentTimeMillis)
-        logger      (get-logger ctx)
-        input       (get-in ctx [:execution/input])
-        ;; Merge provision outputs (from previous phase) into deploy config
-        prev-outputs (get-in ctx [:execution/phase-results :provision :result :outputs] {})
-        kustomize-dir   (or (get input :kustomize-dir) (get config :kustomize-dir))
-        namespace       (if-some [value (or (get input :namespace) (get config :namespace))]
-                            value
-                            "default")
-        context         (or (get input :context) (get config :context)
-                            (:gke_context prev-outputs))
-        app-label       (if-some [value (or (get input :app-label) (get config :app-label))]
-                            value
-                            "ixi")
-        deployment-name (if-some [value (or (get input :deployment-name)
-                                            (get config :deployment-name))]
-                            value
-                            app-label)]
-
-    (log/info logger :deploy :deploy/starting
-              {:data {:kustomize-dir kustomize-dir
-                      :namespace namespace
-                      :deployment deployment-name}})
-
-    ;; Step 0: Capture current state for rollback evidence
-    (let [rollback-info     (capture-current-state deployment-name namespace context logger)
-          rollback-evidence (when rollback-info
-                              (evidence/create-evidence
-                               :evidence/rollback-info rollback-info
-                               {:deployment deployment-name :namespace namespace}))
-          ;; Step 1: Kustomize build + apply
-          result            (shell/kustomize-apply! kustomize-dir
-                                                   :namespace namespace
-                                                   :context context)]
-      (if (schema/failed? result)
-          ;; Build or apply failed
-          (do
-            (log/error logger :deploy :deploy/apply-failed
-                       {:data {:error (:error result)
-                               :build-stderr (get-in result [:build-result :stderr])
-                               :apply-stderr (get-in result [:apply-result :stderr])}})
-            (failed-enter ctx start-time
-                          {:status :error
-                           :error  (or (get result :error)
-                                       (get-in result [:apply-result :stderr]))
-                           :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}}))
-
-          ;; Step 2: Capture rendered manifests as evidence
-          (let [rendered-yaml (:rendered-yaml result)
+  (let [start-time (System/currentTimeMillis)
+        logger     (get-logger ctx)]
+    (try
+      (let [config            (resolve-deploy-config ctx)
+            rollback-info     (capture-current-state (:deployment-name config)
+                                                    (:namespace config)
+                                                    (:context config))
+            rollback-evidence (when rollback-info
+                                (evidence/create-evidence
+                                 :evidence/rollback-info
+                                 rollback-info
+                                 {:deployment (:deployment-name config)
+                                  :namespace (:namespace config)}))
+            result            (shell/kustomize-apply! (:kustomize-dir config)
+                                                      :namespace (:namespace config)
+                                                      :context (:context config))]
+        (if (schema/failed? result)
+          (store-apply-failure ctx start-time logger result)
+          (let [rendered-yaml     (:rendered-yaml result)
                 manifest-evidence (evidence/create-evidence
                                    :evidence/rendered-manifests
                                    rendered-yaml
-                                   {:kustomize-dir kustomize-dir})
-                image-digests (evidence/extract-image-digests rendered-yaml)
-                image-evidence (evidence/create-evidence
-                                :evidence/image-digests
-                                image-digests)]
-
+                                   {:kustomize-dir (:kustomize-dir config)})
+                image-digests     (evidence/extract-image-digests rendered-yaml)
+                image-evidence    (evidence/create-evidence
+                                   :evidence/image-digests
+                                   image-digests)]
             (log/info logger :deploy :deploy/applied
                       {:data {:image-count (count image-digests)}})
-
-            ;; Step 3: Wait for rollout completion
             (let [rollout-result (shell/kubectl-rollout-status!
-                                  (str "deployment/" deployment-name)
-                                  :namespace namespace
-                                  :context context
-                                  :timeout-s 300)]
+                                  (str "deployment/" (:deployment-name config))
+                                  :namespace (:namespace config)
+                                  :context (:context config)
+                                  :timeout-s 300)
+                  pod-state      (or (capture-pod-state (:app-label config)
+                                                        (:namespace config)
+                                                        (:context config))
+                                     (build-pod-state []))]
               (if (schema/failed? rollout-result)
-                ;; Rollout failed/timed out
-                (do
-                  (log/error logger :deploy :deploy/rollout-failed
-                             {:data {:stderr (:stderr rollout-result)}})
-                  (-> (failed-enter ctx start-time
-                                    {:status :rollout-failed
-                                     :error  (:stderr rollout-result)
-                                     :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}})
-                      (evidence/add-evidence-to-ctx manifest-evidence)
-                      (evidence/add-evidence-to-ctx image-evidence)))
-
-                ;; Step 4: Capture post-deploy pod state
-                (let [pod-state (capture-pod-state app-label namespace context)
-                      duration  (- (System/currentTimeMillis) start-time)]
-                  (log/info logger :deploy :deploy/complete
-                            {:data {:pod-count (:pod-count pod-state)
-                                    :ready-count (:ready-count pod-state)
-                                    :duration-ms duration}})
-                  (-> ctx
-                      (assoc-in [:phase :name] :deploy)
-                      (assoc-in [:phase :gates] (:gates config))
-                      (assoc-in [:phase :budget] (:budget config))
-                      (assoc-in [:phase :started-at] start-time)
-                      (assoc-in [:phase :status] :completed)
-                      (assoc-in [:phase :result]
-                                {:status    :success
-                                 :output    {:pod-state pod-state
-                                             :images    image-digests}
-                                 :artifact  {:content   pod-state
-                                             :type      :deployment-state
-                                             :app-label app-label
-                                             :namespace namespace}
-                                 :metrics   {:duration-ms duration
-                                             :pod-count   (:pod-count pod-state)
-                                             :ready-count (:ready-count pod-state)}})
-                      (cond-> rollback-evidence (evidence/add-evidence-to-ctx rollback-evidence))
-                      (evidence/add-evidence-to-ctx manifest-evidence)
-                      (evidence/add-evidence-to-ctx image-evidence))))))))))
+                (store-rollout-failure ctx
+                                       start-time
+                                       logger
+                                       rollout-result
+                                       manifest-evidence
+                                       image-evidence)
+                (store-successful-deploy ctx
+                                         start-time
+                                         config
+                                         rollback-evidence
+                                         manifest-evidence
+                                         image-evidence
+                                         image-digests
+                                         pod-state
+                                         logger))))))
+      (catch clojure.lang.ExceptionInfo ex
+        (invalid-config-result ctx start-time ex)))))
 
 (defn leave-deploy
   "Post-deploy: record final metrics."
   [ctx]
-  (let [status (get-in ctx [:phase :status])]
-    (if (= :completed status)
-      ctx
-      ;; If failed, ensure status is propagated
-      (assoc-in ctx [:phase :status] :failed))))
+  (if (= :completed (get-in ctx [:phase :status]))
+    ctx
+    (assoc-in ctx [:phase :status] :failed)))
 
 (defn error-deploy
   "Handle deploy phase errors."
@@ -257,9 +314,7 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; Test deploy phase (requires K8s cluster access)
-  ;; (enter-deploy {:execution/input {:kustomize-dir "/path/to/overlay"
-  ;;                                  :namespace "ixi"
-  ;;                                  :app-label "ixi"}})
-
+  (enter-deploy {:execution/input {:kustomize-dir "/path/to/overlay"
+                                   :namespace "ixi"
+                                   :app-label "ixi"}})
   :leave-this-here)
