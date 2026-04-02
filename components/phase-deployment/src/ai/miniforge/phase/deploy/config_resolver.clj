@@ -28,7 +28,8 @@
    Note: This is a focused inline resolver for the pilot. If multi-cloud
    config resolution becomes needed, evaluate Data Foundry's connector
    protocol as the abstraction layer."
-  (:require [clojure.set :as set]
+  (:require [ai.miniforge.schema.interface :as schema]
+            [clojure.set :as set]
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -104,10 +105,9 @@
           value        (.invoke to-string-fn data (into-array Object []))]
       ;; Close client
       (try (.close client) (catch Exception _))
-      {:success? true :value value})
+      (schema/success :value value))
     (catch Exception e
-      {:success? false
-       :error    (str "Failed to access secret '" secret-name "': " (ex-message e))})))
+      (schema/failure :value (str "Failed to access secret '" secret-name "': " (ex-message e))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Template resolution + validation
@@ -133,7 +133,7 @@
         resolved (reduce
                   (fn [tmpl secret-name]
                     (let [result (access-secret gcp-project secret-name)]
-                      (if (:success? result)
+                      (if (schema/succeeded? result)
                         (do (swap! resolution-log conj
                                    {:secret    secret-name
                                     :resolved? true
@@ -151,13 +151,11 @@
                   template
                   placeholders)]
     (if (seq @errors)
-      {:success?   false
-       :error      (str "Failed to resolve " (count @errors) " secrets: " (pr-str @errors))
-       :unresolved @errors
-       :log        @resolution-log}
-      {:success? true
-       :resolved resolved
-       :log      @resolution-log})))
+      (schema/failure :resolved (str "Failed to resolve " (count @errors) " secrets: " (pr-str @errors))
+                      {:unresolved @errors
+                       :log        @resolution-log})
+      (schema/success :resolved resolved
+                      {:log @resolution-log}))))
 
 (defn resolve-map
   "Resolve all ${gcp-sm:*} placeholders in a nested map.
@@ -182,7 +180,7 @@
                        (if (seq (extract-placeholders v))
                          (let [result (resolve-template v gcp-project)]
                            (swap! log-acc into (:log result))
-                           (if (:success? result)
+                           (if (schema/succeeded? result)
                              (:resolved result)
                              (do (swap! errors-acc into (:unresolved result))
                                  v)))
@@ -193,13 +191,11 @@
                        :else       v))
         resolved (walk-fn m)]
     (if (seq @errors-acc)
-      {:success?   false
-       :error      (str "Failed to resolve " (count @errors-acc) " secrets")
-       :unresolved @errors-acc
-       :log        @log-acc}
-      {:success?       true
-       :resolved-values resolved
-       :log            @log-acc})))
+      (schema/failure :resolved-values (str "Failed to resolve " (count @errors-acc) " secrets")
+                      {:unresolved @errors-acc
+                       :log        @log-acc})
+      (schema/success :resolved-values resolved
+                      {:log @log-acc}))))
 
 ;; Schema validation (uses Malli via requiring-resolve)
 
@@ -219,12 +215,10 @@
           explain-fn  (requiring-resolve 'malli.core/explain)
           humanize-fn (requiring-resolve 'malli.error/humanize)]
       (if (validate-fn schema config)
-        {:valid? true}
-        {:valid? false
-         :errors (humanize-fn (explain-fn schema config))}))
+        (schema/valid)
+        (schema/invalid-with-errors (humanize-fn (explain-fn schema config)))))
     (catch Exception e
-      {:valid? false
-       :errors {:_schema (str "Validation error: " (ex-message e))}})))
+      (schema/invalid-with-errors {:_schema (str "Validation error: " (ex-message e))}))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

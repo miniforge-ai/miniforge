@@ -22,7 +22,8 @@
    Wraps clojure.java.shell/sh with timeout support, structured results,
    and JSON/YAML output parsing. Provides typed wrappers for pulumi, kubectl,
    and kustomize."
-  (:require [clojure.java.shell :as shell]
+  (:require [ai.miniforge.schema.interface :as schema]
+            [clojure.java.shell :as shell]
             [clojure.string :as str])
   (:import [java.io File]))
 
@@ -61,28 +62,34 @@
             result        (deref future-result timeout-ms ::timeout)]
         (if (= result ::timeout)
           (do (future-cancel future-result)
-              {:success?    false
-               :stdout      ""
-               :stderr      (str "Command timed out after " timeout-ms "ms")
-               :exit-code   -1
-               :duration-ms timeout-ms
-               :command     cmd-str
-               :error-type  :timeout})
-          (let [duration (- (System/currentTimeMillis) start-time)]
-            {:success?    (zero? (:exit result))
-             :stdout      (get result :out "")
-             :stderr      (get result :err "")
-             :exit-code   (:exit result)
-             :duration-ms duration
-             :command     cmd-str})))
+              (schema/failure :stdout (str "Command timed out after " timeout-ms "ms")
+                              {:stderr      (str "Command timed out after " timeout-ms "ms")
+                               :exit-code   -1
+                               :duration-ms timeout-ms
+                               :command     cmd-str
+                               :error-type  :timeout}))
+          (let [duration (- (System/currentTimeMillis) start-time)
+                stdout   (get result :out "")
+                stderr   (get result :err "")
+                exit     (:exit result)]
+            (if (zero? exit)
+              (schema/success :stdout stdout
+                              {:stderr      stderr
+                               :exit-code   exit
+                               :duration-ms duration
+                               :command     cmd-str})
+              (schema/failure :stdout (str "Command failed with exit code " exit)
+                              {:stderr      stderr
+                               :exit-code   exit
+                               :duration-ms duration
+                               :command     cmd-str})))))
       (catch Exception e
-        {:success?    false
-         :stdout      ""
-         :stderr      (str "Execution failed: " (ex-message e))
-         :exit-code   -1
-         :duration-ms (- (System/currentTimeMillis) start-time)
-         :command     cmd-str
-         :error-type  :execution-error}))))
+        (schema/failure :stdout (str "Execution failed: " (ex-message e))
+                        {:stderr      (str "Execution failed: " (ex-message e))
+                         :exit-code   -1
+                         :duration-ms (- (System/currentTimeMillis) start-time)
+                         :command     cmd-str
+                         :error-type  :execution-error})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Output parsing + CLI wrappers
@@ -243,12 +250,10 @@
       :rendered-yaml string (the manifests that were/would be applied)}"
   [kustomize-dir & {:keys [namespace context dry-run?]}]
   (let [build-result (kustomize-build! kustomize-dir)]
-    (if-not (:success? build-result)
-      {:success?     false
-       :build-result build-result
-       :apply-result nil
-       :rendered-yaml nil
-       :error        (str "kustomize build failed: " (:stderr build-result))}
+    (if (schema/failed? build-result)
+      (schema/failure :rendered-yaml (str "kustomize build failed: " (:stderr build-result))
+                      {:build-result  build-result
+                       :apply-result  nil})
       (let [rendered-yaml (:stdout build-result)
             apply-args    (cond-> ["apply" "-f" "-"]
                             namespace  (into ["--namespace" namespace])
@@ -264,10 +269,13 @@
                                                (into (subvec apply-args 3)))
                                            :timeout-ms 120000)]
         (try (.delete tmp-file) (catch Exception _))
-        {:success?      (:success? apply-result)
-         :build-result  build-result
-         :apply-result  apply-result
-         :rendered-yaml rendered-yaml}))))
+        (if (schema/succeeded? apply-result)
+          (schema/success :rendered-yaml rendered-yaml
+                          {:build-result build-result
+                           :apply-result apply-result})
+          (schema/failure :rendered-yaml (or (:stderr apply-result) "kubectl apply failed")
+                          {:build-result build-result
+                           :apply-result apply-result}))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Error classification

@@ -30,7 +30,8 @@
   (:require [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.deploy.evidence :as evidence]
             [ai.miniforge.phase.deploy.shell :as shell]
-            [ai.miniforge.phase.registry :as registry]))
+            [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
@@ -44,7 +45,24 @@
 (registry/register-phase-defaults! :provision default-config)
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Preview analysis + enter-provision helpers
+;; Shared helpers
+
+(defn- get-logger
+  "Resolve logger from ctx, creating a default if absent."
+  [ctx]
+  (or (get-in ctx [:execution/logger])
+      (log/create-logger {:min-level :info :output :human})))
+
+(defn- failed-enter
+  "Build a :failed phase context for enter-time failures."
+  [ctx start-time result-map]
+  (-> ctx
+      (assoc-in [:phase :name] :provision)
+      (assoc-in [:phase :status] :failed)
+      (assoc-in [:phase :started-at] start-time)
+      (assoc-in [:phase :result] result-map)))
+
+;; Preview analysis
 
 (defn- analyze-preview
   "Extract summary metrics from Pulumi preview JSON output.
@@ -99,8 +117,7 @@
   [ctx]
   (let [config      (registry/merge-with-defaults (get-in ctx [:phase-config]) :provision)
         start-time  (System/currentTimeMillis)
-        logger      (or (get-in ctx [:execution/logger])
-                        (log/create-logger {:min-level :info :output :human}))
+        logger      (get-logger ctx)
         ;; Extract provision-specific config from workflow input
         input       (get-in ctx [:execution/input])
         stack-dir   (or (:stack-dir input) (:stack-dir config))
@@ -114,22 +131,18 @@
 
     ;; Step 1: Run Pulumi preview
     (let [preview-result (shell/pulumi-preview! stack-dir :stack stack :env env)]
-      (if-not (:success? preview-result)
+      (if (schema/failed? preview-result)
         ;; Preview failed — surface error
         (let [error-type (shell/classify-error preview-result)]
           (log/error logger :provision :provision/preview-failed
                      {:data {:stderr (:stderr preview-result)
                              :error-type error-type}})
-          (-> ctx
-              (assoc-in [:phase :name] :provision)
-              (assoc-in [:phase :status] :failed)
-              (assoc-in [:phase :started-at] start-time)
-              (assoc-in [:phase :result]
+          (failed-enter ctx start-time
                         {:status     :error
                          :error      (:stderr preview-result)
                          :error-type error-type
                          :command    (:command preview-result)
-                         :metrics    {:duration-ms (:duration-ms preview-result)}})))
+                         :metrics    {:duration-ms (:duration-ms preview-result)}}))
 
         ;; Preview succeeded — analyze and store as artifact for gate checking
         (let [preview-data    (get preview-result :parsed {})
@@ -173,8 +186,7 @@
    Only applies if :enter succeeded and gates passed."
   [ctx]
   (let [phase-status (get-in ctx [:phase :status])
-        logger       (or (get-in ctx [:execution/logger])
-                         (log/create-logger {:min-level :info :output :human}))]
+        logger       (get-logger ctx)]
 
     ;; Only apply if preview succeeded and gates passed
     (if (or (= :failed phase-status) (= :error (get-in ctx [:phase :result :status])))
@@ -192,7 +204,7 @@
                   {:data {:stack-dir stack-dir :stack stack}})
 
         (let [apply-result (shell/pulumi-up! stack-dir :stack stack :env env)]
-          (if-not (:success? apply-result)
+          (if (schema/failed? apply-result)
             ;; Apply failed
             (do
               (log/error logger :provision :provision/apply-failed
@@ -227,8 +239,7 @@
 (defn error-provision
   "Handle provision phase errors."
   [ctx ex]
-  (let [logger (or (get-in ctx [:execution/logger])
-                   (log/create-logger {:min-level :error :output :human}))]
+  (let [logger (get-logger ctx)]
     (log/error logger :provision :provision/error
                {:data {:message (ex-message ex)
                        :data    (ex-data ex)}})

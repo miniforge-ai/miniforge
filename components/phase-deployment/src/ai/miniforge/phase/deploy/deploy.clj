@@ -30,7 +30,8 @@
   (:require [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.deploy.evidence :as evidence]
             [ai.miniforge.phase.deploy.shell :as shell]
-            [ai.miniforge.phase.registry :as registry]))
+            [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
@@ -44,6 +45,23 @@
 (registry/register-phase-defaults! :deploy default-config)
 
 ;------------------------------------------------------------------------------ Layer 1
+;; Shared helpers
+
+(defn- get-logger
+  "Resolve logger from ctx, creating a default if absent."
+  [ctx]
+  (or (get-in ctx [:execution/logger])
+      (log/create-logger {:min-level :info :output :human})))
+
+(defn- failed-enter
+  "Build a :failed phase context for enter-time failures."
+  [ctx start-time result-map]
+  (-> ctx
+      (assoc-in [:phase :name] :deploy)
+      (assoc-in [:phase :status] :failed)
+      (assoc-in [:phase :started-at] start-time)
+      (assoc-in [:phase :result] result-map)))
+
 ;; State capture helpers
 
 (defn- capture-current-state
@@ -54,7 +72,7 @@
                                :context context
                                :output "json"
                                :extra-args ["deployment" deployment-name])]
-    (when (:success? result)
+    (when (schema/succeeded? result)
       (let [parsed (:parsed result)]
         {:revision  (get-in parsed [:metadata :annotations "deployment.kubernetes.io/revision"])
          :image     (get-in parsed [:spec :template :spec :containers 0 :image])
@@ -66,7 +84,7 @@
   (let [result (shell/kubectl-get-pods! (str "app=" app-label)
                                         :namespace namespace
                                         :context context)]
-    (when (:success? result)
+    (when (schema/succeeded? result)
       (let [pods (get-in result [:parsed :items] [])]
         {:pod-count    (count pods)
          :ready-count  (count (filter (fn [pod]
@@ -97,8 +115,7 @@
   [ctx]
   (let [config      (registry/merge-with-defaults (get-in ctx [:phase-config]) :deploy)
         start-time  (System/currentTimeMillis)
-        logger      (or (get-in ctx [:execution/logger])
-                        (log/create-logger {:min-level :info :output :human}))
+        logger      (get-logger ctx)
         input       (get-in ctx [:execution/input])
         ;; Merge provision outputs (from previous phase) into deploy config
         prev-outputs (get-in ctx [:execution/phase-results :provision :result :outputs] {})
@@ -115,32 +132,27 @@
                       :deployment deployment-name}})
 
     ;; Step 0: Capture current state for rollback evidence
-    (let [rollback-info (capture-current-state deployment-name namespace context logger)
+    (let [rollback-info     (capture-current-state deployment-name namespace context logger)
           rollback-evidence (when rollback-info
                               (evidence/create-evidence
                                :evidence/rollback-info rollback-info
-                               {:deployment deployment-name :namespace namespace}))]
-
-      ;; Step 1: Kustomize build + apply
-      (let [result (shell/kustomize-apply! kustomize-dir
-                                           :namespace namespace
-                                           :context context)]
-        (if-not (:success? result)
+                               {:deployment deployment-name :namespace namespace}))
+          ;; Step 1: Kustomize build + apply
+          result            (shell/kustomize-apply! kustomize-dir
+                                                   :namespace namespace
+                                                   :context context)]
+      (if (schema/failed? result)
           ;; Build or apply failed
           (do
             (log/error logger :deploy :deploy/apply-failed
                        {:data {:error (:error result)
                                :build-stderr (get-in result [:build-result :stderr])
                                :apply-stderr (get-in result [:apply-result :stderr])}})
-            (-> ctx
-                (assoc-in [:phase :name] :deploy)
-                (assoc-in [:phase :status] :failed)
-                (assoc-in [:phase :started-at] start-time)
-                (assoc-in [:phase :result]
+            (failed-enter ctx start-time
                           {:status :error
                            :error  (or (:error result)
                                        (get-in result [:apply-result :stderr]))
-                           :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}})))
+                           :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}}))
 
           ;; Step 2: Capture rendered manifests as evidence
           (let [rendered-yaml (:rendered-yaml result)
@@ -162,19 +174,15 @@
                                   :namespace namespace
                                   :context context
                                   :timeout-s 300)]
-              (if-not (:success? rollout-result)
+              (if (schema/failed? rollout-result)
                 ;; Rollout failed/timed out
                 (do
                   (log/error logger :deploy :deploy/rollout-failed
                              {:data {:stderr (:stderr rollout-result)}})
-                  (-> ctx
-                      (assoc-in [:phase :name] :deploy)
-                      (assoc-in [:phase :status] :failed)
-                      (assoc-in [:phase :started-at] start-time)
-                      (assoc-in [:phase :result]
-                                {:status :rollout-failed
-                                 :error  (:stderr rollout-result)
-                                 :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}})
+                  (-> (failed-enter ctx start-time
+                                    {:status :rollout-failed
+                                     :error  (:stderr rollout-result)
+                                     :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}})
                       (evidence/add-evidence-to-ctx manifest-evidence)
                       (evidence/add-evidence-to-ctx image-evidence)))
 
@@ -204,7 +212,7 @@
                                              :ready-count (:ready-count pod-state)}})
                       (cond-> rollback-evidence (evidence/add-evidence-to-ctx rollback-evidence))
                       (evidence/add-evidence-to-ctx manifest-evidence)
-                      (evidence/add-evidence-to-ctx image-evidence)))))))))))
+                      (evidence/add-evidence-to-ctx image-evidence))))))))))
 
 (defn leave-deploy
   "Post-deploy: record final metrics."
@@ -218,8 +226,7 @@
 (defn error-deploy
   "Handle deploy phase errors."
   [ctx ex]
-  (let [logger (or (get-in ctx [:execution/logger])
-                   (log/create-logger {:min-level :error :output :human}))]
+  (let [logger (get-logger ctx)]
     (log/error logger :deploy :deploy/error
                {:data {:message (ex-message ex)
                        :data    (ex-data ex)}})

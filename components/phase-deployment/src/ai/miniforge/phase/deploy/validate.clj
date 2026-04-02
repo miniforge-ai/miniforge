@@ -24,11 +24,12 @@
 
    Agent: none (HTTP checks and CLI commands, no LLM)
    Default gates: [:health-check]"
-  (:require [clojure.string :as str]
-            [ai.miniforge.logging.interface :as log]
+  (:require [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.deploy.evidence :as evidence]
             [ai.miniforge.phase.deploy.shell :as shell]
-            [ai.miniforge.phase.registry :as registry])
+            [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.schema.interface :as schema]
+            [clojure.string :as str])
   (:import [java.net HttpURLConnection URL]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -43,6 +44,14 @@
 (registry/register-phase-defaults! :validate default-config)
 
 ;------------------------------------------------------------------------------ Layer 1
+;; Shared helpers
+
+(defn- get-logger
+  "Resolve logger from ctx, creating a default if absent."
+  [ctx]
+  (or (get-in ctx [:execution/logger])
+      (log/create-logger {:min-level :info :output :human})))
+
 ;; Health check execution + smoke tests
 
 (defn- http-health-check
@@ -122,7 +131,7 @@
                 (let [[bin & args] (str/split cmd #"\s+")
                       result (shell/sh-with-timeout bin (vec args) :timeout-ms 30000)]
                   {:command     cmd
-                   :passed?     (:success? result)
+                   :passed?     (schema/succeeded? result)
                    :stdout      (:stdout result)
                    :stderr      (:stderr result)
                    :duration-ms (:duration-ms result)}))
@@ -144,8 +153,7 @@
   [ctx]
   (let [config       (registry/merge-with-defaults (get-in ctx [:phase-config]) :validate)
         start-time   (System/currentTimeMillis)
-        logger       (or (get-in ctx [:execution/logger])
-                         (log/create-logger {:min-level :info :output :human}))
+        logger       (get-logger ctx)
         input        (get-in ctx [:execution/input])
         endpoints    (or (:health-endpoints input) (:health-endpoints config) [])
         smoke-cmds   (or (:smoke-commands input) (:smoke-commands config) [])
@@ -214,8 +222,7 @@
 (defn error-validate
   "Handle validate phase errors."
   [ctx ex]
-  (let [logger (or (get-in ctx [:execution/logger])
-                   (log/create-logger {:min-level :error :output :human}))]
+  (let [logger (get-logger ctx)]
     (log/error logger :validate :validate/error
                {:data {:message (ex-message ex)
                        :data    (ex-data ex)}})
