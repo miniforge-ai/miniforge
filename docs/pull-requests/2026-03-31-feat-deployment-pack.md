@@ -92,6 +92,7 @@ Resources-only component. One chain EDN:
 |------|--------|
 | `deps.edn` | Added 3 new components to `:dev` and `:test` aliases |
 | `projects/miniforge/deps.edn` | Added deployment pack to full project |
+| `components/schema/src/ai/miniforge/schema/interface.clj` | Added `succeeded?` and `failed?` predicates (required by result-handling rule 003) |
 
 ## Architecture Notes
 
@@ -152,6 +153,8 @@ Applied per miniforge-standards rulesets (`.standards/`):
 | `languages/clojure` (210) | Layer headings monotonic (0→1→2), max 3 strata per file |
 | `languages/clojure` (210) | Map access: `(get m :k default)` not `(or (:k m) default)` |
 | `languages/clojure` (210) | Cross-component deps via interface only (gate.registry for defmethod extension is the accepted pattern matching phase-software-factory) |
+| `foundations/result-handling` (003) | `schema/success`/`schema/failure` constructors throughout; `schema/succeeded?`/`schema/failed?` predicates instead of raw `(:success? result)` access; `schema/valid`/`schema/invalid-with-errors` for validation results |
+| `foundations/code-quality` (002) | Extracted `get-logger` helper (removes duplicated logger setup in enter/leave/error); extracted `failed-enter` helper (removes duplicated failure ctx-building in enter functions) |
 | `project/header-copyright` (810) | Apache 2.0 + copyright header on all .clj files |
 | `foundations/localization` (050) | No raw strings in user-facing output; all keys in en-US.edn |
 
