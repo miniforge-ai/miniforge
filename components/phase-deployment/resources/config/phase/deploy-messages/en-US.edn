@@ -17,6 +17,7 @@
   :deploy/error                  "Deploy phase error"
 
   :validate/starting             "Starting post-deployment validation"
+  :validate/invalid-config       "Validate configuration invalid: {error}"
   :validate/passed               "All validation checks passed"
   :validate/failed               "Validation checks failed"
   :validate/error                "Validate phase error"
