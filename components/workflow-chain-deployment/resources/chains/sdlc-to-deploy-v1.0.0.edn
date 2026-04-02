@@ -1,0 +1,26 @@
+;; SDLC-to-Deploy Chain v1.0.0
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; Full loop: build the service via SDLC workflow, then deploy it.
+;; Links Software Factory output (merged PR, new image) to Deployment workflow.
+
+{:chain/id :sdlc-to-deploy
+ :chain/version "1.0.0"
+ :chain/description
+ "End-to-end: develop the service, then deploy it to GKE.
+  Software Factory produces code changes; Deployment provisions and deploys."
+
+ :chain/steps
+ [{:step/id :build
+   :step/workflow-id :standard-sdlc
+   :step/input-bindings {:title       :chain/input.title
+                         :description :chain/input.description
+                         :intent      :chain/input.intent}}
+
+  {:step/id :deploy
+   :step/workflow-id :quick-deploy
+   :step/input-bindings {:kustomize-dir   :chain/input.kustomize-dir
+                         :namespace       :chain/input.namespace
+                         :context         :chain/input.context
+                         :app-label       :chain/input.app-label
+                         :health-endpoints :chain/input.health-endpoints}}]}

@@ -1,0 +1,21 @@
+;; Provision Only Workflow v1.0.0 (Interceptor-based)
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; Infrastructure provisioning only, no application deployment.
+;; Useful for standing up a new environment or modifying infra independently.
+
+{:workflow/id :provision-only
+ :workflow/version "1.0.0"
+ :workflow/name "Provision Infrastructure"
+ :workflow/description "Pulumi provision with policy gates (no app deploy)"
+
+ :workflow/pipeline
+ [{:phase :provision
+   :gates [:policy-pack :provision-validated]
+   :budget {:tokens 0 :iterations 3 :time-seconds 900}}
+
+  {:phase :done}]
+
+ :workflow/config
+ {:max-iterations 5
+  :failure-strategy :halt}}
