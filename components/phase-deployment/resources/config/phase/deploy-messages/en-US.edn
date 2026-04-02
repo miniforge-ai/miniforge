@@ -26,4 +26,30 @@
   :config-resolver/resolve-map-failed
   "Failed to resolve {count} secrets"
   :config-resolver/validation-error
-  "Validation error: {error}"}}
+  "Validation error: {error}"
+
+  :gate/validation-failed
+  "Deployment gate validation failed"
+  :gate/provision-validated-description
+  "Validates that infrastructure provisioning produced expected outputs"
+  :gate/deploy-healthy-description
+  "Validates all pods are in Ready state after deployment"
+  :gate/health-check-description
+  "Validates health endpoints return HTTP 2xx"
+  :gate/provision-no-outputs
+  "Provisioning produced no outputs"
+  :gate/provision-missing-outputs
+  "Missing expected outputs: {missing}"
+  :gate/deploy-no-pods
+  "No pods found after deployment"
+  :gate/deploy-pods-not-ready
+  "{ready-count}/{pod-count} pods ready"
+  :gate/health-http-failed
+  "HTTP {status-code}"
+  :gate/health-command-failed
+  "Command failed"
+
+  :policy/resource-count-limit
+  "Creating {creates} resources (limit: {limit})"
+  :policy/gke-node-limit
+  "Creating {node-pools} node pools (limit: {limit})"}}

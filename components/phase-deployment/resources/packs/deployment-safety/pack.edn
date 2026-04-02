@@ -1,0 +1,72 @@
+;; Deployment Safety Policy Pack
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; Checked by the :policy-pack gate against Pulumi preview output.
+;; Prevents destructive or unsafe infrastructure changes from applying.
+
+{:pack/id :miniforge/deployment-safety
+ :pack/version "1.0.0"
+ :pack/name "Deployment Safety"
+ :pack/description "Prevents destructive infrastructure operations and enforces deployment guardrails"
+
+ :pack/rules
+ [{:rule/id :deploy/no-destroy-production
+   :rule/title "Block production resource destruction"
+   :rule/description "Prevents deletion of critical production resources without explicit override"
+   :rule/severity :critical
+   :rule/category :safety
+   :rule/applies-to {:phases #{:provision}}
+   :rule/detection {:type :content-scan
+                    :patterns ["\"delete\""
+                               "\"replace\""
+                               "\"deleteBeforeReplace\""]}
+   :rule/enforcement {:action :block
+                      :message "Pulumi preview contains destructive operations. Review and approve explicitly."}}
+
+  {:rule/id :deploy/resource-count-limit
+   :rule/title "Large change warning"
+   :rule/description "Warns when a single operation creates or modifies more than 20 resources"
+   :rule/severity :medium
+   :rule/category :safety
+   :rule/applies-to {:phases #{:provision}}
+   :rule/detection {:type :custom
+                    :check-fn 'ai.miniforge.phase.deploy.policy/check-resource-count}
+   :rule/enforcement {:action :warn
+                      :message "Large infrastructure change detected. Verify scope is intentional."}}
+
+  {:rule/id :deploy/no-public-endpoints
+   :rule/title "Public endpoint approval"
+   :rule/description "Requires approval when creating publicly accessible resources"
+   :rule/severity :high
+   :rule/category :security
+   :rule/applies-to {:phases #{:provision}}
+   :rule/detection {:type :content-scan
+                    :patterns ["0\\.0\\.0\\.0/0"
+                               "\"EXTERNAL\""
+                               "\"allUsers\""
+                               "\"allAuthenticatedUsers\""]}
+   :rule/enforcement {:action :require-approval
+                      :message "Public access detected. Requires security review approval."}}
+
+  {:rule/id :deploy/gke-node-limit
+   :rule/title "GKE node pool size limit"
+   :rule/description "Warns when GKE node pool exceeds configured maximum"
+   :rule/severity :medium
+   :rule/category :cost
+   :rule/applies-to {:phases #{:provision}}
+   :rule/detection {:type :custom
+                    :check-fn 'ai.miniforge.phase.deploy.policy/check-gke-node-limit}
+   :rule/enforcement {:action :warn
+                      :message "GKE node pool exceeds recommended size. Verify cost impact."}}
+
+  {:rule/id :deploy/no-secrets-in-manifests
+   :rule/title "No hardcoded secrets in manifests"
+   :rule/description "Checks rendered K8s manifests for hardcoded secrets"
+   :rule/severity :critical
+   :rule/category :security
+   :rule/applies-to {:phases #{:deploy}}
+   :rule/detection {:type :content-scan
+                    :patterns ["(?i)(password|secret|api[_-]?key|token)\\s*[:=]\\s*[\"'][^\"']{8,}"
+                               "(?i)PRIVATE KEY"]}
+   :rule/enforcement {:action :block
+                      :message "Potential secrets detected in manifests. Use Secret Manager instead."}}]}
