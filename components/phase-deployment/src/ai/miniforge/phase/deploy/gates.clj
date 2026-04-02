@@ -19,168 +19,226 @@
 (ns ai.miniforge.phase.deploy.gates
   "Deployment-specific gate registrations.
 
-   Gates:
-   - :provision-validated — Pulumi outputs non-empty with expected keys
-   - :deploy-healthy      — All pods in Ready state
-   - :health-check        — HTTP health endpoints return 2xx"
-  (:require [ai.miniforge.gate.registry :as registry]))
+   Gate metadata is loaded from EDN so descriptions and registration stay
+   declarative while checks remain focused in code."
+  (:require [ai.miniforge.gate.registry :as registry]
+            [ai.miniforge.phase.deploy.messages :as msg]
+            [ai.miniforge.response.interface :as response]
+            [ai.miniforge.schema.interface :as schema]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Gate check functions
+;; Gate schemas + result constructors
 
-(defn check-provision-validated
-  "Validate that provisioning produced expected infrastructure outputs.
+(def GateError
+  [:map
+   [:type keyword?]
+   [:message :string]
+   [:expected {:optional true} any?]
+   [:actual {:optional true} any?]
+   [:pod-details {:optional true} [:vector map?]]
+   [:url {:optional true} :string]
+   [:status-code {:optional true} :int]
+   [:command {:optional true} :string]])
 
-   Checks:
-   - Pulumi outputs are non-empty
-   - Expected output keys are present (configurable via ctx :expected-outputs)
-   - No error state in outputs
+(def GateFailure
+  [:map
+   [:passed? [:= false]]
+   [:errors [:vector GateError]]
+   [:anomaly map?]])
 
-   Arguments:
-     artifact - Phase result artifact from :provision phase
-     ctx      - Execution context (may contain :expected-outputs set)"
-  [artifact ctx]
-  (let [outputs (or (:outputs artifact)
-                    (get-in artifact [:content :outputs])
-                    (get-in artifact [:artifact/content :outputs])
-                    artifact)
-        expected-keys (get ctx :expected-outputs #{})
-        output-keys   (set (keys outputs))]
-    (cond
-      (or (nil? outputs) (empty? outputs))
-      {:passed? false
-       :errors [{:type :no-outputs
-                 :message "Provisioning produced no outputs"}]}
+(def GateDefinition
+  [:map
+   [:name keyword?]
+   [:description-key keyword?]])
 
-      (and (seq expected-keys)
-           (not-every? output-keys expected-keys))
-      {:passed? false
-       :errors [{:type :missing-outputs
-                 :message (str "Missing expected outputs: "
-                              (pr-str (remove output-keys expected-keys)))
-                 :expected expected-keys
-                 :actual   output-keys}]}
+(def GateConfig
+  [:map
+   [:deploy/gates [:vector GateDefinition]]])
 
-      :else
-      {:passed? true
-       :output-count (count outputs)
-       :output-keys  (vec output-keys)})))
+(declare gate-definitions)
 
-(defn check-deploy-healthy
-  "Validate that all pods are in Ready state after deployment.
+(defn- validate-result!
+  [result-schema result]
+  (schema/validate result-schema result))
 
-   Checks:
-   - Pod count > 0
-   - All pods are Ready
-   - No pods in CrashLoopBackOff or Error state
+(defn- gate-error
+  ([error-type message-key]
+   (gate-error error-type message-key {} nil))
+  ([error-type message-key params]
+   (gate-error error-type message-key params nil))
+  ([error-type message-key params extra]
+   (reduce-kv (fn [error-map k v]
+                (if (nil? v)
+                  error-map
+                  (assoc error-map k v)))
+              {:type error-type
+               :message (msg/t message-key params)}
+              (or extra {}))))
 
-   Arguments:
-     artifact - Phase result artifact from :deploy phase (pod state)
-     ctx      - Execution context"
-  [artifact _ctx]
-  (let [pod-state (or (get-in artifact [:content])
-                      artifact)
-        pod-count   (:pod-count pod-state 0)
-        ready-count (:ready-count pod-state 0)
-        pods        (:pods pod-state [])]
-    (cond
-      (zero? pod-count)
-      {:passed? false
-       :errors [{:type :no-pods
-                 :message "No pods found after deployment"}]}
+(defn- passed
+  ([] (passed nil))
+  ([extra]
+   (merge {:passed? true} extra)))
 
-      (not= pod-count ready-count)
-      {:passed? false
-       :errors [{:type :pods-not-ready
-                 :message (str ready-count "/" pod-count " pods ready")
-                 :pod-details (filterv (complement :ready?) pods)}]}
+(defn- failed
+  [errors]
+  (validate-result!
+   GateFailure
+   {:passed? false
+    :errors errors
+    :anomaly (response/gate-anomaly
+              :anomalies.gate/validation-failed
+              (msg/t :gate/validation-failed)
+              errors)}))
 
-      :else
-      {:passed? true
-       :pod-count pod-count
-       :ready-count ready-count})))
+(defn- gate-map
+  [gate-kw check-fn]
+  (let [{:keys [description-key]} (get @gate-definitions gate-kw)]
+    {:name gate-kw
+     :description (msg/t description-key)
+     :check check-fn
+     :repair nil}))
 
-(defn check-health-endpoint
-  "Validate that health check results all passed.
+(defn- outputs-from-artifact
+  [artifact]
+  (or (get artifact :outputs)
+      (get-in artifact [:content :outputs])
+      (get-in artifact [:artifact/content :outputs])
+      artifact))
 
-   Arguments:
-     artifact - Phase result artifact from :validate phase
-     ctx      - Execution context"
-  [artifact _ctx]
-  (let [content (or (:content artifact) artifact)
-        health-results (or (:health-results content)
-                          (get-in content [:health :results])
-                          [])
-        smoke-results  (or (:smoke-results content)
-                          (get-in content [:smoke :results])
-                          [])
-        all-health-passed? (or (empty? health-results)
-                               (every? :passed? health-results))
-        all-smoke-passed?  (or (empty? smoke-results)
-                               (every? :passed? smoke-results))]
-    (cond
-      (not all-health-passed?)
-      {:passed? false
-       :errors (mapv (fn [r]
-                       {:type :health-check-failed
-                        :url  (:url r)
-                        :status-code (:status-code r)
-                        :message (or (:error r)
-                                     (str "HTTP " (:status-code r)))})
-                     (remove :passed? health-results))}
+(defn- content-from-artifact
+  [artifact]
+  (or (get artifact :content) artifact))
 
-      (not all-smoke-passed?)
-      {:passed? false
-       :errors (mapv (fn [r]
-                       {:type :smoke-test-failed
-                        :command (:command r)
-                        :message (get r :stderr "Command failed")})
-                     (remove :passed? smoke-results))}
+(defn- nested-results
+  [content direct-key nested-path]
+  (if-some [results (or (get content direct-key)
+                        (get-in content nested-path))]
+    results
+    []))
 
-      :else
-      {:passed? true
-       :health-checks-passed (count health-results)
-       :smoke-tests-passed   (count smoke-results)})))
+(defn- load-gate-config
+  []
+  (let [config (edn/read-string (slurp (io/resource "config/phase/deploy-gates.edn")))]
+    (schema/validate GateConfig config)))
+
+(def ^:private gate-definitions
+  (delay
+    (into {}
+          (map (juxt :name identity))
+          (:deploy/gates (load-gate-config)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+;; Gate checks
+
+(defn check-provision-validated
+  "Validate that provisioning produced expected infrastructure outputs."
+  [artifact ctx]
+  (let [outputs (outputs-from-artifact artifact)
+        expected-keys (get ctx :expected-outputs #{})
+        output-keys   (set (keys outputs))
+        missing-keys  (vec (remove output-keys expected-keys))]
+    (cond
+      (or (nil? outputs) (empty? outputs))
+      (failed [(gate-error :no-outputs :gate/provision-no-outputs)])
+
+      (seq missing-keys)
+      (failed [(gate-error :missing-outputs
+                           :gate/provision-missing-outputs
+                           {:missing (pr-str missing-keys)}
+                           {:expected expected-keys
+                            :actual output-keys})])
+
+      :else
+      (passed {:output-count (count outputs)
+               :output-keys  (vec output-keys)}))))
+
+(defn check-deploy-healthy
+  "Validate that all pods are in Ready state after deployment."
+  [artifact _ctx]
+  (let [pod-state    (content-from-artifact artifact)
+        pod-count    (get pod-state :pod-count 0)
+        ready-count  (get pod-state :ready-count 0)
+        pods         (get pod-state :pods [])
+        failing-pods (filterv (complement :ready?) pods)]
+    (cond
+      (zero? pod-count)
+      (failed [(gate-error :no-pods :gate/deploy-no-pods)])
+
+      (not= pod-count ready-count)
+      (failed [(gate-error :pods-not-ready
+                           :gate/deploy-pods-not-ready
+                           {:ready-count ready-count
+                            :pod-count pod-count}
+                           {:pod-details failing-pods})])
+
+      :else
+      (passed {:pod-count pod-count
+               :ready-count ready-count}))))
+
+(defn check-health-endpoint
+  "Validate that health check results all passed."
+  [artifact _ctx]
+  (let [content            (content-from-artifact artifact)
+        health-results     (nested-results content :health-results [:health :results])
+        smoke-results      (nested-results content :smoke-results [:smoke :results])
+        failed-health      (remove :passed? health-results)
+        failed-smoke       (remove :passed? smoke-results)
+        all-health-passed? (or (empty? health-results) (empty? failed-health))
+        all-smoke-passed?  (or (empty? smoke-results) (empty? failed-smoke))]
+    (cond
+      (not all-health-passed?)
+      (failed (mapv (fn [result]
+                      (gate-error :health-check-failed
+                                  :gate/health-http-failed
+                                  {:status-code (get result :status-code)}
+                                  {:url (get result :url)
+                                   :status-code (get result :status-code)}))
+                    failed-health))
+
+      (not all-smoke-passed?)
+      (failed (mapv (fn [result]
+                      (gate-error :smoke-test-failed
+                                  :gate/health-command-failed
+                                  {}
+                                  {:command (get result :command)
+                                   :message (get result
+                                                 :stderr
+                                                 (msg/t :gate/health-command-failed))}))
+                    failed-smoke))
+
+      :else
+      (passed {:health-checks-passed (count health-results)
+               :smoke-tests-passed   (count smoke-results)}))))
+
+;------------------------------------------------------------------------------ Layer 2
 ;; Registration
 
-(registry/register-gate! :provision-validated)
-(registry/register-gate! :deploy-healthy)
-(registry/register-gate! :health-check)
+(doseq [gate-kw (keys @gate-definitions)]
+  (registry/register-gate! gate-kw))
 
 (defmethod registry/get-gate :provision-validated
   [_]
-  {:name        :provision-validated
-   :description "Validates that infrastructure provisioning produced expected outputs"
-   :check       check-provision-validated
-   :repair      nil})
+  (gate-map :provision-validated check-provision-validated))
 
 (defmethod registry/get-gate :deploy-healthy
   [_]
-  {:name        :deploy-healthy
-   :description "Validates all pods are in Ready state after deployment"
-   :check       check-deploy-healthy
-   :repair      nil})
+  (gate-map :deploy-healthy check-deploy-healthy))
 
 (defmethod registry/get-gate :health-check
   [_]
-  {:name        :health-check
-   :description "Validates health endpoints return HTTP 2xx"
-   :check       check-health-endpoint
-   :repair      nil})
+  (gate-map :health-check check-health-endpoint))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; Test provision gate
   (check-provision-validated {:outputs {:gke_endpoint "https://..." :db_host "10.0.0.1"}} {})
   (check-provision-validated {} {})
 
-  ;; Test deploy gate
   (check-deploy-healthy {:pod-count 3 :ready-count 3 :pods []} {})
   (check-deploy-healthy {:pod-count 3 :ready-count 1 :pods [{:name "p1" :ready? false}]} {})
 
-  ;; Test health gate
   (check-health-endpoint {:health-results [{:passed? true :url "http://x/health"}]} {})
 
   :leave-this-here)

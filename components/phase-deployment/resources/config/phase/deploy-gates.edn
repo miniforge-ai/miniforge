@@ -1,0 +1,7 @@
+{:deploy/gates
+ [{:name :provision-validated
+   :description-key :gate/provision-validated-description}
+  {:name :deploy-healthy
+   :description-key :gate/deploy-healthy-description}
+  {:name :health-check
+   :description-key :gate/health-check-description}]}

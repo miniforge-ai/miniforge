@@ -21,73 +21,89 @@
 
    Referenced by detection entries in the deployment-safety policy pack
    via :check-fn symbols."
-  (:require [clojure.string :as str]))
+  (:require [ai.miniforge.phase.deploy.messages :as msg]
+            [ai.miniforge.schema.interface :as schema]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Preview parsing + violation helpers
+
+(def PolicyViolation
+  [:map
+   [:violation/rule-id keyword?]
+   [:violation/severity keyword?]
+   [:violation/message :string]
+   [:violation/data map?]])
+
+(defn- validate-violation!
+  [violation]
+  (schema/validate PolicyViolation violation))
+
+(defn- parse-preview
+  [content]
+  (if (string? content)
+    (try
+      (let [parse-fn (requiring-resolve 'cheshire.core/parse-string)]
+        (parse-fn content true))
+      (catch Exception _ {}))
+    content))
+
+(defn- preview-steps
+  [content]
+  (let [preview (parse-preview content)]
+    (if-some [steps (or (get preview :steps)
+                        (get preview :Steps))]
+      steps
+      [])))
+
+(defn- created-steps
+  [steps]
+  (filter #(= "create" (or (get % :op) (get % :Op))) steps))
+
+(defn- violation
+  [rule-id severity message-key params data]
+  (validate-violation!
+   {:violation/rule-id   rule-id
+    :violation/severity  severity
+    :violation/message   (msg/t message-key params)
+    :violation/data      data}))
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Custom detection functions for policy pack rules
 
 (defn check-resource-count
-  "Check if a Pulumi preview creates too many resources in a single operation.
-
-   Arguments:
-     content - Pulumi preview JSON (as string or parsed map)
-     context - Detection context (may contain :max-resources, default 20)
-
-   Returns:
-     nil if no violation, or violation map."
+  "Check if a Pulumi preview creates too many resources in a single operation."
   [content context]
   (let [max-resources (get context :max-resources 20)
-        preview       (if (string? content)
-                        (try
-                          (let [parse-fn (requiring-resolve 'cheshire.core/parse-string)]
-                            (parse-fn content true))
-                          (catch Exception _ {}))
-                        content)
-        steps         (or (:steps preview) (:Steps preview) [])
-        creates       (count (filter #(= "create" (or (:op %) (:Op %))) steps))]
+        creates       (count (created-steps (preview-steps content)))]
     (when (> creates max-resources)
-      {:violation/rule-id   :deploy/resource-count-limit
-       :violation/severity  :medium
-       :violation/message   (str "Creating " creates " resources (limit: " max-resources ")")
-       :violation/data      {:creates creates :limit max-resources}})))
+      (violation :deploy/resource-count-limit
+                 :medium
+                 :policy/resource-count-limit
+                 {:creates creates
+                  :limit max-resources}
+                 {:creates creates
+                  :limit max-resources}))))
 
 (defn check-gke-node-limit
-  "Check if a GKE node pool exceeds configured maximum size.
-
-   Arguments:
-     content - Pulumi preview JSON
-     context - Detection context (may contain :max-nodes, default 10)
-
-   Returns:
-     nil if no violation, or violation map."
+  "Check if a GKE node pool exceeds configured maximum size."
   [content context]
-  (let [max-nodes (get context :max-nodes 10)
-        preview   (if (string? content)
-                    (try
-                      (let [parse-fn (requiring-resolve 'cheshire.core/parse-string)]
-                        (parse-fn content true))
-                      (catch Exception _ {}))
-                    content)
-        steps     (or (:steps preview) (:Steps preview) [])
-        node-pools (->> steps
-                        (filter #(str/includes? (str (or (:type %) ""))
-                                               "NodePool"))
-                        (filter #(= "create" (or (:op %) (:Op %)))))]
-    ;; Check each node pool's node count configuration
-    ;; (This is a simplified check — real implementation would parse the
-    ;;  resource inputs for initialNodeCount or autoscaling maxNodeCount)
-    (when (and (seq node-pools) (> (count node-pools) max-nodes))
-      {:violation/rule-id   :deploy/gke-node-limit
-       :violation/severity  :medium
-       :violation/message   (str "Creating " (count node-pools) " node pools (limit: " max-nodes ")")
-       :violation/data      {:node-pools (count node-pools) :limit max-nodes}})))
+  (let [max-nodes  (get context :max-nodes 10)
+        node-pools (->> (preview-steps content)
+                        created-steps
+                        (filter #(str/includes? (str (get % :type "")) "NodePool")))]
+    (when (> (count node-pools) max-nodes)
+      (violation :deploy/gke-node-limit
+                 :medium
+                 :policy/gke-node-limit
+                 {:node-pools (count node-pools)
+                  :limit max-nodes}
+                 {:node-pools (count node-pools)
+                  :limit max-nodes}))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (check-resource-count {:steps (repeat 25 {:op "create" :type "gcp:compute:Instance"})} {})
-  ;; => {:violation/rule-id :deploy/resource-count-limit ...}
-
   (check-resource-count {:steps (repeat 5 {:op "create"})} {})
-  ;; => nil
 
   :leave-this-here)
