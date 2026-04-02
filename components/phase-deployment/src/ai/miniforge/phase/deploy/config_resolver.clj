@@ -28,16 +28,85 @@
    Note: This is a focused inline resolver for the pilot. If multi-cloud
    config resolution becomes needed, evaluate Data Foundry's connector
    protocol as the abstraction layer."
-  (:require [ai.miniforge.schema.interface :as schema]
+  (:require [ai.miniforge.phase.deploy.messages :as msg]
+            [ai.miniforge.schema.interface :as schema]
             [clojure.set :as set]
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Placeholder parsing
+;; Placeholder parsing + schemas
 
 (def ^:private placeholder-pattern
   "Regex for GCP Secret Manager placeholders: ${gcp-sm:secret-name}"
   #"\$\{gcp-sm:([^}]+)\}")
+
+(def ResolutionLogEntry
+  [:map
+   [:secret :string]
+   [:resolved? :boolean]
+   [:timestamp :int]
+   [:error {:optional true} :string]])
+
+(def ResolveTemplateSuccess
+  [:map
+   [:success? [:= true]]
+   [:resolved :string]
+   [:log [:vector ResolutionLogEntry]]])
+
+(def ResolveTemplateFailure
+  [:map
+   [:success? [:= false]]
+   [:resolved nil?]
+   [:error :string]
+   [:anomaly map?]
+   [:unresolved [:vector :string]]
+   [:log [:vector ResolutionLogEntry]]])
+
+(def ResolveMapSuccess
+  [:map
+   [:success? [:= true]]
+   [:resolved-values map?]
+   [:log [:vector ResolutionLogEntry]]])
+
+(def ResolveMapFailure
+  [:map
+   [:success? [:= false]]
+   [:resolved-values nil?]
+   [:error :string]
+   [:anomaly map?]
+   [:unresolved [:vector :string]]
+   [:log [:vector ResolutionLogEntry]]])
+
+(declare access-secret)
+
+(defn- validate-result!
+  [result-schema result]
+  (schema/validate result-schema result))
+
+(defn- timestamp-now
+  []
+  (System/currentTimeMillis))
+
+(defn- log-entry
+  [secret-name resolved? & [error-message]]
+  (cond-> {:secret secret-name
+           :resolved? resolved?
+           :timestamp (timestamp-now)}
+    error-message (assoc :error error-message)))
+
+(defn- apply-secret-resolution
+  [tmpl gcp-project secret-name resolution-log errors]
+  (let [result (access-secret gcp-project secret-name)]
+    (if (schema/succeeded? result)
+      (do
+        (swap! resolution-log conj (log-entry secret-name true))
+        (str/replace tmpl
+                     (str "${gcp-sm:" secret-name "}")
+                     (:value result)))
+      (do
+        (swap! resolution-log conj (log-entry secret-name false (:error result)))
+        (swap! errors conj secret-name)
+        tmpl))))
 
 (defn extract-placeholders
   "Extract all ${gcp-sm:*} placeholders from a template string.
@@ -107,7 +176,10 @@
       (try (.close client) (catch Exception _))
       (schema/success :value value))
     (catch Exception e
-      (schema/failure :value (str "Failed to access secret '" secret-name "': " (ex-message e))))))
+      (schema/failure :value
+                      (msg/t :config-resolver/secret-access-failed
+                             {:secret-name secret-name
+                              :error (ex-message e)})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Template resolution + validation
@@ -132,30 +204,24 @@
         errors         (atom [])
         resolved (reduce
                   (fn [tmpl secret-name]
-                    (let [result (access-secret gcp-project secret-name)]
-                      (if (schema/succeeded? result)
-                        (do (swap! resolution-log conj
-                                   {:secret    secret-name
-                                    :resolved? true
-                                    :timestamp (System/currentTimeMillis)})
-                            (str/replace tmpl
-                                         (str "${gcp-sm:" secret-name "}")
-                                         (:value result)))
-                        (do (swap! resolution-log conj
-                                   {:secret    secret-name
-                                    :resolved? false
-                                    :error     (:error result)
-                                    :timestamp (System/currentTimeMillis)})
-                            (swap! errors conj secret-name)
-                            tmpl))))
+                    (apply-secret-resolution tmpl
+                                             gcp-project
+                                             secret-name
+                                             resolution-log
+                                             errors))
                   template
                   placeholders)]
-    (if (seq @errors)
-      (schema/failure :resolved (str "Failed to resolve " (count @errors) " secrets: " (pr-str @errors))
-                      {:unresolved @errors
-                       :log        @resolution-log})
-      (schema/success :resolved resolved
-                      {:log @resolution-log}))))
+    (validate-result!
+     (if (seq @errors) ResolveTemplateFailure ResolveTemplateSuccess)
+     (if (seq @errors)
+       (schema/failure :resolved
+                       (msg/t :config-resolver/resolve-template-failed
+                              {:count (count @errors)
+                               :unresolved (pr-str @errors)})
+                       {:unresolved @errors
+                        :log        @resolution-log})
+       (schema/success :resolved resolved
+                       {:log @resolution-log})))))
 
 (defn resolve-map
   "Resolve all ${gcp-sm:*} placeholders in a nested map.
@@ -190,12 +256,16 @@
                        (seq? v)    (map walk v)
                        :else       v))
         resolved (walk-fn m)]
-    (if (seq @errors-acc)
-      (schema/failure :resolved-values (str "Failed to resolve " (count @errors-acc) " secrets")
-                      {:unresolved @errors-acc
-                       :log        @log-acc})
-      (schema/success :resolved-values resolved
-                      {:log @log-acc}))))
+    (validate-result!
+     (if (seq @errors-acc) ResolveMapFailure ResolveMapSuccess)
+     (if (seq @errors-acc)
+       (schema/failure :resolved-values
+                       (msg/t :config-resolver/resolve-map-failed
+                              {:count (count @errors-acc)})
+                       {:unresolved @errors-acc
+                        :log        @log-acc})
+       (schema/success :resolved-values resolved
+                       {:log @log-acc})))))
 
 ;; Schema validation (uses Malli via requiring-resolve)
 
@@ -209,16 +279,18 @@
    Returns:
      {:valid?  boolean
       :errors  nil or humanized error map}"
-  [config schema]
+  [config config-schema]
   (try
     (let [validate-fn (requiring-resolve 'malli.core/validate)
           explain-fn  (requiring-resolve 'malli.core/explain)
           humanize-fn (requiring-resolve 'malli.error/humanize)]
-      (if (validate-fn schema config)
+      (if (validate-fn config-schema config)
         (schema/valid)
-        (schema/invalid-with-errors (humanize-fn (explain-fn schema config)))))
+        (schema/invalid-with-errors (humanize-fn (explain-fn config-schema config)))))
     (catch Exception e
-      (schema/invalid-with-errors {:_schema (str "Validation error: " (ex-message e))}))))
+      (schema/invalid-with-errors
+       {:_schema (msg/t :config-resolver/validation-error
+                        {:error (ex-message e)})}))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -1,20 +1,29 @@
-;; Deployment phase messages (English)
-{:provision/preview-starting    "Starting Pulumi preview"
- :provision/preview-complete    "Pulumi preview complete"
- :provision/preview-failed      "Pulumi preview failed"
- :provision/apply-starting      "Applying infrastructure changes"
- :provision/apply-complete      "Infrastructure provisioning complete"
- :provision/apply-failed        "Infrastructure apply failed"
- :provision/error               "Provision phase error"
+{:deploy/messages
+ {:provision/preview-starting    "Starting Pulumi preview"
+  :provision/preview-complete    "Pulumi preview complete"
+  :provision/preview-failed      "Pulumi preview failed"
+  :provision/apply-starting      "Applying infrastructure changes"
+  :provision/apply-complete      "Infrastructure provisioning complete"
+  :provision/apply-failed        "Infrastructure apply failed"
+  :provision/error               "Provision phase error"
 
- :deploy/starting               "Starting application deployment"
- :deploy/applied                "Manifests applied to cluster"
- :deploy/rollout-failed         "Deployment rollout failed"
- :deploy/complete               "Application deployment complete"
- :deploy/apply-failed           "Kustomize apply failed"
- :deploy/error                  "Deploy phase error"
+  :deploy/starting               "Starting application deployment"
+  :deploy/applied                "Manifests applied to cluster"
+  :deploy/rollout-failed         "Deployment rollout failed"
+  :deploy/complete               "Application deployment complete"
+  :deploy/apply-failed           "Kustomize apply failed"
+  :deploy/error                  "Deploy phase error"
 
- :validate/starting             "Starting post-deployment validation"
- :validate/passed               "All validation checks passed"
- :validate/failed               "Validation checks failed"
- :validate/error                "Validate phase error"}
+  :validate/starting             "Starting post-deployment validation"
+  :validate/passed               "All validation checks passed"
+  :validate/failed               "Validation checks failed"
+  :validate/error                "Validate phase error"
+
+  :config-resolver/secret-access-failed
+  "Failed to access secret '{secret-name}': {error}"
+  :config-resolver/resolve-template-failed
+  "Failed to resolve {count} secrets: {unresolved}"
+  :config-resolver/resolve-map-failed
+  "Failed to resolve {count} secrets"
+  :config-resolver/validation-error
+  "Validation error: {error}"}}
