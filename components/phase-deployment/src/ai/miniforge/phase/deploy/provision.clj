@@ -17,32 +17,46 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.phase.deploy.provision
-  "Provision phase interceptor.
-
-   Executes infrastructure provisioning via Pulumi:
-   1. pulumi preview --json → captures structured preview
-   2. Policy gate checks preview for destructive/unsafe operations
-   3. pulumi up --yes → applies approved changes
-   4. Captures stack outputs as phase result
-
-   Agent: none (CLI tool execution, no LLM)
-   Default gates: [:policy-pack :provision-validated]"
+  "Provision phase interceptor."
   (:require [ai.miniforge.logging.interface :as log]
+            [ai.miniforge.phase.deploy.defaults :as defaults]
             [ai.miniforge.phase.deploy.evidence :as evidence]
+            [ai.miniforge.phase.deploy.messages :as msg]
             [ai.miniforge.phase.deploy.shell :as shell]
             [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Defaults
+;; Defaults + schemas
 
 (def default-config
-  "Phase defaults — overridable via workflow EDN."
-  {:gates  [:policy-pack :provision-validated]
-   :budget {:tokens 0 :iterations 3 :time-seconds 900}
-   :agent  nil})
+  "Provision phase defaults loaded from EDN."
+  (defaults/phase-defaults :provision))
 
-(registry/register-phase-defaults! :provision default-config)
+(def ProvisionRunConfig
+  [:map
+   [:phase-config map?]
+   [:stack-dir :string]
+   [:stack :string]
+   [:env [:map-of :string :string]]
+   [:gcp-project {:optional true} [:maybe :string]]])
+
+(def PreviewAnalysis
+  [:map
+   [:creates nat-int?]
+   [:updates nat-int?]
+   [:deletes nat-int?]
+   [:sames nat-int?]
+   [:resources
+    [:vector
+     [:map
+      [:type {:optional true} [:maybe :string]]
+      [:name {:optional true} [:maybe :string]]
+      [:action {:optional true} [:maybe :string]]]]]])
+
+(defn- validate!
+  [result-schema value]
+  (schema/validate result-schema value))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Shared helpers
@@ -62,125 +76,129 @@
       (assoc-in [:phase :started-at] start-time)
       (assoc-in [:phase :result] result-map)))
 
-;; Preview analysis
+(defn- merged-phase-config
+  [ctx phase-kw]
+  (registry/merge-with-defaults
+   (assoc (or (get-in ctx [:phase-config]) {}) :phase phase-kw)))
 
-(defn- analyze-preview
-  "Extract summary metrics from Pulumi preview JSON output.
+(defn- resolve-provision-config
+  [ctx]
+  (let [phase-config (merged-phase-config ctx :provision)
+        input        (or (get-in ctx [:execution/input]) {})
+        gcp-project  (or (get input :gcp-project)
+                         (get phase-config :gcp-project))]
+    (validate!
+     ProvisionRunConfig
+     (cond-> {:phase-config phase-config
+              :stack-dir    (or (get input :stack-dir)
+                                (get phase-config :stack-dir))
+              :stack        (get input :stack
+                                 (get phase-config :stack "dev"))
+              :env          (cond-> {}
+                              gcp-project (assoc "GOOGLE_PROJECT" gcp-project))}
+       true (assoc :gcp-project gcp-project)))))
 
-   Returns:
-     {:creates int :updates int :deletes int :sames int
-      :resources [{:type :name :action}...]}"
+(defn analyze-preview
+  "Extract summary metrics from Pulumi preview JSON output."
   [preview-json]
-  (if-let [steps (or (:steps preview-json) (:Steps preview-json))]
-    (let [actions (map #(or (:op %) (:Op %)) steps)
-          counts  (frequencies actions)]
-      {:creates   (get counts "create" 0)
-       :updates   (get counts "update" 0)
-       :deletes   (get counts "delete" 0)
-       :sames     (get counts "same" 0)
-       :resources (mapv (fn [step]
-                          {:type   (or (:type step) (get-in step [:newState :type]))
-                           :name   (or (:urn step) (get-in step [:newState :urn]))
-                           :action (or (:op step) (:Op step))})
-                        steps)})
-    {:creates 0 :updates 0 :deletes 0 :sames 0 :resources []}))
+  (let [steps   (or (:steps preview-json) (:Steps preview-json) [])
+        actions (map #(or (:op %) (:Op %)) steps)
+        counts  (frequencies actions)]
+    (validate!
+     PreviewAnalysis
+     {:creates   (get counts "create" 0)
+      :updates   (get counts "update" 0)
+      :deletes   (get counts "delete" 0)
+      :sames     (get counts "same" 0)
+      :resources (mapv (fn [step]
+                         {:type   (or (:type step) (get-in step [:newState :type]))
+                          :name   (or (:urn step) (get-in step [:newState :urn]))
+                          :action (or (:op step) (:Op step))})
+                       steps)})))
+
+(defn- preview-result
+  [preview-data analysis preview-command]
+  {:status   :preview-complete
+   :output   preview-data
+   :artifact {:content  preview-data
+              :type     :pulumi-preview
+              :analysis analysis}
+   :command  preview-command
+   :metrics  {:duration-ms (:duration-ms preview-command)
+              :creates     (:creates analysis)
+              :updates     (:updates analysis)
+              :deletes     (:deletes analysis)}})
+
+(defn- store-provision-preview
+  [ctx start-time config preview-command]
+  (let [preview-data     (get preview-command :parsed {})
+        analysis         (analyze-preview preview-data)
+        preview-evidence (evidence/create-evidence
+                          :evidence/pulumi-preview
+                          preview-data
+                          {:stack (:stack config)
+                           :stack-dir (:stack-dir config)
+                           :analysis analysis})]
+    (log/info (get-logger ctx) :provision :provision/preview-complete
+              {:data {:creates (:creates analysis)
+                      :updates (:updates analysis)
+                      :deletes (:deletes analysis)}})
+    (-> ctx
+        (assoc-in [:phase :name] :provision)
+        (assoc-in [:phase :gates] (get-in config [:phase-config :gates]))
+        (assoc-in [:phase :budget] (get-in config [:phase-config :budget]))
+        (assoc-in [:phase :started-at] start-time)
+        (assoc-in [:phase :status] :pending-gates)
+        (assoc-in [:phase :result] (preview-result preview-data
+                                                   analysis
+                                                   preview-command))
+        (evidence/add-evidence-to-ctx preview-evidence)
+        (assoc-in [:phase :provision-config]
+                  (select-keys config [:stack-dir :stack :env])))))
+
+(defn- store-provision-failure
+  [ctx start-time logger preview-result]
+  (let [error-type (shell/classify-error preview-result)]
+    (log/error logger :provision :provision/preview-failed
+               {:data {:stderr (:stderr preview-result)
+                       :error-type error-type}})
+    (failed-enter ctx start-time
+                  {:status     :error
+                   :error      (:stderr preview-result)
+                   :error-type error-type
+                   :command    (:command preview-result)
+                   :metrics    {:duration-ms (:duration-ms preview-result)}})))
+
+(defn- invalid-config-result
+  [ctx start-time ex]
+  (failed-enter ctx start-time
+                {:status :error
+                 :error  (msg/t :provision/invalid-config
+                                {:error (ex-message ex)})}))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Phase interceptors + registration
 
 (defn enter-provision
-  "Execute provisioning: preview → (gate check) → apply → capture outputs.
-
-   The :enter function runs the preview and stores it as the phase artifact.
-   After :enter returns, execution.clj checks gates (including :policy-pack)
-   against the artifact. If gates pass, the leave function applies.
-
-   For provision, we split into two sub-operations:
-   - :enter does preview + stores artifact for gate checking
-   - If gates pass, we need to apply. Since gates run between enter and leave,
-     we store the 'needs apply' flag and do the apply in a post-gate callback.
-
-   Architecture note: The current phase model runs enter → gates → leave.
-   Apply must happen after gates pass but before leave. We handle this by
-   doing both preview AND apply in enter, with the policy-pack gate checking
-   the preview artifact mid-execution. The gate system checks after :enter
-   returns, but we need apply to happen only if gates pass.
-
-   Solution: enter does preview only. If gates pass, the workflow will proceed
-   to the next phase. We use a two-phase approach: provision-preview and
-   provision-apply as separate steps, OR we do the apply in enter after preview
-   and let the gate check happen on the preview artifact.
-
-   Chosen approach: Enter does preview. Stores preview as artifact for gate.
-   If gates pass, the 'leave' triggers apply. If gates fail, leave does NOT apply.
-   This aligns with the interceptor model: enter produces, gates validate, leave finalizes."
+  "Execute provisioning preview and capture the artifact used by gates."
   [ctx]
-  (let [config      (registry/merge-with-defaults (get-in ctx [:phase-config]) :provision)
-        start-time  (System/currentTimeMillis)
-        logger      (get-logger ctx)
-        ;; Extract provision-specific config from workflow input
-        input       (get-in ctx [:execution/input])
-        stack-dir   (or (get input :stack-dir) (get config :stack-dir))
-        stack       (if-some [value (or (get input :stack) (get config :stack))]
-                      value
-                      "dev")
-        gcp-project (or (get input :gcp-project) (get config :gcp-project))
-        env         (cond-> {}
-                      gcp-project (assoc "GOOGLE_PROJECT" gcp-project))]
-
-    (log/info logger :provision :provision/preview-starting
-              {:data {:stack-dir stack-dir :stack stack}})
-
-    ;; Step 1: Run Pulumi preview
-    (let [preview-result (shell/pulumi-preview! stack-dir :stack stack :env env)]
-      (if (schema/failed? preview-result)
-        ;; Preview failed — surface error
-        (let [error-type (shell/classify-error preview-result)]
-          (log/error logger :provision :provision/preview-failed
-                     {:data {:stderr (:stderr preview-result)
-                             :error-type error-type}})
-          (failed-enter ctx start-time
-                        {:status     :error
-                         :error      (:stderr preview-result)
-                         :error-type error-type
-                         :command    (:command preview-result)
-                         :metrics    {:duration-ms (:duration-ms preview-result)}}))
-
-        ;; Preview succeeded — analyze and store as artifact for gate checking
-        (let [preview-data    (get preview-result :parsed {})
-              analysis        (analyze-preview preview-data)
-              preview-evidence (evidence/create-evidence
-                                :evidence/pulumi-preview
-                                preview-data
-                                {:stack stack :stack-dir stack-dir
-                                 :analysis analysis})]
-          (log/info logger :provision :provision/preview-complete
-                    {:data {:creates (:creates analysis)
-                            :updates (:updates analysis)
-                            :deletes (:deletes analysis)}})
-
-          (-> ctx
-              (assoc-in [:phase :name] :provision)
-              (assoc-in [:phase :gates] (:gates config))
-              (assoc-in [:phase :budget] (:budget config))
-              (assoc-in [:phase :started-at] start-time)
-              (assoc-in [:phase :status] :pending-gates)
-              ;; Store the preview as the artifact that gates will check
-              (assoc-in [:phase :result]
-                        {:status   :preview-complete
-                         :output   preview-data
-                         :artifact {:content  preview-data
-                                    :type     :pulumi-preview
-                                    :analysis analysis}
-                         :metrics  {:duration-ms (:duration-ms preview-result)
-                                    :creates     (:creates analysis)
-                                    :updates     (:updates analysis)
-                                    :deletes     (:deletes analysis)}})
-              ;; Store evidence
-              (evidence/add-evidence-to-ctx preview-evidence)
-              ;; Store config for leave phase to use for apply
-              (assoc-in [:phase :provision-config]
-                        {:stack-dir stack-dir :stack stack :env env})))))))
+  (let [start-time (System/currentTimeMillis)
+        logger     (get-logger ctx)]
+    (try
+      (let [config         (resolve-provision-config ctx)
+            stack-dir      (:stack-dir config)
+            stack          (:stack config)
+            preview-result (do
+                             (log/info logger :provision :provision/preview-starting
+                                       {:data {:stack-dir stack-dir :stack stack}})
+                             (shell/pulumi-preview! stack-dir
+                                                    :stack stack
+                                                    :env (:env config)))]
+        (if (schema/failed? preview-result)
+          (store-provision-failure ctx start-time logger preview-result)
+          (store-provision-preview ctx start-time config preview-result)))
+      (catch clojure.lang.ExceptionInfo ex
+        (invalid-config-result ctx start-time ex)))))
 
 (defn leave-provision
   "After gates pass: execute pulumi up and capture outputs.
@@ -189,25 +207,17 @@
   [ctx]
   (let [phase-status (get-in ctx [:phase :status])
         logger       (get-logger ctx)]
-
-    ;; Only apply if preview succeeded and gates passed
-    (if (or (= :failed phase-status) (= :error (get-in ctx [:phase :result :status])))
-      ;; Already failed — pass through
-      (-> ctx
-          (assoc-in [:phase :status] :failed))
-
-      ;; Gates passed — apply
+    (if (or (= :failed phase-status)
+            (= :error (get-in ctx [:phase :result :status])))
+      (assoc-in ctx [:phase :status] :failed)
       (let [config    (get-in ctx [:phase :provision-config])
             stack-dir (:stack-dir config)
             stack     (:stack config)
             env       (:env config)]
-
         (log/info logger :provision :provision/apply-starting
                   {:data {:stack-dir stack-dir :stack stack}})
-
         (let [apply-result (shell/pulumi-up! stack-dir :stack stack :env env)]
           (if (schema/failed? apply-result)
-            ;; Apply failed
             (do
               (log/error logger :provision :provision/apply-failed
                          {:data {:stderr (:stderr apply-result)}})
@@ -218,17 +228,14 @@
                               :error   (:stderr apply-result)
                               :metrics (merge (get-in ctx [:phase :result :metrics])
                                               {:apply-duration-ms (:duration-ms apply-result)})})))
-
-            ;; Apply succeeded — get outputs
-            (let [outputs-result (shell/pulumi-outputs! stack-dir :stack stack)
-                  outputs        (get outputs-result :parsed {})
+            (let [outputs-result   (shell/pulumi-outputs! stack-dir :stack stack)
+                  outputs          (get outputs-result :parsed {})
                   outputs-evidence (evidence/create-evidence
-                                   :evidence/pulumi-outputs
-                                   outputs
-                                   {:stack stack})]
+                                    :evidence/pulumi-outputs
+                                    outputs
+                                    {:stack stack})]
               (log/info logger :provision :provision/apply-complete
                         {:data {:output-keys (vec (keys outputs))}})
-
               (-> ctx
                   (assoc-in [:phase :status] :completed)
                   (update-in [:phase :result] merge
@@ -265,7 +272,5 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; Test provision phase against a real Pulumi project
-  ;; (enter-provision {:execution/input {:stack-dir "/path/to/project" :stack "dev"}})
-
+  (enter-provision {:execution/input {:stack-dir "/path/to/project" :stack "dev"}})
   :leave-this-here)
