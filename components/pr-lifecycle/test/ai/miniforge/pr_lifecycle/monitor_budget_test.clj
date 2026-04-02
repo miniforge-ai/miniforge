@@ -21,6 +21,12 @@
 ;; Budget tests
 
 (deftest record-fix-attempt-test
+  (testing "defaults are loaded from monitor config"
+    (let [budget (sut/create-budget 42)]
+      (is (= 3 (get-in budget [:limits :max-fix-attempts-per-comment])))
+      (is (= 10 (get-in budget [:limits :max-total-fix-attempts-per-pr])))
+      (is (= 72 (get-in budget [:limits :abandon-after-hours])))))
+
   (testing "increments comment-local and total attempt counters"
     (let [budget (-> (sut/create-budget 42)
                      (sut/record-fix-attempt 1001)
