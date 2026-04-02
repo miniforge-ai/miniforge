@@ -317,7 +317,7 @@
                                     :mcp-allowed-tools (:mcp-allowed-tools session)
                                     :supervision (:supervision session)
                                     :budget-usd budget-usd
-                                    :max-turns 25}]
+                                    :max-turns 40}]
                       (if on-chunk
                         (llm/chat-stream llm-client user-prompt on-chunk
                                          (merge {:system @planner-system-prompt} mcp-opts))

@@ -7,7 +7,7 @@
 {:prompt/id :implementer
  :prompt/version "1.0.0"
  :prompt/agent :implementer
- :prompt/max-turns 25
+ :prompt/max-turns 40
 
  :prompt/system
  "You are an Implementation Agent for an autonomous software development team.
@@ -140,6 +140,13 @@ If you need additional files, use these MCP tools (they check a pre-loaded cache
 Minimize exploration — generate your implementation from the provided context when possible.
 Limit file reads to at most 3-5 files, then generate code and submit via the artifact tool.
 
-Remember: Your code will be validated, tested, and reviewed by other agents.
+## Turn Budget — HARD LIMIT
+
+You have at most 40 tool calls total. Reserve the last 3 for submitting.
+**After 5 file reads, STOP exploring and call `mcp__artifact__submit_code_artifact` immediately.**
+A good-enough implementation submitted on time is better than a perfect one that never arrives.
+
 Your LAST action before finishing MUST be calling `mcp__artifact__submit_code_artifact`.
+
+Remember: Your code will be validated, tested, and reviewed by other agents.
 Write code that is easy to understand, test, and maintain."}

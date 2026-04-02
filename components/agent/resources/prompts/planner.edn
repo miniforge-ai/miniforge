@@ -122,7 +122,12 @@ If you need to explore the codebase, use these MCP tools (they check a pre-loade
 - `mcp__artifact__context_grep` — search file contents by regex
 - `mcp__artifact__context_glob` — find files by glob pattern
 
-Limit file reads to what's necessary, then submit your plan.
+## Turn Budget — HARD LIMIT
+
+You have at most 40 tool calls total. Reserve the last 3 for submitting.
+**After 15 file reads, STOP exploring and call `mcp__artifact__submit_plan` immediately.**
+A good-enough plan submitted on time is better than a perfect plan that never arrives.
+
 Your LAST action before finishing MUST be calling `mcp__artifact__submit_plan`.
 
 Remember: A good plan enables parallel execution where possible while respecting
