@@ -26,11 +26,42 @@
    Human comment classification uses an LLM call with structured output
    when a generate-fn is provided, falling back to keyword-based heuristics."
   (:require
+   [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.pr-lifecycle.triage :as triage]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Bot detection
+;; Schemas + bot detection
+
+(def ClassifiedComment
+  [:map
+   [:category keyword?]
+   [:confidence keyword?]
+   [:method keyword?]
+   [:comment map?]])
+
+(def ClassificationStats
+  [:map
+   [:total nat-int?]
+   [:change-requests nat-int?]
+   [:questions nat-int?]
+   [:approvals nat-int?]
+   [:bot-comments nat-int?]
+   [:noise nat-int?]])
+
+(def ClassifiedCommentsBatch
+  [:map
+   [:change-requests [:vector ClassifiedComment]]
+   [:questions [:vector ClassifiedComment]]
+   [:approvals [:vector ClassifiedComment]]
+   [:bot-comments [:vector ClassifiedComment]]
+   [:noise [:vector ClassifiedComment]]
+   [:all [:vector ClassifiedComment]]
+   [:stats ClassificationStats]])
+
+(defn- validate!
+  [result-schema value]
+  (schema/validate result-schema value))
 
 (def bot-login-patterns
   "Login substrings and suffixes for known bots."
@@ -125,6 +156,52 @@ Do not include any other text.")
 ;------------------------------------------------------------------------------ Layer 2
 ;; Unified classifier
 
+(defn- heuristic-category
+  [body]
+  (cond
+    (question-comment? body)                                          :question
+    (pos? (triage/score-indicators body triage/actionable-indicators)) :change-request
+    (approval-comment? body)                                          :approval
+    :else                                                             :noise))
+
+(defn- build-classification
+  [category confidence method comment]
+  (validate!
+   ClassifiedComment
+   {:category category
+    :confidence confidence
+    :method method
+    :comment comment}))
+
+(defn- llm-category
+  [body generate-fn]
+  (let [prompt   (build-classify-prompt body)
+        response (try (generate-fn prompt) (catch Exception _e nil))]
+    (parse-llm-classification response)))
+
+(defn- classify-human-comment
+  [comment body generate-fn]
+  (if generate-fn
+    (if-let [category (llm-category body generate-fn)]
+      (build-classification category :high :llm comment)
+      (build-classification (heuristic-category body) :low :heuristic-fallback comment))
+    (build-classification (heuristic-category body) :medium :heuristic comment)))
+
+(defn- grouped-comments
+  [classified-comments]
+  (group-by :category classified-comments))
+
+(defn- stats-for
+  [classified-comments grouped]
+  (validate!
+   ClassificationStats
+   {:total           (count classified-comments)
+    :change-requests (count (get grouped :change-request))
+    :questions       (count (get grouped :question))
+    :approvals       (count (get grouped :approval))
+    :bot-comments    (count (get grouped :bot-comment))
+    :noise           (count (get grouped :noise))}))
+
 (defn classify-comment
   "Classify a single comment into a category.
 
@@ -149,52 +226,20 @@ Do not include any other text.")
     (cond
       ;; 1. Self-comment: always noise (loop prevention — never respond to own comments)
       (and self-author author (= author self-author))
-      {:category   :noise
-       :confidence :high
-       :method     :self-filter
-       :comment    comment}
+      (build-classification :noise :high :self-filter comment)
 
       ;; 2. Bot detection by author login pattern
       (bot-author? author)
-      {:category   :bot-comment
-       :confidence :high
-       :method     :bot-rule
-       :comment    comment}
+      (build-classification :bot-comment :high :bot-rule comment)
 
       ;; 3. Pure approval with no actionable indicators
       (and (approval-comment? body)
            (zero? (triage/score-indicators body triage/actionable-indicators)))
-      {:category   :approval
-       :confidence :high
-       :method     :heuristic
-       :comment    comment}
+      (build-classification :approval :high :heuristic comment)
 
-      ;; 4. LLM-based classification for ambiguous human comments
-      generate-fn
-      (let [prompt   (build-classify-prompt body)
-            response (try (generate-fn prompt) (catch Exception _e nil))
-            category (parse-llm-classification response)]
-        {:category   (or category
-                         ;; Fallback to heuristic if LLM fails or returns garbage
-                         (cond
-                           (question-comment? body) :question
-                           (pos? (triage/score-indicators body triage/actionable-indicators)) :change-request
-                           (approval-comment? body) :approval
-                           :else :noise))
-         :confidence (if category :high :low)
-         :method     (if category :llm :heuristic-fallback)
-         :comment    comment})
-
-      ;; 5. Heuristic fallback (no LLM available)
+      ;; 4. Heuristic or LLM-based classification for other human comments
       :else
-      {:category   (cond
-                     (question-comment? body)                                            :question
-                     (pos? (triage/score-indicators body triage/actionable-indicators))   :change-request
-                     (approval-comment? body)                                            :approval
-                     :else                                                               :noise)
-       :confidence :medium
-       :method     :heuristic
-       :comment    comment})))
+      (classify-human-comment comment body generate-fn))))
 
 (defn classify-comments
   "Classify a batch of comments.
@@ -215,23 +260,20 @@ Do not include any other text.")
     :all             [classified...]
     :stats           {:total n :change-requests n ...}}"
   [comments & {:keys [generate-fn self-author]}]
-  (let [classified (mapv #(classify-comment %
-                                            :generate-fn generate-fn
-                                            :self-author self-author)
-                         comments)
-        by-cat     (group-by :category classified)]
-    {:change-requests (vec (get by-cat :change-request))
-     :questions       (vec (get by-cat :question))
-     :approvals       (vec (get by-cat :approval))
-     :bot-comments    (vec (get by-cat :bot-comment))
-     :noise           (vec (get by-cat :noise))
-     :all             classified
-     :stats           {:total           (count classified)
-                       :change-requests (count (get by-cat :change-request))
-                       :questions       (count (get by-cat :question))
-                       :approvals       (count (get by-cat :approval))
-                       :bot-comments    (count (get by-cat :bot-comment))
-                       :noise           (count (get by-cat :noise))}}))
+  (let [classified (into [] (map #(classify-comment %
+                                                   :generate-fn generate-fn
+                                                   :self-author self-author))
+                          comments)
+        grouped    (grouped-comments classified)]
+    (validate!
+     ClassifiedCommentsBatch
+     {:change-requests (vec (get grouped :change-request))
+      :questions       (vec (get grouped :question))
+      :approvals       (vec (get grouped :approval))
+      :bot-comments    (vec (get grouped :bot-comment))
+      :noise           (vec (get grouped :noise))
+      :all             classified
+      :stats           (stats-for classified grouped)})))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
