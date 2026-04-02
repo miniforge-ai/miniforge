@@ -1,0 +1,243 @@
+{:spec/id "pr-monitor-loop-v1"
+ :spec/version "0.1.0"
+ :spec/created "2026-03-30"
+ :spec/status "active"
+ :workflow/type :standard-sdlc
+
+ :spec/title "PR Monitor Loop: Autonomous Comment Resolution and Change Iteration"
+
+ :spec/description
+ "Build the PR monitor loop: poll open miniforge-authored PRs for new review
+  comments, classify each comment (change-request/question/bot/noise), and route
+  to the appropriate handler. Change-requests trigger implement→test→push→reply.
+  Questions get an LLM reply without code changes. Budgets are enforced per PR.
+  Events emitted for TUI visibility. Wired into the N2 Observe phase."
+
+ :title "PR Monitor Loop: Autonomous Comment Resolution and Change Iteration"
+
+ :description
+ "miniforge will watch its own open PRs and autonomously resolve incoming
+  review comments — answering questions, implementing requested changes, pushing
+  updated commits, and posting reply comments — closing the feedback loop without
+  human involvement on every cycle.
+
+  This is the first phase of the PR Monitoring Workflow described in
+  informative/pr-monitoring-workflow.md. Success means a miniforge-authored PR
+  can receive reviewer comments and reach merge-ready state without manual
+  re-triggering."
+
+ :context
+ {:normative-refs
+  ["N2 §7 — Observe phase: PR lifecycle after release"
+   "N3 §3.x — :pr-monitor/* event types"
+   "N6 §2.5 — pr-lifecycle evidence extension"
+   "N9 — External PR Integration: PR Work Item model, readiness computation"
+   "informative/pr-monitoring-workflow.md — full workflow design reference"]
+
+  :current-state
+  ["Release phase creates PRs and pushes branches"
+   "No polling or webhook listener watches open PRs after creation"
+   "Reviewer comments accumulate with no autonomous response"
+   "Human must manually re-trigger a workflow to address feedback"
+   "The :observe phase in N2 is declared but not implemented"]
+
+  :existing-components
+  ["agent — implementer, reviewer, tester already exist"
+   "event-stream — append-only event emission"
+   "llm — Claude CLI integration"
+   "config — user config with github token"
+   "artifact — provenance model for all outputs"
+   "workflow — state machine, phase executor"]
+
+  :missing-pieces
+  ["GitHub polling/webhook listener (thin adapter)"
+   "Comment classifier (question / change-request / approval / bot)"
+   "PR monitor agent — routes events to existing agents"
+   "Push + reply comment after fix cycle"
+   "Budget enforcement (max fix attempts, abandon-after)"]}
+
+ :objectives
+ ["Poll open miniforge-authored PRs for new comments on a configurable interval"
+  "Classify each comment: question, change-request, bot-comment, or approval"
+  "For change-requests: hand off to implementer → tester → reviewer inner loop, push fix, post reply"
+  "For questions: generate a clarifying reply and post it without pushing code"
+  "For bot comments (Dependabot, CodeQL, Codecov): parse and act per existing rules"
+  "Track attempt budgets; escalate to human when budget exhausted"
+  "Emit :pr-monitor/* events for TUI/web visibility"
+  "Add pr-lifecycle evidence to the workflow evidence bundle"]
+
+ :deliverables
+ [{:id :github-pr-poller
+   :type :component-or-adapter
+   :path "components/github/src/ai/miniforge/github/pr_poller.clj"
+   :priority :p0
+   :description
+   "Polls GitHub API for open PRs owned by miniforge (identified by author or label).
+    Returns new comments since last poll watermark. Persists watermark in ~/.miniforge/state/."
+   :interfaces
+   {:public-api
+    ["(poll-open-prs config) → [{:pr/url :pr/number :comments [...]}]"
+     "(latest-comments-since pr-url since-timestamp) → [comment]"
+     "(post-comment pr-url body) → {:comment-id ...}"
+     "(push-branch branch-name commit-msg files) → {:sha ...}"]}
+   :config-keys
+   [":github/token (from config)"
+    ":github/poll-interval-seconds (default 60)"
+    ":github/owner and :github/repo (or inferred from git remote)"]
+   :tests
+   ["Poll returns normalized comment maps"
+    "Watermark persisted and advanced correctly"
+    "Post comment returns comment-id"]}
+
+  {:id :comment-classifier
+   :type :fn-or-agent
+   :path "components/agent/src/ai/miniforge/agent/pr_monitor.clj"
+   :priority :p0
+   :description
+   "Classifies each GitHub comment into one of:
+    :question — reviewer asking for clarification
+    :change-request — reviewer asking for code change
+    :approval — reviewer approving
+    :bot-comment — automated tool (Dependabot, CodeQL, Codecov, Renovate)
+    :noise — emoji reactions, acknowledgements requiring no action"
+   :approach
+   "Use a small LLM call with structured output. Bot detection first
+    (author login matching known bot patterns), then LLM classification for human comments."
+   :tests
+   ["Classify change-request correctly"
+    "Classify question correctly"
+    "Detect bot comment by author login"
+    "Classify approval correctly"]}
+
+  {:id :pr-monitor-agent
+   :type :agent
+   :path "components/agent/src/ai/miniforge/agent/pr_monitor.clj"
+   :priority :p0
+   :description
+   "Orchestrates the PR monitor loop. Receives classified comment events and
+    routes them to appropriate handlers. Tracks attempt budgets. Emits events."
+   :responsibilities
+   ["Receive poll results and classify comments"
+    "Route change-requests to implementer → tester inner loop"
+    "Route questions to LLM reply generator"
+    "Route bot comments to bot-specific handlers"
+    "After successful fix: push branch, post reply comment citing changes"
+    "Track budget per PR; emit :pr-monitor/budget-exhausted and escalate when exceeded"
+    "Emit :pr-monitor/comment-received, :pr-monitor/fix-pushed, :pr-monitor/reply-posted events"]
+   :budget-defaults
+   {:max-fix-attempts-per-comment 3
+    :max-total-fix-attempts-per-pr 10
+    :abandon-after-hours 72}
+   :tests
+   ["Routes change-request → implementer correctly"
+    "Routes question → reply generator"
+    "Pushes branch after fix and posts reply"
+    "Exhausts budget and escalates"
+    "Emits correct event types"]}
+
+  {:id :pr-monitor-loop-integration
+   :type :integration
+   :path "components/workflow/src/ai/miniforge/workflow/observe_phase.clj"
+   :priority :p1
+   :description
+   "Wires the PR monitor agent into the N2 Observe phase. After Release phase
+    creates a PR, the Observe phase starts the monitor loop for that PR and runs
+    until PR is merged, abandoned, or budget exhausted."
+   :phase-contract
+   {:entry "Release phase has pushed a branch and created a PR"
+    :exit-conditions
+    ["PR merged (detected by GitHub API)"
+     "Budget exhausted (human escalation emitted)"
+     "PR closed externally"]
+    :outputs [:pr-lifecycle-evidence]}
+   :tests
+   ["Observe phase starts after release"
+    "Monitor loop terminates on merge"
+    "Monitor loop terminates on budget exhaustion"]}
+
+  {:id :pr-lifecycle-evidence
+   :type :evidence-extension
+   :path "components/artifact/src/ai/miniforge/artifact/evidence.clj"
+   :priority :p1
+   :description
+   "Adds :evidence/pr-lifecycle to the workflow evidence bundle per N6 §2.5."
+   :schema
+   {:created-at :inst
+    :pr-url :string
+    :comments-received :int
+    :comments-addressed :int
+    :fixes-pushed [{:comment-id :int :sha :string :at :inst}]
+    :questions-answered [{:comment-id :int :at :inst}]
+    :budget-remaining :int
+    :closed-reason :keyword
+    :total-monitoring-duration-hours :float}
+   :tests
+   ["Evidence bundle includes :pr-lifecycle key after observe phase"
+    "Evidence schema validates correctly"]}
+
+  {:id :tui-pr-monitor-view
+   :type :tui-extension
+   :path "components/tui-views/..."
+   :priority :p2
+   :description
+   "Extend the PR Fleet (:pr-fleet) view to show monitor loop status inline:
+    last-polled time, comment count, attempts remaining, last action taken."
+   :tests
+   ["PR row shows monitor status when observe phase is active"]}]
+
+ :implementation-strategy
+ {:approach "Bottom-up: poller → classifier → agent → integration"
+  :phases
+  [{:phase 1
+    :focus "GitHub poller + comment classifier"
+    :deliverables [:github-pr-poller :comment-classifier]
+    :validation "Can poll a real PR and classify comments correctly"}
+
+   {:phase 2
+    :focus "PR monitor agent with change-request and question routing"
+    :deliverables [:pr-monitor-agent]
+    :validation "Agent routes, fixes, pushes, and replies autonomously in a test PR"}
+
+   {:phase 3
+    :focus "Observe phase wiring and evidence"
+    :deliverables [:pr-monitor-loop-integration :pr-lifecycle-evidence]
+    :validation "Full dogfood: miniforge's own PRs reach merge-ready autonomously"}
+
+   {:phase 4
+    :focus "TUI visibility"
+    :deliverables [:tui-pr-monitor-view]
+    :validation "Monitor loop status visible in PR Fleet view"}]
+
+  :dogfooding-notes
+  "Phase 3 should be validated by using miniforge to submit a PR to itself,
+   then having a human leave review comments and watching them get resolved.
+   This is the core dogfood loop described in the project's dogfood order (item a)."}
+
+ :constraints
+ {:architecture
+  ["Must follow stratified design"
+   "GitHub adapter must be isolated behind an interface"
+   "All state must be persisted in ~/.miniforge/ (not in-process only)"
+   "Poller must be safe to restart (idempotent watermark)"]
+  :safety
+  ["Must never force-push or amend published commits — always new commit"
+   "Must post reply comment before or simultaneously with push, never silently"
+   "Must not respond to its own bot comments (loop prevention)"
+   "Change-request responses must go through tester gate before push"]
+  :budget
+  ["Budget limits are hard stops, not soft warnings"
+   "Escalation must emit a human-visible event and stop all autonomous action"]}
+
+ :success-criteria
+ [{:criterion "Poller detects new comments within 2× poll interval"
+   :validation "Integration test with mock GitHub responses"}
+  {:criterion "Change-request → fix → push → reply completes autonomously"
+   :validation "Dogfood test on a real miniforge PR"}
+  {:criterion "Question → reply posted without pushing code"
+   :validation "Unit test verifying no git operations for :question class"}
+  {:criterion "Budget exhaustion escalates correctly"
+   :validation "Simulated budget-exceeded scenario emits correct events"}
+  {:criterion "Evidence bundle contains :pr-lifecycle after observe phase"
+   :validation "Schema validation test"}
+  {:criterion "TUI shows monitor loop activity in PR Fleet view"
+   :validation "Visual check during live dogfood run"}]}
