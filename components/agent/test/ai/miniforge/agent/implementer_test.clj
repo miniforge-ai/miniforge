@@ -1,10 +1,14 @@
 (ns ai.miniforge.agent.implementer-test
   "Tests for the Implementer agent."
   (:require
+   [ai.miniforge.agent.artifact-session :as artifact-session]
+   [ai.miniforge.agent.budget :as budget]
    [clojure.test :as test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.agent.core :as core]
+   [ai.miniforge.agent.file-artifacts :as file-artifacts]
    [ai.miniforge.agent.implementer :as implementer]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -25,6 +29,36 @@
    :code/files [{:path "src/minimal.clj"
                  :content "(ns minimal)"
                  :action :create}]})
+
+(defn- llm-response
+  "Create a mock successful LLM response."
+  [& {:keys [content tokens cost-usd tools-called]
+      :or {content ""
+           tokens 0
+           cost-usd 0.0
+           tools-called []}}]
+  {:success true
+   :content content
+   :tokens tokens
+   :cost-usd cost-usd
+   :tools-called tools-called})
+
+(defn- session-map
+  "Create an artifact session map for tests."
+  [& {:keys [pre-session-snapshot]
+      :or {pre-session-snapshot {:untracked #{}
+                                 :modified #{}
+                                 :deleted #{}
+                                 :added #{}}}}]
+  {:dir "/tmp/miniforge-artifact-test"
+   :mcp-config-path "/tmp/miniforge-artifact-test/mcp-config.json"
+   :artifact-path "/tmp/miniforge-artifact-test/artifact.edn"
+   :pre-session-snapshot pre-session-snapshot})
+
+(defn- find-log-entry
+  "Find a specific event in collected log entries."
+  [entries event]
+  (some #(when (= event (:log/event %)) %) @entries))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Agent creation tests
@@ -58,7 +92,49 @@
                               {:task/description "Implement user login"
                                :task/type :implement})]
       (is (= :error (:status result)))
-      (is (some? (:error result))))))
+      (is (some? (:error result)))))
+
+  (testing "uses file artifact fallback when MCP artifact is missing"
+    (let [[logger entries] (log/collecting-logger {:min-level :trace})
+          fallback-artifact {:code/files [{:path "src/generated.clj"
+                                           :content "(ns generated)"
+                                           :action :create}]
+                             :code/summary "Collected from working tree"
+                             :code/language "clojure"
+                             :code/tests-needed? true}
+          response (llm-response :tokens 42 :cost-usd 0.12)
+          result (with-redefs [artifact-session/create-session!
+                               (fn [] (session-map))
+                               artifact-session/write-mcp-config!
+                               identity
+                               artifact-session/read-artifact
+                               (constantly nil)
+                               artifact-session/read-context-misses
+                               (constantly nil)
+                               artifact-session/cleanup-session!
+                               (constantly nil)
+                               budget/resolve-cost-budget-usd
+                               (fn [& _] 1.0)
+                               llm/chat
+                               (fn [& _] response)
+                               llm/success?
+                               :success
+                               llm/get-content
+                               :content
+                               file-artifacts/collect-written-files
+                               (fn [_ _] fallback-artifact)]
+                   (@#'implementer/invoke-with-llm
+                    nil "prompt" "system" {} {} nil logger []))
+          fallback-log (find-log-entry entries :implementer/file-artifact-fallback)]
+      (is (= :success (:status result)))
+      (is (= [{:path "src/generated.clj"
+               :content "(ns generated)"
+               :action :create}]
+             (get-in result [:output :code/files])))
+      (is (= "Collected from working tree"
+             (get-in result [:output :code/summary])))
+      (is (= :warn (:log/level fallback-log)))
+      (is (= 1 (get-in fallback-log [:data :file-count]))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation tests

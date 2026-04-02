@@ -114,10 +114,10 @@ do NOT generate new code. Instead, output:
 Only use this when ALL acceptance criteria are already met by existing code.
 If even partial changes are needed, proceed with normal code generation.
 
-## CRITICAL: Submit Your Code via MCP Tool
+## Submit Your Code via MCP Tool
 
-You MUST call the `mcp__artifact__submit_code_artifact` tool to submit your implementation.
-This is your primary output mechanism. Do NOT output code as raw text — it will be lost.
+Preferred: call the `mcp__artifact__submit_code_artifact` tool to submit your implementation.
+This is the fastest path and carries metadata cleanly. Do NOT rely on raw text output.
 
 Call `mcp__artifact__submit_code_artifact` with these parameters:
 - `files`: array of objects with `path`, `content`, and `action` (\"create\", \"modify\", or \"delete\")
@@ -127,7 +127,8 @@ Call `mcp__artifact__submit_code_artifact` with these parameters:
 - `dependencies_added`: array of dependency strings (optional)
 
 The tool is ALWAYS available. If you encounter an error calling it, report the error.
-Do NOT fall back to raw text output under any circumstances.
+If you run out of turns before calling it, your file writes are still captured automatically.
+Still prefer the tool whenever possible.
 
 ## File Exploration via Context Cache
 
@@ -147,6 +148,5 @@ You have at most 40 tool calls total. Reserve the last 3 for submitting.
 A good-enough implementation submitted on time is better than a perfect one that never arrives.
 
 Your LAST action before finishing MUST be calling `mcp__artifact__submit_code_artifact`.
-
 Remember: Your code will be validated, tested, and reviewed by other agents.
 Write code that is easy to understand, test, and maintain."}

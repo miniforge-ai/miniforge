@@ -4,6 +4,7 @@
   (:require
    [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.budget :as budget]
+   [ai.miniforge.agent.file-artifacts :as file-artifacts]
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
@@ -388,14 +389,17 @@
 
 (defn- process-llm-response
   "Process a successful LLM response, returning the appropriate result."
-  [response artifact context logger tokens cost-usd]
+  [response artifact artifact-source context logger tokens cost-usd]
   (let [content (llm/get-content response)
         parsed (or artifact (parse-code-response content))]
     (let [tools (get response :tools-called [])]
-      (if artifact
+      (cond
+        (= :mcp artifact-source)
         (log/info logger :implementer :implementer/mcp-artifact-received
                   {:data {:file-count (count (:code/files artifact))
                           :tools-called tools}})
+
+        (nil? artifact-source)
         (log/warn logger :implementer :implementer/mcp-tool-not-called
                   {:data {:content-length (count (or content ""))
                           :tools-called tools
@@ -410,7 +414,8 @@
   "Invoke the implementer via the LLM backend."
   [llm-client user-prompt effective-system-prompt config context on-chunk logger
    existing-files]
-  (let [{:keys [llm-result artifact context-misses]}
+  (let [working-dir (System/getProperty "user.dir")
+        {:keys [llm-result artifact context-misses pre-session-snapshot]}
         (artifact-session/with-artifact-session [session]
           ;; Write context cache so MCP tools can serve from it
           (when (seq existing-files)
@@ -427,23 +432,37 @@
             (if on-chunk
               (llm/chat-stream llm-client user-prompt on-chunk
                                (merge {:system effective-system-prompt} mcp-opts))
-              (llm/chat llm-client user-prompt
-                        (merge {:system effective-system-prompt} mcp-opts)))))
+                        (llm/chat llm-client user-prompt
+                                  (merge {:system effective-system-prompt} mcp-opts)))))
         response llm-result
+        file-artifact (when-not artifact
+                        (file-artifacts/collect-written-files pre-session-snapshot
+                                                              working-dir))
+        artifact-source (cond
+                          artifact :mcp
+                          file-artifact :file-fallback
+                          :else nil)
+        effective-artifact (or artifact file-artifact)
         tokens (get response :tokens 0)
         cost-usd (get response :cost-usd)]
     (when (seq context-misses)
       (log/info logger :implementer :implementer/context-cache-misses
                 {:data {:miss-count (count context-misses)
                         :misses context-misses}}))
+    (when file-artifact
+      (log/warn logger :implementer :implementer/file-artifact-fallback
+                {:data {:file-count (count (:code/files file-artifact))
+                        :tools-called (get response :tools-called [])}}))
     (log/info logger :implementer :implementer/llm-called
               {:data {:success (llm/success? response)
                       :tokens tokens
                       :streaming? (boolean on-chunk)
-                      :mcp-artifact? (boolean artifact)
+                      :mcp-artifact? (= :mcp artifact-source)
+                      :file-artifact-fallback? (= :file-fallback artifact-source)
                       :tools-called (get response :tools-called [])}})
     (if (llm/success? response)
-      (process-llm-response response artifact context logger tokens cost-usd)
+      (process-llm-response response effective-artifact artifact-source
+                            context logger tokens cost-usd)
       (response/error (or (:message (llm/get-error response))
                           (messages/t :error/llm-failed))))))
 

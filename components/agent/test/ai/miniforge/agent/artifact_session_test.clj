@@ -15,6 +15,7 @@
         (is (string? (:dir s)))
         (is (string? (:mcp-config-path s)))
         (is (string? (:artifact-path s)))
+        (is (map? (:pre-session-snapshot s)))
         (is (.exists (io/file (:dir s))))
         (is (.startsWith (:dir s) (System/getProperty "java.io.tmpdir")))
         (is (.endsWith (:mcp-config-path s) "/mcp-config.json"))
