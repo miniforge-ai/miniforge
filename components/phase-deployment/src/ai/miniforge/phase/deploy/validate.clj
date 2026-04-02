@@ -105,7 +105,7 @@
         (mapv (fn [url]
                 (loop [attempt 1]
                   (let [result (http-health-check url)]
-                    (if (or (:passed? result) (>= attempt retries))
+                    (if (or (get result :passed? false) (>= attempt retries))
                       (assoc result :attempts attempt)
                       (do (Thread/sleep retry-delay)
                           (recur (inc attempt)))))))
@@ -155,8 +155,14 @@
         start-time   (System/currentTimeMillis)
         logger       (get-logger ctx)
         input        (get-in ctx [:execution/input])
-        endpoints    (or (:health-endpoints input) (:health-endpoints config) [])
-        smoke-cmds   (or (:smoke-commands input) (:smoke-commands config) [])
+        endpoints    (if-some [value (or (get input :health-endpoints)
+                                         (get config :health-endpoints))]
+                       value
+                       [])
+        smoke-cmds   (if-some [value (or (get input :smoke-commands)
+                                         (get config :smoke-commands))]
+                       value
+                       [])
         retries      (get input :retries 3)
         retry-delay  (get input :retry-delay-ms 5000)]
 
