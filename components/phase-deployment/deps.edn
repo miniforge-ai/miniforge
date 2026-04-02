@@ -1,0 +1,12 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge/messages {:local/root "../messages"}
+        ai.miniforge/phase {:local/root "../phase"}
+        ai.miniforge/gate {:local/root "../gate"}
+        ai.miniforge/logging {:local/root "../logging"}
+        ai.miniforge/schema {:local/root "../schema"}
+        ai.miniforge/response {:local/root "../response"}
+        ai.miniforge/evidence-bundle {:local/root "../evidence-bundle"}
+        ai.miniforge/policy-pack {:local/root "../policy-pack"}}
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps {ai.miniforge/gate {:local/root "../gate"}}}}}

@@ -184,6 +184,18 @@
              :anomaly (response/from-exception ex)}
             opts))))
 
+(defn succeeded?
+  "Returns true if result represents a successful operation.
+   Prefer over direct :success? key access."
+  [result]
+  (true? (:success? result)))
+
+(defn failed?
+  "Returns true if result represents a failed operation.
+   Prefer over direct :success? key access."
+  [result]
+  (not (true? (:success? result))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation response helpers
 

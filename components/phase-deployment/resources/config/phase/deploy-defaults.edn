@@ -1,0 +1,17 @@
+;; Deployment phase defaults
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; Default configuration for deployment phases.
+;; Overridable per-workflow via the :phase-config key in workflow EDN.
+
+{:provision {:agent nil
+             :gates [:policy-pack :provision-validated]
+             :budget {:tokens 0 :iterations 3 :time-seconds 900}}
+
+ :deploy    {:agent nil
+             :gates [:deploy-healthy]
+             :budget {:tokens 0 :iterations 3 :time-seconds 300}}
+
+ :validate  {:agent nil
+             :gates [:health-check]
+             :budget {:tokens 0 :iterations 3 :time-seconds 120}}}
