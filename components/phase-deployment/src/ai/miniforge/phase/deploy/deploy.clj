@@ -119,12 +119,19 @@
         input       (get-in ctx [:execution/input])
         ;; Merge provision outputs (from previous phase) into deploy config
         prev-outputs (get-in ctx [:execution/phase-results :provision :result :outputs] {})
-        kustomize-dir   (or (:kustomize-dir input) (:kustomize-dir config))
-        namespace       (or (:namespace input) (:namespace config) "default")
-        context         (or (:context input) (:context config)
+        kustomize-dir   (or (get input :kustomize-dir) (get config :kustomize-dir))
+        namespace       (if-some [value (or (get input :namespace) (get config :namespace))]
+                            value
+                            "default")
+        context         (or (get input :context) (get config :context)
                             (:gke_context prev-outputs))
-        app-label       (or (:app-label input) (:app-label config) "ixi")
-        deployment-name (or (:deployment-name input) (:deployment-name config) app-label)]
+        app-label       (if-some [value (or (get input :app-label) (get config :app-label))]
+                            value
+                            "ixi")
+        deployment-name (if-some [value (or (get input :deployment-name)
+                                            (get config :deployment-name))]
+                            value
+                            app-label)]
 
     (log/info logger :deploy :deploy/starting
               {:data {:kustomize-dir kustomize-dir
@@ -150,7 +157,7 @@
                                :apply-stderr (get-in result [:apply-result :stderr])}})
             (failed-enter ctx start-time
                           {:status :error
-                           :error  (or (:error result)
+                           :error  (or (get result :error)
                                        (get-in result [:apply-result :stderr]))
                            :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}}))
 
