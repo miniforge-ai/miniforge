@@ -1,0 +1,6 @@
+{:pr-monitor/defaults
+ {:poll-interval-ms 60000
+  :self-author nil
+  :max-fix-attempts-per-comment 3
+  :max-total-fix-attempts-per-pr 10
+  :abandon-after-hours 72}}
