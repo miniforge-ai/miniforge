@@ -17,22 +17,35 @@
 
    Tracks fix attempts per comment, total attempts per PR, and time bounds.
    Budget limits are hard stops — when exhausted, all autonomous action
-   ceases and an escalation event is emitted.
+  ceases and an escalation event is emitted.
 
    Budget state is persisted in ~/.miniforge/state/pr-monitor/ so that
    restarts do not reset counters."
   (:require
+   [ai.miniforge.pr-lifecycle.monitor-config :as config]
+   [ai.miniforge.schema.interface :as schema]
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Budget defaults
+;; Schemas + budget defaults
 
-(def default-budget
-  "Default budget limits for the PR monitor loop."
-  {:max-fix-attempts-per-comment 3
-   :max-total-fix-attempts-per-pr 10
-   :abandon-after-hours 72})
+(def BudgetState
+  [:map
+   [:pr-number pos-int?]
+   [:limits [:map
+             [:max-fix-attempts-per-comment pos-int?]
+             [:max-total-fix-attempts-per-pr pos-int?]
+             [:abandon-after-hours pos-int?]]]
+   [:comment-attempts [:map-of int? nat-int?]]
+   [:total-attempts nat-int?]
+   [:started-at inst?]
+   [:questions-answered nat-int?]
+   [:fixes-pushed nat-int?]])
+
+(defn- validate!
+  [result-schema value]
+  (schema/validate result-schema value))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Budget state
@@ -46,14 +59,16 @@
 
    Returns budget state map."
   [pr-number & [config]]
-  (let [limits (merge default-budget config)]
-    {:pr-number pr-number
-     :limits limits
-     :comment-attempts {}   ; comment-id → attempt-count
-     :total-attempts 0
-     :started-at (java.util.Date.)
-     :questions-answered 0
-     :fixes-pushed 0}))
+  (let [limits (merge (config/budget-defaults) config)]
+    (validate!
+     BudgetState
+     {:pr-number pr-number
+      :limits limits
+      :comment-attempts {}
+      :total-attempts 0
+      :started-at (java.util.Date.)
+      :questions-answered 0
+      :fixes-pushed 0})))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Budget operations
