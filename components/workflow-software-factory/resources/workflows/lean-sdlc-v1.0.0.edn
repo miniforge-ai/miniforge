@@ -100,7 +100,7 @@
     :repair-strategy :none}
    :phase/gates [:metrics-collected]
    :phase/budget {:tokens 2000 :time-seconds 60 :iterations 1}
-   :phase/next [{:target :meta-loop}]
+   :phase/next []
    :phase/metrics [:total-time :total-tokens]}]
 
  :workflow/config

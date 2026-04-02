@@ -168,7 +168,7 @@
     :repair-strategy :none}
    :phase/gates [:metrics-collected]
    :phase/budget {:tokens 5000 :time-seconds 120 :iterations 1}
-   :phase/next [{:target :meta-loop}]
+   :phase/next []
    :phase/metrics [:total-iterations :total-tokens :total-time :success-outcome]}]
 
  ;; ──────────────────────────────────────────────────────────────────────────

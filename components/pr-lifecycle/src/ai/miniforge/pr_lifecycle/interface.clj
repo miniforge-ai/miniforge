@@ -6,20 +6,29 @@
    - CI status monitoring
    - Review monitoring
    - Comment triage (actionable vs non-actionable)
+   - Comment classification (change-request/question/bot/noise)
+   - PR monitor loop (autonomous comment resolution)
    - Automated fix generation for CI failures and review feedback
    - Merge policy enforcement
+   - Per-PR budget enforcement
 
    The PR lifecycle controller drives tasks from implementation
-   through merge with minimal manual intervention."
+   through merge with minimal manual intervention. The PR monitor
+   loop autonomously resolves reviewer comments after release."
   (:require
    [ai.miniforge.pr-lifecycle.controller :as controller]
    [ai.miniforge.pr-lifecycle.ci-monitor :as ci]
+   [ai.miniforge.pr-lifecycle.classifier :as classifier]
    [ai.miniforge.pr-lifecycle.review-monitor :as review]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
    [ai.miniforge.pr-lifecycle.github :as github]
    [ai.miniforge.pr-lifecycle.triage :as triage]
    [ai.miniforge.pr-lifecycle.merge :as merge]
-   [ai.miniforge.pr-lifecycle.events :as events]))
+   [ai.miniforge.pr-lifecycle.events :as events]
+   [ai.miniforge.pr-lifecycle.monitor-events :as mevents]
+   [ai.miniforge.pr-lifecycle.monitor-loop :as monitor]
+   [ai.miniforge.pr-lifecycle.monitor-budget :as mbudget]
+   [ai.miniforge.pr-lifecycle.pr-poller :as poller]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Events
@@ -456,6 +465,141 @@
                      :on-event #(println \"Event:\" %))"
   controller/run-lifecycle!)
 
+;------------------------------------------------------------------------------ Layer 1.5
+;; Comment classification (category-based, complements triage)
+
+(def categorize-comment
+  "Classify a comment into a category: :change-request :question :approval
+   :bot-comment :noise.
+
+   Arguments:
+   - comment: Map with :body, :author, :id, :path, :line keys
+
+   Options:
+   - :generate-fn — LLM generation function for ambiguous comments
+   - :self-author — Author login to filter self-comments (loop prevention)
+
+   Returns {:category keyword :confidence keyword :method keyword :comment map}
+
+   Example:
+     (categorize-comment {:body \"Please fix the null pointer\" :author \"alice\"})
+     ; => {:category :change-request :confidence :medium :method :heuristic ...}"
+  classifier/classify-comment)
+
+(def categorize-comments
+  "Classify a batch of comments into categories.
+
+   Returns {:change-requests [...] :questions [...] :approvals [...]
+            :bot-comments [...] :noise [...] :all [...] :stats {...}}
+
+   Example:
+     (categorize-comments [{:body \"Add tests\" :author \"alice\"}
+                           {:body \"LGTM!\" :author \"bob\"}]
+                          :self-author \"miniforge[bot]\")"
+  classifier/classify-comments)
+
+;------------------------------------------------------------------------------ Layer 5.5
+;; PR Poller (GitHub adapter)
+
+(def poll-open-prs
+  "Poll GitHub for open PRs authored by a given login.
+   Returns DAG result with :prs vector of PR info maps."
+  poller/poll-open-prs)
+
+(def fetch-pr-comments
+  "Fetch all comments for a PR (review + issue comments).
+   Returns DAG result with :comments vector."
+  poller/fetch-pr-comments)
+
+(def post-pr-comment
+  "Post an issue comment on a PR.
+   Returns DAG result with :comment-posted true."
+  poller/post-comment)
+
+(def load-watermarks
+  "Load polling watermarks from persistent storage."
+  poller/load-watermarks)
+
+(def save-watermarks!
+  "Persist polling watermarks to disk."
+  poller/save-watermarks!)
+
+;------------------------------------------------------------------------------ Layer 6
+;; PR Monitor Loop (autonomous comment resolution)
+
+(def create-pr-monitor
+  "Create a PR monitor loop state.
+
+   Required config keys:
+   - :worktree-path — path to git repo
+   - :self-author — miniforge's GitHub login
+
+   Optional config keys:
+   - :poll-interval-ms — polling interval (default 60000)
+   - :event-bus — event bus for TUI visibility
+   - :logger — structured logger
+   - :generate-fn — LLM generation function
+   - :max-fix-attempts-per-comment — per-comment limit (default 3)
+   - :max-total-fix-attempts-per-pr — per-PR limit (default 10)
+   - :abandon-after-hours — time limit (default 72)
+
+   Returns monitor state atom.
+
+   Example:
+     (def m (create-pr-monitor {:worktree-path \"/repo\"
+                                :self-author \"miniforge[bot]\"
+                                :generate-fn my-llm-fn}))"
+  monitor/create-monitor)
+
+(def run-pr-monitor-loop
+  "Run the PR monitor loop continuously.
+
+   Polls open PRs, classifies comments, routes to handlers.
+   Runs until stopped, budget exhausted, or no open PRs remain.
+
+   Arguments:
+   - monitor: Monitor state atom (from create-pr-monitor)
+   - author: GitHub login to filter PRs by
+
+   Returns evidence summary when loop completes."
+  monitor/run-monitor-loop)
+
+(def stop-pr-monitor-loop
+  "Stop a running PR monitor loop gracefully."
+  monitor/stop-monitor-loop)
+
+(def pr-monitor-evidence
+  "Get current evidence from the PR monitor."
+  monitor/monitor-evidence)
+
+(def pr-monitor-running?
+  "Check if the PR monitor loop is currently running."
+  monitor/monitor-running?)
+
+;------------------------------------------------------------------------------ Layer 6
+;; PR Monitor Budget
+
+(def create-pr-budget
+  "Create a budget tracker for a PR.
+   Returns budget state map."
+  mbudget/create-budget)
+
+(def budget-summary
+  "Get budget status summary for events and logging."
+  mbudget/budget-summary)
+
+(def any-budget-exhausted?
+  "Check if any budget dimension is exhausted.
+   Returns nil if OK, or :comment-limit :pr-limit :time-limit."
+  mbudget/any-budget-exhausted?)
+
+;------------------------------------------------------------------------------ Layer 6
+;; PR Monitor Events
+
+(def monitor-event-types
+  "Valid PR monitor loop event types (:pr-monitor/*)."
+  mevents/monitor-event-types)
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Quick example: Full PR lifecycle
@@ -494,5 +638,32 @@
    [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}
     {:name "lint" :state "COMPLETED" :conclusion "FAILURE"}])
   ; => {:status :failure :passed [...] :failed [...] ...}
+
+  ;; Comment classification example
+  (categorize-comment {:body "Please fix the null pointer" :author "alice"})
+  ; => {:category :change-request :confidence :medium :method :heuristic ...}
+
+  (categorize-comments [{:body "Add tests" :author "alice"}
+                        {:body "LGTM!" :author "bob"}
+                        {:body "Why this approach?" :author "charlie"}
+                        {:body "Security scan ok" :author "codeql[bot]"}])
+  ; => {:change-requests [...] :questions [...] :approvals [...] ...}
+
+  ;; PR monitor loop example
+  (def m (create-pr-monitor
+          {:worktree-path "/path/to/repo"
+           :self-author "miniforge[bot]"
+           :generate-fn (fn [prompt] "mock response")
+           :event-bus bus}))
+
+  ;; Start loop in background
+  ;; (future (run-pr-monitor-loop m "miniforge[bot]"))
+
+  ;; Stop gracefully
+  ;; (stop-pr-monitor-loop m)
+
+  ;; Get evidence
+  (pr-monitor-evidence m)
+  ; => {:comments-received 5 :comments-addressed 3 :fixes-pushed [...] ...}
 
   :leave-this-here)
