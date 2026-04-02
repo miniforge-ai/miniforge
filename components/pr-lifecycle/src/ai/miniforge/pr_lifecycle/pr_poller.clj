@@ -24,6 +24,7 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.schema.interface :as schema]
    [babashka.process :as process]
    [cheshire.core :as json]
    [clojure.edn :as edn]
@@ -31,7 +32,38 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Watermark persistence
+;; Schemas + watermark persistence
+
+(def WatermarkEntry
+  [:map
+   [:last-seen-at :string]
+   [:advanced-at :string]])
+
+(def Watermarks
+  [:map-of int? WatermarkEntry])
+
+(def PrInfo
+  [:map
+   [:pr/number int?]
+   [:pr/url :string]
+   [:pr/title :string]
+   [:pr/branch :string]
+   [:pr/sha :string]
+   [:pr/updated-at :string]])
+
+(def PrComment
+  [:map
+   [:comment/id int?]
+   [:comment/body {:optional true} [:maybe :string]]
+   [:comment/author {:optional true} [:maybe :string]]
+   [:comment/created-at :string]
+   [:comment/type keyword?]
+   [:comment/path {:optional true} [:maybe :string]]
+   [:comment/line {:optional true} [:maybe int?]]])
+
+(defn- validate!
+  [result-schema value]
+  (schema/validate result-schema value))
 
 (def ^:private state-dir
   "Base directory for PR monitor state."
@@ -53,7 +85,10 @@
   (let [f (io/file state-dir "watermarks.edn")]
     (if (.exists f)
       (try
-        (edn/read-string (slurp f))
+        (->> f
+             slurp
+             edn/read-string
+             (validate! Watermarks))
         (catch Exception _e {}))
       {})))
 
@@ -69,9 +104,11 @@
 
    Returns updated watermarks map (pure — call save-watermarks! to persist)."
   [watermarks pr-number timestamp]
-  (assoc watermarks pr-number
-         {:last-seen-at timestamp
-          :advanced-at (str (java.util.Date.))}))
+  (validate!
+   Watermarks
+   (assoc watermarks pr-number
+          {:last-seen-at timestamp
+           :advanced-at (str (java.util.Date.))})))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; GitHub CLI helpers
@@ -102,6 +139,17 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; PR listing
 
+(defn- normalize-pr
+  [pr]
+  (validate!
+   PrInfo
+   {:pr/number (:number pr)
+    :pr/url (:url pr)
+    :pr/title (:title pr)
+    :pr/branch (:headRefName pr)
+    :pr/sha (:headRefOid pr)
+    :pr/updated-at (:updatedAt pr)}))
+
 (defn poll-open-prs
   "Poll GitHub for open PRs authored by a given login.
 
@@ -126,14 +174,7 @@
               prs (if (str/blank? raw)
                     []
                     (json/parse-string raw true))]
-          (dag/ok {:prs (mapv (fn [pr]
-                                {:pr/number (:number pr)
-                                 :pr/url (:url pr)
-                                 :pr/title (:title pr)
-                                 :pr/branch (:headRefName pr)
-                                 :pr/sha (:headRefOid pr)
-                                 :pr/updated-at (:updatedAt pr)})
-                              prs)}))
+          (dag/ok {:prs (into [] (map normalize-pr) prs)}))
         (catch Exception e
           (dag/err :json-parse-error (.getMessage e))))
       result)))
@@ -141,28 +182,31 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Comment fetching
 
+(defn- normalize-comment
+  [comment comment-type]
+  (validate!
+   PrComment
+   (cond-> {:comment/id (:id comment)
+            :comment/body (:body comment)
+            :comment/author (get-in comment [:user :login])
+            :comment/created-at (:created_at comment)
+            :comment/type comment-type}
+     (:path comment)
+     (assoc :comment/path (:path comment))
+
+     (:original_line comment)
+     (assoc :comment/line (:original_line comment))
+
+     (:line comment)
+     (assoc :comment/line (:line comment)))))
+
 (defn- parse-gh-comments
   "Parse JSON output from gh api into normalized comment maps."
   [raw comment-type]
   (when-not (str/blank? raw)
     (try
       (let [parsed (json/parse-string raw true)]
-        (mapv (fn [c]
-                (cond-> {:comment/id (:id c)
-                         :comment/body (:body c)
-                         :comment/author (get-in c [:user :login])
-                         :comment/created-at (:created_at c)
-                         :comment/type comment-type}
-                  ;; Review comments have file/line context
-                  (:path c)
-                  (assoc :comment/path (:path c))
-
-                  (:original_line c)
-                  (assoc :comment/line (:original_line c))
-
-                  (:line c)
-                  (assoc :comment/line (:line c))))
-              parsed))
+        (into [] (map #(normalize-comment % comment-type)) parsed))
       (catch Exception _e []))))
 
 (defn fetch-pr-comments
