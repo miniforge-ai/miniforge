@@ -45,16 +45,15 @@
     (instance? UUID v) (str v)
     (instance? Instant v) (str v)
     (instance? Date v) (str (.toInstant ^Date v))
-    (map? v) (persistent!
-              (reduce-kv (fn [m k val]
-                           (assoc! m
-                                   (cond
-                                     (keyword? k) (subs (str k) 1)
-                                     (instance? UUID k) (str k)
-                                     :else k)
-                                   (serialize-for-json val)))
-                         (transient {})
-                         v))
+    (map? v) (reduce-kv (fn [m k val]
+                          (assoc m
+                                 (cond
+                                   (keyword? k) (subs (str k) 1)
+                                   (instance? UUID k) (str k)
+                                   :else k)
+                                 (serialize-for-json val)))
+                        {}
+                        v)
     (sequential? v) (mapv serialize-for-json v)
     :else v))
 
