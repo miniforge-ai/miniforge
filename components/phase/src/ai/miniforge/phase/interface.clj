@@ -118,6 +118,32 @@
   "Create a phase-scoped streaming callback when an event stream is available."
   telemetry/create-streaming-callback)
 
+(def resolve-event-stream
+  "Locate the event-stream atom from an execution context.
+   Checks :event-stream and :execution/event-stream keys."
+  telemetry/resolve-event-stream)
+
+(def emit-phase-started!
+  "Emit a :workflow/phase-started event. Safe no-op when event-stream is absent."
+  telemetry/emit-phase-started!)
+
+(def emit-phase-completed!
+  "Emit a :workflow/phase-completed event. Safe no-op when event-stream is absent."
+  telemetry/emit-phase-completed!)
+
+(def create-streaming-callback-or-noop
+  "Create a phase-scoped streaming callback, or no-op if unavailable.
+   Never returns nil — always returns a callable function."
+  telemetry/create-streaming-callback-or-noop)
+
+(def emit-agent-started!
+  "Emit an :agent/started event when a phase begins agent execution."
+  telemetry/emit-agent-started!)
+
+(def emit-agent-completed!
+  "Emit an :agent/completed event when a phase finishes agent execution."
+  telemetry/emit-agent-completed!)
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pipeline construction
 

@@ -123,6 +123,9 @@
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
 
+        ;; Emit phase-started telemetry event
+        _ (phase/emit-phase-started! ctx :verify)
+
         ;; Create tester agent (specialized implementation uses llm/chat directly)
         tester-agent (agent/create-tester {})
 
@@ -150,11 +153,17 @@
         on-chunk (phase/create-streaming-callback ctx :verify)
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
 
+        ;; Emit agent-started telemetry event
+        _ (phase/emit-agent-started! agent-ctx :verify :tester)
+
         ;; Invoke agent
         result (try
                  (agent/invoke tester-agent task agent-ctx)
                  (catch Exception e
                    (response/failure e)))
+
+        ;; Emit agent-completed telemetry event
+        _ (phase/emit-agent-completed! agent-ctx :verify :tester result)
 
         ;; Execute tests if agent produced test files
         worktree-path (or (:worktree-path ctx) (System/getProperty "user.dir"))
@@ -219,26 +228,32 @@
     ;; When verify failed and on-fail is configured, redirect to target phase
     ;; UNLESS the failure was a timeout or rate limit — those aren't code quality
     ;; issues and retrying implement won't help.
-    (if (and (= :failed phase-status) on-fail
-             (not timeout?) (not rate-limited?))
-      (-> updated-ctx
-          (assoc-in [:phase :redirect-to] on-fail)
-          (assoc-in [:phase :error]
-                    {:message (or (not-empty (get-in result [:error :message]))
-                                  (when gate-failed? "Gate validation failed")
-                                  "Verification failed")
-                     :agent-status agent-status
-                     :gate-failed? gate-failed?}))
-      (cond-> updated-ctx
-        (= :failed phase-status)
-        (assoc-in [:phase :error]
-                  {:message (or (not-empty (get-in result [:error :message]))
-                                (when gate-failed? "Gate validation failed")
-                                "Verification failed")
-                   :agent-status agent-status
-                   :timeout? timeout?
-                   :rate-limited? rate-limited?
-                   :gate-failed? gate-failed?})))))
+    (let [final-ctx (if (and (= :failed phase-status) on-fail
+                             (not timeout?) (not rate-limited?))
+                      (-> updated-ctx
+                          (assoc-in [:phase :redirect-to] on-fail)
+                          (assoc-in [:phase :error]
+                                    {:message (or (not-empty (get-in result [:error :message]))
+                                                  (when gate-failed? "Gate validation failed")
+                                                  "Verification failed")
+                                     :agent-status agent-status
+                                     :gate-failed? gate-failed?}))
+                      (cond-> updated-ctx
+                        (= :failed phase-status)
+                        (assoc-in [:phase :error]
+                                  {:message (or (not-empty (get-in result [:error :message]))
+                                                (when gate-failed? "Gate validation failed")
+                                                "Verification failed")
+                                   :agent-status agent-status
+                                   :timeout? timeout?
+                                   :rate-limited? rate-limited?
+                                   :gate-failed? gate-failed?})))]
+      ;; Emit phase-completed telemetry event
+      (phase/emit-phase-completed! final-ctx :verify
+        {:outcome (if (= :completed phase-status) :success :failure)
+         :duration-ms duration-ms
+         :tokens (:tokens metrics 0)})
+      final-ctx)))
 
 (defn error-verify
   "Handle verification phase errors.
