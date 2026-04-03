@@ -63,67 +63,31 @@
  ;; TASKS
  ;; -------------------------------------------------------------------------
 
+ ;; NOTE: :acquire-environment-in-runner is already implemented in runner.clj
+ ;; (acquire-execution-environment!, release-execution-environment!, run-pipeline
+ ;; with try/finally, worktree-preferred executor). Removed from task list to
+ ;; prevent agents from trying to reimplement it.
+
  :plan/tasks
 
- [{:task/id :acquire-environment-in-runner
-   :task/description
-   "Workflow runner acquires executor environment before the first phase.
-
-    In components/workflow/src/ai/miniforge/workflow/runner.clj:
-
-    In run-pipeline (line 363):
-    1. Before building the pipeline, call executor selection:
-       - Use dag-executor/create-executor-registry to get available executors
-       - Use dag-executor/select-executor to pick Docker > worktree
-       - Call acquire-environment! with workflow-id and repo config
-       - Store environment-id and executor in pipeline context
-
-    2. Add environment keys to the initial context:
-       :execution/executor      — the TaskExecutor instance
-       :execution/environment-id — the environment identifier
-       :execution/worktree-path  — resolved path (container workdir or worktree path)
-
-    3. Wrap pipeline execution in a try/finally that calls
-       release-environment! on the executor when the workflow completes
-       (success or failure).
-
-    4. For Docker: the container should have the repo cloned from
-       :spec/repo-url or the local repo (inferred from git remote).
-       For worktree: create a worktree from main branch.
-
-    In bases/cli/src/ai/miniforge/cli/workflow_runner.clj:
-    - Pass repo-url and branch from spec context to runner
-    - The CLI already resolves these in sandbox.clj (line 18-24) — reuse that
-
-    The executor.clj with-environment helper (line 190) already does
-    acquire/release lifecycle. Consider using it or replicating the pattern.
-
-    Acceptance:
-    - Every workflow run acquires an isolated environment before phase 1
-    - Docker preferred, worktree fallback
-    - Environment released on completion (success or failure)
-    - :execution/environment-id available to all phases via context"
-   :task/type :implement
-   :task/dependencies []}
-
-  {:task/id :implement-phase-uses-environment
+ [{:task/id :implement-phase-uses-environment
    :task/description
    "Implement phase runs the agent inside the acquired environment.
 
     In components/phase-software-factory/src/ai/miniforge/phase/implement.clj:
 
-    In resolve-worktree-path (line 102):
+    In resolve-worktree-path:
     - Read :execution/worktree-path from context (already the primary source)
-    - Remove System/getProperty 'user.dir' fallback — if no environment, fail
+    - Remove System/getProperty 'user.dir' fallback — if no environment, fail fast
 
-    In enter-implement (line 199):
+    In enter-implement:
     - The implementer agent's :worktree-path comes from ctx, which now
       points to the executor environment (container workdir or worktree)
     - The agent writes files DIRECTLY into the environment via its tools
     - No change needed to agent invocation — it already writes to worktree-path
     - Remove any code that tries to read :code/files from agent output
 
-    In leave-implement (line 272):
+    In leave-implement:
     - The phase result no longer needs to carry :code/files
     - Instead, store a lightweight result:
       {:status :success
@@ -144,7 +108,7 @@
     - No MCP artifact submission needed
     - cargo test (or equivalent) can run in the environment after implement"
    :task/type :implement
-   :task/dependencies [:acquire-environment-in-runner]}
+   :task/dependencies []}
 
   {:task/id :verify-phase-uses-environment
    :task/description
@@ -152,9 +116,9 @@
 
     In components/phase-software-factory/src/ai/miniforge/phase/verify.clj:
 
-    In enter-verify (line 116):
-    - Remove the artifact retrieval from [:execution/phase-results :implement :result :output]
-      (lines 139-148). The code is in the environment, not in phase-results.
+    In enter-verify:
+    - Remove the artifact retrieval from [:execution/phase-results :implement :result :output].
+      The code is in the environment, not in phase-results.
     - Instead, read :execution/environment-id and :execution/executor from context
     - Run tests via executor/execute!:
       (executor/execute! executor environment-id test-command opts)
@@ -176,8 +140,8 @@
     3. Capture test output and exit code
     4. Store pass/fail + output in phase-results
 
-    Remove the code-artifact validation (lines 144-148) — replace with
-    environment-id validation. If no environment-id, fail fast.
+    Remove the code-artifact validation — replace with environment-id validation.
+    If no environment-id in context, fail fast.
 
     Also remove the tester agent's need to write test files — tests should
     already exist in the repo or be written by the implementer.
@@ -196,19 +160,19 @@
 
     In components/phase-software-factory/src/ai/miniforge/phase/release.clj:
 
-    In build-workflow-state (line 114):
-    - Remove code-artifact extraction from implement phase-results (lines 121-132)
+    In build-workflow-state:
+    - Remove code-artifact extraction from implement phase-results
     - The files are already in the environment — no need to reconstruct them
-    - git-dirty-files (line 90) already works as fallback; make it the primary
+    - git-dirty-files already works as fallback; make it the primary source
 
-    In build-executor-context (line 141):
+    In build-executor-context:
     - :worktree-path comes from :execution/worktree-path
     - Add :executor and :environment-id from execution context
     - sandbox? is now ALWAYS true (we always have an environment)
 
     In components/release-executor/src/ai/miniforge/release_executor/core.clj:
 
-    In execute-release-phase (line 292):
+    In execute-release-phase:
     - Remove the sandbox?/local? conditional branches
     - Always use the sandbox (executor) path
     - The environment already has the files — skip step-write-and-stage for
@@ -274,7 +238,7 @@
    :task/description
    "Update execution context schema to reflect new environment model.
 
-    In the workflow context (execution.clj line 188, runner.clj):
+    In the workflow context (execution.clj and runner.clj):
     - :execution/executor — TaskExecutor instance (Docker or worktree)
     - :execution/environment-id — opaque ID for the acquired environment
     - :execution/worktree-path — resolved working directory in environment
@@ -301,7 +265,7 @@
     - Phase results contain environment references, not serialized code
     - Evidence bundle still complete (derives code from PR)"
    :task/type :implement
-   :task/dependencies [:acquire-environment-in-runner]}
+   :task/dependencies []}
 
   {:task/id :integration-test-environment-promotion
    :task/description
@@ -348,9 +312,9 @@
  ;; -------------------------------------------------------------------------
 
  :dependencies
- {:acquire-environment-in-runner []
-  :update-context-schema [:acquire-environment-in-runner]
-  :implement-phase-uses-environment [:acquire-environment-in-runner]
+ {;; :acquire-environment-in-runner — already done, removed
+  :update-context-schema []
+  :implement-phase-uses-environment []
   :verify-phase-uses-environment [:implement-phase-uses-environment]
   :release-phase-from-environment [:verify-phase-uses-environment]
   :remove-mcp-artifact-server [:release-phase-from-environment]

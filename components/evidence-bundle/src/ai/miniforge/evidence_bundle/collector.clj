@@ -25,25 +25,50 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Phase Evidence Collection
 
-(defn build-phase-evidence
+(defn- build-phase-output
+  "Extract the output map for phase evidence.
+
+   Handles both:
+   - Legacy shape: {:output {...}} — extracts :output directly
+   - New environment model: {:environment-id ... :summary ... :metrics ...}
+     — synthesizes an output map from the provenance metadata
+
+   In the new model, :evidence/implement captures summary + metrics (not code).
+   :evidence/verify captures test output. :evidence/release captures PR metadata."
+  [phase-result]
+  (or
+   ;; Legacy: explicit :output key
+   (get phase-result :output)
+   ;; New environment model: synthesize output from provenance metadata
+   (when (or (:summary phase-result) (:metrics phase-result)
+             (:environment-id phase-result))
+     (cond-> {}
+       (:summary phase-result)        (assoc :summary        (:summary phase-result))
+       (:metrics phase-result)        (assoc :metrics        (:metrics phase-result))
+       (:environment-id phase-result) (assoc :environment-id (:environment-id phase-result))))
+   {}))\n\n(defn build-phase-evidence
   "Build phase evidence from phase execution context.
-   Returns phase evidence map per N6 spec."
+   Returns phase evidence map per N6 spec.
+
+   Handles both legacy (:output map) and new-model (:environment-id, :summary,
+   :metrics) phase result shapes. In the new model, code is NOT captured here;
+   it is derived from the PR diff at release time."
   [phase-name agent-id phase-result]
-  (let [started-at (get phase-result :started-at (java.time.Instant/now))
+  (let [started-at   (get phase-result :started-at (java.time.Instant/now))
         completed-at (get phase-result :completed-at (java.time.Instant/now))]
-    {:phase/name phase-name
-     :phase/agent agent-id
-     :phase/agent-instance-id (get phase-result :agent-instance-id (random-uuid))
-     :phase/started-at started-at
-     :phase/completed-at completed-at
-     :phase/duration-ms (get phase-result :duration-ms
-                             (- (.toEpochMilli completed-at)
-                                (.toEpochMilli started-at)))
-     :phase/output (get phase-result :output {})
-     :phase/artifacts (vec (get phase-result :artifacts []))
+    {:phase/name                phase-name
+     :phase/agent               agent-id
+     :phase/agent-instance-id   (get phase-result :agent-instance-id (random-uuid))
+     :phase/started-at          started-at
+     :phase/completed-at        completed-at
+     :phase/duration-ms         (get phase-result :duration-ms
+                                     (- (.toEpochMilli completed-at)
+                                        (.toEpochMilli started-at)))
+     :phase/output              (build-phase-output phase-result)
+     :phase/artifacts           (vec (get phase-result :artifacts []))
      :phase/inner-loop-iterations (get phase-result :inner-loop-iterations 0)
-     :phase/event-stream-range (get phase-result :event-stream-range
-                                    {:start-seq 0 :end-seq 0})}))
+     :phase/event-stream-range  (get phase-result :event-stream-range
+                                     {:start-seq 0 :end-seq 0})}))
 
 (defn collect-phase-evidence
   "Collect evidence for a single phase from workflow state.
