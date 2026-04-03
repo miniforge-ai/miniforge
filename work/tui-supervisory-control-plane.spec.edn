@@ -1,0 +1,596 @@
+;; TUI Supervisory Control Plane — Work Spec
+;;
+;; Build-oriented work spec for evolving the miniforge TUI into a
+;; supervisory control plane for agent-executed workflows.
+;;
+;; Normative contract: specs/normative/N5-delta-supervisory-control-plane.md
+;; Deferred Fleet items: work/fleet-supervisory-deferred.spec.edn
+;; Supersedes: work/tui-fidelity.spec.edn, work/tui-dashboard-v2.spec.edn
+
+{:spec/id "tui-supervisory-control-plane-v1"
+ :spec/version "0.1.0"
+ :spec/created "2026-04-02"
+ :spec/status "draft"
+ :spec/type :work-spec
+ :spec/depends-on ["N5-delta-supervisory-control-plane-v1"]
+ :spec/supersedes ["tui-fidelity-v1" "tui-dashboard-v2"]
+ :spec/related ["pr-monitor-loop-v1" "pr-comment-monitoring"
+                "control-plane-completion"]
+
+ :title "TUI Supervisory Control Plane — Work Spec"
+
+ :problem
+ "The human works inside Claude Code or Codex. The agent drives miniforge
+  through MCP. The human wants live visibility into workflow progress,
+  PR trains, governance, and exceptions — without leaving the agent session.
+
+  Today this requires tailing workflow files or launching GitHub. The TUI
+  exists but reflects an older human-command model: command mode, chat,
+  batch operations are the focus. Live visibility, durable startup, and
+  governance surfaces are under-built.
+
+  The PR monitor loop (pr-monitor-loop-v1, merged 2026-04-01) adds a
+  concrete autonomous feedback loop: miniforge monitors its own PRs,
+  classifies review comments, pushes fixes, and posts replies — all
+  emitting :pr-monitor/* events. This is the first real-world source of
+  supervisory events the TUI needs to render. The monitor loop's Phase 4
+  deliverable (:tui-pr-monitor-view) is subsumed by this work spec.
+
+  The center of gravity needs to shift from 'human operates the system'
+  to 'human supervises agent-operated system.'"
+
+ ;; -------------------------------------------------------------------------
+ ;; Workstreams
+ ;; -------------------------------------------------------------------------
+
+ :workstreams
+
+ [{:ws :ws1
+   :name "Supervisory domain formalization"
+   :purpose
+   "Make the supervisory entities explicit so the monitor renders from
+    canonical data, not ad-hoc model keys. This is foundation work —
+    without it, the monitor will be visually improved but brittle."
+
+   :deliverables
+   [{:id :supervisory-entities
+     :description
+     "Introduce Malli schemas for the v1 supervisory entities defined in
+      the normative delta §3: WorkflowRun, PolicyEvaluation, PolicyViolation,
+      AttentionItem, Waiver, EvidenceBundle (supervisory projection).
+
+      Schemas MUST be open (:map with required keys, additional keys pass
+      through). This allows experimentation — we validate what we use,
+      ignore what we don't yet need.
+
+      These may live in a new `supervisory-model` component or as schemas
+      within existing components (tui-views, policy-pack, etc). Prefer
+      whichever avoids circular dependencies."
+     :approach
+     "Define schemas, add coercion/validation at component boundaries
+      (persistence load, event translation, PR sync). Existing data shapes
+      are close — this is mostly naming, organizing, and adding Malli."
+     :tests
+     ["Malli schema validates a well-formed WorkflowRun"
+      "Extra keys pass validation without error"
+      "Missing required keys fail validation"
+      "PolicyEvaluation with violations validates correctly"
+      "Waiver schema validates with evaluation-id reference"]}
+
+    {:id :projection-builders
+     :description
+     "Define pure projection functions with stable input/output contracts
+      for each monitor zone:
+      - workflow-ticker: [supervisory-state] -> [{:run ... :status ... :phase ...}]
+      - pr-train-strip: [supervisory-state] -> {:train-progress ... :fleet-summary ...}
+      - policy-health:  [supervisory-state] -> {:pass-rate ... :violations-by-category ...}
+      - attention:      [supervisory-state] -> [{:severity ... :summary ... :source ...}]
+
+      These replace the current pattern where views reach into raw model
+      keys with implicit business logic."
+     :tests
+     ["Workflow ticker projection returns sorted active-first list"
+      "Policy health projection computes correct pass rate"
+      "Attention projection derives items from model state"
+      "Projections return stable shapes when model is empty"]}
+
+    {:id :governance-state-derivation
+     :description
+     "Implement the PR governance state derivation from the normative delta §4:
+      :not-evaluated, :policy-passing, :policy-failing, :waived, :escalated.
+
+      Currently policy disposition is implicit — a PR either has policy data
+      or doesn't. Formalize this into an explicit derived state."
+     :tests
+     ["PR with no evaluation returns :not-evaluated"
+      "PR with passing evaluation returns :policy-passing"
+      "PR with failing evaluation and no waiver returns :policy-failing"
+      "PR with failing evaluation and waiver returns :waived"]}]
+
+   :acceptance
+   ["Monitor zones can be described in terms of projection builders"
+    "No view depends on hidden ad-hoc state for supervisory meaning"
+    "PR governance state is always derivable, never hardcoded"]}
+
+  {:ws :ws2
+   :name "Durable startup, replay, and live subscription"
+   :purpose
+   "The TUI must be useful immediately on startup and stay current.
+    This is the #1 functional gap today."
+
+   :deliverables
+   [{:id :startup-load
+     :description
+     "On startup, load recent supervisory state from disk:
+      - Workflow runs from ~/.miniforge/workflows/ index
+      - PR state from sync cache
+      - Policy evaluation results from pr-cache
+      - Derive attention items and governance states from loaded data
+
+      The standalone TUI already calls persistence/load-workflows-into-model.
+      Verify this path works end-to-end and produces valid supervisory
+      entities. Add PR + policy loading to the startup path if missing."
+     :tests
+     ["Workflows from disk appear in model after init"
+      "PR state loaded from cache on startup"
+      "Policy evaluations loaded and governance states derived"
+      "Empty disk state produces valid empty model, not nil/crash"]}
+
+    {:id :live-event-subscription
+     :description
+     "Wire event-stream subscription to update supervisory projections
+      during active runs. The file-subscription path exists but model
+      updates during runs are incomplete.
+
+      Required event → model mappings:
+      - :workflow/started → add WorkflowRun to model
+      - :workflow/phase-changed → update current-phase, status
+      - :agent/status → update agent activity text
+      - :gate/evaluated → append gate result, re-derive governance state
+      - :workflow/completed → set terminal status
+      - :workflow/failed → set terminal status + error
+      - :pr/synced → update PR data, re-derive governance state
+
+      PR monitor loop events (from pr-lifecycle component, merged 2026-04-01):
+      - :pr-monitor/loop-started → mark PR as actively monitored
+      - :pr-monitor/comment-received → increment pending comment count
+      - :pr-monitor/comment-classified → update classification (change-request/question/bot)
+      - :pr-monitor/fix-started → show fix in progress for PR
+      - :pr-monitor/fix-pushed → update PR with new commit SHA
+      - :pr-monitor/reply-posted → decrement pending, show last action
+      - :pr-monitor/budget-warning → surface as attention item (warning)
+      - :pr-monitor/budget-exhausted → surface as attention item (critical)
+      - :pr-monitor/escalated → surface as attention item (critical)
+      - :pr-monitor/cycle-completed → update cycle stats
+      - :pr-monitor/loop-stopped → mark PR monitoring as inactive
+
+      These events already have constructors in monitor_events.clj with
+      consistent payloads including :pr/id. The TUI subscription layer
+      needs handlers for the :pr-monitor/* event family.
+
+      Control plane events (from control-plane component, PR #326):
+      - :control-plane/agent-discovered → add agent session to model
+      - :control-plane/status-changed → update agent status/task
+      - :control-plane/decision-submitted → add pending decision, mark agent blocked
+      - :control-plane/decision-resolved → clear pending decision, unblock agent
+
+      The control-plane orchestrator (control-plane-completion.spec.edn)
+      will emit these events once wired. The TUI must subscribe to them
+      alongside workflow and PR monitor events. Agent sessions come from
+      the registry (adapter-claude-code discovers Claude Code sessions,
+      adapter-miniforge handles miniforge's own agents).
+
+      NOTE: The 'AgentSession' entity from the normative delta discussion
+      ALREADY EXISTS as agent records in control-plane/registry. The
+      registry provides: vendor, external-id, name, capabilities, status,
+      heartbeat timestamps, metadata. No new entity definition needed —
+      just wire the TUI to render registry state."
+     :tests
+     ["Model updates when workflow phase changes during active run"
+      "Gate results accumulate in real time"
+      "Completed/failed events set terminal status"
+      "New workflow appears in model when started from agent session"
+      "PR monitor events update PR monitoring state in model"
+      "Budget exhaustion from monitor loop creates attention item"
+      "Agent discovered event adds agent session to model"
+      "Decision submitted event surfaces in attention bar as critical"
+      "Agent status change updates agent display in monitor"]}
+
+    {:id :stale-read-degradation
+     :description
+     "When live subscription is unavailable, display stale state from
+      the most recent startup load with a visible indicator (e.g.,
+      '⊘ stale' in the status bar with timestamp of last update).
+
+      Do not show an empty screen. Do not silently display stale data
+      without indicating staleness."
+     :tests
+     ["TUI shows data from startup load when no events arrive"
+      "Stale indicator visible when subscription is disconnected"
+      "Stale indicator disappears when live events resume"]}]
+
+   :acceptance
+   ["Launching TUI with no active workflow shows recent runs and PR state"
+    "Starting a workflow from Claude Code updates TUI in real time"
+    "Restarting TUI reconstructs state without requiring fresh activity"
+    "Subscription outage does not yield empty screen"]}
+
+  {:ws :ws3
+   :name "Monitor mode"
+   :purpose "The default supervisory surface — glance and understand."
+
+   :deliverables
+   [{:id :monitor-screen
+     :description
+     "New :monitor view as the default screen. Single-screen layout with:
+
+      Agent Sessions zone (when control plane active):
+        Shows discovered agent sessions from control-plane registry:
+        [vendor-icon] agent-name  status  task  heartbeat
+        e.g.: 🤖 Claude Code: miniforge  executing  PR review  5s ago
+              🤖 Codex: data-pipeline     blocked    awaiting decision
+        When an agent is :blocked on a decision, the row highlights
+        and the attention bar surfaces it.
+
+      Workflow Ticker zone:
+        [status] name  phase  duration  agent-status
+        e.g.: ● plan-auth  implement  3m  agent working
+              ✓ fix-login  complete   12m
+              ✗ add-metrics failed    8m  gate: coverage
+
+      PR Train / Fleet zone:
+        When train active: ▓▓▓░░ 3/5 merged  Next: #247 (CI passing)
+        When no train:     12 open │ 3 ready │ 1 blocked │ 2 policy-fail
+        When monitor active: show per-PR monitor status inline
+          e.g.: #247 ● monitoring (2 comments, 1 fix pushed)
+                #251 ⊘ budget exhausted — escalated
+
+      Attention Bar zone (bottom):
+        Color-coded items: red=critical, yellow=warning, dim=info
+        Auto-derived from supervisory state per normative delta §5
+
+      Policy Health zone (when width permits):
+        Pass rate: 87% (26/30)  Top violations: missing-tests (3)
+
+      Selection: arrow keys highlight, Enter drills into detail, Esc returns."
+     :tests
+     ["Monitor renders with all zones populated"
+      "Workflow ticker shows active workflows with correct status chars"
+      "PR zone shows train progress or fleet summary"
+      "Attention bar surfaces derived items"
+      "Enter drills into selected item"
+      "Esc returns to monitor from any detail view"
+      "Empty state shows guidance, not blank screen"]}
+
+    {:id :narrow-width-rendering
+     :description
+     "Monitor mode must work at 60 columns (tmux right pane).
+
+      At 60-80 cols:
+      - Workflow rows: icon + name (truncated) + phase + duration
+      - PR rows: repo#number + policy-icon
+      - Footer: abbreviated keybindings
+      - Box borders optional (save 2 columns)
+
+      At 80-120 cols:
+      - Add agent status column to workflows
+      - Add title column to PRs
+      - Full footer
+
+      At 120+ cols:
+      - Full-width tables per existing layout
+
+      Width detection via terminal cols on startup."
+     :tests
+     ["Table renders without overflow at 60 columns"
+      "Text truncation with ellipsis for long names"
+      "Layout adapts when terminal width changes"]}
+
+    {:id :monitor-as-default
+     :description
+     "Monitor becomes the default view on startup. Existing views
+      (workflow-list, pr-fleet, evidence, etc.) remain accessible via
+      Tab/number keys. The model's initial :view should be :monitor.
+
+      Update model/init-model, model/top-level-views, and screens.edn."
+     :tests
+     ["TUI starts in :monitor view"
+      "Tab cycles to existing views"
+      "Number keys jump to specific views"
+      "Returning from detail goes to monitor, not workflow-list"]}]
+
+   :acceptance
+   ["Monitor mode useful in a tmux right pane at 60 columns"
+    "Active workflows and PR disposition visible without navigation"
+    "Attention items visible without drilling in"]}
+
+  {:ws :ws4
+   :name "Governance surface"
+   :purpose "Answer 'are my policies working?' from the monitor."
+
+   :deliverables
+   [{:id :policy-health-zone
+     :description
+     "Aggregate policy health in the monitor's policy zone:
+      - Pass rate as percentage (N passing / N total)
+      - Top violation categories with counts
+      - PRs in each governance state (:passing, :failing, :waived)
+
+      Backed by the policy-health projection builder from WS1."
+     :tests
+     ["Pass rate computed correctly from evaluations"
+      "Violation categories grouped and counted"
+      "Governance states shown with correct counts"
+      "Zero-violation state shows 'All PRs passing policy'"]}
+
+    {:id :waiver-recording
+     :description
+     "Implement Waiver entity persistence and the :waive intervention.
+      When a user selects a failing PR and invokes waive (from the
+      intervention menu), prompt for reason, create a Waiver record,
+      re-derive the PR's governance state.
+
+      Waiver storage: ~/.miniforge/waivers/{eval-id}.edn
+      Waivers loaded on startup and applied to governance state derivation."
+     :tests
+     ["Waiver record persisted to disk"
+      "Waiver loaded on startup"
+      "PR governance state changes from :policy-failing to :waived"
+      "Waived PR displays distinctly from passing PR"
+      "Original PolicyEvaluation unchanged after waiver"]}
+
+    {:id :governance-drill-down
+     :description
+     "From the policy health zone, drill into violations:
+      - Select a violation category → see all PRs with that violation
+      - Select a PR → see full policy evaluation detail and evidence
+      - Waived violations shown with waiver reason"
+     :tests
+     ["Drill from violation category to PR list"
+      "Drill from PR to policy evaluation detail"
+      "Waiver reason visible in drill-down"]}]
+
+   :acceptance
+   ["User can answer 'are my review policies working?' from monitor"
+    "Failing/waived/passing states visually distinct"
+    "Drill-down shows evidence behind governance disposition"]}
+
+  {:ws :ws5
+   :name "Attention and bounded intervention"
+   :purpose "Compress the system into actionable exceptions."
+
+   :deliverables
+   [{:id :attention-derivation
+     :description
+     "Implement the attention derivation rules from the normative delta §5.
+      On every model change, recompute attention items from supervisory state.
+      Cache for performance if needed but derive from canonical state.
+
+      Required rules: workflow failed, PR policy-blocked, train blocked,
+      workflow stale, PR conflicts, train policy violation, workflow
+      completed, PR merged.
+
+      PR monitor loop rules (from :pr-monitor/* events):
+      - :pr-monitor/budget-exhausted → critical (monitor gave up, human must act)
+      - :pr-monitor/escalated → critical (monitor explicitly escalated)
+      - :pr-monitor/budget-warning → warning (approaching limit)
+      - :pr-monitor/fix-pushed → info (autonomous fix landed)
+
+      Control plane rules (from :control-plane/* events):
+      - Agent :blocked on pending decision → critical (human must resolve)
+      - Agent heartbeat stale → warning (agent may be dead)
+      - Agent :failed → critical (agent session crashed)
+      - Agent :completed → info (session finished)"
+     :tests
+     ["Failed workflow generates critical attention item"
+      "Stale workflow generates warning after threshold"
+      "Completed workflow generates info item"
+      "Items auto-resolve when underlying condition resolves"
+      "Empty model produces empty attention list, not error"]}
+
+    {:id :intervention-menu
+     :description
+     "Bounded intervention actions from the monitor and detail views.
+      When an attention item or entity is selected, offer applicable
+      interventions:
+
+      - Failed workflow: retry, cancel
+      - Running workflow: pause
+      - Paused workflow: resume, cancel
+      - Failing PR: waive, re-evaluate
+      - Blocked agent (pending decision): resolve decision
+      - Stale/failed agent: terminate
+      - Attention item: acknowledge
+
+      Decision resolution: when an agent is :blocked on a decision,
+      the intervention menu shows the decision's summary and options
+      (from decision-queue). The human selects an option or provides
+      free-form resolution. This calls control-plane/resolve-and-deliver!
+      which delivers the result back to the agent and transitions it
+      to :running.
+
+      Present as a context menu or confirmation dialog (existing
+      confirm overlay pattern). Record the intervention per N5 §6.2."
+     :tests
+     ["Retry creates new workflow run from failed run's spec"
+      "Pause/resume change workflow status correctly"
+      "Waive creates Waiver record and updates governance state"
+      "Re-evaluate triggers new PolicyEvaluation"
+      "Resolve decision delivers result and unblocks agent"
+      "Acknowledge marks attention item as seen"
+      "Intervention recorded in evidence/override log"]}]
+
+   :acceptance
+   ["Failed workflows, blocked trains, policy failures surface automatically"
+    "Interventions are durable and bounded"
+    "UI does not expand into a general command shell"]}]
+
+ ;; -------------------------------------------------------------------------
+ ;; Phasing
+ ;; -------------------------------------------------------------------------
+
+ :phases
+ [{:phase 1
+   :name "Foundation + live data"
+   :workstreams [:ws1 :ws2]
+   :description
+   "Formalize supervisory entities (Malli schemas, projection builders,
+    governance state derivation) and fix startup load + live subscription.
+    After this phase, the model is clean and the data flows work."
+   :validation
+   "Start a workflow from Claude Code. TUI model updates in real time.
+    Restart TUI — recent state reappears from disk. Supervisory entities
+    validate against schemas."}
+
+  {:phase 2
+   :name "Usable side-pane monitor"
+   :workstreams [:ws3]
+   :description
+   "Build the monitor screen, responsive layout, and drill-down.
+    This is the first dogfooding milestone — useful in a tmux right pane."
+   :validation
+   "Run mf tui in a tmux right pane. Start a workflow from Claude Code.
+    Watch it progress through phases. See PR status. All at 60 columns,
+    without touching the TUI."}
+
+  {:phase 3
+   :name "Governance visibility"
+   :workstreams [:ws4]
+   :description
+   "Policy health aggregation, waiver recording, governance drill-down.
+    The TUI becomes more than a workflow progress screen."
+   :validation
+   "After agents review 10 PRs, monitor shows pass rate, violation
+    categories, governance states. Waive a failing PR with reason —
+    state changes to :waived. Drill into violations to see evidence."}
+
+  {:phase 4
+   :name "Attention and intervention"
+   :workstreams [:ws5]
+   :description
+   "Derived attention items and bounded intervention menu. Completes
+    the shift from passive visibility to supervisory control."
+   :validation
+   "A workflow fails — attention bar shows critical item without
+    navigation. Select it, choose retry — new run starts. A PR fails
+    policy in the train — warning surfaces. Waive it with reason."}]
+
+ ;; -------------------------------------------------------------------------
+ ;; Acceptance scenarios
+ ;; -------------------------------------------------------------------------
+
+ :scenarios
+ [{:id :side-pane-dogfooding
+   :name "Side-pane dogfooding"
+   :steps
+   ["Open Claude Code or Codex"
+    "Agent starts a workflow through MCP"
+    "TUI in right pane immediately shows the run"
+    "Phases update live"
+    "Related PR/train state visible when review/release completes"
+    "Policy disposition visible when evaluation occurs"
+    "A failure creates an attention item without requiring navigation"]}
+
+  {:id :restart-and-catchup
+   :name "Restart and catch-up"
+   :steps
+   ["Run workflows"
+    "Close the TUI"
+    "Reopen it"
+    "Recent runs, PR state, and governance state appear immediately"
+    "Live updates resume when fresh events arrive"]}
+
+  {:id :governance-exception
+   :name "Governance exception"
+   :steps
+   ["A PR fails policy"
+    "Monitor shows the violation category and failing governance state"
+    "Drill down reveals evidence"
+    "Waive with reason"
+    "Governance state changes to :waived, visible and auditable"]}
+
+  {:id :blocked-train
+   :name "Blocked train"
+   :steps
+   ["A PR train becomes blocked (CI or policy failure)"
+    "Train strip reflects blocked state"
+    "Attention bar surfaces it"
+    "Drill into the blocked PR to see the failing gate"]}
+
+  {:id :pr-monitor-loop-visibility
+   :name "PR monitor loop visibility"
+   :steps
+   ["Agent creates a PR via miniforge workflow (Release phase)"
+    "Observe phase starts the PR monitor loop"
+    "TUI shows PR with 'monitoring' status in fleet zone"
+    "Reviewer leaves a comment on the PR"
+    ":pr-monitor/comment-received event updates TUI — pending count increments"
+    "Monitor classifies and fixes — :pr-monitor/fix-pushed updates TUI"
+    "If budget exhausts — critical attention item surfaces without navigation"
+    "Monitor loop stops (PR merged or budget) — monitoring status clears"]}]
+
+ ;; -------------------------------------------------------------------------
+ ;; Deprioritized features
+ ;; -------------------------------------------------------------------------
+
+ :deprioritized
+ [{:feature "Command mode (:decompose, :review, :remediate)"
+   :reason "Agent handles these via MCP"
+   :status "Keep as-is, accessible from existing views"}
+
+  {:feature "Chat integration (c key → LLM conversation)"
+   :reason "Agent session IS the conversation"
+   :status "Keep as-is"}
+
+  {:feature "Batch selection / visual mode"
+   :reason "Agent handles batch operations via MCP"
+   :status "Keep as-is"}
+
+  {:feature "Repo manager view"
+   :reason "One-time setup, not a monitoring concern"
+   :status "Keep as-is"}
+
+  {:feature "DAG Kanban view"
+   :reason "Monitor workflow ticker serves this purpose more compactly"
+   :status "Revisit if multi-workflow orchestration drives need"}
+
+  {:feature "React-style renderer (tui-react-renderer.spec)"
+   :reason "Performance sufficient for monitoring use case"
+   :status "Defer until rendering is measurably slow"}
+
+  {:feature "PR decomposition workflow (tui-decomposition-workflow.spec)"
+   :reason "Agent handles decomposition via MCP"
+   :status "Defer"}]
+
+ ;; -------------------------------------------------------------------------
+ ;; Risks
+ ;; -------------------------------------------------------------------------
+
+ :risks
+ [{:risk "UI built ahead of model"
+   :description
+   "If monitor mode is built before supervisory entities and projections
+    are formalized, the result will be another UI layer with brittle
+    hidden semantics."
+   :mitigation "Phase 1 (WS1 + WS2) is prerequisite for Phase 2 (WS3)"}
+
+  {:risk "Over-specifying entities before validation"
+   :description
+   "Defining exhaustive entity shapes before the monitor exists to
+    validate them against risks premature formalization."
+   :mitigation
+   "Malli open schemas — validate required keys, ignore the rest.
+    Entity shapes grow as we learn what we actually use."}
+
+  {:risk "Governance ambiguity"
+   :description
+   "If PR governance state is not explicitly derived from policy
+    evaluations and waivers, the TUI will present governance status
+    ambiguously."
+   :mitigation "WS1 formalizes governance state derivation before WS4 builds on it"}
+
+  {:risk "Passive dashboard framing"
+   :description
+   "If framed as read-only monitoring, bounded interventions will remain
+    underspecified and the control-plane value will be weaker."
+   :mitigation "WS5 explicitly implements intervention vocabulary"}]}
