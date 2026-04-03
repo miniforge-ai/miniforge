@@ -230,10 +230,12 @@
     {:data-workflow-id (str (:id workflow))}
     (workflow-panel-meta workflow)
 
-    (when-let [preview (:latest-output workflow)]
-      [:div.workflow-panel-output
-       [:h4.section-title "Latest Output"]
-       [:pre.workflow-stream-preview preview]])
+    ;; Streaming output — always rendered so JS can update it in real-time
+    [:div.workflow-panel-output
+     [:h4.section-title "Latest Output"]
+     [:pre.workflow-stream-preview
+      {:id (str "wf-streaming-" (:id workflow))}
+      (or (:latest-output workflow) "")]]
 
     ;; Controls — only for running workflows
     (when (= :running (:status workflow))

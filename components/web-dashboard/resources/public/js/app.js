@@ -298,6 +298,7 @@ window.miniforge = {
   addFilterChip,
   removeFilterChip,
   getActiveFilters: () => Array.from(activeFilters.entries()),
+  queryEvents,
   fleet: {
     addRepo: fleetAddRepo,
     discoverRepos: fleetDiscoverRepos,
@@ -315,7 +316,8 @@ const BASE_RECONNECT_DELAY = 1000;   // 1s initial
 const MAX_RECONNECT_DELAY = 30000;   // 30s cap
 
 function connectWebSocket() {
-  const wsUrl = `ws://${window.location.host}/ws`;
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${window.location.host}/ws`;
 
   try {
     ws = new WebSocket(wsUrl);
@@ -393,16 +395,20 @@ function updateConnectionStatus(status) {
 }
 
 function handleWebSocketMessage(data) {
-  if (data && (data['event/type'] || data.event_type)) {
+  if (!data) return;
+
+  // Raw event (no envelope wrapper) — forward directly
+  if (!data.type && (data['event/type'] || data.event_type)) {
     handleWorkflowEvent(data);
     return;
   }
 
-  const type = data && data.type;
+  const type = data.type;
   switch (type) {
     case 'init':
       console.log('WebSocket connected, SSR data is current');
-      // No refresh needed — page already has server-rendered data
+      // Light refresh after short delay to pick up events missed during page load
+      scheduleRefresh(500);
       break;
 
     case 'state':
@@ -410,9 +416,26 @@ function handleWebSocketMessage(data) {
       scheduleRefresh();
       break;
 
-    case 'event':
-      handleWorkflowEvent(data.data || data.event || data.payload);
+    case 'event': {
+      // Unwrap envelope — prefer the inner event, fall back to envelope itself.
+      // Overlay envelope's pre-resolved metadata since Cheshire strips namespaces
+      // from inner keyword map keys (e.g. :event/type → "type" not "event/type").
+      var innerEvent = data.data || data.event || data;
+      if (data.event_type) {
+        innerEvent.event_type = innerEvent.event_type || data.event_type;
+      }
+      if (data['event-type']) {
+        innerEvent['event-type'] = innerEvent['event-type'] || data['event-type'];
+      }
+      if (data.workflow_id) {
+        innerEvent.workflow_id = innerEvent.workflow_id || data.workflow_id;
+      }
+      if (data['workflow-id']) {
+        innerEvent['workflow-id'] = innerEvent['workflow-id'] || data['workflow-id'];
+      }
+      handleWorkflowEvent(innerEvent);
       break;
+    }
 
     default:
       console.log('Unknown message type:', type, data);
@@ -446,12 +469,98 @@ function showToast(message, type = 'info', duration = 5000) {
   }, duration);
 }
 
+// Event type normalization — handles all envelope key variants and strips
+// leading colons from Clojure keyword serialization
+function normalizeEventType(event) {
+  var raw = event['event/type'] || event.event_type || event['event-type'] || event.eventType || '';
+  raw = String(raw);
+  return raw.charAt(0) === ':' ? raw.substring(1) : raw;
+}
+
+// Stream buffers for accumulating agent chunks per workflow
+var streamBuffers = {};
+
+// Update the live event banner (top-of-page activity ticker)
+function updateEventBanner(eventType, event) {
+  var banner = document.getElementById('event-banner');
+  if (!banner) return;
+
+  var icons = {
+    'workflow/started': '\u{1F680}', 'workflow/phase-started': '\u25B6',
+    'workflow/phase-completed': '\u2713', 'workflow/completed': '\u2705',
+    'workflow/failed': '\u274C', 'agent/started': '\u{1F916}',
+    'agent/completed': '\u{1F916}', 'agent/chunk': '\u{1F4AC}',
+    'gate/passed': '\u{1F513}', 'gate/failed': '\u{1F512}'
+  };
+
+  var icon = icons[eventType] || '\u{1F4E1}';
+  var phase = event['workflow/phase'] || event['phase'] || '';
+  if (typeof phase === 'string' && phase.charAt(0) === ':') {
+    phase = phase.substring(1);
+  }
+  var message = eventType + (phase ? ' \u00B7 ' + phase : '');
+
+  // Build DOM node safely (no innerHTML)
+  var item = document.createElement('div');
+  item.className = 'event-banner-item';
+
+  var iconSpan = document.createElement('span');
+  iconSpan.className = 'event-icon';
+  iconSpan.textContent = icon;
+
+  var textSpan = document.createElement('span');
+  textSpan.className = 'event-text';
+  textSpan.textContent = message;
+
+  item.appendChild(iconSpan);
+  item.appendChild(textSpan);
+
+  // Keep last 5 items
+  while (banner.children.length >= 5) {
+    banner.removeChild(banner.firstChild);
+  }
+  banner.appendChild(item);
+}
+
+// Update streaming preview panel with latest agent chunk
+function updateStreamingPreview(workflowId, chunk) {
+  if (!workflowId || !chunk) return;
+
+  var key = String(workflowId);
+  if (!streamBuffers[key]) {
+    streamBuffers[key] = '';
+  }
+  // Accept both namespaced (from serialize-for-json) and legacy key forms
+  var text = chunk['chunk/delta'] || chunk['chunk/text'] || chunk.delta || chunk.text || chunk.content || '';
+  streamBuffers[key] = (streamBuffers[key] + text).slice(-500);
+
+  var selector = '#wf-streaming-' + escapeSelectorValue(key);
+  var el = document.querySelector(selector);
+  if (el) {
+    el.textContent = streamBuffers[key];
+  }
+}
+
+// Query historical events from the /api/events endpoint
+function queryEvents(params) {
+  var qs = Object.keys(params || {}).map(function(k) {
+    return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+  }).join('&');
+  return fetch('/api/events' + (qs ? '?' + qs : ''))
+    .then(function(r) { return r.json(); });
+}
+
 // Handle individual workflow events
 function handleWorkflowEvent(event) {
   if (!event) return;
 
-  const eventType = event['event/type'] || event.event_type;
-  const workflowId = normalizeWorkflowId(event);
+  var eventType = normalizeEventType(event);
+  var workflowId = normalizeWorkflowId(event);
+
+  // Update the live event banner for all event types
+  if (eventType) {
+    updateEventBanner(eventType, event);
+  }
 
   switch (eventType) {
     case 'workflow/started':
@@ -463,9 +572,9 @@ function handleWorkflowEvent(event) {
       break;
 
     case 'workflow/phase-completed': {
-      const outcome = event['phase/outcome'] || 'completed';
-      const type = outcome === 'success' ? 'success' : 'warning';
-      showToast('Phase completed: ' + (event['workflow/phase'] || 'unknown'), type);
+      var outcome = event['phase/outcome'] || 'completed';
+      var toastType = outcome === 'success' ? 'success' : 'warning';
+      showToast('Phase completed: ' + (event['workflow/phase'] || 'unknown'), toastType);
       break;
     }
 
@@ -477,18 +586,28 @@ function handleWorkflowEvent(event) {
       showToast('Workflow failed: ' + (event['workflow/failure-reason'] || 'unknown error'), 'error', 8000);
       break;
 
-    // agent/chunk events are high-frequency — don't toast, just refresh
+    case 'agent/started':
+    case 'agent/completed':
+    case 'agent/status':
+      // Agent lifecycle — refresh panels to show activity
+      break;
+
+    // agent/chunk events are high-frequency — don't toast, just stream + debounced refresh
     case 'agent/chunk':
+      updateStreamingPreview(workflowId, event);
       scheduleWorkflowRefresh(workflowId, 150);
+      return;
+
+    case 'gate/passed':
+    case 'gate/failed':
+      // Gate events — refresh to update gate status indicators
       break;
 
     default:
       break;
   }
 
-  if (eventType !== 'agent/chunk') {
-    scheduleWorkflowRefresh(workflowId, 75);
-  }
+  scheduleWorkflowRefresh(workflowId, 75);
 }
 
 // Initialize WebSocket on page load

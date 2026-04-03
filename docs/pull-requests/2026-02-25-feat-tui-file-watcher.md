@@ -6,11 +6,15 @@
 
 ## Overview
 
-Add a file-based event subscription that tail-follows `~/.miniforge/events/*.edn` files, enabling the TUI to run as a standalone process monitoring running workflows without an in-memory event stream.
+Add a file-based event subscription that tail-follows `~/.miniforge/events/*.edn` files, enabling the TUI to run as a
+standalone process monitoring running workflows without an in-memory event stream.
 
 ## Motivation
 
-The existing TUI (`start-tui!`) requires an in-memory event stream, meaning it must run in the same process as the workflow executor. This limits the TUI to embedded mode only. With file-based subscription, `mf tui` can launch independently and discover/monitor any running workflows via the filesystem protocol already used by `event-stream/file-sink`.
+The existing TUI (`start-tui!`) requires an in-memory event stream, meaning it must run in the same process as the
+workflow executor. This limits the TUI to embedded mode only. With file-based subscription, `mf tui` can launch
+independently and discover/monitor any running workflows via the filesystem protocol already used by
+`event-stream/file-sink`.
 
 ## Changes in Detail
 
@@ -31,7 +35,7 @@ The existing TUI (`start-tui!`) requires an in-memory event stream, meaning it m
 
 ## Architecture
 
-```
+```text
 mf tui  -->  monitoring/tui-cmd  -->  interface/start-standalone-tui!
                                           |
                                           v
@@ -50,6 +54,14 @@ mf tui  -->  monitoring/tui-cmd  -->  interface/start-standalone-tui!
 
 1. **RandomAccessFile for tail-following**: Efficient seek-based reading avoids re-reading entire files
 2. **Position tracking via atoms**: Each tracked file has its own position atom for independent progress
-3. **Reuse `translate-event`**: Made public so both in-memory and file-based subscriptions share the same event-to-message translation
+3. **Reuse `translate-event`**: Made public so both in-memory and file-based subscriptions share the same
+  event-to-message translation
 4. **Daemon thread**: Background poller is a daemon thread that dies with the JVM
 5. **Hydration on startup**: Existing file content is read in full to reconstruct current state
+
+## Testing Plan
+
+- [ ] `bb test`
+- [ ] Run `mf run ...` to emit filesystem events and verify standalone `mf tui`
+  follows them live
+- [ ] Verify command writes still flow through `~/.miniforge/commands/`

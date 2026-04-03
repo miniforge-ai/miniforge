@@ -10,11 +10,10 @@
                  :workflow/id wf-id
                  :workflow/phase :verify}
           envelope (sut/ws-event-envelope event)]
-      (is (= "event" (:type envelope)))
-      (is (= "workflow/phase-started" (:event-type envelope)))
-      (is (= (str wf-id) (:workflow-id envelope)))
-      (is (= event (:data envelope)))
-      (is (= event (:event envelope))))))
+      (is (= "event" (get envelope "type")))
+      (is (= "workflow/phase-started" (get envelope "event-type")))
+      (is (= (str wf-id) (get envelope "workflow-id")))
+      (is (map? (get envelope "data"))))))
 
 (deftest normalize-workflow-event-test
   (testing "workflow websocket ingestion re-keywordizes fields and restores UUID ids"

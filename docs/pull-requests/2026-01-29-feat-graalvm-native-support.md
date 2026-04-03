@@ -1,17 +1,19 @@
-# PR #97: Enable GraalVM/Babashka Native Compatibility
+# feat: enable GraalVM/Babashka native compatibility
 
 **Status:** ✅ Complete
 **Date:** 2026-01-29
 **Branch:** `feat/graalvm-native-support`
 **Type:** Critical Infrastructure / Performance
 
-## Summary
+## Overview
 
-Enabled full GraalVM/Babashka native compilation support for miniforge CLI, delivering instant startup times and native performance. This was blocked by JVM-only dependencies that prevented Babashka execution.
+Enabled full GraalVM/Babashka native compilation support for miniforge CLI, delivering instant startup times and native
+performance. This was blocked by JVM-only dependencies that prevented Babashka execution.
 
-## Problem Statement
+## Motivation
 
-**Blocker:** `org.clojure/data.json` library uses `definterface` - a JVM-only feature not available in GraalVM's SCI (Small Clojure Interpreter) or Babashka.
+**Blocker:** `org.clojure/data.json` library uses `definterface` - a JVM-only feature not available in GraalVM's SCI
+  (Small Clojure Interpreter) or Babashka.
 
 **Impact:**
 
@@ -22,7 +24,7 @@ Enabled full GraalVM/Babashka native compilation support for miniforge CLI, deli
 
 **Error Message:**
 
-```
+```text
 Could not resolve symbol: definterface
 Location: clojure/data/json.clj:22:1
 
@@ -30,7 +32,7 @@ Workflow execution not available in Babashka build
 Reason: JVM-only dependencies required
 ```
 
-## Solution
+## Changes in Detail
 
 ### 1. Replace JVM-Only Dependencies
 
@@ -160,16 +162,16 @@ Ran 4 tests containing 96 assertions.
 
 ## Files Changed
 
-```
+```text
 M  components/llm/deps.edn
 M  components/llm/src/ai/miniforge/llm/protocols/impl/llm_client.clj
 M  components/workflow/src/ai/miniforge/workflow/loader.clj
 A  tests/graalvm_compatibility_test.clj
 M  bb.edn
-A  docs/pull-requests/PR-097-graalvm-native-compatibility.md
+A  docs/pull-requests/2026-01-29-feat-graalvm-native-support.md
 ```
 
-## Testing
+## Testing Plan
 
 ### Unit Tests
 
@@ -226,11 +228,18 @@ Future enhancements (not blocking):
 2. Explore GraalVM native-image compilation for even faster startup
 3. Add Babashka pod support for additional features
 
-## Related Issues
+## Related Issues/PRs
 
 - Resolves: "Workflow execution not available in Babashka build"
 - Enables: Native CLI distribution via Homebrew
 - Supports: OSS v1.0 release goals (native speed requirement)
+
+## Checklist
+
+- [x] Replaced JVM-only JSON dependency with GraalVM-compatible parsing
+- [x] Added GraalVM/Babashka compatibility test coverage
+- [x] Wired compatibility validation into the pre-commit path
+- [x] Documented the PR under the datever PR-doc convention
 
 ## References
 

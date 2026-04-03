@@ -22,7 +22,8 @@
    [ai.miniforge.web-dashboard.server.filters :as filters]
    [ai.miniforge.web-dashboard.views :as views]
    [ai.miniforge.web-dashboard.state :as state]
-   [ai.miniforge.web-dashboard.filters-new :as filters-new]))
+   [ai.miniforge.web-dashboard.filters-new :as filters-new]
+   [ai.miniforge.web-dashboard.server.websocket :as ws]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Anomaly/response helpers (via requiring-resolve, no hard dep on response component)
@@ -294,20 +295,42 @@
                                :pane pane}))))
 
 (defn handle-api-events
-  "API: Query raw events from event stream."
+  "API: Query events from event stream with pagination metadata.
+
+   Query parameters:
+     workflow-id — UUID filter (optional)
+     event-type  — keyword filter, e.g. workflow/phase-started (optional)
+     since       — ISO-8601 lower-bound timestamp (optional)
+     limit       — max results per page, default 100, cap 500
+     offset      — number of events to skip for pagination, default 0
+
+   Response envelope:
+     {\"events\" [...], \"offset\" N, \"limit\" N, \"count\" N, \"has_more\" bool}"
   [state params]
   (let [workflow-id (when-let [wid (filters/param-value params :workflow-id nil)]
                       (try (parse-uuid wid) (catch Exception _ nil)))
-        event-type (when-let [et (filters/param-value params :event-type nil)]
-                     (keyword et))
-        since (filters/param-value params :since nil)
-        limit (try (Integer/parseInt (str (filters/param-value params :limit "100")))
-                   (catch Exception _ 100))
-        events (state/get-events state {:workflow-id workflow-id
-                                        :event-type event-type
-                                        :since since
-                                        :limit (min limit 500)})]
-    (responses/json-response events)))
+        event-type  (when-let [et (filters/param-value params :event-type nil)]
+                      (keyword et))
+        since       (filters/param-value params :since nil)
+        limit       (min (try (Integer/parseInt (str (filters/param-value params :limit "100")))
+                              (catch Exception _ 100))
+                         500)
+        offset      (max (try (Integer/parseInt (str (filters/param-value params :offset "0")))
+                              (catch Exception _ 0))
+                         0)
+        ;; Fetch offset + limit + 1 so we can detect whether more events exist
+        all-events  (state/get-events state {:workflow-id workflow-id
+                                             :event-type  event-type
+                                             :since       since
+                                             :limit       (+ offset limit 1)})
+        has-more?   (> (count all-events) (+ offset limit))
+        page-events (->> all-events (drop offset) (take limit) vec)]
+    (responses/json-response
+     {"events"   (mapv ws/serialize-for-json page-events)
+      "offset"   offset
+      "limit"    limit
+      "count"    (count page-events)
+      "has_more" has-more?})))
 
 (defn handle-api-workflow-events
   "API: Workflow events fragment (for htmx updates)."
