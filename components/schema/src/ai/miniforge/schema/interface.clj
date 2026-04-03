@@ -6,6 +6,7 @@
    [malli.error :as me]
    [ai.miniforge.schema.core :as core]
    [ai.miniforge.schema.logging :as logging]
+   [ai.miniforge.schema.supervisory :as supervisory]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -23,6 +24,14 @@
 (def LogEntry logging/LogEntry)
 (def Scenario logging/Scenario)
 
+;; Supervisory entity schemas
+(def WorkflowRun supervisory/WorkflowRun)
+(def PolicyEvaluation supervisory/PolicyEvaluation)
+(def PolicyViolation supervisory/PolicyViolation)
+(def AttentionItem supervisory/AttentionItem)
+(def Waiver supervisory/Waiver)
+(def EvidenceBundle supervisory/EvidenceBundle)
+
 ;; Enum value sets for programmatic access
 (def agent-roles core/agent-roles)
 (def task-types core/task-types)
@@ -34,6 +43,12 @@
 (def log-categories logging/log-categories)
 (def all-events logging/all-events)
 (def scenario-tags logging/scenario-tags)
+
+;; Supervisory enum value sets
+(def eval-results supervisory/eval-results)
+(def violation-categories supervisory/violation-categories)
+(def violation-severities supervisory/violation-severities)
+(def attention-source-types supervisory/attention-source-types)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Validation functions
@@ -88,6 +103,38 @@
   "Returns true if value is a valid Scenario."
   [value]
   (valid? Scenario value))
+
+;; Supervisory entity validators
+
+(defn valid-workflow-run?
+  "Returns true if value is a valid WorkflowRun."
+  [value]
+  (valid? WorkflowRun value))
+
+(defn valid-policy-evaluation?
+  "Returns true if value is a valid PolicyEvaluation."
+  [value]
+  (valid? PolicyEvaluation value))
+
+(defn valid-policy-violation?
+  "Returns true if value is a valid PolicyViolation."
+  [value]
+  (valid? PolicyViolation value))
+
+(defn valid-attention-item?
+  "Returns true if value is a valid AttentionItem."
+  [value]
+  (valid? AttentionItem value))
+
+(defn valid-waiver?
+  "Returns true if value is a valid Waiver."
+  [value]
+  (valid? Waiver value))
+
+(defn valid-evidence-bundle?
+  "Returns true if value is a valid EvidenceBundle."
+  [value]
+  (valid? EvidenceBundle value))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Response helpers
@@ -275,6 +322,14 @@
                   :task/type :implement
                   :task/status :pending})
   ;; => {:task/id #uuid "...", :task/type :implement, :task/status :pending}
+
+  ;; Supervisory entity validation
+  (valid-workflow-run? {:workflow/id (random-uuid)
+                        :workflow/key "feature-auth"
+                        :workflow/status :running
+                        :workflow/phase :implement
+                        :workflow/started-at (java.util.Date.)})
+  ;; => true
 
   ;; Access enum values
   agent-roles
