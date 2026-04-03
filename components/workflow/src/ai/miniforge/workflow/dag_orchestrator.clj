@@ -45,8 +45,8 @@
    :error error
    :metrics (or metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0})})
 
-(defn dag-execution-result [completed failed artifacts metrics-agg]
-  {:success? (zero? failed)
+(defn dag-execution-result [completed failed artifacts metrics-agg & {:keys [unreached] :or {unreached 0}}]
+  {:success? (and (zero? failed) (zero? unreached))
    :tasks-completed completed
    :tasks-failed failed
    :artifacts (vec artifacts)
@@ -206,9 +206,16 @@
 (defn task-sub-opts
   "Build execution opts for a DAG task's sub-workflow.
 
-   Carries forward LLM backend, event stream, and sandbox/isolation config
-   from parent context. Disables DAG execution to prevent recursion and
-   skips lifecycle events (parent workflow owns those)."
+   Carries forward LLM backend and event stream from parent context.
+   Disables DAG execution to prevent recursion and skips lifecycle events
+   (parent workflow owns those).
+
+   IMPORTANT: Does NOT pass the parent's executor, environment-id, or
+   worktree-path. Each sub-workflow acquires its own isolated environment
+   via run-pipeline's acquire-execution-environment!. This prevents:
+   - Concurrent sub-workflows from writing to the same directory
+   - Stale/broken files from previous runs polluting the release commit
+   - Pre-commit hooks picking up unrelated changes from sibling tasks"
   [context]
   (cond-> {:disable-dag-execution true
            :skip-lifecycle-events true
@@ -217,14 +224,7 @@
     (:llm-backend context)      (assoc :llm-backend (:llm-backend context))
     (:event-stream context)     (assoc :event-stream (:event-stream context))
     (get-in context [:execution/opts :event-stream])
-    (assoc :event-stream (get-in context [:execution/opts :event-stream]))
-    (:executor context)         (assoc :executor (:executor context))
-    (:environment-id context)   (assoc :environment-id (:environment-id context))
-    (:sandbox-workdir context)  (assoc :sandbox-workdir (:sandbox-workdir context))
-    ;; Worktree path: try direct context, then execution/opts, then fall back to cwd
-    true (assoc :worktree-path (or (:worktree-path context)
-                                   (get-in context [:execution/opts :worktree-path])
-                                   (System/getProperty "user.dir")))))
+    (assoc :event-stream (get-in context [:execution/opts :event-stream]))))
 
 ;--- Layer 1: Mini-Workflow Execution
 
@@ -494,7 +494,8 @@
                       :failed (count all-failed)
                       :unreached unreached
                       :iterations iteration}})
-    (cond-> (assoc (dag-execution-result (count completed-ids) (count all-failed) (:artifacts metrics-agg) metrics-agg)
+    (cond-> (assoc (dag-execution-result (count completed-ids) (count all-failed) (:artifacts metrics-agg) metrics-agg
+                                         :unreached unreached)
                    :tasks-unreached unreached
                    :sub-workflow-ids (vec sub-workflow-ids))
       (:pr-infos metrics-agg) (assoc :pr-infos (:pr-infos metrics-agg)))))
@@ -540,18 +541,19 @@
                 _ (notify-batch-complete results on-task-complete)
                 {:keys [completed failed]} (partition-results results)
                 batch-sub-ids (map (fn [[tid _]] (keyword (str "dag-task-" tid))) batch)
-                {:keys [rate-limited-ids]} (resilience/analyze-batch-for-rate-limits results)
-                new-completed (into completed-ids completed)]
+                {:keys [rate-limited-ids other-failed-ids]} (resilience/analyze-batch-for-rate-limits results)
+                new-completed (into completed-ids completed)
+                new-failed (into failed-ids other-failed-ids)]
 
             (emit-completed-checkpoints! completed results event-stream workflow-id)
 
             (if (seq rate-limited-ids)
               (let [decision (handle-rate-limit-in-batch
-                              context rate-limited-ids new-completed failed-ids
+                              context rate-limited-ids new-completed new-failed
                               all-results results event-stream workflow-id logger)]
                 (if (= :continue (:action decision))
                   (recur new-completed
-                         failed-ids
+                         new-failed
                          (merge all-results (select-keys results completed))
                          (into sub-workflow-ids batch-sub-ids)
                          (:new-backend decision)
