@@ -148,19 +148,31 @@
           (get phase-result :metrics {})))
 
 (defn track-phase-files
-  "Track files written by phase for meta-agent monitoring."
-  [ctx phase-result]
-  (let [output (get-in phase-result [:result :output])
-        file-paths (when (map? output)
-                     (mapv :path (:code/files output)))]
-    (update ctx :execution/files-written into (or file-paths []))))
+  "Track files written by phase for meta-agent monitoring.
+
+   In the new environment model, code changes live in the execution
+   environment's git working tree (:execution/worktree-path) rather than
+   being serialized into phase results. File tracking via :code/files in
+   phase output is therefore a no-op; actual file discovery happens at
+   release time via git diff."
+  [ctx _phase-result]
+  ;; Phase results no longer carry :code/files.
+  ;; File changes are in the environment's worktree, captured at release time.
+  ctx)
 
 (defn record-phase-artifacts
-  "Record phase artifacts in execution context."
+  "Record phase artifacts in execution context.
+
+   In the new environment model, phase results carry provenance metadata
+   (:environment-id, :summary, :metrics) rather than serialized :code/files.
+   The recorded artifact captures lightweight provenance metadata for the
+   evidence bundle."
   [ctx phase-result]
-  (let [output (get-in phase-result [:result :output])
-        artifacts (when (map? output) [output])]
-    (update ctx :execution/artifacts into (or artifacts []))))
+  (let [result   (get phase-result :result)
+        artifact (when (map? result)
+                   (not-empty (select-keys result [:status :environment-id
+                                                   :summary :metrics])))]
+    (update ctx :execution/artifacts into (if artifact [artifact] []))))
 
 ;------------------------------------------------------------------------------ Layer 1: Composition
 
@@ -339,23 +351,24 @@
 
 (defn apply-dag-success
   "Apply a successful DAG result to the execution context.
-   Merges artifacts, synthesizes an :implement phase result so downstream
-   phases (release) can find the code artifact, and advances past implement."
+   Merges artifact provenance, synthesizes an :implement phase result in the
+   new environment-model shape (no :code/files), and advances past implement.
+
+   Code changes live in the environment's worktree; provenance is captured
+   at release time via PR diff."
   [ctx dag-result pipeline transition-to-completed-fn]
-  (let [artifacts (:artifacts dag-result)
-        ;; Collect all :code/files across DAG task artifacts
-        all-files (vec (mapcat #(get % :code/files []) artifacts))
-        ;; Synthesize the implement phase result that release.clj expects
-        ;; at [:execution/phase-results :implement :result :output].
-        ;; Release checks for :artifacts key first (multi-artifact path),
-        ;; falling back to wrapping the output directly.
+  (let [artifacts  (:artifacts dag-result)
+        task-count (count artifacts)
+        ;; Synthesize new-style implement phase result.
+        ;; Code is in the environment's worktree — no :code/files serialization.
         synthesized-implement-result
-        {:name :implement
+        {:name   :implement
          :status :completed
-         :result (response/success {:code/id (random-uuid)
-                                    :code/files all-files
-                                    :artifacts artifacts}
-                                   {:metrics (:metrics dag-result)})}
+         :result {:status         :success
+                  :environment-id (get ctx :execution/environment-id)
+                  :summary        (str "DAG executed " task-count " task(s) successfully")
+                  :metrics        (merge {:task-count task-count}
+                                         (:metrics dag-result))}}
         ctx-with-dag (-> ctx
                          (update :execution/artifacts into artifacts)
                          (assoc :execution/dag-result dag-result)

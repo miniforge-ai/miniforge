@@ -34,6 +34,8 @@
   "Create minimal execution context for testing."
   []
   {:execution/id (random-uuid)
+   :execution/environment-id (random-uuid)
+   :execution/worktree-path "/tmp/test-worktree"
    :execution/input {:description "Test implementation"
                      :title "Add feature"
                      :intent "testing"}
@@ -61,60 +63,39 @@
 
 ;------------------------------------------------------------------------------ Layer 1: Interceptor Enter Tests
 
-(deftest enter-implement-returns-artifact-test
-  (testing "implement phase returns code artifact in result"
+(deftest enter-implement-sets-phase-metadata-test
+  (testing "implement phase sets correct phase metadata"
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                   agent/invoke (fn [_ _ _]
-                                (response/success mock-code-artifact
-                                                {:tokens 1000 :duration-ms 2000}))]
+                                (response/success nil {:tokens 1000 :duration-ms 2000}))]
       (let [ctx (create-base-context)
             ctx-with-config (assoc ctx :phase-config {:phase :implement})
             interceptor (registry/get-phase-interceptor {:phase :implement})
             result ((:enter interceptor) ctx-with-config)]
-        
-        (testing "phase metadata is set"
-          (is (= :implement (get-in result [:phase :name])))
-          (is (= :implementer (get-in result [:phase :agent])))
-          (is (= :running (get-in result [:phase :status]))))
-        
-        (testing "artifact is present in result"
-          (is (some? (get-in result [:phase :result :output]))
-              "Result should contain output")
-          
-          (let [artifact (get-in result [:phase :result :output])]
-            (is (some? (:code/id artifact))
-                "Artifact should have code/id")
-            (is (some? (:code/files artifact))
-                "Artifact should have code/files")
-            (is (= "clojure" (:code/language artifact))
-                "Artifact should specify language")))))))
 
-(deftest artifact-contains-code-files-test
-  (testing "artifact contains :code/files with proper structure"
+        (is (= :implement (get-in result [:phase :name])))
+        (is (= :implementer (get-in result [:phase :agent])))
+        (is (= :running (get-in result [:phase :status])))))))
+
+(deftest leave-implement-result-contains-environment-id-test
+  (testing "leave-implement stores environment-id in result, not serialized :code/files"
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                   agent/invoke (fn [_ _ _]
-                                (response/success mock-code-artifact
-                                                {:tokens 800 :duration-ms 1500}))]
-      (let [ctx (create-base-context)
+                                (response/success nil {:tokens 800 :duration-ms 1500}))]
+      (let [env-id (random-uuid)
+            ctx (-> (create-base-context)
+                    (assoc :execution/environment-id env-id))
             ctx-with-config (assoc ctx :phase-config {:phase :implement})
             interceptor (registry/get-phase-interceptor {:phase :implement})
-            result ((:enter interceptor) ctx-with-config)
-            files (get-in result [:phase :result :output :code/files])]
-        
-        (is (vector? files)
-            "code/files should be a vector")
-        (is (pos? (count files))
-            "code/files should not be empty")
-        
-        (doseq [file files]
-          (is (contains? file :path)
-              "Each file should have :path")
-          (is (contains? file :content)
-              "Each file should have :content")
-          (is (contains? file :action)
-              "Each file should have :action")
-          (is (#{:create :modify :delete} (:action file))
-              "Action should be valid keyword"))))))
+            enter-result ((:enter interceptor) ctx-with-config)
+            final-result ((:leave interceptor) enter-result)]
+
+        (is (= :completed (get-in final-result [:phase :status]))
+            "Phase should complete when agent returns success with nil output")
+        (is (= env-id (get-in final-result [:phase :result :environment-id]))
+            "Result should reference the environment-id")
+        (is (nil? (get-in final-result [:phase :result :output]))
+            "Result should NOT contain serialized :output / :code/files")))))
 
 (deftest implement-reads-plan-from-context-test
   (testing "implement phase reads plan from execution phase results"
@@ -136,24 +117,21 @@
           (is (= (:plan/id mock-plan-result) (:plan/id @plan-read-atom))
               "Agent should receive the correct plan"))))))
 
-(deftest implement-handles-empty-artifact-test
-  (testing "implement phase handles empty artifact (no code generated)"
+(deftest implement-handles-nil-output-test
+  (testing "implement phase treats nil agent output as success — code is in the environment"
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                   agent/invoke (fn [_ _ _]
-                                (response/success mock-empty-artifact
-                                                {:tokens 200 :duration-ms 500}))]
+                                (response/success nil {:tokens 200 :duration-ms 500}))]
       (let [ctx (create-base-context)
             ctx-with-config (assoc ctx :phase-config {:phase :implement})
             interceptor (registry/get-phase-interceptor {:phase :implement})
-            result ((:enter interceptor) ctx-with-config)]
-        
-        ;; Phase should complete even with empty artifact
-        (is (= :success (get-in result [:phase :result :status]))
-            "Phase should succeed even with empty artifact")
-        
-        (let [files (get-in result [:phase :result :output :code/files])]
-          (is (empty? files)
-              "Files should be empty for empty artifact"))))))
+            enter-result ((:enter interceptor) ctx-with-config)
+            final-result ((:leave interceptor) enter-result)]
+
+        (is (= :completed (get-in final-result [:phase :status]))
+            "Phase should complete — nil output means code is in environment, not an error")
+        (is (= :success (get-in final-result [:phase :result :status]))
+            "Result status should be :success")))))
 
 (deftest implement-handles-agent-exception-test
   (testing "implement phase handles agent exceptions gracefully"

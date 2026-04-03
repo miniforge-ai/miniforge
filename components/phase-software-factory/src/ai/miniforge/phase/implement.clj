@@ -100,9 +100,12 @@
                    (get-in verify-result [:result :output :metadata :test-results :output]))}))
 
 (defn- resolve-worktree-path
-  "Resolve the worktree path from context, falling back to user.dir."
+  "Resolve the worktree path from execution context.
+   Fails fast if no environment has been acquired — do not fall back to host filesystem."
   [ctx]
-  (get ctx :worktree-path (System/getProperty "user.dir")))
+  (or (get ctx :execution/worktree-path)
+      (throw (ex-info "No :execution/worktree-path in context — workflow runner must acquire an execution environment before the implement phase"
+                      {:ctx-keys (keys ctx)}))))
 
 (defn- resolve-files-in-scope
   "Resolve files-in-scope from input, checking context and intent."
@@ -284,12 +287,10 @@
         iterations (get-in ctx [:phase :iterations] 1)
         max-iterations (get-in ctx [:phase :budget :iterations]
                                (get-in default-config [:budget :iterations]))
-        ;; Treat nil output as error — the LLM produced no usable artifact.
-        ;; This prevents a "successful" implement with nothing for release to consume.
-        nil-output? (and (= :success agent-status)
-                         (not= :already-implemented agent-status)
-                         (nil? (:output result)))
-        effective-status (if nil-output? :error agent-status)
+        ;; In the environment promotion model the agent writes files directly to
+        ;; the executor environment. A nil output is NOT an error — code is in
+        ;; the environment, not serialized in the result.
+        effective-status agent-status
         phase-status (cond
                        gate-failed? :failed
                        (= :already-implemented agent-status) :already-implemented
@@ -302,6 +303,10 @@
                      (:cost-usd metrics)
                      (* (get metrics :tokens 0) 0.000015))
         metrics (assoc metrics :cost-usd cost-usd :duration-ms duration-ms)
+        env-id (get ctx :execution/environment-id)
+        summary (or (get-in result [:output :code/summary])
+                    (when (string? (:output result)) (:output result))
+                    "Implementation complete")
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
@@ -319,12 +324,13 @@
       (knowledge/capture-repair-learning!
        (:knowledge-store ctx) :implementer
        (get-in ctx [:execution/input :title]) iterations))
-    ;; Warn if result has no output and isn't already-implemented
-    (when (and (not= :already-implemented agent-status)
-               (nil? (:output result)))
-      (println (messages/t :implement/warn-no-output)))
-    ;; Handle retrying, failure, or already-implemented outcomes
+    ;; Handle retrying, failure, completed, or already-implemented outcomes
     (cond-> updated-ctx
+      ;; On success: store lightweight result — code is in the environment, not here
+      (= :completed phase-status)
+      (assoc-in [:phase :result] {:status :success
+                                   :environment-id env-id
+                                   :summary summary})
       (registry/retrying? (:phase updated-ctx))
       (-> (update-in [:phase :iterations] (fnil inc 1))
           (assoc-in [:phase :last-error]

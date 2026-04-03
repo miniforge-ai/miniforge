@@ -1,10 +1,17 @@
 (ns ai.miniforge.phase.release-test
   "Unit tests for the release phase interceptor.
 
-  Tests file writing, persistence validation, and failure modes."
+  Tests file writing, persistence validation, and failure modes.
+
+  In the new environment model, code changes live in the execution
+  environment's git working tree rather than being serialized into phase
+  results. Tests that exercise file-based behavior write mock files to the
+  test worktree before invoking the phase, simulating what the implement
+  agent would do in production."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.java.io :as io]
+   [clojure.java.shell :as shell]
    [babashka.fs :as fs]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.phase.release :as release]
@@ -16,13 +23,14 @@
 (def ^:dynamic *test-worktree* nil)
 
 (defn create-temp-worktree
+  "Create a temporary directory initialized as a real git repository.
+   Required for git-dirty-files to work in the new environment model."
   []
   (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")
                           (str "release-test-" (random-uuid)))]
     (.mkdirs temp-dir)
-    ;; Create minimal git structure
-    (let [git-dir (io/file temp-dir ".git")]
-      (.mkdirs git-dir))
+    ;; Initialize a real git repository so git status --porcelain works
+    (shell/sh "git" "init" :dir (.getPath temp-dir))
     (.getPath temp-dir)))
 
 (defn cleanup-temp-worktree
@@ -56,19 +64,48 @@
    :code/language "clojure"})
 
 (def mock-implement-result
-  {:code/id (:code/id mock-code-artifact)
-   :code/files (:code/files mock-code-artifact)
-   :code/language "clojure"})
+  "New-model implement phase result: carries environment reference and summary,
+   NOT serialized :code/files. Code changes live in the worktree."
+  {:status         :success
+   :environment-id "test-environment-id"
+   :summary        "Implemented feature: Add feature (2 files)"
+   :metrics        {:tokens 1500 :duration-ms 3200}})
+
+(defn write-mock-files-to-worktree!
+  "Write mock code artifact files to the test worktree.
+   Simulates what the implement phase does in production: writing code
+   directly to the execution environment's working directory."
+  []
+  (doseq [{:keys [path content]} (:code/files mock-code-artifact)]
+    (let [file (io/file *test-worktree* path)]
+      (io/make-parents file)
+      (spit file content))))
 
 (defn create-base-context
+  "Create a test context with mock files already written to the test worktree.
+   In the new environment model, code changes are in the worktree (not phase
+   results). Most tests use this context."
+  []
+  ;; Write mock files to the worktree, simulating what the implement phase does
+  (write-mock-files-to-worktree!)
+  {:execution/id (random-uuid)
+   :execution/input {:description "Test release"
+                     :title "Add feature"
+                     :intent "testing"}
+   :execution/metrics {:tokens 0 :duration-ms 0}
+   :execution/phase-results {:implement {:result mock-implement-result}}
+   :worktree-path *test-worktree*})
+
+(defn create-empty-context
+  "Create a test context with NO files written to the worktree.
+   Used to test zero-files detection (no git dirty files in environment)."
   []
   {:execution/id (random-uuid)
    :execution/input {:description "Test release"
                      :title "Add feature"
                      :intent "testing"}
    :execution/metrics {:tokens 0 :duration-ms 0}
-   :execution/phase-results {:implement {:result {:status :success
-                                                  :output mock-implement-result}}}
+   :execution/phase-results {:implement {:result mock-implement-result}}
    :worktree-path *test-worktree*})
 
 ;------------------------------------------------------------------------------ Layer 0: Defaults Tests
@@ -213,15 +250,17 @@
               "Release should succeed when verification passes"))))))
 
 (deftest release-handles-zero-files-artifact-test
-  (testing "release phase fails fast when code artifact has zero files"
-    (let [ctx (-> (create-base-context)
-                  (assoc-in [:execution/phase-results :implement :result :output :code/files] []))
+  (testing "release phase fails fast when no files changed in the environment"
+    ;; With the new environment model, zero-file detection is via the git
+    ;; working tree rather than :code/files in phase results.
+    ;; create-empty-context does NOT write any files to the worktree.
+    (let [ctx (create-empty-context)
           ctx-with-config (assoc ctx :phase-config {:phase :release})
           interceptor (registry/get-phase-interceptor {:phase :release})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Release phase received code artifact with zero files"
                             ((:enter interceptor) ctx-with-config))
-          "Release should fail fast when code artifact has empty files"))))
+          "Release should fail fast when environment has no changed files"))))
 
 (deftest release-includes-pr-info-test
   (testing "release phase includes PR info in result"

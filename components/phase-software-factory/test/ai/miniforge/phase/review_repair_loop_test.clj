@@ -120,7 +120,8 @@
     ;; The implement phase reads review feedback from execution/phase-results
     ;; (survives :phase clearing between phases) and includes it as :task/review-feedback
     (let [build-implement-task #'ai.miniforge.phase.implement/build-implement-task
-          ctx {:execution/input {:description "Build widget"}
+          ctx {:execution/worktree-path "/tmp/test-worktree"
+               :execution/input {:description "Build widget"}
                :execution/phase-results {:plan {:result {:output nil}}
                                          :review {:result {:output {:review/decision :changes-requested
                                                                      :review/feedback [{:severity :blocking
@@ -133,7 +134,8 @@
 (deftest implement-task-omits-review-feedback-when-absent
   (testing "build-implement-task works normally without review feedback"
     (let [build-implement-task #'ai.miniforge.phase.implement/build-implement-task
-          ctx {:execution/input {:description "Build widget"}
+          ctx {:execution/worktree-path "/tmp/test-worktree"
+               :execution/input {:description "Build widget"}
                :execution/phase-results {:plan {:result {:output nil}}}}
           {:keys [task]} (build-implement-task ctx)]
       (is (nil? (:task/review-feedback task))
