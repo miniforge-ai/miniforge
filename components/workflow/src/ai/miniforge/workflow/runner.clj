@@ -203,36 +203,31 @@
 
 (defn- acquire-execution-environment!
   "Acquire an isolated execution environment before pipeline starts.
-   Prefers Docker, falls back to worktree.
+   Uses worktree executor — creates a git worktree so each workflow
+   (or sub-workflow) gets an isolated copy of the repo.
 
    Uses requiring-resolve to avoid hard dependency on dag-executor component.
 
    Returns map with :executor, :environment-id, :worktree-path
    or nil if acquisition fails or dag-executor is unavailable."
-  [workflow-id {:keys [repo-url branch]}]
+  [workflow-id {:keys [_repo-url _branch]}]
   (try
     (let [create-registry (requiring-resolve 'ai.miniforge.dag-executor.executor/create-executor-registry)
           select-exec     (requiring-resolve 'ai.miniforge.dag-executor.executor/select-executor)
           acquire-env!    (requiring-resolve 'ai.miniforge.dag-executor.executor/acquire-environment!)
-          clone-checkout! (requiring-resolve 'ai.miniforge.dag-executor.executor/clone-and-checkout!)
-          exec-type-fn    (requiring-resolve 'ai.miniforge.dag-executor.executor/executor-type)
           result-ok?      (requiring-resolve 'ai.miniforge.dag-executor.result/ok?)
           result-unwrap   (requiring-resolve 'ai.miniforge.dag-executor.result/unwrap)
-          registry        (create-registry {:docker {} :worktree {}})
-          executor        (select-exec registry :preferred :docker)]
+          registry        (create-registry {:worktree {}})
+          executor        (select-exec registry :preferred :worktree)]
       (when executor
         (let [task-id    (if (uuid? workflow-id) workflow-id (random-uuid))
               env-result (acquire-env! executor task-id {})]
           (when (result-ok? env-result)
-            (let [env       (result-unwrap env-result)
-                  env-id    (:environment-id env)
-                  workdir   (:workdir env)
-                  exec-type (exec-type-fn executor)]
-              (when (and (= exec-type :docker) repo-url)
-                (clone-checkout! executor env-id repo-url (or branch "main") {}))
+            (let [env    (result-unwrap env-result)
+                  env-id (:environment-id env)]
               {:executor       executor
                :environment-id env-id
-               :worktree-path  (or workdir "/workspace")})))))
+               :worktree-path  (:workdir env)})))))
     (catch Exception e
       (println (messages/t :warn/publish-event
                            {:error (str "Environment acquisition failed: " (ex-message e))}))
