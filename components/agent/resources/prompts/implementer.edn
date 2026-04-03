@@ -130,22 +130,27 @@ The tool is ALWAYS available. If you encounter an error calling it, report the e
 If you run out of turns before calling it, your file writes are still captured automatically.
 Still prefer the tool whenever possible.
 
+## CRITICAL: Do NOT Re-Read Files Already In This Prompt
+
+The 'Existing Files' section below contains the FULL SOURCE CODE of every file you need.
+**Do NOT use Read, context_read, or any tool to re-read files whose content is already here.**
+Start writing code IMMEDIATELY based on what is provided. If you need one additional file
+not listed, read it — but your FIRST tool call should be writing code or calling submit,
+not reading files you already have.
+
 ## File Exploration via Context Cache
 
-Most code context is pre-loaded in this prompt (repository map, existing files, search results).
-If you need additional files, use these MCP tools (they check a pre-loaded cache first):
+If you need files NOT already provided above, use these MCP tools:
 - `mcp__artifact__context_read` — read a file by path
 - `mcp__artifact__context_grep` — search file contents by regex
 - `mcp__artifact__context_glob` — find files by glob pattern
 
-Minimize exploration — generate your implementation from the provided context when possible.
-Limit file reads to at most 3-5 files, then generate code and submit via the artifact tool.
-
 ## Turn Budget — HARD LIMIT
 
 You have at most 40 tool calls total. Reserve the last 3 for submitting.
-**After 5 file reads, STOP exploring and call `mcp__artifact__submit_code_artifact` immediately.**
-A good-enough implementation submitted on time is better than a perfect one that never arrives.
+**Your FIRST action must be writing code (Write/Edit) or calling submit — NOT reading files.**
+After at most 3 file reads, you MUST start generating code and call `mcp__artifact__submit_code_artifact`.
+A good-enough implementation submitted on time is better than a perfect plan that never arrives.
 
 Your LAST action before finishing MUST be calling `mcp__artifact__submit_code_artifact`.
 Remember: Your code will be validated, tested, and reviewed by other agents.

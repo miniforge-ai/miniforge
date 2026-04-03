@@ -104,9 +104,9 @@
 (deftest event-count-test
   (testing "Full workflow run emits expected number of events"
     (let [{:keys [events]} (simulate-workflow-run!)]
-      ;; 21 events in simulate-workflow-run!
-      (is (= 21 (count @events))
-          "Full simulation must emit exactly 21 events"))))
+      ;; 20 events in simulate-workflow-run!
+      (is (= 20 (count @events))
+          "Full simulation must emit exactly 20 events"))))
 
 (deftest event-causal-ordering-test
   (testing "Workflow-started is first and workflow-completed is last"

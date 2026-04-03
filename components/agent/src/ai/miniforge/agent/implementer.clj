@@ -175,6 +175,13 @@
        (when-let [test-output (:test-output verify-failures)]
          (str "\n\n" (messages/t :prompt/test-output-label) "\n" test-output))))
 
+(defn- format-prior-attempts-section
+  "Format prior attempt context as a prominent warning section."
+  [{:keys [attempt-number prior-error instruction]}]
+  (str "\n\n## ⚠️ RETRY — Attempt " attempt-number "\n\n"
+       "**Previous attempt failed:** " prior-error "\n\n"
+       "**" instruction "**\n"))
+
 (defn task->text
   "Convert a task to text for the LLM.
    Includes plan and intent when available for richer context."
@@ -186,7 +193,10 @@
                       intent (:task/intent task)
                       review-feedback (:task/review-feedback task)
                       verify-failures (:task/verify-failures task)
+                      prior-attempts (:task/prior-attempts task)
                       parts (cond-> []
+                              prior-attempts
+                              (conj (format-prior-attempts-section prior-attempts))
                               desc
                               (conj desc)
                               plan

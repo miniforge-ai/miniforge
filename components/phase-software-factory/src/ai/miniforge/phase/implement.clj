@@ -164,11 +164,18 @@
                      :task/existing-files existing-files
                      :task/behavior-addendum behavior-addendum}
                     pack-ctx formatted)
+        iteration (get-in ctx [:phase :iterations] 0)
+        last-error (get-in ctx [:phase :last-error])
         task (cond-> base-task
                verify-failure
                (assoc :task/verify-failures (build-verify-failures verify-failure))
                review-feedback
-               (assoc :task/review-feedback review-feedback))]
+               (assoc :task/review-feedback review-feedback)
+               (pos? iteration)
+               (assoc :task/prior-attempts
+                      {:attempt-number (inc iteration)
+                       :prior-error (or last-error "No artifact produced — agent exhausted turn budget exploring files instead of writing code")
+                       :instruction "This is a RETRY. Do NOT explore or read files. The plan and existing files are already in this prompt. Write the implementation code IMMEDIATELY and call submit."}))]
     {:task task
      :rules-manifest manifest}))
 
