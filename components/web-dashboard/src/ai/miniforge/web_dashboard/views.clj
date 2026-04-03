@@ -63,8 +63,8 @@
                            :alt "Miniforge"}]
         [:div.logo-tagline "an industrial software factory that fits on your desk"]]]
       [:div.banner-center
-       ;; Optional: Event status scroll area
-       [:div.event-scroll
+       ;; Live event banner — updated by WebSocket events via app.js
+       [:div.event-scroll {:id "event-banner"}
         [:div.event-item
          [:span.event-icon "⚡"]
          [:span.event-text "Build passing"]]

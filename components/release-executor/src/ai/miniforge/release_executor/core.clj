@@ -45,6 +45,13 @@
                   (:content artifact))))
        (remove nil?)))
 
+(defn extract-workflow-data
+  "Extract review and test artifacts from workflow artifacts for PR metadata.
+   Returns a map with :review-artifacts and :test-artifacts."
+  [workflow-artifacts]
+  {:review-artifacts (metadata/extract-review-artifacts workflow-artifacts)
+   :test-artifacts (metadata/extract-test-artifacts workflow-artifacts)})
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pipeline steps
 
@@ -84,9 +91,11 @@
     state
     (if (:release-meta state)
       state ;; Already provided (e.g. by caller or test)
-      (let [{:keys [releaser code-artifacts task-description context logger]} state
+      (let [{:keys [releaser code-artifacts task-description context logger
+                    workflow-data]} state
             release-meta (metadata/generate-release-metadata
-                          releaser code-artifacts task-description context logger)]
+                          releaser code-artifacts task-description context logger
+                          workflow-data)]
         (if release-meta
           (assoc state :release-meta release-meta)
           (fail state :metadata-generation-failed
@@ -298,6 +307,7 @@
         executor (:executor context)
         environment-id (:environment-id context)
         sandbox? (boolean (and executor environment-id))
+        workflow-artifacts (:workflow/artifacts workflow-state)
         initial-state (cond-> {:logger logger
                                :worktree-path (:worktree-path context)
                                :artifact-store (:artifact-store context)
@@ -305,7 +315,8 @@
                                :create-pr? (get context :create-pr? true)
                                :releaser (:releaser opts)
                                :task-description (get-in workflow-state [:workflow/spec :spec/description])
-                               :code-artifacts (extract-code-artifacts (:workflow/artifacts workflow-state))
+                               :code-artifacts (extract-code-artifacts workflow-artifacts)
+                               :workflow-data (extract-workflow-data workflow-artifacts)
                                :executor executor
                                :environment-id environment-id
                                :sandbox? sandbox?}

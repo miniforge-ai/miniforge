@@ -18,19 +18,66 @@
    [cheshire.core :as json]
    [clojure.string :as str]
    [org.httpkit.server :as http]
-   [ai.miniforge.web-dashboard.state :as state]))
+   [ai.miniforge.web-dashboard.state :as state])
+  (:import
+   [java.time Instant]
+   [java.util UUID Date]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event normalization and envelopes
 
+(defn serialize-for-json
+  "Recursively convert Clojure types to JSON-safe equivalents.
+
+   - Keywords → namespace-preserving strings WITHOUT colon prefix
+     :workflow/phase-started → \"workflow/phase-started\"
+     :plan → \"plan\"
+     Cheshire's (name kw) strips namespaces; (str kw) adds colon prefix.
+     This strips the colon so browser event dispatch matches on bare names.
+   - UUID → string
+   - Instant → ISO-8601 string
+   - Date → ISO-8601 string
+   - Maps → recursively serialized
+   - Vectors/seqs → recursively serialized"
+  [v]
+  (cond
+    (keyword? v) (subs (str v) 1)
+    (instance? UUID v) (str v)
+    (instance? Instant v) (str v)
+    (instance? Date v) (str (.toInstant ^Date v))
+    (map? v) (persistent!
+              (reduce-kv (fn [m k val]
+                           (assoc! m
+                                   (cond
+                                     (keyword? k) (subs (str k) 1)
+                                     (instance? UUID k) (str k)
+                                     :else k)
+                                   (serialize-for-json val)))
+                         (transient {})
+                         v))
+    (sequential? v) (mapv serialize-for-json v)
+    :else v))
+
 (defn ws-event-envelope
-  "Build a browser-friendly event wrapper while preserving the raw event payload."
+  "Build a browser-friendly event wrapper while preserving the raw event payload.
+
+   Uses string keys with underscores for JavaScript dot-notation access, plus
+   hyphenated aliases for backward compatibility. The inner event data is
+   pre-serialized so Clojure-specific types (Instant, keyword, UUID) survive
+   JSON encoding without Jackson errors."
   [event]
-  {:type "event"
-   :event-type (some-> (:event/type event) str (str/replace #"^:" ""))
-   :workflow-id (some-> (:workflow/id event) str)
-   :data event
-   :event event})
+  (let [evt-type  (some-> (:event/type event) str (str/replace #"^:" ""))
+        wf-id     (some-> (:workflow/id event) str)
+        timestamp (or (some-> (:event/timestamp event) str)
+                      (str (Instant/now)))
+        safe-data (serialize-for-json event)]
+    {"type"        "event"
+     "event_type"  evt-type
+     "event-type"  evt-type
+     "workflow_id" wf-id
+     "workflow-id" wf-id
+     "timestamp"   timestamp
+     "data"        safe-data}))
 
 (defn maybe-uuid
   "Parse UUID strings when possible, preserving non-UUID identifiers."
