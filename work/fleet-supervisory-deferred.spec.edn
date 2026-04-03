@@ -1,0 +1,158 @@
+;; Fleet Supervisory — Deferred Concepts
+;;
+;; Concepts recognized in the supervisory control plane design that are
+;; architecturally important but deferred to Fleet-scale work. Captured
+;; here so they survive until Fleet specs are written.
+;;
+;; Origin: N5-delta-supervisory-control-plane §10, tui-dashboard-v2 discussions.
+;; Date: 2026-04-02
+
+{:spec/id "fleet-supervisory-deferred"
+ :spec/version "0.1.0"
+ :spec/created "2026-04-02"
+ :spec/status "parking-lot"
+ :spec/context "Deferred from supervisory TUI v1 to Fleet-scale specs"
+
+ :deferred-concepts
+
+ [{:id :agent-session-entity
+   :concept "AgentSession as first-class supervisory entity"
+   :status :resolved
+   :resolution
+   "ALREADY EXISTS as agent records in control-plane/registry (PR #326).
+    The control-plane component provides: agent registry with CRUD,
+    heartbeat tracking, state transitions, vendor-specific adapters
+    (adapter-claude-code discovers sessions via ~/.claude/projects/),
+    decision queue, and orchestrator. Agent records carry: :agent/vendor,
+    :agent/external-id, :agent/name, :agent/capabilities, :agent/status,
+    :agent/heartbeat-interval-ms, :agent/metadata, :agent/tags.
+
+    States: :idle, :starting, :executing, :blocked, :completed, :failed.
+
+    The TUI supervisory work spec (tui-supervisory-control-plane-v1)
+    includes control plane event subscription and agent session rendering
+    in the monitor screen. No additional entity design needed.
+
+    Remaining Fleet-scale work: control-plane-completion.spec.edn covers
+    wiring decision delivery and event emission from the orchestrator."
+   :original-design-questions-answered
+   ["Discovery: adapter-claude-code scans ~/.claude/projects/ for active sessions"
+    "Registration: adapter discovers and registers via orchestrator discovery loop"
+    "Session end: heartbeat watchdog detects stale agents; PID liveness check"]}
+
+  {:id :lens-abstraction
+   :concept "Lens as a first-class projection contract"
+   :description
+   "A lens is a named projection strategy over canonical supervisory state.
+    Each lens declares: identity, source entities, projection builder,
+    default filters/sorts, drill targets. The monitor surface would be
+    backed by lenses rather than hard-coded projection functions.
+
+    Deferred because: defining a lens contract before the monitor exists
+    risks premature abstraction. The Clojure data-oriented approach
+    (pure projection functions of model) is sufficient for v1. Extract
+    the lens contract after monitor patterns stabilize."
+   :triggers
+   ["Monitor has 3+ stable projection patterns to generalize"
+    "Fleet dashboard needs to reuse the same projections"
+    "Custom/user-defined views are requested"]
+   :minimum-contract
+   {:lens/id "keyword"
+    :lens/source-entities "vector of entity type keywords"
+    :lens/projection-fn "fn [supervisory-state opts] -> projection-data"
+    :lens/default-sort "keyword or comparator"
+    :lens/drill-targets "map of selection-type -> target-view"}
+   :built-in-lenses
+   [:workflows :pr-trains :policy-health :attention :agents]}
+
+  {:id :full-intervention-audit
+   :concept "Complete intervention audit trail with attribution"
+   :description
+   "Every supervisory action that changes execution or governance
+    disposition produces a durable Intervention record with full
+    attribution (who, when, what, why, affected entities).
+
+    v1 uses the existing N5 §6.2 override logging in evidence bundles.
+    The full audit trail adds: queryable intervention history,
+    intervention-driven attention items, intervention effectiveness
+    metrics.
+
+    Deferred because: N5 §6.2 override logging is sufficient for
+    single-user dogfooding. Full audit becomes important for
+    multi-user Fleet governance and compliance."
+   :triggers
+   ["Multi-user access to supervisory surface"
+    "Compliance requirements (SOC2, FedRAMP)"
+    "Intervention effectiveness analysis"]
+   :minimum-keys
+   [:intervention/id :intervention/type :intervention/target-type
+    :intervention/target-id :intervention/actor :intervention/reason
+    :intervention/timestamp :intervention/outcome]}
+
+  {:id :event-versioning
+   :concept "Versioned event envelope with schema evolution"
+   :description
+   "N3 defines event envelope fields but does not include a :version
+    field on individual events. For Fleet-scale, events should carry
+    schema version to support forward/backward compatibility across
+    versions of miniforge processing the same event store.
+
+    Deferred because: single-version deployment in dogfooding means
+    all producers and consumers share the same schema. Versioning
+    becomes important when: Fleet aggregates events from multiple
+    miniforge instances, or event stores persist across upgrades."
+   :triggers
+   ["Fleet aggregation across miniforge instances"
+    "Long-term event store persistence across version upgrades"
+    "Third-party event consumers"]}
+
+  {:id :cross-entity-correlation
+   :concept "Systematic correlation IDs across entity boundaries"
+   :description
+   "The normative delta identified required correlations:
+    - agent session -> workflow runs
+    - workflow runs -> PRs
+    - workflow runs -> PR trains
+    - PRs -> policy evaluations
+    - policy evaluations -> evidence bundles
+    - interventions -> affected entities
+
+    Some correlations exist (workflow-id on events, PR identity on
+    evaluations). Others are missing (workflow-run -> PR linkage is
+    implicit via branch matching).
+
+    v1 adds correlation IDs incrementally where they block the monitor.
+    Systematic correlation is a Fleet concern."
+   :triggers
+   ["Monitor needs a correlation that doesn't exist yet"
+    "Fleet dashboard needs cross-entity navigation"
+    "Audit trail requires full entity graph traversal"]
+   :existing-correlations
+   ["workflow-id on workflow events (N3)"
+    "PR identity [repo number] on policy evaluations"
+    "train-id on PR train events (N9)"]
+   :missing-correlations
+   ["workflow-run-id -> PR (currently inferred from branch)"
+    "agent-session-id -> workflow-runs (agent session doesn't exist yet)"
+    "policy-evaluation-id -> evidence-bundle-id (weak link)"]}
+
+  {:id :fleet-aggregation
+   :concept "Multi-project fleet dashboard with aggregate metrics"
+   :description
+   "The supervisory model should scale to showing dozens of projects,
+    hundreds of concurrent workflows, aggregate policy pass rates,
+    throughput trends, cost attribution across projects/agents.
+
+    Deferred because: single-project dogfooding is current scope.
+    The v1 monitor architecture should not preclude Fleet aggregation
+    but does not need to implement it."
+   :triggers
+   ["Monitoring >1 project simultaneously"
+    "Policy effectiveness trends over time"
+    "Cost/throughput analysis across projects"]
+   :capabilities
+   ["Multi-project supervisory state aggregation"
+    "Policy pass-rate trends (time series)"
+    "Agent utilization and cost attribution"
+    "Cross-project attention rollup"
+    "Anomaly detection across fleet"]}]}

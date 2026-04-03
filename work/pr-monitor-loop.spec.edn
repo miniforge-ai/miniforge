@@ -181,7 +181,15 @@
    :priority :p2
    :description
    "Extend the PR Fleet (:pr-fleet) view to show monitor loop status inline:
-    last-polled time, comment count, attempts remaining, last action taken."
+    last-polled time, comment count, attempts remaining, last action taken.
+
+    NOTE: This deliverable is subsumed by tui-supervisory-control-plane-v1
+    (WS2 live-event-subscription + WS3 monitor-screen). The supervisory TUI
+    work spec includes :pr-monitor/* event handling in the monitor mode,
+    including attention items for budget-exhausted/escalated events. PR
+    monitor status will be visible in the monitor screen's PR zone rather
+    than only in the legacy PR Fleet view."
+   :superseded-by "tui-supervisory-control-plane-v1"
    :tests
    ["PR row shows monitor status when observe phase is active"]}]
 
