@@ -34,6 +34,9 @@
   ;; Release phase - creates PR
   {:phase :release}
 
+  ;; Observe phase - monitors PR, responds to comments, resolves feedback
+  {:phase :observe}
+
   ;; Terminal phase
   {:phase :done}]
 

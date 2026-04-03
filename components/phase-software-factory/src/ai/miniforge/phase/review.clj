@@ -79,15 +79,24 @@
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
         start-time (System/currentTimeMillis)
+        ;; Emit phase-started telemetry event
+        _ (phase/emit-phase-started! ctx :review)
         reviewer-agent (agent/create-reviewer
                         (select-keys ctx [:llm-backend]))
         {:keys [task rules-manifest]} (build-review-task ctx)
         on-chunk (create-streaming-callback ctx :review)
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
+
+        ;; Emit agent-started telemetry event
+        _ (phase/emit-agent-started! agent-ctx :review :reviewer)
+
         result (try
                  (agent/invoke reviewer-agent task agent-ctx)
                  (catch Exception e
-                   (response/failure e)))]
+                   (response/failure e)))
+
+        ;; Emit agent-completed telemetry event
+        _ (phase/emit-agent-completed! agent-ctx :review :reviewer result)]
 
     (-> ctx
         (assoc-in [:phase :name] :review)
@@ -139,18 +148,24 @@
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
     ;; Handle changes-requested: redirect to implement with review feedback
-    (if (and (= :changes-requested review-decision)
-             (< iterations max-iterations))
-      (let [feedback (or (get-in result [:output :review/feedback])
-                         (get-in result [:output :review/issues]))]
-        (knowledge/capture-feedback-learning!
-         (:knowledge-store ctx) :reviewer
-         (get-in ctx [:execution/input :title]) feedback)
-        (-> updated-ctx
-            (update-in [:phase :iterations] (fnil inc 1))
-            (assoc-in [:phase :review-feedback] feedback)
-            (assoc-in [:phase :redirect-to] :implement)))
-      updated-ctx)))
+    (let [final-ctx (if (and (= :changes-requested review-decision)
+                             (< iterations max-iterations))
+                      (let [feedback (or (get-in result [:output :review/feedback])
+                                         (get-in result [:output :review/issues]))]
+                        (knowledge/capture-feedback-learning!
+                         (:knowledge-store ctx) :reviewer
+                         (get-in ctx [:execution/input :title]) feedback)
+                        (-> updated-ctx
+                            (update-in [:phase :iterations] (fnil inc 1))
+                            (assoc-in [:phase :review-feedback] feedback)
+                            (assoc-in [:phase :redirect-to] :implement)))
+                      updated-ctx)]
+      ;; Emit phase-completed telemetry event
+      (phase/emit-phase-completed! final-ctx :review
+        {:outcome (if (= :completed phase-status) :success :failure)
+         :duration-ms duration-ms
+         :tokens (:tokens metrics 0)})
+      final-ctx)))
 
 (defn error-review
   "Handle review phase errors.

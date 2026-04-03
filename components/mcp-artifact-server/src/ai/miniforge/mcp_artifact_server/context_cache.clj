@@ -43,9 +43,11 @@
   [pattern path]
   (let [regex-str (-> pattern
                       (str/replace "." "\\.")
-                      (str/replace "**" "<<<GLOBSTAR>>>")
+                      (str/replace "**/" "<<<GLOBSTAR>>>")
+                      (str/replace "**" "<<<GLOBSTAR2>>>")
                       (str/replace "*" "[^/]*")
-                      (str/replace "<<<GLOBSTAR>>>" ".*"))
+                      (str/replace "<<<GLOBSTAR>>>" "(.*/)?")
+                      (str/replace "<<<GLOBSTAR2>>>" ".*"))
         regex (re-pattern (str "^" regex-str "$"))]
     (boolean (re-matches regex path))))
 

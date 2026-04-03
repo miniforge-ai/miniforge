@@ -114,22 +114,33 @@
 (defn build-workflow-state
   "Build workflow state from phase context for the release executor.
 
-   Accepts any artifact shape from the implement phase:
-   - :code/files present → use them directly (standard code path)
-   - no :code/files       → fall back to git working tree (design docs, specs, etc.)"
+   Accepts artifacts from any phase that produced releasable files:
+   - implement :code/files present → use them directly (standard code path)
+   - no :code/files                → fall back to git working tree
+     (tests from verify, docs, specs, deployment configs, etc.)
+   - no git changes either         → throws :release/zero-files"
   [ctx]
   (let [impl-status      (get-in ctx [:execution/phase-results :implement :result :status])
-        implement-result (get-in ctx [:execution/phase-results :implement :result :output])]
+        implement-result (get-in ctx [:execution/phase-results :implement :result :output])
+        already-impl?    (= :already-implemented impl-status)]
     (log-already-implemented! ctx impl-status)
-    (assert-implement-artifact! ctx impl-status implement-result)
+    ;; Only assert implement artifact when implement wasn't already-implemented.
+    ;; When already-implemented, other phases (verify, review) may have produced
+    ;; git changes that should still be released.
+    (when-not already-impl?
+      (assert-implement-artifact! ctx impl-status implement-result))
     (let [explicit-files (not-empty (:code/files implement-result))
           files          (or explicit-files
                              (not-empty (git-dirty-files (ctx-worktree-path ctx)))
                              (throw (ex-info (messages/t :release/zero-files)
                                              {:phase :release
                                               :artifact-id (:code/id implement-result)})))
+          base-artifact  (or implement-result
+                              {:code/id (random-uuid)
+                               :code/language "mixed"
+                               :code/summary "Changes from pipeline phases"})
           code-artifacts [{:artifact/type    :code
-                           :artifact/content (assoc implement-result :code/files files)}]
+                           :artifact/content (assoc base-artifact :code/files files)}]
           input          (get-in ctx [:execution/input])]
       {:workflow/id       (or (get-in ctx [:execution/id]) (random-uuid))
        :workflow/phase    :release
@@ -172,9 +183,13 @@
         impl-status (get-in ctx [:execution/phase-results :implement :result :status])
 
         logger (or (get-in ctx [:execution/logger])
-                   (log/create-logger {:min-level :debug :output :human}))]
-    ;; Short-circuit: nothing to release for already-implemented tasks
-    (if (= :already-implemented impl-status)
+                   (log/create-logger {:min-level :debug :output :human}))
+        ;; Emit phase-started telemetry event
+        _ (phase/emit-phase-started! ctx :release)]
+    ;; Short-circuit: skip release only when implement was already-implemented
+    ;; AND there are no git changes from other phases (tests, docs, specs, etc.)
+    (if (and (= :already-implemented impl-status)
+             (empty? (git-dirty-files (ctx-worktree-path ctx))))
       (-> ctx
           (assoc-in [:phase :name] :release)
           (assoc-in [:phase :gates] gates)
@@ -194,6 +209,9 @@
         exec-context (build-executor-context ctx config)
         releaser-agent (get config :releaser-agent)
         ;; Execute the release phase
+        ;; Emit agent-started telemetry event for release executor
+        _ (phase/emit-agent-started! ctx :release :releaser)
+
         result (try
                  (let [exec-result (release-executor/execute-release-phase
                                     workflow-state
@@ -220,7 +238,10 @@
                                {:errors (:errors exec-result)
                                 :metrics (:metrics exec-result)}))))
                  (catch Exception e
-                   (response/failure e)))]
+                   (response/failure e)))
+
+        ;; Emit agent-completed telemetry event for release executor
+        _ (phase/emit-agent-completed! ctx :release :releaser result)]
 
     (-> ctx
         (assoc-in [:phase :name] :release)
@@ -268,12 +289,18 @@
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
     ;; Handle retrying: increment iteration counter
-    (cond-> updated-ctx
-      (registry/retrying? (:phase updated-ctx))
-      (-> (update-in [:phase :iterations] (fnil inc 1))
-          (assoc-in [:phase :last-error]
-                    (or (get-in result [:error :message])
-                        "Release phase failed"))))))
+    (let [final-ctx (cond-> updated-ctx
+                      (registry/retrying? (:phase updated-ctx))
+                      (-> (update-in [:phase :iterations] (fnil inc 1))
+                          (assoc-in [:phase :last-error]
+                                    (or (get-in result [:error :message])
+                                        "Release phase failed"))))]
+      ;; Emit phase-completed telemetry event
+      (phase/emit-phase-completed! final-ctx :release
+        {:outcome (if (= :completed phase-status) :success :failure)
+         :duration-ms duration-ms
+         :tokens (:tokens metrics 0)})
+      final-ctx)))
 
 (defn error-release
   "Handle release phase errors."

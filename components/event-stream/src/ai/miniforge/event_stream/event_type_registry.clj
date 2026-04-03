@@ -349,9 +349,9 @@
    :audit/source-browser "components/web-dashboard/resources/public/js/app.js"
    :audit/browser-switch "handleWorkflowEvent"
 
-   :total-server-events      43
+   :total-server-events      42
    :browser-handled-count    6
-   :browser-unhandled-count  37
+   :browser-unhandled-count  36
    :naming-asymmetry-count   11
 
    ;; Verdict

@@ -42,7 +42,8 @@
 (defn- porcelain-entry
   "Parse a single git status --porcelain=v1 line."
   [line]
-  (let [status (subs line 0 2)
+  (when (>= (count line) 3)
+    (let [status (subs line 0 2)
         raw-path (subs line 3)
         path (if (str/includes? raw-path " -> ")
                (second (str/split raw-path #" -> " 2))
@@ -52,7 +53,7 @@
       (deleted? status) {:bucket :deleted :path path}
       (tracked-addition? status) {:bucket :added :path path}
       (modified? status) {:bucket :modified :path path}
-      :else nil)))
+      :else nil))))
 
 (defn empty-snapshot
   "Return an empty working tree snapshot."
