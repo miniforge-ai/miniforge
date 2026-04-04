@@ -27,6 +27,7 @@
             [ai.miniforge.phase.file-context :as file-ctx]
             [ai.miniforge.phase.agent-behavior :as agent-beh]
             [ai.miniforge.phase.messages :as messages]
+            [ai.miniforge.phase.phase-result :as phase-result]
             [ai.miniforge.phase.phase-config :as phase-config]
             [ai.miniforge.phase.knowledge-helpers :as kb-helpers]
             [ai.miniforge.agent.interface :as agent]
@@ -231,14 +232,7 @@
                  (agent/invoke implementer-agent task agent-ctx)
                  (catch Exception e
                    (response/failure e)))]
-    (-> ctx
-        (assoc-in [:phase :name] :implement)
-        (assoc-in [:phase :agent] :implementer)
-        (assoc-in [:phase :gates] gates)
-        (assoc-in [:phase :budget] budget)
-        (assoc-in [:phase :started-at] start-time)
-        (assoc-in [:phase :status] :running)
-        (assoc-in [:phase :result] result)
+    (-> (phase-result/enter-context ctx :implement :implementer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest))))
 
 (def ^:private rate-limit-pattern
@@ -329,9 +323,7 @@
     (cond-> updated-ctx
       ;; On success: store lightweight result — code is in the environment, not here
       (= :completed phase-status)
-      (assoc-in [:phase :result] {:status :success
-                                   :environment-id env-id
-                                   :summary summary})
+      (assoc-in [:phase :result] (phase-result/success env-id summary))
       (registry/retrying? (:phase updated-ctx))
       (-> (update-in [:phase :iterations] (fnil inc 1))
           (assoc-in [:phase :last-error]

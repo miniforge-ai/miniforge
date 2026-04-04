@@ -25,6 +25,7 @@
   (:require [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.phase.phase-config :as phase-config]
+            [ai.miniforge.phase.phase-result :as phase-result]
             [ai.miniforge.phase.knowledge-helpers :as kb-helpers]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.knowledge.interface :as knowledge]
@@ -98,14 +99,7 @@
         ;; Emit agent-completed telemetry event
         _ (phase/emit-agent-completed! agent-ctx :review :reviewer result)]
 
-    (-> ctx
-        (assoc-in [:phase :name] :review)
-        (assoc-in [:phase :agent] :reviewer)
-        (assoc-in [:phase :gates] gates)
-        (assoc-in [:phase :budget] budget)
-        (assoc-in [:phase :started-at] start-time)
-        (assoc-in [:phase :status] :running)
-        (assoc-in [:phase :result] result)
+    (-> (phase-result/enter-context ctx :review :reviewer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest))))
 
 (defn leave-review
@@ -146,26 +140,24 @@
                         (update-in [:execution :phases-completed] (fnil conj []) :review)
                         ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
-                        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))
-        ;; Handle changes-requested: redirect to implement with review feedback
-        final-ctx (if (and (= :changes-requested review-decision)
-                           (< iterations max-iterations))
-                    (let [feedback (or (get-in result [:output :review/feedback])
-                                       (get-in result [:output :review/issues]))]
-                      (knowledge/capture-feedback-learning!
-                       (:knowledge-store ctx) :reviewer
-                       (get-in ctx [:execution/input :title]) feedback)
-                      (-> updated-ctx
-                          (update-in [:phase :iterations] (fnil inc 1))
-                          (assoc-in [:phase :review-feedback] feedback)
-                          (assoc-in [:phase :redirect-to] :implement)))
-                    updated-ctx)]
-    ;; Emit phase-completed telemetry event
-    (phase/emit-phase-completed! final-ctx :review
-      {:outcome (if (= :completed phase-status) :success :failure)
-       :duration-ms duration-ms
-       :tokens (:tokens metrics 0)})
-    final-ctx))
+                        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
+    ;; Handle changes-requested: redirect to implement with review feedback
+    (doto (if (and (= :changes-requested review-decision)
+                   (< iterations max-iterations))
+            (let [feedback (or (get-in result [:output :review/feedback])
+                               (get-in result [:output :review/issues]))]
+              (knowledge/capture-feedback-learning!
+               (:knowledge-store ctx) :reviewer
+               (get-in ctx [:execution/input :title]) feedback)
+              (-> updated-ctx
+                  (update-in [:phase :iterations] (fnil inc 1))
+                  (assoc-in [:phase :review-feedback] feedback)
+                  (assoc-in [:phase :redirect-to] :implement)))
+            updated-ctx)
+      (phase/emit-phase-completed! :review
+        {:outcome     (if (= :completed phase-status) :success :failure)
+         :duration-ms duration-ms
+         :tokens      (:tokens metrics 0)}))))
 
 (defn error-review
   "Handle review phase errors.

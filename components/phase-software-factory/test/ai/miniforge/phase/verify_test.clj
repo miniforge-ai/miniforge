@@ -1,21 +1,3 @@
-;; Title: Miniforge.ai
-;; Subtitle: An agentic SDLC / fleet-control platform
-;; Author: Christopher Lester
-;; Line: Founder, Miniforge.ai (project)
-;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
-;;
-;; Licensed under the Apache License, Version 2.0 (the "License");
-;; you may not use this file except in compliance with the License.
-;; You may obtain a copy of the License at
-;;
-;;     http://www.apache.org/licenses/LICENSE-2.0
-;;
-;; Unless required by applicable law or agreed to in writing, software
-;; distributed under the License is distributed on an "AS IS" BASIS,
-;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-;; See the License for the specific language governing permissions and
-;; limitations under the License.
-
 (ns ai.miniforge.phase.verify-test
   "Tests for the verify phase interceptor.
 
@@ -45,8 +27,8 @@
   [body-fn]
   (let [run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
     (with-redefs-fn
-      {run-var (fn [_] {:passed? true :test-count 5 :assertion-count 10
-                        :fail-count 0 :error-count 0 :output "Ran 5 tests containing 10 assertions.\n0 failures, 0 errors."})}
+      {run-var (fn [_ & _opts] {:passed? true :test-count 5 :assertion-count 10
+                                :fail-count 0 :error-count 0 :output "Ran 5 tests containing 10 assertions.\n0 failures, 0 errors."})}
       body-fn)))
 
 (defn with-failing-test-runner
@@ -54,9 +36,9 @@
   [body-fn]
   (let [run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
     (with-redefs-fn
-      {run-var (fn [_] {:passed? false :test-count 3 :assertion-count 6
-                        :fail-count 2 :error-count 0
-                        :output "Ran 3 tests containing 6 assertions.\n2 failures, 0 errors."})}
+      {run-var (fn [_ & _opts] {:passed? false :test-count 3 :assertion-count 6
+                                :fail-count 2 :error-count 0
+                                :output "Ran 3 tests containing 6 assertions.\n2 failures, 0 errors."})}
       body-fn)))
 
 ;------------------------------------------------------------------------------ Layer 0: Defaults tests
@@ -136,7 +118,7 @@
     (let [captured-path (atom nil)
           run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
       (with-redefs-fn
-        {run-var (fn [path]
+        {run-var (fn [path & _opts]
                    (reset! captured-path path)
                    {:passed? true :test-count 1 :fail-count 0 :error-count 0})}
         (fn []

@@ -41,17 +41,17 @@
 (defn with-passing-tests [body-fn]
   (let [run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
     (with-redefs-fn
-      {run-var (fn [_] {:passed? true :test-count 5 :assertion-count 10
-                        :fail-count 0 :error-count 0
-                        :output "Ran 5 tests containing 10 assertions.\n0 failures, 0 errors."})}
+      {run-var (fn [_ & _opts] {:passed? true :test-count 5 :assertion-count 10
+                                :fail-count 0 :error-count 0
+                                :output "Ran 5 tests containing 10 assertions.\n0 failures, 0 errors."})}
       body-fn)))
 
 (defn with-failing-tests [body-fn]
   (let [run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
     (with-redefs-fn
-      {run-var (fn [_] {:passed? false :test-count 3 :assertion-count 6
-                        :fail-count 2 :error-count 1
-                        :output "Ran 3 tests.\n2 failures, 1 error."})}
+      {run-var (fn [_ & _opts] {:passed? false :test-count 3 :assertion-count 6
+                                :fail-count 2 :error-count 1
+                                :output "Ran 3 tests.\n2 failures, 1 error."})}
       body-fn)))
 
 ;------------------------------------------------------------------------------ Enter Tests
@@ -106,8 +106,8 @@
   (testing "verify phase handles test runner exception as test failure"
     (let [run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
       (with-redefs-fn
-        {run-var (fn [_] {:passed? false :test-count 0 :fail-count 0 :error-count 1
-                          :output "bb: command not found"})}
+        {run-var (fn [_ & _opts] {:passed? false :test-count 0 :fail-count 0 :error-count 1
+                                  :output "bb: command not found"})}
         (fn []
           (let [ctx (-> (create-base-context)
                         (assoc :phase-config {:phase :verify}))
