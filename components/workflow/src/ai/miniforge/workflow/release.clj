@@ -227,9 +227,13 @@
                          :message "No code artifacts found in workflow state"}]
                :metrics {}})
             
-            ;; Process all files from all code artifacts
+            ;; Process all files from all code artifacts.
+            ;; In the new environment model, files are discovered via git diff in
+            ;; the worktree and stored under :release/files (the internal bridge key).
+            ;; Fall back to the legacy :code/files key for backward compatibility.
             (let [results (atom {:created 0 :modified 0 :deleted 0 :errors []})
-                  all-files (mapcat :code/files code-artifacts)]
+                  all-files (mapcat (fn [a] (or (:release/files a) (:code/files a)))
+                                    code-artifacts)]
               
               ;; Process each file
               (doseq [file-spec all-files]

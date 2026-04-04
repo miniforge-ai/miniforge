@@ -1,9 +1,8 @@
 (ns ai.miniforge.release-executor.core-sandbox-test
-  "Tests for dual-mode dispatch in release-executor core.
+  "Tests for environment-model dispatch in release-executor core.
 
-   Verifies that execute-release-phase correctly dispatches to sandbox
-   operations when :executor and :environment-id are present in context,
-   and falls back to git operations when they are absent."
+   Verifies that execute-release-phase always routes through the executor
+   (sandbox) path — stages dirty files instead of writing from code artifacts."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [clojure.string]
@@ -11,7 +10,7 @@
    [ai.miniforge.release-executor.core :as core]))
 
 ;; ============================================================================
-;; Mock executor (same pattern as sandbox_test.clj)
+;; Mock executor
 ;; ============================================================================
 
 (defn create-mock-executor
@@ -44,11 +43,9 @@
 ;; ============================================================================
 
 (defn make-workflow-state
-  "Create a minimal workflow state with code artifacts."
-  [files]
-  {:workflow/artifacts [{:artifact/type :code
-                         :artifact/content {:code/id (random-uuid)
-                                           :code/files files}}]
+  "Create a minimal workflow state."
+  []
+  {:workflow/artifacts []
    :workflow/spec {:spec/description "test task"}})
 
 (def test-release-meta
@@ -61,74 +58,80 @@
    :release/created-at (java.util.Date.)})
 
 ;; ============================================================================
-;; Sandbox mode detection tests
+;; Environment model: executor always required
 ;; ============================================================================
 
-(deftest sandbox-mode-detected-when-executor-present
-  (testing "sandbox? is true when both :executor and :environment-id in context"
-    (let [[exec cmds] (create-mock-executor
-                       :responses {"gh auth" {:exit-code 0 :stdout "Logged in" :stderr ""}
-                                   "git symbolic-ref" {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""}
-                                   "git fetch" {:exit-code 0 :stdout "" :stderr ""}
-                                   "git checkout" {:exit-code 0 :stdout "" :stderr ""}
-                                   "git commit" {:exit-code 0 :stdout "" :stderr ""}
-                                   "git rev-parse" {:exit-code 0 :stdout "abc123\n" :stderr ""}
-                                   "git push" {:exit-code 0 :stdout "" :stderr ""}
-                                   "gh pr create" {:exit-code 0 :stdout "https://github.com/o/r/pull/1\n" :stderr ""}})
-          workflow-state (make-workflow-state
-                          [{:action :create :path "src/a.clj" :content "(ns a)"}])
-          context {:executor exec
-                   :environment-id "mock-env"
-                   :create-pr? false}  ;; skip PR creation for simplicity
-          result (core/execute-release-phase workflow-state context
-                                             {:release-meta test-release-meta})]
-      ;; Should succeed via sandbox path
-      (is (:success? result))
-      ;; Commands should have been sent to the mock executor
-      (is (pos? (count @cmds)))
-      ;; Should contain sandbox operations (base64 write, git add)
-      (is (some #(clojure.string/includes? % "base64 -d") @cmds))
-      (is (some #(clojure.string/includes? % "git add") @cmds)))))
+(deftest executor-required-for-release
+  (testing "execute-release-phase fails without :executor in context"
+    (let [result (core/execute-release-phase
+                  (make-workflow-state)
+                  {:worktree-path "/tmp/wt" :environment-id "env-1" :create-pr? false}
+                  {:release-meta test-release-meta})]
+      (is (not (:success? result)))
+      (is (= :missing-executor (:type (first (:errors result))))))))
 
-(deftest host-mode-when-no-executor
-  (testing "sandbox? is false when :executor is nil"
-    (let [workflow-state (make-workflow-state
-                          [{:action :create :path "src/a.clj" :content "(ns a)"}])
-          ;; No :executor or :environment-id -> host mode
-          ;; Missing worktree-path should cause validation failure
-          context {:create-pr? false}
-          result (core/execute-release-phase workflow-state context {})]
-      ;; Should fail because no worktree-path and not sandbox
+(deftest environment-id-required-for-release
+  (testing "execute-release-phase fails without :environment-id in context"
+    (let [[exec _] (create-mock-executor)
+          result (core/execute-release-phase
+                  (make-workflow-state)
+                  {:worktree-path "/tmp/wt" :executor exec :create-pr? false}
+                  {:release-meta test-release-meta})]
+      (is (not (:success? result)))
+      (is (= :missing-environment-id (:type (first (:errors result))))))))
+
+(deftest worktree-path-required-for-release
+  (testing "execute-release-phase fails without :worktree-path in context"
+    (let [[exec _] (create-mock-executor)
+          result (core/execute-release-phase
+                  (make-workflow-state)
+                  {:executor exec :environment-id "env-1" :create-pr? false}
+                  {:release-meta test-release-meta})]
       (is (not (:success? result)))
       (is (= :missing-worktree-path (:type (first (:errors result))))))))
 
-(deftest sandbox-mode-skips-worktree-validation
-  (testing "sandbox mode does not require :worktree-path"
-    (let [[exec _cmds] (create-mock-executor
-                        :responses {"gh auth" {:exit-code 0 :stdout "" :stderr ""}
-                                    "git symbolic-ref" {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""}
-                                    "git fetch" {:exit-code 0 :stdout "" :stderr ""}
-                                    "git checkout" {:exit-code 0 :stdout "" :stderr ""}
-                                    "git commit" {:exit-code 0 :stdout "" :stderr ""}
-                                    "git rev-parse" {:exit-code 0 :stdout "abc123\n" :stderr ""}})
-          workflow-state (make-workflow-state
-                          [{:action :create :path "src/a.clj" :content "(ns a)"}])
-          ;; No :worktree-path but has :executor -> should NOT fail validation
-          context {:executor exec
-                   :environment-id "mock-env"
-                   :create-pr? false}
-          result (core/execute-release-phase workflow-state context
-                                             {:release-meta test-release-meta})]
-      (is (:success? result)))))
+;; ============================================================================
+;; Executor dispatch: git add instead of base64 write
+;; ============================================================================
 
-(deftest sandbox-no-code-artifacts-still-fails
-  (testing "sandbox mode still fails when no code artifacts"
-    (let [[exec _cmds] (create-mock-executor)
-          workflow-state {:workflow/artifacts []
-                          :workflow/spec {:spec/description "test"}}
-          context {:executor exec
+(deftest release-stages-dirty-files-not-base64
+  (testing "release executor stages dirty files — no base64 file writes"
+    (let [[exec cmds] (create-mock-executor
+                       :responses {"gh auth"        {:exit-code 0 :stdout "Logged in" :stderr ""}
+                                   "git symbolic-ref" {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""}
+                                   "git fetch"       {:exit-code 0 :stdout "" :stderr ""}
+                                   "git checkout"    {:exit-code 0 :stdout "" :stderr ""}
+                                   "git add"         {:exit-code 0 :stdout "" :stderr ""}
+                                   "git diff"        {:exit-code 0 :stdout "src/a.clj\n" :stderr ""}
+                                   "git commit"      {:exit-code 0 :stdout "" :stderr ""}
+                                   "git rev-parse"   {:exit-code 0 :stdout "abc123\n" :stderr ""}})
+          result (core/execute-release-phase
+                  (make-workflow-state)
+                  {:executor exec
                    :environment-id "mock-env"
+                   :worktree-path "/tmp/wt"
                    :create-pr? false}
-          result (core/execute-release-phase workflow-state context {})]
+                  {:release-meta test-release-meta})]
+      (is (:success? result))
+      ;; git add . was sent to executor
+      (is (some #(clojure.string/includes? % "git add") @cmds))
+      ;; No base64 writes — files already in worktree
+      (is (not (some #(clojure.string/includes? % "base64 -d") @cmds))))))
+
+(deftest release-fails-when-nothing-staged
+  (testing "release fails when git diff --cached shows nothing staged"
+    (let [[exec _] (create-mock-executor
+                    :responses {"git symbolic-ref" {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""}
+                                "git fetch"        {:exit-code 0 :stdout "" :stderr ""}
+                                "git checkout"     {:exit-code 0 :stdout "" :stderr ""}
+                                "git add"          {:exit-code 0 :stdout "" :stderr ""}
+                                "git diff"         {:exit-code 0 :stdout "" :stderr ""}}) ;; empty — nothing staged
+          result (core/execute-release-phase
+                  (make-workflow-state)
+                  {:executor exec
+                   :environment-id "mock-env"
+                   :worktree-path "/tmp/wt"
+                   :create-pr? false}
+                  {:release-meta test-release-meta})]
       (is (not (:success? result)))
-      (is (= :no-code-artifacts (:type (first (:errors result))))))))
+      (is (= :no-files-to-stage (:type (first (:errors result))))))))

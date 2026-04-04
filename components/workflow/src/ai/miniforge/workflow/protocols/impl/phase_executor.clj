@@ -140,14 +140,19 @@
        :metrics (:metrics result)})))
 
 (defn code-artifact->standard-artifact
-  "Convert a CodeArtifact to standard artifact format."
+  "Convert a CodeArtifact to standard artifact format.
+
+   In the new environment model, code changes live in the execution
+   environment's git working tree and are NOT serialized into artifacts.
+   :file-count defaults to 0 when :code/files is absent (new model);
+   code provenance is derived from the PR diff at release time."
   [code-artifact]
   (build-standard-artifact
    :code
    code-artifact
    {:phase :implement
     :language (:code/language code-artifact)
-    :file-count (count (:code/files code-artifact))}))
+    :file-count (count (get code-artifact :code/files []))}))
 
 (defn execute-implement-phase
   "Execute implement phase - generates code from plans."
