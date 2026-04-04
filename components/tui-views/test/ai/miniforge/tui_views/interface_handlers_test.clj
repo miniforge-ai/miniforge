@@ -1,3 +1,21 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
 (ns ai.miniforge.tui-views.interface-handlers-test
   "Tests for side-effect handlers in interface.clj that lack dedicated coverage.
 
@@ -16,15 +34,12 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.tui-views.interface :as iface]
-   [ai.miniforge.tui-views.msg :as msg]
    [ai.miniforge.tui-views.persistence :as persistence]
    [ai.miniforge.tui-views.persistence.pr :as persistence-pr]
    [ai.miniforge.tui-views.persistence.pr-cache :as pr-cache]
    [ai.miniforge.tui-views.persistence.github :as github]
    [ai.miniforge.policy-pack.software-factory :as policy-pack]
-   [ai.miniforge.pr-train.interface :as pr-train]
-   [ai.miniforge.llm.interface :as llm]
-   [ai.miniforge.response.interface :as response]))
+   [ai.miniforge.llm.interface :as llm]))
 
 ;; ---------------------------------------------------------------------------- Helpers
 
@@ -45,7 +60,7 @@
   (testing "evaluates policy for multiple PRs and returns review-completed"
     (with-redefs [persistence-pr/load-policy-packs (fn [] [{:pack/name "security"}])
                   policy-pack/evaluate-external-pr
-                  (fn [packs pr]
+                  (fn [packs _pr]
                     (is (= 1 (count packs)))
                     {:evaluation/passed? true})]
       (let [prs [(make-pr "a/b" 1) (make-pr "c/d" 2)]
@@ -166,18 +181,17 @@
 
 (deftest handle-control-action-returns-nil-test
   (testing "returns nil (fire-and-forget side-effect)"
-    (let [wf-id (random-uuid)]
-      ;; We can't easily test file writing without temp dirs, but we can
-      ;; verify the function doesn't throw and returns nil.
-      ;; Using a temp dir via system property override.
-      (let [tmp-dir (System/getProperty "java.io.tmpdir")
-            original-home (System/getProperty "user.home")]
-        (try
-          (System/setProperty "user.home" tmp-dir)
-          (let [result (iface/handle-control-action {:action :pause :workflow-id wf-id})]
-            (is (nil? result)))
-          (finally
-            (System/setProperty "user.home" original-home)))))))
+    (let [wf-id (random-uuid)
+          ;; We can't easily test file writing without temp dirs, but we can
+          ;; verify the function doesn't throw and returns nil.
+          ;; Using a temp dir via system property override.
+          tmp-dir (System/getProperty "java.io.tmpdir")
+          original-home (System/getProperty "user.home")]
+      (try
+        (System/setProperty "user.home" tmp-dir)
+        (is (nil? (iface/handle-control-action {:action :pause :workflow-id wf-id})))
+        (finally
+          (System/setProperty "user.home" original-home))))))
 
 ;; ---------------------------------------------------------------------------- handle-archive-workflows
 
@@ -193,13 +207,13 @@
 (deftest handle-archive-workflows-empty-ids-test
   (testing "empty workflow list returns zero archived"
     (with-redefs [persistence/archive-workflows!
-                  (fn [ids] {:archived 0 :failed 0})]
+                  (fn [_ids] {:archived 0 :failed 0})]
       (let [m (iface/handle-archive-workflows {:workflow-ids []})]
         (is (= 0 (:archived (msg-payload m))))))))
 
 ;; ---------------------------------------------------------------------------- handle-fleet-risk-triage
 
-(defn mock-llm-success [content]
+(defn mock-llm-success [_content]
   (reify
     Object
     (toString [_] "mock-result")))
@@ -245,7 +259,7 @@
                   llm/success?    (fn [_] true)
                   llm/get-content (fn [_] "I can't assess risk for these PRs.")
                   iface/fleet-triage-system-prompt (fn [] "prompt")]
-      (let [ids [["a/b" 1] ["c/d" 2]]
+      (let [_ids [["a/b" 1] ["c/d" 2]]
             m (iface/handle-fleet-risk-triage
                 {:pr-summaries [{:id ["a/b" 1] :summary "s1"}
                                 {:id ["c/d" 2] :summary "s2"}]})]
@@ -275,13 +289,13 @@
 
 (deftest parse-risk-triage-response-multiple-lines-test
   (testing "parses multiple RISK: lines"
-    (let [content "RISK: org/repo#10 | high | Security issue\nRISK: org/repo#20 | low | Docs only\nSome other text"]
-      (let [result (iface/parse-risk-triage-response content)]
-        (is (= 2 (count result)))
-        (is (= ["org/repo" 10] (:id (first result))))
-        (is (= "high" (:level (first result))))
-        (is (= "Security issue" (:reason (first result))))
-        (is (= ["org/repo" 20] (:id (second result))))))))
+    (let [content "RISK: org/repo#10 | high | Security issue\nRISK: org/repo#20 | low | Docs only\nSome other text"
+          result (iface/parse-risk-triage-response content)]
+      (is (= 2 (count result)))
+      (is (= ["org/repo" 10] (:id (first result))))
+      (is (= "high" (:level (first result))))
+      (is (= "Security issue" (:reason (first result))))
+      (is (= ["org/repo" 20] (:id (second result)))))))
 
 (deftest parse-risk-triage-response-empty-test
   (testing "returns empty vector for no RISK: lines"
@@ -383,13 +397,13 @@
 
 (deftest dispatch-effect-routes-discover-repos-test
   (testing ":discover-repos routes correctly"
-    (with-redefs [persistence-pr/discover-repos (fn [owner] {:repos []})]
+    (with-redefs [persistence-pr/discover-repos (fn [_owner] {:repos []})]
       (let [m (iface/dispatch-effect nil {:type :discover-repos :owner "acme"})]
         (is (= :msg/repos-discovered (msg-type m)))))))
 
 (deftest dispatch-effect-routes-browse-repos-test
   (testing ":browse-repos routes correctly"
-    (with-redefs [persistence-pr/browse-repos (fn [opts] {:repos []})]
+    (with-redefs [persistence-pr/browse-repos (fn [_opts] {:repos []})]
       (let [m (iface/dispatch-effect nil {:type :browse-repos :owner "acme"
                                            :provider :github :limit 10 :source :browse})]
         (is (= :msg/repos-browsed (msg-type m)))))))
@@ -456,7 +470,7 @@
 (deftest dispatch-effect-routes-reload-workflow-detail-test
   (testing ":reload-workflow-detail routes correctly"
     (let [wf-id (random-uuid)]
-      (with-redefs [persistence/load-workflow-detail (fn [id] {:phases [:plan]})]
+      (with-redefs [persistence/load-workflow-detail (fn [_id] {:phases [:plan]})]
         (let [m (iface/dispatch-effect nil {:type :reload-workflow-detail :workflow-id wf-id})]
           (is (= :msg/workflow-detail-loaded (msg-type m))))))))
 

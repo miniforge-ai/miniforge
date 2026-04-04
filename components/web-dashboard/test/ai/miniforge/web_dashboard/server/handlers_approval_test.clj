@@ -29,8 +29,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [cheshire.core :as json]
-   [ai.miniforge.web-dashboard.server.handlers :as sut]
-   [ai.miniforge.event-stream.interface :as es]))
+   [ai.miniforge.web-dashboard.server.handlers :as sut]))
 
 ;------------------------------------------------------------------------------ Helpers
 

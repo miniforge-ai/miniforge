@@ -1,3 +1,21 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
 (ns ai.miniforge.release-executor.artifact-validation-integration-test
   "Project-level integration tests for artifact validation in the release executor.
 
@@ -77,13 +95,12 @@
                                                     :action :create}]}}])
           result (release-executor/execute-release-phase state (make-context) {})]
       ;; Pipeline may fail later at git branch (no remote) but should NOT fail at validation
-      (let [error-types (set (map :type (:errors result)))]
-        (is (not (contains? error-types :no-code-artifacts))
-            "Should not fail with no-code-artifacts for valid artifact")
-        (is (not (contains? error-types :no-code-files))
-            "Should not fail with no-code-files for valid artifact")
-        (is (not (contains? error-types :no-files-to-write))
-            "Should not fail with no-files-to-write for valid artifact")))))
+      (is (not (contains? (set (map :type (:errors result))) :no-code-artifacts))
+          "Should not fail with no-code-artifacts for valid artifact")
+      (is (not (contains? (set (map :type (:errors result))) :no-code-files))
+          "Should not fail with no-code-files for valid artifact")
+      (is (not (contains? (set (map :type (:errors result))) :no-files-to-write))
+          "Should not fail with no-files-to-write for valid artifact"))))
 
 (deftest mixed-nil-and-valid-artifacts-test
   (testing "release executor filters out nil artifacts and processes valid ones"
@@ -97,8 +114,7 @@
                                                     :action :create}]}}])
           result (release-executor/execute-release-phase state (make-context) {})]
       ;; Nil artifact should be filtered out, valid one should pass validation
-      (let [error-types (set (map :type (:errors result)))]
-        (is (not (contains? error-types :no-code-artifacts))
-            "Should not fail with no-code-artifacts — nil was filtered, valid remained")
-        (is (not (contains? error-types :no-code-files))
-            "Should not fail with no-code-files — valid artifact has files")))))
+      (is (not (contains? (set (map :type (:errors result))) :no-code-artifacts))
+          "Should not fail with no-code-artifacts — nil was filtered, valid remained")
+      (is (not (contains? (set (map :type (:errors result))) :no-code-files))
+          "Should not fail with no-code-files — valid artifact has files"))))
