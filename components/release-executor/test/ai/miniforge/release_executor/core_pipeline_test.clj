@@ -18,8 +18,12 @@
 
 (ns ai.miniforge.release-executor.core-pipeline-test
   "Unit tests for release-executor core pipeline helpers, step functions,
-   and execute-release-phase integration (non-sandbox, mocked git)."
+   and execute-release-phase integration.
+
+   In the environment model, files live in the executor worktree — no code
+   artifact file writes. Tests use pre-provided :release-meta to skip LLM."
   (:require
+   [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.release-executor.core :as sut]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
@@ -27,6 +31,21 @@
 ;; ============================================================================
 ;; Test helpers
 ;; ============================================================================
+
+(defn create-failing-mock-executor
+  "Mock executor that always fails, used to reach a specific pipeline stage."
+  []
+  (reify
+    dag/TaskExecutor
+    (executor-type [_] :mock-failing)
+    (available? [_] (dag/ok {:available? true}))
+    (acquire-environment! [_ _ _] (dag/ok {:environment-id "mock-env"}))
+    (execute! [_ _env-id _command _opts]
+      (dag/ok {:exit-code 1 :stdout "" :stderr "mock error"}))
+    (copy-to! [_ _ _ _] (dag/ok {}))
+    (copy-from! [_ _ _ _] (dag/ok {}))
+    (release-environment! [_ _] (dag/ok {:released? true}))
+    (environment-status [_ _] (dag/ok {:status :running}))))
 
 (def test-release-meta
   {:release/branch-name "mf/test-change-abc12345"
@@ -147,50 +166,31 @@
       (is (= state (sut/step-validate-inputs state))))))
 
 (deftest step-validate-inputs-missing-worktree-path
-  (testing "fails when worktree-path is nil and not sandbox"
-    (let [state {:code-artifacts [{:code/files [{:path "a.clj"}]}]
-                 :sandbox? false}
+  (testing "fails when :worktree-path is absent"
+    (let [state {:executor :some-executor :environment-id "env-1"}
           result (sut/step-validate-inputs state)]
       (is (sut/failed? result))
       (is (= :missing-worktree-path (get-in result [:failure :type]))))))
 
-(deftest step-validate-inputs-sandbox-skips-worktree-check
-  (testing "sandbox mode does not require :worktree-path"
-    (let [state {:code-artifacts [{:code/files [{:path "a.clj"}]}]
-                 :sandbox? true}
-          result (sut/step-validate-inputs state)]
-      (is (not (sut/failed? result))))))
-
-(deftest step-validate-inputs-empty-code-artifacts
-  (testing "fails when code-artifacts is empty"
-    (let [state {:worktree-path "/tmp" :code-artifacts [] :sandbox? false}
+(deftest step-validate-inputs-missing-executor
+  (testing "fails when :executor is absent"
+    (let [state {:worktree-path "/tmp/wt" :environment-id "env-1"}
           result (sut/step-validate-inputs state)]
       (is (sut/failed? result))
-      (is (= :no-code-artifacts (get-in result [:failure :type]))))))
+      (is (= :missing-executor (get-in result [:failure :type]))))))
 
-(deftest step-validate-inputs-all-empty-files
-  (testing "fails when all code artifacts have empty file lists"
-    (let [state {:worktree-path "/tmp"
-                 :code-artifacts [{:code/files []} {:code/files []}]
-                 :sandbox? false}
+(deftest step-validate-inputs-missing-environment-id
+  (testing "fails when :environment-id is absent"
+    (let [state {:worktree-path "/tmp/wt" :executor :some-executor}
           result (sut/step-validate-inputs state)]
       (is (sut/failed? result))
-      (is (= :no-code-files (get-in result [:failure :type]))))))
+      (is (= :missing-environment-id (get-in result [:failure :type]))))))
 
 (deftest step-validate-inputs-valid-state-passes
-  (testing "valid state passes validation"
-    (let [state {:worktree-path "/tmp"
-                 :code-artifacts [{:code/files [{:path "a.clj" :action :create}]}]
-                 :sandbox? false}
-          result (sut/step-validate-inputs state)]
-      (is (not (sut/failed? result))))))
-
-(deftest step-validate-inputs-at-least-one-non-empty-artifact
-  (testing "passes if at least one artifact has files"
-    (let [state {:worktree-path "/tmp"
-                 :code-artifacts [{:code/files []}
-                                  {:code/files [{:path "a.clj" :action :create}]}]
-                 :sandbox? false}
+  (testing "state with worktree-path, executor, and environment-id passes"
+    (let [state {:worktree-path "/tmp/wt"
+                 :executor :some-executor
+                 :environment-id "env-1"}
           result (sut/step-validate-inputs state)]
       (is (not (sut/failed? result))))))
 
@@ -248,6 +248,15 @@
       (is (str/includes? body "Clean code")))))
 
 ;; ============================================================================
+;; step-stage-dirty-files — passes through failure
+;; ============================================================================
+
+(deftest step-stage-dirty-files-already-failed-passes-through
+  (testing "already-failed state passes through"
+    (let [state {:failure {:type :branch-create-failed :message "nope"}}]
+      (is (= state (sut/step-stage-dirty-files state))))))
+
+;; ============================================================================
 ;; step-validate-diff
 ;; ============================================================================
 
@@ -255,12 +264,6 @@
   (testing "already-failed state passes through"
     (let [state {:failure {:type :prior :message "x"}}]
       (is (= state (sut/step-validate-diff state))))))
-
-(deftest step-validate-diff-skipped-in-sandbox-mode
-  (testing "sandbox mode skips diff validation"
-    (let [state {:sandbox? true :worktree-path "/tmp"}
-          result (sut/step-validate-diff state)]
-      (is (not (sut/failed? result))))))
 
 ;; ============================================================================
 ;; pipeline->result
@@ -299,7 +302,7 @@
 
 (deftest pipeline-result-failure-without-metrics
   (testing "failure without write-metrics uses empty map"
-    (let [state {:failure {:type :no-code-artifacts :message "empty"}}
+    (let [state {:failure {:type :no-files-to-stage :message "empty"}}
           result (sut/pipeline->result state)]
       (is (not (:success? result)))
       (is (= {} (:metrics result))))))
@@ -319,93 +322,55 @@
 ;; execute-release-phase — integration (short-circuit paths)
 ;; ============================================================================
 
-(deftest execute-release-phase-no-artifacts
-  (testing "fails gracefully when workflow has no artifacts"
-    (let [workflow-state {:workflow/artifacts []
-                          :workflow/spec {:spec/description "test"}}
-          context {:worktree-path "/tmp" :create-pr? false}
-          result (sut/execute-release-phase workflow-state context {})]
-      (is (not (:success? result)))
-      (is (= :no-code-artifacts (:type (first (:errors result))))))))
-
-(deftest execute-release-phase-no-code-artifacts-only-reviews
-  (testing "fails when workflow only has review artifacts, no code"
-    (let [workflow-state {:workflow/artifacts
-                          [{:artifact/type :review
-                            :artifact/content {:review/summary "good"}}]
-                          :workflow/spec {:spec/description "test"}}
-          context {:worktree-path "/tmp" :create-pr? false}
-          result (sut/execute-release-phase workflow-state context {})]
-      (is (not (:success? result)))
-      (is (= :no-code-artifacts (:type (first (:errors result))))))))
-
-(deftest execute-release-phase-code-artifact-empty-files
-  (testing "fails when code artifact has empty files list"
-    (let [workflow-state (make-workflow-state
-                          [(make-code-artifact [])])
-          context {:worktree-path "/tmp" :create-pr? false}
-          result (sut/execute-release-phase workflow-state context {})]
-      (is (not (:success? result)))
-      (is (= :no-code-files (:type (first (:errors result))))))))
-
-(deftest execute-release-phase-missing-worktree-non-sandbox
-  (testing "fails when worktree-path missing in non-sandbox mode"
-    (let [workflow-state (make-workflow-state
-                          [(make-code-artifact
-                            [{:path "a.clj" :action :create :content "(ns a)"}])])
-          context {:create-pr? false}
+(deftest execute-release-phase-missing-worktree-path
+  (testing "fails when :worktree-path is absent"
+    (let [workflow-state (make-workflow-state [])
+          context {:executor :some-executor :environment-id "env-1" :create-pr? false}
           result (sut/execute-release-phase workflow-state context {})]
       (is (not (:success? result)))
       (is (= :missing-worktree-path (:type (first (:errors result))))))))
 
+(deftest execute-release-phase-missing-executor
+  (testing "fails when :executor is absent"
+    (let [workflow-state (make-workflow-state [])
+          context {:worktree-path "/tmp/wt" :environment-id "env-1" :create-pr? false}
+          result (sut/execute-release-phase workflow-state context {})]
+      (is (not (:success? result)))
+      (is (= :missing-executor (:type (first (:errors result))))))))
+
+(deftest execute-release-phase-missing-environment-id
+  (testing "fails when :environment-id is absent"
+    (let [workflow-state (make-workflow-state [])
+          context {:worktree-path "/tmp/wt" :executor :some-executor :create-pr? false}
+          result (sut/execute-release-phase workflow-state context {})]
+      (is (not (:success? result)))
+      (is (= :missing-environment-id (:type (first (:errors result))))))))
+
 (deftest execute-release-phase-pre-provided-release-meta
   (testing "pre-provided release-meta skips metadata generation"
-    ;; This will still fail at branch creation (no real git), but metadata step passes
-    (let [workflow-state (make-workflow-state
-                          [(make-code-artifact
-                            [{:path "a.clj" :action :create :content "(ns a)"}])])
-          context {:worktree-path "/tmp/nonexistent-test-dir" :create-pr? false}
+    ;; Fails at branch creation (mock executor returns exit 1), but metadata step passes
+    (let [workflow-state (make-workflow-state [])
+          exec (create-failing-mock-executor)
+          context {:worktree-path "/tmp/wt" :executor exec
+                   :environment-id "env-1" :create-pr? false}
           result (sut/execute-release-phase workflow-state context
                                            {:release-meta test-release-meta})]
-      ;; Will fail at branch creation, but should have gotten past metadata
-      (is (not (:success? result)))
-      ;; Error should NOT be metadata-related
+      ;; Error should NOT be metadata-related — pre-provided meta was used
       (is (not= :metadata-generation-failed (:type (first (:errors result))))))))
 
 (deftest execute-release-phase-extracts-workflow-data
   (testing "review and test artifacts are extracted from workflow state"
-    ;; We verify by checking the metadata includes review info in the fallback body
-    ;; Will fail at git operations, but metadata is generated first
-    (let [workflow-state {:workflow/artifacts
-                          [(make-code-artifact
-                            [{:path "a.clj" :action :create :content "(ns a)"}])
-                           {:artifact/type :review
-                            :artifact/content {:review/summary "Excellent code"
-                                               :review/decision :approved}}]
-                          :workflow/spec {:spec/description "Test task"}}
-          context {:worktree-path "/tmp/nonexistent-test-dir" :create-pr? false}
-          ;; Don't pass release-meta so fallback is used with workflow-data
-          result (sut/execute-release-phase workflow-state context {})]
-      ;; Will fail at git step, but that's expected
-      (is (not (:success? result))))))
-
-;; ============================================================================
-;; step-write-and-stage — passes through failure
-;; ============================================================================
-
-(deftest step-write-and-stage-already-failed-passes-through
-  (testing "already-failed state passes through"
-    (let [state {:failure {:type :branch-create-failed :message "nope"}}]
-      (is (= state (sut/step-write-and-stage state))))))
-
-(deftest step-write-and-stage-empty-files-fails
-  (testing "fails when all artifacts have no files"
-    (let [state {:worktree-path "/tmp"
-                 :code-artifacts [{:code/files []}]
-                 :sandbox? false}
-          result (sut/step-write-and-stage state)]
-      (is (sut/failed? result))
-      (is (= :no-files-to-write (get-in result [:failure :type]))))))
+    ;; step-generate-metadata uses workflow-data before any executor call
+    (let [state {:code-artifacts []
+                 :task-description "Test task"
+                 :context {}
+                 :workflow-data {:review-artifacts
+                                [{:review/summary "Excellent code"
+                                  :review/decision :approved}]}}
+          result (sut/step-generate-metadata state)
+          body (get-in result [:release-meta :release/pr-body])]
+      ;; Review content appears in the generated PR body
+      (is (str/includes? body "Excellent code")))))
 
 ;; ============================================================================
 ;; step-commit / step-push / step-create-pr — pass through failure
@@ -455,8 +420,8 @@
                  :commit-sha "abc123"
                  :create-pr? false
                  :release-meta test-release-meta
-                 :write-metrics {:files-written 2 :files-modified 1 :total-operations 3}
-                 :code-artifacts [{:code/files [{:path "a.clj"}]}]}
+                 :write-metrics {:files-written 2 :total-operations 2}
+                 :code-artifacts []}
           result (sut/step-build-artifact state)]
       (is (not (sut/failed? result)))
       (is (some? (:release-artifact result))))))

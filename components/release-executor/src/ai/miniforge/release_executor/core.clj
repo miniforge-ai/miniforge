@@ -19,20 +19,18 @@
 (ns ai.miniforge.release-executor.core
   "Release phase executor - orchestrates the release pipeline.
 
-   This is the main entry point that coordinates:
-   - Git operations (branch, commit, push, PR)
-   - File operations (write, delete, stage)
-   - Metadata generation (releaser agent or fallback)
-
-   The pipeline pattern ensures clean sequential execution with early exit on failure."
+   In the environment model, code changes live in the executor's git worktree.
+   The release phase stages dirty files, commits, pushes, and creates a PR.
+   No file writes from code artifacts — the implement agent already wrote files
+   to the worktree during the implement phase."
   (:require
    [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.release-executor.files :as files]
    [ai.miniforge.release-executor.git :as git]
    [ai.miniforge.release-executor.metadata :as metadata]
    [ai.miniforge.release-executor.result :as result]
-   [ai.miniforge.release-executor.sandbox :as sandbox]))
+   [ai.miniforge.release-executor.sandbox :as sandbox]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pipeline helpers
@@ -53,7 +51,7 @@
              hint (assoc :hint hint)))))
 
 (defn extract-code-artifacts
-  "Extract code artifacts from workflow artifacts."
+  "Extract code artifacts from workflow artifacts (used for PR metadata generation)."
   [workflow-artifacts]
   (->> workflow-artifacts
        (filter #(or (= :code (:type %))
@@ -76,17 +74,12 @@
 (defn step-validate-inputs [state]
   (cond
     (failed? state) state
-    ;; In sandbox mode, worktree-path is not required (container has its own workspace)
-    (and (not (:sandbox? state)) (not (:worktree-path state)))
+    (not (:worktree-path state))
     (fail state :missing-worktree-path "Context must include :worktree-path for release phase")
-    (empty? (:code-artifacts state))
-    (do
-      (when-let [logger (:logger state)]
-        (log/warn logger :release-executor :no-code-artifacts
-                  {:message "No code artifacts found to release"}))
-      (fail state :no-code-artifacts "No code artifacts found in workflow state"))
-    (every? #(empty? (:code/files %)) (:code-artifacts state))
-    (fail state :no-code-files "Code artifacts contain no files")
+    (not (:executor state))
+    (fail state :missing-executor "Context must include :executor for release phase")
+    (not (:environment-id state))
+    (fail state :missing-environment-id "Context must include :environment-id for release phase")
     :else state))
 
 (defn step-check-gh-auth [state]
@@ -94,9 +87,7 @@
     (failed? state) state
     (not (:create-pr? state)) state
     :else
-    (let [gh-auth (if (:sandbox? state)
-                    (sandbox/check-gh-auth! (:executor state) (:environment-id state))
-                    (git/check-gh-auth!))]
+    (let [gh-auth (sandbox/check-gh-auth! (:executor state) (:environment-id state))]
       (if (:authenticated? gh-auth)
         state
         (fail state :gh-auth-failed (:error gh-auth)
@@ -122,45 +113,46 @@
 (defn step-create-branch [state]
   (if (failed? state)
     state
-    (let [{:keys [worktree-path release-meta sandbox? executor environment-id]} state
+    (let [{:keys [release-meta executor environment-id]} state
           branch-name (:release/branch-name release-meta)
-          result (if sandbox?
-                   (sandbox/create-branch! executor environment-id branch-name)
-                   (git/create-branch! worktree-path branch-name))]
+          result (sandbox/create-branch! executor environment-id branch-name)]
       (if (result/succeeded? result)
         (assoc state
                :branch (:branch result)
                :base-branch (:base-branch result))
         (fail state :branch-create-failed (:error result))))))
 
-(defn step-write-and-stage [state]
+(defn step-stage-dirty-files
+  "Stage all dirty files in the executor environment.
+
+   In the environment model, files are already in the worktree (written by
+   the implement agent); this step stages them for commit."
+  [state]
   (if (failed? state)
     state
-    (let [{:keys [worktree-path code-artifacts logger sandbox? executor environment-id]} state
-          all-files (mapcat :code/files code-artifacts)]
-      (if (empty? all-files)
-        (fail state :no-files-to-write "No files in code artifacts")
-        (let [result (if sandbox?
-                       (sandbox/write-and-stage-files! executor environment-id code-artifacts)
-                       (files/write-and-stage-files! worktree-path code-artifacts logger))]
-          (if (result/succeeded? result)
-            (let [total-ops (get-in result [:metrics :total-operations] 0)]
-              (if (zero? total-ops)
-                (fail state :no-files-written "Expected files but wrote 0")
-                (assoc state :write-metrics (:metrics result))))
-            (do
-              (when logger
-                (log/error logger :release-executor :write-stage-failed
-                           {:data {:errors (:errors result)}}))
-              (assoc state
-                     :failure {:type :write-stage-failed :errors (:errors result)}
-                     :write-metrics (:metrics result)))))))))
+    (let [{:keys [executor environment-id]} state
+          stage-r (sandbox/stage-files! executor environment-id :all)
+          staged-r (when (result/succeeded? stage-r)
+                     (sandbox/exec! executor environment-id "git diff --cached --name-only"))]
+      (cond
+        (not (result/succeeded? stage-r))
+        (fail state :stage-failed (:error stage-r))
+
+        (str/blank? (get staged-r :output ""))
+        (fail state :no-files-to-stage
+              "No modified files in executor environment to stage for release")
+
+        :else
+        (let [staged-count (count (remove str/blank?
+                                          (str/split-lines (:output staged-r ""))))]
+          (assoc state :write-metrics {:total-operations staged-count
+                                       :files-written staged-count}))))))
 
 (defn step-validate-diff
   "Validate staged diff is not destructive before committing.
    Rejects changes that delete more tests than they add or that empty files."
   [state]
-  (if (or (failed? state) (:sandbox? state))
+  (if (failed? state)
     state
     (let [{:keys [worktree-path logger]} state
           diff-stats (git/diff-stats worktree-path)
@@ -204,10 +196,9 @@
 (defn step-commit [state]
   (if (failed? state)
     state
-    (let [{:keys [worktree-path release-meta sandbox? executor environment-id]} state
-          result (if sandbox?
-                   (sandbox/commit-changes! executor environment-id (:release/commit-message release-meta))
-                   (git/commit-changes! worktree-path (:release/commit-message release-meta)))]
+    (let [{:keys [release-meta executor environment-id]} state
+          result (sandbox/commit-changes! executor environment-id
+                                          (:release/commit-message release-meta))]
       (if (result/succeeded? result)
         (assoc state :commit-sha (:commit-sha result))
         (fail state :commit-failed (:error result))))))
@@ -217,10 +208,8 @@
     (failed? state) state
     (not (:create-pr? state)) state
     :else
-    (let [{:keys [worktree-path branch sandbox? executor environment-id]} state
-          result (if sandbox?
-                   (sandbox/push-branch! executor environment-id branch)
-                   (git/push-branch! worktree-path branch))]
+    (let [{:keys [branch executor environment-id]} state
+          result (sandbox/push-branch! executor environment-id branch)]
       (if (result/succeeded? result)
         state
         (fail state :push-failed (:error result))))))
@@ -230,16 +219,11 @@
     (failed? state) state
     (not (:create-pr? state)) state
     :else
-    (let [{:keys [worktree-path release-meta base-branch sandbox? executor environment-id]} state
-          result (if sandbox?
-                   (sandbox/create-pr! executor environment-id
-                                       {:title (:release/pr-title release-meta)
-                                        :body (:release/pr-description release-meta)
-                                        :base-branch base-branch})
-                   (git/create-pr! worktree-path
-                                   {:title (:release/pr-title release-meta)
-                                    :body (:release/pr-description release-meta)
-                                    :base-branch base-branch}))]
+    (let [{:keys [release-meta base-branch executor environment-id]} state
+          result (sandbox/create-pr! executor environment-id
+                                     {:title (:release/pr-title release-meta)
+                                      :body (:release/pr-description release-meta)
+                                      :base-branch base-branch})]
       (if (result/succeeded? result)
         (assoc state
                :pr-number (:pr-number result)
@@ -310,10 +294,14 @@
 (defn execute-release-phase
   "Execute the release phase.
 
+   Requires an executor environment (worktree) acquired before this phase.
+   Stages dirty files in the worktree, commits, pushes, and creates a PR.
+
    Arguments:
    - workflow-state - Workflow state with :workflow/artifacts
-   - context        - Execution context with :worktree-path, :logger, etc.
-   - opts           - Options with :releaser (optional)
+   - context        - Execution context with :worktree-path, :executor,
+                      :environment-id, :logger, etc.
+   - opts           - Options with :releaser (optional), :release-meta (optional)
 
    Returns:
    {:success? bool
@@ -324,7 +312,6 @@
   (let [logger (:logger context)
         executor (:executor context)
         environment-id (:environment-id context)
-        sandbox? (boolean (and executor environment-id))
         workflow-artifacts (:workflow/artifacts workflow-state)
         initial-state (cond-> {:logger logger
                                :worktree-path (:worktree-path context)
@@ -336,9 +323,8 @@
                                :code-artifacts (extract-code-artifacts workflow-artifacts)
                                :workflow-data (extract-workflow-data workflow-artifacts)
                                :executor executor
-                               :environment-id environment-id
-                               :sandbox? sandbox?}
-                       (:release-meta opts) (assoc :release-meta (:release-meta opts)))]
+                               :environment-id environment-id}
+                        (:release-meta opts) (assoc :release-meta (:release-meta opts)))]
 
     (when logger
       (log/info logger :release-executor :phase-started
@@ -350,7 +336,7 @@
                      step-check-gh-auth
                      step-generate-metadata
                      step-create-branch
-                     step-write-and-stage
+                     step-stage-dirty-files
                      step-validate-diff
                      step-commit
                      step-push
@@ -361,8 +347,6 @@
         (spit "/tmp/miniforge-release-executor-debug.edn"
               (str (pr-str {:failure (:failure result)
                             :worktree-path (:worktree-path initial-state)
-                            :code-artifact-count (count (:code-artifacts initial-state))
-                            :file-count (count (mapcat :code/files (:code-artifacts initial-state)))
                             :create-pr? (:create-pr? initial-state)
                             :has-releaser? (boolean (:releaser initial-state))
                             :timestamp (java.util.Date.)})
