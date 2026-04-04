@@ -523,7 +523,10 @@
                                 :execution/environment-id (get opts :environment-id)
                                 :execution/worktree-path (or (:worktree-path opts)
                                                              (:sandbox-workdir opts))
-                                :execution/mode (get opts :execution-mode :local)))]
+                                :execution/mode (get opts :execution-mode :local)
+                                ;; Injected so dag-orchestrator can call back into the
+                                ;; runner without a circular namespace dependency.
+                                :execution/run-pipeline-fn run-pipeline))]
 
      ;; Publish workflow started event (unless caller already did)
      (when-not skip-lifecycle?
