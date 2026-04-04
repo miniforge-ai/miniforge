@@ -6,6 +6,7 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]
+   [ai.miniforge.dag-executor.executor]
    [ai.miniforge.phase.interface]))
 
 ;; ============================================================================
