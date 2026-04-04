@@ -271,14 +271,16 @@
 
 (deftest run-pipeline-without-executor-skips-env-keys-test
   (testing "when no executor in opts and acquisition yields nil, env keys are absent"
-    ;; dag-executor is on the classpath but worktree creation may fail in the
-    ;; test environment (no real git repo configured for worktrees).
-    ;; The test verifies the safe-nil path: acquisition failure → no env keys.
-    (let [workflow {:workflow/id :test
-                    :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase :done}]}
-          result (runner/run-pipeline workflow {:task "Test"} {})]
-      (is (= :completed (:execution/status result)))
-      ;; env keys absent when acquisition fails or returns nil
-      (is (nil? (:execution/environment-id result)))
-      (is (nil? (:execution/worktree-path result))))))
+    ;; Force acquisition to return nil for deterministic test isolation.
+    ;; Verifies the safe-nil path: acquisition failure → no env keys.
+    (let [acquire-var (resolve 'ai.miniforge.workflow.runner/acquire-execution-environment!)]
+      (with-redefs-fn
+        {acquire-var (fn [& _] nil)}
+        (fn []
+          (let [workflow {:workflow/id :test
+                          :workflow/version "1.0.0"
+                          :workflow/pipeline [{:phase :done}]}
+                result (runner/run-pipeline workflow {:task "Test"} {})]
+            (is (= :completed (:execution/status result)))
+            (is (nil? (:execution/environment-id result)))
+            (is (nil? (:execution/worktree-path result)))))))))

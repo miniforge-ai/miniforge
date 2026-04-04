@@ -8,6 +8,23 @@
   :release/using-deterministic-metadata
   "No releaser agent or LLM available, using deterministic metadata"
 
+  ;; validation
+  :exec/missing-worktree-path "Context must include :worktree-path for release phase"
+  :exec/missing-executor "Context must include :executor for release phase"
+  :exec/missing-environment-id "Context must include :environment-id for release phase"
+
+  ;; gh auth
+  :gh/auth-login-hint "Run: gh auth login"
+  :gh/install-hint "Install: brew install gh"
+
+  ;; pipeline steps
+  :step/metadata-generation-failed "Releaser agent failed to generate release metadata"
+  :step/no-files-to-stage "No modified files in executor environment to stage for release"
+  :step/diff-net-negative-tests
+  "Diff removes more tests than it adds ({removed} removed, {added} added)"
+  :step/diff-heavily-destructive
+  "Diff is heavily destructive ({deletions} deletions vs {additions} additions)"
+
   ;; release metadata
   :pr/summary-section "## Summary\n\n{summary}\n\n"
   :pr/changes-section "## Changes\n\n{file-list}\n\n"

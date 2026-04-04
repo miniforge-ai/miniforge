@@ -1,21 +1,3 @@
-;; Title: Miniforge.ai
-;; Subtitle: An agentic SDLC / fleet-control platform
-;; Author: Christopher Lester
-;; Line: Founder, Miniforge.ai (project)
-;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
-;;
-;; Licensed under the Apache License, Version 2.0 (the "License");
-;; you may not use this file except in compliance with the License.
-;; You may obtain a copy of the License at
-;;
-;;     http://www.apache.org/licenses/LICENSE-2.0
-;;
-;; Unless required by applicable law or agreed to in writing, software
-;; distributed under the License is distributed on an "AS IS" BASIS,
-;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-;; See the License for the specific language governing permissions and
-;; limitations under the License.
-
 (ns ai.miniforge.release-executor.core
   "Release phase executor - orchestrates the release pipeline.
 
@@ -27,6 +9,7 @@
    [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.release-executor.git :as git]
+   [ai.miniforge.release-executor.messages :as msg]
    [ai.miniforge.release-executor.metadata :as metadata]
    [ai.miniforge.release-executor.result :as result]
    [ai.miniforge.release-executor.sandbox :as sandbox]
@@ -73,14 +56,11 @@
 
 (defn step-validate-inputs [state]
   (cond
-    (failed? state) state
-    (not (:worktree-path state))
-    (fail state :missing-worktree-path "Context must include :worktree-path for release phase")
-    (not (:executor state))
-    (fail state :missing-executor "Context must include :executor for release phase")
-    (not (:environment-id state))
-    (fail state :missing-environment-id "Context must include :environment-id for release phase")
-    :else state))
+    (failed? state)              state
+    (not (:worktree-path state)) (fail state :missing-worktree-path (msg/t :exec/missing-worktree-path))
+    (not (:executor state))      (fail state :missing-executor (msg/t :exec/missing-executor))
+    (not (:environment-id state)) (fail state :missing-environment-id (msg/t :exec/missing-environment-id))
+    :else                        state))
 
 (defn step-check-gh-auth [state]
   (cond
@@ -92,8 +72,8 @@
         state
         (fail state :gh-auth-failed (:error gh-auth)
               :hint (if (:available? gh-auth)
-                      "Run: gh auth login"
-                      "Install: brew install gh"))))))
+                      (msg/t :gh/auth-login-hint)
+                      (msg/t :gh/install-hint)))))))
 
 (defn step-generate-metadata [state]
   (if (failed? state)
@@ -107,8 +87,7 @@
                           workflow-data)]
         (if release-meta
           (assoc state :release-meta release-meta)
-          (fail state :metadata-generation-failed
-                "Releaser agent failed to generate release metadata"))))))
+          (fail state :metadata-generation-failed (msg/t :step/metadata-generation-failed)))))))
 
 (defn step-create-branch [state]
   (if (failed? state)
@@ -139,14 +118,25 @@
         (fail state :stage-failed (:error stage-r))
 
         (str/blank? (get staged-r :output ""))
-        (fail state :no-files-to-stage
-              "No modified files in executor environment to stage for release")
+        (fail state :no-files-to-stage (msg/t :step/no-files-to-stage))
 
         :else
         (let [staged-count (count (remove str/blank?
                                           (str/split-lines (:output staged-r ""))))]
           (assoc state :write-metrics {:total-operations staged-count
                                        :files-written staged-count}))))))
+
+(defn- net-negative-tests?
+  "True when the diff removes more test definitions than it adds."
+  [{:keys [removed added] :as test-counts}]
+  (and test-counts (pos? removed) (> removed added)))
+
+(defn- heavily-destructive?
+  "True when deletions exceed 20 lines and outnumber additions 3-to-1."
+  [{:keys [deletions additions] :as diff-stats}]
+  (and diff-stats
+       (> deletions 20)
+       (> deletions (* 3 (max 1 additions)))))
 
 (defn step-validate-diff
   "Validate staged diff is not destructive before committing.
@@ -155,43 +145,24 @@
   (if (failed? state)
     state
     (let [{:keys [worktree-path logger]} state
-          diff-stats (git/diff-stats worktree-path)
+          diff-stats  (git/diff-stats worktree-path)
           test-counts (git/count-test-defs worktree-path)]
       (cond
-        ;; Net-negative test count — agent deleted existing tests
-        (and test-counts
-             (> (:removed test-counts) 0)
-             (> (:removed test-counts) (:added test-counts)))
-        (do
-          (when logger
-            (log/error logger :release-executor :diff/net-negative-tests
-                       {:data {:added (:added test-counts)
-                               :removed (:removed test-counts)}}))
-          (fail state :destructive-diff
-                (str "Diff removes more tests than it adds ("
-                     (:removed test-counts) " removed, "
-                     (:added test-counts) " added)")))
+        (net-negative-tests? test-counts)
+        (let [data {:added (:added test-counts) :removed (:removed test-counts)}]
+          (when logger (log/error logger :release-executor :diff/net-negative-tests {:data data}))
+          (fail state :destructive-diff (msg/t :step/diff-net-negative-tests data)))
 
-        ;; Deletions vastly outweigh additions (> 3:1 ratio, min 20 lines)
-        (and diff-stats
-             (> (:deletions diff-stats) 20)
-             (> (:deletions diff-stats) (* 3 (max 1 (:additions diff-stats)))))
-        (do
-          (when logger
-            (log/warn logger :release-executor :diff/heavily-destructive
-                      {:data {:additions (:additions diff-stats)
-                              :deletions (:deletions diff-stats)}}))
-          (fail state :destructive-diff
-                (str "Diff is heavily destructive ("
-                     (:deletions diff-stats) " deletions vs "
-                     (:additions diff-stats) " additions)")))
+        (heavily-destructive? diff-stats)
+        (let [data {:additions (:additions diff-stats) :deletions (:deletions diff-stats)}]
+          (when logger (log/warn logger :release-executor :diff/heavily-destructive {:data data}))
+          (fail state :destructive-diff (msg/t :step/diff-heavily-destructive data)))
 
         :else
-        (do
-          (when logger
-            (log/debug logger :release-executor :diff/validated
-                       {:data (merge {} diff-stats test-counts)}))
-          state)))))
+        (do (when logger
+              (log/debug logger :release-executor :diff/validated
+                         {:data (merge {} diff-stats test-counts)}))
+            state)))))
 
 (defn step-commit [state]
   (if (failed? state)
@@ -331,25 +302,16 @@
                 {:data {:worktree-path (:worktree-path initial-state)
                         :create-pr? (:create-pr? initial-state)}}))
 
-    (let [result (-> initial-state
-                     step-validate-inputs
-                     step-check-gh-auth
-                     step-generate-metadata
-                     step-create-branch
-                     step-stage-dirty-files
-                     step-validate-diff
-                     step-commit
-                     step-push
-                     step-create-pr
-                     step-build-artifact
-                     step-save-artifact)]
-      (when (failed? result)
-        (spit "/tmp/miniforge-release-executor-debug.edn"
-              (str (pr-str {:failure (:failure result)
-                            :worktree-path (:worktree-path initial-state)
-                            :create-pr? (:create-pr? initial-state)
-                            :has-releaser? (boolean (:releaser initial-state))
-                            :timestamp (java.util.Date.)})
-                   "\n")
-              :append true))
-      (pipeline->result result))))
+    (-> initial-state
+        step-validate-inputs
+        step-check-gh-auth
+        step-generate-metadata
+        step-create-branch
+        step-stage-dirty-files
+        step-validate-diff
+        step-commit
+        step-push
+        step-create-pr
+        step-build-artifact
+        step-save-artifact
+        pipeline->result)))

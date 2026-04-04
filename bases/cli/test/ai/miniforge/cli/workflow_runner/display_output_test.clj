@@ -34,13 +34,10 @@
 ;------------------------------------------------------------------------------ Helpers
 
 (defn- capture-stdout
-  "Execute body-fn and return all stdout output as a string."
+  "Execute body-fn and return all stdout output as a string.
+   Uses with-out-str (thread-local *out* binding) for parallel-safe isolation."
   [body-fn]
-  (let [output (atom [])]
-    (with-redefs [println (fn [& args] (swap! output conj (apply str args)))
-                  print   (fn [& args] (swap! output conj (apply str args)))]
-      (body-fn))
-    (str/join "\n" @output)))
+  (with-out-str (body-fn)))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; print-workflow-header
