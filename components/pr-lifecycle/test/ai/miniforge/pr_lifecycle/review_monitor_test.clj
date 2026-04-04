@@ -1,9 +1,28 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
 (ns ai.miniforge.pr-lifecycle.review-monitor-test
   "Unit tests for review monitoring.
 
    Tests review status computation, comment tracking, review decision
    parsing, monitor lifecycle, and mocked gh CLI interactions."
   (:require
+   [babashka.process]
    [clojure.test :refer [deftest testing is are]]
    [ai.miniforge.pr-lifecycle.review-monitor :as review]
    [ai.miniforge.dag-executor.interface :as dag]))
@@ -436,10 +455,10 @@
                     (dag/ok {:raw "{}"}))]
       (let [monitor (review/create-review-monitor
                       (random-uuid) (random-uuid) (random-uuid)
-                      42 "/tmp/repo")]
-        (let [result (review/poll-review-status monitor nil)]
-          (is (= :unknown (:status result)))
-          (is (some? (:error result))))))))
+                      42 "/tmp/repo")
+            result (review/poll-review-status monitor nil)]
+        (is (= :unknown (:status result)))
+        (is (some? (:error result)))))))
 
 (deftest poll-review-status-increments-poll-count-test
   (testing "Each poll increments the poll counter"
