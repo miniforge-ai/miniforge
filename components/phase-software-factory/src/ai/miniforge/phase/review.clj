@@ -25,6 +25,7 @@
   (:require [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.phase.phase-config :as phase-config]
+            [ai.miniforge.phase.phase-result :as phase-result]
             [ai.miniforge.phase.knowledge-helpers :as kb-helpers]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.knowledge.interface :as knowledge]
@@ -98,14 +99,7 @@
         ;; Emit agent-completed telemetry event
         _ (phase/emit-agent-completed! agent-ctx :review :reviewer result)]
 
-    (-> ctx
-        (assoc-in [:phase :name] :review)
-        (assoc-in [:phase :agent] :reviewer)
-        (assoc-in [:phase :gates] gates)
-        (assoc-in [:phase :budget] budget)
-        (assoc-in [:phase :started-at] start-time)
-        (assoc-in [:phase :status] :running)
-        (assoc-in [:phase :result] result)
+    (-> (phase-result/enter-context ctx :review :reviewer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest))))
 
 (defn leave-review

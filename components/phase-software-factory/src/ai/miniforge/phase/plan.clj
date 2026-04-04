@@ -25,6 +25,7 @@
   (:require [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.phase.phase-config :as phase-config]
+            [ai.miniforge.phase.phase-result :as phase-result]
             [ai.miniforge.phase.knowledge-helpers :as kb-helpers]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.response.interface :as response]))
@@ -38,21 +39,6 @@
 
 ;; Register defaults on load
 (registry/register-phase-defaults! :plan default-config)
-
-;------------------------------------------------------------------------------ Layer 1
-;; Phase context builder
-
-(defn build-phase-context
-  "Build the common phase context fields for plan phase."
-  [ctx gates budget start-time result]
-  (-> ctx
-      (assoc-in [:phase :name] :plan)
-      (assoc-in [:phase :agent] :planner)
-      (assoc-in [:phase :gates] gates)
-      (assoc-in [:phase :budget] budget)
-      (assoc-in [:phase :started-at] start-time)
-      (assoc-in [:phase :status] :running)
-      (assoc-in [:phase :result] result)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Plan from spec tasks (fast path — no LLM)
@@ -134,7 +120,7 @@
           {:result (plan-from-spec-tasks input spec-tasks)
            :rules-manifest nil}
           (plan-from-agent ctx input))]
-    (-> (build-phase-context ctx gates budget start-time result)
+    (-> (phase-result/enter-context ctx :plan :planner gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest))))
 
 (defn leave-plan

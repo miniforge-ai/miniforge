@@ -26,6 +26,7 @@
 
    Provides the main run-pipeline entry point."
   (:require [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.execution :as exec]
@@ -321,7 +322,7 @@
 (defn terminal-state?
   "Check if workflow is in terminal state."
   [context]
-  (boolean (#{:completed :failed} (:execution/status context))))
+  (or (registry/succeeded? context) (registry/failed? context)))
 
 (defn execute-single-iteration
   "Execute single pipeline iteration: health check -> phase execution -> cleanup.
