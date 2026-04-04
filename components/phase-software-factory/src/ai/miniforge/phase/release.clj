@@ -169,6 +169,8 @@
                                 (get-in config [:worktree-path])
                                 (get-in ctx [:execution/opts :worktree-path])
                                 (System/getProperty "user.dir"))
+             :executor (get-in ctx [:execution/executor])
+             :environment-id (get-in ctx [:execution/environment-id])
              :logger (get-in ctx [:execution/logger])
              :llm-backend (get-in ctx [:execution/llm-backend])
              :artifact-store (get-in ctx [:execution/artifact-store])
