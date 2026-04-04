@@ -70,27 +70,31 @@
    NOTE: Currently Clojure-specific. When supporting other languages (Rust, JS, etc.),
    this should dispatch on a :test/framework or :language key from the workflow config."
   [output]
-  (let [ran-match (re-find #"Ran (\d+) tests? containing (\d+) assertions?" output)
-        fail-match (re-find #"(\d+) failures?,\s*(\d+) errors?" output)]
-    (if (and ran-match fail-match)
-      (let [test-count (parse-long (nth ran-match 1))
-            assertion-count (parse-long (nth ran-match 2))
-            fail-count (parse-long (nth fail-match 1))
-            error-count (parse-long (nth fail-match 2))]
-        {:passed? (and (zero? fail-count) (zero? error-count))
-         :test-count test-count
-         :assertion-count assertion-count
-         :fail-count fail-count
-         :error-count error-count
-         :output output})
-      ;; Could not parse — treat as failure to be safe
-      {:passed? false
-       :test-count 0
-       :assertion-count 0
-       :fail-count 0
-       :error-count 0
-       :parse-error? true
-       :output output})))
+  (if (re-find #"(?i)No changed bricks|nothing to test" output)
+    ;; Test runner intentionally skipped — no bricks changed. Treat as pass.
+    {:passed? true :test-count 0 :assertion-count 0 :fail-count 0 :error-count 0
+     :no-tests? true :output output}
+    (let [ran-match (re-find #"Ran (\d+) tests? containing (\d+) assertions?" output)
+          fail-match (re-find #"(\d+) failures?,\s*(\d+) errors?" output)]
+      (if (and ran-match fail-match)
+        (let [test-count (parse-long (nth ran-match 1))
+              assertion-count (parse-long (nth ran-match 2))
+              fail-count (parse-long (nth fail-match 1))
+              error-count (parse-long (nth fail-match 2))]
+          {:passed? (and (zero? fail-count) (zero? error-count))
+           :test-count test-count
+           :assertion-count assertion-count
+           :fail-count fail-count
+           :error-count error-count
+           :output output})
+        ;; Could not parse — treat as failure to be safe
+        {:passed? false
+         :test-count 0
+         :assertion-count 0
+         :fail-count 0
+         :error-count 0
+         :parse-error? true
+         :output output}))))
 
 (defn run-tests!
   "Run tests in the worktree via bb test.
