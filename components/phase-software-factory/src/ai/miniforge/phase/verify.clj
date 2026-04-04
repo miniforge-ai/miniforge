@@ -26,6 +26,8 @@
   (:require [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.phase.phase-config :as phase-config]
+            [ai.miniforge.phase.phase-result :as phase-result]
+            [ai.miniforge.phase.messages :as messages]
             [babashka.process :as process]
             [babashka.fs :as fs]
             [clojure.string :as str]))
@@ -131,9 +133,9 @@
 
         ;; Fail fast if no executor environment has been acquired
         _ (when-not (get ctx :execution/environment-id)
-            (throw (ex-info "Verify phase received no code artifact"
+            (throw (ex-info (messages/t :verify/no-environment)
                             {:phase :verify
-                             :hint "Workflow runner must acquire an execution environment before verify phase"})))
+                             :hint (messages/t :verify/no-environment-hint)})))
 
         worktree-path (or (get ctx :execution/worktree-path)
                           (get ctx :worktree-path)
@@ -146,39 +148,19 @@
         ;; No serialized code — changes live in the environment's worktree.
         ;; :metrics carries pass/fail counts and test-output for the evidence bundle.
         env-id     (get ctx :execution/environment-id)
+        passed?    (:passed? test-results)
         pass-count (get test-results :test-count 0)
-        fail-count (+ (get test-results :fail-count 0) (get test-results :error-count 0))
-        summary    (if (:passed? test-results)
-                     (str "All " pass-count " test(s) passed")
-                     (str "Tests failed: " (get test-results :fail-count 0) " failure(s), "
-                          (get test-results :error-count 0) " error(s)"))
-        result     (if (:passed? test-results)
-                     {:status         :success
-                      :environment-id env-id
-                      :summary        summary
-                      :metrics        {:tokens 0 :duration-ms 0
-                                       :pass-count  pass-count
-                                       :fail-count  fail-count
-                                       :test-output (get test-results :output "")}}
-                     {:status         :error
-                      :environment-id env-id
-                      :summary        summary
-                      :error          {:message (str "Tests failed: "
-                                                     (get test-results :fail-count 0) " failures, "
-                                                     (get test-results :error-count 0) " errors")}
-                      :metrics        {:tokens 0 :duration-ms 0
-                                       :pass-count  pass-count
-                                       :fail-count  fail-count
-                                       :test-output (get test-results :output "")}})]
+        raw-fails  (get test-results :fail-count 0)
+        raw-errors (get test-results :error-count 0)
+        metrics    (phase-result/test-metrics pass-count (+ raw-fails raw-errors) (get test-results :output ""))
+        summary    (if passed?
+                     (messages/t :verify/tests-passed {:pass-count pass-count})
+                     (messages/t :verify/tests-failed {:fail-count raw-fails :error-count raw-errors}))
+        result     (if passed?
+                     (phase-result/success env-id summary metrics)
+                     (phase-result/error   env-id summary summary metrics))]
 
-    (-> ctx
-        (assoc-in [:phase :name] :verify)
-        (assoc-in [:phase :agent] nil)
-        (assoc-in [:phase :gates] gates)
-        (assoc-in [:phase :budget] budget)
-        (assoc-in [:phase :started-at] start-time)
-        (assoc-in [:phase :status] :running)
-        (assoc-in [:phase :result] result))))
+    (phase-result/enter-context ctx :verify nil gates budget start-time result)))
 
 (defn leave-verify
   "Post-processing for verification phase.
@@ -218,35 +200,32 @@
                         ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
-    ;; When verify failed and on-fail is configured, redirect to target phase
-    ;; UNLESS the failure was a timeout or rate limit — those aren't code quality
-    ;; issues and retrying implement won't help.
-    (let [final-ctx (if (and (= :failed phase-status) on-fail
-                             (not timeout?) (not rate-limited?))
-                      (-> updated-ctx
-                          (assoc-in [:phase :redirect-to] on-fail)
-                          (assoc-in [:phase :error]
-                                    {:message (or (not-empty (get-in result [:error :message]))
-                                                  (when gate-failed? "Gate validation failed")
-                                                  "Verification failed")
-                                     :agent-status agent-status
-                                     :gate-failed? gate-failed?}))
-                      (cond-> updated-ctx
-                        (= :failed phase-status)
-                        (assoc-in [:phase :error]
-                                  {:message (or (not-empty (get-in result [:error :message]))
-                                                (when gate-failed? "Gate validation failed")
-                                                "Verification failed")
-                                   :agent-status agent-status
-                                   :timeout? timeout?
-                                   :rate-limited? rate-limited?
-                                   :gate-failed? gate-failed?})))]
-      ;; Emit phase-completed telemetry event
-      (phase/emit-phase-completed! final-ctx :verify
-        {:outcome (if (= :completed phase-status) :success :failure)
-         :duration-ms duration-ms
-         :tokens (:tokens metrics 0)})
-      final-ctx)))
+    ;; When verify failed and on-fail is configured, redirect to target phase.
+    ;; Timeout and rate-limit failures are not code quality issues — retrying
+    ;; implement won't help, so we do not redirect in those cases.
+    (let [error-message (or (not-empty (get-in result [:error :message]))
+                            (when gate-failed? (messages/t :verify/gate-failed))
+                            (messages/t :verify/failed))]
+      (doto (if (and (= :failed phase-status) on-fail
+                     (not timeout?) (not rate-limited?))
+              (-> updated-ctx
+                  (assoc-in [:phase :redirect-to] on-fail)
+                  (assoc-in [:phase :error]
+                            {:message      error-message
+                             :agent-status agent-status
+                             :gate-failed? gate-failed?}))
+              (cond-> updated-ctx
+                (= :failed phase-status)
+                (assoc-in [:phase :error]
+                          {:message       error-message
+                           :agent-status  agent-status
+                           :timeout?      timeout?
+                           :rate-limited? rate-limited?
+                           :gate-failed?  gate-failed?})))
+        (phase/emit-phase-completed! :verify
+          {:outcome     (if (= :completed phase-status) :success :failure)
+           :duration-ms duration-ms
+           :tokens      (get metrics :tokens 0)})))))
 
 (defn error-verify
   "Handle verification phase errors.

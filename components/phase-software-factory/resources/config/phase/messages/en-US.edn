@@ -10,6 +10,14 @@
   :implement/retry-instruction     "This is a RETRY. Do NOT explore or read files. The plan and existing files are already in this prompt. Write the implementation code IMMEDIATELY and call submit."
   :implement/summary-default       "Implementation complete"
 
+  ;; Verify phase
+  :verify/no-environment      "Verify phase received no code artifact"
+  :verify/no-environment-hint "Workflow runner must acquire an execution environment before verify phase"
+  :verify/tests-passed        "All {pass-count} test(s) passed"
+  :verify/tests-failed        "Tests failed: {fail-count} failure(s), {error-count} error(s)"
+  :verify/gate-failed         "Gate validation failed"
+  :verify/failed              "Verification failed"
+
   ;; Release phase
   :release/no-implement-artifact        "Release phase has no code artifact from implement phase"
   :release/zero-files                   "Release phase received code artifact with zero files"

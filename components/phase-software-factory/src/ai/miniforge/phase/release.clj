@@ -29,6 +29,7 @@
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.phase.messages :as messages]
+            [ai.miniforge.phase.phase-result :as phase-result]
             [ai.miniforge.phase.phase-config :as phase-config]
             [ai.miniforge.release-executor.interface :as release-executor]
             [ai.miniforge.response.interface :as response]))
@@ -69,7 +70,7 @@
    We check :status to confirm the phase completed successfully."
   [ctx impl-result]
   (let [impl-status (:status impl-result)
-        succeeded?  (contains? #{:success :completed} impl-status)]
+        succeeded?  (phase-result/succeeded? impl-result)]
     (when (or (nil? impl-result) (not succeeded?))
       (let [phase-results-keys (vec (keys (:execution/phase-results ctx)))
             logger (or (get-in ctx [:execution/logger])
@@ -203,16 +204,9 @@
     ;; AND there are no git changes from other phases (tests, docs, specs, etc.)
     (if (and (= :already-implemented impl-status)
              (empty? (git-dirty-files (ctx-worktree-path ctx))))
-      (-> ctx
-          (assoc-in [:phase :name] :release)
-          (assoc-in [:phase :gates] gates)
-          (assoc-in [:phase :budget] budget)
-          (assoc-in [:phase :started-at] start-time)
-          (assoc-in [:phase :status] :completed)
-          (assoc-in [:phase :result]
-                    {:status :success
-                     :output {:skipped true :reason :already-implemented}
-                     :metrics {:tokens 0 :duration-ms 0 :cost-usd 0.0}}))
+      (-> (phase-result/enter-context ctx :release nil gates budget start-time
+                                      (phase-result/skipped :already-implemented))
+          (assoc-in [:phase :status] :completed))
       (let [;; Build workflow state and context
             workflow-state (build-workflow-state ctx)
         _ (log/debug logger :release :release/workflow-state-built
@@ -256,14 +250,7 @@
         ;; Emit agent-completed telemetry event for release executor
         _ (phase/emit-agent-completed! ctx :release :releaser result)]
 
-    (-> ctx
-        (assoc-in [:phase :name] :release)
-        (assoc-in [:phase :agent] :releaser)
-        (assoc-in [:phase :gates] gates)
-        (assoc-in [:phase :budget] budget)
-        (assoc-in [:phase :started-at] start-time)
-        (assoc-in [:phase :status] :running)
-        (assoc-in [:phase :result] result)
+    (-> (phase-result/enter-context ctx :release :releaser gates budget start-time result)
         ;; Store PR info at top level for easy access
         (cond-> (= :success (:status result))
           (assoc-in [:workflow/pr-info] (get-in (:output result) [:workflow/pr-info]))))))))

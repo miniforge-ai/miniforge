@@ -27,6 +27,7 @@
    Agent: nil (no LLM — deterministic file loading)
    Default gates: []"
   (:require [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.phase.phase-result :as phase-result]
             [ai.miniforge.phase.file-context :as file-ctx]
             [ai.miniforge.knowledge.interface :as knowledge]))
 
@@ -82,15 +83,8 @@
                       (seq kb-results)
                       (assoc :exploration/knowledge kb-results))]
 
-    (-> ctx
-        (assoc-in [:phase :name] :explore)
-        (assoc-in [:phase :agent] nil)
-        (assoc-in [:phase :gates] [])
-        (assoc-in [:phase :budget] (:budget default-config))
-        (assoc-in [:phase :started-at] start-time)
-        (assoc-in [:phase :status] :running)
-        (assoc-in [:phase :result] {:status :completed
-                                    :output exploration}))))
+    (phase-result/enter-context ctx :explore nil [] (:budget default-config) start-time
+                                {:status :success :output exploration})))
 
 (defn leave-explore
   "Post-processing for exploration phase.
