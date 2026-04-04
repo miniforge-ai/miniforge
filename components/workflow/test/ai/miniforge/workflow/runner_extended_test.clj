@@ -151,6 +151,55 @@
   (testing "no-op with nil event stream"
     (is (nil? (runner/publish-phase-completed! nil {} :plan {})))))
 
+;; ---------------------------------------------------------------------------- execution mode: local (default)
+
+(deftest run-pipeline-local-mode-sets-execution-mode-test
+  (testing ":local mode is the default and sets :execution/mode on context"
+    (let [wf {:workflow/id :test
+              :workflow/version "1.0.0"
+              :workflow/pipeline [{:phase :done}]}
+          result (runner/run-pipeline wf {:task "Test"})]
+      (is (= :local (:execution/mode result))))))
+
+(deftest run-pipeline-explicit-local-mode-test
+  (testing "explicit :local mode uses worktree"
+    (let [wf {:workflow/id :test
+              :workflow/version "1.0.0"
+              :workflow/pipeline [{:phase :done}]}
+          result (runner/run-pipeline wf {:task "Test"} {:execution-mode :local})]
+      (is (= :completed (:execution/status result)))
+      (is (= :local (:execution/mode result))))))
+
+(deftest run-pipeline-governed-mode-sets-execution-mode-test
+  (testing ":governed mode sets :execution/mode :governed on context"
+    ;; Governed mode requires Docker or K8s. This test verifies the mode is
+    ;; propagated to the context regardless of which executor is selected.
+    ;; In environments without Docker/K8s, governed mode throws instead
+    ;; (N11 §7 no-silent-downgrade) — tested separately via mock.
+    (let [wf {:workflow/id :test
+              :workflow/version "1.0.0"
+              :workflow/pipeline [{:phase :done}]}]
+      (try
+        (let [result (runner/run-pipeline wf {:task "Test"} {:execution-mode :governed})]
+          ;; Docker was available — mode should be :governed on context
+          (is (= :governed (:execution/mode result))))
+        (catch Exception e
+          ;; Docker unavailable — exception message should match N11 spec language
+          (is (re-find #"(?i)No capsule executor" (ex-message e))))))))
+
+(deftest run-pipeline-governed-mode-rejects-worktree-fallback-test
+  (testing ":governed mode does not fall through to worktree (N11 §7.4 no-silent-downgrade)"
+    ;; Simulate all executors appearing as :worktree type so governed mode
+    ;; rejects them and throws rather than silently falling back.
+    (let [wf {:workflow/id :test
+              :workflow/version "1.0.0"
+              :workflow/pipeline [{:phase :done}]}]
+      (with-redefs [ai.miniforge.dag-executor.executor/executor-type (constantly :worktree)]
+        (is (thrown-with-msg?
+             Exception #"(?i)No capsule executor available"
+             (runner/run-pipeline wf {:task "Test"}
+                                  {:execution-mode :governed})))))))
+
 ;; TODO: Tests for publish-agent-started!/completed! — not yet implemented in runner.clj
 (comment
 (deftest publish-agent-started-nil-stream-test
