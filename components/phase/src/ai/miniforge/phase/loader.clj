@@ -19,8 +19,7 @@
 (ns ai.miniforge.phase.loader
   "Generic resource-driven loader for phase implementation namespaces."
   (:require
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]))
+   [clojure.edn :as edn]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration

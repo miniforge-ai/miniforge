@@ -1,3 +1,21 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
 (ns ai.miniforge.phase.agent-behavior-test
   "Unit tests for agent-behavior extraction, formatting, and phase filtering.
 
@@ -12,7 +30,7 @@
    - Always-inject rules bypass file-glob/task-type matching
    - Phase-only gating for always-inject rules"
   (:require
-   [clojure.test :refer [deftest testing is are]]
+   [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.phase.agent-behavior :as sut]))
 
@@ -260,7 +278,7 @@
       (is (vector? standards-rules))
       ;; If both have rules, their IDs should be from different namespaces
       (when (and (seq builtin-rules) (seq standards-rules))
-        (let [builtin-ids (set (map :rule/id builtin-rules))
+        (let [_builtin-ids (set (map :rule/id builtin-rules))
               standards-ids (set (map :rule/id standards-rules))]
           ;; Standards rules use :std/ namespace
           (doseq [id standards-ids]
