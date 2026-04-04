@@ -199,6 +199,52 @@
   [workflow]
   (phase/validate-pipeline workflow))
 
+;------------------------------------------------------------------------------ Layer 0.5: Execution environment lifecycle
+
+(defn- acquire-execution-environment!
+  "Acquire an isolated execution environment before pipeline starts.
+   Uses worktree executor — creates a git worktree so each workflow
+   (or sub-workflow) gets an isolated copy of the repo.
+
+   Uses requiring-resolve to avoid hard dependency on dag-executor component.
+
+   Returns map with :executor, :environment-id, :worktree-path
+   or nil if acquisition fails or dag-executor is unavailable."
+  [workflow-id {:keys [_repo-url _branch]}]
+  (try
+    (let [create-registry (requiring-resolve 'ai.miniforge.dag-executor.executor/create-executor-registry)
+          select-exec     (requiring-resolve 'ai.miniforge.dag-executor.executor/select-executor)
+          acquire-env!    (requiring-resolve 'ai.miniforge.dag-executor.executor/acquire-environment!)
+          result-ok?      (requiring-resolve 'ai.miniforge.dag-executor.result/ok?)
+          result-unwrap   (requiring-resolve 'ai.miniforge.dag-executor.result/unwrap)
+          registry        (create-registry {:worktree {}})
+          executor        (select-exec registry :preferred :worktree)]
+      (when executor
+        (let [task-id    (if (uuid? workflow-id) workflow-id (random-uuid))
+              env-result (acquire-env! executor task-id {})]
+          (when (result-ok? env-result)
+            (let [env    (result-unwrap env-result)
+                  env-id (:environment-id env)]
+              {:executor       executor
+               :environment-id env-id
+               :worktree-path  (:workdir env)})))))
+    (catch Exception e
+      (println (messages/t :warn/publish-event
+                           {:error (str "Environment acquisition failed: " (ex-message e))}))
+      nil)))
+
+(defn- release-execution-environment!
+  "Release an execution environment acquired by the runner.
+   Safe to call with nil values."
+  [executor environment-id]
+  (when (and executor environment-id)
+    (try
+      (let [release-env! (requiring-resolve 'ai.miniforge.dag-executor.executor/release-environment!)]
+        (release-env! executor environment-id))
+      (catch Exception e
+        (println (messages/t :warn/publish-event
+                             {:error (str "Environment release failed: " (ex-message e))}))))))
+
 ;------------------------------------------------------------------------------ Layer 1: Orchestration helpers
 
 (defn handle-empty-pipeline
@@ -363,19 +409,43 @@
 (defn run-pipeline
   "Execute a workflow pipeline.
 
+   Acquires an isolated execution environment (Docker preferred, worktree
+   fallback) before building the pipeline. The environment is released
+   on completion regardless of success or failure.
+
    Arguments:
    - workflow: Workflow configuration
-   - input: Input data
+   - input: Input data (may contain :repo-url and :branch)
    - opts: Execution options
      - :max-phases - Max phases to execute (default 50)
      - :on-phase-start - Callback fn [ctx interceptor]
      - :on-phase-complete - Callback fn [ctx interceptor result]
+     - :executor - Pre-acquired TaskExecutor (skips acquisition)
+     - :environment-id - Pre-acquired environment ID (skips acquisition)
 
    Returns final execution context."
   ([workflow input]
    (run-pipeline workflow input {}))
   ([workflow input opts]
-   (let [pipeline (build-pipeline workflow)
+   (let [;; Skip acquisition if executor already provided (e.g., sandbox setup)
+         has-executor? (and (:executor opts) (:environment-id opts))
+
+         ;; Acquire isolated environment before pipeline starts
+         repo-url (or (:repo-url opts) (:repo-url input))
+         branch   (or (:branch opts) (:branch input) "main")
+         acquired-env (when-not has-executor?
+                        (acquire-execution-environment!
+                         (:workflow/id workflow)
+                         {:repo-url repo-url :branch branch}))
+
+         ;; Merge acquired environment info into opts
+         opts (if acquired-env
+                (merge opts {:executor       (:executor acquired-env)
+                             :environment-id (:environment-id acquired-env)
+                             :worktree-path  (:worktree-path acquired-env)})
+                opts)
+
+         pipeline (build-pipeline workflow)
          max-phases (get opts :max-phases 50)
          ;; Control state for dashboard commands — caller can provide their own
          control-state (or (:control-state opts)
@@ -397,13 +467,18 @@
                                            (cb ctx interceptor result)))}
 
          skip-lifecycle? (:skip-lifecycle-events opts)
-         initial-ctx (ctx/create-context workflow input opts)]
+         initial-ctx (-> (ctx/create-context workflow input opts)
+                         (assoc :execution/executor (get opts :executor)
+                                :execution/environment-id (get opts :environment-id)
+                                :execution/worktree-path (or (:worktree-path opts)
+                                                             (:sandbox-workdir opts))))]
 
      ;; Publish workflow started event (unless caller already did)
      (when-not skip-lifecycle?
        (publish-workflow-started! event-stream initial-ctx))
 
-     (let [final-ctx
+     (try
+      (let [final-ctx
            (try
              (if (empty? pipeline)
                (handle-empty-pipeline initial-ctx)
@@ -456,7 +531,11 @@
        ;; Post-workflow: auto-promote high-confidence learnings
        (promote-mature-learnings! (:knowledge-store opts))
 
-       output-ctx))))
+       output-ctx)
+      (finally
+        (when acquired-env
+          (release-execution-environment! (:executor acquired-env)
+                                          (:environment-id acquired-env))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

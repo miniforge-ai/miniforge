@@ -1,8 +1,25 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
 (ns ai.miniforge.cli.workflow-runner
   (:require
    [clojure.string :as str]
    [clojure.edn :as edn]
-   [clojure.java.io :as io]
    [cheshire.core :as json]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.cli.messages :as messages]
@@ -250,6 +267,10 @@
           workflow-version (or (:spec/workflow-version spec) "latest")
           workflow (load-or-create-workflow load-workflow workflow-type workflow-version)
           enriched-spec (context/decorate-spec-with-runtime-context spec opts)
+          ;; Infer repo URL and branch for execution environment (Docker clone / worktree).
+          ;; Reuses sandbox helpers which fall back to `git remote get-url origin`.
+          repo-url (sandbox/infer-repo-url spec enriched-spec)
+          branch   (sandbox/infer-branch spec enriched-spec)
           workflow-input (context/spec->workflow-input enriched-spec)
           artifact-store (create-artifact-store quiet)
           event-stream (es/create-event-stream)
@@ -260,18 +281,22 @@
           ;; Create workflow-specific LLM client for execution
           llm-client (context/create-llm-client workflow spec quiet backend-override)
           callbacks (create-phase-callbacks quiet)
-          base-context (context/create-workflow-context {:callbacks callbacks
-                                                        :artifact-store artifact-store
-                                                        :event-stream event-stream
-                                                        :workflow-id workflow-id
-                                                        :workflow-type workflow-type
-                                                        :workflow-version workflow-version
-                                                        :llm-client llm-client
-                                                        :quiet quiet
-                                                        :spec-title (:spec/title spec)
-                                                        :control-state control-state
-                                                        :skip-lifecycle-events true
-                                                        :execution-opts (:execution-opts opts)})
+          base-context (-> (context/create-workflow-context {:callbacks callbacks
+                                                            :artifact-store artifact-store
+                                                            :event-stream event-stream
+                                                            :workflow-id workflow-id
+                                                            :workflow-type workflow-type
+                                                            :workflow-version workflow-version
+                                                            :llm-client llm-client
+                                                            :quiet quiet
+                                                            :spec-title (:spec/title spec)
+                                                            :control-state control-state
+                                                            :skip-lifecycle-events true
+                                                            :execution-opts (:execution-opts opts)})
+                           ;; Pass inferred repo-url and branch so runner.clj's
+                           ;; acquire-execution-environment! can clone into Docker
+                           ;; or create a worktree from the correct branch.
+                           (assoc :repo-url repo-url :branch branch))
           sandbox? (or (:sandbox opts) (:spec/sandbox spec))
           [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)
           progress-cleanup (display/start-progress! event-stream quiet)]

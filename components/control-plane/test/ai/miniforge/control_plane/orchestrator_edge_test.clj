@@ -290,10 +290,10 @@
           es (stream/create-event-stream)
           published (atom [])
           _ (stream/subscribe! es :test-sub #(swap! published conj %))
-          agent-rec (registry/register-agent! reg
-                     {:agent/external-id "ext-status-key"
-                      :agent/name "Status Key Agent"
-                      :agent/vendor :test-adapter})
+          _agent-rec (registry/register-agent! reg
+                      {:agent/external-id "ext-status-key"
+                       :agent/name "Status Key Agent"
+                       :agent/vendor :test-adapter})
           ;; Return :status (not :agent/status) matching the code's (:status status-update)
           adapter (make-mock-adapter
                    {:poll-agent-status
