@@ -1,10 +1,17 @@
 {:phase/messages
- {;; Implementation phase
-  :implement/agent-error       "Agent returned error status"
-  :implement/exhausted-retries "Implementation failed after exhausting retry budget"
-  :implement/warn-no-output    "WARNING: implement phase result has no :output — artifact may be nil"
+ {;; Defaults
+  :default/task-description "implement changes"
+
+  ;; Implementation phase
+  :implement/agent-error           "Agent returned error status"
+  :implement/exhausted-retries     "Implementation failed after exhausting retry budget"
+  :implement/warn-no-output        "WARNING: implement phase result has no :output — artifact may be nil"
+  :implement/prior-error-default   "No artifact produced — agent exhausted turn budget exploring files instead of writing code"
+  :implement/retry-instruction     "This is a RETRY. Do NOT explore or read files. The plan and existing files are already in this prompt. Write the implementation code IMMEDIATELY and call submit."
+  :implement/summary-default       "Implementation complete"
 
   ;; Release phase
-  :release/no-implement-artifact  "Release phase has no code artifact from implement phase"
-  :release/zero-files             "Release phase received code artifact with zero files"
-  :release/skipped-already-implemented "Release skipped — task was already implemented"}}
+  :release/no-implement-artifact        "Release phase has no code artifact from implement phase"
+  :release/zero-files                   "Release phase received code artifact with zero files"
+  :release/skipped-already-implemented  "Release skipped — task was already implemented"
+  :release/phase-failed                 "Release phase failed"}}

@@ -157,7 +157,7 @@
        :workflow/phase    :release
        :workflow/spec     {:spec/description (or (:description input)
                                                  (:title input)
-                                                 "implement changes")}
+                                                 (messages/t :default/task-description))}
        :workflow/artifacts code-artifacts})))
 
 (defn build-executor-context
@@ -235,7 +235,7 @@
                            content (:artifact/content release-artifact)]
                        (response/success
                         (merge
-                         {:release/id (or (:artifact/id release-artifact) (random-uuid))
+                         {:release/id (get release-artifact :artifact/id (random-uuid))
                           :release/status :completed
                           :release/artifacts (:artifacts exec-result)}
                          ;; Include PR info for evidence bundle
@@ -247,7 +247,7 @@
                          {:release/metrics (:metrics exec-result)})))
                      ;; Execution failed
                      (response/failure
-                      (ex-info "Release phase failed"
+                      (ex-info (messages/t :release/phase-failed)
                                {:errors (:errors exec-result)
                                 :metrics (:metrics exec-result)}))))
                  (catch Exception e
@@ -278,7 +278,7 @@
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
         release-data (when (= :success (:status result)) (:output result))
-        release-metrics (or (:release/metrics release-data) {})
+        release-metrics (get release-data :release/metrics {})
         metrics (merge {:tokens 0 :duration-ms duration-ms} release-metrics)
         agent-status (:status result)
         iterations (get-in ctx [:phase :iterations] 1)
@@ -301,19 +301,16 @@
                         ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
-    ;; Handle retrying: increment iteration counter
-    (let [final-ctx (cond-> updated-ctx
-                      (registry/retrying? (:phase updated-ctx))
-                      (-> (update-in [:phase :iterations] (fnil inc 1))
-                          (assoc-in [:phase :last-error]
-                                    (or (get-in result [:error :message])
-                                        "Release phase failed"))))]
-      ;; Emit phase-completed telemetry event
-      (phase/emit-phase-completed! final-ctx :release
-        {:outcome (if (= :completed phase-status) :success :failure)
+    ;; Handle retrying: increment iteration counter, then emit telemetry
+    (doto (cond-> updated-ctx
+            (registry/retrying? (:phase updated-ctx))
+            (-> (update-in [:phase :iterations] (fnil inc 1))
+                (assoc-in [:phase :last-error]
+                          (get-in result [:error :message] (messages/t :release/phase-failed)))))
+      (phase/emit-phase-completed! :release
+        {:outcome     (if (= :completed phase-status) :success :failure)
          :duration-ms duration-ms
-         :tokens (:tokens metrics 0)})
-      final-ctx)))
+         :tokens      (:tokens metrics 0)}))))
 
 (defn error-release
   "Handle release phase errors."

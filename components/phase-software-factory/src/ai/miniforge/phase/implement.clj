@@ -178,8 +178,8 @@
                (pos? iteration)
                (assoc :task/prior-attempts
                       {:attempt-number (inc iteration)
-                       :prior-error (or last-error "No artifact produced — agent exhausted turn budget exploring files instead of writing code")
-                       :instruction "This is a RETRY. Do NOT explore or read files. The plan and existing files are already in this prompt. Write the implementation code IMMEDIATELY and call submit."}))]
+                       :prior-error    (or last-error (messages/t :implement/prior-error-default))
+                       :instruction    (messages/t :implement/retry-instruction)}))]
     {:task task
      :rules-manifest manifest}))
 
@@ -300,14 +300,14 @@
                        :else (registry/determine-phase-status
                                effective-status iterations max-iterations))
         metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
-        cost-usd (or (:cost-usd result)
-                     (:cost-usd metrics)
-                     (* (get metrics :tokens 0) 0.000015))
+        cost-usd (get result :cost-usd
+                   (get metrics :cost-usd
+                     (* (get metrics :tokens 0) 0.000015)))
         metrics (assoc metrics :cost-usd cost-usd :duration-ms duration-ms)
         env-id (get ctx :execution/environment-id)
         summary (or (get-in result [:output :code/summary])
                     (when (string? (:output result)) (:output result))
-                    "Implementation complete")
+                    (messages/t :implement/summary-default))
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
