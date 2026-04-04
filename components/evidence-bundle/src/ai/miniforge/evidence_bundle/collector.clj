@@ -95,7 +95,7 @@
   (when-let [phase-data (get-in workflow-state [:workflow/phases phase-name])]
     (build-phase-evidence
      phase-name
-     (or (:agent phase-data) :unknown)
+     (get phase-data :agent :unknown)
      phase-data)))
 
 (defn collect-all-phases
@@ -114,7 +114,7 @@
 (defn collect-tool-invocations
   "Collect tool invocation records from workflow state."
   [workflow-state]
-  (vec (or (:workflow/tool-invocations workflow-state) [])))
+  (vec (get workflow-state :workflow/tool-invocations [])))
 
 ;------------------------------------------------------------------------------ Layer 1.5
 ;; Rules Applied Evidence

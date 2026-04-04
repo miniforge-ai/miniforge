@@ -171,7 +171,7 @@
    DAG task produces its own PR."
   [task-def context]
   (let [parent-workflow (:execution/workflow context)
-        parent-pipeline (or (:workflow/pipeline parent-workflow) [])
+        parent-pipeline (get parent-workflow :workflow/pipeline [])
         sub-phases (->> parent-pipeline
                         (remove #(#{:explore :plan} (:phase %)))
                         vec)

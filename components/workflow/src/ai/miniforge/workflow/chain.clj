@@ -156,7 +156,7 @@
               updated-results (conj step-results step-result)]
           (if (phase/failed? result)
             ;; Step failed — emit failure events and stop
-            (let [error (or (:execution/error result) "Step execution failed")]
+            (let [error (get result :execution/error "Step execution failed")]
               (emit! opts 'ai.miniforge.event-stream.interface/chain-step-failed
                      chain-id step-id idx error)
               (emit! opts 'ai.miniforge.event-stream.interface/chain-failed
