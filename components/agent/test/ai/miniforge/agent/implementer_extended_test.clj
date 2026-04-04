@@ -1,3 +1,21 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
 (ns ai.miniforge.agent.implementer-extended-test
   "Extended tests for implementer: response parsing, code block extraction,
    language detection, artifact repair edge cases, formatting, and prior-attempts."
@@ -120,8 +138,7 @@
                  {:path "src/b.clj" :content "" :action :create}
                  {:path "src/c.js" :content "" :action :create}]]
       ;; clj is more common, so should detect clojure
-      (let [lang (impl/extract-language files {})]
-        (is (string? lang)))))
+      (is (string? (impl/extract-language files {})))))
 
   (testing "context :language takes priority over file extensions"
     (let [files [{:path "src/core.clj" :content "" :action :create}]]
@@ -275,9 +292,8 @@
                  :task/prior-attempts {:attempt-number 2
                                        :prior-error "Error"
                                        :instruction "Fix it"}})]
-      (let [retry-idx (str/index-of text "RETRY")
-            desc-idx (str/index-of text "Main task")]
-        (is (< retry-idx desc-idx))))))
+      (is (< (str/index-of text "RETRY")
+             (str/index-of text "Main task"))))))
 
 (deftest task->text-non-string-non-map-test
   (testing "non-string, non-map values are stringified"

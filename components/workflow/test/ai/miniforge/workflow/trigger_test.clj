@@ -114,7 +114,7 @@
                                                   :input-from-event  {:branch :pr/branch}}}]}]
       ;; Redef cross-component functions
       (with-redefs [ai.miniforge.workflow.trigger/create-event-trigger
-                    (fn [event-stream trigger-config opts]
+                    (fn [_event-stream trigger-config _opts]
                       (let [triggers     (:triggers trigger-config)
                             futures-atom (atom [])
                             sub-id       :event-trigger
@@ -152,7 +152,7 @@
                                    :repo "org/repo"
                                    :run  {:workflow-id :deploy-v1}}]}]
       (with-redefs [ai.miniforge.workflow.trigger/create-event-trigger
-                    (fn [event-stream trigger-config opts]
+                    (fn [_event-stream trigger-config _opts]
                       (let [triggers (:triggers trigger-config)
                             sub-id   :event-trigger
                             callback (fn [event]

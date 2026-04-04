@@ -1,3 +1,21 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
 (ns ai.miniforge.workflow.runner-test
   "Unit tests for the interceptor-based workflow runner.
    Tests that execute real phase pipelines (plan, implement, etc.)
@@ -252,13 +270,15 @@
       (is (= "/tmp/worktree" (:execution/worktree-path result))))))
 
 (deftest run-pipeline-without-executor-skips-env-keys-test
-  (testing "when acquisition returns nil (no dag-executor on classpath), env keys are absent"
-    ;; In the test environment dag-executor is not on the classpath,
-    ;; so acquire-execution-environment! returns nil.
+  (testing "when no executor in opts and acquisition yields nil, env keys are absent"
+    ;; dag-executor is on the classpath but worktree creation may fail in the
+    ;; test environment (no real git repo configured for worktrees).
+    ;; The test verifies the safe-nil path: acquisition failure → no env keys.
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
                     :workflow/pipeline [{:phase :done}]}
           result (runner/run-pipeline workflow {:task "Test"} {})]
       (is (= :completed (:execution/status result)))
+      ;; env keys absent when acquisition fails or returns nil
       (is (nil? (:execution/environment-id result)))
       (is (nil? (:execution/worktree-path result))))))
