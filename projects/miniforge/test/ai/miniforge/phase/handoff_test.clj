@@ -20,7 +20,7 @@
         run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
     (with-redefs-fn
       {write-var (fn [_ files] (mapv :path files))
-       run-var (fn [_] {:all-passed? true :test-count 1 :fail-count 0 :error-count 0})}
+       run-var (fn [_] {:passed? true :test-count 1 :fail-count 0 :error-count 0})}
       body-fn)))
 
 ;------------------------------------------------------------------------------ Mock Data

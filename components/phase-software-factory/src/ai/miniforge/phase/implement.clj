@@ -91,13 +91,14 @@
       nil)))
 
 (defn- build-verify-failures
-  "Extract lean verify-failure data from phase results."
+  "Extract lean verify-failure data from phase results.
+   In the environment model, test metrics are in :result :metrics."
   [verify-result]
-  (let [test-results (get-in verify-result [:result :output :metadata :test-results])
-        test-results-lean (dissoc test-results :output)]
-    {:test-results test-results-lean
-     :test-output (truncate-test-output
-                   (get-in verify-result [:result :output :metadata :test-results :output]))}))
+  {:test-results {:pass-count (get-in verify-result [:result :metrics :pass-count] 0)
+                  :fail-count (get-in verify-result [:result :metrics :fail-count] 0)
+                  :summary    (get-in verify-result [:result :summary])}
+   :test-output (truncate-test-output
+                 (get-in verify-result [:result :metrics :test-output]))})
 
 (defn- resolve-worktree-path
   "Resolve the worktree path from execution context.

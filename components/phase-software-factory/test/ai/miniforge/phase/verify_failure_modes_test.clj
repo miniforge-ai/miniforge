@@ -1,162 +1,109 @@
 (ns ai.miniforge.phase.verify-failure-modes-test
-  "Additional tests for verify phase failure modes and artifact validation.
+  "Tests for verify phase failure modes.
 
-  Extends the existing verify_test.clj with comprehensive failure mode testing."
+   Covers: environment-based test execution, fail-fast on missing env-id,
+   test runner errors, and leave-verify redirect suppression."
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.phase.registry :as registry]
-   [ai.miniforge.phase.verify :as verify] ;; registers :verify defmethod
-   [ai.miniforge.agent.interface :as agent]
-   [ai.miniforge.response.interface :as response]))
+   [ai.miniforge.phase.verify :as verify]))
 
 ;------------------------------------------------------------------------------ Test Fixtures
 
-(def mock-code-artifact
-  {:code/id (random-uuid)
-   :code/files [{:path "src/example.clj"
-                 :content "(ns example)\n(defn hello [] \"world\")"
-                 :action :create}]
-   :code/language "clojure"})
-
-(def mock-empty-artifact
-  {:code/id (random-uuid)
-   :code/files []
-   :code/language "clojure"})
-
-(def mock-test-result
-  {:test/id (random-uuid)
-   :test/passed? true
-   :test/coverage {:lines 85.0}})
-
 (defn create-base-context
-  "Create base context for testing."
+  "Base context with executor environment."
   []
   {:execution/id (random-uuid)
-   :execution/input {:description "Test task"
-                     :title "Test"
-                     :intent "testing"}
+   :execution/environment-id (random-uuid)
+   :execution/worktree-path "/tmp/test-worktree"
+   :execution/input {:description "Test task" :title "Test" :intent "testing"}
    :execution/metrics {:tokens 0 :duration-ms 0}
    :execution/phase-results {}})
 
-;------------------------------------------------------------------------------ Artifact Validation Tests
+(defn with-passing-tests [body-fn]
+  (let [run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
+    (with-redefs-fn
+      {run-var (fn [_] {:passed? true :test-count 5 :assertion-count 10
+                        :fail-count 0 :error-count 0
+                        :output "Ran 5 tests containing 10 assertions.\n0 failures, 0 errors."})}
+      body-fn)))
 
-(deftest verify-succeeds-with-artifact-present-test
-  (testing "verify phase succeeds when code artifact is present"
-    (with-redefs [agent/create-tester (fn [_] {:type :mock-tester})
-                  agent/invoke (fn [_agent _task _ctx]
-                                (response/success mock-test-result
-                                                {:tokens 200 :duration-ms 600}))]
-      (let [ctx (-> (create-base-context)
-                   (assoc-in [:execution/phase-results :implement]
-                            {:result {:status :success
-                                     :output mock-code-artifact}})
-                   (assoc :phase-config {:phase :verify}))
-            interceptor (registry/get-phase-interceptor {:phase :verify})
-            result ((:enter interceptor) ctx)]
-        
-        (is (= :success (get-in result [:phase :result :status]))
-            "Verify should succeed with artifact present")
-        
-        (is (some? (get-in result [:phase :result :output]))
-            "Should return test results")))))
+(defn with-failing-tests [body-fn]
+  (let [run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
+    (with-redefs-fn
+      {run-var (fn [_] {:passed? false :test-count 3 :assertion-count 6
+                        :fail-count 2 :error-count 1
+                        :output "Ran 3 tests.\n2 failures, 1 error."})}
+      body-fn)))
 
-(deftest verify-handles-empty-artifact-test
-  (testing "verify phase handles empty artifact (zero files)"
-    (with-redefs [agent/create-tester (fn [_] {:type :mock-tester})
-                  agent/invoke (fn [_agent _task _ctx]
-                                (response/success {:test/passed? true
-                                                 :test/note "No code to test"}
-                                                {:tokens 50 :duration-ms 100}))]
-      (let [ctx (-> (create-base-context)
-                   (assoc-in [:execution/phase-results :implement]
-                            {:result {:status :success
-                                     :output mock-empty-artifact}})
-                   (assoc :phase-config {:phase :verify}))
-            interceptor (registry/get-phase-interceptor {:phase :verify})
-            result ((:enter interceptor) ctx)]
-        
-        ;; Phase should complete (agent decides how to handle empty artifact)
-        (is (some? (get-in result [:phase :result]))
-            "Phase should return a result")))))
+;------------------------------------------------------------------------------ Enter Tests
 
-(deftest verify-with-missing-implement-result-test
-  (testing "verify phase fails fast when implement phase result is completely missing"
-    (with-redefs [agent/create-tester (fn [_] {:type :mock-tester})
-                  agent/invoke (fn [_agent _task _ctx]
-                                (response/success {:test/passed? true}
-                                                {:tokens 10 :duration-ms 50}))]
-      (let [ctx (-> (create-base-context)
-                   ;; NO implement phase result at all
-                   (assoc :phase-config {:phase :verify}))
-            interceptor (registry/get-phase-interceptor {:phase :verify})]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"Verify phase received no code artifact"
-                              ((:enter interceptor) ctx))
-            "Verify should throw when no code artifact is available")))))
+(deftest verify-succeeds-when-tests-pass-test
+  (testing "verify phase returns :success when test suite passes"
+    (with-passing-tests
+      (fn []
+        (let [ctx (-> (create-base-context)
+                      (assoc :phase-config {:phase :verify}))
+              interceptor (registry/get-phase-interceptor {:phase :verify})
+              result ((:enter interceptor) ctx)]
 
-(deftest verify-descriptive-error-on-agent-failure-test
-  (testing "verify phase provides descriptive error when agent fails"
-    (with-redefs [agent/create-tester (fn [_] {:type :mock-tester})
-                  agent/invoke (fn [_ _ _]
-                                (throw (ex-info "Test generation failed: syntax error in code"
-                                               {:reason :syntax-error
-                                                :file "src/example.clj"
-                                                :line 42})))]
-      (let [ctx (-> (create-base-context)
-                   (assoc-in [:execution/phase-results :implement]
-                            {:result {:status :success
-                                     :output mock-code-artifact}})
-                   (assoc :phase-config {:phase :verify}))
-            interceptor (registry/get-phase-interceptor {:phase :verify})
-            result ((:enter interceptor) ctx)]
-        
-        (is (= false (get-in result [:phase :result :success]))
-            "Result should indicate failure")
-        
-        (is (some? (get-in result [:phase :result :error :message]))
-            "Error message should be present")
-        
-        (is (= "Test generation failed: syntax error in code"
-               (get-in result [:phase :result :error :message]))
-            "Error message should be descriptive")
-        
-        (is (= :syntax-error (get-in result [:phase :result :error :data :reason]))
-            "Error data should be preserved")))))
+          (is (= :success (get-in result [:phase :result :status]))
+              "Verify should succeed when all tests pass")
 
-(deftest verify-captures-test-failures-test
-  (testing "verify phase captures test failures from agent"
-    (with-redefs [agent/create-tester (fn [_] {:type :mock-tester})
-                  agent/invoke (fn [_ _ _]
-                                (response/success {:test/id (random-uuid)
-                                                 :test/passed? false
-                                                 :test/failures [{:test "test-feature"
-                                                                 :expected true
-                                                                 :actual false
-                                                                 :message "Feature not working"}]}
-                                                {:tokens 150 :duration-ms 400}))]
-      (let [ctx (-> (create-base-context)
-                   (assoc-in [:execution/phase-results :implement]
-                            {:result {:status :success
-                                     :output mock-code-artifact}})
-                   (assoc :phase-config {:phase :verify}))
-            interceptor (registry/get-phase-interceptor {:phase :verify})
-            result ((:enter interceptor) ctx)]
-        
-        (is (= :success (get-in result [:phase :result :status]))
-            "Phase should succeed even with test failures")
-        
-        (let [test-result (get-in result [:phase :result :output])]
-          (is (false? (:test/passed? test-result))
-              "Test result should indicate failure")
-          (is (seq (:test/failures test-result))
-              "Failures should be captured"))))))
+          (is (= 0 (get-in result [:phase :result :metrics :fail-count]))
+              "No failures captured in metrics when all tests pass")
+          (is (pos? (get-in result [:phase :result :metrics :pass-count]))
+              "Pass count captured in metrics"))))))
+
+(deftest verify-fails-when-tests-fail-test
+  (testing "verify phase returns :error when test suite fails"
+    (with-failing-tests
+      (fn []
+        (let [ctx (-> (create-base-context)
+                      (assoc :phase-config {:phase :verify}))
+              interceptor (registry/get-phase-interceptor {:phase :verify})
+              result ((:enter interceptor) ctx)]
+
+          (is (= :error (get-in result [:phase :result :status]))
+              "Verify should fail when tests fail")
+
+          (is (some? (get-in result [:phase :result :error :message]))
+              "Error message should be present")
+
+          (is (pos? (get-in result [:phase :result :metrics :fail-count]))
+              "Fail count captured in metrics when tests fail"))))))
+
+(deftest verify-with-missing-environment-id-test
+  (testing "verify phase fails fast when no execution environment-id is in context"
+    (let [ctx (-> (create-base-context)
+                  (dissoc :execution/environment-id)
+                  (assoc :phase-config {:phase :verify}))
+          interceptor (registry/get-phase-interceptor {:phase :verify})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Verify phase received no code artifact"
+                            ((:enter interceptor) ctx))
+          "Verify should throw when no execution environment is available"))))
+
+(deftest verify-handles-test-runner-error-gracefully-test
+  (testing "verify phase handles test runner exception as test failure"
+    (let [run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
+      (with-redefs-fn
+        {run-var (fn [_] {:passed? false :test-count 0 :fail-count 0 :error-count 1
+                          :output "bb: command not found"})}
+        (fn []
+          (let [ctx (-> (create-base-context)
+                        (assoc :phase-config {:phase :verify}))
+                interceptor (registry/get-phase-interceptor {:phase :verify})
+                result ((:enter interceptor) ctx)]
+            (is (= :error (get-in result [:phase :result :status]))
+                "Runner error should produce :error result")
+            (is (some? (get-in result [:phase :result :metrics :test-output]))
+                "Test output captured in metrics even on runner error")))))))
 
 ;------------------------------------------------------------------------------ Leave-verify redirect suppression tests (PR #288)
 
 (defn make-leave-ctx
-  "Build a minimal context suitable for leave-verify.
-   `result` is the phase result map (agent output).
-   `on-fail` is the redirect target (e.g. :implement) or nil."
+  "Build a minimal context suitable for leave-verify."
   [result on-fail]
   (cond-> {:phase {:started-at (- (System/currentTimeMillis) 1000)
                    :result result
@@ -192,14 +139,14 @@
           result (verify/leave-verify ctx)]
       (is (nil? (get-in result [:phase :redirect-to])))
       (is (= :failed (get-in result [:phase :status])))
-      (is (some? (get-in result [:phase :error :rate-limited?])))))
+      (is (some? (get-in result [:phase :error :rate-limited?]))))
 
-  (testing "rate-limit variant: you've hit your limit"
-    (let [ctx (make-leave-ctx {:status :error
-                               :error {:message "You've hit your limit · resets 7pm"}}
-                              :implement)
-          result (verify/leave-verify ctx)]
-      (is (nil? (get-in result [:phase :redirect-to]))))))
+    (testing "rate-limit variant: you've hit your limit"
+      (let [ctx (make-leave-ctx {:status :error
+                                 :error {:message "You've hit your limit · resets 7pm"}}
+                                :implement)
+            result (verify/leave-verify ctx)]
+        (is (nil? (get-in result [:phase :redirect-to])))))))
 
 (deftest leave-verify-no-redirect-without-on-fail-test
   (testing "normal failure without :on-fail does not set :redirect-to"
