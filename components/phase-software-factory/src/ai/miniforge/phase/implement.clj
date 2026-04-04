@@ -104,7 +104,7 @@
    Fails fast if no environment has been acquired — do not fall back to host filesystem."
   [ctx]
   (or (get ctx :execution/worktree-path)
-      (throw (ex-info "No :execution/worktree-path in context — workflow runner must acquire an execution environment before the implement phase"
+      (throw (ex-info (messages/t :implement/no-worktree)
                       {:ctx-keys (keys ctx)}))))
 
 (defn- resolve-files-in-scope
@@ -177,8 +177,8 @@
                (pos? iteration)
                (assoc :task/prior-attempts
                       {:attempt-number (inc iteration)
-                       :prior-error (or last-error "No artifact produced — agent exhausted turn budget exploring files instead of writing code")
-                       :instruction "This is a RETRY. Do NOT explore or read files. The plan and existing files are already in this prompt. Write the implementation code IMMEDIATELY and call submit."}))]
+                       :prior-error (or last-error (messages/t :implement/prior-error-default))
+                       :instruction (messages/t :implement/retry-instruction)}))]
     {:task task
      :rules-manifest manifest}))
 
@@ -306,7 +306,7 @@
         env-id (get ctx :execution/environment-id)
         summary (or (get-in result [:output :code/summary])
                     (when (string? (:output result)) (:output result))
-                    "Implementation complete")
+                    (messages/t :implement/summary-default))
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)

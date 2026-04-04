@@ -80,7 +80,7 @@
         (throw (ex-info (messages/t :release/no-implement-artifact)
                         {:phase            :release
                          :implement-status impl-status
-                         :hint             "Implement phase may have failed or produced no output"}))))))
+                         :hint             (messages/t :release/no-implement-hint)}))))))
 
 (defn- ctx-worktree-path
   "Resolve the working directory from phase context."
@@ -150,14 +150,14 @@
                                               :code/language  "mixed"
                                               :code/files     files
                                               :code/summary   (get impl-result :summary
-                                                                   "Changes from implementation")
+                                                                   (messages/t :release/changes-description))
                                               :environment-id (:environment-id impl-result)}}]
           input          (get-in ctx [:execution/input])]
       {:workflow/id       (or (get-in ctx [:execution/id]) (random-uuid))
        :workflow/phase    :release
        :workflow/spec     {:spec/description (or (:description input)
                                                  (:title input)
-                                                 "implement changes")}
+                                                 (messages/t :default/task-description))}
        :workflow/artifacts code-artifacts})))
 
 (defn build-executor-context
@@ -245,7 +245,7 @@
                          {:release/metrics (:metrics exec-result)})))
                      ;; Execution failed
                      (response/failure
-                      (ex-info "Release phase failed"
+                      (ex-info (messages/t :release/phase-failed)
                                {:errors (:errors exec-result)
                                 :metrics (:metrics exec-result)}))))
                  (catch Exception e
@@ -305,7 +305,7 @@
                       (-> (update-in [:phase :iterations] (fnil inc 1))
                           (assoc-in [:phase :last-error]
                                     (or (get-in result [:error :message])
-                                        "Release phase failed"))))]
+                                        (messages/t :release/phase-failed)))))]
       ;; Emit phase-completed telemetry event
       (phase/emit-phase-completed! final-ctx :release
         {:outcome (if (= :completed phase-status) :success :failure)
