@@ -118,7 +118,7 @@
     (let [result (gate/check-gates [:syntax]
                                     {:content "(+ 1 2)"}
                                     {})]
-      (is (:all-passed? result))
+      (is (:passed? result))
       (is (empty? (:failed-gates result))))))
 
 (deftest check-gates-one-fails-test
@@ -128,13 +128,13 @@
                                     {:content "password = \"secretpassword123\""}
                                     {})]
       ;; Syntax passes but secrets fails
-      (is (not (:all-passed? result)))
+      (is (not (:passed? result)))
       (is (seq (:failed-gates result))))))
 
 (deftest check-gates-empty-test
   (testing "check-gates passes for empty gate list"
     (let [result (gate/check-gates [] {} {})]
-      (is (:all-passed? result)))))
+      (is (:passed? result)))))
 
 ;; ============================================================================
 ;; Repair gate tests

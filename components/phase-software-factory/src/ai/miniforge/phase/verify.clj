@@ -19,15 +19,13 @@
 (ns ai.miniforge.phase.verify
   "Verification phase interceptor.
 
-   Generates and runs tests for code artifacts.
-   Agent: :tester
+   Runs the test suite directly inside the executor environment.
+   No tester agent: the implementer wrote both source and test files;
+   this phase validates them by running the test suite.
    Default gates: [:tests-pass :coverage]"
   (:require [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.phase.phase-config :as phase-config]
-            [ai.miniforge.agent.interface :as agent]
-            [ai.miniforge.task.interface :as task]
-            [ai.miniforge.response.interface :as response]
             [babashka.process :as process]
             [babashka.fs :as fs]
             [clojure.string :as str]))
@@ -79,14 +77,14 @@
             assertion-count (parse-long (nth ran-match 2))
             fail-count (parse-long (nth fail-match 1))
             error-count (parse-long (nth fail-match 2))]
-        {:all-passed? (and (zero? fail-count) (zero? error-count))
+        {:passed? (and (zero? fail-count) (zero? error-count))
          :test-count test-count
          :assertion-count assertion-count
          :fail-count fail-count
          :error-count error-count
          :output output})
       ;; Could not parse — treat as failure to be safe
-      {:all-passed? false
+      {:passed? false
        :test-count 0
        :assertion-count 0
        :fail-count 0
@@ -105,7 +103,7 @@
                    "bb" "test")]
       (parse-test-output (str (:out result "") "\n" (:err result ""))))
     (catch Exception e
-      {:all-passed? false
+      {:passed? false
        :test-count 0 :assertion-count 0
        :fail-count 0 :error-count 1
        :output (.getMessage e)})))
@@ -116,8 +114,9 @@
 (defn enter-verify
   "Execute verification phase.
 
-   Generates tests for code artifacts, runs them,
-   checks coverage thresholds."
+   Runs the test suite directly inside the executor environment.
+   No tester agent — the implementer already wrote test files.
+   Fails fast if no execution environment is present in context."
   [ctx]
   (let [config (registry/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
@@ -126,61 +125,51 @@
         ;; Emit phase-started telemetry event
         _ (phase/emit-phase-started! ctx :verify)
 
-        ;; Create tester agent (specialized implementation uses llm/chat directly)
-        tester-agent (agent/create-tester {})
-
-        ;; Build task from workflow input and implementation result
-        input (get-in ctx [:execution/input])
-        ;; Code can come from:
-        ;; 1. Previous implement phase result (in multi-phase workflows)
-        ;; 2. Direct input as :task/code-artifact (in test-only workflows)
-        ;; Read from execution phase results where implement phase stored its output
-        ;; Phase results contain the full phase map, so extract :result :output
-        implement-result (get-in ctx [:execution/phase-results :implement :result :output])
-        code-artifact (or implement-result
-                         (:task/code-artifact input)
-                         (:code-artifact input))
-        ;; Fail fast if no code artifact is available
-        _ (when-not code-artifact
-            (throw (ex-info "Verify phase received no code artifact from implement phase"
+        ;; Fail fast if no executor environment has been acquired
+        _ (when-not (get ctx :execution/environment-id)
+            (throw (ex-info "Verify phase received no code artifact"
                             {:phase :verify
-                             :available-keys (keys (get-in ctx [:execution/phase-results :implement :result]))
-                             :hint "Check implement phase agent result"})))
-        ;; Build task using canonical builder
-        task (task/verify-task code-artifact input)
+                             :hint "Workflow runner must acquire an execution environment before verify phase"})))
 
-        ;; Create streaming callback for agent output
-        on-chunk (phase/create-streaming-callback ctx :verify)
-        agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
+        worktree-path (or (get ctx :execution/worktree-path)
+                          (get ctx :worktree-path)
+                          (System/getProperty "user.dir"))
 
-        ;; Emit agent-started telemetry event
-        _ (phase/emit-agent-started! agent-ctx :verify :tester)
+        ;; Run the test suite directly in the executor environment
+        test-results (run-tests! worktree-path)
 
-        ;; Invoke agent
-        result (try
-                 (agent/invoke tester-agent task agent-ctx)
-                 (catch Exception e
-                   (response/failure e)))
-
-        ;; Emit agent-completed telemetry event
-        _ (phase/emit-agent-completed! agent-ctx :verify :tester result)
-
-        ;; Execute tests if agent produced test files
-        worktree-path (or (:worktree-path ctx) (System/getProperty "user.dir"))
-        test-artifact (get-in result [:output])
-        test-files (when test-artifact (:test/files test-artifact))
-        test-results (when (seq test-files)
-                       (write-test-files! worktree-path test-files)
-                       (run-tests! worktree-path))
-
-        ;; Enrich artifact with test results
-        result (if test-results
-                 (assoc-in result [:output :metadata :test-results] test-results)
-                 result)]
+        ;; Phase result carries environment reference and test metrics (N6 environment model).
+        ;; No serialized code — changes live in the environment's worktree.
+        ;; :metrics carries pass/fail counts and test-output for the evidence bundle.
+        env-id     (get ctx :execution/environment-id)
+        pass-count (get test-results :test-count 0)
+        fail-count (+ (get test-results :fail-count 0) (get test-results :error-count 0))
+        summary    (if (:passed? test-results)
+                     (str "All " pass-count " test(s) passed")
+                     (str "Tests failed: " (get test-results :fail-count 0) " failure(s), "
+                          (get test-results :error-count 0) " error(s)"))
+        result     (if (:passed? test-results)
+                     {:status         :success
+                      :environment-id env-id
+                      :summary        summary
+                      :metrics        {:tokens 0 :duration-ms 0
+                                       :pass-count  pass-count
+                                       :fail-count  fail-count
+                                       :test-output (get test-results :output "")}}
+                     {:status         :error
+                      :environment-id env-id
+                      :summary        summary
+                      :error          {:message (str "Tests failed: "
+                                                     (get test-results :fail-count 0) " failures, "
+                                                     (get test-results :error-count 0) " errors")}
+                      :metrics        {:tokens 0 :duration-ms 0
+                                       :pass-count  pass-count
+                                       :fail-count  fail-count
+                                       :test-output (get test-results :output "")}})]
 
     (-> ctx
         (assoc-in [:phase :name] :verify)
-        (assoc-in [:phase :agent] :tester)
+        (assoc-in [:phase :agent] nil)
         (assoc-in [:phase :gates] gates)
         (assoc-in [:phase :budget] budget)
         (assoc-in [:phase :started-at] start-time)

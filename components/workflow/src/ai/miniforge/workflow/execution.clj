@@ -106,7 +106,7 @@
                        (get-in phase-result [:result :output]))]
       (if (and (seq gate-keywords) artifact)
         (let [gate-result (gate/check-gates gate-keywords artifact ctx)]
-          (if (:all-passed? gate-result)
+          (if (:passed? gate-result)
             phase-result
             (assoc phase-result
                    :phase/status :failed

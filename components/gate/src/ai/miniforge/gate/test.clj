@@ -40,7 +40,7 @@
        :warnings [{:type :no-tests
                    :message "No test results found"}]}
 
-      (:all-passed? test-results)
+      (:passed? test-results)
       {:passed? true
        :test-count (:test-count test-results)
        :pass-count (:pass-count test-results)}
@@ -103,7 +103,7 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  (check-tests-pass {:metadata {:test-results {:all-passed? true :test-count 10}}} {})
+  (check-tests-pass {:metadata {:test-results {:passed? true :test-count 10}}} {})
   (check-coverage {:metadata {:coverage 85}} {})
   (check-coverage {:metadata {:coverage 70}} {})
   :leave-this-here)

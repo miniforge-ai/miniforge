@@ -164,11 +164,11 @@
      ctx      - Execution context
 
    Returns:
-     {:all-passed? bool :results [...]}"
+     {:passed? bool :results [...]}"
   [gate-kws artifact ctx]
   (let [results (mapv #(check-gate % artifact ctx) gate-kws)
-        all-passed? (every? :passed? results)]
-    {:all-passed? all-passed?
+        passed? (every? :passed? results)]
+    {:passed? passed?
      :results results
      :failed-gates (filterv failed? results)}))
 
