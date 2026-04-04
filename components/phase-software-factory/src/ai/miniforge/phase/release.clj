@@ -287,20 +287,20 @@
                         (update-in [:execution :phases-completed] (fnil conj []) :release)
                         ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
-                        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
-    ;; Handle retrying: increment iteration counter
-    (let [final-ctx (cond-> updated-ctx
-                      (registry/retrying? (:phase updated-ctx))
-                      (-> (update-in [:phase :iterations] (fnil inc 1))
-                          (assoc-in [:phase :last-error]
-                                    (or (get-in result [:error :message])
-                                        "Release phase failed"))))]
-      ;; Emit phase-completed telemetry event
-      (phase/emit-phase-completed! final-ctx :release
-        {:outcome (if (= :completed phase-status) :success :failure)
-         :duration-ms duration-ms
-         :tokens (:tokens metrics 0)})
-      final-ctx)))
+                        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))
+        ;; Handle retrying: increment iteration counter
+        final-ctx (cond-> updated-ctx
+                    (registry/retrying? (:phase updated-ctx))
+                    (-> (update-in [:phase :iterations] (fnil inc 1))
+                        (assoc-in [:phase :last-error]
+                                  (or (get-in result [:error :message])
+                                      "Release phase failed"))))]
+    ;; Emit phase-completed telemetry event
+    (phase/emit-phase-completed! final-ctx :release
+      {:outcome (if (= :completed phase-status) :success :failure)
+       :duration-ms duration-ms
+       :tokens (:tokens metrics 0)})
+    final-ctx))
 
 (defn error-release
   "Handle release phase errors."

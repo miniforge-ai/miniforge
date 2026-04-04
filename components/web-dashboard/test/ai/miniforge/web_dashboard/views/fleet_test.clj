@@ -78,7 +78,7 @@
 ;; readiness-state-badge-variant, and readiness-state-label are added to fleet.clj.
 (comment
 
-(deftest error-category-badge-variant-test
+#_(deftest error-category-badge-variant-test
   (testing "Maps error categories to badge variants"
     (is (= :error (sut/error-category-badge-variant :auth)))
     (is (= :error (sut/error-category-badge-variant :access)))
@@ -88,7 +88,7 @@
     (is (= :neutral (sut/error-category-badge-variant :unknown)))
     (is (= :neutral (sut/error-category-badge-variant :something-else)))))
 
-(deftest error-category-label-test
+#_(deftest error-category-label-test
   (testing "Maps error categories to human-readable labels"
     (is (= "Auth" (sut/error-category-label :auth)))
     (is (= "Access" (sut/error-category-label :access)))
@@ -98,7 +98,7 @@
     (is (= "Error" (sut/error-category-label :unknown)))
     (is (= "Error" (sut/error-category-label :something-else)))))
 
-(deftest readiness-state-badge-variant-test
+#_(deftest readiness-state-badge-variant-test
   (testing "Maps readiness states to badge variants"
     (is (= :success (sut/readiness-state-badge-variant :merge-ready)))
     (is (= :error (sut/readiness-state-badge-variant :ci-failing)))
@@ -109,7 +109,7 @@
     (is (= :info (sut/readiness-state-badge-variant :needs-review)))
     (is (= :neutral (sut/readiness-state-badge-variant :something-else)))))
 
-(deftest readiness-state-label-test
+#_(deftest readiness-state-label-test
   (testing "Maps readiness states to human-readable labels"
     (is (= "Ready" (sut/readiness-state-label :merge-ready)))
     (is (= "CI Failing" (sut/readiness-state-label :ci-failing)))

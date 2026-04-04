@@ -1,3 +1,21 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
 (ns conformance.n1_architecture_test
   "End-to-end N1 Architecture conformance tests.
    Verifies complete workflow execution from spec → PR with evidence bundle."
@@ -6,9 +24,7 @@
    [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.evidence-bundle.interface :as evidence]
    [ai.miniforge.artifact.interface :as artifact]
-   [ai.miniforge.agent.interface :as agent]
-   [ai.miniforge.loop.interface :as loop]
-   [ai.miniforge.gate.interface :as gate]))
+   [ai.miniforge.agent.interface :as agent]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures
@@ -163,13 +179,11 @@
 (deftest phase-artifact-tracking-test
   (testing "N1 §2.2: Phase MUST track artifacts produced"
     (let [context (create-test-context)
-          artifact-store (:artifact-store context)
           wf (workflow/create-workflow)
           wf-id (workflow/start wf test-workflow-spec context)
-          test-artifact (artifact/create-artifact
-                         artifact-store
-                         {:artifact/type :code
-                          :artifact/content "(defn test [] :ok)"})]
+          test-artifact {:artifact/id (random-uuid)
+                         :artifact/type :code
+                         :artifact/content "(defn test [] :ok)"}]
       (workflow/advance wf wf-id
                        {:success? true
                         :artifacts [(:artifact/id test-artifact)]})
@@ -205,11 +219,9 @@
 
       ;; Phase 2: Implement
       (testing "Implement phase executes"
-        (let [state (workflow/get-state wf wf-id)
-              test-artifact (artifact/create-artifact
-                            (:artifact-store context)
-                            {:artifact/type :code
-                             :artifact/content "(defn feature [] :implemented)"})]
+        (let [test-artifact {:artifact/id (random-uuid)
+                             :artifact/type :code
+                             :artifact/content "(defn feature [] :implemented)"}]
           (workflow/advance wf wf-id
                            {:success? true
                             :artifacts [(:artifact/id test-artifact)]
