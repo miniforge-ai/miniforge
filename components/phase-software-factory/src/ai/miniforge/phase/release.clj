@@ -235,7 +235,7 @@
                            content (:artifact/content release-artifact)]
                        (response/success
                         (merge
-                         {:release/id (or (:artifact/id release-artifact) (random-uuid))
+                         {:release/id (get release-artifact :artifact/id (random-uuid))
                           :release/status :completed
                           :release/artifacts (:artifacts exec-result)}
                          ;; Include PR info for evidence bundle
@@ -278,7 +278,7 @@
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
         release-data (when (= :success (:status result)) (:output result))
-        release-metrics (or (:release/metrics release-data) {})
+        release-metrics (get release-data :release/metrics {})
         metrics (merge {:tokens 0 :duration-ms duration-ms} release-metrics)
         agent-status (:status result)
         iterations (get-in ctx [:phase :iterations] 1)
@@ -306,12 +306,11 @@
             (registry/retrying? (:phase updated-ctx))
             (-> (update-in [:phase :iterations] (fnil inc 1))
                 (assoc-in [:phase :last-error]
-                          (or (get-in result [:error :message])
-                              (messages/t :release/phase-failed)))))
+                          (get-in result [:error :message] (messages/t :release/phase-failed)))))
       (phase/emit-phase-completed! :release
-        {:outcome (if (= :completed phase-status) :success :failure)
+        {:outcome     (if (= :completed phase-status) :success :failure)
          :duration-ms duration-ms
-         :tokens (:tokens metrics 0)}))))
+         :tokens      (:tokens metrics 0)}))))
 
 (defn error-release
   "Handle release phase errors."

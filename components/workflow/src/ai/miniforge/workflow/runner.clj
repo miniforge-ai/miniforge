@@ -120,12 +120,11 @@
   "Publish phase completed event."
   [event-stream context phase-name result]
   (when event-stream
-    (let [succeeded? (or (:success? result)
-                         (phase/succeeded-or-done? result))
-          outcome (if succeeded? :success :failure)
-          duration-ms (or (:duration-ms result)
-                          (get-in result [:phase/metrics :duration-ms])
-                          (get-in result [:metrics :duration-ms]))
+    (let [succeeded? (get result :success? (phase/succeeded-or-done? result))
+          outcome    (if succeeded? :success :failure)
+          duration-ms (get result :duration-ms
+                        (get-in result [:phase/metrics :duration-ms]
+                          (get-in result [:metrics :duration-ms])))
           error-info (when-not succeeded?
                        (or (:error result)
                            (when-let [msg (get-in result [:phase/gate-errors])]
@@ -133,10 +132,10 @@
                            (when-let [msg (:message result)]
                              {:message msg})))
           redirect-to (:redirect-to result)
-          tokens (or (get-in result [:metrics :tokens])
+          tokens   (get-in result [:metrics :tokens]
                      (get-in result [:phase/metrics :tokens]))
-          cost-usd (or (get-in result [:metrics :cost-usd])
-                       (get-in result [:phase/metrics :cost-usd]))
+          cost-usd (get-in result [:metrics :cost-usd]
+                     (get-in result [:phase/metrics :cost-usd]))
           event-data (cond-> {:outcome outcome :duration-ms duration-ms}
                        error-info (assoc :error error-info)
                        redirect-to (assoc :redirect-to redirect-to)
@@ -201,70 +200,80 @@
 
 ;------------------------------------------------------------------------------ Layer 0.5: Execution environment lifecycle
 
+(defn- dag-executor-fns
+  "Resolve dag-executor functions via requiring-resolve.
+   Uses requiring-resolve so the workflow component has no hard dependency on dag-executor."
+  []
+  {:create-registry (requiring-resolve 'ai.miniforge.dag-executor.executor/create-executor-registry)
+   :select-exec     (requiring-resolve 'ai.miniforge.dag-executor.executor/select-executor)
+   :acquire-env!    (requiring-resolve 'ai.miniforge.dag-executor.executor/acquire-environment!)
+   :executor-type   (requiring-resolve 'ai.miniforge.dag-executor.executor/executor-type)
+   :result-ok?      (requiring-resolve 'ai.miniforge.dag-executor.result/ok?)
+   :result-unwrap   (requiring-resolve 'ai.miniforge.dag-executor.result/unwrap)})
+
+(defn- registry-config-for-mode
+  "Build executor registry config for execution mode.
+   :governed — Docker/K8s only (no worktree; no-silent-downgrade per N11 §7.4).
+   :local    — worktree only."
+  [mode executor-config]
+  (case mode
+    :governed (merge (select-keys (or executor-config {}) [:docker :kubernetes])
+                     (when-not executor-config {:docker {}}))
+    {:worktree {}}))
+
+(defn- select-capsule-executor
+  "Select executor for mode; rejects worktree fallback in governed mode (N11 §7.4)."
+  [registry mode {:keys [select-exec executor-type]}]
+  (let [raw (case mode
+              :governed (select-exec registry)
+              (select-exec registry :preferred :worktree))]
+    (when-not (and (= :governed mode) raw (= :worktree (executor-type raw)))
+      raw)))
+
+(defn- assert-executor-for-mode!
+  "Throws for :governed mode when no capsule executor is available."
+  [executor mode]
+  (when (and (nil? executor) (= :governed mode))
+    (throw (ex-info (messages/t :governed/no-capsule)
+                    {:execution-mode :governed
+                     :hint (messages/t :governed/no-capsule-hint)}))))
+
+(defn- build-env-record
+  "Acquire environment from executor and build the result map."
+  [executor workflow-id mode {:keys [acquire-env! result-ok? result-unwrap]}]
+  (let [task-id    (if (uuid? workflow-id) workflow-id (random-uuid))
+        env-result (acquire-env! executor task-id {})]
+    (when (result-ok? env-result)
+      (let [env (result-unwrap env-result)]
+        {:executor       executor
+         :environment-id (:environment-id env)
+         :worktree-path  (:workdir env)
+         :execution-mode mode}))))
+
 (defn- acquire-execution-environment!
   "Acquire an isolated execution environment before pipeline starts.
 
    Execution mode (from opts):
-   - :local (default) — worktree executor; agent runs on host with host-accessible
-     git worktree. Correct for the current agent-on-host architecture.
-   - :governed — capsule executor required (Docker or Kubernetes); fails loudly
-     if none available. Implements N11 §7 no-silent-downgrade rule.
+   - :local (default) — worktree; agent-on-host model; correct for current architecture.
+   - :governed — Docker or Kubernetes capsule required; throws if unavailable (N11 §7).
 
-   Uses requiring-resolve to avoid hard dependency on dag-executor component.
-
-   Returns map with :executor, :environment-id, :worktree-path
-   or nil if acquisition fails or dag-executor is unavailable.
-   For :governed mode, throws instead of returning nil when no capsule is available."
+   Returns map with :executor, :environment-id, :worktree-path, :execution-mode,
+   or nil if acquisition fails (:local) / throws (:governed)."
   [workflow-id {:keys [_repo-url _branch execution-mode executor-config]}]
-  (let [mode (or execution-mode :local)]
+  (let [mode (get {:governed :governed} execution-mode :local)]
     (try
-      (let [create-registry (requiring-resolve 'ai.miniforge.dag-executor.executor/create-executor-registry)
-            select-exec     (requiring-resolve 'ai.miniforge.dag-executor.executor/select-executor)
-            acquire-env!    (requiring-resolve 'ai.miniforge.dag-executor.executor/acquire-environment!)
-            executor-type   (requiring-resolve 'ai.miniforge.dag-executor.executor/executor-type)
-            result-ok?      (requiring-resolve 'ai.miniforge.dag-executor.result/ok?)
-            result-unwrap   (requiring-resolve 'ai.miniforge.dag-executor.result/unwrap)
-            ;; Registry config — :governed includes Docker/K8s, :local is worktree only.
-            ;; Note: create-executor-registry always adds worktree as a fallback entry,
-            ;; so for governed mode we check the selected executor type post-selection
-            ;; to enforce the no-silent-downgrade rule (N11 §7.4).
-            registry-config (case mode
-                              :governed (merge (select-keys (or executor-config {})
-                                                            [:docker :kubernetes])
-                                               (when-not executor-config {:docker {}}))
-                              ;; :local and any other value → worktree only
-                              {:worktree {}})
-            registry        (create-registry registry-config)
-            raw-executor    (case mode
-                              :governed (select-exec registry)
-                              (select-exec registry :preferred :worktree))
-            ;; For governed mode: reject worktree fallback — it's not a capsule (N11 §7.4)
-            executor        (if (and (= :governed mode)
-                                     raw-executor
-                                     (= :worktree (executor-type raw-executor)))
-                              nil
-                              raw-executor)]
-        (if (nil? executor)
-          (if (= :governed mode)
-            (throw (ex-info (messages/t :runner/no-capsule)
-                            {:execution-mode :governed
-                             :hint (messages/t :runner/no-capsule-hint)}))
-            nil)
-          (let [task-id    (if (uuid? workflow-id) workflow-id (random-uuid))
-                env-result (acquire-env! executor task-id {})]
-            (when (result-ok? env-result)
-              (let [env (result-unwrap env-result)]
-                {:executor        executor
-                 :environment-id  (:environment-id env)
-                 :worktree-path   (:workdir env)
-                 :execution-mode  mode})))))
+      (let [fns      (dag-executor-fns)
+            config   (registry-config-for-mode mode executor-config)
+            registry ((:create-registry fns) config)
+            executor (select-capsule-executor registry mode fns)]
+        (assert-executor-for-mode! executor mode)
+        (when executor
+          (build-env-record executor workflow-id mode fns)))
       (catch Exception e
-        (if (= :governed mode)
-          (throw e)
-          (do
-            (println (messages/t :warn/publish-event
-                                 {:error (str "Environment acquisition failed: " (ex-message e))}))
-            nil))))))
+        (when (= :governed mode) (throw e))
+        (println (messages/t :warn/publish-event
+                             {:error (str "Environment acquisition failed: " (ex-message e))}))
+        nil))))
 
 (defn- release-execution-environment!
   "Release an execution environment acquired by the runner.

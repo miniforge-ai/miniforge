@@ -18,6 +18,6 @@
   :status/stopped-control    "Workflow stopped by control plane"
   :status/empty-completion   "Workflow completed but produced no artifacts or phase results"
 
-  ;; Execution environment
-  :runner/no-capsule         "No capsule executor available for governed workflow"
-  :runner/no-capsule-hint    "Start Docker or configure a Kubernetes cluster"}}
+  ;; Execution mode
+  :governed/no-capsule      "No capsule executor available for governed workflow"
+  :governed/no-capsule-hint "Start Docker or configure a Kubernetes cluster"}}
