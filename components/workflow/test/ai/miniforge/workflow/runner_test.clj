@@ -252,13 +252,14 @@
       (is (= "/tmp/worktree" (:execution/worktree-path result))))))
 
 (deftest run-pipeline-without-executor-skips-env-keys-test
-  (testing "when acquisition returns nil (no dag-executor on classpath), env keys are absent"
-    ;; In the test environment dag-executor is not on the classpath,
-    ;; so acquire-execution-environment! returns nil.
-    (let [workflow {:workflow/id :test
-                    :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase :done}]}
-          result (runner/run-pipeline workflow {:task "Test"} {})]
-      (is (= :completed (:execution/status result)))
-      (is (nil? (:execution/environment-id result)))
-      (is (nil? (:execution/worktree-path result))))))
+  (testing "when acquisition returns nil, env keys are absent from context"
+    ;; Force acquisition to return nil to test the nil-acquisition path.
+    (with-redefs [ai.miniforge.dag-executor.executor/create-executor-registry
+                  (constantly nil)]
+      (let [workflow {:workflow/id :test
+                      :workflow/version "1.0.0"
+                      :workflow/pipeline [{:phase :done}]}
+            result (runner/run-pipeline workflow {:task "Test"} {})]
+        (is (= :completed (:execution/status result)))
+        (is (nil? (:execution/environment-id result)))
+        (is (nil? (:execution/worktree-path result)))))))
