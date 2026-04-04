@@ -32,12 +32,12 @@
       (is (= :codex (get-in cfg [:llm :backend])))
       (is (= "gpt-5.2-codex" (get-in cfg [:llm :model]))))
 
-    (testing "default agent models use GPT for thinking and execution"
+    (testing "default agent models use GPT for thinking, Claude for execution"
       (is (= "gpt-5.4" (get-in cfg [:agents :default-models :thinking])))
-      (is (= "gpt-5.2-codex" (get-in cfg [:agents :default-models :execution]))))
+      (is (= "claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution]))))
 
-    (testing "default self-healing enables codex failover"
-      (is (= [:codex] (get-in cfg [:self-healing :allowed-failover-backends]))))))
+    (testing "default self-healing enables claude and codex failover"
+      (is (= [:claude :codex] (get-in cfg [:self-healing :allowed-failover-backends]))))))
 
 (deftest load-default-config-falls-back-to-edn-resource-test
   (let [orig-resource io/resource]
@@ -49,4 +49,4 @@
                                   nil))]
       (let [cfg (user/load-default-config)]
         (is (= :codex (get-in cfg [:llm :backend])))
-        (is (= "gpt-5.2-codex" (get-in cfg [:agents :default-models :execution])))))))
+        (is (= "claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution])))))))
