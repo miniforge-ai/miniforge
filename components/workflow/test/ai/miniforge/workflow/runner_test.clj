@@ -232,3 +232,33 @@
           ctx (ctx/create-context workflow {:task "Test"} {})]
       (is (contains? ctx :execution/output))
       (is (nil? (:execution/output ctx))))))
+
+;; ============================================================================
+;; Execution environment tests
+;; ============================================================================
+
+(deftest run-pipeline-uses-pre-acquired-executor-test
+  (testing "pre-acquired executor/environment-id in opts lands in initial context"
+    (let [env-id (random-uuid)
+          workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase :done}]}
+          result (runner/run-pipeline workflow {:task "Test"}
+                                       {:executor       ::stub-executor
+                                        :environment-id env-id
+                                        :worktree-path  "/tmp/worktree"})]
+      (is (= :completed (:execution/status result)))
+      (is (= env-id (:execution/environment-id result)))
+      (is (= "/tmp/worktree" (:execution/worktree-path result))))))
+
+(deftest run-pipeline-without-executor-skips-env-keys-test
+  (testing "when acquisition returns nil (no dag-executor on classpath), env keys are absent"
+    ;; In the test environment dag-executor is not on the classpath,
+    ;; so acquire-execution-environment! returns nil.
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase :done}]}
+          result (runner/run-pipeline workflow {:task "Test"} {})]
+      (is (= :completed (:execution/status result)))
+      (is (nil? (:execution/environment-id result)))
+      (is (nil? (:execution/worktree-path result))))))

@@ -223,10 +223,9 @@
         (let [task-id    (if (uuid? workflow-id) workflow-id (random-uuid))
               env-result (acquire-env! executor task-id {})]
           (when (result-ok? env-result)
-            (let [env    (result-unwrap env-result)
-                  env-id (:environment-id env)]
+            (let [env (result-unwrap env-result)]
               {:executor       executor
-               :environment-id env-id
+               :environment-id (:environment-id env)
                :worktree-path  (:workdir env)})))))
     (catch Exception e
       (println (messages/t :warn/publish-event
@@ -440,9 +439,7 @@
 
          ;; Merge acquired environment info into opts
          opts (if acquired-env
-                (merge opts {:executor       (:executor acquired-env)
-                             :environment-id (:environment-id acquired-env)
-                             :worktree-path  (:worktree-path acquired-env)})
+                (merge opts acquired-env)
                 opts)
 
          pipeline (build-pipeline workflow)
