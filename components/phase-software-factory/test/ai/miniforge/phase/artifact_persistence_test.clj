@@ -101,22 +101,19 @@
 
 ;------------------------------------------------------------------------------ Tests
 
-(deftest test-verify-fails-without-artifact
-  (testing "verify phase throws when no implement result is present"
-    (with-redefs [agent/create-tester (fn [_] {:type :mock-tester})
-                  agent/invoke (fn [_ _ _]
-                                 (response/success {:result :ok} {:tokens 0 :duration-ms 0}))]
-      (let [ctx (create-base-context)]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"Verify phase received no code artifact"
-                              (execute-phase-enter :verify ctx)))
-        ;; Verify ex-data contains diagnostic info
-        (try
-          (execute-phase-enter :verify ctx)
-          (catch clojure.lang.ExceptionInfo e
-            (let [data (ex-data e)]
-              (is (= :verify (:phase data)))
-              (is (some? (:hint data))))))))))
+(deftest test-verify-fails-without-environment
+  (testing "verify phase throws when no execution environment-id is in context"
+    (let [ctx (dissoc (create-base-context) :execution/environment-id)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Verify phase received no code artifact"
+                            (execute-phase-enter :verify ctx)))
+      ;; Verify ex-data contains diagnostic info
+      (try
+        (execute-phase-enter :verify ctx)
+        (catch clojure.lang.ExceptionInfo e
+          (let [data (ex-data e)]
+            (is (= :verify (:phase data)))
+            (is (some? (:hint data)))))))))
 
 (deftest test-release-fails-when-no-implement-result
   (testing "release phase throws when implement phase result is absent"

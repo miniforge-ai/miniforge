@@ -275,7 +275,7 @@
     (let [text (implementer/task->text
                  {:task/description "Fix failing tests"
                   :task/verify-failures
-                  {:test-results {:all-passed? false
+                  {:test-results {:passed? false
                                   :test-count 5
                                   :fail-count 2
                                   :error-count 0}
@@ -300,7 +300,7 @@
                  {:task/description "Fix everything"
                   :task/review-feedback "Add input validation"
                   :task/verify-failures
-                  {:test-results {:all-passed? false :fail-count 1}}})]
+                  {:test-results {:passed? false :fail-count 1}}})]
       (is (str/includes? text "## Review Feedback (MUST FIX)"))
       (is (str/includes? text "Add input validation"))
       (is (str/includes? text "## Test Failures (MUST FIX)"))

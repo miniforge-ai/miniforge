@@ -9,13 +9,14 @@
    :model-hint :sonnet}
 
   ;; Verify phase defaults.
+  ;; No agent: verify runs the test suite directly in the executor environment.
   :verify
-  {:agent :tester
+  {:agent nil
    :gates [:tests-pass :coverage]
-   :budget {:tokens 15000
+   :budget {:tokens 0
             :iterations 3
             :time-seconds 300}
-   :model-hint :sonnet}
+   :model-hint nil}
 
   ;; Review phase defaults.
   :review

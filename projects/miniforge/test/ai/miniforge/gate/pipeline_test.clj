@@ -159,7 +159,7 @@
          results []]
     (if (empty? remaining-gates)
       {:success? true
-       :all-passed? (every? #(= :success (:status %)) results)
+       :passed? (every? #(= :success (:status %)) results)
        :results results}
       (let [gate-fn (first remaining-gates)
             result (gate-fn artifact context)]
@@ -212,7 +212,7 @@
 
       (is (true? (:success? result))
           "All gates should pass")
-      (is (true? (:all-passed? result))
+      (is (true? (:passed? result))
           "Chain should report all passed")
       (is (= 3 (count (:results result)))
           "Should have 3 gate results"))))
