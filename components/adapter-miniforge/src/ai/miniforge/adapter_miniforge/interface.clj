@@ -77,7 +77,7 @@
     ;; Return current known status.
     {:status (:agent/status agent-record)})
 
-  (deliver-decision [_ agent-record decision-resolution]
+  (deliver-decision [_ _agent-record _decision-resolution]
     ;; For miniforge native agents, decisions flow through
     ;; the approval system in event-stream.
     ;; TODO: Wire to es/submit-approval when control-action integration is ready.

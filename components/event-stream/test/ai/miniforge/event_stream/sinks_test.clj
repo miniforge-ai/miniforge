@@ -1,9 +1,28 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
 (ns ai.miniforge.event-stream.sinks-test
   "Unit tests for event sink functions."
   (:require
-   [clojure.test :refer [deftest testing is use-fixtures]]
+   [clojure.test :refer [deftest testing is]]
    [clojure.java.io :as io]
    [clojure.edn :as edn]
+   [clojure.string]
    [ai.miniforge.event-stream.sinks :as sinks]))
 
 ;------------------------------------------------------------------------------ Helpers
@@ -108,13 +127,12 @@
 
 (deftest stderr-sink-test
   (testing "only passes events matching filter"
-    (let [passed (atom [])
+    (let [_passed (atom [])
           sink (sinks/stderr-sink {:filter (fn [e] (= :workflow/failed (:event/type e)))})]
       ;; Redirect stderr to capture output
-      (let [err-output (java.io.StringWriter.)]
-        (binding [*err* err-output]
-          (sink (sample-event {:event/type :workflow/started}))
-          (sink (sample-event {:event/type :workflow/failed})))
+      (binding [*err* (java.io.StringWriter.)]
+        (sink (sample-event {:event/type :workflow/started}))
+        (sink (sample-event {:event/type :workflow/failed})))
         ;; The failed event should have been written to stderr
         ;; The started event should not
         ;; We verify by checking the err output contains "workflow/failed"
@@ -122,7 +140,7 @@
         ;; Note: stderr-sink binds *out* to *err* internally, so we need
         ;; to capture differently. Let's just verify the filter works
         ;; by using a custom sink that tracks calls.
-        )))
+        ))
 
   (testing "default filter passes all events"
     (let [sink (sinks/stderr-sink)
@@ -189,8 +207,8 @@
 
 (deftest create-sink-vector-test
   (testing "vector creates multi-sink"
-    (let [received-1 (atom [])
-          received-2 (atom [])
+    (let [_received-1 (atom [])
+          _received-2 (atom [])
           ;; Use a vector of keyword sinks but verify via multi-sink behavior
           sink (sinks/create-sink [:stdout :stdout])]
       ;; Should be a function

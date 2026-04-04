@@ -40,7 +40,9 @@
      the browser switch; the remaining 37 silently fall through to `default: break`.
    * NAMING ASYMMETRIES: 13 constructors use a function name whose implied
      namespace differs from the actual `:event/type` namespace.  See
-     `naming-asymmetries` below.")
+     `naming-asymmetries` below."
+  (:require
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Registry
