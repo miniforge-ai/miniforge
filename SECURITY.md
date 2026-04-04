@@ -10,7 +10,7 @@
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 
-To report a security vulnerability, email **christopher@miniforge.ai** with:
+To report a security vulnerability, email **security@miniforge.ai** with:
 
 - A description of the vulnerability and its potential impact
 - Steps to reproduce or proof-of-concept code
