@@ -199,14 +199,14 @@
                         (update-in [:execution :phases-completed] (fnil conj []) :verify)
                         ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
-                        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
+                        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))
+        error-message (or (not-empty (get-in result [:error :message]))
+                          (when gate-failed? (messages/t :verify/gate-failed))
+                          (messages/t :verify/failed))]
     ;; When verify failed and on-fail is configured, redirect to target phase.
     ;; Timeout and rate-limit failures are not code quality issues — retrying
     ;; implement won't help, so we do not redirect in those cases.
-    (let [error-message (or (not-empty (get-in result [:error :message]))
-                            (when gate-failed? (messages/t :verify/gate-failed))
-                            (messages/t :verify/failed))]
-      (doto (if (and (= :failed phase-status) on-fail
+    (doto (if (and (= :failed phase-status) on-fail
                      (not timeout?) (not rate-limited?))
               (-> updated-ctx
                   (assoc-in [:phase :redirect-to] on-fail)
@@ -225,7 +225,7 @@
         (phase/emit-phase-completed! :verify
           {:outcome     (if (= :completed phase-status) :success :failure)
            :duration-ms duration-ms
-           :tokens      (get metrics :tokens 0)})))))
+           :tokens      (get metrics :tokens 0)}))))
 
 (defn error-verify
   "Handle verification phase errors.

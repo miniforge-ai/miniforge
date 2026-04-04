@@ -142,24 +142,22 @@
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
     ;; Handle changes-requested: redirect to implement with review feedback
-    (let [final-ctx (if (and (= :changes-requested review-decision)
-                             (< iterations max-iterations))
-                      (let [feedback (or (get-in result [:output :review/feedback])
-                                         (get-in result [:output :review/issues]))]
-                        (knowledge/capture-feedback-learning!
-                         (:knowledge-store ctx) :reviewer
-                         (get-in ctx [:execution/input :title]) feedback)
-                        (-> updated-ctx
-                            (update-in [:phase :iterations] (fnil inc 1))
-                            (assoc-in [:phase :review-feedback] feedback)
-                            (assoc-in [:phase :redirect-to] :implement)))
-                      updated-ctx)]
-      ;; Emit phase-completed telemetry event
-      (phase/emit-phase-completed! final-ctx :review
-        {:outcome (if (= :completed phase-status) :success :failure)
+    (doto (if (and (= :changes-requested review-decision)
+                   (< iterations max-iterations))
+            (let [feedback (or (get-in result [:output :review/feedback])
+                               (get-in result [:output :review/issues]))]
+              (knowledge/capture-feedback-learning!
+               (:knowledge-store ctx) :reviewer
+               (get-in ctx [:execution/input :title]) feedback)
+              (-> updated-ctx
+                  (update-in [:phase :iterations] (fnil inc 1))
+                  (assoc-in [:phase :review-feedback] feedback)
+                  (assoc-in [:phase :redirect-to] :implement)))
+            updated-ctx)
+      (phase/emit-phase-completed! :review
+        {:outcome     (if (= :completed phase-status) :success :failure)
          :duration-ms duration-ms
-         :tokens (:tokens metrics 0)})
-      final-ctx)))
+         :tokens      (:tokens metrics 0)}))))
 
 (defn error-review
   "Handle review phase errors.
