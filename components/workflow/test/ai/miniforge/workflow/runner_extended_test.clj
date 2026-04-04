@@ -5,6 +5,7 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]
+   [ai.miniforge.dag-executor.executor :as dag-exec]
    [ai.miniforge.phase.interface]))
 
 ;; ---------------------------------------------------------------------------- extract-output
@@ -194,19 +195,9 @@
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
               :workflow/pipeline [{:phase :done}]}]
-      (with-redefs [ai.miniforge.dag-executor.executor/executor-type (constantly :worktree)]
+      (with-redefs [dag-exec/executor-type (constantly :worktree)]
         (is (thrown-with-msg?
              Exception #"(?i)No capsule executor available"
              (runner/run-pipeline wf {:task "Test"}
                                   {:execution-mode :governed})))))))
 
-;; TODO: Tests for publish-agent-started!/completed! — not yet implemented in runner.clj
-(comment
-(deftest publish-agent-started-nil-stream-test
-  (testing "no-op with nil event stream"
-    (is (nil? (runner/publish-agent-started! nil {} :plan)))))
-
-(deftest publish-agent-completed-nil-stream-test
-  (testing "no-op with nil event stream"
-    (is (nil? (runner/publish-agent-completed! nil {} :plan {})))))
-) ;; end comment
