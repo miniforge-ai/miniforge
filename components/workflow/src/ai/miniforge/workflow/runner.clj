@@ -203,34 +203,68 @@
 
 (defn- acquire-execution-environment!
   "Acquire an isolated execution environment before pipeline starts.
-   Uses worktree executor — creates a git worktree so each workflow
-   (or sub-workflow) gets an isolated copy of the repo.
+
+   Execution mode (from opts):
+   - :local (default) — worktree executor; agent runs on host with host-accessible
+     git worktree. Correct for the current agent-on-host architecture.
+   - :governed — capsule executor required (Docker or Kubernetes); fails loudly
+     if none available. Implements N11 §7 no-silent-downgrade rule.
 
    Uses requiring-resolve to avoid hard dependency on dag-executor component.
 
    Returns map with :executor, :environment-id, :worktree-path
-   or nil if acquisition fails or dag-executor is unavailable."
-  [workflow-id {:keys [_repo-url _branch]}]
-  (try
-    (let [create-registry (requiring-resolve 'ai.miniforge.dag-executor.executor/create-executor-registry)
-          select-exec     (requiring-resolve 'ai.miniforge.dag-executor.executor/select-executor)
-          acquire-env!    (requiring-resolve 'ai.miniforge.dag-executor.executor/acquire-environment!)
-          result-ok?      (requiring-resolve 'ai.miniforge.dag-executor.result/ok?)
-          result-unwrap   (requiring-resolve 'ai.miniforge.dag-executor.result/unwrap)
-          registry        (create-registry {:worktree {}})
-          executor        (select-exec registry :preferred :worktree)]
-      (when executor
-        (let [task-id    (if (uuid? workflow-id) workflow-id (random-uuid))
-              env-result (acquire-env! executor task-id {})]
-          (when (result-ok? env-result)
-            (let [env (result-unwrap env-result)]
-              {:executor       executor
-               :environment-id (:environment-id env)
-               :worktree-path  (:workdir env)})))))
-    (catch Exception e
-      (println (messages/t :warn/publish-event
-                           {:error (str "Environment acquisition failed: " (ex-message e))}))
-      nil)))
+   or nil if acquisition fails or dag-executor is unavailable.
+   For :governed mode, throws instead of returning nil when no capsule is available."
+  [workflow-id {:keys [_repo-url _branch execution-mode executor-config]}]
+  (let [mode (or execution-mode :local)]
+    (try
+      (let [create-registry (requiring-resolve 'ai.miniforge.dag-executor.executor/create-executor-registry)
+            select-exec     (requiring-resolve 'ai.miniforge.dag-executor.executor/select-executor)
+            acquire-env!    (requiring-resolve 'ai.miniforge.dag-executor.executor/acquire-environment!)
+            executor-type   (requiring-resolve 'ai.miniforge.dag-executor.executor/executor-type)
+            result-ok?      (requiring-resolve 'ai.miniforge.dag-executor.result/ok?)
+            result-unwrap   (requiring-resolve 'ai.miniforge.dag-executor.result/unwrap)
+            ;; Registry config — :governed includes Docker/K8s, :local is worktree only.
+            ;; Note: create-executor-registry always adds worktree as a fallback entry,
+            ;; so for governed mode we check the selected executor type post-selection
+            ;; to enforce the no-silent-downgrade rule (N11 §7.4).
+            registry-config (case mode
+                              :governed (merge (select-keys (or executor-config {})
+                                                            [:docker :kubernetes])
+                                               (when-not executor-config {:docker {}}))
+                              ;; :local and any other value → worktree only
+                              {:worktree {}})
+            registry        (create-registry registry-config)
+            raw-executor    (case mode
+                              :governed (select-exec registry)
+                              (select-exec registry :preferred :worktree))
+            ;; For governed mode: reject worktree fallback — it's not a capsule (N11 §7.4)
+            executor        (if (and (= :governed mode)
+                                     raw-executor
+                                     (= :worktree (executor-type raw-executor)))
+                              nil
+                              raw-executor)]
+        (if (nil? executor)
+          (if (= :governed mode)
+            (throw (ex-info (messages/t :runner/no-capsule)
+                            {:execution-mode :governed
+                             :hint (messages/t :runner/no-capsule-hint)}))
+            nil)
+          (let [task-id    (if (uuid? workflow-id) workflow-id (random-uuid))
+                env-result (acquire-env! executor task-id {})]
+            (when (result-ok? env-result)
+              (let [env (result-unwrap env-result)]
+                {:executor        executor
+                 :environment-id  (:environment-id env)
+                 :worktree-path   (:workdir env)
+                 :execution-mode  mode})))))
+      (catch Exception e
+        (if (= :governed mode)
+          (throw e)
+          (do
+            (println (messages/t :warn/publish-event
+                                 {:error (str "Environment acquisition failed: " (ex-message e))}))
+            nil))))))
 
 (defn- release-execution-environment!
   "Release an execution environment acquired by the runner.
@@ -408,19 +442,25 @@
 (defn run-pipeline
   "Execute a workflow pipeline.
 
-   Acquires an isolated execution environment (Docker preferred, worktree
-   fallback) before building the pipeline. The environment is released
-   on completion regardless of success or failure.
+   Acquires an isolated execution environment before building the pipeline.
+   The environment type depends on :execution-mode in opts:
+   - :local (default) — git worktree on host; agent-on-host model
+   - :governed — Docker or Kubernetes capsule required (N11 §7); fails loudly
+     if no container runtime available
+
+   The environment is released on completion regardless of success or failure.
 
    Arguments:
    - workflow: Workflow configuration
    - input: Input data (may contain :repo-url and :branch)
    - opts: Execution options
-     - :max-phases - Max phases to execute (default 50)
-     - :on-phase-start - Callback fn [ctx interceptor]
-     - :on-phase-complete - Callback fn [ctx interceptor result]
-     - :executor - Pre-acquired TaskExecutor (skips acquisition)
-     - :environment-id - Pre-acquired environment ID (skips acquisition)
+     - :execution-mode     - :local (default) or :governed
+     - :executor-config    - Executor config map {:docker {...} :kubernetes {...}}
+     - :max-phases         - Max phases to execute (default 50)
+     - :on-phase-start     - Callback fn [ctx interceptor]
+     - :on-phase-complete  - Callback fn [ctx interceptor result]
+     - :executor           - Pre-acquired TaskExecutor (skips acquisition)
+     - :environment-id     - Pre-acquired environment ID (skips acquisition)
 
    Returns final execution context."
   ([workflow input]
@@ -435,7 +475,10 @@
          acquired-env (when-not has-executor?
                         (acquire-execution-environment!
                          (:workflow/id workflow)
-                         {:repo-url repo-url :branch branch}))
+                         {:repo-url        repo-url
+                          :branch          branch
+                          :execution-mode  (:execution-mode opts)
+                          :executor-config (:executor-config opts)}))
 
          ;; Merge acquired environment info into opts
          opts (if acquired-env
@@ -468,7 +511,8 @@
                          (assoc :execution/executor (get opts :executor)
                                 :execution/environment-id (get opts :environment-id)
                                 :execution/worktree-path (or (:worktree-path opts)
-                                                             (:sandbox-workdir opts))))]
+                                                             (:sandbox-workdir opts))
+                                :execution/mode (get opts :execution-mode :local)))]
 
      ;; Publish workflow started event (unless caller already did)
      (when-not skip-lifecycle?
