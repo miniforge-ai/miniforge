@@ -65,54 +65,71 @@
         test-files))
 
 (defn parse-test-output
-  "Parse clojure.test summary output.
-   Looks for: 'Ran N tests containing M assertions. F failures, E errors.'
-   Returns map with test result counts.
+  "Parse test summary output. Handles Clojure (bb test) and Rust (cargo test) formats.
 
-   NOTE: Currently Clojure-specific. When supporting other languages (Rust, JS, etc.),
-   this should dispatch on a :test/framework or :language key from the workflow config."
-  [output]
-  (if (re-find #"(?i)No changed bricks|nothing to test" output)
-    ;; Test runner intentionally skipped — no bricks changed. Treat as pass.
+   Clojure: 'Ran N tests containing M assertions. F failures, E errors.'
+   Rust:    'test result: ok. N passed; M failed; ...' (exit code is authoritative)"
+  [output exit-code]
+  (cond
+    (re-find #"(?i)No changed bricks|nothing to test" output)
     {:passed? true :test-count 0 :assertion-count 0 :fail-count 0 :error-count 0
      :no-tests? true :output output}
-    (let [ran-match (re-find #"Ran (\d+) tests? containing (\d+) assertions?" output)
+
+    ;; Rust / cargo test
+    (re-find #"test result:" output)
+    (let [result-match (re-find #"test result: (\w+)\. (\d+) passed; (\d+) failed" output)
+          passed (if result-match (parse-long (nth result-match 2)) 0)
+          failed (if result-match (parse-long (nth result-match 3)) 0)]
+      {:passed? (zero? exit-code)
+       :test-count (+ passed failed)
+       :assertion-count (+ passed failed)
+       :fail-count failed
+       :error-count 0
+       :output output})
+
+    ;; Clojure / bb test
+    :else
+    (let [ran-match  (re-find #"Ran (\d+) tests? containing (\d+) assertions?" output)
           fail-match (re-find #"(\d+) failures?,\s*(\d+) errors?" output)]
       (if (and ran-match fail-match)
-        (let [test-count (parse-long (nth ran-match 1))
-              assertion-count (parse-long (nth ran-match 2))
-              fail-count (parse-long (nth fail-match 1))
+        (let [test-count  (parse-long (nth ran-match 1))
+              fail-count  (parse-long (nth fail-match 1))
               error-count (parse-long (nth fail-match 2))]
           {:passed? (and (zero? fail-count) (zero? error-count))
            :test-count test-count
-           :assertion-count assertion-count
+           :assertion-count (parse-long (nth ran-match 2))
            :fail-count fail-count
            :error-count error-count
            :output output})
-        ;; Could not parse — treat as failure to be safe
-        {:passed? false
-         :test-count 0
-         :assertion-count 0
-         :fail-count 0
-         :error-count 0
-         :parse-error? true
-         :output output}))))
+        {:passed? false :test-count 0 :assertion-count 0
+         :fail-count 0 :error-count 0 :parse-error? true :output output}))))
+
+(defn infer-test-command
+  "Infer the test command from the repo structure.
+   Checks for bb.edn (Clojure), Cargo.toml (Rust), package.json (JS) in that order.
+   Falls back to 'bb test'."
+  [worktree-path]
+  (cond
+    (fs/exists? (fs/path worktree-path "Cargo.toml")) "cargo test --workspace"
+    (fs/exists? (fs/path worktree-path "package.json")) "npm test"
+    :else "bb test"))
 
 (defn run-tests!
-  "Run tests in the worktree via bb test.
+  "Run tests in the worktree. Infers the test command from the repo structure
+   unless test-cmd is supplied explicitly.
    Returns parsed test results map."
-  [worktree-path]
-  (try
-    (let [result (process/shell
-                   {:dir (str worktree-path)
-                    :out :string :err :string :continue true}
-                   "bb" "test")]
-      (parse-test-output (str (:out result "") "\n" (:err result ""))))
-    (catch Exception e
-      {:passed? false
-       :test-count 0 :assertion-count 0
-       :fail-count 0 :error-count 1
-       :output (.getMessage e)})))
+  [worktree-path & {:keys [test-cmd]}]
+  (let [cmd (or test-cmd (infer-test-command worktree-path))]
+    (try
+      (let [result (process/shell
+                     {:dir (str worktree-path)
+                      :out :string :err :string :continue true}
+                     "sh" "-c" cmd)]
+        (parse-test-output (str (:out result "") "\n" (:err result ""))
+                           (:exit result 1)))
+      (catch Exception e
+        {:passed? false :test-count 0 :assertion-count 0
+         :fail-count 0 :error-count 1 :output (.getMessage e)}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
@@ -141,8 +158,12 @@
                           (get ctx :worktree-path)
                           (System/getProperty "user.dir"))
 
+        ;; Allow spec to override the test command; otherwise infer from repo structure
+        test-cmd (or (get-in ctx [:execution/input :spec/test-command])
+                     (get-in ctx [:execution/input :test-command]))
+
         ;; Run the test suite directly in the executor environment
-        test-results (run-tests! worktree-path)
+        test-results (run-tests! worktree-path :test-cmd test-cmd)
 
         ;; Phase result carries environment reference and test metrics (N6 environment model).
         ;; No serialized code — changes live in the environment's worktree.

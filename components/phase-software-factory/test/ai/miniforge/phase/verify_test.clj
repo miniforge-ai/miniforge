@@ -27,8 +27,8 @@
   [body-fn]
   (let [run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
     (with-redefs-fn
-      {run-var (fn [_] {:passed? true :test-count 5 :assertion-count 10
-                        :fail-count 0 :error-count 0 :output "Ran 5 tests containing 10 assertions.\n0 failures, 0 errors."})}
+      {run-var (fn [_ & _opts] {:passed? true :test-count 5 :assertion-count 10
+                                :fail-count 0 :error-count 0 :output "Ran 5 tests containing 10 assertions.\n0 failures, 0 errors."})}
       body-fn)))
 
 (defn with-failing-test-runner
@@ -36,9 +36,9 @@
   [body-fn]
   (let [run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
     (with-redefs-fn
-      {run-var (fn [_] {:passed? false :test-count 3 :assertion-count 6
-                        :fail-count 2 :error-count 0
-                        :output "Ran 3 tests containing 6 assertions.\n2 failures, 0 errors."})}
+      {run-var (fn [_ & _opts] {:passed? false :test-count 3 :assertion-count 6
+                                :fail-count 2 :error-count 0
+                                :output "Ran 3 tests containing 6 assertions.\n2 failures, 0 errors."})}
       body-fn)))
 
 ;------------------------------------------------------------------------------ Layer 0: Defaults tests
@@ -118,7 +118,7 @@
     (let [captured-path (atom nil)
           run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
       (with-redefs-fn
-        {run-var (fn [path]
+        {run-var (fn [path & _opts]
                    (reset! captured-path path)
                    {:passed? true :test-count 1 :fail-count 0 :error-count 0})}
         (fn []
