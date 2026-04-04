@@ -17,13 +17,13 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.phase.artifact-persistence-test
-  "Integration tests for artifact persistence and fail-fast validation.
+  "Integration tests for environment promotion and fail-fast validation.
 
   Verifies that:
   - Phases fail fast when required artifacts are missing
   - Implement phase propagates agent errors correctly
   - Release phase validates artifacts before execution
-  - Full pipeline writes files to disk"
+  - Implement phase completes with environment-id when agent writes files directly"
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.java.io :as io]
@@ -39,8 +39,7 @@
    [ai.miniforge.phase.release]
    [ai.miniforge.phase.registry :as registry]
    [ai.miniforge.agent.interface :as agent]
-   [ai.miniforge.response.interface :as response]
-   [ai.miniforge.release-executor.interface :as release-executor]))
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Test Fixtures
 
@@ -80,6 +79,8 @@
 
 (defn create-base-context []
   {:execution/id (random-uuid)
+   :execution/environment-id (random-uuid)
+   :execution/worktree-path *test-worktree*
    :execution/input {:description "Test implementation"
                      :title "Add feature"
                      :intent "testing"}
@@ -117,70 +118,55 @@
               (is (= :verify (:phase data)))
               (is (some? (:hint data))))))))))
 
-(deftest test-release-fails-with-nil-artifact
-  (testing "release phase throws when implement result is nil"
+(deftest test-release-fails-when-no-implement-result
+  (testing "release phase throws when implement phase result is absent"
     (let [ctx (-> (create-base-context)
-                  ;; Simulate implement phase that stored nil output
-                  (assoc-in [:execution/phase-results :implement :result :output] nil)
+                  ;; No implement result in phase-results (phase never ran)
                   (assoc :worktree-path *test-worktree*))]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Release phase has no code artifact"
                             (execute-phase-enter :release ctx))))))
 
-(deftest test-release-fails-with-empty-files
-  (testing "release phase throws when code artifact has empty :code/files"
+(deftest test-release-fails-with-failed-implement
+  (testing "release phase throws when implement result shows failure status"
     (let [ctx (-> (create-base-context)
-                  (assoc-in [:execution/phase-results :implement :result :output]
-                            {:code/id (random-uuid) :code/files []})
+                  ;; Simulate implement phase that failed
+                  (assoc-in [:execution/phase-results :implement :result]
+                            {:status :failed :error {:message "Agent timeout"}})
                   (assoc :worktree-path *test-worktree*))]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Release phase received code artifact with zero files"
+                            #"Release phase has no code artifact"
                             (execute-phase-enter :release ctx))))))
 
-(deftest test-full-pipeline-writes-files
-  (testing "full pipeline with mock agent writes files to temp dir"
-    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
-                  agent/invoke (fn [_ _ _]
-                                 (response/success mock-code-artifact
-                                                   {:tokens 1000 :duration-ms 2000}))
-                  release-executor/execute-release-phase
-                  (fn [workflow-state exec-context _opts]
-                    ;; Actually write files to the worktree
-                    (let [worktree (:worktree-path exec-context)
-                          code-artifacts (map :artifact/content (:workflow/artifacts workflow-state))
-                          files (mapcat :code/files code-artifacts)]
-                      (doseq [{:keys [path content]} files]
-                        (let [file (io/file worktree path)]
-                          (io/make-parents file)
-                          (spit file content)))
-                      {:success? true
-                       :artifacts [{:artifact/id (random-uuid)
-                                    :artifact/type :release
-                                    :artifact/content {:files-written (count files)
-                                                       :branch "test-branch"
-                                                       :commit-sha "abc123"}}]
-                       :metrics {:files-written (count files)}}))]
-      (let [;; Run implement phase
-            ctx1 (execute-phase-enter :implement (create-base-context))
-            ctx2 (execute-phase-leave :implement ctx1)
-            ;; Run release phase
-            ctx2-with-path (assoc ctx2 :worktree-path *test-worktree*)
-            ctx3 (execute-phase-enter :release ctx2-with-path)]
+(deftest test-implement-writes-to-environment
+  (testing "implement phase completes with environment-id when agent writes files directly"
+    (let [env-id (random-uuid)]
+      (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                    agent/invoke (fn [_ _ ctx]
+                                   ;; Simulate agent writing files directly to the environment
+                                   (let [worktree-path (:execution/worktree-path ctx)
+                                         file (io/file worktree-path "src/feature.clj")]
+                                     (io/make-parents file)
+                                     (spit file "(ns feature)\n(defn new-feature [] :implemented)"))
+                                   (response/success nil {:tokens 1000 :duration-ms 2000}))]
+        (let [ctx (-> (create-base-context)
+                      (assoc :execution/environment-id env-id))
+              ctx-entered (execute-phase-enter :implement ctx)
+              ctx-left (execute-phase-leave :implement ctx-entered)]
 
-        ;; Verify release succeeded
-        (is (= :success (get-in ctx3 [:phase :result :status]))
-            "Release phase should succeed")
+          ;; Phase should complete
+          (is (= :completed (get-in ctx-left [:phase :status]))
+              "Implement phase should complete when agent writes files directly")
 
-        ;; Verify files exist on disk
-        (is (.exists (io/file *test-worktree* "src/feature.clj"))
-            "Source file should exist on disk")
-        (is (.exists (io/file *test-worktree* "test/feature_test.clj"))
-            "Test file should exist on disk")
+          ;; Result should have environment-id, not serialized code
+          (is (= env-id (get-in ctx-left [:phase :result :environment-id]))
+              "Phase result should reference the environment-id")
+          (is (nil? (get-in ctx-left [:phase :result :output]))
+              "Phase result should not carry serialized :output / :code/files")
 
-        ;; Verify file contents
-        (is (= "(ns feature)\n(defn new-feature [] :implemented)"
-               (slurp (io/file *test-worktree* "src/feature.clj")))
-            "Source file content should match artifact")))))
+          ;; Files written by agent should exist in the worktree
+          (is (.exists (io/file *test-worktree* "src/feature.clj"))
+              "Agent-written file should exist in the executor environment"))))))
 
 (deftest test-implement-fails-on-agent-error
   (testing "leave-implement retries when agent returns :error and within budget"

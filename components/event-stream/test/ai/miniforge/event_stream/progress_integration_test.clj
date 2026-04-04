@@ -341,30 +341,30 @@
   (testing "start-progress! prints events and returns cleanup fn"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
-          output (atom "")]
-      (with-redefs [println (fn [& args] (swap! output str (apply str args) "\n"))]
-        (let [cleanup (display/start-progress! stream false)]
-          (es/publish! stream (es/workflow-started stream wf-id))
-          (es/publish! stream (es/phase-started stream wf-id :plan))
-          (cleanup)))
+          ;; with-out-str is thread-safe (binds *out* thread-locally),
+          ;; unlike with-redefs [println ...] which mutates a global var
+          output (with-out-str
+                   (let [cleanup (display/start-progress! stream false)]
+                     (es/publish! stream (es/workflow-started stream wf-id))
+                     (es/publish! stream (es/phase-started stream wf-id :plan))
+                     (cleanup)))]
       ;; Verify output was produced
-      (is (not (str/blank? @output))
+      (is (not (str/blank? output))
           "start-progress! must produce output for published events"))))
 
 (deftest start-progress-cleanup-stops-output-test
   (testing "After cleanup, no more output should be produced"
     (let [stream (es/create-event-stream {:sinks []})
-          wf-id (random-uuid)
-          output (atom "")]
-      (with-redefs [println (fn [& args] (swap! output str (apply str args) "\n"))]
-        (let [cleanup (display/start-progress! stream false)]
-          (es/publish! stream (es/workflow-started stream wf-id))
-          (cleanup)
-          ;; Reset and check no further output
-          (reset! output "")
-          (es/publish! stream (es/workflow-completed stream wf-id :success 1000))))
-      (is (str/blank? @output)
-          "After cleanup, no more output should be produced"))))
+          wf-id (random-uuid)]
+      ;; Phase 1: subscribe and publish one event, then cleanup
+      (let [cleanup (display/start-progress! stream false)]
+        (with-out-str (es/publish! stream (es/workflow-started stream wf-id)))
+        (cleanup))
+      ;; Phase 2: after cleanup, publish another event — subscriber is gone
+      (let [output (with-out-str
+                     (es/publish! stream (es/workflow-completed stream wf-id :success 1000)))]
+        (is (str/blank? output)
+            "After cleanup, no more output should be produced")))))
 
 (deftest start-progress-quiet-noop-test
   (testing "start-progress! with quiet=true is a no-op"
@@ -383,29 +383,27 @@
   (testing "start-progress! deduplicates back-to-back identical lines"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
-          lines (atom [])]
-      (with-redefs [println (fn [& args] (swap! lines conj (apply str args)))]
-        (let [cleanup (display/start-progress! stream false)]
-          ;; Publish the same event twice — should only print once
-          (let [e (es/workflow-started stream wf-id)]
-            (es/publish! stream e)
-            (es/publish! stream e))
-          (cleanup)))
-      (is (= 1 (count @lines))
+          output (with-out-str
+                   (let [cleanup (display/start-progress! stream false)]
+                     ;; Publish the same event twice — should only print once
+                     (let [e (es/workflow-started stream wf-id)]
+                       (es/publish! stream e)
+                       (es/publish! stream e))
+                     (cleanup)))]
+      (is (= 1 (count (remove str/blank? (str/split-lines output))))
           "Duplicate events should be deduplicated"))))
 
 (deftest start-progress-different-events-not-deduplicated-test
   (testing "start-progress! does not deduplicate different events"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
-          lines (atom [])]
-      (with-redefs [println (fn [& args] (swap! lines conj (apply str args)))]
-        (let [cleanup (display/start-progress! stream false)]
-          (es/publish! stream (es/workflow-started stream wf-id))
-          (es/publish! stream (es/phase-started stream wf-id :plan))
-          (es/publish! stream (es/agent-started stream wf-id :planner))
-          (cleanup)))
-      (is (= 3 (count @lines))
+          output (with-out-str
+                   (let [cleanup (display/start-progress! stream false)]
+                     (es/publish! stream (es/workflow-started stream wf-id))
+                     (es/publish! stream (es/phase-started stream wf-id :plan))
+                     (es/publish! stream (es/agent-started stream wf-id :planner))
+                     (cleanup)))]
+      (is (= 3 (count (remove str/blank? (str/split-lines output))))
           "Different events must each produce their own line"))))
 
 ;------------------------------------------------------------------------------ Layer 5

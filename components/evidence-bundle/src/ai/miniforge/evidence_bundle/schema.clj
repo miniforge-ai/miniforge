@@ -66,6 +66,45 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Phase Evidence Schema
 
+(def phase-result-status-values
+  "Valid status values for a phase result in the N6 environment model."
+  #{:success :failure :already-implemented :retrying :completed})
+
+(def implement-phase-result-schema
+  "Schema for the implement phase result in the N6 environment model.
+
+   Code changes live in the execution environment's git working tree and are
+   NOT serialized here. The :environment-id identifies where changes landed;
+   :summary is the agent's description of changes made.
+   :metrics shape: {:tokens N :duration-ms N}"
+  {:status         (fn [s] (contains? phase-result-status-values s))
+   :environment-id string?
+   :summary        string?
+   :metrics        map?})
+
+(def verify-phase-result-schema
+  "Schema for the verify phase result in the N6 environment model.
+
+   Test results are captured in :metrics; no serialized code is stored.
+   :metrics shape: {:tokens N :duration-ms N :pass-count N :fail-count N
+                    :test-output string}"
+  {:status         (fn [s] (contains? phase-result-status-values s))
+   :environment-id string?
+   :summary        string?
+   :metrics        map?})
+
+(def release-phase-result-schema
+  "Schema for the release phase result in the N6 environment model.
+
+   PR metadata is captured in :metrics. Code provenance is derived from the
+   PR diff — the PR URL provides the authoritative record of what changed.
+   :metrics shape: {:tokens N :duration-ms N :pr-url string :branch string
+                    :commit-sha string}"
+  {:status         (fn [s] (contains? phase-result-status-values s))
+   :environment-id string?
+   :summary        string?
+   :metrics        map?})
+
 (def phase-evidence-schema
   "Schema for individual phase evidence."
   {:phase/name keyword?
@@ -185,6 +224,9 @@
    :evidence/intent map?
 
    ;; Phase Evidence (only for executed phases)
+   ;; :evidence/implement — summary + metrics (no :code/files)
+   ;; :evidence/verify   — test output in :phase/output :metrics
+   ;; :evidence/release  — PR metadata in :phase/output :metrics; code from PR diff
    (optional-key :evidence/plan) map?
    (optional-key :evidence/design) map?
    (optional-key :evidence/implement) map?

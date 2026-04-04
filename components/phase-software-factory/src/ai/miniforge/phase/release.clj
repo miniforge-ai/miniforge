@@ -62,22 +62,25 @@
                 {:data {:summary (get-in ctx [:execution/phase-results :implement :result :summary])}}))))
 
 (defn- assert-implement-artifact!
-  "Throw when implement phase produced no artifact (and status is not :already-implemented)."
-  [ctx impl-status implement-result]
-  (when (and (not= :already-implemented impl-status) (not implement-result))
-    (let [impl-keys (keys (get-in ctx [:execution/phase-results :implement :result]))
-          phase-results-keys (vec (keys (:execution/phase-results ctx)))
-          logger (or (get-in ctx [:execution/logger])
-                     (log/create-logger {:min-level :error :output :human}))]
-      (log/error logger :release :release/no-implement-artifact
-                 {:data {:implement-status impl-status
-                         :implement-result-keys (vec impl-keys)
-                         :phase-results-keys phase-results-keys}})
-      (throw (ex-info (messages/t :release/no-implement-artifact)
-                      {:phase :release
-                       :implement-status impl-status
-                       :implement-result-keys impl-keys
-                       :hint "Implement phase may have failed or produced no output"})))))
+  "Throw when implement phase has no result or has not succeeded.
+
+   In the new environment model, the implement result carries :status,
+   :environment-id, :summary, and :metrics — NOT a serialized :output map.
+   We check :status to confirm the phase completed successfully."
+  [ctx impl-result]
+  (let [impl-status (:status impl-result)
+        succeeded?  (contains? #{:success :completed} impl-status)]
+    (when (or (nil? impl-result) (not succeeded?))
+      (let [phase-results-keys (vec (keys (:execution/phase-results ctx)))
+            logger (or (get-in ctx [:execution/logger])
+                       (log/create-logger {:min-level :error :output :human}))]
+        (log/error logger :release :release/no-implement-artifact
+                   {:data {:implement-status impl-status
+                           :phase-results-keys phase-results-keys}})
+        (throw (ex-info (messages/t :release/no-implement-artifact)
+                        {:phase            :release
+                         :implement-status impl-status
+                         :hint             (messages/t :release/no-implement-hint)}))))))
 
 (defn- ctx-worktree-path
   "Resolve the working directory from phase context."
@@ -114,39 +117,47 @@
 (defn build-workflow-state
   "Build workflow state from phase context for the release executor.
 
-   Accepts artifacts from any phase that produced releasable files:
-   - implement :code/files present → use them directly (standard code path)
-   - no :code/files                → fall back to git working tree
-     (tests from verify, docs, specs, deployment configs, etc.)
-   - no git changes either         → throws :release/zero-files"
+   In the new environment model, code changes live in the execution environment's
+   git working tree (:execution/worktree-path) rather than being serialized
+   into phase results. This function reads the current git diff from the
+   worktree to discover which files need to be released.
+
+   Falls back gracefully if implement was :already-implemented (other phases
+   such as verify or review may have produced git changes that still need
+   releasing).
+
+   Throws :release/zero-files when no changed files are found in the worktree."
   [ctx]
-  (let [impl-status      (get-in ctx [:execution/phase-results :implement :result :status])
-        implement-result (get-in ctx [:execution/phase-results :implement :result :output])
-        already-impl?    (= :already-implemented impl-status)]
+  (let [impl-result   (get-in ctx [:execution/phase-results :implement :result])
+        impl-status   (:status impl-result)
+        already-impl? (= :already-implemented impl-status)]
     (log-already-implemented! ctx impl-status)
-    ;; Only assert implement artifact when implement wasn't already-implemented.
-    ;; When already-implemented, other phases (verify, review) may have produced
-    ;; git changes that should still be released.
+    ;; Assert implement phase succeeded (unless :already-implemented).
+    ;; In the environment model we check :status on the result map directly.
     (when-not already-impl?
-      (assert-implement-artifact! ctx impl-status implement-result))
-    (let [explicit-files (not-empty (:code/files implement-result))
-          files          (or explicit-files
-                             (not-empty (git-dirty-files (ctx-worktree-path ctx)))
-                             (throw (ex-info (messages/t :release/zero-files)
-                                             {:phase :release
-                                              :artifact-id (:code/id implement-result)})))
-          base-artifact  (or implement-result
-                              {:code/id (random-uuid)
-                               :code/language "mixed"
-                               :code/summary "Changes from pipeline phases"})
+      (assert-implement-artifact! ctx impl-result))
+    ;; Discover files via the environment's git working tree.
+    ;; Code provenance is environment-based: the agent writes to the worktree
+    ;; and the PR diff is the authoritative record of what changed.
+    (let [worktree-path (ctx-worktree-path ctx)
+          files         (or (not-empty (git-dirty-files worktree-path))
+                            (throw (ex-info (messages/t :release/zero-files)
+                                            {:phase          :release
+                                             :environment-id (:environment-id impl-result)
+                                             :worktree-path  worktree-path})))
           code-artifacts [{:artifact/type    :code
-                           :artifact/content (assoc base-artifact :code/files files)}]
+                           :artifact/content {:code/id        (random-uuid)
+                                              :code/language  "mixed"
+                                              :code/files     files
+                                              :code/summary   (get impl-result :summary
+                                                                   (messages/t :release/changes-description))
+                                              :environment-id (:environment-id impl-result)}}]
           input          (get-in ctx [:execution/input])]
       {:workflow/id       (or (get-in ctx [:execution/id]) (random-uuid))
        :workflow/phase    :release
        :workflow/spec     {:spec/description (or (:description input)
                                                  (:title input)
-                                                 "implement changes")}
+                                                 (messages/t :default/task-description))}
        :workflow/artifacts code-artifacts})))
 
 (defn build-executor-context
@@ -234,7 +245,7 @@
                          {:release/metrics (:metrics exec-result)})))
                      ;; Execution failed
                      (response/failure
-                      (ex-info "Release phase failed"
+                      (ex-info (messages/t :release/phase-failed)
                                {:errors (:errors exec-result)
                                 :metrics (:metrics exec-result)}))))
                  (catch Exception e
@@ -294,7 +305,7 @@
                     (-> (update-in [:phase :iterations] (fnil inc 1))
                         (assoc-in [:phase :last-error]
                                   (or (get-in result [:error :message])
-                                      "Release phase failed"))))]
+                                      (messages/t :release/phase-failed)))))]
     ;; Emit phase-completed telemetry event
     (phase/emit-phase-completed! final-ctx :release
       {:outcome (if (= :completed phase-status) :success :failure)

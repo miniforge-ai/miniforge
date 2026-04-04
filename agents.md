@@ -79,3 +79,24 @@ See `.standards/CLAUDE.md` for authoritative descriptions. Summary:
 - **Simple Made Easy** — values over state; data over syntax; no speculative complexity
 - **PR Discipline** — one stratum per PR, <400 lines, branch from main, never bypass hooks
 - **Specification-Driven** — N-series specs are implementation contracts; code conforms to specs
+
+## Writing Spec Task Descriptions (`work/*.spec.edn`)
+
+Task descriptions in `work/` specs are the primary context given to agents.
+Stale descriptions cause agents to misidentify what's done and try to re-implement
+existing work — which leads to syntax errors and broken commits.
+
+**Rules:**
+
+- **Never use line numbers** (e.g., "In foo (line 123)"). Lines shift with every edit.
+  Use function/variable names instead: "In the `foo` function".
+- **Reference function and variable names** — these survive refactors far better.
+  Agents use grep/read tools to locate code by name, not by line.
+- **Describe WHAT to implement and WHY**, not WHERE in the file.
+- **Keep scope small** — one acceptance criterion per task where possible.
+- **Remove tasks that are already done** rather than leaving them with stale descriptions.
+  Agents that find "already implemented" tasks may still try to change things; removing
+  the task from the spec is cleaner than hoping the agent's judgment holds.
+
+Bad: `In enter-verify (line 116): remove artifact retrieval (lines 139-148).`
+Good: `In the enter-verify function: remove artifact retrieval from [:execution/phase-results :implement].`

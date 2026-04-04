@@ -20,7 +20,91 @@
   "Execution context management.
 
    Handles creation and manipulation of workflow execution context,
-   including FSM state transitions and metrics merging."
+   including FSM state transitions and metrics merging.
+
+   ## Execution Context Schema
+
+   The execution context is a flat map passed through the workflow pipeline.
+   Keys use the :execution/ namespace prefix unless otherwise noted.
+
+   ### Identity & Status
+   :execution/id               — UUID for this workflow run
+   :execution/workflow         — Workflow configuration map
+   :execution/workflow-id      — UUID from workflow config
+   :execution/workflow-version — Version string from workflow config
+   :execution/status           — FSM state: :running | :completed | :failed |
+                                 :completed-with-warnings
+   :execution/fsm-state        — Raw FSM state map
+
+   ### Input / Output
+   :execution/input            — Input data for the workflow (task spec, etc.)
+   :execution/output           — Final workflow output (set on completion)
+
+   ### Environment Model (N6)
+   The workflow runs inside an acquired execution environment (Docker container
+   or git worktree). Three keys track the environment lifecycle:
+
+   :execution/executor         — TaskExecutor instance (Docker or worktree
+                                 strategy). Carries the release-environment!
+                                 method used at workflow teardown.
+   :execution/environment-id   — Opaque ID for the acquired execution
+                                 environment; passed to release-environment!
+                                 at workflow teardown.
+   :execution/worktree-path    — Resolved working directory within the
+                                 environment; agents write code directly here.
+
+   Code changes are NOT serialized into phase results. Instead they live in
+   the environment's git working tree and are captured via PR diff at release
+   time (see Phase Result Schema below).
+
+   ### Phase Execution
+   :execution/phase-results    — Map of phase-name → phase result (see below)
+   :execution/current-phase    — Currently executing phase keyword
+   :execution/phase-index      — Current position in the pipeline vector
+   :execution/redirect-count   — Phase redirect counter (guards against loops)
+
+   ### Phase Result Schema
+   Entries in :execution/phase-results follow the shape:
+
+     {:status         :success | :failure | :already-implemented | :retrying
+      :environment-id  opaque ID of the environment where changes landed
+      :summary         agent's human-readable description of what was done
+      :metrics         map of phase-specific metrics (see per-phase shapes)}
+
+   Phase-specific :metrics content:
+     :implement  → {:tokens N :duration-ms N}
+     :verify     → {:tokens N :duration-ms N :pass-count N :fail-count N
+                    :test-output string}
+     :release    → {:tokens N :duration-ms N :pr-url string :branch string
+                    :commit-sha string}
+
+   NOTE: Phase results do NOT carry :code/files or any serialized code.
+   Code provenance is derived from the PR diff at release time.
+
+   ### Artifacts & Tracking
+   :execution/artifacts        — Vector of lightweight provenance artifacts
+                                 produced by phases (not serialized code)
+   :execution/files-written    — Set of file paths written (meta-agent
+                                 monitoring; populated from environment)
+   :execution/metrics          — Accumulated metrics:
+                                 {:tokens N :cost-usd N :duration-ms N}
+   :execution/started-at       — System time millis at workflow start
+   :execution/ended-at         — System time millis at workflow end
+
+   ### Error Handling
+   :execution/errors           — DEPRECATED: use :execution/response-chain
+   :execution/response-chain   — Structured response chain (per-phase
+                                 success/failure tracking)
+
+   ### Meta-Agent Support
+   :execution/meta-coordinator    — Coordinator for workflow health monitoring
+   :execution/streaming-activity  — Transient streaming activity tracking
+
+   ### Pass-Through from opts
+   :llm-backend    — LLM backend configuration
+   :artifact-store — Artifact persistence store
+   :knowledge-store — Knowledge base store
+   :event-stream   — Event stream for telemetry"
   (:require [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.fsm :as fsm]
             [ai.miniforge.workflow.monitoring :as monitoring]
