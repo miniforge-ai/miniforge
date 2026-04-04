@@ -7,8 +7,6 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.release-executor.core :as sut]
-   [ai.miniforge.release-executor.metadata :as metadata]
-   [ai.miniforge.release-executor.result :as result]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
