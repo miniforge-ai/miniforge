@@ -25,7 +25,9 @@
    - Health monitoring (monitoring namespace)
 
    Provides the main run-pipeline entry point."
-  (:require [ai.miniforge.phase.interface :as phase]
+  (:require [ai.miniforge.dag-executor.executor :as dag-exec]
+            [ai.miniforge.dag-executor.result :as dag-result]
+            [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.context :as ctx]
@@ -202,15 +204,14 @@
 ;------------------------------------------------------------------------------ Layer 0.5: Execution environment lifecycle
 
 (defn- dag-executor-fns
-  "Resolve dag-executor functions via requiring-resolve.
-   Uses requiring-resolve so the workflow component has no hard dependency on dag-executor."
+  "Return dag-executor function references."
   []
-  {:create-registry (requiring-resolve 'ai.miniforge.dag-executor.executor/create-executor-registry)
-   :select-exec     (requiring-resolve 'ai.miniforge.dag-executor.executor/select-executor)
-   :acquire-env!    (requiring-resolve 'ai.miniforge.dag-executor.executor/acquire-environment!)
-   :executor-type   (requiring-resolve 'ai.miniforge.dag-executor.executor/executor-type)
-   :result-ok?      (requiring-resolve 'ai.miniforge.dag-executor.result/ok?)
-   :result-unwrap   (requiring-resolve 'ai.miniforge.dag-executor.result/unwrap)})
+  {:create-registry dag-exec/create-executor-registry
+   :select-exec     dag-exec/select-executor
+   :acquire-env!    dag-exec/acquire-environment!
+   :executor-type   dag-exec/executor-type
+   :result-ok?      dag-result/ok?
+   :result-unwrap   dag-result/unwrap})
 
 (defn- registry-config-for-mode
   "Build executor registry config for execution mode.
@@ -282,8 +283,7 @@
   [executor environment-id]
   (when (and executor environment-id)
     (try
-      (let [release-env! (requiring-resolve 'ai.miniforge.dag-executor.executor/release-environment!)]
-        (release-env! executor environment-id))
+      (dag-exec/release-environment! executor environment-id)
       (catch Exception e
         (println (messages/t :warn/publish-event
                              {:error (str "Environment release failed: " (ex-message e))}))))))
@@ -431,16 +431,15 @@
 
 (defn- observe-workflow-signal!
   "Feed workflow completion/failure signal to the operator for pattern analysis.
-   No-ops when no operator is configured."
+   Callers provide :observe-signal-fn in opts — a (fn [signal]) callback that
+   forwards to their operator instance. No-ops when no callback is configured."
   [opts output-ctx]
   (try
-    (when-let [operator (:operator opts)]
-      (let [observe-fn (requiring-resolve 'ai.miniforge.operator.interface/observe-signal)
-            signal-type (if (phase/succeeded? output-ctx)
+    (when-let [observe-fn (:observe-signal-fn opts)]
+      (let [signal-type (if (phase/succeeded? output-ctx)
                           :workflow-complete
                           :workflow-failed)]
-        (observe-fn operator
-                    {:signal/type signal-type
+        (observe-fn {:signal/type signal-type
                      :workflow-id (:execution/id output-ctx)
                      :phase-results (:execution/phase-results output-ctx)
                      :metrics (:execution/metrics output-ctx)
@@ -469,8 +468,10 @@
      - :max-phases         - Max phases to execute (default 50)
      - :on-phase-start     - Callback fn [ctx interceptor]
      - :on-phase-complete  - Callback fn [ctx interceptor result]
-     - :executor           - Pre-acquired TaskExecutor (skips acquisition)
-     - :environment-id     - Pre-acquired environment ID (skips acquisition)
+     - :executor            - Pre-acquired TaskExecutor (skips acquisition)
+     - :environment-id      - Pre-acquired environment ID (skips acquisition)
+     - :observe-signal-fn   - Callback fn [signal] for operator integration; caller
+                              wraps their operator: (fn [sig] (operator/observe-signal op sig))
 
    Returns final execution context."
   ([workflow input]

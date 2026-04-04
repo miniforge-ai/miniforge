@@ -1,6 +1,8 @@
 (ns ai.miniforge.workflow.interface.pipeline
   "Interceptor-pipeline workflow APIs."
   (:require
+   [ai.miniforge.workflow.chain :as chain]
+   [ai.miniforge.workflow.chain-loader :as chain-loader]
    [ai.miniforge.workflow.runner :as runner]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -12,14 +14,12 @@
 
 (defn run-chain
   [chain-def chain-input opts]
-  ((requiring-resolve 'ai.miniforge.workflow.chain/run-chain)
-   chain-def chain-input opts))
+  (chain/run-chain chain-def chain-input opts))
 
 (defn load-chain
   [chain-id version]
-  ((requiring-resolve 'ai.miniforge.workflow.chain-loader/load-chain)
-   chain-id version))
+  (chain-loader/load-chain chain-id version))
 
 (defn list-chains
   []
-  ((requiring-resolve 'ai.miniforge.workflow.chain-loader/list-chains)))
+  (chain-loader/list-chains))

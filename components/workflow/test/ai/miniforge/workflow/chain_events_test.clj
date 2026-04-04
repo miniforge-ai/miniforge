@@ -3,6 +3,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.workflow.chain :as chain]
+   [ai.miniforge.workflow.loader :as loader]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.event-stream.interface :as event-stream]))
 
@@ -45,23 +46,11 @@
    :execution/error "LLM timeout"})
 
 (defmacro with-chain-mocks
-  "Run body with load-workflow and run-pipeline mocked.
-   Uses alter-var-root to avoid corrupting requiring-resolve for other tests."
+  "Run body with load-workflow and run-pipeline mocked."
   [pipeline-fn & body]
-  `(with-redefs [runner/run-pipeline ~pipeline-fn]
-     ;; Temporarily install mock load-workflow via the emit-safe requiring-resolve
-     ;; We avoid with-redefs on requiring-resolve to prevent cross-test pollution
-     (let [saved-rr# @#'clojure.core/requiring-resolve]
-       (try
-         (alter-var-root #'clojure.core/requiring-resolve
-                         (fn [orig#]
-                           (fn [sym#]
-                             (if (= sym# 'ai.miniforge.workflow.interface/load-workflow)
-                               mock-load-workflow
-                               (orig# sym#)))))
-         ~@body
-         (finally
-           (alter-var-root #'clojure.core/requiring-resolve (constantly saved-rr#)))))))
+  `(with-redefs [runner/run-pipeline ~pipeline-fn
+                 loader/load-workflow mock-load-workflow]
+     ~@body))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Success path event emission
@@ -83,8 +72,6 @@
       (with-chain-mocks mock-pipeline-success
         (let [result (chain/run-chain chain-def {:task "build"} opts)]
           (is (= :completed (:chain/status result)))
-
-          ;; Verify event sequence
           (is (= [:chain/started
                    :chain/step-started
                    :chain/step-completed
@@ -92,19 +79,13 @@
                    :chain/step-completed
                    :chain/completed]
                  (event-types stream)))
-
-          ;; Verify chain-started event fields
           (let [started (first (:events @stream))]
             (is (= :test-chain (:chain/id started)))
             (is (= 2 (:chain/step-count started))))
-
-          ;; Verify step-started has workflow-id
           (let [step-started (second (:events @stream))]
             (is (= :step-1 (:step/id step-started)))
             (is (= 0 (:step/index step-started)))
             (is (= :workflow-a (:step/workflow-id step-started))))
-
-          ;; Verify chain-completed has duration and step count
           (let [completed (last (:events @stream))]
             (is (= :test-chain (:chain/id completed)))
             (is (= 2 (:chain/step-count completed)))
@@ -130,21 +111,15 @@
       (with-chain-mocks mock-pipeline-failure
         (let [result (chain/run-chain chain-def {:task "doomed"} opts)]
           (is (= :failed (:chain/status result)))
-
-          ;; Verify event sequence: started, step-started, step-failed, chain-failed
           (is (= [:chain/started
                    :chain/step-started
                    :chain/step-failed
                    :chain/failed]
                  (event-types stream)))
-
-          ;; Verify step-failed has error info
           (let [step-failed (nth (:events @stream) 2)]
             (is (= :step-1 (:step/id step-failed)))
             (is (= 0 (:step/index step-failed)))
             (is (= "LLM timeout" (:chain/error step-failed))))
-
-          ;; Verify chain-failed has failed step reference
           (let [chain-failed (last (:events @stream))]
             (is (= :step-1 (:chain/failed-step chain-failed)))
             (is (= "LLM timeout" (:chain/error chain-failed)))))))))

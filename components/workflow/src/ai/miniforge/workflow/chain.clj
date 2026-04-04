@@ -38,6 +38,7 @@
    - keyword                 — reads from chain input"
   (:require
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.workflow.loader :as loader]
    [ai.miniforge.workflow.runner :as runner]))
 
 ;------------------------------------------------------------------------------ Layer 0: Binding resolution
@@ -116,7 +117,7 @@
   (let [start-time (System/currentTimeMillis)
         chain-id (:chain/id chain-def)
         steps (:chain/steps chain-def)
-        load-workflow (requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)]
+        load-workflow loader/load-workflow]
     (emit! opts 'ai.miniforge.event-stream.interface/chain-started
            chain-id (count steps))
     (loop [remaining steps

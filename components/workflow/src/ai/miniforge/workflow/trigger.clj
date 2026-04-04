@@ -21,7 +21,9 @@
 
    Subscribes to event streams and fires workflows or chains
    when matching events occur."
-  (:require [clojure.edn]))
+  (:require [ai.miniforge.workflow.loader :as loader]
+            [ai.miniforge.workflow.runner :as runner]
+            [clojure.edn]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Trigger matching
@@ -113,8 +115,8 @@
         futures-atom (atom [])
         subscribe!   (requiring-resolve 'ai.miniforge.event-stream.interface/subscribe!)
         unsubscribe! (requiring-resolve 'ai.miniforge.event-stream.interface/unsubscribe!)
-        run-pipeline (requiring-resolve 'ai.miniforge.workflow.interface/run-pipeline)
-        load-wf      (requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)
+        run-pipeline runner/run-pipeline
+        load-wf      loader/load-workflow
         sub-id       :event-trigger]
     (subscribe! event-stream sub-id
                 (partial handle-trigger-event triggers opts futures-atom load-wf run-pipeline))
