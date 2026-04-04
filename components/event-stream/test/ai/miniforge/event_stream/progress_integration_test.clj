@@ -1,3 +1,21 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
 (ns ai.miniforge.event-stream.progress-integration-test
   "Integration tests for end-to-end event sequence coverage.
 
@@ -53,7 +71,7 @@
     (es/publish! stream (es/workflow-completed stream wf-id :success 12000))
     {:stream stream :wf-id wf-id :events captured}))
 
-(defn- event-type-seq
+(defn event-type-seq
   "Extract a vector of :event/type from captured events."
   [captured-atom]
   (mapv :event/type @captured-atom))
@@ -180,8 +198,7 @@
           evts @events
           tool-events (filter #(#{:tool/invoked :tool/completed} (:event/type %)) evts)]
       ;; Collect pairs by agent and tool
-      (let [by-agent-tool (group-by (juxt :agent/id :tool/id) tool-events)]
-        (doseq [[[agent tool] tevts] by-agent-tool]
+      (doseq [[[agent tool] tevts] (group-by (juxt :agent/id :tool/id) tool-events)]
           (let [invoked-seq (->> tevts
                                  (filter #(= :tool/invoked (:event/type %)))
                                  first
@@ -192,7 +209,7 @@
                                    :event/sequence-number)]
             (when (and invoked-seq completed-seq)
               (is (< invoked-seq completed-seq)
-                  (str "Tool " tool " invoked by " agent " must precede completed")))))))))
+                  (str "Tool " tool " invoked by " agent " must precede completed"))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Display formatter coverage tests
@@ -242,39 +259,39 @@
   (testing "format-event-line handles workflow-failed with reason"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
-          event (es/workflow-failed stream wf-id {:message "LLM timeout" :type :timeout})]
-      (let [line (display/format-event-line event)]
-        (is (some? line) "Must render workflow/failed")
-        (is (string? line))))))
+          event (es/workflow-failed stream wf-id {:message "LLM timeout" :type :timeout})
+          line (display/format-event-line event)]
+      (is (some? line) "Must render workflow/failed")
+      (is (string? line)))))
 
 (deftest format-event-line-agent-failed-test
   (testing "format-event-line handles agent-failed"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
-          event (es/agent-failed stream wf-id :reviewer {:message "timeout"})]
-      (let [line (display/format-event-line event)]
-        (is (some? line) "Must render agent/failed")
-        (is (string? line))))))
+          event (es/agent-failed stream wf-id :reviewer {:message "timeout"})
+          line (display/format-event-line event)]
+      (is (some? line) "Must render agent/failed")
+      (is (string? line)))))
 
 (deftest format-event-line-phase-completed-with-duration-test
   (testing "format-event-line includes duration when present"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
-          event (es/phase-completed stream wf-id :plan {:outcome :success :duration-ms 5000})]
-      (let [line (display/format-event-line event)]
-        (is (some? line))
-        (is (str/includes? line "5.0s")
-            "Phase completed line should include formatted duration")))))
+          event (es/phase-completed stream wf-id :plan {:outcome :success :duration-ms 5000})
+          line (display/format-event-line event)]
+      (is (some? line))
+      (is (str/includes? line "5.0s")
+          "Phase completed line should include formatted duration"))))
 
 (deftest format-event-line-workflow-completed-with-duration-test
   (testing "format-event-line includes duration in workflow-completed"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
-          event (es/workflow-completed stream wf-id :success 120000)]
-      (let [line (display/format-event-line event)]
-        (is (some? line))
-        (is (str/includes? line "2.0m")
-            "Workflow completed line should include formatted duration")))))
+          event (es/workflow-completed stream wf-id :success 120000)
+          line (display/format-event-line event)]
+      (is (some? line))
+      (is (str/includes? line "2.0m")
+          "Workflow completed line should include formatted duration"))))
 
 (deftest format-event-line-no-stall-test
   (testing "Every event in a full run produces display output (no silent gaps)"
@@ -324,30 +341,30 @@
   (testing "start-progress! prints events and returns cleanup fn"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
-          output (atom "")]
-      (with-redefs [println (fn [& args] (swap! output str (apply str args) "\n"))]
-        (let [cleanup (display/start-progress! stream false)]
-          (es/publish! stream (es/workflow-started stream wf-id))
-          (es/publish! stream (es/phase-started stream wf-id :plan))
-          (cleanup)))
+          ;; with-out-str is thread-safe (binds *out* thread-locally),
+          ;; unlike with-redefs [println ...] which mutates a global var
+          output (with-out-str
+                   (let [cleanup (display/start-progress! stream false)]
+                     (es/publish! stream (es/workflow-started stream wf-id))
+                     (es/publish! stream (es/phase-started stream wf-id :plan))
+                     (cleanup)))]
       ;; Verify output was produced
-      (is (not (str/blank? @output))
+      (is (not (str/blank? output))
           "start-progress! must produce output for published events"))))
 
 (deftest start-progress-cleanup-stops-output-test
   (testing "After cleanup, no more output should be produced"
     (let [stream (es/create-event-stream {:sinks []})
-          wf-id (random-uuid)
-          output (atom "")]
-      (with-redefs [println (fn [& args] (swap! output str (apply str args) "\n"))]
-        (let [cleanup (display/start-progress! stream false)]
-          (es/publish! stream (es/workflow-started stream wf-id))
-          (cleanup)
-          ;; Reset and check no further output
-          (reset! output "")
-          (es/publish! stream (es/workflow-completed stream wf-id :success 1000))))
-      (is (str/blank? @output)
-          "After cleanup, no more output should be produced"))))
+          wf-id (random-uuid)]
+      ;; Phase 1: subscribe and publish one event, then cleanup
+      (let [cleanup (display/start-progress! stream false)]
+        (with-out-str (es/publish! stream (es/workflow-started stream wf-id)))
+        (cleanup))
+      ;; Phase 2: after cleanup, publish another event — subscriber is gone
+      (let [output (with-out-str
+                     (es/publish! stream (es/workflow-completed stream wf-id :success 1000)))]
+        (is (str/blank? output)
+            "After cleanup, no more output should be produced")))))
 
 (deftest start-progress-quiet-noop-test
   (testing "start-progress! with quiet=true is a no-op"
@@ -366,29 +383,27 @@
   (testing "start-progress! deduplicates back-to-back identical lines"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
-          lines (atom [])]
-      (with-redefs [println (fn [& args] (swap! lines conj (apply str args)))]
-        (let [cleanup (display/start-progress! stream false)]
-          ;; Publish the same event twice — should only print once
-          (let [e (es/workflow-started stream wf-id)]
-            (es/publish! stream e)
-            (es/publish! stream e))
-          (cleanup)))
-      (is (= 1 (count @lines))
+          output (with-out-str
+                   (let [cleanup (display/start-progress! stream false)]
+                     ;; Publish the same event twice — should only print once
+                     (let [e (es/workflow-started stream wf-id)]
+                       (es/publish! stream e)
+                       (es/publish! stream e))
+                     (cleanup)))]
+      (is (= 1 (count (remove str/blank? (str/split-lines output))))
           "Duplicate events should be deduplicated"))))
 
 (deftest start-progress-different-events-not-deduplicated-test
   (testing "start-progress! does not deduplicate different events"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
-          lines (atom [])]
-      (with-redefs [println (fn [& args] (swap! lines conj (apply str args)))]
-        (let [cleanup (display/start-progress! stream false)]
-          (es/publish! stream (es/workflow-started stream wf-id))
-          (es/publish! stream (es/phase-started stream wf-id :plan))
-          (es/publish! stream (es/agent-started stream wf-id :planner))
-          (cleanup)))
-      (is (= 3 (count @lines))
+          output (with-out-str
+                   (let [cleanup (display/start-progress! stream false)]
+                     (es/publish! stream (es/workflow-started stream wf-id))
+                     (es/publish! stream (es/phase-started stream wf-id :plan))
+                     (es/publish! stream (es/agent-started stream wf-id :planner))
+                     (cleanup)))]
+      (is (= 3 (count (remove str/blank? (str/split-lines output))))
           "Different events must each produce their own line"))))
 
 ;------------------------------------------------------------------------------ Layer 5

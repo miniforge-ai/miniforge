@@ -1,3 +1,21 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
 (ns conformance.protocol_conformance_test
   "N1 Protocol conformance tests.
    Verifies all protocols are correctly implemented per N1 §2 and §8.1."
@@ -7,7 +25,7 @@
    [ai.miniforge.agent.interface.protocols.agent :as agent-proto]
    [ai.miniforge.agent.interface.protocols.lifecycle :as lifecycle-proto]
    [ai.miniforge.tool.interface :as tool]
-   [ai.miniforge.gate.interface :as gate]
+   [ai.miniforge.loop.interface.protocols.gate :as gate-proto]
    [ai.miniforge.loop.gates :as gates]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -92,8 +110,7 @@
           "Tool must satisfy Tool protocol")
 
       ;; Verify invoke exists (called execute in current impl)
-      (is (or (fn? tool/execute)
-              (fn? tool/invoke))
+      (is (fn? tool/execute)
           "Tool must have execute/invoke method"))))
 
 (deftest tool-validate-args-method-test
@@ -134,11 +151,11 @@
 (deftest gate-check-method-test
   (testing "N1 §2.6.1: Gate MUST implement check method"
     (let [syntax-gate (gates/syntax-gate)]
-      (is (satisfies? gate/Gate syntax-gate)
+      (is (satisfies? gate-proto/Gate syntax-gate)
           "Gate must satisfy Gate protocol")
 
       ;; Test check method
-      (let [result (gate/check syntax-gate valid-artifact {})]
+      (let [result (gate-proto/check syntax-gate valid-artifact {})]
         (is (some? result)
             "Gate check must return result")
         (is (map? result)
@@ -150,13 +167,13 @@
   (testing "N1 §2.6.1: Gate MUST implement repair method"
     ;; PR #79 added repair method
     (let [lint-gate (gates/lint-gate)]
-      (is (satisfies? gate/Gate lint-gate)
+      (is (satisfies? gate-proto/Gate lint-gate)
           "Gate must satisfy Gate protocol")
 
       ;; Test repair method
       (let [violations [{:code :debug-println
                         :message "Debug println found"}]
-            result (gate/repair lint-gate invalid-artifact violations {})]
+            result (gate-proto/repair lint-gate invalid-artifact violations {})]
         (is (some? result)
             "Gate repair must return result")
         (is (map? result)
@@ -192,7 +209,7 @@
                      :policy (gates/policy-gate :test {:policies [:no-secrets]})
                      :test (gates/test-gate)}]
       (doseq [[gate-type gate-instance] gates-map]
-        (is (satisfies? gate/Gate gate-instance)
+        (is (satisfies? gate-proto/Gate gate-instance)
             (str gate-type " gate must satisfy Gate protocol"))))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -230,7 +247,7 @@
     (let [gate-instance (gates/syntax-gate)]
       ;; check: [gate artifact context] -> result
       (try
-        (gate/check gate-instance valid-artifact {})
+        (gate-proto/check gate-instance valid-artifact {})
         (is true "check accepts artifact and context")
         (catch Exception e
           (is (not (re-find #"Wrong number of args" (.getMessage e)))
@@ -238,7 +255,7 @@
 
       ;; repair: [gate artifact violations context] -> result
       (try
-        (gate/repair gate-instance invalid-artifact [] {})
+        (gate-proto/repair gate-instance invalid-artifact [] {})
         (is true "repair accepts artifact, violations, and context")
         (catch Exception e
           (is (not (re-find #"Wrong number of args" (.getMessage e)))

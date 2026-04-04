@@ -1,3 +1,21 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
 (ns ai.miniforge.tui-views.github-acceptance-criteria-test
   "Acceptance criteria verification tests that validate all stated requirements
    for the GitHub persistence layer in a single consolidated test file.
@@ -82,8 +100,8 @@
   (testing "fetch-pr-diff-and-detail calls both fetch-pr-diff and fetch-pr-detail"
     (let [diff-called (atom false)
           detail-called (atom false)]
-      (with-redefs [github/fetch-pr-diff   (fn [r n] (reset! diff-called true) "d")
-                    github/fetch-pr-detail (fn [r n] (reset! detail-called true) {:t 1})]
+      (with-redefs [github/fetch-pr-diff   (fn [_r _n] (reset! diff-called true) "d")
+                    github/fetch-pr-detail (fn [_r _n] (reset! detail-called true) {:t 1})]
         (github/fetch-pr-diff-and-detail "r" 1)
         (is (true? @diff-called))
         (is (true? @detail-called))))))

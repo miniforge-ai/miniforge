@@ -1,3 +1,21 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
 (ns ai.miniforge.tui-views.persistence.github-acceptance-test
   "Acceptance tests for the GitHub PR diff/detail fetch pipeline.
 
@@ -279,7 +297,7 @@
 
 (deftest ac4-composite-partial-failure-preserves-success-test
   (testing "when diff fails but detail succeeds, detail is preserved"
-    (let [call-count (atom 0)]
+    (let [_call-count (atom 0)]
       (with-redefs [process/shell (fn [_opts & args]
                                  (let [cmd (nth (vec args) 2)]
                                    (if (= "diff" cmd)

@@ -255,7 +255,7 @@
 
 (defn unauthorized-response
   "Return an auth challenge response for the current request."
-  [auth-state req]
+  [_auth-state req]
   (let [return-to (safe-return-to
                    (str (:uri req)
                         (when-let [qs (:query-string req)]
