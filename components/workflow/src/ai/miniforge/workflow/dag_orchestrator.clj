@@ -273,7 +273,7 @@
   (let [sub-workflow (task-sub-workflow task-def context)
         sub-input (task-sub-input task-def)
         sub-opts (task-sub-opts context)
-        run-pipeline (requiring-resolve 'ai.miniforge.workflow.runner/run-pipeline)
+        run-pipeline (:execution/run-pipeline-fn context)
         result (run-pipeline sub-workflow sub-input sub-opts)
         artifacts (:execution/artifacts result)
         metrics (:execution/metrics result)
