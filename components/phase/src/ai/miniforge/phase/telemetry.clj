@@ -27,8 +27,7 @@
 
    All functions are safe no-ops when the event-stream component is absent
    (soft dependency via requiring-resolve)."
-  (:require
-   [clojure.string :as str]))
+)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event-stream resolution
