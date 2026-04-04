@@ -7,7 +7,7 @@
    Covers property-based tests, concurrency edge cases,
    and scenarios not in the primary test file."
   (:require
-   [clojure.test :refer [deftest testing is use-fixtures]]
+   [clojure.test :refer [deftest testing is]]
    [ai.miniforge.control-plane.orchestrator :as sut]
    [ai.miniforge.control-plane.registry :as registry]
    [ai.miniforge.control-plane.decision-queue :as dq]
@@ -129,10 +129,10 @@
           es (stream/create-event-stream)
           published (atom [])
           _ (stream/subscribe! es :test-sub #(swap! published conj %))
-          agent-rec (registry/register-agent! reg
-                     {:agent/external-id "ext-change"
-                      :agent/name "Change Agent"
-                      :agent/vendor :test-adapter})
+          _agent-rec (registry/register-agent! reg
+                      {:agent/external-id "ext-change"
+                       :agent/name "Change Agent"
+                       :agent/vendor :test-adapter})
           ;; Agent starts as :unknown (default), poll returns :running
           adapter (make-mock-adapter
                    {:poll-agent-status
@@ -548,10 +548,10 @@
               {:agent/external-id "ext-mix-2"
                :agent/name "Completed Agent"
                :agent/vendor :test-adapter})
-          a3 (registry/register-agent! reg
-              {:agent/external-id "ext-mix-3"
-               :agent/name "Unknown Agent"
-               :agent/vendor :test-adapter})
+          _a3 (registry/register-agent! reg
+               {:agent/external-id "ext-mix-3"
+                :agent/name "Unknown Agent"
+                :agent/vendor :test-adapter})
           ;; Transition a1 to running, a2 to completed
           _ (registry/transition-agent! reg (:agent/id a1) :running)
           _ (registry/transition-agent! reg (:agent/id a2) :running)

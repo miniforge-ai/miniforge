@@ -224,36 +224,36 @@
                         (update-in [:execution :phases-completed] (fnil conj []) :verify)
                         ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
-                        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
-    ;; When verify failed and on-fail is configured, redirect to target phase
-    ;; UNLESS the failure was a timeout or rate limit — those aren't code quality
-    ;; issues and retrying implement won't help.
-    (let [final-ctx (if (and (= :failed phase-status) on-fail
-                             (not timeout?) (not rate-limited?))
-                      (-> updated-ctx
-                          (assoc-in [:phase :redirect-to] on-fail)
-                          (assoc-in [:phase :error]
-                                    {:message (or (not-empty (get-in result [:error :message]))
-                                                  (when gate-failed? "Gate validation failed")
-                                                  "Verification failed")
-                                     :agent-status agent-status
-                                     :gate-failed? gate-failed?}))
-                      (cond-> updated-ctx
-                        (= :failed phase-status)
+                        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))
+        ;; When verify failed and on-fail is configured, redirect to target phase
+        ;; UNLESS the failure was a timeout or rate limit — those aren't code quality
+        ;; issues and retrying implement won't help.
+        final-ctx (if (and (= :failed phase-status) on-fail
+                           (not timeout?) (not rate-limited?))
+                    (-> updated-ctx
+                        (assoc-in [:phase :redirect-to] on-fail)
                         (assoc-in [:phase :error]
                                   {:message (or (not-empty (get-in result [:error :message]))
                                                 (when gate-failed? "Gate validation failed")
                                                 "Verification failed")
                                    :agent-status agent-status
-                                   :timeout? timeout?
-                                   :rate-limited? rate-limited?
-                                   :gate-failed? gate-failed?})))]
-      ;; Emit phase-completed telemetry event
-      (phase/emit-phase-completed! final-ctx :verify
-        {:outcome (if (= :completed phase-status) :success :failure)
-         :duration-ms duration-ms
-         :tokens (:tokens metrics 0)})
-      final-ctx)))
+                                   :gate-failed? gate-failed?}))
+                    (cond-> updated-ctx
+                      (= :failed phase-status)
+                      (assoc-in [:phase :error]
+                                {:message (or (not-empty (get-in result [:error :message]))
+                                              (when gate-failed? "Gate validation failed")
+                                              "Verification failed")
+                                 :agent-status agent-status
+                                 :timeout? timeout?
+                                 :rate-limited? rate-limited?
+                                 :gate-failed? gate-failed?})))]
+    ;; Emit phase-completed telemetry event
+    (phase/emit-phase-completed! final-ctx :verify
+      {:outcome (if (= :completed phase-status) :success :failure)
+       :duration-ms duration-ms
+       :tokens (:tokens metrics 0)})
+    final-ctx))
 
 (defn error-verify
   "Handle verification phase errors.

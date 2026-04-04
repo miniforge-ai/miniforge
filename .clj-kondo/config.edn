@@ -1,4 +1,5 @@
 {:hooks
  {:analyze-call
   {ai.miniforge.agent.artifact-session/with-artifact-session
-   hooks.artifact-session/with-artifact-session}}}
+   hooks.artifact-session/with-artifact-session}}
+ :linters {:underscore-in-namespace {:level :off}}}

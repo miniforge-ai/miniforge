@@ -4,11 +4,10 @@
 
 (ns ai.miniforge.control-plane.orchestrator-test
   (:require
-   [clojure.test :refer [deftest testing is use-fixtures]]
+   [clojure.test :refer [deftest testing is]]
    [ai.miniforge.control-plane.orchestrator :as sut]
    [ai.miniforge.control-plane.registry :as registry]
    [ai.miniforge.control-plane.decision-queue :as dq]
-   [ai.miniforge.control-plane.heartbeat :as heartbeat]
    [ai.miniforge.control-plane-adapter.protocol :as adapter]
    [ai.miniforge.event-stream.interface.stream :as stream]))
 
@@ -436,10 +435,10 @@
           es (stream/create-event-stream)
           published (atom [])
           _ (stream/subscribe! es :test-sub #(swap! published conj %))
-          agent-rec (registry/register-agent! reg
-                     {:agent/external-id "ext-state"
-                      :agent/name "State Agent"
-                      :agent/vendor :test-adapter})
+          _agent-rec (registry/register-agent! reg
+                      {:agent/external-id "ext-state"
+                       :agent/name "State Agent"
+                       :agent/vendor :test-adapter})
           ;; Agent starts as :initializing, poll returns :running
           adapter (make-mock-adapter
                    {:poll-agent-status
@@ -461,10 +460,10 @@
           es (stream/create-event-stream)
           published (atom [])
           _ (stream/subscribe! es :test-sub #(swap! published conj %))
-          agent-rec (registry/register-agent! reg
-                     {:agent/external-id "ext-same"
-                      :agent/name "Same Agent"
-                      :agent/vendor :test-adapter})
+          _agent-rec (registry/register-agent! reg
+                      {:agent/external-id "ext-same"
+                       :agent/name "Same Agent"
+                       :agent/vendor :test-adapter})
           ;; Agent starts as :initializing, poll returns :initializing (same)
           adapter (make-mock-adapter
                    {:poll-agent-status

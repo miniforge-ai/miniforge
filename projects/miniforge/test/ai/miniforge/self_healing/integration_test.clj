@@ -1,6 +1,26 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
 (ns ai.miniforge.self-healing.integration-test
   "Integration tests for self-healing wiring into execution pipeline."
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
+            [clojure.java.io :as io]
+            [clojure.edn :as edn]
             [ai.miniforge.agent.core :as core]
             [ai.miniforge.agent.protocol :as protocol]
             [ai.miniforge.self-healing.interface :as sh]
@@ -46,7 +66,7 @@
   protocol/Agent
   (invoke [_this _task _context]
     (throw throw-ex))
-  (validate [_this output _context]
+  (validate [_this _output _context]
     {:valid? true :errors []})
   (repair [_this output _errors _context]
     {:repaired output :changes [] :success true})
@@ -55,7 +75,7 @@
   (init [this _new-config] this)
   (status [_this] {:status :ready})
   (shutdown [this] this)
-  (abort [this _reason] {:aborted true}))
+  (abort [_this _reason] {:aborted true}))
 
 (defrecord SuccessAgent [id role capabilities config memory-id state]
   protocol/Agent
@@ -67,7 +87,7 @@
      :decisions [:completed]
      :signals [:done]
      :metrics (core/make-metrics)})
-  (validate [_this output _context]
+  (validate [_this _output _context]
     {:valid? true :errors []})
   (repair [_this output _errors _context]
     {:repaired output :changes [] :success true})
@@ -76,7 +96,7 @@
   (init [this _new-config] this)
   (status [_this] {:status :ready})
   (shutdown [this] this)
-  (abort [this _reason] {:aborted true}))
+  (abort [_this _reason] {:aborted true}))
 
 (defn make-throwing-agent [ex]
   (->ThrowingAgent (random-uuid) :tester #{} {} (random-uuid) {:status :ready} ex))
@@ -147,7 +167,7 @@
                                :decisions [:completed]
                                :signals [:done]
                                :metrics (core/make-metrics)})))
-                        (validate [_ output _context]
+                        (validate [_ _output _context]
                           {:valid? true :errors []})
                         (repair [_ output _errors _context]
                           {:repaired output :changes [] :success true})
@@ -155,7 +175,7 @@
                         (init [this _config] this)
                         (status [_] {:status :ready})
                         (shutdown [this] this)
-                        (abort [this _reason] {:aborted true}))]
+                        (abort [_this _reason] {:aborted true}))]
       ;; Make self-healing return a successful workaround
       (with-redefs [sh/record-backend-call! (fn [_ _] nil)
                     health/load-health (fn [] {:backends {} :switch-cooldowns {}
