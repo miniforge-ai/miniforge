@@ -42,7 +42,7 @@
   "Read a single phase loader config resource."
   [resource]
   (let [config (-> resource slurp edn/read-string)]
-    (or (:phase/namespaces config) [])))
+    (get config :phase/namespaces [])))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Discovery

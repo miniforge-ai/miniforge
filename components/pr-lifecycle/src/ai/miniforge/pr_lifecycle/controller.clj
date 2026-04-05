@@ -146,7 +146,7 @@
   "Stage and commit all changes with the given task info.
    Returns the commit result or a DAG error."
   [controller worktree-path task task-id]
-  (let [commit-msg (str "feat: " (or (:task/title task) "implement task")
+  (let [commit-msg (str "feat: " (get task :task/title "implement task")
                         "\n\nTask: " task-id)
         commit-result (release/commit-changes! worktree-path commit-msg)]
     (if (:success? commit-result)
@@ -162,7 +162,7 @@
       (fail-controller! controller :push-failed (:error push-result))
       (let [pr-title (or (:task/title task) (str "Task " (subs (str task-id) 0 8)))
             pr-body  (str "## Task\n\n"
-                          (or (:task/description task) "Automated task implementation")
+                          (get task :task/description "Automated task implementation")
                           "\n\n"
                           "## Acceptance Criteria\n\n"
                           (when-let [criteria (:task/acceptance-criteria task)]

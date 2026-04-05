@@ -75,7 +75,7 @@
         source {:source/type (:type learning)
                 :source/agent (:agent learning)
                 :source/task-id (:task-id learning)
-                :source/confidence (or (:confidence learning) 0.7)}
+                :source/confidence (get learning :confidence 0.7)}
 
         ;; Resolve link targets (UIDs to UUIDs)
         links (when (seq (:links learning))
@@ -168,7 +168,7 @@
                                   (subs 0 (min 40 (count (:zettel/title learning)))))))
 
             ;; Update source to mark promotion
-            updated-source (-> (or (:zettel/source learning) {})
+            updated-source (-> (get learning :zettel/source {})
                                (assoc :source/promoted-at (java.util.Date.)
                                       :source/promoted-from (:zettel/uid learning))
                                (cond-> reviewed-by (assoc :source/reviewed-by reviewed-by)))

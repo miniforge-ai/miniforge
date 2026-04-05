@@ -83,9 +83,9 @@
           agent-info {:agent/vendor (keyword (:vendor body))
                       :agent/external-id (:external_id body)
                       :agent/name (:name body)
-                      :agent/capabilities (set (map keyword (or (:capabilities body) [])))
-                      :agent/heartbeat-interval-ms (or (:heartbeat_interval_ms body) 30000)
-                      :agent/metadata (or (:metadata body) {})}
+                      :agent/capabilities (set (map keyword (get body :capabilities [])))
+                      :agent/heartbeat-interval-ms (get body :heartbeat_interval_ms 30000)
+                      :agent/metadata (get body :metadata {})}
           ;; Check for existing agent with same external ID
           existing (when (:agent/external-id agent-info)
                      (cp/get-agent-by-external-id registry (:agent/external-id agent-info)))
@@ -115,7 +115,7 @@
                            :metrics (:metrics body)}
                 _ (cp/record-heartbeat! registry agent-id heartbeat)
                 ;; Process any new decisions
-                new-decisions (or (:decisions_needed body) [])
+                new-decisions (get body :decisions_needed [])
                 submitted (mapv (fn [d]
                                   (let [decision (cp/create-decision
                                                   agent-id

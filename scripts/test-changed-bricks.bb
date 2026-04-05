@@ -91,7 +91,12 @@
   "Bricks that share with-redefs targets and must NOT run in parallel.
    phase-software-factory tests redefine agent/invoke, agent/create-implementer,
    etc., so they must run in the same sequential group as the agent brick."
-  {"agent+phases" #{"agent" "phase-software-factory"}})
+  {;; phase-software-factory tests redefine agent/invoke etc.
+   "agent+phases" #{"agent" "phase-software-factory"}
+   ;; workflow and phase tests both dynamically require context_pack via
+   ;; ensure-phase-implementations-loaded! — concurrent pmap loading causes
+   ;; Compiler$CompilerException races on context_pack/interface.clj.
+   "workflow+phase" #{"workflow" "phase"}})
 
 (defn coalesce-by-affinity
   "Merge brick-groups that belong to the same affinity group into a single

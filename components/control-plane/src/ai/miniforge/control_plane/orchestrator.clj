@@ -71,7 +71,7 @@
   [opts]
   {:registry (or (:registry opts) (registry/create-registry))
    :decision-manager (or (:decision-manager opts) (dq/create-decision-manager))
-   :adapters (vec (or (:adapters opts) []))
+   :adapters (vec (get opts :adapters []))
    :event-stream (:event-stream opts)
    :workflow-id (or (:workflow-id opts) (random-uuid))
    :discovery-interval-ms (get opts :discovery-interval-ms default-discovery-interval-ms)

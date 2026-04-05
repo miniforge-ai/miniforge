@@ -169,7 +169,7 @@
 
     ;; Worktree is always available as fallback
     true
-    (assoc :worktree (create-worktree-executor (or (:worktree config) {})))))
+    (assoc :worktree (create-worktree-executor (get config :worktree {})))))
 
 (defn prepare-docker-executor!
   "Create a Docker executor with images ensured to exist.

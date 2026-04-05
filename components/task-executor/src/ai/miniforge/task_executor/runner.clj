@@ -218,16 +218,16 @@
    - pr-url: GitHub PR URL
    - status: Final status (:merged, :failed, etc.)"
   [run-atom task-id lifecycle-result start-time]
-  (let [total-tokens (or (:total-tokens lifecycle-result) 0)
+  (let [total-tokens (get lifecycle-result :total-tokens 0)
         end-time (System/currentTimeMillis)
         duration-ms (- end-time start-time)
 
         metrics {:tokens-used total-tokens
                  :cost-usd (calculate-cost-usd total-tokens)
-                 :iterations (or (:fix-iterations lifecycle-result) 0)
+                 :iterations (get lifecycle-result :fix-iterations 0)
                  :time-to-merge-ms duration-ms
-                 :ci-runs (or (:ci-runs lifecycle-result) 0)
-                 :review-cycles (or (:review-cycles lifecycle-result) 0)
+                 :ci-runs (get lifecycle-result :ci-runs 0)
+                 :review-cycles (get lifecycle-result :review-cycles 0)
                  :pr-url (:pr-url lifecycle-result)
                  :status (:status lifecycle-result)
                  :start-time start-time

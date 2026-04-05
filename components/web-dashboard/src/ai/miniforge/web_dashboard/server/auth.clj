@@ -52,7 +52,7 @@
       [uname {:username uname
               :password (:password entry)
               :display-name (or (:display-name entry) uname)
-              :role (or (:role entry) :operator)}])))
+              :role (get entry :role :operator)}])))
 
 (defn- normalize-users
   [auth-config]
@@ -63,7 +63,7 @@
        {:username (str (:username auth-config))
         :password (:password auth-config)
         :display-name (or (:display-name auth-config) (str (:username auth-config)))
-        :role (or (:role auth-config) :operator)}}
+        :role (get auth-config :role :operator)}}
 
       (map? users)
       (into {}
@@ -78,7 +78,7 @@
                        {:username (:username entry)
                         :password (:password entry)
                         :display-name (or (:display-name entry) (:username entry))
-                        :role (or (:role entry) :operator)}])))
+                        :role (get entry :role :operator)}])))
             users)
 
       :else

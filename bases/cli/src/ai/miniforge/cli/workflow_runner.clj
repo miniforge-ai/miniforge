@@ -264,7 +264,7 @@
           backend-override (:backend opts)
           selection-llm-client (context/create-llm-client nil spec quiet backend-override)
           workflow-type (select-workflow-type spec selection-llm-client quiet)
-          workflow-version (or (:spec/workflow-version spec) "latest")
+          workflow-version (get spec :spec/workflow-version "latest")
           workflow (load-or-create-workflow load-workflow workflow-type workflow-version)
           enriched-spec (context/decorate-spec-with-runtime-context spec opts)
           ;; Infer repo URL and branch for execution environment (Docker clone / worktree).
@@ -407,8 +407,8 @@
    - chain-id: Chain identifier keyword (e.g. :reporting-chain)
    - opts: {:version \"latest\" :spec \"spec.edn\" :input-json \"{...}\" :quiet false}"
   [chain-id opts]
-  (let [quiet (or (:quiet opts) false)
-        version (or (:version opts) "latest")]
+  (let [quiet (get opts :quiet false)
+        version (get opts :version "latest")]
     (try
       (let [load-chain-fn (requiring-resolve 'ai.miniforge.workflow.interface/load-chain)
             run-chain-fn (requiring-resolve 'ai.miniforge.workflow.interface/run-chain)

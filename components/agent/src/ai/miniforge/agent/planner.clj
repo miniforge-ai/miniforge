@@ -368,7 +368,7 @@
                                   :plan/name "already-satisfied"
                                   :plan/tasks []
                                   :plan/summary (:plan/summary plan-final)
-                                  :plan/evidence (or (:plan/evidence plan-final) [])}]
+                                  :plan/evidence (get plan-final :plan/evidence [])}]
                       (assoc (response/success output {:tokens tokens})
                              :status :already-satisfied))
                     (response/success plan-final

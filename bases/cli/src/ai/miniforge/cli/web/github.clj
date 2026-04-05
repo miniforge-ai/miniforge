@@ -105,7 +105,7 @@
         {:success false :summary "Could not fetch PR diff."}
         (let [prompt (str "You are a senior code reviewer. Analyze this PR and provide a brief summary.\n\n"
                           "PR Title: " (:title pr-info) "\n"
-                          "PR Description: " (or (:body pr-info) "(none)") "\n\n"
+                          "PR Description: " (get pr-info :body "(none)") "\n\n"
                           "Diff preview:\n```\n" (subs diff 0 (min 6000 (count diff))) "\n```\n\n"
                           "Provide a 2-3 sentence summary covering what it does, concerns, and recommendation.")
               result (process/sh "claude" "-p" prompt)]

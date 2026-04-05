@@ -136,7 +136,7 @@
                   false "fail"
                   "unknown")
     (:state :status)
-    (name (or (:pr/status pr) :unknown))
+    (name (get pr :pr/status :unknown))
     :recommend  (name (resolve-or :wait
                         #(:action (project/derive-recommendation pr))))
     ""))

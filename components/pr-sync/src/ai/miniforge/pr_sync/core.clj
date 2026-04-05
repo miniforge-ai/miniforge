@@ -697,16 +697,16 @@
                            (map #(list-github-owner-repos % limit))
                            doall)
                       [])
-        repos (->> (concat (or (:repos viewer) [])
-                           (mapcat #(or (:repos %) []) (filter succeeded? org-results)))
+        repos (->> (concat (get viewer :repos [])
+                           (mapcat #(get % :repos []) (filter succeeded? org-results)))
                    distinct
                    (take limit)
                    vec)
         warnings (vec (concat
                        (when-not (succeeded? viewer)
-                         [(or (:error viewer) "GraphQL browse failed.")])
+                         [(get viewer :error "GraphQL browse failed.")])
                        (when-not (succeeded? orgs-result)
-                         [(or (:error orgs-result) "Organization browse failed.")])
+                         [(get orgs-result :error "Organization browse failed.")])
                        (for [{:keys [success? owner error]} org-results
                              :when (not success?)]
                          (str "Org " owner ": " (or error "browse failed")))))]
@@ -784,17 +784,17 @@
                         (list-github-owner-repos owner* limit*)
                         (list-github-accessible-repos limit*))
             gl-result (list-gitlab-repos {:owner owner* :limit limit*})
-            repos (->> (concat (or (:repos gh-result) [])
-                               (or (:repos gl-result) []))
+            repos (->> (concat (get gh-result :repos [])
+                               (get gl-result :repos []))
                        distinct
                        (take limit*)
                        vec)
             warnings (vec (concat
                            (when-not (succeeded? gh-result)
-                             [(str "GitHub: " (or (:error gh-result) "browse failed"))])
+                             [(str "GitHub: " (get gh-result :error "browse failed"))])
                            (when-not (succeeded? gl-result)
-                             [(str "GitLab: " (or (:error gl-result) "browse failed"))])
-                           (or (:warnings gh-result) [])))]
+                             [(str "GitLab: " (get gl-result :error "browse failed"))])
+                           (get gh-result :warnings [])))]
         (if (seq repos)
           (cond-> (result-success {:owner owner* :provider :all :repos repos})
             (seq warnings) (assoc :warnings warnings))

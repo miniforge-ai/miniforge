@@ -81,7 +81,7 @@
     (when-let [result (dispatch method params artifact-dir)]
       (protocol/write-response id result))
     (catch Exception e
-      (let [code (or (:code (ex-data e)) -32603)]
+      (let [code (get (ex-data e) :code -32603)]
         (log-stderr "Error handling" method ":" (ex-message e))
         (protocol/write-error id code (ex-message e))))))
 

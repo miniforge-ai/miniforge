@@ -101,7 +101,7 @@
 (defn mock-get-put-count
   "Get the number of put-string! calls on a mock screen."
   [mock-screen]
-  (or (:put-count @(:state mock-screen)) 0))
+  (get @(:state mock-screen) :put-count 0))
 
 (defn mock-reset-put-count!
   "Reset the put-string! call counter to zero."

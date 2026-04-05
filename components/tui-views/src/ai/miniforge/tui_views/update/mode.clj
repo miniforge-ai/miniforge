@@ -120,7 +120,7 @@
         ["Intent"
          (or (get-in evidence [:intent :description]) "")]
         ["Phases"]
-        (map #(str (name (:phase %)) " " (name (or (:status %) :pending))) phases)
+        (map #(str (name (:phase %)) " " (name (get % :status :pending))) phases)
         ["Validation"
          (if (get-in evidence [:validation :passed?])
            "All gates passed" "Errors")]
