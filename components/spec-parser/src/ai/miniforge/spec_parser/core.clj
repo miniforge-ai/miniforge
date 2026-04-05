@@ -74,20 +74,62 @@
       (throw (ex-info "Failed to parse JSON file"
                       {:error (ex-message e)} e)))))
 
+(def ^:private spec-key->ns
+  "Map plain YAML keys to their :spec/* or :workflow/* namespace.
+   The YAML parser produces unnamespaced keywords; normalize-spec requires
+   namespaced ones.
+
+   Both hyphenated (:acceptance-criteria) and underscore (:acceptance_criteria)
+   forms are listed because the YAML parser regex only captures \\w+ (no hyphens),
+   so frontmatter authors must use underscores for multi-word keys."
+  {:title                "spec"
+   :description          "spec"
+   :intent               "spec"
+   :constraints          "spec"
+   :tags                 "spec"
+   :acceptance-criteria  "spec"
+   :acceptance_criteria  "spec"   ; underscore form from YAML parser
+   :code-artifact        "spec"
+   :code_artifact        "spec"
+   :repo-url             "spec"
+   :repo_url             "spec"
+   :branch               "spec"
+   :llm-backend          "spec"
+   :llm_backend          "spec"
+   :sandbox              "spec"
+   :plan-tasks           "spec"
+   :plan_tasks           "spec"
+   :type                 "workflow"
+   :version              "workflow"})
+
+(defn- namespace-frontmatter-keys
+  "Remap plain YAML keys to :spec/* / :workflow/* namespaces for normalize-spec.
+   Underscore key names (from YAML parser limitation) are normalized to hyphens
+   so :acceptance_criteria becomes :spec/acceptance-criteria."
+  [m]
+  (reduce-kv (fn [acc k v]
+               (if-let [ns (get spec-key->ns k)]
+                 (let [canonical (str/replace (name k) "_" "-")]
+                   (assoc acc (keyword ns canonical) v))
+                 (assoc acc k v)))
+             {} m))
+
 (defn parse-markdown
   "Parse Markdown file with YAML frontmatter.
-   Frontmatter contains structured spec data, body is optional context."
+   Frontmatter contains structured spec data; body is appended to description."
   [content]
   (let [parsed (knowledge/split-frontmatter content)]
     (when-not parsed
-      (throw (ex-info "Markdown file must have YAML frontmatter (---)"
-                      {:hint "Add frontmatter with title, description, etc."})))
-    (let [frontmatter (knowledge/parse-yaml-frontmatter (:frontmatter parsed))
-          body (:body parsed)]
-      ;; If there's body content beyond title, use it to extend description
-      (cond-> frontmatter
+      (throw (ex-info "Markdown spec requires YAML frontmatter (---...---)"
+                      {:hint "Add frontmatter with at least title and description."})))
+    (let [raw-fm   (knowledge/parse-yaml-frontmatter (:frontmatter parsed))
+          fm       (namespace-frontmatter-keys raw-fm)
+          body     (:body parsed)]
+      ;; Append body prose to description so agents get full context without
+      ;; needing to re-read the source file.
+      (cond-> fm
         (and body (not (str/blank? body)))
-        (update :description
+        (update :spec/description
                 #(str % "\n\n" (str/trim body)))))))
 
 (def format-parsers
@@ -139,9 +181,9 @@
            :spec/intent           (or intent {:type :general})
            :spec/constraints      (or constraints [])
            :spec/tags             (or tags [])
+           :spec/workflow-type    (or type :full-sdlc)
            :spec/workflow-version (or version "latest")
            :spec/raw-data         spec}
-    type                (assoc :spec/workflow-type type)
     acceptance-criteria (assoc :spec/acceptance-criteria acceptance-criteria)
     code-artifact       (assoc :spec/code-artifact code-artifact)
     repo-url            (assoc :spec/repo-url repo-url)

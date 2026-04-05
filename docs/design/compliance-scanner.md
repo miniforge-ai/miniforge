@@ -1,4 +1,11 @@
-# Compliance Scanner
+---
+title: Compliance Scanner
+description: Build a Miniforge capability that scans a repository against compiled policy packs, produces a compliance
+delta report, generates a DAG remediation plan, and executes fixes autonomously via the dag-executor.
+acceptance_criteria: Scan detects policy violations by rule-id, classify adds auto-fixable flag and rationale, plan
+generates DAG tasks and markdown work spec, execute applies auto-fixable fixes via dag-executor and opens PRs
+tags: [compliance, policy, scanner, dag, remediation]
+---
 
 ## Vision
 

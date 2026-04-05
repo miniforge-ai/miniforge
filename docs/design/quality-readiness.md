@@ -1,4 +1,12 @@
-# Quality Readiness Assessment — Design
+---
+title: Quality Readiness Assessment Workflow
+description: Build a Miniforge workflow that evaluates a repository against a 9-domain quality-readiness rubric,
+produces evidence-backed domain scores, identifies blockers, and routes output to human review or remediation planning
+workflows.
+acceptance_criteria: Workflow scores all 9 domains with evidence citations, produces red/orange/yellow/green status per
+domain, detects hard blockers, routes to proceed/human-vet/plan-remediation/block, emits handoff artifacts
+tags: [quality, readiness, assessment, rubric, governance]
+---
 
 ## Spec Reference
 
