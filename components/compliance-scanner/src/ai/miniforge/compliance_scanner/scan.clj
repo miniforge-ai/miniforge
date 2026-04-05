@@ -134,7 +134,7 @@
    - repo-path      - string path to repo root
    - standards-path - string path to .standards dir (not used in M1)
    - opts           - map with:
-       :rules  - set of Dewey strings to run, or :all (default)
+       :rules  - set of :rule/id keywords to run, or :all (default)
        :since  - git ref (optional, ignored in M1)
 
    Returns ScanResult map."

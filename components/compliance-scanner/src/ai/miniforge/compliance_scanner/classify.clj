@@ -44,8 +44,8 @@
         (some #(str/includes? current %) json-signal-keys)
         (str/includes? current ";; JSON"))))
 
-(defn- classify-210
-  "Classify a Dewey 210 violation."
+(defn- classify-clojure-map-access
+  "Classify a :std/clojure violation (Clojure Map Access standard)."
   [violation]
   (if (json-context? violation)
     (assoc violation
@@ -55,15 +55,15 @@
            :auto-fixable? true
            :rationale     "Literal default, non-JSON field")))
 
-(defn- classify-730
-  "Classify a Dewey 730 violation."
+(defn- classify-datever
+  "Classify a :std/datever violation (DateVer version format standard)."
   [violation]
   (assoc violation
          :auto-fixable? true
          :rationale     "SemVer X.Y.Z found where DateVer X.Y.Z.N is required; append build count .0"))
 
-(defn- classify-810
-  "Classify a Dewey 810 violation."
+(defn- classify-copyright-header
+  "Classify a :std/header-copyright violation (copyright header standard)."
   [violation]
   (let [current (get violation :current "")]
     (if (= current "(missing copyright header)")
@@ -77,12 +77,12 @@
              :rationale     "Copyright header content incorrect; manual correction required"))))
 
 (defn- classify-one
-  "Dispatch classification for a single violation by rule id."
+  "Dispatch classification for a single violation by :rule/id."
   [violation]
   (case (get violation :rule/id)
-    :std/clojure          (classify-210 violation)
-    :std/datever          (classify-730 violation)
-    :std/header-copyright (classify-810 violation)
+    :std/clojure          (classify-clojure-map-access violation)
+    :std/datever          (classify-datever violation)
+    :std/header-copyright (classify-copyright-header violation)
     ;; Unknown rule — default to needs-review
     (assoc violation
            :auto-fixable? false
