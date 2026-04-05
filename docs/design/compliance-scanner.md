@@ -33,10 +33,11 @@ it to its own codebase first (dogfood), then exposes it as a product feature for
 
 **`policy-selector` options:**
 
-- `:always-apply` — all packs with `alwaysApply: true` in frontmatter (default)
-- `:all` — every `.mdc` file in the standards path
-- `#{"dewey.210" "dewey.810"}` — explicit set of Dewey codes
-- `"dewey.2xx"` — prefix wildcard (all language rules)
+- `:always-apply` — all rules with default enabled across loaded packs (default)
+- `:all` — every rule in every loaded pack
+- `#{:mf.rule/clojure-map-access :mf.rule/copyright-header}` — explicit rule IDs
+- `#{:mf.cat/210 :mf.cat/810}` — all rules in specified categories
+- `"mf.cat/8xx"` — prefix wildcard over category codes (all project-standards rules)
 
 ---
 
@@ -56,21 +57,25 @@ Machine-readable. Stored at `.miniforge/compliance-report.edn` after each scan.
                     :needs-review      24
                     :files-affected    61
                     :rules-violated     9}
- :violations       [{:rule/dewey      "210"
-                     :rule/title      "Clojure Map Access"
+ :violations       [{:rule/id         :mf.rule/clojure-map-access
+                     :rule/title      "Clojure Map Access Style"
+                     :rule/categories [:mf.cat/210]
+                     :rule/pack       :miniforge/core
                      :file            "components/foo/src/..."
                      :line            42
                      :current         "(or (:k m) default)"
                      :suggested       "(get m :k default)"
-                     :auto-fixable?   true
+                     :auto-fix?       true
                      :rationale       "Literal default, non-JSON field"}
-                    {:rule/dewey      "210"
-                     :rule/title      "Clojure Map Access"
+                    {:rule/id         :mf.rule/clojure-map-access
+                     :rule/title      "Clojure Map Access Style"
+                     :rule/categories [:mf.cat/210]
+                     :rule/pack       :miniforge/core
                      :file            "components/server/src/..."
                      :line            88
                      :current         "(or (:type d) \"choice\")"
                      :suggested       nil
-                     :auto-fixable?   false
+                     :auto-fix?       false
                      :rationale       "JSON-deserialized map; key can be present with nil value"}
                     ...]}
 ```
@@ -83,8 +88,8 @@ Format designed to be fed directly back to Miniforge as a work input — the sam
 Sections:
 
 - **Executive summary** — violation counts by rule, files affected
-- **Auto-fixable violations** — grouped by Dewey code, with file lists and patterns
-- **Needs-review violations** — grouped by Dewey code, with rationale for each exception
+- **Auto-fixable violations** — grouped by category title (from loaded taxonomy), with file lists and patterns
+- **Needs-review violations** — grouped by category title, with rationale for each exception
 - **Execution instructions** — DAG topology, recommended PR structure, ordering constraints
 
 ### 3. DAG Definition (EDN)
@@ -111,9 +116,9 @@ Each agent:
 
 | Rule category | Detection method |
 |---|---|
-| Mechanical patterns (Dewey 210, 810) | Regex scan via existing `Scanner` protocol |
-| Structural conventions (Dewey 300, 400) | AST-level or pattern matching |
-| Semantic/design rules (Dewey 003, 004, 010) | LLM-powered analysis; violations returned as `:needs-review` |
+| Mechanical patterns (`:mf.cat/210`, `:mf.cat/810`) | Regex scan via existing `Scanner` protocol |
+| Structural conventions (`:mf.cat/310`, `:mf.cat/400`) | AST-level or pattern matching |
+| Semantic/design rules (`:mf.cat/001`, `:mf.cat/003`, `:mf.cat/010`) | LLM-powered analysis; violations returned as `auto-fix? false` |
 
 Each scan agent returns a sequence of violation maps for its rule. All rule scans run in parallel — they share only the
 read-only repo index.
@@ -135,7 +140,7 @@ Aggregate violation lists from all scan agents. For each violation, determine:
 
 1. The rule requires reasoning about runtime behavior or type semantics
 2. The specific instance matches a known edge case (e.g., JSON-deserialized maps, `or` as nil-coerce)
-3. The rule category is Dewey 003, 004, or 010 (semantic design rules)
+3. The rule belongs to a semantic-design category (`:mf.cat/001`, `:mf.cat/003`, `:mf.cat/004`, `:mf.cat/010`)
 
 The classification step is itself agent-powered for mixed rules — a classification agent reviews each candidate
 violation for the edge-case patterns documented in the rule body.
@@ -147,14 +152,14 @@ Convert the classified violation list into a DAG of remediation tasks.
 **DAG topology:**
 
 - **Node** = `(file × rule)` — apply one rule's violations to one file atomically
-- **Edge** = same-file serialization — two nodes sharing a file run sequentially in Dewey code order (lowest Dewey first
-  = most foundational rules applied first)
+- **Edge** = same-file serialization — two nodes sharing a file run sequentially in `:category/order` ascending
+  (lowest order first = most foundational rules applied first)
 - Auto-fixable nodes → executable agent tasks
 - Needs-review nodes → human-approval gates (DAG pauses, waits for confirmation)
 
 **Node execution order within a file:**
-Apply rules in ascending Dewey order to ensure deterministic application and respect rule hierarchy (architectural rules
-before language rules before project rules).
+Apply rules in ascending `:category/order` (resolved from the loaded taxonomy) to ensure deterministic application
+and respect rule hierarchy (architectural rules before language rules before project rules).
 
 **Output:**
 
@@ -175,8 +180,9 @@ Feed the DAG to `dag-executor/execute-dag`. Each task node:
 5. Transitions task to `:implemented`
 
 **PR structure:**
-One PR per rule (matching the Dewey 210 PR pattern). Configurable to one PR per brick or one PR for all. Each PR title
-follows: `fix: [Dewey NNN] <rule-title> compliance pass`.
+One PR per rule. Configurable to one PR per brick or one PR for all. Each PR title follows:
+`fix: [<category-code>] <rule-title> compliance pass` — e.g. `fix: [810] Copyright Header compliance pass`.
+The category code is resolved from the loaded taxonomy at plan time.
 
 ---
 
@@ -189,10 +195,10 @@ The first consumer is Miniforge itself:
 3. **Review** the delta report — see the full outstanding compliance picture
 4. **Execute** — DAG executor applies auto-fixable violations in parallel across the codebase
 5. **Review gate** — needs-review violations surface as human-approval gates; decide case by case
-6. **Merge** — one PR per Dewey code, reviewable in isolation
+6. **Merge** — one PR per rule, reviewable in isolation
 7. **Prevent regression** — compliance scanner runs on every PR as a pre-merge check
 
-This replaces the current manual per-standards-doc pass we just completed for Dewey 210.
+This replaces the current manual per-standards-doc pass we just completed for the Clojure map-access rule.
 
 ---
 
@@ -209,7 +215,7 @@ This replaces the current manual per-standards-doc pass we just completed for De
 
 | Component | Extension |
 |---|---|
-| `policy-pack` | LLM-powered `Scanner` implementation alongside existing regex scanner |
+| `policy-pack` | Taxonomy loader, pack loader, mapping artifact support, overlay resolution (M3); LLM-powered `Scanner` implementation (M4) |
 | `phase-software-factory` | `:compliance-fix` phase variant — targeted single-file edit with rule context |
 
 ### Used As-Is
@@ -235,30 +241,31 @@ This makes compliance checking fast enough to run on every PR.
 
 ## Auto-Fixability Reference
 
-Initial classification per existing standards:
+Initial classification per existing standards. Rule IDs are from `miniforge/core`; category codes
+are from the `miniforge/dewey` taxonomy.
 
-| Dewey | Rule | Auto-fixable? | Notes |
-|---|---|---|---|
-| 001 | Stratified Design | No | Structural/architectural judgment |
-| 002 | Code Quality | Partial | Mechanical patterns yes; design patterns no |
-| 003 | Result Handling | No | Semantic; requires error-path reasoning |
-| 004 | Validation Boundaries | No | Semantic; requires boundary identification |
-| 010 | Simple Made Easy | No | Design judgment |
-| 020 | Specification Standards | No | Document structure judgment |
-| 050 | Localization | Partial | Missing i18n keys yes; structural patterns no |
-| 210 | Clojure Map Access | Yes | Except JSON-deserialized nil edge cases |
-| 220 | Python Standards | Yes | Where mechanical pattern applies |
-| 300 | Polylith | Partial | Interface violations yes; dep structure needs review |
-| 320 | Kubernetes | No | Infrastructure judgment |
-| 400 | Testing Standards | Partial | Naming/structure yes; coverage judgment no |
-| 710 | Git Branch Management | No | Workflow judgment |
-| 715 | Pre-commit Discipline | No | Process, not code |
-| 721 | PR Documentation | Partial | Missing fields yes; quality judgment no |
-| 722 | PR Layering | No | Judgment call |
-| 725 | Git Worktrees | No | Workflow judgment |
-| 730 | Datever | Yes | Date format substitution, fully mechanical |
-| 810 | Copyright Header | Yes | Missing/malformed headers, fully mechanical |
-| 900 | Meta | No | Standards authoring rules |
+| Rule ID | Category | Title | Auto-fixable? | Notes |
+|---|---|---|---|---|
+| `:mf.rule/stratified-design` | 001 | Stratified Design | No | Structural/architectural judgment |
+| `:mf.rule/code-quality` | 002 | Code Quality | Partial | Mechanical patterns yes; design patterns no |
+| `:mf.rule/result-handling` | 003 | Result Handling | No | Semantic; requires error-path reasoning |
+| `:mf.rule/validation-boundaries` | 004 | Validation Boundaries | No | Semantic; requires boundary identification |
+| `:mf.rule/simple-made-easy` | 010 | Simple Made Easy | No | Design judgment |
+| `:mf.rule/specification-standards` | 020 | Specification Standards | No | Document structure judgment |
+| `:mf.rule/localisation` | 050 | Localisation | Partial | Missing i18n keys yes; structural patterns no |
+| `:mf.rule/clojure-map-access` | 210 | Clojure Map Access Style | Yes | Except JSON-deserialized nil edge cases |
+| `:mf.rule/python-standards` | 220 | Python Standards | Yes | Where mechanical pattern applies |
+| `:mf.rule/polylith-structure` | 310 | Polylith | Partial | Interface violations yes; dep structure needs review |
+| `:mf.rule/kubernetes-config` | 320 | Kubernetes | No | Infrastructure judgment |
+| `:mf.rule/testing-standards` | 400 | Testing Standards | Partial | Naming/structure yes; coverage judgment no |
+| `:mf.rule/git-branch-management` | 710 | Git Branch Management | No | Workflow judgment |
+| `:mf.rule/precommit-discipline` | 715 | Pre-commit Discipline | No | Process, not code |
+| `:mf.rule/pr-documentation` | 721 | PR Documentation | Partial | Missing fields yes; quality judgment no |
+| `:mf.rule/pr-layering` | 722 | PR Layering | No | Judgment call |
+| `:mf.rule/git-worktrees` | 725 | Git Worktrees | No | Workflow judgment |
+| `:mf.rule/datever-format` | 730 | DateVer Format | Yes | Date format substitution, fully mechanical |
+| `:mf.rule/copyright-header` | 810 | Copyright Header | Yes | Missing/malformed headers, fully mechanical |
+| `:mf.rule/meta-standards` | 900 | Meta | No | Standards authoring rules |
 
 ---
 
