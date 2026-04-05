@@ -114,7 +114,7 @@
 (defn add-link
   "Add a link to a zettel."
   [zettel link]
-  (let [links (or (:zettel/links zettel) [])]
+  (let [links (get zettel :zettel/links [])]
     (-> zettel
         (assoc :zettel/links (conj links link))
         (assoc :zettel/modified (java.util.Date.)))))
@@ -122,7 +122,7 @@
 (defn remove-link
   "Remove a link by target ID."
   [zettel target-id]
-  (let [links (or (:zettel/links zettel) [])]
+  (let [links (get zettel :zettel/links [])]
     (-> zettel
         (assoc :zettel/links (vec (remove #(= target-id (:link/target-id %)) links)))
         (assoc :zettel/modified (java.util.Date.)))))
@@ -136,9 +136,9 @@
    - :both      - All connections"
   [zettel direction]
   (case direction
-    :outgoing (or (:zettel/links zettel) [])
+    :outgoing (get zettel :zettel/links [])
     :incoming (mapv (fn [id] {:link/target-id id :link/type :backlink})
-                    (or (:zettel/backlinks zettel) []))
+                    (get zettel :zettel/backlinks []))
     :both (concat (get-links zettel :outgoing)
                   (get-links zettel :incoming))))
 
@@ -154,7 +154,7 @@
           (let [target-id (:link/target-id link)]
             (update acc2 target-id (fnil conj []) source-id)))
         acc
-        (or (:zettel/links zettel) []))))
+        (get zettel :zettel/links []))))
    {}
    zettels))
 
@@ -242,7 +242,7 @@
                    :zettel/type (keyword (:type frontmatter))
                    :zettel/created (or (parse-inst (:created frontmatter))
                                        (java.util.Date.))
-                   :zettel/author (or (:author frontmatter) "unknown")}
+                   :zettel/author (get frontmatter :author "unknown")}
             (:dewey frontmatter) (assoc :zettel/dewey (:dewey frontmatter))
             (seq (:tags frontmatter)) (assoc :zettel/tags (mapv keyword (:tags frontmatter)))
             (:modified frontmatter) (assoc :zettel/modified (parse-inst (:modified frontmatter)))

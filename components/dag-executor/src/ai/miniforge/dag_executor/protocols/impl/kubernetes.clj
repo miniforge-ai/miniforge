@@ -183,7 +183,7 @@
                             "-o" "jsonpath={.items[0].metadata.name}")]
     (if (and (zero? (:exit result)) (not (str/blank? (:out result))))
       (result/ok {:pod-name (str/trim (:out result))})
-      (result/err :pod-not-found (or (:err result) "No pod found for job")))))
+      (result/err :pod-not-found (get result :err "No pod found for job")))))
 
 (defn wait-for-pod-ready
   "Wait for pod to be in Running state with containers ready."

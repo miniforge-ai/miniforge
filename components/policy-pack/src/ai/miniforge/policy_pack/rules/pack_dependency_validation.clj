@@ -144,7 +144,7 @@
   "Extract dependencies from a pack manifest.
    Returns vector of {:pack-id string :version-constraint string}."
   [pack]
-  (or (:pack/extends pack) []))
+  (get pack :pack/extends []))
 
 (defn build-dependency-graph
   "Build a dependency graph from a collection of packs.

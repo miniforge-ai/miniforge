@@ -112,7 +112,7 @@
 (defn extract-constraints-mentions
   "Extract constraint mentions from spec."
   [spec]
-  (let [constraints (or (:spec/constraints spec) [])]
+  (let [constraints (get spec :spec/constraints [])]
     (set (concat
           (when (some #(or (str/includes? (str/lower-case (str %)) "rule 720")
                            (str/includes? (str/lower-case (str %)) "≤400"))

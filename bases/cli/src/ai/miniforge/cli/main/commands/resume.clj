@@ -133,7 +133,7 @@
   (let [workflow-spec (:workflow-spec reconstructed)
         workflow-type (or (some-> workflow-spec :name keyword)
                           (selection-config/resolve-selection-profile :default))
-        workflow-version (or (:version workflow-spec) "latest")]
+        workflow-version (get workflow-spec :version "latest")]
     (when-not workflow-type
       (throw (ex-info "Could not resolve a default workflow for resume"
                       {:operation :resume-workflow
@@ -173,7 +173,7 @@
 
             ;; Load the workflow definition
             {:keys [workflow]} (load-workflow workflow-type workflow-version {})
-            pipeline (or (:workflow/pipeline workflow) [])
+            pipeline (get workflow :workflow/pipeline [])
 
             ;; Trim pipeline: remove phases that already completed
             completed-set (set completed-phases)

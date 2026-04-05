@@ -147,7 +147,7 @@
    stored on the row."
   [wf]
   (merge (workflow-row->detail wf)
-         (or (:detail-snapshot wf) {})
+         (get wf :detail-snapshot {})
          {:workflow-id (:id wf)}))
 
 (defn enter-workflow-detail [model]

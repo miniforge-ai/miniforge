@@ -58,7 +58,7 @@
   "Check if a zettel matches query criteria."
   [zettel {:keys [tags dewey-prefixes include-types exclude-types
                   text-search]}]
-  (let [zettel-tags (set (or (:zettel/tags zettel) []))
+  (let [zettel-tags (set (get zettel :zettel/tags []))
         zettel-type (:zettel/type zettel)
         zettel-dewey (:zettel/dewey zettel)
         zettel-content (str (:zettel/title zettel) " " (:zettel/content zettel))]

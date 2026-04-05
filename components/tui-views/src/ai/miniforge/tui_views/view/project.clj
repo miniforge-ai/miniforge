@@ -211,7 +211,7 @@
    Respects :filtered-indices from search/filter modes."
   [model]
   (let [prs (:pr-items model [])
-        agent-risk (or (:agent-risk model) {})
+        agent-risk (get model :agent-risk {})
         filtered (if-let [fi (:filtered-indices model)]
                    (vec (keep-indexed (fn [i pr] (when (contains? fi i) pr)) prs))
                    prs)]
@@ -424,7 +424,7 @@
 
 (defn ctx-train-title [model]
   (let [train (get-in model [:detail :selected-train])
-        name (or (:train/name train) "Merge Train")
+        name (get train :train/name "Merge Train")
         progress (:train/progress train)]
     (str " MINIFORGE │ Train: " name
          (when progress

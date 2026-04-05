@@ -78,12 +78,12 @@
 (defn method-label
   "Human-readable label for an install method."
   [entry]
-  (case (or (:install-method entry) :github)
+  (case (get entry :install-method :github)
     :github     "github release"
     :npm        "npm"
     :go-install "go install"
     :custom     "manual install"
-    (name (or (:install-method entry) :github))))
+    (name (get entry :install-method :github))))
 
 (defn pad
   "Right-pad a string to the given width."

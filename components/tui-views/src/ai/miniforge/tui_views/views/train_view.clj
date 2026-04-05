@@ -29,14 +29,14 @@
 ;; Rendering helpers
 
 (defn format-pr-row [pr]
-  {:title (or (:pr/title pr) "Untitled")
-   :readiness (str (int (* 100 (or (:pr/readiness pr) 0))) "%")
-   :order (str (or (:pr/merge-order pr) "—"))})
+  {:title (get pr :pr/title "Untitled")
+   :readiness (str (int (* 100 (get pr :pr/readiness 0))) "%")
+   :order (str (get pr :pr/merge-order "—"))})
 
 (defn render-title-bar [train [cols rows]]
   (layout/text [cols rows]
     (str " MINIFORGE │ Train: "
-         (or (:train/name train) "Release Train"))
+         (get train :train/name "Release Train"))
     {:fg palette/status-info :bold? true}))
 
 (defn render-table [prs selected [cols rows]]
@@ -67,7 +67,7 @@
    [cols rows]: available screen area"
   [model [cols rows]]
   (let [train (get-in model [:detail :selected-train])
-        prs (or (:train/prs train) [])
+        prs (get train :train/prs [])
         selected (:selected-idx model)]
     (layout/split-v [cols rows] (/ 2.0 rows)
       (fn [size] (render-title-bar train size))

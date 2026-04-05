@@ -279,8 +279,8 @@
      ;; Shape 5: gate result {:gate/passed? false}
      (false? (:gate/passed? error-data))
      (anomaly/gate-anomaly :anomalies.gate/validation-failed
-                           (str "Gate " (or (:gate/id error-data) "unknown") " failed")
-                           (or (:gate/errors error-data) []))
+                           (str "Gate " (get error-data :gate/id "unknown") " failed")
+                           (get error-data :gate/errors []))
 
      ;; Shape 2/3/4: {:success false} or {:success? false}
      (or (false? (:success error-data))

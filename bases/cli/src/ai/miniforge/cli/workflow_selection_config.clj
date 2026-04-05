@@ -32,7 +32,7 @@
   "Read a single selection profile config resource."
   [resource]
   (let [config (-> resource slurp edn/read-string)]
-    (or (:workflow-selection/profiles config) {})))
+    (get config :workflow-selection/profiles {})))
 
 (defn configured-selection-profiles
   "Merge workflow selection profile mappings from all matching classpath resources."

@@ -213,7 +213,7 @@
 
    Returns: Workflow recommendation map"
   [spec available-workflows]
-  (let [task-type (or (:spec/workflow-type spec) :simple)
+  (let [task-type (get spec :spec/workflow-type :simple)
         matching-workflows (filter #(some #{task-type} (:workflow/task-types %)) available-workflows)]
     (if (seq matching-workflows)
       {:workflow (:workflow/id (first matching-workflows))

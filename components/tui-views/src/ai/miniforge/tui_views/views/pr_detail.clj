@@ -32,7 +32,7 @@
 (defn render-title-bar [pr [cols rows]]
   (layout/text [cols rows]
     (str " MINIFORGE │ "
-         (or (:pr/title pr) "PR Detail"))
+         (get pr :pr/title "PR Detail"))
     {:fg palette/status-info :bold? true}))
 
 (defn render-info-panel [pr [cols rows]]
@@ -40,12 +40,12 @@
     {:title "PR Info" :border :single :fg :default
      :content-fn
      (fn [[ic ir]]
-       (let [lines [(str "  Title:     " (or (:pr/title pr) "—"))
-                    (str "  Repo:      " (or (:pr/repo pr) "—"))
-                    (str "  Readiness: " (int (* 100 (or (:pr/readiness pr) 0))) "%")
-                    (str "  Risk:      " (name (or (:pr/risk pr) :unknown)))
-                    (str "  CI:        " (name (or (:pr/ci-status pr) :unknown)))
-                    (str "  Author:    " (or (:pr/author pr) "—"))]]
+       (let [lines [(str "  Title:     " (get pr :pr/title "—"))
+                    (str "  Repo:      " (get pr :pr/repo "—"))
+                    (str "  Readiness: " (int (* 100 (get pr :pr/readiness 0))) "%")
+                    (str "  Risk:      " (name (get pr :pr/risk :unknown)))
+                    (str "  CI:        " (name (get pr :pr/ci-status :unknown)))
+                    (str "  Author:    " (get pr :pr/author "—"))]]
          (layout/text [ic ir] (str/join "\n" lines))))}))
 
 (defn render-footer [[cols rows]]

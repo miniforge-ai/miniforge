@@ -252,7 +252,7 @@
 (defn run-install
   "Run the appropriate install method for a server entry."
   [server-entry]
-  (let [install-method (or (:install-method server-entry) :github)]
+  (let [install-method (get server-entry :install-method :github)]
     (case install-method
       :github     (install-via-github server-entry (platform-key))
       :npm        (install-via-npm server-entry)
