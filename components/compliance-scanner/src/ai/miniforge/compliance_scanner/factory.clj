@@ -29,8 +29,9 @@
 
 (defn ->violation
   "Create a Violation map."
-  [dewey title file line current suggested auto-fixable? rationale]
-  {:rule/dewey    dewey
+  [rule-id rule-category title file line current suggested auto-fixable? rationale]
+  {:rule/id       rule-id
+   :rule/category rule-category
    :rule/title    title
    :file          file
    :line          line
@@ -59,7 +60,7 @@
   (let [auto-fixable (filter :auto-fixable? violations)
         needs-review (remove :auto-fixable? violations)
         files        (->> violations (map :file) distinct count)
-        rules        (->> violations (map :rule/dewey) distinct count)]
+        rules        (->> violations (map :rule/id) distinct count)]
     {:total-violations (count violations)
      :auto-fixable     (count auto-fixable)
      :needs-review     (count needs-review)
@@ -71,12 +72,12 @@
 
 (defn ->plan-task
   "Create a PlanTask map."
-  [id deps file dewey violations]
-  {:task/id          id
-   :task/deps        deps
-   :task/file        file
-   :task/rule-dewey  dewey
-   :task/violations  violations})
+  [id deps file rule-id violations]
+  {:task/id         id
+   :task/deps       deps
+   :task/file       file
+   :task/rule-id    rule-id
+   :task/violations violations})
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Plan
@@ -102,7 +103,7 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  (->violation "210" "Clojure Map Access"
+  (->violation :std/clojure "210" "Clojure Map Access"
                "components/foo/src/ai/miniforge/foo/core.clj"
                42
                "(or (:k m) default)"
@@ -111,9 +112,9 @@
                "Literal default, non-JSON field")
 
   (->plan-summary
-   [{:auto-fixable? true  :file "a.clj" :rule/dewey "210"}
-    {:auto-fixable? false :file "a.clj" :rule/dewey "810"}
-    {:auto-fixable? true  :file "b.clj" :rule/dewey "210"}])
+   [{:auto-fixable? true  :file "a.clj" :rule/id :std/clojure}
+    {:auto-fixable? false :file "a.clj" :rule/id :std/header-copyright}
+    {:auto-fixable? true  :file "b.clj" :rule/id :std/clojure}])
   ;; => {:total-violations 3, :auto-fixable 2, :needs-review 1,
   ;;     :files-affected 2, :rules-violated 2}
 

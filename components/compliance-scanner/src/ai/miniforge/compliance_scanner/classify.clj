@@ -77,12 +77,12 @@
              :rationale     "Copyright header content incorrect; manual correction required"))))
 
 (defn- classify-one
-  "Dispatch classification for a single violation by Dewey code."
+  "Dispatch classification for a single violation by rule id."
   [violation]
-  (case (get violation :rule/dewey)
-    "210" (classify-210 violation)
-    "730" (classify-730 violation)
-    "810" (classify-810 violation)
+  (case (get violation :rule/id)
+    :std/clojure          (classify-210 violation)
+    :std/datever          (classify-730 violation)
+    :std/header-copyright (classify-810 violation)
     ;; Unknown rule — default to needs-review
     (assoc violation
            :auto-fixable? false
@@ -100,17 +100,17 @@
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (classify-violations
-   [{:rule/dewey "210"
-     :file       "components/foo/src/ai/miniforge/foo/core.clj"
-     :current    "(or (:timeout m) 5000)"}
-    {:rule/dewey "210"
-     :file       "server/handler.clj"
-     :current    "(or (:status m) :pending)"}
-    {:rule/dewey "730"
-     :file       "build.clj"
-     :current    "1.2.3"}
-    {:rule/dewey "810"
-     :file       "docs/guide.md"
-     :current    "(missing copyright header)"}])
+   [{:rule/id :std/clojure :rule/category "210"
+     :file    "components/foo/src/ai/miniforge/foo/core.clj"
+     :current "(or (:timeout m) 5000)"}
+    {:rule/id :std/clojure :rule/category "210"
+     :file    "server/handler.clj"
+     :current "(or (:status m) :pending)"}
+    {:rule/id :std/datever :rule/category "730"
+     :file    "build.clj"
+     :current "1.2.3"}
+    {:rule/id :std/header-copyright :rule/category "810"
+     :file    "docs/guide.md"
+     :current "(missing copyright header)"}])
 
   :leave-this-here)

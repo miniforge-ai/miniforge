@@ -27,7 +27,8 @@
 (def Violation
   "Schema for a single detected violation."
   [:map
-   [:rule/dewey    [:string {:min 1}]]
+   [:rule/id       :keyword]
+   [:rule/category [:string {:min 1}]]
    [:rule/title    :string]
    [:file          :string]
    [:line          :int]
@@ -43,7 +44,7 @@
   "Schema for the result of scanning a repository."
   [:map
    [:violations       [:vector Violation]]
-   [:rules-scanned    [:vector :string]]
+   [:rules-scanned    [:vector :keyword]]
    [:files-scanned    :int]
    [:scan-duration-ms :int]])
 
@@ -53,11 +54,11 @@
 (def PlanTask
   "Schema for a single task in the remediation plan DAG."
   [:map
-   [:task/id          uuid?]
-   [:task/deps        [:set uuid?]]
-   [:task/file        :string]
-   [:task/rule-dewey  :string]
-   [:task/violations  [:vector Violation]]])
+   [:task/id         uuid?]
+   [:task/deps       [:set uuid?]]
+   [:task/file       :string]
+   [:task/rule-id    :keyword]
+   [:task/violations [:vector Violation]]])
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; PlanSummary — aggregate counts
@@ -98,7 +99,8 @@
   (require '[malli.core :as m])
 
   (m/validate Violation
-    {:rule/dewey    "210"
+    {:rule/id       :std/clojure
+     :rule/category "210"
      :rule/title    "Clojure Map Access"
      :file          "components/foo/src/ai/miniforge/foo/core.clj"
      :line          42

@@ -22,15 +22,15 @@
    Covers Dewey 210 regex correctness and integration with a temp repo."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io]
-            [ai.miniforge.compliance-scanner.rules :as rules]
-            [ai.miniforge.compliance-scanner.scan  :as scan]))
+            [ai.miniforge.compliance-scanner.scanner-registry :as scanner-registry]
+            [ai.miniforge.compliance-scanner.scan             :as scan]))
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers
 
 (def ^:private d210-pattern
-  "Pull the compiled pattern directly from rule-configs for white-box tests."
-  (get-in rules/rule-configs ["210" :pattern]))
+  "Pull the compiled pattern directly from scanner-registry for white-box tests."
+  (get-in scanner-registry/registry [:std/clojure :pattern]))
 
 (defn- matches? [pattern s]
   (boolean (re-find pattern s)))
@@ -117,14 +117,14 @@
           "components/foo/test/core_test.clj"
           "(ns core-test)\n(or (:k m) nil)\n")
 
-        (let [result (scan/scan-repo (.getAbsolutePath tmp-dir) "" {:rules #{"210"}})]
+        (let [result (scan/scan-repo (.getAbsolutePath tmp-dir) "" {:rules #{:std/clojure}})]
           (is (map? result))
-          (is (= ["210"] (:rules-scanned result)))
+          (is (= [:std/clojure] (:rules-scanned result)))
           (is (>= (:files-scanned result) 0))
           ;; Should detect 2 violations in core.clj (lines 2 and 3)
           (let [viols (:violations result)]
             (is (seq viols) "Expected at least one violation")
-            (is (every? #(= "210" (:rule/dewey %)) viols))
+            (is (every? #(= :std/clojure (:rule/id %)) viols))
             (is (every? #(string? (:file %)) viols))
             (is (every? #(pos-int? (:line %)) viols))))
         (finally

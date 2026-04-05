@@ -29,10 +29,10 @@
 ;; DAG topology helpers
 
 (defn- group-by-file-rule
-  "Group violations by [file dewey-code].
-   Returns map of [file dewey] -> [violation ...]."
+  "Group violations by [file rule-id].
+   Returns map of [file rule-id] -> [violation ...]."
   [violations]
-  (group-by (fn [v] [(get v :file) (get v :rule/dewey)]) violations))
+  (group-by (fn [v] [(get v :file) (get v :rule/id)]) violations))
 
 (defn- dewey-order
   "Numeric sort key for a Dewey code string."
@@ -42,28 +42,31 @@
 (defn- build-dag-tasks
   "Build PlanTask records with intra-file ordering deps.
 
-   Within a file, a task for a higher Dewey code depends on all tasks
-   for lower Dewey codes in that same file."
+   Within a file, a task for a rule with a higher Dewey category depends on all
+   tasks for rules with lower Dewey categories in that same file."
   [violations]
-  (let [groups         (group-by-file-rule violations)
-        ;; Build a map: [file dewey] -> fresh UUID (assigned now)
-        key->id        (into {} (map (fn [k] [k (random-uuid)]) (keys groups)))
-        ;; Sort dewey codes per file for dep resolution
-        file->deweys   (->> (keys groups)
+  (let [groups    (group-by-file-rule violations)
+        ;; Build a map: [file rule-id] -> fresh UUID
+        key->id   (into {} (map (fn [k] [k (random-uuid)]) (keys groups)))
+        ;; Dewey category (for ordering) for each [file rule-id] key
+        key->cat  (into {} (map (fn [[k vs]]
+                                  [k (get (first vs) :rule/category "0")])
+                                groups))
+        ;; Sort rule-ids per file by their Dewey category
+        file->rule-ids (->> (keys groups)
                             (group-by first)
                             (into {} (map (fn [[file ks]]
                                            [file (->> ks
-                                                      (map second)
-                                                      (sort-by dewey-order)
-                                                      vec)]))))]
-    (mapv (fn [[[file dewey] viols]]
-            (let [id         (get key->id [file dewey])
-                  ;; Deps = UUIDs of same-file tasks with lower Dewey codes
-                  prior-deweys (take-while #(< (dewey-order %)
-                                               (dewey-order dewey))
-                                           (get file->deweys file []))
-                  deps       (into #{} (map #(get key->id [file %]) prior-deweys))]
-              (factory/->plan-task id deps file dewey viols)))
+                                                      (sort-by #(dewey-order (get key->cat %)))
+                                                      (mapv second))]))))]
+    (mapv (fn [[[file rule-id] viols]]
+            (let [id        (get key->id [file rule-id])
+                  prior-ids (take-while
+                             #(< (dewey-order (get key->cat [file %]))
+                                 (dewey-order (get key->cat [file rule-id])))
+                             (get file->rule-ids file []))
+                  deps      (into #{} (map #(get key->id [file %]) prior-ids))]
+              (factory/->plan-task id deps file rule-id viols)))
           groups)))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -79,14 +82,15 @@
          " [" fixable "]")))
 
 (defn- section-for-rule
-  "Render a markdown section for all violations of one Dewey rule."
-  [dewey viols]
-  (let [rule-title (get (first viols) :rule/title dewey)
+  "Render a markdown section for all violations of one rule."
+  [_rule-id viols]
+  (let [rule-title (get (first viols) :rule/title (str _rule-id))
+        rule-cat   (get (first viols) :rule/category "?")
         auto  (filter :auto-fixable? viols)
         needs (remove :auto-fixable? viols)]
     (str/join "\n"
       (concat
-       [(str "### Dewey " dewey " — " rule-title)
+       [(str "### Dewey " rule-cat " — " rule-title)
         ""]
        (when (seq auto)
          (concat
@@ -103,7 +107,7 @@
 (defn- build-work-spec
   "Build the full markdown work spec string from classified violations."
   [violations summary]
-  (let [by-rule      (group-by :rule/dewey violations)
+  (let [by-rule      (group-by :rule/id violations)
         review-viols (remove :auto-fixable? violations)]
     (str/join "\n"
       ["# Compliance Remediation Plan"
@@ -121,9 +125,10 @@
        "## Violations by Rule"
        ""
        (str/join "\n\n"
-         (map (fn [[dewey viols]]
-                (section-for-rule dewey viols))
-              (sort-by #(dewey-order (first %)) by-rule)))
+         (map (fn [[rule-id viols]]
+                (section-for-rule rule-id viols))
+              (sort-by #(dewey-order (get (first (second %)) :rule/category "0"))
+                       by-rule)))
        ""
        "## Needs-Review Summary"
        ""
@@ -131,7 +136,7 @@
          (str/join "\n"
            (map (fn [v]
                   (str "- `" (get v :file) "` L" (get v :line)
-                       " (" (get v :rule/dewey) "): " (get v :rationale)))
+                       " (" (get v :rule/category) "): " (get v :rationale)))
                 review-viols))
          "_No violations require manual review._")
        ""
@@ -162,15 +167,15 @@
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (def viols
-    [{:rule/dewey "210" :rule/title "Clojure Map Access"
+    [{:rule/id :std/clojure :rule/category "210" :rule/title "Clojure Map Access"
       :file "components/foo/src/core.clj" :line 10
       :current "(or (:k m) nil)" :suggested "(get m :k nil)"
       :auto-fixable? true :rationale "Literal default"}
-     {:rule/dewey "810" :rule/title "Copyright Header (Markdown)"
+     {:rule/id :std/header-copyright :rule/category "810" :rule/title "Copyright Header (Markdown)"
       :file "components/foo/src/core.clj" :line 1
       :current "(missing copyright header)" :suggested nil
       :auto-fixable? true :rationale "Header absent"}
-     {:rule/dewey "210" :rule/title "Clojure Map Access"
+     {:rule/id :std/clojure :rule/category "210" :rule/title "Clojure Map Access"
       :file "components/bar/src/core.clj" :line 5
       :current "(or (:status m) :ok)" :suggested nil
       :auto-fixable? false :rationale "Possible JSON-mapped field"}])

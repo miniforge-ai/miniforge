@@ -22,10 +22,10 @@
    Layer 0: Per-file detection helpers
    Layer 1: Per-rule scanning
    Layer 2: Top-level scan-repo entry point"
-  (:require [ai.miniforge.compliance-scanner.factory :as factory]
-            [ai.miniforge.compliance-scanner.rules   :as rules]
-            [ai.miniforge.repo-index.interface       :as repo-index]
-            [clojure.string                          :as str]))
+  (:require [ai.miniforge.compliance-scanner.factory          :as factory]
+            [ai.miniforge.compliance-scanner.scanner-registry :as scanner-registry]
+            [ai.miniforge.repo-index.interface                :as repo-index]
+            [clojure.string                                   :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Per-file detection helpers
@@ -53,16 +53,21 @@
    Returns vector of Violation maps (without :auto-fixable? / :rationale —
    those are added by classify)."
   [rule-cfg file-path content]
-  (let [{:keys [dewey title pattern suggest-fn]} rule-cfg
-        matches (positive-matches pattern content)]
+  (let [rule-id  (get rule-cfg :rule/id)
+        rule-cat (get rule-cfg :rule/category)
+        title    (get rule-cfg :title)
+        pattern  (get rule-cfg :pattern)
+        suggest  (get rule-cfg :suggest-fn)
+        matches  (positive-matches pattern content)]
     (mapv (fn [{:keys [line text]}]
             (factory/->violation
-             dewey
+             rule-id
+             rule-cat
              title
              file-path
              line
              (str/trim text)
-             (suggest-fn (str/trim text))
+             (suggest (str/trim text))
              false          ; classify phase fills this in
              ""))           ; classify phase fills this in
           matches)))
@@ -71,17 +76,22 @@
   "Scan a single file with a negative-match rule (absence of pattern = violation).
    Returns a vector of 0 or 1 Violation maps."
   [rule-cfg file-path content]
-  (let [{:keys [dewey title pattern email-pattern suggest-fn]} rule-cfg
-        ep (get rule-cfg :email-pattern email-pattern)]
+  (let [rule-id  (get rule-cfg :rule/id)
+        rule-cat (get rule-cfg :rule/category)
+        title    (get rule-cfg :title)
+        pattern  (get rule-cfg :pattern)
+        suggest  (get rule-cfg :suggest-fn)
+        ep       (get rule-cfg :email-pattern)]
     (if (header-present? content pattern ep)
       []
       [(factory/->violation
-        dewey
+        rule-id
+        rule-cat
         title
         file-path
         1
         "(missing copyright header)"
-        (suggest-fn nil)
+        (suggest nil)
         false   ; classify phase fills this in
         "")]))) ; classify phase fills this in
 
@@ -131,16 +141,16 @@
   [repo-path _standards-path opts]
   (let [start-ms   (System/currentTimeMillis)
         index      (repo-index/build-index repo-path)
-        rule-cfgs  (rules/enabled-rule-configs opts)
+        rule-cfgs  (scanner-registry/enabled-rule-configs opts)
         all-violations (->> rule-cfgs
                             (mapcat #(scan-rule % index))
                             vec)
         end-ms     (System/currentTimeMillis)
-        file-count (:file-count index 0)
-        deweys     (mapv :dewey rule-cfgs)]
+        file-count (get index :file-count 0)
+        rule-ids   (mapv :rule/id rule-cfgs)]
     (factory/->scan-result
      all-violations
-     deweys
+     rule-ids
      file-count
      (- end-ms start-ms))))
 

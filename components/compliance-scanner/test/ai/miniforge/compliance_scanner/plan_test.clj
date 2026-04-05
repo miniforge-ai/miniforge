@@ -26,12 +26,13 @@
 ;; Test fixtures
 
 (defn- make-violation
-  [dewey file line auto-fixable?]
-  {:rule/dewey    dewey
-   :rule/title    (str "Rule " dewey)
+  [rule-id rule-category file line auto-fixable?]
+  {:rule/id       rule-id
+   :rule/category rule-category
+   :rule/title    (str "Rule " rule-category)
    :file          file
    :line          line
-   :current       (str "violation-" dewey)
+   :current       (str "violation-" rule-category)
    :suggested     nil
    :auto-fixable? auto-fixable?
    :rationale     "test"})
@@ -44,14 +45,14 @@
 
 (deftest same-file-different-rules-creates-deps
   (testing "two rules on the same file produce an intra-file dep edge"
-    (let [viols [(make-violation "210" file-a 10 true)
-                 (make-violation "810" file-a 1  true)]
+    (let [viols [(make-violation :std/clojure          "210" file-a 10 true)
+                 (make-violation :std/header-copyright "810" file-a 1  true)]
           {:keys [dag-tasks]} (plan/plan viols ".")]
       ;; Should be 2 tasks (one per [file x rule] pair)
       (is (= 2 (count dag-tasks)))
       ;; The 810 task depends on the 210 task (higher Dewey depends on lower)
-      (let [task-210 (first (filter #(= "210" (:task/rule-dewey %)) dag-tasks))
-            task-810 (first (filter #(= "810" (:task/rule-dewey %)) dag-tasks))]
+      (let [task-210 (first (filter #(= :std/clojure          (:task/rule-id %)) dag-tasks))
+            task-810 (first (filter #(= :std/header-copyright (:task/rule-id %)) dag-tasks))]
         (is (some? task-210))
         (is (some? task-810))
         ;; 210 has no deps (lowest Dewey in the file)
@@ -61,8 +62,8 @@
 
 (deftest different-files-have-no-deps
   (testing "violations on different files produce tasks with no cross-file deps"
-    (let [viols [(make-violation "210" file-a 10 true)
-                 (make-violation "210" file-b 5  true)]
+    (let [viols [(make-violation :std/clojure "210" file-a 10 true)
+                 (make-violation :std/clojure "210" file-b 5  true)]
           {:keys [dag-tasks]} (plan/plan viols ".")]
       (is (= 2 (count dag-tasks)))
       ;; Each task has no deps (separate files)
@@ -70,7 +71,7 @@
 
 (deftest single-violation-has-no-deps
   (testing "a plan with one violation produces a task with an empty dep set"
-    (let [viols [(make-violation "730" file-a 3 true)]
+    (let [viols [(make-violation :std/datever "730" file-a 3 true)]
           {:keys [dag-tasks]} (plan/plan viols ".")]
       (is (= 1 (count dag-tasks)))
       (is (empty? (:task/deps (first dag-tasks)))))))
@@ -80,10 +81,10 @@
 
 (deftest summary-stats-are-correct
   (testing "plan summary counts match the violation list"
-    (let [viols [(make-violation "210" file-a 10 true)
-                 (make-violation "810" file-a 1  true)
-                 (make-violation "210" file-b 5  false)
-                 (make-violation "730" file-b 3  true)]
+    (let [viols [(make-violation :std/clojure          "210" file-a 10 true)
+                 (make-violation :std/header-copyright "810" file-a 1  true)
+                 (make-violation :std/clojure          "210" file-b 5  false)
+                 (make-violation :std/datever          "730" file-b 3  true)]
           {:keys [summary]} (plan/plan viols ".")]
       (is (= 4 (:total-violations summary)))
       (is (= 3 (:auto-fixable summary)))
@@ -96,8 +97,8 @@
 
 (deftest work-spec-contains-expected-sections
   (testing "work spec markdown includes all required section headers"
-    (let [viols [(make-violation "210" file-a 10 true)
-                 (make-violation "810" file-b 1  false)]
+    (let [viols [(make-violation :std/clojure          "210" file-a 10 true)
+                 (make-violation :std/header-copyright "810" file-b 1  false)]
           {:keys [work-spec]} (plan/plan viols ".")]
       (is (str/includes? work-spec "# Compliance Remediation Plan"))
       (is (str/includes? work-spec "## Executive Summary"))
@@ -107,15 +108,15 @@
 
 (deftest work-spec-lists-dewey-codes
   (testing "work spec mentions each Dewey code present in violations"
-    (let [viols [(make-violation "210" file-a 10 true)
-                 (make-violation "730" file-b 3  true)]
+    (let [viols [(make-violation :std/clojure  "210" file-a 10 true)
+                 (make-violation :std/datever  "730" file-b 3  true)]
           {:keys [work-spec]} (plan/plan viols ".")]
       (is (str/includes? work-spec "Dewey 210"))
       (is (str/includes? work-spec "Dewey 730")))))
 
 (deftest work-spec-no-violations-shows-no-review-message
   (testing "work spec says no violations need review when all are auto-fixable"
-    (let [viols [(make-violation "210" file-a 10 true)]
+    (let [viols [(make-violation :std/clojure "210" file-a 10 true)]
           {:keys [work-spec]} (plan/plan viols ".")]
       (is (str/includes? work-spec "_No violations require manual review._")))))
 
@@ -124,14 +125,14 @@
 
 (deftest tasks-have-required-keys
   (testing "every PlanTask has all required keys"
-    (let [viols [(make-violation "210" file-a 10 true)
-                 (make-violation "810" file-b 1  false)]
+    (let [viols [(make-violation :std/clojure          "210" file-a 10 true)
+                 (make-violation :std/header-copyright "810" file-b 1  false)]
           {:keys [dag-tasks]} (plan/plan viols ".")]
       (doseq [t dag-tasks]
         (is (uuid? (:task/id t)))
         (is (set? (:task/deps t)))
         (is (string? (:task/file t)))
-        (is (string? (:task/rule-dewey t)))
+        (is (keyword? (:task/rule-id t)))
         (is (vector? (:task/violations t)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment

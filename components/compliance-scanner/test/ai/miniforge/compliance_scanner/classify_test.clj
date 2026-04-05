@@ -25,32 +25,36 @@
 ;; Test fixtures
 
 (def ^:private base-210
-  {:rule/dewey "210"
-   :rule/title "Clojure Map Access"
-   :line       10
-   :current    "(or (:timeout m) 5000)"
-   :suggested  "(get m :timeout 5000)"})
+  {:rule/id       :std/clojure
+   :rule/category "210"
+   :rule/title    "Clojure Map Access"
+   :line          10
+   :current       "(or (:timeout m) 5000)"
+   :suggested     "(get m :timeout 5000)"})
 
 (def ^:private base-730
-  {:rule/dewey "730"
-   :rule/title "Version Format (SemVer vs DateVer)"
-   :line       3
-   :current    "1.2.3"
-   :suggested  "1.2.3.0"})
+  {:rule/id       :std/datever
+   :rule/category "730"
+   :rule/title    "Version Format (SemVer vs DateVer)"
+   :line          3
+   :current       "1.2.3"
+   :suggested     "1.2.3.0"})
 
 (def ^:private base-810-absent
-  {:rule/dewey "810"
-   :rule/title "Copyright Header (Markdown)"
-   :line       1
-   :current    "(missing copyright header)"
-   :suggested  nil})
+  {:rule/id       :std/header-copyright
+   :rule/category "810"
+   :rule/title    "Copyright Header (Markdown)"
+   :line          1
+   :current       "(missing copyright header)"
+   :suggested     nil})
 
 (def ^:private base-810-wrong
-  {:rule/dewey "810"
-   :rule/title "Copyright Header (Markdown)"
-   :line       1
-   :current    "## Copyright 2019 Acme Corp"
-   :suggested  nil})
+  {:rule/id       :std/header-copyright
+   :rule/category "810"
+   :rule/title    "Copyright Header (Markdown)"
+   :line          1
+   :current       "## Copyright 2019 Acme Corp"
+   :suggested     nil})
 
 ;; ---------------------------------------------------------------------------
 ;; Dewey 210 classification
