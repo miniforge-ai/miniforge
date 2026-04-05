@@ -20,6 +20,7 @@
   "Tests for spec-parser component: schema validation, normalization, and parsing."
   (:require
    [clojure.test :refer [deftest testing is]]
+   [clojure.string :as str]
    [ai.miniforge.spec-parser.interface :as spec-parser]
    [ai.miniforge.spec-parser.schema :as schema]
    [malli.core :as m]
@@ -206,6 +207,80 @@
     (let [result (spec-parser/validate-spec {:spec/title "T"})]
       (is (false? (:valid? result)))
       (is (some? (:errors result))))))
+
+;------------------------------------------------------------------------------ Layer 5: Markdown Parsing Tests
+;; Regression coverage for parse-markdown frontmatter key namespacing and body appending
+
+(deftest parse-markdown-key-namespacing-test
+  (testing "title and description map to :spec/* namespace"
+    (let [result (spec-parser/parse-content
+                  :markdown
+                  "---\ntitle: My Spec\ndescription: Do the thing\n---\n")]
+      (is (= "My Spec" (:spec/title result)))
+      (is (str/includes? (:spec/description result) "Do the thing"))))
+
+  (testing "acceptance_criteria underscore form maps to :spec/acceptance-criteria"
+    (let [result (spec-parser/parse-content
+                  :markdown
+                  "---\ntitle: T\ndescription: D\nacceptance_criteria: Tests pass\n---\n")]
+      (is (= "Tests pass" (:spec/acceptance-criteria result)))))
+
+  (testing "tags map to :spec/tags (as EDN keywords)"
+    (let [result (spec-parser/parse-content
+                  :markdown
+                  "---\ntitle: T\ndescription: D\ntags: [:compliance :scanner]\n---\n")]
+      (is (= [:compliance :scanner] (:spec/tags result)))))
+
+  (testing "type maps to :workflow/type"
+    (let [result (spec-parser/parse-content
+                  :markdown
+                  "---\ntitle: T\ndescription: D\ntype: canonical-sdlc\n---\n")]
+      (is (= "canonical-sdlc" (:workflow/type result)))))
+
+  (testing "markdown without frontmatter throws"
+    (is (thrown-with-msg? Exception #"YAML frontmatter"
+          (spec-parser/parse-content :markdown "# No Frontmatter\n\nJust body.")))))
+
+(deftest parse-markdown-body-appended-test
+  (testing "markdown body prose is appended to :spec/description"
+    (let [content (str "---\ntitle: T\ndescription: Frontmatter desc\n---\n\n"
+                       "# Design\n\nBody prose goes here.")
+          result  (spec-parser/parse-content :markdown content)]
+      (is (str/includes? (:spec/description result) "Frontmatter desc"))
+      (is (str/includes? (:spec/description result) "Body prose goes here"))))
+
+  (testing "empty body does not alter description"
+    (let [content "---\ntitle: T\ndescription: Only frontmatter\n---\n"
+          result  (spec-parser/parse-content :markdown content)]
+      (is (= "Only frontmatter" (:spec/description result))))))
+
+(deftest normalize-workflow-type-default-test
+  (testing "workflow-type defaults to :full-sdlc when not provided"
+    (let [result (spec-parser/normalize-spec {:spec/title "T" :spec/description "D"})]
+      (is (= :full-sdlc (:spec/workflow-type result)))))
+
+  (testing "workflow-type from :workflow/type key is used when provided"
+    (let [result (spec-parser/normalize-spec
+                  {:spec/title "T" :spec/description "D" :workflow/type :canonical-sdlc})]
+      (is (= :canonical-sdlc (:spec/workflow-type result))))))
+
+(deftest markdown-round-trip-test
+  (testing "markdown design doc parses and normalizes to valid SpecPayload"
+    (let [content (str "---\n"
+                       "title: Compliance Scanner\n"
+                       "description: Build a scanner.\n"
+                       "tags: [:compliance :scanner]\n"
+                       "---\n\n"
+                       "## Design\n\nDetailed design goes here.\n")
+          parsed     (spec-parser/parse-content :markdown content)
+          normalized (spec-parser/normalize-spec parsed)
+          validation (spec-parser/validate-spec normalized)]
+      (is (= "Compliance Scanner" (:spec/title normalized)))
+      (is (= :full-sdlc (:spec/workflow-type normalized)))
+      (is (str/includes? (:spec/description normalized) "Build a scanner"))
+      (is (str/includes? (:spec/description normalized) "Detailed design goes here"))
+      (is (= [:compliance :scanner] (:spec/tags normalized)))
+      (is (true? (:valid? validation))))))
 
 ;------------------------------------------------------------------------------ Layer 4: Schema Validation Helpers
 

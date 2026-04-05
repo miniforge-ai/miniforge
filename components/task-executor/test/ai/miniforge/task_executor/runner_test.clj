@@ -22,7 +22,8 @@
   Tests that a task flows correctly through: environment acquisition →
   code generation → PR lifecycle → metrics accumulation → cleanup."
   (:require
-   [clojure.test :refer [deftest testing is]]))
+   [clojure.test :refer [deftest testing is]]
+   [ai.miniforge.task-executor.runner :as runner]))
 
 ;------------------------------------------------------------------------------ Mock Data
 
@@ -434,3 +435,63 @@
       ;; First attempt would fail, triggering fix loop
       (is (= 1 @attempt-count)
           "Should attempt PR lifecycle once"))))
+
+;------------------------------------------------------------------------------ validate-spec! Tests
+;; Regression coverage for the fail-fast spec validation gate added to execute-task
+
+(defn- write-temp-spec!
+  "Write content to a temp .md file and return its path string."
+  [content]
+  (let [f (java.io.File/createTempFile "test-spec" ".md")]
+    (.deleteOnExit f)
+    (spit f content)
+    (.getAbsolutePath f)))
+
+(deftest validate-spec-no-path-test
+  (testing "no-op when task has no spec path"
+    (is (nil? (runner/validate-spec! "task-1" {} nil))
+        "Should return nil when no spec-related key present"))
+  (testing "no-op when task has other keys but no spec path"
+    (is (nil? (runner/validate-spec! "task-1" {:task/description "Do stuff"} nil))
+        "Should return nil for task with no spec path")))
+
+(deftest validate-spec-valid-file-test
+  (testing "returns nil for a well-formed markdown spec"
+    (let [path (write-temp-spec!
+                (str "---\n"
+                     "title: Test Spec\n"
+                     "description: A valid test spec\n"
+                     "---\n\n"
+                     "## Design\n\nSome design content.\n"))
+          task {:spec/source-file path}]
+      (is (nil? (runner/validate-spec! "task-1" task nil))
+          "Should return nil for valid spec"))))
+
+(deftest validate-spec-missing-file-test
+  (testing "throws when spec path points to a nonexistent file"
+    (let [task {:spec/source-file "/nonexistent/path/spec.md"}]
+      (is (thrown-with-msg? Exception #"Spec validation failed"
+            (runner/validate-spec! "task-1" task nil))))))
+
+(deftest validate-spec-malformed-spec-test
+  (testing "throws when spec file has no YAML frontmatter"
+    (let [path (write-temp-spec! "# No Frontmatter\n\nJust a plain markdown file.")
+          task {:spec/source-file path}]
+      (is (thrown-with-msg? Exception #"Spec validation failed"
+            (runner/validate-spec! "task-1" task nil)))))
+
+  (testing "spec-path key is also checked"
+    (let [task {:spec-path "/nonexistent/spec.md"}]
+      (is (thrown-with-msg? Exception #"Spec validation failed"
+            (runner/validate-spec! "task-1" task nil))))))
+
+(deftest validate-spec-provenance-key-test
+  (testing "reads spec path from :spec/provenance :source-file"
+    (let [path (write-temp-spec!
+                (str "---\n"
+                     "title: T\n"
+                     "description: D\n"
+                     "---\n"))
+          task {:spec/provenance {:source-file path}}]
+      (is (nil? (runner/validate-spec! "task-1" task nil))
+          "Should accept path nested under :spec/provenance"))))
