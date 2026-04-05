@@ -71,11 +71,19 @@
 ;; Git commands
 
 (defn- run-git-command
-  "Execute a git command in repo-root and return trimmed stdout, or nil on failure."
+  "Execute a git command in repo-root and return trimmed stdout, or nil on failure.
+
+   Clears git environment overrides (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE)
+   so the command operates on repo-root rather than any inherited worktree context."
   [repo-root args]
   (try
-    (let [pb (ProcessBuilder. ^java.util.List args)
-          _ (.directory pb (io/file repo-root))
+    (let [pb  (ProcessBuilder. ^java.util.List args)
+          _   (.directory pb (io/file repo-root))
+          env (.environment pb)
+          _   (doto env
+                (.remove "GIT_DIR")
+                (.remove "GIT_WORK_TREE")
+                (.remove "GIT_INDEX_FILE"))
           proc (.start pb)
           output (slurp (.getInputStream proc))
           exit-code (.waitFor proc)]
