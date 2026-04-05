@@ -1,0 +1,248 @@
+;; =============================================================================
+;; Spec: Behavioral Verification in the Monitor Phase
+;; =============================================================================
+;;
+;; Design question resolved 2026-04-03:
+;;   Where should behavioral verification (orchestrate → observe → policy) run?
+;;   Answer: post-PR, during the monitor/observe phase — not pre-PR.
+;;
+;; Rationale:
+;;   - The verify phase is a thin shell around `bb test`: fast, structural,
+;;     unit-test correctness only. That bar is sufficient for PR creation.
+;;   - Real verification is: run the application, listen to the event stream,
+;;     and apply policy to the observed telemetry to determine pass/fail.
+;;   - Behavioral runs can be slow (minutes to hours). Blocking PR creation on
+;;     them defeats the purpose of a parallel review pipeline.
+;;   - The monitor phase is already the "watch and wait" phase. Behavioral
+;;     telemetry is another signal stream it should listen to.
+;;   - Human reviewers see code AND behavioral verification results together,
+;;     giving them richer context at decision time.
+;;   - The monitor's redirect loop is already wired to push back to :implement
+;;     on CI failure. Behavioral gate failure is the same failure mode.
+;;
+;; Verification model (three steps):
+;;   1. Orchestrate — run the workflow or trigger the behavior under test
+;;   2. Observe     — listen to the event stream as execution runs
+;;   3. Policy      — apply gate criteria to observed telemetry → pass/fail
+;;
+;; This mirrors the existing gate/observer/policy-pack architecture:
+;;   policy is applied to telemetry, not to subprocess stdout or exit codes.
+;;
+;; Phase split:
+;;   :verify  (pre-PR)  — `bb test` structural correctness, fast
+;;   :monitor (post-PR) — behavioral orchestration + telemetry + gate evaluation
+
+{:spec/id     "behavioral-verification-monitor-v1"
+ :spec/version "0.1.0"
+ :spec/created "2026-04-03"
+ :spec/status  "design"
+
+ :spec/title
+ "Behavioral Verification in the Monitor Phase"
+
+ :spec/description
+ "Extend the monitor/observe phase to run behavioral verification after a PR
+  is created: orchestrate the implemented workflow against a test harness or
+  staging environment, observe the emitted event stream telemetry, and apply
+  policy-pack gates to determine pass/fail. Gate failures redirect back to
+  :implement via the existing monitor redirect loop. Behavioral results are
+  added to the evidence bundle alongside structural (bb test) results."
+
+ :spec/intent
+ {:type  :feature
+  :scope ["components/workflow/src/ai/miniforge/workflow/observe_phase.clj"
+          "components/gate/src/ai/miniforge/gate"
+          "components/observer/src/ai/miniforge/observer"
+          "components/policy-pack/src/ai/miniforge/policy_pack"
+          "components/event-stream/src/ai/miniforge/event_stream"
+          "components/evidence-bundle/src/ai/miniforge/evidence_bundle"]}
+
+ :spec/constraints
+ ["Verify phase remains a thin shell — no behavioral logic added pre-PR"
+  "Behavioral verification is always post-PR; PR creation is not blocked"
+  "Observation surface is the event stream — NOT subprocess stdout/exit codes"
+  "Policy evaluation uses the existing gate/policy-pack architecture"
+  "Behavioral gate failure triggers the same redirect-to-implement path as CI failure"
+  "Behavioral evidence is added to the evidence bundle alongside verify metrics"
+  "The spec may declare :spec/behavioral-harness to configure what is orchestrated"
+  "If no harness is declared, behavioral verification is skipped (not an error)"]
+
+ :context
+ {:normative-refs
+  ["N2 §7 — Observe phase lifecycle"
+   "N6 — Environment promotion pipeline (executor environment model)"
+   "N11 — Task capsule isolation"
+   "pr-monitor-loop.spec.edn — PR comment resolution (separate concern)"
+   "rn-13-success-predicates.spec.edn — success predicate model"
+   "rn-15-evaluation-pipeline.spec.edn — evaluation pipeline design"]
+
+  :existing-infrastructure
+  ["gate — evaluates named gate criteria against context"
+   "observer — subscribes to event stream, projects state"
+   "policy-pack — loads and applies structured rule packs"
+   "event-stream — append-only, in-process pub/sub with typed events"
+   "evidence-bundle — aggregates all phase outputs into a workflow artifact"
+   "verify phase — already runs bb test, captures pass/fail + test output"
+   "monitor redirect loop — already redirects to :implement on CI failure"]
+
+  :gap
+  "No component currently orchestrates the application under test, observes its
+   event stream output, and applies policy to determine behavioral pass/fail.
+   The verify phase only runs unit tests (subprocess exit code). Real behavioral
+   correctness — does the workflow behave as the spec intended? — is unverified."}
+
+ ;; ---------------------------------------------------------------------------
+ ;; MILESTONES
+ ;; ---------------------------------------------------------------------------
+
+ :plan/milestones
+
+ [{:milestone/id :M0
+   :milestone/title "Design captured (this spec)"
+   :milestone/status :done
+   :milestone/description
+   "Record the architectural decision: verify = thin bb-test shell (pre-PR),
+    behavioral verification = orchestrate→observe→policy (post-PR, in monitor).
+    No implementation yet."}
+
+  {:milestone/id :M1
+   :milestone/title "Behavioral harness protocol"
+   :milestone/status :todo
+   :milestone/description
+   "Define the protocol for behavioral harnesses: what a harness must provide,
+    how it is declared in a spec, how the monitor phase invokes it.
+
+    A harness is a function or component that:
+      - Accepts the executor environment (worktree-path, environment-id)
+      - Triggers the application behavior under test
+      - Returns a channel or collection of observed events
+
+    Harness types to support:
+      :bb-script   — run a Babashka script in the executor environment
+      :workflow    — re-run a sub-workflow against a test fixture
+      :repl-eval   — evaluate a Clojure form in a REPL against the environment
+
+    Deliverables:
+      - Protocol definition in components/observer or new components/harness
+      - Spec schema extension: :spec/behavioral-harness {:type :bb-script :path ...}
+      - Monitor phase reads :spec/behavioral-harness and invokes harness if present"}
+
+  {:milestone/id :M2
+   :milestone/title "Event stream observation during behavioral run"
+   :milestone/status :todo
+   :milestone/description
+   "Wire the monitor phase to collect event stream telemetry during the
+    behavioral harness run. The observer subscribes before the harness fires,
+    collects all emitted events, and closes the subscription when the harness
+    completes (or times out).
+
+    Events of interest:
+      - :phase/* — phase transitions, decisions
+      - :gate/* — gate evaluations, pass/fail
+      - :llm/* — model calls, token usage
+      - :error/* — exceptions, failures
+      - Application-domain events declared in the spec
+
+    Deliverables:
+      - Observer subscription wired into monitor phase behavioral run
+      - Telemetry snapshot: all events from harness start to completion
+      - Timeout enforcement: harness budget from spec or default (10 min)"}
+
+  {:milestone/id :M3
+   :milestone/title "Gate evaluation on observed telemetry"
+   :milestone/status :todo
+   :milestone/description
+   "Apply the policy-pack gate criteria to the collected telemetry snapshot.
+    Gate evaluation is the same mechanism used in the verify phase for unit
+    tests — the difference is the input: event stream projection vs test output.
+
+    Gate examples for behavioral verification:
+      :workflow-completed    — at least one :phase/completed event observed
+      :no-unhandled-errors   — no :error/unhandled events in stream
+      :all-phases-passed     — every phase gate in the stream shows :passed?
+      :latency-within-budget — total duration within spec :budget/ms
+      :custom-predicate      — spec-declared Clojure predicate over the events
+
+    Deliverables:
+      - Gate evaluators for the standard behavioral gate names above
+      - Policy-pack integration: behavioral gates declared in spec map to evaluators
+      - Gate results: {:gate/name ... :passed? ... :evidence ...} per gate
+      - Overall behavioral verdict: all gates passed? → :passed? true"}
+
+  {:milestone/id :M4
+   :milestone/title "Monitor redirect loop on behavioral gate failure"
+   :milestone/status :todo
+   :milestone/description
+   "When behavioral gates fail, redirect back to :implement via the existing
+    monitor redirect loop. The redirect carries the gate failure evidence as
+    the error context — the implementer can see which behavioral assertion
+    failed and why.
+
+    Behavioral gate failure is treated identically to CI failure in the monitor:
+      - Emit :monitor/behavioral-gate-failed event
+      - Set redirect-to :implement in monitor phase context
+      - Attach gate failure evidence to the implement retry prompt
+      - Budget decrement applies (behavioral failures count toward total budget)
+
+    Special case: if the harness itself errors (not the app behavior), this is
+    a :monitor/harness-error — escalate rather than redirect (not a code bug).
+
+    Deliverables:
+      - Monitor phase handles :passed? false from gate evaluator
+      - Redirect wired to :implement with evidence
+      - Harness error vs gate failure distinguished in event types"}
+
+  {:milestone/id :M5
+   :milestone/title "Behavioral evidence in the evidence bundle"
+   :milestone/status :todo
+   :milestone/description
+   "Add :evidence/behavioral-verification to the workflow evidence bundle.
+    This complements :evidence/verify (unit test results) with behavioral results.
+
+    Schema:
+      {:harness/type    keyword
+       :harness/path    string
+       :gates           [{:gate/name keyword :passed? boolean :evidence map}]
+       :passed?         boolean
+       :event-count     int
+       :duration-ms     long
+       :telemetry-snapshot [event]}  ;; trimmed to relevant events only
+
+    Deliverables:
+      - evidence-bundle schema extended with :behavioral-verification key
+      - Monitor phase writes evidence after gate evaluation
+      - Evidence visible in TUI evidence view and web dashboard"}]
+
+ ;; ---------------------------------------------------------------------------
+ ;; DEPENDENCIES
+ ;; ---------------------------------------------------------------------------
+
+ :dependencies
+ {:M0 []
+  :M1 [:M0]
+  :M2 [:M1]
+  :M3 [:M2]
+  :M4 [:M3]
+  :M5 [:M3]}
+
+ ;; ---------------------------------------------------------------------------
+ ;; OPEN QUESTIONS
+ ;; ---------------------------------------------------------------------------
+
+ :open-questions
+
+ [{:q "For specs without a declared harness, should we infer one (e.g., run
+       the default workflow entry point against the PR's changes in a sandbox)?
+       Or is no-harness always a skip?"
+   :lean "Skip — requiring explicit harness declaration avoids surprise runs.
+          Implicit orchestration of unknown workflows is too risky."}
+
+  {:q "Should behavioral gate failure create a new commit addressing the
+       failure, or should the implementer start from the existing PR branch?"
+   :lean "Existing PR branch — amend the implementation in place rather than
+          creating a second PR. Keeps the review history coherent."}
+
+  {:q "How do we prevent behavioral runs from being unbounded in cost?
+       Who pays for the orchestration?"
+   :lean "Enforce a harness budget (tokens + wall time) from the spec.
+          Default: 10 min / 5k tokens. Overrun → harness-error, not gate-failure."}]}
