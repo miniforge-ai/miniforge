@@ -110,7 +110,7 @@
                   (dissoc :execution/environment-id)
                   (assoc :phase-config {:phase :verify}))]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Verify phase received no code artifact"
+                            #"Verify phase has no execution environment"
                             (verify/enter-verify ctx))))))
 
 (deftest enter-verify-uses-execution-worktree-path-test

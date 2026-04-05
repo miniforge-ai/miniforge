@@ -318,15 +318,13 @@
       (-> ctx
           (assoc-in [:phase :status] :failed)
           (assoc-in [:phase :redirect-to] on-fail)
-          (assoc-in [:phase :error] {:message (ex-message ex)
-                                     :data (ex-data ex)}))
+          (assoc-in [:phase :error] (phase-result/exception-error ex)))
 
       ;; No recovery - propagate
       :else
       (-> ctx
           (assoc-in [:phase :status] :failed)
-          (assoc-in [:phase :error] {:message (ex-message ex)
-                                     :data (ex-data ex)})))))
+          (assoc-in [:phase :error] (phase-result/exception-error ex))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Registry methods

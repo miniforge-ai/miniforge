@@ -53,17 +53,6 @@
 ;------------------------------------------------------------------------------ Layer 0.5
 ;; Test execution helpers
 
-(defn write-test-files!
-  "Write test files from tester agent output to disk.
-   Returns vector of written file paths."
-  [worktree-path test-files]
-  (mapv (fn [{:keys [path content]}]
-          (let [full-path (fs/path worktree-path path)]
-            (fs/create-dirs (fs/parent full-path))
-            (spit (str full-path) content)
-            path))
-        test-files))
-
 (defn parse-test-output
   "Parse test summary output. Handles Clojure (bb test) and Rust (cargo test) formats.
 
@@ -269,15 +258,13 @@
       (-> ctx
           (assoc-in [:phase :status] :failed)
           (assoc-in [:phase :redirect-to] on-fail)
-          (assoc-in [:phase :error] {:message (ex-message ex)
-                                     :data (ex-data ex)}))
+          (assoc-in [:phase :error] (phase-result/exception-error ex)))
 
       ;; No recovery - propagate
       :else
       (-> ctx
           (assoc-in [:phase :status] :failed)
-          (assoc-in [:phase :error] {:message (ex-message ex)
-                                     :data (ex-data ex)})))))
+          (assoc-in [:phase :error] (phase-result/exception-error ex))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Registry method

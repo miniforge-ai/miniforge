@@ -63,18 +63,6 @@
 
 (use-fixtures :each worktree-fixture)
 
-;------------------------------------------------------------------------------ Mock Data
-
-(def mock-code-artifact
-  {:code/id (random-uuid)
-   :code/files [{:path "src/feature.clj"
-                 :content "(ns feature)\n(defn new-feature [] :implemented)"
-                 :action :create}
-                {:path "test/feature_test.clj"
-                 :content "(ns feature-test)\n(deftest t (is true))"
-                 :action :create}]
-   :code/language "clojure"})
-
 ;------------------------------------------------------------------------------ Test Helpers
 
 (defn create-base-context []
@@ -105,7 +93,7 @@
   (testing "verify phase throws when no execution environment-id is in context"
     (let [ctx (dissoc (create-base-context) :execution/environment-id)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Verify phase received no code artifact"
+                            #"Verify phase has no execution environment"
                             (execute-phase-enter :verify ctx)))
       ;; Verify ex-data contains diagnostic info
       (try
