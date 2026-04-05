@@ -1,0 +1,6 @@
+{:paths ["src"]
+ :deps {ai.miniforge/logging    {:local/root "../logging"}
+        ai.miniforge/repo-index {:local/root "../repo-index"}
+        ai.miniforge/policy-pack {:local/root "../policy-pack"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps  {}}}}
