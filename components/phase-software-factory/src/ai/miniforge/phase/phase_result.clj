@@ -104,6 +104,13 @@
    :error          {:message error-message}
    :metrics        metrics})
 
+(defn exception-error
+  "Build a [:phase :error] map from an unhandled exception.
+   Used uniformly in error-* interceptor handlers across all phases."
+  [ex]
+  {:message (ex-message ex)
+   :data    (ex-data ex)})
+
 (defn skipped
   "Build a skipped-phase result.
 
