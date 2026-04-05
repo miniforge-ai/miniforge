@@ -98,7 +98,7 @@
                   (assoc :phase-config {:phase :verify}))
           interceptor (registry/get-phase-interceptor {:phase :verify})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Verify phase received no code artifact"
+                            #"Verify phase has no execution environment"
                             ((:enter interceptor) ctx))
           "Verify should throw when no execution environment is available"))))
 
