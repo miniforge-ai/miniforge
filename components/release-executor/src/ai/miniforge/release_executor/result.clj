@@ -62,4 +62,4 @@
     :artifacts []
     :errors [(merge {:type error-type :message error-msg}
                     (select-keys opts [:hint :data]))]
-    :metrics (or (:metrics opts) {})}))
+    :metrics (get opts :metrics {})}))

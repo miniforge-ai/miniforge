@@ -112,7 +112,7 @@
   [code-artifacts]
   (let [files (mapcat :code/files code-artifacts)]
     (when (seq files)
-      (str/join "\n" (map #(str "- `" (:path %) "` (" (name (or (:action %) :create)) ")") files)))))
+      (str/join "\n" (map #(str "- `" (:path %) "` (" (name (get % :action :create)) ")") files)))))
 
 (defn- format-gate-results
   "Format gate results from review artifacts as markdown for the test plan.

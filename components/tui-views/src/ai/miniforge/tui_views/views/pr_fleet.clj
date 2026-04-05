@@ -46,8 +46,8 @@
          " " pct "%")))
 
 (defn format-pr-row [pr cols]
-  {:title (or (:pr/title pr) "Untitled")
-   :repo  (or (:pr/repo pr) "")
+  {:title (get pr :pr/title "Untitled")
+   :repo  (get pr :pr/repo "")
    :readiness (readiness-bar (:pr/readiness pr) (min 15 (max 8 (quot cols 6))))
    :risk (risk-indicator (:pr/risk pr))})
 

@@ -31,7 +31,7 @@
 
    Falls back to default progress monitor if no meta-agents configured."
   [workflow]
-  (let [meta-agent-configs (or (:workflow/meta-agents workflow) [])]
+  (let [meta-agent-configs (get workflow :workflow/meta-agents [])]
     (if (seq meta-agent-configs)
       ;; Use configured meta-agents
       (for [config meta-agent-configs

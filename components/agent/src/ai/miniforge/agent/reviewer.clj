@@ -93,7 +93,7 @@
      :passed? passed?
      :errors errors
      :warnings warnings
-     :duration-ms (or (:gate/duration-ms result) 0)}))
+     :duration-ms (get result :gate/duration-ms 0)}))
 
 (defn create-exception-feedback
   "Create error feedback when gate throws exception."
@@ -557,8 +557,8 @@
                                  (parse-review-response (llm/get-content response)))
                     llm-decision (when llm-review
                                   (normalize-llm-decision (:review/decision llm-review)))
-                    llm-issues (or (:review/issues llm-review) [])
-                    llm-strengths (or (:review/strengths llm-review) [])
+                    llm-issues (get llm-review :review/issues [])
+                    llm-strengths (get llm-review :review/strengths [])
                     llm-summary (:review/summary llm-review)
 
                     ;; Run deterministic gates

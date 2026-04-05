@@ -330,7 +330,7 @@
                                           :artifacts (:loop/artifacts state)
                                           :history (:loop/history state)}})))
             ;; Phase failed
-            (response/failure (or (:error result-data) "Phase execution failed")
+            (response/failure (get result-data :error "Phase execution failed")
                               {:data {:phase (:loop/phase state)
                                       :artifacts (:loop/artifacts state)
                                       :history (:loop/history state)}})))))))

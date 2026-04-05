@@ -341,14 +341,14 @@
       (cond->
         (:workflow/tokens event) (assoc :tokens (:workflow/tokens event))
         (:workflow/cost-usd event) (assoc :cost-usd (:workflow/cost-usd event)))
-      (append-artifacts (or (:current-phase detail) :done) (nested-dag-artifacts event))))
+      (append-artifacts (get detail :current-phase :done) (nested-dag-artifacts event))))
 
 (defn- apply-workflow-failed
   [detail event]
   (-> detail
       (assoc :error (or (:workflow/failure-reason event)
                         (get-in event [:workflow/error-details :message])))
-      (append-artifacts (or (:current-phase detail) :failed) (nested-dag-artifacts event))))
+      (append-artifacts (get detail :current-phase :failed) (nested-dag-artifacts event))))
 
 (defn apply-detail-event
   [detail event]
@@ -390,7 +390,7 @@
    (let [terminal (workflow-terminal-event events)
          last-event (last events)]
      (case (:event/type terminal)
-       :workflow/completed (or (:workflow/status terminal) :success)
+       :workflow/completed (get terminal :workflow/status :success)
        :workflow/failed    :failed
        (let [active? (contains? #{:workflow/phase-completed :workflow/phase-started
                                    :agent/chunk :agent/status :workflow/started}

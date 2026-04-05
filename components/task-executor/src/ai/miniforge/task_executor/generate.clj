@@ -104,7 +104,7 @@
                                     ;; Inner generate-fn that invokes implementer agent
                                     (let [agent-result (agent/invoke implementer ctx t)]
                                       {:artifact (:artifact agent-result)
-                                       :tokens (or (:tokens agent-result) 0)}))
+                                       :tokens (get agent-result :tokens 0)}))
                                   loop-context)]
       {:artifact (:artifact result)
        :tokens (or (:total-tokens result) (:tokens result) 0)})))

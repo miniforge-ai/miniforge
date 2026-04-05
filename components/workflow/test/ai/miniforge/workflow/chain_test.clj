@@ -21,6 +21,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.workflow.chain :as chain]
+   [ai.miniforge.workflow.loader :as loader]
    [ai.miniforge.workflow.runner :as runner]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -80,6 +81,11 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; run-chain tests
 
+(def ^:private mock-workflow
+  {:workflow {:workflow/id :mock
+              :workflow/pipeline [{:phase :plan}]}
+   :source :mock})
+
 (deftest run-chain-two-steps-test
   (testing "chain with 2 steps where step 2 receives step 1 output"
     (let [call-log (atom [])
@@ -103,38 +109,21 @@
                                           :last-phase-result {:success? true
                                                               :plan (str "plan-for-" (:task input))}
                                           :status :completed}})
-                    ;; Mock load-workflow via requiring-resolve
-                    ;; We need to mock at the requiring-resolve level
-                    ]
-        ;; Mock load-workflow by redefining requiring-resolve behavior
-        (let [orig-requiring-resolve requiring-resolve]
-          (with-redefs [requiring-resolve
-                        (fn [sym]
-                          (if (= sym 'ai.miniforge.workflow.interface/load-workflow)
-                            (fn [_wf-id _version _opts]
-                              {:workflow {:workflow/id :mock
-                                          :workflow/pipeline [{:phase :plan}]}
-                               :source :mock})
-                            (orig-requiring-resolve sym)))]
-            (let [result (chain/run-chain chain-def {:task "build-login"} {})]
-              (is (= :test-chain (:chain/id result)))
-              (is (= :completed (:chain/status result)))
-              (is (= 2 (count (:chain/step-results result))))
-              (is (nat-int? (:chain/duration-ms result)))
-
-              ;; Verify step 1 received chain input
-              (is (= {:task "build-login"} (first @call-log)))
-
-              ;; Verify step 2 received resolved bindings from step 1 output
-              (let [step2-input (second @call-log)]
-                (is (= "build-login" (:task step2-input)))
-                (is (= "plan-for-build-login" (:plan step2-input))))
-
-              ;; Verify step results structure
-              (is (= :step-1 (get-in result [:chain/step-results 0 :step/id])))
-              (is (= :step-2 (get-in result [:chain/step-results 1 :step/id])))
-              (is (= :completed (get-in result [:chain/step-results 0 :step/status])))
-              (is (= :completed (get-in result [:chain/step-results 1 :step/status]))))))))))
+                    loader/load-workflow
+                    (constantly mock-workflow)]
+        (let [result (chain/run-chain chain-def {:task "build-login"} {})]
+          (is (= :test-chain (:chain/id result)))
+          (is (= :completed (:chain/status result)))
+          (is (= 2 (count (:chain/step-results result))))
+          (is (nat-int? (:chain/duration-ms result)))
+          (is (= {:task "build-login"} (first @call-log)))
+          (let [step2-input (second @call-log)]
+            (is (= "build-login" (:task step2-input)))
+            (is (= "plan-for-build-login" (:plan step2-input))))
+          (is (= :step-1 (get-in result [:chain/step-results 0 :step/id])))
+          (is (= :step-2 (get-in result [:chain/step-results 1 :step/id])))
+          (is (= :completed (get-in result [:chain/step-results 0 :step/status])))
+          (is (= :completed (get-in result [:chain/step-results 1 :step/status]))))))))
 
 (deftest run-chain-stops-on-failure-test
   (testing "chain stops immediately when a step fails"
@@ -156,19 +145,12 @@
                        :execution/output {:artifacts []
                                           :phase-results {}
                                           :last-phase-result {:success? false}
-                                          :status :failed}})]
-        (let [orig-requiring-resolve requiring-resolve]
-          (with-redefs [requiring-resolve
-                        (fn [sym]
-                          (if (= sym 'ai.miniforge.workflow.interface/load-workflow)
-                            (fn [_wf-id _version _opts]
-                              {:workflow {:workflow/id :mock
-                                          :workflow/pipeline [{:phase :plan}]}
-                               :source :mock})
-                            (orig-requiring-resolve sym)))]
-            (let [result (chain/run-chain chain-def {:task "doomed"} {})]
-              (is (= :failed (:chain/status result)))
-              (is (= 1 (count (:chain/step-results result))))
-              (is (= 1 @call-count) "step 2 should never execute")
-              (is (= :failed (get-in result [:chain/step-results 0 :step/status])))
-              (is (nat-int? (:chain/duration-ms result))))))))))
+                                          :status :failed}})
+                    loader/load-workflow
+                    (constantly mock-workflow)]
+        (let [result (chain/run-chain chain-def {:task "doomed"} {})]
+          (is (= :failed (:chain/status result)))
+          (is (= 1 (count (:chain/step-results result))))
+          (is (= 1 @call-count) "step 2 should never execute")
+          (is (= :failed (get-in result [:chain/step-results 0 :step/status])))
+          (is (nat-int? (:chain/duration-ms result))))))))

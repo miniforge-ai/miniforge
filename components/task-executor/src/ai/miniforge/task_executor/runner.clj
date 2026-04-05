@@ -30,7 +30,8 @@
             [ai.miniforge.pr-lifecycle.interface :as pr]
             [ai.miniforge.dag-executor.interface :as dag]
             [ai.miniforge.logging.interface :as log]
-            [ai.miniforge.agent-runtime.interface :as error-classifier]))
+            [ai.miniforge.agent-runtime.interface :as error-classifier]
+            [ai.miniforge.spec-parser.interface :as spec-parser]))
 
 (defn create-task-context
   "Assemble context for a task execution.
@@ -192,6 +193,34 @@
         (log-event logger :release-locks-error task-id
                    {:error (ex-message e)})))))
 
+(defn validate-spec!
+  "Validate task spec before acquiring any resources.
+
+   If the task carries a :spec/source-file path, attempts to parse it.
+   A parse failure means the agent would have no structured context and
+   would waste its entire turn budget exploring the codebase.
+
+   Returns nil on success. Throws ex-info on failure so the caller
+   can fail-fast and surface a clear error without touching the environment."
+  [task-id task logger]
+  (when-let [spec-path (or (get-in task [:spec/provenance :source-file])
+                           (get task :spec/source-file)
+                           (get task :spec-path))]
+    (log-event logger :validating-spec task-id {:spec-path spec-path})
+    (try
+      (spec-parser/parse-spec-file spec-path)
+      (log-event logger :spec-valid task-id {:spec-path spec-path})
+      nil
+      (catch Exception e
+        (throw (ex-info
+                (str "Spec validation failed — refusing to spawn agent without valid spec. "
+                     "Fix the spec at: " spec-path ". "
+                     "Cause: " (ex-message e))
+                {:task-id   task-id
+                 :spec-path spec-path
+                 :cause     (ex-message e)}
+                e))))))
+
 (defn calculate-cost-usd
   "Calculate estimated cost in USD based on tokens used.
    Using Claude Sonnet pricing as baseline: ~$3/million input, ~$15/million output.
@@ -218,16 +247,16 @@
    - pr-url: GitHub PR URL
    - status: Final status (:merged, :failed, etc.)"
   [run-atom task-id lifecycle-result start-time]
-  (let [total-tokens (or (:total-tokens lifecycle-result) 0)
+  (let [total-tokens (get lifecycle-result :total-tokens 0)
         end-time (System/currentTimeMillis)
         duration-ms (- end-time start-time)
 
         metrics {:tokens-used total-tokens
                  :cost-usd (calculate-cost-usd total-tokens)
-                 :iterations (or (:fix-iterations lifecycle-result) 0)
+                 :iterations (get lifecycle-result :fix-iterations 0)
                  :time-to-merge-ms duration-ms
-                 :ci-runs (or (:ci-runs lifecycle-result) 0)
-                 :review-cycles (or (:review-cycles lifecycle-result) 0)
+                 :ci-runs (get lifecycle-result :ci-runs 0)
+                 :review-cycles (get lifecycle-result :review-cycles 0)
                  :pr-url (:pr-url lifecycle-result)
                  :status (:status lifecycle-result)
                  :start-time start-time
@@ -238,6 +267,7 @@
   "Execute a single task through its full lifecycle.
 
   Steps:
+  0. Validate spec (fail fast — no resources acquired on bad spec)
   1. Acquire resources (worktree + environment)
   2. Generate code artifact (inner loop)
   3. Create PR lifecycle controller
@@ -264,6 +294,9 @@
 
     (let [env-record (atom nil)]
       (try
+        ;; Step 0: Validate spec — fail fast before spending any resources
+        (validate-spec! task-id task logger)
+
         ;; Step 1: Acquire resources
         (let [resources (acquire-resources! task-id lock-pool executor logger config)]
           (reset! env-record (:env-record resources)))

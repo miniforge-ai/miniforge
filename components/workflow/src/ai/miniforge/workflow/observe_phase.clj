@@ -24,6 +24,8 @@
    phase of the standard SDLC workflow: plan → implement → verify →
    review → release → observe."
   (:require [ai.miniforge.phase.registry :as registry]
+            [ai.miniforge.pr-lifecycle.monitor-config :as monitor-config]
+            [ai.miniforge.pr-lifecycle.monitor-loop :as monitor-loop]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
             [clojure.edn :as edn]
@@ -71,9 +73,7 @@
 
 (defn- load-monitor-defaults
   []
-  (let [defaults-fn (requiring-resolve
-                     'ai.miniforge.pr-lifecycle.monitor-config/monitor-defaults)]
-    (defaults-fn)))
+  (monitor-config/monitor-defaults))
 
 (defn- present-overrides
   [overrides]
@@ -123,7 +123,7 @@
    - PRs closed externally
    - No open PRs remain
 
-   Uses requiring-resolve to avoid circular component dependencies."
+   pr-lifecycle is a direct dependency of the workflow component."
   [ctx]
   (let [pr-infos (or (get-in ctx [:execution/dag-pr-infos])
                      ;; Single PR from release phase
@@ -140,20 +140,14 @@
                     (response/success {:observe/status :skipped
                                        :observe/reason "No PRs to observe"})))
 
-      ;; Resolve monitor-loop at runtime to avoid circular deps
-      (let [create-monitor (requiring-resolve
-                            'ai.miniforge.pr-lifecycle.monitor-loop/create-monitor)
-            run-monitor-loop (requiring-resolve
-                              'ai.miniforge.pr-lifecycle.monitor-loop/run-monitor-loop)
-
-            logger (get-in ctx [:execution/logger])
+      (let [logger (get-in ctx [:execution/logger])
             generate-fn (get-in ctx [:execution/generate-fn])
             event-bus (get-in ctx [:execution/event-bus])
             monitor-config (resolve-monitor-config ctx logger generate-fn event-bus)
             self-author (:self-author monitor-config)
 
-            monitor (create-monitor monitor-config)
-            evidence (run-monitor-loop monitor self-author)
+            monitor (monitor-loop/create-monitor monitor-config)
+            evidence (monitor-loop/run-monitor-loop monitor self-author)
 
             result-data {:observe/status :completed
                          :observe/evidence evidence

@@ -77,9 +77,10 @@
 
 (deftest get-workflows-exposes-stream-preview-and-metrics-test
   (testing "live workflow summaries include recent streaming output and aggregated metrics"
-    (let [stream (es/create-event-stream {:sinks []})
-          state  (core/create-state {:event-stream stream})
-          wf-id  (random-uuid)]
+    (let [stream     (es/create-event-stream {:sinks []})
+          state      (core/create-state {:event-stream stream})
+          events-dir (temp-events-dir)
+          wf-id      (random-uuid)]
       (es/publish! stream (wf-event :workflow/started    wf-id "2026-03-28T11:00:00Z"
                                     :workflow/spec {:name "Telemetry"}))
       (es/publish! stream (wf-event :workflow/phase-started wf-id "2026-03-28T11:00:01Z"
@@ -91,9 +92,10 @@
                                     :phase/tokens 42
                                     :phase/duration-ms 3000
                                     :phase/outcome :success))
-      (let [workflow (->> (sut/get-workflows state) (filter #(= wf-id (:id %))) first)]
-        (is (= wf-id (:id workflow)))
-        (is (= :review (:phase workflow)))
-        (is (= "Checking issues..." (:latest-output workflow)))
-        (is (= 42 (get-in workflow [:metrics :tokens])))
-        (is (= 3000 (get-in workflow [:metrics :duration-ms])))))))
+      (with-redefs [sut/events-dir-path (.getPath events-dir)]
+        (let [workflow (->> (sut/get-workflows state) (filter #(= wf-id (:id %))) first)]
+          (is (= wf-id (:id workflow)))
+          (is (= :review (:phase workflow)))
+          (is (= "Checking issues..." (:latest-output workflow)))
+          (is (= 42 (get-in workflow [:metrics :tokens])))
+          (is (= 3000 (get-in workflow [:metrics :duration-ms]))))))))

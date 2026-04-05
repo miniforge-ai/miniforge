@@ -89,7 +89,7 @@
    (tier-allows? tier operation readiness risk default-tier-definitions))
   ([tier operation readiness risk tiers]
    (let [tier-def (get tiers tier)
-         risk-level (or (:risk/level risk) :low)]
+         risk-level (get risk :risk/level :low)]
      (when tier-def
        (case operation
          :auto-approve (check-operation tier-def :auto-approve? readiness risk-level)

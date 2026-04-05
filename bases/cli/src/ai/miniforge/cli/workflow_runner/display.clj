@@ -108,7 +108,7 @@
       :gate/failed (colorize :red (messages/t :workflow-runner/gate-failed
                                               {:gate gate}))
       :chain/completed (str (colorize :green (messages/t :workflow-runner/chain-step-completed
-                                                                 {:chain-id (name (or (:chain/id event) :unknown))}))
+                                                                 {:chain-id (name (get event :chain/id :unknown))}))
                             (when-let [d (:chain/duration-ms event)]
                               (str " (" (format-duration d) ")")))
       nil)))

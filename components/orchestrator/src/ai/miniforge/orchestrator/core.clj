@@ -153,7 +153,7 @@
 
   (inject-for-agent [_this agent-role task context]
     (when (:knowledge-injection? config)
-      (let [task-tags (or (:task/tags task) [])
+      (let [task-tags (get task :task/tags [])
             context-tags (get context :tags [])
             query-context {:tags (distinct (concat task-tags context-tags))}
             zettels (knowledge/inject-knowledge knowledge-store agent-role query-context)]

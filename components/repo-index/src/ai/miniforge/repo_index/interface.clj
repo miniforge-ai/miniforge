@@ -160,7 +160,7 @@
    - {:path :content :lines :truncated?} or nil if file not in index"
   ([index file-path] (get-file index file-path {}))
   ([index file-path opts]
-   (let [max-lines (or (:max-lines opts) 500)]
+   (let [max-lines (get opts :max-lines 500)]
      (when (find-in-index index file-path)
        (read-file-limited (:repo-root index) file-path max-lines)))))
 

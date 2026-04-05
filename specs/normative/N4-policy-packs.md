@@ -1,7 +1,7 @@
 # N4 — Policy Packs & Gates Standard
 
-**Version:** 0.5.0-draft
-**Date:** 2026-03-08
+**Version:** 0.6.0-draft
+**Date:** 2026-04-05
 **Status:** Draft
 **Conformance:** MUST
 
@@ -12,7 +12,10 @@
 This specification defines the **policy pack** and **gate validation** contracts for miniforge
 autonomous software factory. It establishes:
 
-- **Policy pack structure** - Format, versioning, signature requirements
+- **Taxonomy artifact** - Independently versioned category tree (new in 0.6)
+- **Policy pack structure** - Format, versioning, taxonomy reference, overlay/extends
+- **Mapping artifact** - First-class bridge between policy systems (new in 0.6)
+- **Overlay pack** - Extension model for packs without forking (new in 0.6)
 - **Gate execution contract** - Check and repair function interfaces
 - **Semantic intent validation** - Rules for intent vs. behavior matching
 - **Violation schema** - Severity levels, remediation, enforcement actions
@@ -21,72 +24,220 @@ autonomous software factory. It establishes:
 Policy packs enable **policy-as-code** enforcement at workflow gates, preventing intent violations and dangerous
 changes.
 
+For the full design rationale behind the four-artifact model, see
+`docs/design/policy-pack-taxonomy.md`.
+
 ### 1.1 Design Principles
 
 1. **Declarative** - Policies define "what" to check, not "how" to check it
-2. **Composable** - Multiple policy packs can be combined
-3. **Versioned** - Policy packs have semantic versions for compatibility
+2. **Composable** - Multiple policy packs can be combined via overlays and mappings
+3. **Versioned** - Taxonomy, packs, and mappings are independently versioned
 4. **Repairable** - Violations should provide actionable remediation guidance
 5. **Observable** - All policy checks emit events and store results in evidence (see N3, N6)
+6. **Rule IDs are the durable anchor** - Rule IDs are stable, namespace-qualified keywords;
+   categories are classification metadata that can evolve independently
+
+### 1.2 Canonical Taxonomy
+
+miniforge ships a canonical taxonomy (`miniforge/dewey`) and a canonical pack (`miniforge/core`).
+The platform normalises findings against this taxonomy by default. This is an explicit design
+decision, not an implementation detail. Third-party packs extend or map to it.
 
 ---
 
 ## 2. Policy Pack Structure
 
-### 2.1 Policy Pack Schema
+### 2.1 Taxonomy Artifact
+
+A taxonomy is an independently versioned category tree. Packs reference taxonomies by ID and
+minimum version. Taxonomy and ruleset have different change velocities and MUST be versioned
+separately.
 
 ```clojure
-{:policy-pack/id string            ; REQUIRED: Unique identifier (e.g., "terraform-aws")
- :policy-pack/version string       ; REQUIRED: Semantic version (e.g., "1.2.3")
- :policy-pack/name string          ; REQUIRED: Human-readable name
+{:taxonomy/id         keyword           ; REQUIRED: e.g. :miniforge/dewey
+ :taxonomy/version    string            ; REQUIRED: SemVer e.g. "1.0.0"
+ :taxonomy/title      string            ; REQUIRED: Human-readable name
 
- :policy-pack/description string   ; OPTIONAL: What this pack validates
- :policy-pack/author string        ; OPTIONAL: Pack author/maintainer
- :policy-pack/license string       ; OPTIONAL: License (e.g., "Apache-2.0")
+ :taxonomy/categories                   ; REQUIRED: Category definitions
+ [{:category/id    keyword              ; REQUIRED: Stable namespaced keyword
+   :category/code  string              ; REQUIRED: Display code (e.g. "210")
+   :category/title string              ; REQUIRED: Human-readable label
+   :category/parent keyword            ; OPTIONAL: Parent category ID (nil = root)
+   :category/order  int}               ; REQUIRED: Sort order for rule application
+  ...]
 
- :policy-pack/rules [...]          ; REQUIRED: Validation rules (see Section 2.2)
- :policy-pack/scanners [...]       ; OPTIONAL: Custom scanners (see Section 2.3)
-
- :policy-pack/metadata
- {:tags [string ...]               ; OPTIONAL: Tags for discovery
-  :target-types [keyword ...]      ; OPTIONAL: Applicable workflow types
-  :created-at inst
-  :updated-at inst}
-
- :policy-pack/signature string}    ; OPTIONAL: Cryptographic signature for verification
+ :taxonomy/aliases                      ; OPTIONAL: Logical name → category ID
+ [{:alias/id keyword
+   :alias/of keyword}
+  ...]}
 ```
 
-### 2.2 Policy Rule Schema
+The canonical miniforge taxonomy is distributed at
+`components/policy-pack/resources/taxonomies/miniforge-dewey-1.0.0.edn`.
+
+### 2.2 Policy Pack Schema
 
 ```clojure
-{:rule/id string                   ; REQUIRED: Unique rule identifier
- :rule/name string                 ; REQUIRED: Human-readable name
- :rule/description string          ; REQUIRED: What this rule checks
+{:pack/id           keyword            ; REQUIRED: Namespaced e.g. :miniforge/core
+ :pack/version      string             ; REQUIRED: SemVer e.g. "1.0.0"
+ :pack/title        string             ; REQUIRED: Human-readable name
 
- :rule/severity keyword            ; REQUIRED: :critical, :high, :medium, :low, :info
- :rule/enabled? boolean            ; REQUIRED: Is rule active? (default true)
+ :pack/description  string             ; OPTIONAL: What this pack validates
+ :pack/author       string             ; OPTIONAL: Pack author/maintainer
+ :pack/license      string             ; OPTIONAL: License (e.g. "Apache-2.0")
 
- :rule/check-fn function           ; REQUIRED: Validation function (see Section 3.1)
- :rule/repair-fn function          ; OPTIONAL: Auto-repair function (see Section 3.2)
+ ;; Taxonomy reference — pack declares which taxonomy its rule categories belong to.
+ ;; min-version allows compatible taxonomy upgrades without requiring pack rev.
+ :pack/taxonomy-ref                    ; REQUIRED for packs with rules
+ {:taxonomy/id          keyword
+  :taxonomy/min-version string}
 
- :rule/applies-to [keyword ...]    ; OPTIONAL: Artifact types this rule checks
- :rule/phase keyword               ; OPTIONAL: Which phase to run this rule (:implement, :review, etc.)
+ ;; Overlay — inherit rules + taxonomy ref from base packs; add/override on top.
+ ;; Pack MUST NOT declare both :pack/extends and conflicting :pack/taxonomy-ref.
+ :pack/extends                         ; OPTIONAL
+ [{:pack/id      keyword
+   :pack/version string}
+  ...]
 
- :rule/remediation-template string ; REQUIRED: Template for remediation message
- :rule/documentation-url string}   ; OPTIONAL: Link to detailed docs
+ :pack/rules       [...]               ; REQUIRED: Validation rules (see Section 2.3)
+ :pack/overrides   [...]               ; OPTIONAL: Severity/enable overrides on inherited rules
+ :pack/scanners    [...]               ; OPTIONAL: Custom scanners (see Section 2.5)
+
+ ;; Convenience bundled mapping artifacts. These are standalone mapping artifacts
+ ;; distributed with the pack. They can also be loaded independently.
+ :pack/bundled-mappings [keyword ...]  ; OPTIONAL: Mapping artifact IDs
+
+ :pack/metadata
+ {:tags         [string ...]           ; OPTIONAL: Tags for discovery
+  :target-types [keyword ...]          ; OPTIONAL: Applicable workflow types
+  :created-at   inst
+  :updated-at   inst}
+
+ :pack/signature string}               ; OPTIONAL: Cryptographic signature
 ```
 
-#### 2.2.1 Rule Severity Levels
+### 2.3 Policy Rule Schema
 
-| Severity    | Meaning                                     | Enforcement                       |
-| ----------- | ------------------------------------------- | --------------------------------- |
-| `:critical` | Blocks deployment, requires human override  | MUST block phase completion       |
-| `:high`     | Strongly discouraged, auto-repair or review | SHOULD block unless auto-repaired |
-| `:medium`   | Warning, may auto-repair                    | MAY proceed with warning          |
-| `:low`      | Informational, suggests improvement         | MAY proceed                       |
-| `:info`     | Informational only, no action needed        | MUST NOT block                    |
+```clojure
+{:rule/id           keyword            ; REQUIRED: Namespaced e.g. :mf.rule/copyright-header
+                                       ;   Globally unique. Immutable after publication.
+ :rule/title        string             ; REQUIRED: Human-readable label for reports
+ :rule/description  string             ; REQUIRED: What this rule checks
 
-### 2.3 Scanner Protocol
+ :rule/categories   [keyword ...]      ; REQUIRED: One or more taxonomy category IDs (plural)
+                                       ;   A rule may belong to multiple categories.
+ :rule/severity     keyword            ; REQUIRED: :error, :warning, :info
+ :rule/enabled?     boolean            ; OPTIONAL: Default true
+ :rule/auto-fix?    boolean            ; REQUIRED: Whether mechanical fix is safe without review
+
+ :rule/check-fn     function           ; REQUIRED: Validation function (see Section 3.1)
+ :rule/repair-fn    function           ; OPTIONAL: Auto-repair function (see Section 3.2)
+
+ :rule/applies-to   [keyword ...]      ; OPTIONAL: Artifact types this rule checks
+ :rule/phase        keyword            ; OPTIONAL: Which phase to run (:implement, :review, etc.)
+
+ :rule/remediation-template string     ; REQUIRED: Template for remediation message
+ :rule/documentation-url    string     ; OPTIONAL: Link to detailed docs
+
+ :rule/deprecated-by keyword}          ; OPTIONAL: Rule ID that supersedes this rule
+```
+
+**Rule ID convention:** `:<pack-ns>.rule/<rule-name>` — e.g. `:mf.rule/copyright-header`,
+`:acme.rule/internal-banner`. Rule IDs are keywords, never strings.
+
+**Categories are plural from day one.** Use `:rule/categories [...]` even when a rule currently
+belongs to a single category. This prevents a schema migration when multi-category rules arise.
+
+#### 2.3.1 Rule Severity Levels
+
+| Severity   | Meaning                                      | Enforcement                       |
+|------------|----------------------------------------------|-----------------------------------|
+| `:error`   | Blocks phase; requires fix or human override | MUST block phase completion       |
+| `:warning` | Strongly discouraged; auto-repair or review  | SHOULD block unless auto-repaired |
+| `:info`    | Informational; no action required            | MUST NOT block                    |
+
+### 2.4 Mapping Artifact
+
+A mapping artifact bridges one policy system to another. It is a first-class standalone artifact —
+neither the source nor the target owns it. A pack may bundle convenience mappings, but mappings
+MUST be loadable independently of any pack.
+
+```clojure
+{:mapping/id      keyword            ; REQUIRED: Namespaced e.g. :miniforge-to-vanta/core-2026
+ :mapping/version string             ; REQUIRED: SemVer
+
+ :mapping/source
+ {:mapping/source-kind    keyword    ; :pack | :taxonomy | :framework
+  :mapping/source-id      keyword
+  :mapping/source-version string}
+
+ :mapping/target
+ {:mapping/target-kind    keyword    ; :pack | :taxonomy | :framework
+  :mapping/target-id      keyword
+  :mapping/target-version string}
+
+ :mapping/entries
+ [{;; Source side: reference by rule ID or category ID (not both)
+   :source/rule     keyword          ; OPTIONAL: specific rule ID
+   :source/category keyword          ; OPTIONAL: category ID (category-level mapping)
+
+   ;; Target side
+   :target/control  string           ; OPTIONAL: target framework control ID (nil = no mapping)
+
+   ;; Mapping quality metadata
+   :mapping/type    keyword          ; REQUIRED: :exact | :broad | :partial | :none
+   :mapping/notes   string}          ; OPTIONAL: rationale / caveats
+  ...]
+
+ :mapping/authorship
+ {:publisher    keyword              ; Who authored this mapping
+  :confidence   keyword              ; :high | :medium | :low | :unvalidated
+  :validated-at string}}             ; ISO date when last validated against target version
+```
+
+**Mapping types:**
+
+| Type | Meaning |
+|---|---|
+| `:exact` | Source rule directly and completely satisfies the target control |
+| `:broad` | Category-level coverage; individual rules may vary |
+| `:partial` | Source rule partially satisfies the target control |
+| `:none` | Explicitly documented as having no mapping (absence of entry ≠ no mapping) |
+
+### 2.5 Overlay Pack
+
+An overlay pack extends one or more base packs. It inherits the base taxonomy reference and rule
+set, adding new rules and/or overriding severity and enable/disable settings.
+
+```clojure
+{:pack/id      keyword              ; REQUIRED: Namespaced e.g. :acme/internal-policy
+ :pack/version string               ; REQUIRED
+
+ :pack/extends                      ; REQUIRED for overlay packs
+ [{:pack/id      keyword
+   :pack/version string}
+  ...]
+
+ ;; New rules — IDs must not collide with any inherited rule
+ :pack/rules    [...]
+
+ ;; Overrides on inherited rules — only :rule/severity and :rule/enabled? may be overridden
+ :pack/overrides
+ [{:rule/id      keyword            ; REQUIRED: must exist in inherited rule set
+   :rule/severity  keyword          ; OPTIONAL: override severity
+   :rule/enabled?  boolean}         ; OPTIONAL: enable or disable
+  ...]}
+```
+
+**Overlay resolution rules (MUST):**
+
+1. Inherited rules are merged from all `:pack/extends` entries in declaration order.
+2. Overlay `:pack/rules` are appended. Rule IDs MUST NOT collide with inherited rules.
+3. `:pack/overrides` apply last; only `:rule/severity` and `:rule/enabled?` are overridable.
+4. Taxonomy ref is inherited from the base pack(s). An overlay that declares a conflicting
+   `:pack/taxonomy-ref` is invalid.
+
+### 2.6 Scanner Protocol
 
 **Scanners** are reusable components that analyze artifacts and extract structured data for rules to check.
 
@@ -97,7 +248,7 @@ changes.
      Returns {:findings [...] :metadata {...}}"))
 ```
 
-#### 2.3.1 Example Scanner
+#### 2.6.1 Example Scanner
 
 ```clojure
 ;; Terraform Plan Scanner
@@ -127,20 +278,20 @@ changes.
       :total-destroys 0}}))
 ```
 
-### 2.4 Knowledge Safety and Pack Validation (Reference)
+### 2.7 Knowledge Safety and Pack Validation (Reference)
 
 miniforge MUST support deterministic policy packs that protect the system from prompt-injection
 and untrusted input escalation during ingestion and execution.
 
 A reference policy pack named `knowledge-safety` SHOULD be provided.
 
-#### 2.4.1 Threat Model
+#### 2.7.1 Threat Model
 
 Untrusted repository content (markdown, issues, wikis, etc.) may contain instructions that
 attempt to override agent behavior. The platform MUST treat such content as *data* unless it
 is normalized into schema-valid packs and promoted to `:trusted` under policy.
 
-#### 2.4.2 Reference Rules (knowledge-safety)
+#### 2.7.2 Reference Rules (knowledge-safety)
 
 The `knowledge-safety` pack SHOULD include rules such as:
 
@@ -172,7 +323,7 @@ The `knowledge-safety` pack SHOULD include rules such as:
     - Version conflict: pack A requires pack C v1.x, pack B requires pack C v2.x
     - Trust violation: pack A (:untrusted) requires pack B (:trusted, :authority/instruction)
 
-#### 2.4.3 Deterministic Prompt Injection Tripwire Scanner
+#### 2.7.3 Deterministic Prompt Injection Tripwire Scanner
 
 The platform SHOULD ship a deterministic scanner that emits findings on suspicious
 directives, including (non-exhaustive):
@@ -847,7 +998,8 @@ This pack is RECOMMENDED for production environments.
 
 #### 5.1.11 Data Foundry Quality Packs
 
-**Purpose:** Register Data Foundry data quality policy packs as standard packs in the Core registry. These packs extend the Core N4 gate model with data-specific quality validation. See Data Foundry N4 for full specifications.
+**Purpose:** Register Data Foundry data quality policy packs as standard packs in the Core registry. These packs extend
+  the Core N4 gate model with data-specific quality validation. See Data Foundry N4 for full specifications.
 
 **financial-statement-validation** (severity: critical)
 **ID:** `financial-statement-validation`

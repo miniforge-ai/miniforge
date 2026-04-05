@@ -260,7 +260,7 @@
    Returns MCP tool result map."
   [params manager]
   (let [tool-name (:name params)
-        args (or (:arguments params) {})]
+        args (get params :arguments {})]
     (try
       (handle-tool tool-name args manager)
       (catch Exception e
