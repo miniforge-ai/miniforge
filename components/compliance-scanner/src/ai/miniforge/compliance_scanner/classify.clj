@@ -21,7 +21,8 @@
 
    Layer 0: Per-rule classification predicates
    Layer 1: Top-level classify-violations entry point"
-  (:require [clojure.string :as str]))
+  (:require [ai.miniforge.compliance-scanner.messages :as msg]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Per-rule classification predicates
@@ -50,31 +51,31 @@
   (if (json-context? violation)
     (assoc violation
            :auto-fixable? false
-           :rationale     "Possible JSON-mapped field — manual review required")
+           :rationale     (msg/t :classify/json-context))
     (assoc violation
            :auto-fixable? true
-           :rationale     "Literal default, non-JSON field")))
+           :rationale     (msg/t :classify/literal-default))))
 
 (defn- classify-datever
   "Classify a :std/datever violation (DateVer version format standard)."
   [violation]
   (assoc violation
          :auto-fixable? true
-         :rationale     "SemVer X.Y.Z found where DateVer X.Y.Z.N is required; append build count .0"))
+         :rationale     (msg/t :classify/datever)))
 
 (defn- classify-copyright-header
   "Classify a :std/header-copyright violation (copyright header standard)."
   [violation]
   (let [current (get violation :current "")]
-    (if (= current "(missing copyright header)")
+    (if (= current (msg/t :scan/missing-header))
       ;; Header is completely absent — can be prepended automatically
       (assoc violation
              :auto-fixable? true
-             :rationale     "Copyright header absent; can be prepended")
+             :rationale     (msg/t :classify/header-absent))
       ;; Header exists but content is wrong — needs manual review
       (assoc violation
              :auto-fixable? false
-             :rationale     "Copyright header content incorrect; manual correction required"))))
+             :rationale     (msg/t :classify/header-incorrect)))))
 
 (defn- classify-one
   "Dispatch classification for a single violation by :rule/id."
@@ -86,7 +87,7 @@
     ;; Unknown rule — default to needs-review
     (assoc violation
            :auto-fixable? false
-           :rationale     "Unknown rule; manual review required")))
+           :rationale     (msg/t :classify/unknown-rule))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Top-level entry point

@@ -24,11 +24,61 @@
    The compiled pack drives WHAT rules exist; this registry drives HOW
    mechanical rules are detected.
 
-   Layer 0: Registry data
-   Layer 1: Accessor helpers"
+   Layer 0: File predicates and suggest functions
+   Layer 1: Registry data
+   Layer 2: Accessor helpers"
   (:require [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; File predicates
+
+(defn clojure-source-file?
+  "Return true if path is a Clojure source file in a component or base src tree."
+  [path]
+  (and (or (str/ends-with? path ".clj")
+           (str/ends-with? path ".cljc"))
+       (or (re-find #"(?:^|/)components/[^/]+/src/" path)
+           (re-find #"(?:^|/)bases/[^/]+/src/" path))))
+
+(defn version-file?
+  "Return true if path is a version declaration or CI workflow file."
+  [path]
+  (or (str/ends-with? path "build.clj")
+      (str/ends-with? path "version.edn")
+      (boolean (re-find #"\.github/workflows/[^/]+\.ya?ml$" path))))
+
+(defn markdown-doc-file?
+  "Return true if path is a tracked markdown file in docs/, specs/, or at repo root."
+  [path]
+  (and (str/ends-with? path ".md")
+       (not (re-find #"(?:^|/)\.git/" path))
+       (not (re-find #"(?:^|/)node_modules/" path))
+       (or (re-find #"(?:^|/)docs/" path)
+           (re-find #"(?:^|/)specs/" path)
+           (not (str/includes? path "/")))))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Suggest functions
+
+(defn suggest-clojure-map-access
+  "Return a (get m :k v) replacement for a matched (or (:k m) v) form, or nil."
+  [matched-text]
+  (when-let [[_ kw m default-val]
+             (re-find #"\(or \((:[\w?!*+<>-]+)\s+([\w-]+)\)\s+(.+?)\)"
+                      (str matched-text))]
+    (str "(get " m " " kw " " (str/trimr default-val) ")")))
+
+(defn suggest-datever
+  "Return DateVer form by appending .0 to a matched SemVer string."
+  [matched-text]
+  (str matched-text ".0"))
+
+(defn suggest-copyright-header
+  "Return nil — prepending the header is the fix; no inline replacement exists."
+  [_]
+  nil)
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Registry
 
 (def registry
@@ -47,18 +97,8 @@
     :rule/category "210"
     :title         "Clojure Map Access"
     :pattern       #"\(or \(:[a-zA-Z][a-zA-Z0-9?!_*+<>-]*\s+[a-zA-Z][a-zA-Z0-9_-]*\)\s+(?:nil|true|false|\"[^\"]*\"|-?\d+(?:\.\d+)?|\[\]|\{\}|:[a-zA-Z][a-zA-Z0-9_-]*)\)"
-    :file-pred     (fn [path]
-                     (and (or (str/ends-with? path ".clj")
-                              (str/ends-with? path ".cljc"))
-                          (or (re-find #"(?:^|/)components/[^/]+/src/" path)
-                              (re-find #"(?:^|/)bases/[^/]+/src/" path))))
-    :suggest-fn    (fn [matched-text]
-                     ;; Parse (or (:k m) v) -> (get m :k v)
-                     (when-let [[_ kw m default-val]
-                                (re-find
-                                 #"\(or \((:[\w?!*+<>-]+)\s+([\w-]+)\)\s+(.+?)\)"
-                                 (str matched-text))]
-                       (str "(get " m " " kw " " (str/trimr default-val) ")")))
+    :file-pred     clojure-source-file?
+    :suggest-fn    suggest-clojure-map-access
     :detect-mode   :positive}
 
    :std/datever
@@ -66,13 +106,8 @@
     :rule/category "730"
     :title         "Version Format (SemVer vs DateVer)"
     :pattern       #"\b(\d+)\.(\d+)\.(\d+)\b(?!\.\d)"
-    :file-pred     (fn [path]
-                     (or (str/ends-with? path "build.clj")
-                         (str/ends-with? path "version.edn")
-                         (re-find #"\.github/workflows/[^/]+\.ya?ml$" path)))
-    :suggest-fn    (fn [matched-text]
-                     ;; SemVer X.Y.Z → DateVer X.Y.Z.N; append build count placeholder
-                     (str matched-text ".0"))
+    :file-pred     version-file?
+    :suggest-fn    suggest-datever
     :detect-mode   :positive}
 
    :std/header-copyright
@@ -83,18 +118,11 @@
     ;; Absence of both name + email patterns = violation.
     :pattern       #"Christopher Lester"
     :email-pattern #"christopher@miniforge\.ai"
-    :file-pred     (fn [path]
-                     (and (str/ends-with? path ".md")
-                          (not (re-find #"(?:^|/)\.git/" path))
-                          (not (re-find #"(?:^|/)node_modules/" path))
-                          (or (re-find #"(?:^|/)docs/" path)
-                              (re-find #"(?:^|/)specs/" path)
-                              ;; Root-level .md files (no subdirectory separator)
-                              (not (str/includes? path "/")))))
-    :suggest-fn    (fn [_] nil)   ; prepending is the fix, no inline replacement
-    :detect-mode   :negative}})   ; absence of :pattern = violation
+    :file-pred     markdown-doc-file?
+    :suggest-fn    suggest-copyright-header
+    :detect-mode   :negative}})
 
-;------------------------------------------------------------------------------ Layer 1
+;------------------------------------------------------------------------------ Layer 2
 ;; Accessors
 
 (defn suggest
@@ -125,6 +153,13 @@
 
   (suggest :std/datever "1.2.3")
   ;; => "1.2.3.0"
+
+  (clojure-source-file? "components/foo/src/ai/miniforge/foo/core.clj")
+  ;; => true
+  (version-file? "build.clj")
+  ;; => true
+  (markdown-doc-file? "docs/guide.md")
+  ;; => true
 
   (enabled-rule-configs {:rules #{:std/clojure :std/header-copyright}})
 

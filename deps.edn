@@ -95,6 +95,7 @@
                        "components/mcp-artifact-server/src"
                        "components/mcp-artifact-server/resources"
                        "components/compliance-scanner/src"
+                       "components/compliance-scanner/resources"
                        "components/repo-index/src"
                        "components/repo-index/resources"
                        "components/context-pack/src"

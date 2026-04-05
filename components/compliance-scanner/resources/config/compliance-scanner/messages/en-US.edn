@@ -1,0 +1,34 @@
+{:compliance-scanner/messages
+ {;; Plan phase — markdown report structure
+  :plan/title               "# Compliance Remediation Plan"
+  :plan/exec-summary        "## Executive Summary"
+  :plan/violations-by-rule  "## Violations by Rule"
+  :plan/needs-review-summary "## Needs-Review Summary"
+  :plan/exec-instructions   "## Execution Instructions"
+  :plan/table-header        "| Metric | Count |"
+  :plan/table-separator     "|--------|-------|"
+  :plan/metric-total        "| Total violations     | {n} |"
+  :plan/metric-auto         "| Auto-fixable         | {n} |"
+  :plan/metric-needs-review "| Needs review         | {n} |"
+  :plan/metric-files        "| Files affected       | {n} |"
+  :plan/metric-rules        "| Rules violated       | {n} |"
+  :plan/no-review           "_No violations require manual review._"
+  :plan/instr-1             "1. Run `clj -M:compliance-scanner run! <repo-path>` to apply all auto-fixes."
+  :plan/instr-2             "2. Manually address the needs-review violations listed above."
+  :plan/instr-3             "3. Re-run the scanner to confirm zero violations."
+  :plan/auto-fixable-label  "**Auto-fixable:**"
+  :plan/needs-review-label  "**Needs review:**"
+  :plan/rule-section-header "### {category} — {title}"
+  :plan/tag-auto            "auto-fix"
+  :plan/tag-review          "review"
+
+  ;; Classify phase — rationale messages
+  :classify/json-context    "Possible JSON-mapped field — manual review required"
+  :classify/literal-default "Literal default, non-JSON field"
+  :classify/datever         "SemVer X.Y.Z found where DateVer X.Y.Z.N is required; append build count .0"
+  :classify/header-absent   "Copyright header absent; can be prepended"
+  :classify/header-incorrect "Copyright header content incorrect; manual correction required"
+  :classify/unknown-rule    "Unknown rule; manual review required"
+
+  ;; Scan phase — violation current-value labels
+  :scan/missing-header      "(missing copyright header)"}}

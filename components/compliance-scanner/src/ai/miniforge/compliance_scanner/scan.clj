@@ -23,6 +23,7 @@
    Layer 1: Per-rule scanning
    Layer 2: Top-level scan-repo entry point"
   (:require [ai.miniforge.compliance-scanner.factory          :as factory]
+            [ai.miniforge.compliance-scanner.messages         :as msg]
             [ai.miniforge.compliance-scanner.scanner-registry :as scanner-registry]
             [ai.miniforge.repo-index.interface                :as repo-index]
             [clojure.string                                   :as str]))
@@ -90,7 +91,7 @@
         title
         file-path
         1
-        "(missing copyright header)"
+        (msg/t :scan/missing-header)
         (suggest nil)
         false   ; classify phase fills this in
         "")]))) ; classify phase fills this in
@@ -107,21 +108,26 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Per-rule scanning
 
+(defn- scan-file-record
+  "Load and scan a single file record against a rule config.
+   Returns vector of raw Violation maps, or [] if the file cannot be read."
+  [rule-cfg index file-record]
+  (let [path    (:path file-record)
+        content (try
+                  (slurp (str (:repo-root index) "/" path))
+                  (catch Exception _ nil))]
+    (if content
+      (scan-file rule-cfg path content)
+      [])))
+
 (defn- scan-rule
   "Scan the entire repo for a single rule.
    Returns vector of raw Violation maps."
   [rule-cfg index]
-  (let [file-pred (get rule-cfg :file-pred (constantly false))
-        matching-files (repo-index/find-files index (fn [f] (file-pred (:path f))))]
+  (let [file-pred      (get rule-cfg :file-pred (constantly false))
+        matching-files (repo-index/find-files index #(file-pred (:path %)))]
     (->> matching-files
-         (mapcat (fn [file-record]
-                   (let [path    (:path file-record)
-                         content (try
-                                   (slurp (str (:repo-root index) "/" path))
-                                   (catch Exception _ nil))]
-                     (if content
-                       (scan-file rule-cfg path content)
-                       []))))
+         (mapcat (partial scan-file-record rule-cfg index))
          vec)))
 
 ;------------------------------------------------------------------------------ Layer 2

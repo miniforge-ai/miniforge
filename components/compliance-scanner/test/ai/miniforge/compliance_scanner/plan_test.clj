@@ -106,13 +106,13 @@
       (is (str/includes? work-spec "## Needs-Review Summary"))
       (is (str/includes? work-spec "## Execution Instructions")))))
 
-(deftest work-spec-lists-dewey-codes
-  (testing "work spec mentions each Dewey code present in violations"
+(deftest work-spec-lists-rule-categories
+  (testing "work spec includes each rule category in section headers"
     (let [viols [(make-violation :std/clojure  "210" file-a 10 true)
                  (make-violation :std/datever  "730" file-b 3  true)]
           {:keys [work-spec]} (plan/plan viols ".")]
-      (is (str/includes? work-spec "Dewey 210"))
-      (is (str/includes? work-spec "Dewey 730")))))
+      (is (str/includes? work-spec "210 —"))
+      (is (str/includes? work-spec "730 —")))))
 
 (deftest work-spec-no-violations-shows-no-review-message
   (testing "work spec says no violations need review when all are auto-fixable"

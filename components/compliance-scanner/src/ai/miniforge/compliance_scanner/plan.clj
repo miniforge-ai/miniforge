@@ -22,8 +22,9 @@
    Layer 0: DAG topology helpers
    Layer 1: Markdown work-spec builder
    Layer 2: Top-level plan entry point"
-  (:require [ai.miniforge.compliance-scanner.factory :as factory]
-            [clojure.string                          :as str]))
+  (:require [ai.miniforge.compliance-scanner.factory   :as factory]
+            [ai.miniforge.compliance-scanner.messages  :as msg]
+            [clojure.string                            :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; DAG topology helpers
@@ -39,35 +40,47 @@
   [dewey-str]
   (try (Integer/parseInt dewey-str) (catch Exception _ 0)))
 
+(defn- key->uuid-entry
+  "Return [k (random-uuid)] for use in building a key->id map."
+  [k]
+  [k (random-uuid)])
+
+(defn- key->category-entry
+  "Return [k category-string] for a [file rule-id] key and its violations."
+  [[k vs]]
+  [k (get (first vs) :rule/category "0")])
+
+(defn- file->ordered-rule-ids-entry
+  "Return [file ordered-rule-ids] sorted by Dewey category ascending.
+   ks is a seq of [file rule-id] keys; the result extracts just the rule-ids."
+  [key->cat [file ks]]
+  [file (->> ks
+             (sort-by #(dewey-order (get key->cat %)))
+             (mapv second))])
+
+(defn- build-task
+  "Build a PlanTask for a [file rule-id] group, resolving intra-file deps."
+  [key->id key->cat file->rule-ids [[file rule-id] viols]]
+  (let [id        (get key->id [file rule-id])
+        prior-ids (take-while
+                   #(< (dewey-order (get key->cat [file %]))
+                       (dewey-order (get key->cat [file rule-id])))
+                   (get file->rule-ids file []))
+        deps      (into #{} (map #(get key->id [file %]) prior-ids))]
+    (factory/->plan-task id deps file rule-id viols)))
+
 (defn- build-dag-tasks
   "Build PlanTask records with intra-file ordering deps.
 
    Within a file, a task for a rule with a higher Dewey category depends on all
    tasks for rules with lower Dewey categories in that same file."
   [violations]
-  (let [groups    (group-by-file-rule violations)
-        ;; Build a map: [file rule-id] -> fresh UUID
-        key->id   (into {} (map (fn [k] [k (random-uuid)]) (keys groups)))
-        ;; Dewey category (for ordering) for each [file rule-id] key
-        key->cat  (into {} (map (fn [[k vs]]
-                                  [k (get (first vs) :rule/category "0")])
-                                groups))
-        ;; Sort rule-ids per file by their Dewey category
-        file->rule-ids (->> (keys groups)
-                            (group-by first)
-                            (into {} (map (fn [[file ks]]
-                                           [file (->> ks
-                                                      (sort-by #(dewey-order (get key->cat %)))
-                                                      (mapv second))]))))]
-    (mapv (fn [[[file rule-id] viols]]
-            (let [id        (get key->id [file rule-id])
-                  prior-ids (take-while
-                             #(< (dewey-order (get key->cat [file %]))
-                                 (dewey-order (get key->cat [file rule-id])))
-                             (get file->rule-ids file []))
-                  deps      (into #{} (map #(get key->id [file %]) prior-ids))]
-              (factory/->plan-task id deps file rule-id viols)))
-          groups)))
+  (let [groups         (group-by-file-rule violations)
+        key->id        (into {} (map key->uuid-entry (keys groups)))
+        key->cat       (into {} (map key->category-entry groups))
+        file->rule-ids (into {} (map (partial file->ordered-rule-ids-entry key->cat)
+                                     (group-by first (keys groups))))]
+    (mapv (partial build-task key->id key->cat file->rule-ids) groups)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Markdown work-spec builder
@@ -75,34 +88,33 @@
 (defn- violation->md-row
   "Render a single violation as a markdown list item."
   [v]
-  (let [fixable (if (get v :auto-fixable?) "auto-fix" "review")]
+  (let [tag (if (get v :auto-fixable?) (msg/t :plan/tag-auto) (msg/t :plan/tag-review))]
     (str "- **L" (get v :line) "** `" (get v :current) "`"
          (when-let [s (get v :suggested)]
            (str " → `" s "`"))
-         " [" fixable "]")))
+         " [" tag "]")))
+
+(defn- render-violation-group
+  "Render a labeled group of violations as markdown lines, or nil if empty."
+  [label viols]
+  (when (seq viols)
+    (concat [label ""]
+            (map violation->md-row viols)
+            [""])))
 
 (defn- section-for-rule
   "Render a markdown section for all violations of one rule."
   [_rule-id viols]
   (let [rule-title (get (first viols) :rule/title (str _rule-id))
         rule-cat   (get (first viols) :rule/category "?")
-        auto  (filter :auto-fixable? viols)
-        needs (remove :auto-fixable? viols)]
+        auto       (filter :auto-fixable? viols)
+        needs      (remove :auto-fixable? viols)]
     (str/join "\n"
       (concat
-       [(str "### Dewey " rule-cat " — " rule-title)
+       [(msg/t :plan/rule-section-header {:category rule-cat :title rule-title})
         ""]
-       (when (seq auto)
-         (concat
-          ["**Auto-fixable:**" ""]
-          (map violation->md-row auto)
-          [""]))
-       (when (seq needs)
-         (concat
-          ["**Needs review:**" ""]
-          (map violation->md-row needs)
-          [""])
-         )))))
+       (render-violation-group (msg/t :plan/auto-fixable-label) auto)
+       (render-violation-group (msg/t :plan/needs-review-label) needs)))))
 
 (defn- build-work-spec
   "Build the full markdown work spec string from classified violations."
@@ -110,19 +122,19 @@
   (let [by-rule      (group-by :rule/id violations)
         review-viols (remove :auto-fixable? violations)]
     (str/join "\n"
-      ["# Compliance Remediation Plan"
+      [(msg/t :plan/title)
        ""
-       "## Executive Summary"
+       (msg/t :plan/exec-summary)
        ""
-       "| Metric | Count |"
-       "|--------|-------|"
-       (str "| Total violations     | " (get summary :total-violations) " |")
-       (str "| Auto-fixable         | " (get summary :auto-fixable)     " |")
-       (str "| Needs review         | " (get summary :needs-review)      " |")
-       (str "| Files affected       | " (get summary :files-affected)    " |")
-       (str "| Rules violated       | " (get summary :rules-violated)    " |")
+       (msg/t :plan/table-header)
+       (msg/t :plan/table-separator)
+       (msg/t :plan/metric-total        {:n (get summary :total-violations)})
+       (msg/t :plan/metric-auto         {:n (get summary :auto-fixable)})
+       (msg/t :plan/metric-needs-review {:n (get summary :needs-review)})
+       (msg/t :plan/metric-files        {:n (get summary :files-affected)})
+       (msg/t :plan/metric-rules        {:n (get summary :rules-violated)})
        ""
-       "## Violations by Rule"
+       (msg/t :plan/violations-by-rule)
        ""
        (str/join "\n\n"
          (map (fn [[rule-id viols]]
@@ -130,7 +142,7 @@
               (sort-by #(dewey-order (get (first (second %)) :rule/category "0"))
                        by-rule)))
        ""
-       "## Needs-Review Summary"
+       (msg/t :plan/needs-review-summary)
        ""
        (if (seq review-viols)
          (str/join "\n"
@@ -138,13 +150,13 @@
                   (str "- `" (get v :file) "` L" (get v :line)
                        " (" (get v :rule/category) "): " (get v :rationale)))
                 review-viols))
-         "_No violations require manual review._")
+         (msg/t :plan/no-review))
        ""
-       "## Execution Instructions"
+       (msg/t :plan/exec-instructions)
        ""
-       "1. Run `clj -M:compliance-scanner run! <repo-path>` to apply all auto-fixes."
-       "2. Manually address the needs-review violations listed above."
-       "3. Re-run the scanner to confirm zero violations."
+       (msg/t :plan/instr-1)
+       (msg/t :plan/instr-2)
+       (msg/t :plan/instr-3)
        ""])))
 
 ;------------------------------------------------------------------------------ Layer 2

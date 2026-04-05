@@ -64,7 +64,7 @@
     (let [v    (assoc base-210 :file "components/foo/src/ai/miniforge/foo/core.clj")
           [r]  (classify/classify-violations [v])]
       (is (true? (:auto-fixable? r)))
-      (is (= "Literal default, non-JSON field" (:rationale r))))))
+      (is (re-find #"Literal default" (:rationale r))))))
 
 (deftest classify-210-server-file-is-needs-review
   (testing "210 violation in a server/ file is flagged as needs-review"
