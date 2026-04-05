@@ -74,21 +74,86 @@
       (throw (ex-info "Failed to parse JSON file"
                       {:error (ex-message e)} e)))))
 
+(def ^:private spec-key->ns
+  "Map plain YAML keys to their :spec/* or :workflow/* namespace.
+   The YAML parser produces unnamespaced keywords; normalize-spec requires
+   namespaced ones.
+
+   Both hyphenated (:acceptance-criteria) and underscore (:acceptance_criteria)
+   forms are listed because the YAML parser regex only captures \\w+ (no hyphens),
+   so frontmatter authors must use underscores for multi-word keys."
+  {:title                "spec"
+   :description          "spec"
+   :intent               "spec"
+   :constraints          "spec"
+   :tags                 "spec"
+   :acceptance-criteria  "spec"
+   :acceptance_criteria  "spec"   ; underscore form from YAML parser
+   :code-artifact        "spec"
+   :code_artifact        "spec"
+   :repo-url             "spec"
+   :repo_url             "spec"
+   :branch               "spec"
+   :llm-backend          "spec"
+   :llm_backend          "spec"
+   :sandbox              "spec"
+   :plan-tasks           "spec"
+   :plan_tasks           "spec"
+   :type                 "workflow"
+   :version              "workflow"})
+
+(defn- namespace-frontmatter-keys
+  "Remap plain YAML keys to :spec/* / :workflow/* namespaces for normalize-spec.
+   Underscore key names (from YAML parser limitation) are normalized to hyphens
+   so :acceptance_criteria becomes :spec/acceptance-criteria."
+  [m]
+  (reduce-kv (fn [acc k v]
+               (if-let [ns (get spec-key->ns k)]
+                 (let [canonical (str/replace (name k) "_" "-")]
+                   (assoc acc (keyword ns canonical) v))
+                 (assoc acc k v)))
+             {} m))
+
+(defn- h1-title
+  "Extract the first H1 heading text from a markdown body, or nil if absent."
+  [body]
+  (when-let [[_ title] (re-find #"(?m)^#\s+(.+)$" body)]
+    (str/trim title)))
+
+(defn- body-without-h1
+  "Remove the first H1 heading line from a markdown body."
+  [body]
+  (str/trim (str/replace-first body #"(?m)^#[^\n]*\n?" "")))
+
+(defn- decorate-from-body
+  "Synthesize a :spec/* map from a plain markdown document with no frontmatter.
+   Title is inferred from the first H1; the remainder becomes the description."
+  [body]
+  (let [title (or (h1-title body) "Untitled")]
+    {:spec/title       title
+     :spec/description (let [remainder (body-without-h1 body)]
+                         (if (str/blank? remainder) title remainder))}))
+
 (defn parse-markdown
-  "Parse Markdown file with YAML frontmatter.
-   Frontmatter contains structured spec data, body is optional context."
+  "Parse Markdown file with optional YAML frontmatter.
+
+   With frontmatter: structured fields are namespaced (:title → :spec/title)
+   and the body is appended to :spec/description for full agent context.
+
+   Without frontmatter: title is inferred from the first H1 heading and the
+   remaining body becomes :spec/description. No error is raised — the document
+   is decorated automatically so any design doc can be fed directly to the
+   workflow engine."
   [content]
-  (let [parsed (knowledge/split-frontmatter content)]
-    (when-not parsed
-      (throw (ex-info "Markdown file must have YAML frontmatter (---)"
-                      {:hint "Add frontmatter with title, description, etc."})))
-    (let [frontmatter (knowledge/parse-yaml-frontmatter (:frontmatter parsed))
-          body (:body parsed)]
-      ;; If there's body content beyond title, use it to extend description
-      (cond-> frontmatter
+  (if-let [parsed (knowledge/split-frontmatter content)]
+    (let [raw-fm (knowledge/parse-yaml-frontmatter (:frontmatter parsed))
+          fm     (namespace-frontmatter-keys raw-fm)
+          body   (:body parsed)]
+      (cond-> fm
         (and body (not (str/blank? body)))
-        (update :description
-                #(str % "\n\n" (str/trim body)))))))
+        (update :spec/description #(str % "\n\n" (str/trim body)))))
+    ;; No frontmatter — synthesize spec metadata from document structure
+    (decorate-from-body content)))
 
 (def format-parsers
   "Registry of format -> parser-fn. Extend this to add new formats."
@@ -139,9 +204,9 @@
            :spec/intent           (or intent {:type :general})
            :spec/constraints      (or constraints [])
            :spec/tags             (or tags [])
+           :spec/workflow-type    (or type :full-sdlc)
            :spec/workflow-version (or version "latest")
            :spec/raw-data         spec}
-    type                (assoc :spec/workflow-type type)
     acceptance-criteria (assoc :spec/acceptance-criteria acceptance-criteria)
     code-artifact       (assoc :spec/code-artifact code-artifact)
     repo-url            (assoc :spec/repo-url repo-url)

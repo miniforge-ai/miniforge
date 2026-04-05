@@ -59,21 +59,21 @@ This workflow is not intended to:
 
 ## 3. Primary use cases
 
-## 3.1 Vibe-coded application assessment
+### 3.1 Vibe-coded application assessment
 
 Assess a newly created app with shallow documentation and uncertain test quality, then route gaps into planning or
 test-generation workflows.
 
-## 3.2 Repository release-readiness evaluation
+### 3.2 Repository release-readiness evaluation
 
 Assess a service or repo before broader release or production promotion.
 
-## 3.3 Miniforge workflow evaluation
+### 3.3 Miniforge workflow evaluation
 
 Score a workflow itself for observability, determinism, policy posture, testing, error handling, and operational
 readiness.
 
-## 3.4 Portfolio triage
+### 3.4 Portfolio triage
 
 Evaluate many repos or work items to determine where human review attention should be concentrated.
 
@@ -85,7 +85,7 @@ The workflow SHALL use **rubric-driven evaluation with decision routing**.
 
 It SHALL NOT use a pure binary decision tree as the core evaluation mechanism.
 
-## 4.1 Stages
+### 4.1 Stages
 
 1. Inventory
 2. Classification
@@ -99,7 +99,7 @@ It SHALL NOT use a pure binary decision tree as the core evaluation mechanism.
 
 ## 5. Workflow contract
 
-## 5.1 Inputs
+### 5.1 Inputs
 
 ```edn
 {:target/id string
@@ -130,7 +130,7 @@ It SHALL NOT use a pure binary decision tree as the core evaluation mechanism.
            :strict-blockers? boolean}}
 ```
 
-## 5.2 Input behavior
+### 5.2 Input behavior
 
 The workflow SHALL operate with partial inputs.
 
@@ -140,7 +140,7 @@ If evidence is sparse, it SHALL:
 - distinguish absence of evidence from explicit failure,
 - avoid over-claiming readiness.
 
-## 5.3 Outputs
+### 5.3 Outputs
 
 ```edn
 {:evaluation/id string
@@ -170,7 +170,7 @@ If evidence is sparse, it SHALL:
 
 ## 6. Domain model
 
-## 6.1 Default domains
+### 6.1 Default domains
 
 1. `:product-clarity`
 2. `:delivery-planning`
@@ -182,7 +182,7 @@ If evidence is sparse, it SHALL:
 8. `:quality-evidence`
 9. `:risk-and-governance`
 
-## 6.2 Domain shape
+### 6.2 Domain shape
 
 ```edn
 {:id keyword
@@ -199,7 +199,7 @@ If evidence is sparse, it SHALL:
  :recommended-actions [action]}
 ```
 
-## 6.3 Criterion shape
+### 6.3 Criterion shape
 
 ```edn
 {:id keyword
@@ -217,7 +217,7 @@ If evidence is sparse, it SHALL:
 
 ## 7. Scoring semantics
 
-## 7.1 Atomic criterion scale
+### 7.1 Atomic criterion scale
 
 - `0` = absent or directly contradicted
 - `1` = mentioned, implied, or weakly addressed
@@ -225,7 +225,7 @@ If evidence is sparse, it SHALL:
 - `3` = credibly implemented with reasonable evidence
 - `4` = strong implementation with explicit verification and/or automation
 
-## 7.2 Confidence
+### 7.2 Confidence
 
 Confidence SHALL be separate from score.
 
@@ -241,7 +241,7 @@ Interpretation:
 - `:medium` = mixed direct and indirect evidence
 - `:high` = direct and corroborated evidence
 
-## 7.3 Status mapping
+### 7.3 Status mapping
 
 - `:red` if domain score < 1.5
 - `:orange` if 1.5 <= score < 2.5
@@ -250,7 +250,7 @@ Interpretation:
 
 Implementations MAY include `:gray` when evidence is insufficient.
 
-## 7.4 Hard-blocker overrides
+### 7.4 Hard-blocker overrides
 
 The workflow SHALL support blocker rules that cap or force status.
 
@@ -268,7 +268,7 @@ Examples:
 
 The workflow SHALL distinguish among:
 
-## 8.1 Positive evidence
+### 8.1 Positive evidence
 
 Artifacts directly supporting readiness.
 Examples:
@@ -280,7 +280,7 @@ Examples:
 - threat models
 - migration plans
 
-## 8.2 Missing evidence
+### 8.2 Missing evidence
 
 Expected evidence that is absent.
 Examples:
@@ -289,7 +289,7 @@ Examples:
 - no load-test result
 - no feature-flag evidence
 
-## 8.3 Negative evidence
+### 8.3 Negative evidence
 
 Artifacts suggesting weakness.
 Examples:
@@ -299,7 +299,7 @@ Examples:
 - flaky tests without mitigation
 - broad permissions by default
 
-## 8.4 Contradictory evidence
+### 8.4 Contradictory evidence
 
 Claims undermined by artifacts.
 Examples:
@@ -314,7 +314,7 @@ Examples:
 
 The workflow SHALL support profile-based weighting and criterion activation.
 
-## 9.1 Default profiles
+### 9.1 Default profiles
 
 - `:internal-vibe-app`
 - `:customer-facing-saas`
@@ -323,7 +323,7 @@ The workflow SHALL support profile-based weighting and criterion activation.
 - `:platform-or-infra`
 - `:miniforge-workflow`
 
-## 9.2 Profile behavior
+### 9.2 Profile behavior
 
 Each profile SHALL define:
 
@@ -333,7 +333,7 @@ Each profile SHALL define:
 - optional criteria,
 - routing recommendations.
 
-## 9.3 Example weighting
+### 9.3 Example weighting
 
 ```edn
 {:profile :miniforge-workflow
@@ -354,7 +354,7 @@ Each profile SHALL define:
 
 The workflow SHALL attempt to discover and normalize, where present:
 
-## 10.1 Repo and implementation inventory
+### 10.1 Repo and implementation inventory
 
 - languages/frameworks
 - package/build files
@@ -363,7 +363,7 @@ The workflow SHALL attempt to discover and normalize, where present:
 - UI surface presence
 - jobs/workflows/pipelines
 
-## 10.2 Delivery artifacts
+### 10.2 Delivery artifacts
 
 - CI/CD configs
 - test suites and reports
@@ -373,7 +373,7 @@ The workflow SHALL attempt to discover and normalize, where present:
 - infra definitions
 - migrations
 
-## 10.3 Operational signals
+### 10.3 Operational signals
 
 - logging hooks
 - metrics/traces
@@ -382,7 +382,7 @@ The workflow SHALL attempt to discover and normalize, where present:
 - backup/recovery mechanisms
 - runbooks
 
-## 10.4 Security/trust signals
+### 10.4 Security/trust signals
 
 - secret handling
 - dependency/security scanning config
@@ -390,7 +390,7 @@ The workflow SHALL attempt to discover and normalize, where present:
 - authn/authz signals
 - audit/event logging
 
-## 10.5 Planning/intent artifacts
+### 10.5 Planning/intent artifacts
 
 - specs
 - ADRs
@@ -403,7 +403,7 @@ The workflow SHALL attempt to discover and normalize, where present:
 
 ## 11. Domain criteria (default)
 
-## 11.1 `:product-clarity`
+### 11.1 `:product-clarity`
 
 - purpose stated
 - intended users identified
@@ -411,7 +411,7 @@ The workflow SHALL attempt to discover and normalize, where present:
 - scope/non-goals articulated
 - expected outcomes stated
 
-## 11.2 `:delivery-planning`
+### 11.2 `:delivery-planning`
 
 - owner/team identified
 - dependencies identified
@@ -419,7 +419,7 @@ The workflow SHALL attempt to discover and normalize, where present:
 - status/reporting expectations defined where needed
 - rollout or milestone sequence exists
 
-## 11.3 `:implementation-surface`
+### 11.3 `:implementation-surface`
 
 - impacted services/components identified
 - configs/manifests/runtime modes understood
@@ -427,7 +427,7 @@ The workflow SHALL attempt to discover and normalize, where present:
 - migration/upgrade surface understood
 - compatibility assumptions visible
 
-## 11.4 `:test-strategy`
+### 11.4 `:test-strategy`
 
 - relevant test layers exist
 - major scenarios identified
@@ -435,7 +435,7 @@ The workflow SHALL attempt to discover and normalize, where present:
 - smoke/CIT/BVT equivalents exist where appropriate
 - environment/setup requirements are explicit
 
-## 11.5 `:operational-readiness`
+### 11.5 `:operational-readiness`
 
 - deployment path exists
 - rollback/disable strategy exists
@@ -443,7 +443,7 @@ The workflow SHALL attempt to discover and normalize, where present:
 - recovery/operability considerations exist
 - performance/scalability considered where required
 
-## 11.6 `:security-and-privacy`
+### 11.6 `:security-and-privacy`
 
 - sensitive boundaries identified
 - security strategy or review exists
@@ -451,7 +451,7 @@ The workflow SHALL attempt to discover and normalize, where present:
 - secrets handled correctly
 - abuse/error paths considered
 
-## 11.7 `:user-and-customer-readiness`
+### 11.7 `:user-and-customer-readiness`
 
 - UI testing/manual review exists if UI present
 - accessibility considered if relevant
@@ -459,7 +459,7 @@ The workflow SHALL attempt to discover and normalize, where present:
 - beta/feedback loop exists if relevant
 - customer-facing behavior is documented
 
-## 11.8 `:quality-evidence`
+### 11.8 `:quality-evidence`
 
 - coverage evidence exists where relevant
 - performance/profiling evidence exists where relevant
@@ -467,7 +467,7 @@ The workflow SHALL attempt to discover and normalize, where present:
 - scenario/stress evidence exists where needed
 - reliability evidence available
 
-## 11.9 `:risk-and-governance`
+### 11.9 `:risk-and-governance`
 
 - risks identified
 - mitigations documented
@@ -481,7 +481,7 @@ The workflow SHALL attempt to discover and normalize, where present:
 
 The workflow SHALL support decision routing after scoring.
 
-## 12.1 Default routing states
+### 12.1 Default routing states
 
 - `:proceed`
 - `:proceed-with-conditions`
@@ -489,7 +489,7 @@ The workflow SHALL support decision routing after scoring.
 - `:plan-remediation`
 - `:block`
 
-## 12.2 Example routing rules
+### 12.2 Example routing rules
 
 - If overall is `:red`, route to `:block` and recommend remediation.
 - If overall is `:orange` with medium/high confidence, route to `:plan-remediation`.
@@ -502,7 +502,7 @@ The workflow SHALL support decision routing after scoring.
 
 ## 13. Handoff contracts
 
-## 13.1 Remediation planning handoff
+### 13.1 Remediation planning handoff
 
 ```edn
 {:handoff/type :quality-remediation
@@ -514,7 +514,7 @@ The workflow SHALL support decision routing after scoring.
                :definition-of-done [string]}]}
 ```
 
-## 13.2 Human review handoff
+### 13.2 Human review handoff
 
 The workflow SHALL emit a compact review packet containing:
 
@@ -524,7 +524,7 @@ The workflow SHALL emit a compact review packet containing:
 - low-confidence domains,
 - recommended reviewer questions.
 
-## 13.3 Test-generation handoff
+### 13.3 Test-generation handoff
 
 Where gaps are test-related, the workflow SHOULD emit candidate scenario and test targets.
 
@@ -534,19 +534,19 @@ Where gaps are test-related, the workflow SHOULD emit candidate scenario and tes
 
 This capability SHOULD be implemented as cooperating workflows.
 
-## 14.1 `quality-readiness-inventory`
+### 14.1 `quality-readiness-inventory`
 
 Produces normalized evidence graph and target classification.
 
-## 14.2 `quality-readiness-score`
+### 14.2 `quality-readiness-score`
 
 Applies rubric, weights, blockers, and domain synthesis.
 
-## 14.3 `quality-remediation-plan`
+### 14.3 `quality-remediation-plan`
 
 Converts deficits into backlog/spec/test/doc work.
 
-## 14.4 `quality-vetting-gate`
+### 14.4 `quality-vetting-gate`
 
 Determines automated progression vs human review.
 
