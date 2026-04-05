@@ -474,13 +474,12 @@
             (runner/validate-spec! "task-1" task nil))))))
 
 (deftest validate-spec-malformed-spec-test
-  (testing "throws when spec file has no YAML frontmatter"
-    (let [path (write-temp-spec! "# No Frontmatter\n\nJust a plain markdown file.")
+  (testing "plain markdown without frontmatter is now valid — decorated from H1"
+    (let [path (write-temp-spec! "# Compliance Scanner M2\n\nExecute phase design.")
           task {:spec/source-file path}]
-      (is (thrown-with-msg? Exception #"Spec validation failed"
-            (runner/validate-spec! "task-1" task nil)))))
+      (is (nil? (runner/validate-spec! "task-1" task nil)))))
 
-  (testing "spec-path key is also checked"
+  (testing "spec-path key is also checked — throws for nonexistent file"
     (let [task {:spec-path "/nonexistent/spec.md"}]
       (is (thrown-with-msg? Exception #"Spec validation failed"
             (runner/validate-spec! "task-1" task nil))))))

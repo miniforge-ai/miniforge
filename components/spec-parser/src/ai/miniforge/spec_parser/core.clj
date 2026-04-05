@@ -114,23 +114,46 @@
                  (assoc acc k v)))
              {} m))
 
+(defn- h1-title
+  "Extract the first H1 heading text from a markdown body, or nil if absent."
+  [body]
+  (when-let [[_ title] (re-find #"(?m)^#\s+(.+)$" body)]
+    (str/trim title)))
+
+(defn- body-without-h1
+  "Remove the first H1 heading line from a markdown body."
+  [body]
+  (str/trim (str/replace-first body #"(?m)^#[^\n]*\n?" "")))
+
+(defn- decorate-from-body
+  "Synthesize a :spec/* map from a plain markdown document with no frontmatter.
+   Title is inferred from the first H1; the remainder becomes the description."
+  [body]
+  (let [title (or (h1-title body) "Untitled")]
+    {:spec/title       title
+     :spec/description (let [remainder (body-without-h1 body)]
+                         (if (str/blank? remainder) title remainder))}))
+
 (defn parse-markdown
-  "Parse Markdown file with YAML frontmatter.
-   Frontmatter contains structured spec data; body is appended to description."
+  "Parse Markdown file with optional YAML frontmatter.
+
+   With frontmatter: structured fields are namespaced (:title → :spec/title)
+   and the body is appended to :spec/description for full agent context.
+
+   Without frontmatter: title is inferred from the first H1 heading and the
+   remaining body becomes :spec/description. No error is raised — the document
+   is decorated automatically so any design doc can be fed directly to the
+   workflow engine."
   [content]
-  (let [parsed (knowledge/split-frontmatter content)]
-    (when-not parsed
-      (throw (ex-info "Markdown spec requires YAML frontmatter (---...---)"
-                      {:hint "Add frontmatter with at least title and description."})))
-    (let [raw-fm   (knowledge/parse-yaml-frontmatter (:frontmatter parsed))
-          fm       (namespace-frontmatter-keys raw-fm)
-          body     (:body parsed)]
-      ;; Append body prose to description so agents get full context without
-      ;; needing to re-read the source file.
+  (if-let [parsed (knowledge/split-frontmatter content)]
+    (let [raw-fm (knowledge/parse-yaml-frontmatter (:frontmatter parsed))
+          fm     (namespace-frontmatter-keys raw-fm)
+          body   (:body parsed)]
       (cond-> fm
         (and body (not (str/blank? body)))
-        (update :spec/description
-                #(str % "\n\n" (str/trim body)))))))
+        (update :spec/description #(str % "\n\n" (str/trim body)))))
+    ;; No frontmatter — synthesize spec metadata from document structure
+    (decorate-from-body content)))
 
 (def format-parsers
   "Registry of format -> parser-fn. Extend this to add new formats."

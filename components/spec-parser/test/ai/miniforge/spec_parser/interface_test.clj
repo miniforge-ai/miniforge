@@ -237,9 +237,14 @@
                   "---\ntitle: T\ndescription: D\ntype: canonical-sdlc\n---\n")]
       (is (= "canonical-sdlc" (:workflow/type result)))))
 
-  (testing "markdown without frontmatter throws"
-    (is (thrown-with-msg? Exception #"YAML frontmatter"
-          (spec-parser/parse-content :markdown "# No Frontmatter\n\nJust body.")))))
+  (testing "markdown without frontmatter decorates from body — title from H1"
+    (let [result (spec-parser/parse-content :markdown "# Compliance Scanner M2\n\nExecute phase design.")]
+      (is (= "Compliance Scanner M2" (:spec/title result)))
+      (is (str/includes? (:spec/description result) "Execute phase design"))))
+
+  (testing "markdown without frontmatter and no H1 uses Untitled"
+    (let [result (spec-parser/parse-content :markdown "Just some prose without a heading.")]
+      (is (= "Untitled" (:spec/title result))))))
 
 (deftest parse-markdown-body-appended-test
   (testing "markdown body prose is appended to :spec/description"
