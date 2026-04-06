@@ -288,6 +288,74 @@
       (is (= "Plan failed" (get-in result [:phase :error :message]))
           "Error message should be captured"))))
 
+;------------------------------------------------------------------------------ :compliance-execute Tests
+
+(deftest phases-execute-registered-in-registry-test
+  (testing ":compliance-execute defaults are registered in the registry after namespace load"
+    (is (some? (registry/phase-defaults :compliance-execute))
+        ":compliance-execute defaults should be registered")))
+
+(deftest phase-execute-default-budget-test
+  (testing ":compliance-execute has correct default budget"
+    (let [defaults (registry/phase-defaults :compliance-execute)]
+      (is (= 5000 (get-in defaults [:budget :tokens])))
+      (is (= 1 (get-in defaults [:budget :iterations])))
+      (is (= 1800 (get-in defaults [:budget :time-seconds]))))))
+
+(deftest enter-compliance-execute-stores-execute-result-test
+  (testing "enter-compliance-execute calls execute! and stores output"
+    (let [stub-exec-result {:prs              [{:rule/id :std/clojure
+                                                :branch  "fix/compliance-210-clojure-map-access"
+                                                :pr-url  "https://github.com/org/repo/pull/1"
+                                                :violations-fixed 5
+                                                :files-changed    3}]
+                            :violations-fixed 5
+                            :files-changed    3}]
+      (with-redefs [compliance-scanner/execute! (fn [_plan _repo] stub-exec-result)]
+        (let [ctx    (-> (base-ctx)
+                         (assoc-in [:execution/phase-results :compliance-plan :result :output :plan]
+                                   stub-plan))
+              result (phases/enter-compliance-execute ctx)]
+          (is (= :compliance-execute (get-in result [:phase :name]))
+              "Phase name should be :compliance-execute")
+          (is (= :running (get-in result [:phase :status]))
+              "Phase status should be :running after enter")
+          (is (= stub-exec-result (get-in result [:phase :result :output]))
+              "Execute result should be stored in [:phase :result :output]"))))))
+
+(deftest leave-compliance-execute-records-metrics-test
+  (testing "leave-compliance-execute records pr-count, violations-fixed, files-changed"
+    (let [stub-exec-result {:prs              [{:violations-fixed 5 :files-changed 3}
+                                               {:violations-fixed 1 :files-changed 1}]
+                            :violations-fixed 6
+                            :files-changed    4}]
+      (with-redefs [compliance-scanner/execute! (fn [_plan _repo] stub-exec-result)]
+        (let [ctx      (-> (base-ctx)
+                           (assoc-in [:execution/phase-results :compliance-plan :result :output :plan]
+                                     stub-plan))
+              entered  (phases/enter-compliance-execute ctx)
+              left-ctx (phases/leave-compliance-execute entered)]
+          (is (= :completed (get-in left-ctx [:phase :status]))
+              "Phase status should be :completed after leave")
+          (is (= 2 (get-in left-ctx [:phase :metrics :pr-count]))
+              "PR count should be 2")
+          (is (= 6 (get-in left-ctx [:phase :metrics :violations-fixed]))
+              "Violations fixed should be recorded")
+          (is (= 4 (get-in left-ctx [:phase :metrics :files-changed]))
+              "Files changed should be recorded")
+          (is (= [:compliance-execute] (get-in left-ctx [:execution :phases-completed]))
+              ":compliance-execute should be added to phases-completed"))))))
+
+(deftest error-compliance-execute-sets-failed-status-test
+  (testing "error-compliance-execute sets :failed status"
+    (let [ctx (base-ctx)
+          ex  (ex-info "Execute failed" {:reason :git-error})
+          result (phases/error-compliance-execute ctx ex)]
+      (is (= :failed (get-in result [:phase :status]))
+          "Phase status should be :failed")
+      (is (= "Execute failed" (get-in result [:phase :error :message]))
+          "Error message should be captured"))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.workflow-compliance-scanner.phases-test)

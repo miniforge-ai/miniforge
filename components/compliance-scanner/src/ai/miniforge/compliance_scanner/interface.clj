@@ -29,7 +29,8 @@
             [ai.miniforge.compliance-scanner.scan     :as scan]
             [ai.miniforge.compliance-scanner.classify :as classify]
             [ai.miniforge.compliance-scanner.plan     :as plan]
-            [ai.miniforge.compliance-scanner.report   :as report]))
+            [ai.miniforge.compliance-scanner.report   :as report]
+            [ai.miniforge.compliance-scanner.execute  :as execute]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
@@ -114,6 +115,17 @@
         delta-report (factory/->delta-report repo-path standards-path timestamp
                                              (:summary plan) classified)]
     (write-report! delta-report repo-path)))
+
+(defn execute!
+  "Apply all auto-fixable violations and create one PR per rule.
+
+   Arguments:
+   - plan      - Plan map with :dag-tasks (from the plan phase)
+   - repo-path - string path to the repo/worktree root
+
+   Returns map with :prs (vector of per-rule results), :violations-fixed, :files-changed."
+  [plan repo-path]
+  (execute/execute! plan repo-path))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Convenience orchestrator
