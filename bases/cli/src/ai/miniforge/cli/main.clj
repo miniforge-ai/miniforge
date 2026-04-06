@@ -46,7 +46,11 @@
    [ai.miniforge.cli.main.commands.monitoring :as cmd-monitoring]
    [ai.miniforge.cli.main.commands.fleet :as cmd-fleet]
    [ai.miniforge.cli.main.commands.pr :as cmd-pr]
-   [ai.miniforge.cli.main.commands.control-plane :as cmd-cp]))
+   [ai.miniforge.cli.main.commands.control-plane :as cmd-cp]
+   [ai.miniforge.agent.tool-supervisor :as tool-supervisor]
+   [ai.miniforge.mcp-context-server.interface :as mcp-context-server]
+   [ai.miniforge.lsp-mcp-bridge.main :as lsp-bridge]
+   [ai.miniforge.lsp-mcp-bridge.tasks :as lsp-tasks]))
 
 ;; TUI components loaded conditionally (only in JVM/jlink bundled runtime)
 (def tui-available?
@@ -213,8 +217,7 @@
 
    Reads JSON from stdin, evaluates against policy, writes decision to stdout."
   [_m]
-  (let [hook-eval! (requiring-resolve 'ai.miniforge.agent.tool-supervisor/hook-eval-stdin!)]
-    (System/exit (hook-eval!))))
+  (System/exit (tool-supervisor/hook-eval-stdin!)))
 
 (defn context-server-cmd
   "Run the MCP context server (internal — spawned as subprocess by the agent).
@@ -223,9 +226,25 @@
    from a pre-populated cache with filesystem fallback. Invoked automatically;
    not intended for direct user use."
   [m]
-  (let [{:keys [artifact-dir]} (get-opts m)
-        start-server! (requiring-resolve 'ai.miniforge.mcp-context-server.interface/start-server)]
-    (start-server! artifact-dir)))
+  (let [{:keys [artifact-dir]} (get-opts m)]
+    (mcp-context-server/start-server artifact-dir)))
+
+(defn lsp-mcp-bridge-cmd
+  "Run the LSP-to-MCP bridge server (spawned by Claude Code/Desktop/Codex as MCP server).
+
+   Reads MINIFORGE_PROJECT_DIR env for the project root. Invoked automatically
+   by the MCP client; not intended for direct user use."
+  [_m]
+  (lsp-bridge/-main))
+
+(defn lsp-status-cmd [_m]
+  (lsp-tasks/status))
+
+(defn lsp-install-cmd [m]
+  (lsp-tasks/install (:args m)))
+
+(defn lsp-setup-cmd [m]
+  (lsp-tasks/setup (:args m)))
 
 (defn help-cmd
   [_m]
@@ -268,6 +287,16 @@
    {:cmds ["context-server"]
     :fn context-server-cmd
     :spec {:artifact-dir {:alias :a :require true}}}
+
+   ;; LSP-to-MCP bridge server (internal — spawned by Claude Code/Desktop/Codex)
+   {:cmds ["lsp-mcp-bridge"]
+    :fn lsp-mcp-bridge-cmd}
+
+   ;; LSP management commands (user-facing)
+   {:cmds ["lsp"]          :fn help-cmd}
+   {:cmds ["lsp" "status"] :fn lsp-status-cmd}
+   {:cmds ["lsp" "install"] :fn lsp-install-cmd}
+   {:cmds ["lsp" "setup"] :fn lsp-setup-cmd}
 
    ;; Run command
    {:cmds ["run"]
