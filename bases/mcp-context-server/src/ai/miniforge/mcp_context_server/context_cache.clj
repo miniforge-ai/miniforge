@@ -16,7 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-(ns ai.miniforge.mcp-artifact-server.context-cache
+(ns ai.miniforge.mcp-context-server.context-cache
   "Read-through context cache for MCP file exploration tools.
 
    Provides context_read, context_grep, and context_glob tool handlers that
@@ -25,7 +25,7 @@
 
    Layer 0: Pure helpers (token estimation, line slicing, glob matching, grep)
    Layer 1: Stateful cache operations and tool handler functions"
-  (:require [ai.miniforge.mcp-artifact-server.messages :as msg]
+  (:require [ai.miniforge.mcp-context-server.messages :as msg]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]

@@ -16,12 +16,12 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-(ns ai.miniforge.mcp-artifact-server.main
-  "Entry point for running the MCP artifact server via `bb -m`.
+(ns ai.miniforge.mcp-context-server.main
+  "Entry point for running the MCP context server via `bb -m`.
 
    Usage:
-     bb -cp components/mcp-artifact-server/src -m ai.miniforge.mcp-artifact-server.main --artifact-dir /tmp/dir"
-  (:require [ai.miniforge.mcp-artifact-server.server :as server]))
+     bb -cp components/mcp-context-server/src -m ai.miniforge.mcp-context-server.main --artifact-dir /tmp/dir"
+  (:require [ai.miniforge.mcp-context-server.server :as server]))
 
 (defn parse-args [args]
   (loop [args args

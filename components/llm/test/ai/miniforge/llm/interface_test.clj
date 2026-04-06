@@ -183,7 +183,7 @@
     (let [line (json/generate-string
                  {:type "item.completed"
                   :item {:id "item_2" :type "mcp_tool_call"
-                         :server "artifact" :tool "submit_code_artifact"
+                         :server "context" :tool "context_read"
                          :status "completed"}})
           parsed (impl/parse-codex-stream-line line)]
       (is (= "" (:delta parsed)))

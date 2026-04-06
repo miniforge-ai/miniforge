@@ -248,14 +248,10 @@
               (log/info logger :releaser :releaser/llm-called
                         {:data {:success (llm/success? llm-response)
                                 :tokens tokens
-                                :streaming? (boolean on-chunk)
-                                :mcp-artifact? (boolean artifact)}})
+                                :streaming? (boolean on-chunk)}})
               (if (llm/success? llm-response)
                 (let [content (llm/get-content llm-response)
-                      parsed (or artifact (parse-release-response content))
-                      _ (when artifact
-                          (log/info logger :releaser :releaser/mcp-artifact-received
-                                    {:data {:branch (:release/branch-name artifact)}}))]
+                      parsed (or artifact (parse-release-response content))]
                   (if parsed
                     (let [release-with-meta (-> parsed
                                                 (update :release/id #(or % (random-uuid)))

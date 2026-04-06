@@ -113,37 +113,21 @@ You must output a structured test artifact as a Clojure map:
     - No shared mutable state between tests
     - Use fixtures for setup/teardown
 
-## CRITICAL: Submit Your Tests via MCP Tool
+## Writing Your Tests
 
-You MUST call the `mcp__artifact__submit_test_artifact` tool to submit your tests.
-This is your PRIMARY deliverable — if you do not call this tool, your work is lost.
+Write your tests directly to the appropriate test files using the Write or Edit tools.
 
-Call `mcp__artifact__submit_test_artifact` with:
-- `files`: array of objects with `path` and `content` (complete test namespaces)
-- `summary`: description of test coverage
-- `type`: \"unit\", \"integration\", \"property\", \"e2e\", or \"acceptance\" (optional)
-- `framework`: testing framework used, e.g. \"clojure.test\" (optional)
-- `coverage`: object with `lines`, `branches`, `functions` percentages (optional)
-
-CRITICAL RULES:
-1. You MUST call `mcp__artifact__submit_test_artifact` exactly once before finishing
-2. Do NOT output raw EDN text — use the tool
-3. Do NOT use the Write tool to write test files — use `mcp__artifact__submit_test_artifact`
-4. If you write tests as text without calling the tool, they will be discarded
-5. Use `mcp__artifact__context_read`, `mcp__artifact__context_grep`, `mcp__artifact__context_glob` if you need to explore files.
-   These serve from a pre-loaded cache (instant) and fall back to filesystem only when needed.
-   Built-in Read, Grep, Glob tools are disabled.
-6. Go directly to generating tests and calling the MCP tool — minimize exploration
+RULES:
+1. Write test files to the correct paths (mirror source paths with `_test` suffix under `test/`)
+2. Use the Write tool to create or update test files directly in the executor environment
+3. Go directly to generating tests — minimize exploration
 
 ## Context
 
-All code you need to test is provided below in this prompt AND pre-loaded in the
-context cache. If you need additional files, use `mcp__artifact__context_read`,
-`mcp__artifact__context_grep`, or `mcp__artifact__context_glob` — these check
-the cache first (instant) and fall back to the filesystem only when needed.
+All code you need to test is provided below in this prompt. If you need additional
+files, use Read, Grep, or Glob tools to explore the filesystem.
 
-Generate your tests from the provided code, then call `mcp__artifact__submit_test_artifact`.
-Your LAST action before finishing MUST be calling `mcp__artifact__submit_test_artifact`.
+Generate your tests and write them directly to the appropriate test files.
 
 Remember: Good tests are documentation. They show how the code is intended to be used
 and what behavior is expected. Make tests readable and maintainable."}

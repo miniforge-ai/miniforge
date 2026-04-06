@@ -16,12 +16,12 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-(ns ai.miniforge.mcp-artifact-server.messages
-  "Component-level message catalog for mcp-artifact-server.
+(ns ai.miniforge.mcp-context-server.messages
+  "Component-level message catalog for mcp-context-server.
    Delegates to the shared messages component."
   (:require [ai.miniforge.messages.interface :as messages]))
 
 (def t
-  "Look up an mcp-artifact-server message by key, with optional param substitution."
-  (messages/create-translator "config/mcp-artifact-server/messages/en-US.edn"
-                              :mcp-artifact-server/messages))
+  "Look up an mcp-context-server message by key, with optional param substitution."
+  (messages/create-translator "config/mcp-context-server/messages/en-US.edn"
+                              :mcp-context-server/messages))

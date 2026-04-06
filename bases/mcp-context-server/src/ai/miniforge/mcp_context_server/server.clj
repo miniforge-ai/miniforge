@@ -16,23 +16,13 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-(ns ai.miniforge.mcp-artifact-server.server
+(ns ai.miniforge.mcp-context-server.server
   "Main MCP JSON-RPC 2.0 stdin/stdout loop.
    Babashka-compatible."
-  (:require [ai.miniforge.mcp-artifact-server.context-cache :as context-cache]
-            [ai.miniforge.mcp-artifact-server.protocol :as protocol]
-            [ai.miniforge.mcp-artifact-server.tools :as tools]
+  (:require [ai.miniforge.mcp-context-server.context-cache :as context-cache]
+            [ai.miniforge.mcp-context-server.protocol :as protocol]
+            [ai.miniforge.mcp-context-server.tools :as tools]
             [clojure.string :as str]))
-
-;------------------------------------------------------------------------------ Layer 0
-;; Artifact persistence
-
-(defn write-artifact!
-  "Write an artifact EDN map to the artifact directory. Returns the path."
-  [artifact-dir artifact]
-  (let [path (str artifact-dir "/artifact.edn")]
-    (spit path (pr-str artifact))
-    path))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Logging (stderr only — stdout is the JSON-RPC transport)
@@ -49,24 +39,24 @@
 (defn handle-initialize [_params]
   {:protocolVersion "2024-11-05"
    :capabilities {:tools {:listChanged false}}
-   :serverInfo {:name "miniforge-artifact-server"
-                :version "3.0.0"}})
+   :serverInfo {:name "miniforge-context-server"
+                :version "1.0.0"}})
 
 (defn handle-tools-list [_params]
   {:tools (tools/tool-definitions)})
 
-(defn handle-tools-call [params artifact-dir]
+(defn handle-tools-call [params]
   (let [tool-name (get params "name")
         arguments (get params "arguments" {})]
-    (tools/handle-tool-call tool-name arguments #(write-artifact! artifact-dir %))))
+    (tools/handle-tool-call tool-name arguments)))
 
 (defn dispatch
   "Route a JSON-RPC method to the appropriate handler."
-  [method params artifact-dir]
+  [method params]
   (case method
     "initialize"                  (handle-initialize params)
     "tools/list"                  (handle-tools-list params)
-    "tools/call"                  (handle-tools-call params artifact-dir)
+    "tools/call"                  (handle-tools-call params)
     "notifications/initialized"   nil
     "notifications/cancelled"     nil
     (throw (ex-info (str "Method not found: " method) {:code -32601}))))
@@ -76,9 +66,9 @@
 
 (defn handle-request
   "Handle a JSON-RPC request (has id, expects response)."
-  [id method params artifact-dir]
+  [id method params]
   (try
-    (when-let [result (dispatch method params artifact-dir)]
+    (when-let [result (dispatch method params)]
       (protocol/write-response id result))
     (catch Exception e
       (let [code (get (ex-data e) :code -32603)]
@@ -87,30 +77,30 @@
 
 (defn handle-notification
   "Handle a JSON-RPC notification (no id, no response)."
-  [method params artifact-dir]
+  [method params]
   (try
-    (dispatch method params artifact-dir)
+    (dispatch method params)
     (catch Exception e
       (log-stderr "Notification error:" (ex-message e)))))
 
 (defn process-message
   "Parse and dispatch a single JSON-RPC message."
-  [line artifact-dir]
+  [line]
   (if-let [msg (protocol/parse-message line)]
     (let [id     (get msg "id")
           method (get msg "method")
           params (get msg "params" {})]
       (if id
-        (handle-request id method params artifact-dir)
-        (handle-notification method params artifact-dir)))
+        (handle-request id method params)
+        (handle-notification method params)))
     (log-stderr "Parse error: invalid JSON")))
 
 (defn process-line
   "Process a single line from stdin. Skips blank lines."
-  [line artifact-dir]
+  [line]
   (when-not (str/blank? line)
     (try
-      (process-message line artifact-dir)
+      (process-message line)
       (catch Exception e
         (log-stderr "Parse error:" (ex-message e))))))
 
@@ -125,7 +115,7 @@
   (tools/register-handler! :context-glob  context-cache/handle-context-glob))
 
 (defn run-server
-  "Run the MCP server loop, reading JSON-RPC messages from stdin.
+  "Run the MCP context server loop, reading JSON-RPC messages from stdin.
 
    Lifecycle:
    1. Load context cache from artifact-dir (if present)
@@ -134,16 +124,16 @@
    4. Flush accumulated cache misses to artifact-dir
 
    Arguments:
-   - artifact-dir — directory path for artifact persistence"
+   - artifact-dir — directory path for context cache and miss tracking"
   [artifact-dir]
-  (log-stderr "miniforge-artifact MCP server started, artifact-dir:" artifact-dir)
+  (log-stderr "miniforge-context MCP server started, artifact-dir:" artifact-dir)
   (context-cache/load-cache! artifact-dir)
   (register-context-handlers!)
   (try
     (let [reader (java.io.BufferedReader. (java.io.InputStreamReader. System/in "UTF-8"))]
       (loop []
         (when-let [line (.readLine reader)]
-          (process-line line artifact-dir)
+          (process-line line)
           (recur))))
     (finally
       (context-cache/flush-misses! artifact-dir))))

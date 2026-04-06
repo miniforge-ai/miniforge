@@ -1,8 +1,6 @@
-{:mcp-artifact-server/messages
+{:mcp-context-server/messages
  {;; Tool dispatch
   :tool/unknown                "Unknown tool: {tool-name}"
-  :tool/artifact-written       "Artifact written: {path}"
-  :tool/no-builder             "No builder registered for: {key}"
   :tool/no-handler             "No handler registered for: {key}"
 
   ;; Context cache lifecycle

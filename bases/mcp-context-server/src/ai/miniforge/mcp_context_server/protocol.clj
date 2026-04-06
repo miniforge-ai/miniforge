@@ -16,7 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-(ns ai.miniforge.mcp-artifact-server.protocol
+(ns ai.miniforge.mcp-context-server.protocol
   "JSON-RPC 2.0 protocol helpers for MCP communication.
    Babashka-compatible (cheshire only, no JVM-only deps)."
   (:require [cheshire.core :as json]))

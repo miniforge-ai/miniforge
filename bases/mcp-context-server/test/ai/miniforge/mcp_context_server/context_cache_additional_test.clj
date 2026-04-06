@@ -16,10 +16,10 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-(ns ai.miniforge.mcp-artifact-server.context-cache-additional-test
+(ns ai.miniforge.mcp-context-server.context-cache-additional-test
   "Additional unit tests for context cache — filter helpers and edge cases."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [ai.miniforge.mcp-artifact-server.context-cache :as cache]))
+            [ai.miniforge.mcp-context-server.context-cache :as cache]))
 
 ;------------------------------------------------------------------------------ Fixtures
 

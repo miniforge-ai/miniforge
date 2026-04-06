@@ -313,8 +313,7 @@
                                (when (seq acceptance-criteria)
                                  (str "\n\nAcceptance criteria to verify:\n"
                                       (str/join "\n" (map #(str "- " %) acceptance-criteria))))
-                               "\n\nSubmit your tests by calling the `submit_test_artifact` MCP tool. "
-                               "Do NOT output tests as text — you MUST use the tool. "
+                               "\n\nWrite your tests directly to the appropriate test files. "
                                "Include complete test code, not placeholders.")]
           (if llm-client
             ;; Use the real LLM with artifact session for MCP tool support
@@ -350,15 +349,11 @@
               (log/info logger :tester :tester/llm-called
                         {:data {:success (llm/success? response)
                                 :tokens tokens
-                                :streaming? (boolean on-chunk)
-                                :mcp-artifact? (boolean artifact)}})
+                                :streaming? (boolean on-chunk)}})
               (if (llm/success? response)
                 ;; Check for MCP artifact first, then fall back to text parsing
                 (let [content (llm/get-content response)
                       parsed (or artifact (parse-test-response content))
-                      _ (when artifact
-                          (log/info logger :tester :tester/mcp-artifact-received
-                                    {:data {:file-count (count (:test/files artifact))}}))
                       ;; Try multiple parsing strategies (no fallback — fail explicitly)
                       tests (or parsed
                                 (when-let [files (extract-test-code-blocks content)]

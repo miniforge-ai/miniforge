@@ -104,13 +104,6 @@
       :else
       ["bb" "miniforge"])))
 
-(defn server-command
-  "Build the MCP config command map for starting the artifact server."
-  [artifact-dir]
-  (let [[cmd & args] (resolve-miniforge-command)]
-    {:command cmd
-     :args (vec (concat args ["mcp-serve" "--artifact-dir" artifact-dir]))}))
-
 (defn create-session!
   "Create a new artifact session with a temporary directory.
 
@@ -132,23 +125,43 @@
                                (file-artifacts/empty-snapshot)))}))
 
 ;------------------------------------------------------------------------------ Layer 1
+;; MCP server command
+
+(defn server-command
+  "Build the MCP context server command for a given session directory.
+
+   Returns {:command <string> :args [<string> ...]} suitable for MCP config JSON.
+
+   Resolution order:
+   1. MINIFORGE_MCP_CMD env var (explicit override)
+   2. bb task (dev mode — bb.edn found in ancestor directory)
+   3. mf context-server (production — bundled in the miniforge binary)
+   4. miniforge context-server (fallback binary name)
+
+   The server reads context-cache.edn from artifact-dir on startup and
+   serves context_read/context_grep/context_glob to the inner LLM agent."
+  [artifact-dir]
+  (let [mcp-args ["--artifact-dir" artifact-dir]
+        bb-root  (find-bb-root)]
+    (cond
+      (System/getenv "MINIFORGE_MCP_CMD")
+      {:command (System/getenv "MINIFORGE_MCP_CMD") :args mcp-args}
+
+      bb-root
+      {:command "bb"
+       :args (into ["--config" (str bb-root "/bb.edn")
+                    "--deps-root" bb-root
+                    "mcp-context-server"]
+                   mcp-args)}
+
+      (command-on-path? "mf")
+      {:command "mf" :args (into ["context-server"] mcp-args)}
+
+      :else
+      {:command "miniforge" :args (into ["context-server"] mcp-args)})))
+
+;------------------------------------------------------------------------------ Layer 1
 ;; MCP config generation
-
-(def mcp-server-name
-  "Name used in MCP config for the artifact server.
-   Must match the key in mcpServers — Claude CLI derives tool names as
-   mcp__<server-name>__<tool-name>."
-  "artifact")
-
-(def mcp-tool-names
-  "MCP tool names exposed by the artifact server."
-  ["submit_code_artifact"
-   "submit_plan"
-   "submit_test_artifact"
-   "submit_release_artifact"
-   "context_read"
-   "context_grep"
-   "context_glob"])
 
 (defn write-codex-mcp-config!
   "Write or update .codex/config.toml with [mcp_servers.artifact] block.
@@ -216,14 +229,18 @@
     (spit path (json/generate-string settings {:pretty true}))
     path))
 
+(def mcp-tool-names
+  "MCP tool names exposed by the context server."
+  ["context_read" "context_grep" "context_glob"])
+
 (defn write-mcp-config!
-  "Write MCP server configs for all supported CLI backends.
+  "Write session config files for all supported CLI backends.
 
    Writes config files:
-   - <session-dir>/mcp-config.json — Claude CLI (passed via --mcp-config flag)
+   - <session-dir>/mcp-config.json — MCP server config (for --mcp-config flag)
    - <session-dir>/claude-settings.json — Claude CLI hooks (passed via --settings)
-   - .codex/config.toml — Codex CLI (reads from CWD automatically)
-   - .cursor/mcp.json — Cursor agent (reads from CWD automatically)
+   - .codex/config.toml — Codex MCP server config (cleaned up after session)
+   - .cursor/mcp.json — Cursor MCP server config (cleaned up after session)
 
    Also populates :mcp-allowed-tools and :supervision on the session.
 
@@ -232,21 +249,18 @@
 
    Returns: session (for threading)"
   [session]
-  (let [srv-cmd (server-command (:dir session))
-        {:keys [command args]} srv-cmd
-        config {"mcpServers"
-                {mcp-server-name
-                 {"command" command
-                  "args" args}}}
-        allowed-tools (mapv #(str "mcp__" mcp-server-name "__" %) mcp-tool-names)
-        codex-path (write-codex-mcp-config! srv-cmd)
-        cursor-path (write-cursor-mcp-config! srv-cmd)
+  (let [srv-cmd       (server-command (:dir session))
+        mcp-config    {"mcpServers" {"context" {"command" (:command srv-cmd)
+                                                "args"    (:args srv-cmd)}}}
+        _             (spit (:mcp-config-path session)
+                            (json/generate-string mcp-config {:pretty true}))
         settings-path (write-claude-settings! (:dir session))
+        codex-path    (write-codex-mcp-config! srv-cmd)
+        cursor-path   (write-cursor-mcp-config! srv-cmd)
         [hook-cmd & hook-args] (resolve-miniforge-command)
         hook-eval-cmd (str/join " " (concat [hook-cmd] hook-args ["hook-eval"]))]
-    (spit (:mcp-config-path session) (json/generate-string config))
     (assoc session
-           :mcp-allowed-tools allowed-tools
+           :mcp-allowed-tools mcp-tool-names
            :mcp-cleanup-files [codex-path cursor-path]
            :supervision {:hook-eval-cmd hook-eval-cmd
                          :settings-path settings-path
