@@ -1,3 +1,0 @@
-{:paths []
-
- :deps {ai.miniforge/mcp-context-server {:local/root "../../bases/mcp-context-server"}}}

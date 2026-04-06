@@ -132,19 +132,33 @@
 
    Returns {:command <string> :args [<string> ...]} suitable for MCP config JSON.
 
+   Resolution order:
+   1. MINIFORGE_MCP_CMD env var (explicit override)
+   2. bb task (dev mode — bb.edn found in ancestor directory)
+   3. mf context-server (production — bundled in the miniforge binary)
+   4. miniforge context-server (fallback binary name)
+
    The server reads context-cache.edn from artifact-dir on startup and
    serves context_read/context_grep/context_glob to the inner LLM agent."
   [artifact-dir]
-  (let [bb-root (find-bb-root)]
-    (if bb-root
+  (let [mcp-args ["--artifact-dir" artifact-dir]
+        bb-root  (find-bb-root)]
+    (cond
+      (System/getenv "MINIFORGE_MCP_CMD")
+      {:command (System/getenv "MINIFORGE_MCP_CMD") :args mcp-args}
+
+      bb-root
       {:command "bb"
-       :args ["--config" (str bb-root "/bb.edn")
-              "--deps-root" bb-root
-              "mcp-context-server"
-              "--artifact-dir" artifact-dir]}
-      {:command "bb"
-       :args ["mcp-context-server"
-              "--artifact-dir" artifact-dir]})))
+       :args (into ["--config" (str bb-root "/bb.edn")
+                    "--deps-root" bb-root
+                    "mcp-context-server"]
+                   mcp-args)}
+
+      (command-on-path? "mf")
+      {:command "mf" :args (into ["context-server"] mcp-args)}
+
+      :else
+      {:command "miniforge" :args (into ["context-server"] mcp-args)})))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; MCP config generation

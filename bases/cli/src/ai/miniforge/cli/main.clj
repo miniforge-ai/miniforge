@@ -216,6 +216,17 @@
   (let [hook-eval! (requiring-resolve 'ai.miniforge.agent.tool-supervisor/hook-eval-stdin!)]
     (System/exit (hook-eval!))))
 
+(defn context-server-cmd
+  "Run the MCP context server (internal — spawned as subprocess by the agent).
+
+   Reads JSON-RPC 2.0 from stdin, serves context_read/context_grep/context_glob
+   from a pre-populated cache with filesystem fallback. Invoked automatically;
+   not intended for direct user use."
+  [m]
+  (let [{:keys [artifact-dir]} (get-opts m)
+        start-server! (requiring-resolve 'ai.miniforge.mcp-context-server.interface/start-server)]
+    (start-server! artifact-dir)))
+
 (defn help-cmd
   [_m]
   (let [binary-name (app-config/binary-name)
@@ -252,6 +263,11 @@
    ;; Tool-use supervision hook (Claude PreToolUse)
    {:cmds ["hook-eval"]
     :fn hook-eval-cmd}
+
+   ;; MCP context server (internal — spawned as subprocess by agent)
+   {:cmds ["context-server"]
+    :fn context-server-cmd
+    :spec {:artifact-dir {:alias :a :require true}}}
 
    ;; Run command
    {:cmds ["run"]

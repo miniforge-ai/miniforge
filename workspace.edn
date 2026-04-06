@@ -6,8 +6,7 @@
        :auto-add false}
  :tag-patterns {:stable "stable/*"
                 :release "v[0-9]*"}
- :projects {"development"        {:alias "dev"}
-            "miniforge-core"      {:alias "core"}
-            "miniforge"           {:alias "cli"}
-            "miniforge-tui"       {:alias "tui"}
-            "mcp-context-server"  {:alias "mcp"}}}
+ :projects {"development"    {:alias "dev"}
+            "miniforge-core" {:alias "core"}
+            "miniforge"      {:alias "cli"}
+            "miniforge-tui"  {:alias "tui"}}}
