@@ -53,9 +53,11 @@
 
 (defn- resolve-rules
   "Resolve which rules to apply from context input.
+   Coerces string values (e.g. \":always-apply\" from YAML) to keywords.
    Defaults to :always-apply."
   [ctx]
-  (get-in ctx [:execution/input :rules] :always-apply))
+  (let [raw (get-in ctx [:execution/input :rules] :always-apply)]
+    (if (string? raw) (keyword (subs raw 1)) raw)))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Default configs
