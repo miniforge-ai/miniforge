@@ -241,16 +241,22 @@
                      :hint (messages/t :governed/no-capsule-hint)}))))
 
 (defn- build-env-record
-  "Acquire environment from executor and build the result map."
+  "Acquire environment from executor and build the result map.
+   Returns nil on failure after printing the error so the runner can skip
+   environment setup rather than throwing. Failure is visible in stdout."
   [executor workflow-id mode {:keys [acquire-env! result-ok? result-unwrap]}]
   (let [task-id    (if (uuid? workflow-id) workflow-id (random-uuid))
         env-result (acquire-env! executor task-id {})]
-    (when (result-ok? env-result)
+    (if (result-ok? env-result)
       (let [env (result-unwrap env-result)]
         {:executor       executor
          :environment-id (:environment-id env)
          :worktree-path  (:workdir env)
-         :execution-mode mode}))))
+         :execution-mode mode})
+      (do
+        (println "WARN: Failed to acquire execution environment for" workflow-id
+                 "—" (get-in env-result [:error :message] (str env-result)))
+        nil))))
 
 (defn- acquire-execution-environment!
   "Acquire an isolated execution environment before pipeline starts.
