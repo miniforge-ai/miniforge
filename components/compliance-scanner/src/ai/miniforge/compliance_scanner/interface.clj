@@ -99,6 +99,22 @@
   [work-spec repo-path]
   (report/write-work-spec! work-spec repo-path))
 
+(defn write-delta-report!
+  "Build and write EDN delta report from classified violations and plan.
+
+   Arguments:
+   - repo-path      - string path to repo root
+   - standards-path - string path to .standards dir
+   - classified     - vector of classified Violation maps (from classify phase)
+   - plan           - Plan map (for :summary)
+
+   Returns the path written."
+  [repo-path standards-path classified plan]
+  (let [timestamp    (.toString (java.time.Instant/now))
+        delta-report (factory/->delta-report repo-path standards-path timestamp
+                                             (:summary plan) classified)]
+    (write-report! delta-report repo-path)))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Convenience orchestrator
 

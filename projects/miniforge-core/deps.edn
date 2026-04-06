@@ -33,7 +33,9 @@
         ai.miniforge/event-stream {:local/root "../../components/event-stream"}
         ai.miniforge/self-healing {:local/root "../../components/self-healing"}
 ai.miniforge/messages {:local/root "../../components/messages"}
-        ai.miniforge/patterns {:local/root "../../components/patterns"}}
+        ai.miniforge/patterns {:local/root "../../components/patterns"}
+        ai.miniforge/compliance-scanner {:local/root "../../components/compliance-scanner"}
+        ai.miniforge/workflow-compliance-scanner {:local/root "../../components/workflow-compliance-scanner"}}
 
  :aliases
  {:uberjar
