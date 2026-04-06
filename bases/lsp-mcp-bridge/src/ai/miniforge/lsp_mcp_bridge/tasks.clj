@@ -334,28 +334,27 @@
   (println (render-codex-mcp-block (mcp-server-entry-claude-desktop)))
   (println "\nRun with --claude-code, --claude-desktop, or --codex to write config files."))
 
+(def ^:private client-registry
+  {"--claude-code"    {:label "Claude Code"    :fn setup-claude-code}
+   "--claude-desktop" {:label "Claude Desktop" :fn setup-claude-desktop}
+   "--codex"          {:label "Codex"          :fn setup-codex}
+   "--codex-cli"      {:label "Codex CLI"      :fn setup-codex}
+   "--codex-desktop"  {:label "Codex Desktop"  :fn setup-codex}})
+
 (defn setup
-  "Generate MCP config for Claude Code and/or Claude Desktop and/or Codex.
+  "Generate MCP config for one or more clients.
 
    Arguments:
-   - args - Command-line args (--claude-code, --claude-desktop, --codex, --codex-cli,
-     --codex-desktop, or empty for preview)"
+   - args - Client flags (--claude-code, --claude-desktop, --codex, --codex-cli,
+     --codex-desktop) or empty for a preview of all configs"
   [args]
-  (let [args-set (set args)]
-    (cond
-      (empty? args-set)
-      (print-config-preview)
-
-      :else
-      (do
-        (when (contains? args-set "--claude-code")
-          (setup-claude-code))
-        (when (contains? args-set "--claude-desktop")
-          (setup-claude-desktop))
-        (when (or (contains? args-set "--codex")
-                  (contains? args-set "--codex-cli")
-                  (contains? args-set "--codex-desktop"))
-          (setup-codex))))))
+  (if (empty? args)
+    (print-config-preview)
+    (doseq [arg args]
+      (if-let [{:keys [fn]} (get client-registry arg)]
+        (fn)
+        (println (str "  Unknown client: " arg
+                      "\n  Available: " (str/join ", " (sort (keys client-registry)))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
