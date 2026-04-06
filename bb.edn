@@ -443,7 +443,6 @@
                  "components/dag-executor/resources"
                  "components/task-executor/src"
                  "components/pr-lifecycle/src"
-                "components/pr-lifecycle/resources"
                  "components/release-executor/src"
                  "components/evidence-bundle/src"
                  "components/evidence-bundle/resources"
