@@ -1,0 +1,6 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge/phase              {:local/root "../phase"}
+        ai.miniforge/compliance-scanner {:local/root "../compliance-scanner"}
+        ai.miniforge/response           {:local/root "../response"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps  {}}}}

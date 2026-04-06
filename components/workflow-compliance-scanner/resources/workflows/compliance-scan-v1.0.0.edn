@@ -1,0 +1,26 @@
+;; Compliance Scan Workflow v1.0.0
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; Scan → classify → plan compliance pipeline.
+;; All phases are pure-code (no LLM). Reads repo from :execution/worktree-path
+;; or :repo-path from spec input. Writes delta report and work spec to disk.
+;;
+;; Pipeline: compliance-scan → compliance-classify → compliance-plan → done
+
+{:workflow/id      :compliance-scan
+ :workflow/version "1.0.0"
+ :workflow/name    "Compliance Scan Workflow"
+ :workflow/description
+ "Scan a repository for policy violations, classify each violation as
+  auto-fixable or needs-review, and produce a delta report + remediation
+  work spec. Pure-code phases — no LLM invocation."
+
+ :workflow/pipeline
+ [{:phase :compliance-scan}
+  {:phase :compliance-classify}
+  {:phase :compliance-plan}
+  {:phase :done}]
+
+ :workflow/config
+ {:max-tokens     5000
+  :max-iterations 10}}

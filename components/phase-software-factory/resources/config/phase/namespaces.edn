@@ -8,4 +8,5 @@
   ;; Observe phase lives in workflow component but must be registered here
   ;; because uberjar packaging collapses duplicate config/phase/namespaces.edn
   ;; resources — only one file survives. See loader.clj getResources().
-  ai.miniforge.workflow.observe-phase]}
+  ai.miniforge.workflow.observe-phase
+  ai.miniforge.workflow-compliance-scanner.phases]}

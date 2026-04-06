@@ -94,6 +94,8 @@
                        "components/spec-parser/resources"
                        "components/compliance-scanner/src"
                        "components/compliance-scanner/resources"
+                       "components/workflow-compliance-scanner/src"
+                       "components/workflow-compliance-scanner/resources"
                        "components/repo-index/src"
                        "components/repo-index/resources"
                        "components/context-pack/src"
@@ -158,6 +160,7 @@
                      ai.miniforge/pr-sync {:local/root "components/pr-sync"}
                      ai.miniforge/spec-parser {:local/root "components/spec-parser"}
                      ai.miniforge/compliance-scanner {:local/root "components/compliance-scanner"}
+                     ai.miniforge/workflow-compliance-scanner {:local/root "components/workflow-compliance-scanner"}
                      ai.miniforge/repo-index {:local/root "components/repo-index"}
                      ai.miniforge/context-pack {:local/root "components/context-pack"}
                      ai.miniforge/mcp-context-server {:local/root "bases/mcp-context-server"}
@@ -220,6 +223,7 @@
                        "components/pr-sync/test"
                        "components/spec-parser/test"
                        "components/compliance-scanner/test"
+                       "components/workflow-compliance-scanner/test"
                        "components/repo-index/test"
                        "components/context-pack/test"
                        "bases/mcp-context-server/test"
@@ -277,6 +281,7 @@
                       ai.miniforge/pr-sync {:local/root "components/pr-sync"}
                       ai.miniforge/spec-parser {:local/root "components/spec-parser"}
                       ai.miniforge/compliance-scanner {:local/root "components/compliance-scanner"}
+                      ai.miniforge/workflow-compliance-scanner {:local/root "components/workflow-compliance-scanner"}
                       ai.miniforge/repo-index {:local/root "components/repo-index"}
                       ai.miniforge/context-pack {:local/root "components/context-pack"}
                       ai.miniforge/mcp-context-server {:local/root "bases/mcp-context-server"}
