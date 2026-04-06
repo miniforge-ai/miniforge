@@ -6,6 +6,7 @@
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.dag-executor.executor :as dag-exec]
+   [ai.miniforge.dag-executor.result :as dag-result]
    [ai.miniforge.phase.interface]))
 
 ;; ---------------------------------------------------------------------------- extract-output
@@ -200,4 +201,20 @@
              Exception #"(?i)No capsule executor available"
              (runner/run-pipeline wf {:task "Test"}
                                   {:execution-mode :governed})))))))
+
+;; ---------------------------------------------------------------------------- build-env-record: WARN on failure
+
+(deftest build-env-record-logs-warn-when-acquisition-fails-test
+  (testing "WARN is printed and pipeline completes when worktree acquisition returns an error"
+    (let [wf     {:workflow/id :test
+                  :workflow/version "1.0.0"
+                  :workflow/pipeline [{:phase :done}]}
+          output (with-out-str
+                   (with-redefs [dag-exec/acquire-environment!
+                                 (fn [& _]
+                                   (dag-result/err :worktree-create-failed
+                                                   "git worktree add failed"))]
+                     (runner/run-pipeline wf {:task "Test"} {})))]
+      (is (re-find #"WARN" output))
+      (is (re-find #"Failed to acquire execution environment" output)))))
 
