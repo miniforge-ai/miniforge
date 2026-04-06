@@ -1,6 +1,7 @@
 {:paths ["test" "resources"]
 
  :deps {ai.miniforge/cli {:local/root "../../bases/cli"}
+        ai.miniforge/lsp-mcp-bridge {:local/root "../../bases/lsp-mcp-bridge"}
         ai.miniforge/mcp-context-server {:local/root "../../bases/mcp-context-server"}
         ai.miniforge/workflow {:local/root "../../components/workflow"}
         ai.miniforge/schema {:local/root "../../components/schema"}

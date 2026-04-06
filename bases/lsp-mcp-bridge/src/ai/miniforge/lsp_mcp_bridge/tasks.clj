@@ -167,7 +167,7 @@
 (defn mcp-server-entry-claude-code
   "Build MCP server config for Claude Code CLI (.mcp.json)."
   []
-  {"command" "bb"
+  {"command" "mf"
    "args"    ["lsp-mcp-bridge"]
    "env"     {"MINIFORGE_PROJECT_DIR" "."}})
 
@@ -175,8 +175,8 @@
   "Build MCP server config for Claude Desktop."
   []
   (let [dir (project-dir)]
-    {"command" "bb"
-     "args"    ["--file" (str dir "/bb.edn") "lsp-mcp-bridge"]
+    {"command" "mf"
+     "args"    ["lsp-mcp-bridge"]
      "cwd"     dir
      "env"     {"MINIFORGE_PROJECT_DIR" dir}}))
 

@@ -227,6 +227,32 @@
         start-server! (requiring-resolve 'ai.miniforge.mcp-context-server.interface/start-server)]
     (start-server! artifact-dir)))
 
+(defn lsp-mcp-bridge-cmd
+  "Run the LSP-to-MCP bridge server (spawned by Claude Code/Desktop/Codex as MCP server).
+
+   Reads MINIFORGE_PROJECT_DIR env for the project root. Invoked automatically
+   by the MCP client; not intended for direct user use."
+  [_m]
+  (let [main! (requiring-resolve 'ai.miniforge.lsp-mcp-bridge.main/-main)]
+    (main!)))
+
+(defn lsp-status-cmd [_m]
+  (let [status! (requiring-resolve 'ai.miniforge.lsp-mcp-bridge.tasks/status)]
+    (status!)))
+
+(defn lsp-install-cmd [m]
+  (let [install! (requiring-resolve 'ai.miniforge.lsp-mcp-bridge.tasks/install)]
+    (install! (:args m))))
+
+(defn lsp-setup-cmd [m]
+  (let [opts     (get-opts m)
+        args     (cond-> []
+                   (:claude-code opts)    (conj "--claude-code")
+                   (:claude-desktop opts) (conj "--claude-desktop")
+                   (:codex opts)          (conj "--codex"))
+        setup!   (requiring-resolve 'ai.miniforge.lsp-mcp-bridge.tasks/setup)]
+    (setup! args)))
+
 (defn help-cmd
   [_m]
   (let [binary-name (app-config/binary-name)
@@ -268,6 +294,20 @@
    {:cmds ["context-server"]
     :fn context-server-cmd
     :spec {:artifact-dir {:alias :a :require true}}}
+
+   ;; LSP-to-MCP bridge server (internal — spawned by Claude Code/Desktop/Codex)
+   {:cmds ["lsp-mcp-bridge"]
+    :fn lsp-mcp-bridge-cmd}
+
+   ;; LSP management commands (user-facing)
+   {:cmds ["lsp"]          :fn help-cmd}
+   {:cmds ["lsp" "status"] :fn lsp-status-cmd}
+   {:cmds ["lsp" "install"] :fn lsp-install-cmd}
+   {:cmds ["lsp" "setup"]
+    :fn lsp-setup-cmd
+    :spec {:claude-code    {:coerce :boolean :alias :c}
+           :claude-desktop {:coerce :boolean :alias :d}
+           :codex          {:coerce :boolean :alias :x}}}
 
    ;; Run command
    {:cmds ["run"]
