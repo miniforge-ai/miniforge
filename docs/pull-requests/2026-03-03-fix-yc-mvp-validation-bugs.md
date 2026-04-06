@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # Fix 8 Bugs Found During YC MVP Validation Run
 
 **Branch:** `fix/yc-mvp-validation-bugs`
