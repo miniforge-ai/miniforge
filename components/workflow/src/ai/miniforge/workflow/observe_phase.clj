@@ -65,11 +65,10 @@
 
 (defn- load-observe-phase-config
   []
-  (->> "config/workflow/observe-phase.edn"
-       io/resource
-       slurp
-       edn/read-string
-       (validate! ObservePhaseConfig)))
+  (if-let [res (io/resource "config/workflow/observe-phase.edn")]
+    (->> res slurp edn/read-string (validate! ObservePhaseConfig))
+    (throw (ex-info "Missing classpath resource: config/workflow/observe-phase.edn"
+                    {:hint "Add components/workflow/resources to your classpath"}))))
 
 (defn- load-monitor-defaults
   []
