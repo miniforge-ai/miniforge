@@ -103,12 +103,8 @@
     ("Read" "Glob" "Grep" "WebSearch" "WebFetch" "LS")
     {:decision "allow"}
 
-    ;; MCP artifact tools: always allow
-    ("mcp__artifact__submit_code_artifact"
-     "mcp__artifact__submit_plan"
-     "mcp__artifact__submit_test_artifact"
-     "mcp__artifact__submit_release_artifact"
-     "mcp__artifact__context_read"
+    ;; MCP context tools: always allow
+    ("mcp__artifact__context_read"
      "mcp__artifact__context_grep"
      "mcp__artifact__context_glob")
     {:decision "allow"}
@@ -131,10 +127,6 @@
   "Tools that are always on-task and never need semantic review."
   [tool-name]
   (contains? #{"Read" "Glob" "Grep" "WebSearch" "WebFetch" "LS"
-               "mcp__artifact__submit_code_artifact"
-               "mcp__artifact__submit_plan"
-               "mcp__artifact__submit_test_artifact"
-               "mcp__artifact__submit_release_artifact"
                "mcp__artifact__context_read"
                "mcp__artifact__context_grep"
                "mcp__artifact__context_glob"}

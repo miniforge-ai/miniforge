@@ -346,22 +346,17 @@
               (log/info logger :planner :planner/llm-called
                         {:data {:success (llm/success? llm-response)
                                 :tokens tokens
-                                :streaming? (boolean on-chunk)
-                                :mcp-artifact? (boolean artifact)}})
+                                :streaming? (boolean on-chunk)}})
               (if (llm/success? llm-response)
                 (let [content (llm/get-content llm-response)
                       plan (or artifact
                                (parse-plan-response content)
-                               (throw (ex-info "Plan generation failed: neither MCP artifact nor EDN parse succeeded"
+                               (throw (ex-info "Plan generation failed: EDN parse did not succeed"
                                                {:phase :plan
-                                                :mcp-artifact nil
                                                 :parse-result nil
                                                 :llm-content-length (count content)
                                                 :llm-content-preview (subs content 0 (min 500 (count content)))})))
                       plan-final (finalize-plan plan)]
-                  (when artifact
-                    (log/info logger :planner :planner/mcp-artifact-received
-                              {:data {:task-count (count (:plan/tasks artifact))}}))
                   ;; Check for already-satisfied response
                   (if (= :already-satisfied (:plan/status plan-final))
                     (let [output {:plan/id (random-uuid)

@@ -1,3 +1,0 @@
-{:paths ["src" "resources"]
- :deps {cheshire/cheshire {:mvn/version "5.13.0"}
-        ai.miniforge/messages {:local/root "../messages"}}}

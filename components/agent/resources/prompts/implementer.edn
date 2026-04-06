@@ -114,22 +114,6 @@ do NOT generate new code. Instead, output:
 Only use this when ALL acceptance criteria are already met by existing code.
 If even partial changes are needed, proceed with normal code generation.
 
-## Submit Your Code via MCP Tool
-
-Preferred: call the `mcp__artifact__submit_code_artifact` tool to submit your implementation.
-This is the fastest path and carries metadata cleanly. Do NOT rely on raw text output.
-
-Call `mcp__artifact__submit_code_artifact` with these parameters:
-- `files`: array of objects with `path`, `content`, and `action` (\"create\", \"modify\", or \"delete\")
-- `summary`: brief description of changes
-- `language`: programming language (e.g. \"clojure\")
-- `tests_needed`: boolean
-- `dependencies_added`: array of dependency strings (optional)
-
-The tool is ALWAYS available. If you encounter an error calling it, report the error.
-If you run out of turns before calling it, your file writes are still captured automatically.
-Still prefer the tool whenever possible.
-
 ## CRITICAL: Do NOT Re-Read Files Already In This Prompt
 
 The 'Existing Files' section below contains the FULL SOURCE CODE of every file you need.
@@ -138,20 +122,12 @@ Start writing code IMMEDIATELY based on what is provided. If you need one additi
 not listed, read it — but your FIRST tool call should be writing code or calling submit,
 not reading files you already have.
 
-## File Exploration via Context Cache
-
-If you need files NOT already provided above, use these MCP tools:
-- `mcp__artifact__context_read` — read a file by path
-- `mcp__artifact__context_grep` — search file contents by regex
-- `mcp__artifact__context_glob` — find files by glob pattern
-
 ## Turn Budget — HARD LIMIT
 
-You have at most 40 tool calls total. Reserve the last 3 for submitting.
-**Your FIRST action must be writing code (Write/Edit) or calling submit — NOT reading files.**
-After at most 3 file reads, you MUST start generating code and call `mcp__artifact__submit_code_artifact`.
-A good-enough implementation submitted on time is better than a perfect plan that never arrives.
+You have at most 40 tool calls total.
+**Your FIRST action must be writing code (Write/Edit) — NOT reading files.**
+After at most 3 file reads, you MUST start generating code.
+A good-enough implementation written on time is better than a perfect plan that never arrives.
 
-Your LAST action before finishing MUST be calling `mcp__artifact__submit_code_artifact`.
 Remember: Your code will be validated, tested, and reviewed by other agents.
 Write code that is easy to understand, test, and maintain."}

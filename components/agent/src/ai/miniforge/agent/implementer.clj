@@ -421,13 +421,7 @@
   (let [content (llm/get-content response)
         parsed (or artifact (parse-code-response content))]
     (let [tools (get response :tools-called [])]
-      (cond
-        (= :mcp artifact-source)
-        (log/info logger :implementer :implementer/mcp-artifact-received
-                  {:data {:file-count (count (:code/files artifact))
-                          :tools-called tools}})
-
-        (nil? artifact-source)
+      (when (nil? artifact-source)
         (log/warn logger :implementer :implementer/mcp-tool-not-called
                   {:data {:content-length (count (or content ""))
                           :tools-called tools
@@ -485,7 +479,6 @@
               {:data {:success (llm/success? response)
                       :tokens tokens
                       :streaming? (boolean on-chunk)
-                      :mcp-artifact? (= :mcp artifact-source)
                       :file-artifact-fallback? (= :file-fallback artifact-source)
                       :tools-called (get response :tools-called [])}})
     (if (llm/success? response)

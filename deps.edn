@@ -92,8 +92,6 @@
                        "components/pr-sync/src"
                        "components/spec-parser/src"
                        "components/spec-parser/resources"
-                       "components/mcp-artifact-server/src"
-                       "components/mcp-artifact-server/resources"
                        "components/compliance-scanner/src"
                        "components/compliance-scanner/resources"
                        "components/repo-index/src"
@@ -157,7 +155,6 @@
                      ai.miniforge/self-healing {:local/root "components/self-healing"}
                      ai.miniforge/pr-sync {:local/root "components/pr-sync"}
                      ai.miniforge/spec-parser {:local/root "components/spec-parser"}
-                     ai.miniforge/mcp-artifact-server {:local/root "components/mcp-artifact-server"}
                      ai.miniforge/compliance-scanner {:local/root "components/compliance-scanner"}
                      ai.miniforge/repo-index {:local/root "components/repo-index"}
                      ai.miniforge/context-pack {:local/root "components/context-pack"}
@@ -219,7 +216,6 @@
                        "components/self-healing/test"
                        "components/pr-sync/test"
                        "components/spec-parser/test"
-                       "components/mcp-artifact-server/test"
                        "components/compliance-scanner/test"
                        "components/repo-index/test"
                        "components/context-pack/test"
@@ -276,7 +272,6 @@
                       ai.miniforge/self-healing {:local/root "components/self-healing"}
                       ai.miniforge/pr-sync {:local/root "components/pr-sync"}
                       ai.miniforge/spec-parser {:local/root "components/spec-parser"}
-                      ai.miniforge/mcp-artifact-server {:local/root "components/mcp-artifact-server"}
                       ai.miniforge/compliance-scanner {:local/root "components/compliance-scanner"}
                       ai.miniforge/repo-index {:local/root "components/repo-index"}
                       ai.miniforge/context-pack {:local/root "components/context-pack"}

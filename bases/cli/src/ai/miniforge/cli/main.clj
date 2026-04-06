@@ -208,16 +208,6 @@
 (defn cp-resolve-cmd [m] (cmd-cp/resolve-cmd (get-opts m)))
 (defn cp-terminate-cmd [m] (cmd-cp/terminate-cmd (get-opts m)))
 
-(defn mcp-serve-cmd
-  "Run the MCP artifact server (stdin/stdout JSON-RPC)."
-  [m]
-  (let [{:keys [artifact-dir]} (get-opts m)]
-    (when-not artifact-dir
-      (display/print-error (messages/t :mcp/required-artifact-dir))
-      (System/exit 1))
-    (let [run-server (requiring-resolve 'ai.miniforge.mcp-artifact-server.interface/start-server)]
-      (run-server artifact-dir))))
-
 (defn hook-eval-cmd
   "Evaluate a tool-use request from a Claude PreToolUse hook.
 
@@ -258,11 +248,6 @@
    {:cmds ["doctor"]  :fn doctor-cmd}
    {:cmds ["help"]    :fn help-cmd}
    {:cmds []          :fn help-cmd}  ; default
-
-   ;; MCP artifact server
-   {:cmds ["mcp-serve"]
-    :fn mcp-serve-cmd
-    :spec {:artifact-dir {:alias :d}}}
 
    ;; Tool-use supervision hook (Claude PreToolUse)
    {:cmds ["hook-eval"]

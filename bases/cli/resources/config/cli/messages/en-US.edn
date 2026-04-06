@@ -89,7 +89,6 @@
   :workflow-run/failed "Workflow execution failed: {error}"
   :chain-run/usage "Usage: {command}"
   :chain-run/failed "Chain execution failed: {error}"
-  :mcp/required-artifact-dir "--artifact-dir is required"
   :web/not-available "Web dashboard not available in this runtime."
   :web/requires-jvm "The dashboard requires JVM components not available in Babashka."
   :web/pr-train-warning "Warning: Could not create PR train manager: {error}"
