@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # Configuration Management
 
 > This document covers configuration for the **Miniforge** SDLC product (CLI/TUI). MiniForge Core exposes configuration

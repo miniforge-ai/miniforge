@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # fix: Review Gate, Verify Timeout, and TUI PR Decomposition Wiring
 
 **Branch:** `fix/review-gate-and-verify-timeout`
