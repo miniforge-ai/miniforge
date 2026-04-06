@@ -353,6 +353,20 @@
            (p/shell "bb" "dogfood:dry-run"))}
 
   ;; ──────────────────────────────────────────────────────────────────────────
+  ;; MCP Context Server
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  mcp-context-server
+  {:doc     "Run MCP context server (JSON-RPC 2.0 over stdin/stdout)"
+   :extra-paths ["bases/mcp-context-server/src"
+                 "bases/mcp-context-server/resources"
+                 "components/messages/src"
+                 "components/messages/resources"]
+   :extra-deps {cheshire/cheshire {:mvn/version "5.13.0"}}
+   :requires ([ai.miniforge.mcp-context-server.main :as mcp])
+   :task    (apply mcp/-main *command-line-args*)}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
   ;; LSP-to-MCP Bridge
   ;; ──────────────────────────────────────────────────────────────────────────
 
@@ -455,8 +469,8 @@
                  "components/repo-index/resources"
                  "components/context-pack/src"
                  "components/context-pack/resources"
-                 "components/mcp-context-server/src"
-                 "components/mcp-context-server/resources"
+                 "bases/mcp-context-server/src"
+                 "bases/mcp-context-server/resources"
                  "components/phase-software-factory/src"
                  "components/phase-software-factory/resources"
                  "components/workflow-software-factory/resources"

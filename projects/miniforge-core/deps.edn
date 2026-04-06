@@ -30,8 +30,7 @@
         ai.miniforge/orchestrator {:local/root "../../components/orchestrator"}
         ai.miniforge/event-stream {:local/root "../../components/event-stream"}
         ai.miniforge/self-healing {:local/root "../../components/self-healing"}
-        ai.miniforge/mcp-context-server {:local/root "../../components/mcp-context-server"}
-        ai.miniforge/messages {:local/root "../../components/messages"}
+ai.miniforge/messages {:local/root "../../components/messages"}
         ai.miniforge/patterns {:local/root "../../components/patterns"}}
 
  :aliases
