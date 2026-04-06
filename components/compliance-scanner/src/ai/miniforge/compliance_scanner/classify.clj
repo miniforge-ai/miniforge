@@ -57,10 +57,11 @@
            :rationale     (msg/t :classify/literal-default))))
 
 (defn- classify-datever
-  "Classify a :std/datever violation (DateVer version format standard)."
+  "Classify a :std/datever violation (DateVer version format standard).
+   Always needs-review — SemVer→DateVer requires human context (release date)."
   [violation]
   (assoc violation
-         :auto-fixable? true
+         :auto-fixable? false
          :rationale     (msg/t :classify/datever)))
 
 (defn- classify-copyright-header

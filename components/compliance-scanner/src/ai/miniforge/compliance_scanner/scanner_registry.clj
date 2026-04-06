@@ -69,9 +69,9 @@
     (str "(get " m " " kw " " (str/trimr default-val) ")")))
 
 (defn suggest-datever
-  "Return DateVer form by appending .0 to a matched SemVer string."
-  [matched-text]
-  (str matched-text ".0"))
+  "Return nil — SemVer→DateVer conversion requires human context (release date)."
+  [_]
+  nil)
 
 (defn suggest-copyright-header
   "Return nil — prepending the header is the fix; no inline replacement exists."
@@ -105,7 +105,9 @@
    {:rule/id       :std/datever
     :rule/category "730"
     :title         "Version Format (SemVer vs DateVer)"
-    :pattern       #"\b(\d+)\.(\d+)\.(\d+)\b(?!\.\d)"
+    ;; Match X.Y.Z where first segment is NOT a 4-digit year (2000-2099).
+    ;; This excludes DateVer strings like 2026.01.20.1 from false-positive detection.
+    :pattern       #"\b(?!20\d\d\.)(\d{1,3})\.(\d+)\.(\d+)\b(?!\.\d)"
     :file-pred     version-file?
     :suggest-fn    suggest-datever
     :detect-mode   :positive}
@@ -153,7 +155,7 @@
   ;; => "(get m :status :pending)"
 
   (suggest :std/datever "1.2.3")
-  ;; => "1.2.3.0"
+  ;; => nil (needs human review)
 
   (clojure-source-file? "components/foo/src/ai/miniforge/foo/core.clj")
   ;; => true

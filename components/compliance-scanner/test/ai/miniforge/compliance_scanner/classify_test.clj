@@ -38,7 +38,7 @@
    :rule/title    "Version Format (SemVer vs DateVer)"
    :line          3
    :current       "1.2.3"
-   :suggested     "1.2.3.0"})
+   :suggested     nil})
 
 (def ^:private base-810-absent
   {:rule/id       :std/header-copyright
@@ -84,11 +84,11 @@
 ;; ---------------------------------------------------------------------------
 ;; Dewey 730 classification
 
-(deftest classify-730-always-auto-fixable
-  (testing "Dewey 730 violations are always auto-fixable"
+(deftest classify-730-always-needs-review
+  (testing "Dewey 730 violations always need review — SemVer→DateVer requires human context"
     (let [v   (assoc base-730 :file "build.clj")
           [r] (classify/classify-violations [v])]
-      (is (true? (:auto-fixable? r)))
+      (is (false? (:auto-fixable? r)))
       (is (string? (:rationale r))))))
 
 ;; ---------------------------------------------------------------------------

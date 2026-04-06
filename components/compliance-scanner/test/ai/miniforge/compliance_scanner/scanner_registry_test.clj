@@ -98,9 +98,10 @@
 ;; ---------------------------------------------------------------------------
 ;; suggest-datever
 
-(deftest suggest-datever-appends-build-count
-  (is (= "1.2.3.0" (registry/suggest-datever "1.2.3")))
-  (is (= "10.0.0.0" (registry/suggest-datever "10.0.0"))))
+(deftest suggest-datever-returns-nil
+  (is (nil? (registry/suggest-datever "1.2.3"))
+      "SemVer→DateVer requires human context; suggest returns nil")
+  (is (nil? (registry/suggest-datever "10.0.0"))))
 
 ;; ---------------------------------------------------------------------------
 ;; suggest-copyright-header
