@@ -15,7 +15,7 @@
 ;; Cache misses are recorded to context-misses.edn for meta-loop learning.
 ;;
 ;; Usage:
-;;   bb scripts/mcp-context-server.bb --artifact-dir /tmp/artifact-session-xyz
+;;   bb projects/mcp-context-server/main.bb --artifact-dir /tmp/artifact-session-xyz
 
 (require '[cheshire.core :as json]
          '[clojure.string :as str]

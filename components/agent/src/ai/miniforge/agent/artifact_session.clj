@@ -140,10 +140,10 @@
       {:command "bb"
        :args ["--config" (str bb-root "/bb.edn")
               "--deps-root" bb-root
-              "scripts/mcp-context-server.bb"
+              "projects/mcp-context-server/main.bb"
               "--artifact-dir" artifact-dir]}
       {:command "bb"
-       :args ["scripts/mcp-context-server.bb"
+       :args ["projects/mcp-context-server/main.bb"
               "--artifact-dir" artifact-dir]})))
 
 ;------------------------------------------------------------------------------ Layer 1
