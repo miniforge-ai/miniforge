@@ -235,7 +235,7 @@
      [:h4.section-title "Latest Output"]
      [:pre.workflow-stream-preview
       {:id (str "wf-streaming-" (:id workflow))}
-      (get workflow :latest-output "")
+      (or (:latest-output workflow) "")]]
 
     ;; Controls — only for running workflows
     (when (= :running (:status workflow))

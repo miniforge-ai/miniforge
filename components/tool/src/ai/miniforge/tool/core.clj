@@ -192,8 +192,8 @@
            vals
            (filter (fn [tool]
                      (let [info (tool-info tool)]
-                       (get info :name "")
-                           (get info :description "")
+                       (or (str/includes? (str/lower-case (or (:name info) "")) q)
+                           (str/includes? (str/lower-case (or (:description info) "")) q)))))))))
 
 (defn create-function-tool
   "Create a function-based tool.
