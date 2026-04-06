@@ -47,11 +47,42 @@
   [path]
   (edn/read-string (slurp (str path))))
 
+(defn markdown-spec?
+  "True if path has a markdown extension."
+  [path]
+  (contains? #{"md" "markdown"} (fs/extension (str path))))
+
 ;------------------------------------------------------------------------------ Layer 1
+;; Shared workflow execution path
+
+(defn- run-spec-workflow
+  "Parse, validate, and execute a workflow spec from path.
+   Used by both the markdown and EDN code paths."
+  [spec-path opts]
+  (display/print-info (messages/t :run/parsing-spec {:path spec-path}))
+  (let [parsed-spec (spec-parser/parse-spec-file spec-path)
+        validation  (spec-parser/validate-spec parsed-spec)]
+    (if-not (:valid? validation)
+      (do
+        (display/print-error (messages/t :run/invalid-spec))
+        (doseq [error (:errors validation)]
+          (println (messages/t :run/validation-error {:error error}))))
+      (do
+        (display/print-info (messages/t :run/running-workflow {:title (:spec/title parsed-spec)}))
+        (workflow-runner/run-workflow-from-spec!
+         parsed-spec
+         (cond-> {:output :pretty :quiet false}
+           (:backend opts) (assoc :backend (:backend opts))))))))
+
+;------------------------------------------------------------------------------ Layer 2
 ;; Run command
 
 (defn run-cmd
-  "Execute a workflow from a spec, plan, or DAG file."
+  "Execute a workflow from a spec, plan, or DAG file.
+
+   Dispatch order:
+   1. Markdown files (.md/.markdown) → spec-parser directly (no EDN pre-read)
+   2. EDN/JSON files → read and detect type (:spec, :dag, :plan)"
   [opts]
   (let [{:keys [spec interactive]} opts
         resume-id (:resume opts)]
@@ -76,29 +107,24 @@
       (not (fs/exists? spec))
       (display/print-error (messages/t :run/file-not-found {:path spec}))
 
-      ;; Dispatch based on file content
+      ;; Markdown spec — route directly through spec-parser (no EDN pre-read)
+      (markdown-spec? spec)
+      (try
+        (run-spec-workflow spec opts)
+        (catch Exception e
+          (display/print-error (messages/t :run/failed {:error (ex-message e)}))
+          (when-let [data (ex-data e)]
+            (println (messages/t :run/error-details {:details (pr-str data)})))))
+
+      ;; EDN/JSON — dispatch based on file content
       :else
       (try
-        (let [parsed (read-edn-file spec)
+        (let [parsed     (read-edn-file spec)
               input-type (detect-input-type parsed)]
           (case input-type
-            ;; Spec file — existing workflow path
+            ;; Spec file
             :spec
-            (do
-              (display/print-info (messages/t :run/parsing-spec {:path spec}))
-              (let [parsed-spec (spec-parser/parse-spec-file spec)
-                    validation (spec-parser/validate-spec parsed-spec)]
-                (if-not (:valid? validation)
-                  (do
-                    (display/print-error (messages/t :run/invalid-spec))
-                    (doseq [error (:errors validation)]
-                      (println (messages/t :run/validation-error {:error error}))))
-                  (do
-                    (display/print-info (messages/t :run/running-workflow {:title (:spec/title parsed-spec)}))
-                    (workflow-runner/run-workflow-from-spec!
-                     parsed-spec
-                     (cond-> {:output :pretty :quiet false}
-                       (:backend opts) (assoc :backend (:backend opts))))))))
+            (run-spec-workflow spec opts)
 
             ;; DAG or Plan file — execute directly
             (:dag :plan)
@@ -111,10 +137,10 @@
              (messages/t :run/unrecognized-format {:path spec}))))
         (catch Exception e
           (let [error-classification (try
-                                      (let [classifier (requiring-resolve 'ai.miniforge.agent-runtime.interface/classify-error)]
-                                        (when classifier
-                                          (classifier e (ex-data e))))
-                                      (catch Exception _ nil))]
+                                       (let [classifier (requiring-resolve 'ai.miniforge.agent-runtime.interface/classify-error)]
+                                         (when classifier
+                                           (classifier e (ex-data e))))
+                                       (catch Exception _ nil))]
             (if error-classification
               (display/print-classified-error error-classification)
               (do
