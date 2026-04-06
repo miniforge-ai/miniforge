@@ -40,11 +40,10 @@
 
 (defn- load-monitor-config
   []
-  (->> "config/pr-monitor/defaults.edn"
-       io/resource
-       slurp
-       edn/read-string
-       (validate! MonitorConfig)))
+  (if-let [res (io/resource "config/pr-monitor/defaults.edn")]
+    (->> res slurp edn/read-string (validate! MonitorConfig))
+    (throw (ex-info "Missing classpath resource: config/pr-monitor/defaults.edn"
+                    {:hint "Add components/pr-lifecycle/resources to your classpath"}))))
 
 (def ^:private monitor-config
   (delay (load-monitor-config)))
