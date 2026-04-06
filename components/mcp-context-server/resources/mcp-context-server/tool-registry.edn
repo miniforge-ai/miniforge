@@ -1,0 +1,56 @@
+;; MCP Context Server — Tool Registry Configuration
+;;
+;; Pure EDN configuration for MCP context tools. Each tool entry is keyed by tool name
+;; and contains:
+;;   :tool-def        — MCP tool definition (name, description, inputSchema)
+;;   :required-params — validation rules using keyword validators:
+;;                      :non-empty  — value must be truthy and (seq value) truthy
+;;                      :non-blank  — string must not be blank
+;;   :handler         — keyword referencing the handler function
+
+;; -------------------------------------------------------------------------- Context cache tools
+;; These use :handler (not :builder) — they return {:content [...]} directly
+;; without producing an artifact.
+
+{"context_read"
+ {:handler :context-read
+  :tool-def
+  {:name "context_read"
+   :description "Read a file. Checks the pre-loaded context cache first (instant). Falls back to filesystem on cache miss. Use this instead of the Read tool."
+   :inputSchema
+   {:type "object"
+    :required ["path"]
+    :properties
+    {"path"   {:type "string" :description "File path relative to project root"}
+     "offset" {:type "integer" :description "Line number to start reading from (0-based)"}
+     "limit"  {:type "integer" :description "Maximum number of lines to return"}}}}
+  :required-params
+  {"path" {:check :non-blank :msg "path is required"}}}
+
+ "context_grep"
+ {:handler :context-grep
+  :tool-def
+  {:name "context_grep"
+   :description "Search file contents for a regex pattern. Searches the pre-loaded context cache first (instant). Falls back to ripgrep on cache miss. Use this instead of the Grep tool."
+   :inputSchema
+   {:type "object"
+    :required ["pattern"]
+    :properties
+    {"pattern" {:type "string" :description "Regex pattern to search for"}
+     "path"    {:type "string" :description "Specific file path to search in (optional)"}
+     "glob"    {:type "string" :description "Glob pattern to filter files (optional, e.g. \"*.clj\")"}}}}
+  :required-params
+  {"pattern" {:check :non-blank :msg "pattern is required"}}}
+
+ "context_glob"
+ {:handler :context-glob
+  :tool-def
+  {:name "context_glob"
+   :description "Find files matching a glob pattern. Searches the pre-loaded context cache first (instant), then also checks the filesystem. Use this instead of the Glob tool."
+   :inputSchema
+   {:type "object"
+    :required ["pattern"]
+    :properties
+    {"pattern" {:type "string" :description "Glob pattern to match files (e.g. \"**/*.clj\", \"src/**/*.ts\")"}}}}
+  :required-params
+  {"pattern" {:check :non-blank :msg "pattern is required"}}}}

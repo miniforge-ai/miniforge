@@ -104,9 +104,9 @@
     {:decision "allow"}
 
     ;; MCP context tools: always allow
-    ("mcp__artifact__context_read"
-     "mcp__artifact__context_grep"
-     "mcp__artifact__context_glob")
+    ("mcp__context__context_read"
+     "mcp__context__context_grep"
+     "mcp__context__context_glob")
     {:decision "allow"}
 
     ;; Write tools: allow (inner agent needs to generate code)
@@ -127,9 +127,9 @@
   "Tools that are always on-task and never need semantic review."
   [tool-name]
   (contains? #{"Read" "Glob" "Grep" "WebSearch" "WebFetch" "LS"
-               "mcp__artifact__context_read"
-               "mcp__artifact__context_grep"
-               "mcp__artifact__context_glob"}
+               "mcp__context__context_read"
+               "mcp__context__context_grep"
+               "mcp__context__context_glob"}
              tool-name))
 
 (defn evaluate-with-meta
@@ -266,7 +266,7 @@
   (evaluate-tool-use "Bash" {:command "rm -rf /"})
   ;; => {:decision "deny" :reason "..."}
 
-  (evaluate-tool-use "mcp__artifact__submit_code_artifact" {})
+  (evaluate-tool-use "mcp__context__context_read" {"path" "src/core.clj"})
   ;; => {:decision "allow"}
 
   :end)

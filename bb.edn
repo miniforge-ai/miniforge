@@ -455,6 +455,8 @@
                  "components/repo-index/resources"
                  "components/context-pack/src"
                  "components/context-pack/resources"
+                 "components/mcp-context-server/src"
+                 "components/mcp-context-server/resources"
                  "components/phase-software-factory/src"
                  "components/phase-software-factory/resources"
                  "components/workflow-software-factory/resources"

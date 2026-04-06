@@ -1,0 +1,14 @@
+{:mcp-context-server/messages
+ {;; Tool dispatch
+  :tool/unknown                "Unknown tool: {tool-name}"
+  :tool/no-handler             "No handler registered for: {key}"
+
+  ;; Context cache lifecycle
+  :cache/loaded                "Context cache loaded: {count} files"
+  :cache/load-failed           "WARN: failed to load context cache: {error}"
+  :cache/misses-written        "Context misses written: {count} misses to {path}"
+
+  ;; Context tool responses
+  :context/read-error          "Error reading {path}: file not found or unreadable"
+  :context/no-grep-matches     "No matches found."
+  :context/no-glob-matches     "No files matched the pattern."}}

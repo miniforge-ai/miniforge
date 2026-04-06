@@ -98,6 +98,8 @@
                        "components/repo-index/resources"
                        "components/context-pack/src"
                        "components/context-pack/resources"
+                       "components/mcp-context-server/src"
+                       "components/mcp-context-server/resources"
                        "components/control-plane/src"
                        "components/control-plane/resources"
                        "components/control-plane-adapter/src"
@@ -158,6 +160,7 @@
                      ai.miniforge/compliance-scanner {:local/root "components/compliance-scanner"}
                      ai.miniforge/repo-index {:local/root "components/repo-index"}
                      ai.miniforge/context-pack {:local/root "components/context-pack"}
+                     ai.miniforge/mcp-context-server {:local/root "components/mcp-context-server"}
                      ai.miniforge/control-plane {:local/root "components/control-plane"}
                      ai.miniforge/control-plane-adapter {:local/root "components/control-plane-adapter"}
                      ai.miniforge/adapter-miniforge {:local/root "components/adapter-miniforge"}
@@ -219,6 +222,7 @@
                        "components/compliance-scanner/test"
                        "components/repo-index/test"
                        "components/context-pack/test"
+                       "components/mcp-context-server/test"
                        "components/control-plane/test"
                        "components/adapter-miniforge/test"
                        "components/task-executor/test"
@@ -275,6 +279,7 @@
                       ai.miniforge/compliance-scanner {:local/root "components/compliance-scanner"}
                       ai.miniforge/repo-index {:local/root "components/repo-index"}
                       ai.miniforge/context-pack {:local/root "components/context-pack"}
+                      ai.miniforge/mcp-context-server {:local/root "components/mcp-context-server"}
                       ai.miniforge/control-plane {:local/root "components/control-plane"}
                       ai.miniforge/control-plane-adapter {:local/root "components/control-plane-adapter"}
                       ai.miniforge/adapter-miniforge {:local/root "components/adapter-miniforge"}
