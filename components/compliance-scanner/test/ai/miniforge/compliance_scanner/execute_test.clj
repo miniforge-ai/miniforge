@@ -41,12 +41,14 @@
    :auto-fixable? true})
 
 (def copyright-violation
-  {:rule/id       :std/header-copyright
-   :rule/category "810"
-   :line          1
-   :current       "(missing copyright header)"
-   :suggested     nil
-   :auto-fixable? true})
+  {:rule/id              :std/header-copyright
+   :rule/category        "810"
+   :line                 1
+   :current              "(missing copyright header)"
+   :suggested            nil
+   :auto-fixable?        true
+   :remediation-type     :prepend
+   :remediation-template "<!--\n  Title: Miniforge.ai\n  Author: Christopher Lester (christopher@miniforge.ai)\n  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.\n-->"})
 
 ;------------------------------------------------------------------------------ patch-file-content tests
 

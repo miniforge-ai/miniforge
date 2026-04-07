@@ -19,75 +19,52 @@
 (ns ai.miniforge.compliance-scanner.classify
   "Classify violations: add :auto-fixable? and :rationale to each violation.
 
-   Layer 0: Per-rule classification predicates
+   Classification is pack-driven: uses :auto-fixable-default and
+   :exclude-contexts metadata enriched onto violations during scan.
+
+   Layer 0: Context exclusion matching
    Layer 1: Top-level classify-violations entry point"
   (:require [ai.miniforge.compliance-scanner.messages :as msg]
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Per-rule classification predicates
+;; Context exclusion matching
 
-(def ^:private json-signal-keys
-  "Field names that suggest the key is part of a JSON/external schema."
-  #{":type" ":priority" ":status"})
+(defn- has-path-exclusion?
+  "Return true if the violation's file path matches a :path-contains exclusion."
+  [violation ctx-rule]
+  (when-let [p (get ctx-rule :path-contains)]
+    (str/includes? (get violation :file "") p)))
 
-(defn- json-context?
-  "Return true if the violation line looks like it might be a JSON-mapped field.
+(defn- has-content-exclusion?
+  "Return true if the violation's :current text matches a :current-contains exclusion."
+  [violation ctx-rule]
+  (when-let [cs (get ctx-rule :current-contains)]
+    (let [current (get violation :current "")]
+      (if (vector? cs)
+        (boolean (some #(str/includes? current %) cs))
+        (str/includes? current cs)))))
 
-   Heuristics:
-   1. File is under a server/ path
-   2. The current (matched) text contains a known JSON-signal key
-   3. The current text contains a ;; JSON comment signal"
-  [violation]
-  (let [file    (get violation :file "")
-        current (get violation :current "")]
-    (or (str/includes? file "server/")
-        (some #(str/includes? current %) json-signal-keys)
-        (str/includes? current ";; JSON"))))
-
-(defn- classify-clojure-map-access
-  "Classify a :std/clojure violation (Clojure Map Access standard)."
-  [violation]
-  (if (json-context? violation)
-    (assoc violation
-           :auto-fixable? false
-           :rationale     (msg/t :classify/json-context))
-    (assoc violation
-           :auto-fixable? true
-           :rationale     (msg/t :classify/literal-default))))
-
-(defn- classify-datever
-  "Classify a :std/datever violation (DateVer version format standard)."
-  [violation]
-  (assoc violation
-         :auto-fixable? false
-         :rationale     (msg/t :classify/datever)))
-
-(defn- classify-copyright-header
-  "Classify a :std/header-copyright violation (copyright header standard)."
-  [violation]
-  (let [current (get violation :current "")]
-    (if (= current (msg/t :scan/missing-header))
-      ;; Header is completely absent — can be prepended automatically
-      (assoc violation
-             :auto-fixable? true
-             :rationale     (msg/t :classify/header-absent))
-      ;; Header exists but content is wrong — needs manual review
-      (assoc violation
-             :auto-fixable? false
-             :rationale     (msg/t :classify/header-incorrect)))))
+(defn- matches-exclude-context?
+  "Return true if a violation matches an exclusion context rule.
+   Exclusion contexts are declared in MDC remediation config."
+  [violation ctx-rule]
+  (or (has-path-exclusion? violation ctx-rule)
+      (has-content-exclusion? violation ctx-rule)))
 
 (defn- classify-one
-  "Dispatch classification for a single violation by :rule/id."
+  "Classify a single violation using pack-enriched metadata.
+   Uses :auto-fixable-default and :exclude-contexts from the pack rule."
   [violation]
-  (case (get violation :rule/id)
-    :std/clojure          (classify-clojure-map-access violation)
-    :std/datever          (classify-datever violation)
-    :std/header-copyright (classify-copyright-header violation)
-    ;; Unknown rule — default to needs-review
+  (let [auto-default (get violation :auto-fixable-default true)
+        excludes     (get violation :exclude-contexts [])
+        excluded?    (boolean (some #(matches-exclude-context? violation %) excludes))]
     (assoc violation
-           :auto-fixable? false
-           :rationale     (msg/t :classify/unknown-rule))))
+           :auto-fixable? (and auto-default (not excluded?))
+           :rationale     (cond
+                            excluded?    (msg/t :classify/json-context)
+                            auto-default (msg/t :classify/literal-default)
+                            :else        (msg/t :classify/datever)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Top-level entry point
@@ -103,7 +80,7 @@
   (classify-violations
    [{:rule/id :std/clojure :rule/category "210"
      :file    "components/foo/src/ai/miniforge/foo/core.clj"
-     :current "(get m :timeout 5000)"}
+     :current "(or (:timeout m) 5000)"}
     {:rule/id :std/clojure :rule/category "210"
      :file    "server/handler.clj"
      :current "(or (:status m) :pending)"}

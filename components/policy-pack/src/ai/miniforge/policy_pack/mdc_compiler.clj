@@ -168,6 +168,72 @@
     {:frontmatter (parse-frontmatter frontmatter)
      :body        body}))
 
+;------------------------------------------------------------------------------ Layer 0.5
+;; Detection and remediation config builders
+
+(defn- group-dotted-keys
+  "Group dot-notation keys into nested maps.
+   e.g., {\"detection.mode\" \"positive\" \"detection.pattern\" \"...\"} →
+         {\"detection\" {\"mode\" \"positive\" \"pattern\" \"...\"}}"
+  [fm]
+  (reduce-kv
+   (fn [acc k v]
+     (if-let [dot-idx (str/index-of k ".")]
+       (let [prefix (subs k 0 dot-idx)
+             suffix (subs k (inc dot-idx))]
+         (update acc prefix (fnil assoc {}) suffix v))
+       (assoc acc k v)))
+   {}
+   fm))
+
+(defn- build-exclude-context
+  "Convert path/current exclude lists from MDC remediation config into
+   ExcludeContext maps for the RuleRemediation schema."
+  [remediation-map]
+  (let [path-contains    (get remediation-map "excludePathContains")
+        current-contains (get remediation-map "excludeCurrentContains")]
+    (cond-> []
+      (seq path-contains)
+      (into (mapv (fn [p] {:path-contains p}) path-contains))
+
+      (seq current-contains)
+      (conj {:current-contains (vec current-contains)}))))
+
+(defn- build-detection-config
+  "Build :rule/detection map from grouped frontmatter detection block.
+   Returns {:type :content-scan ...} when detection config is present,
+   {:type :custom} otherwise."
+  [detection-map]
+  (if (and detection-map (get detection-map "pattern"))
+    (cond-> {:type    :content-scan
+             :pattern (get detection-map "pattern")
+             :mode    (keyword (get detection-map "mode" "positive"))}
+      (get detection-map "emailPattern")
+      (assoc :email-pattern (get detection-map "emailPattern")))
+    {:type :custom}))
+
+(defn- build-remediation-config
+  "Build :rule/remediation map from grouped frontmatter remediation block.
+   Returns nil if no remediation config is present."
+  [remediation-map]
+  (when (and remediation-map (get remediation-map "strategy"))
+    (let [excludes (build-exclude-context remediation-map)]
+      (cond-> {:strategy (keyword (get remediation-map "strategy"))}
+        (get remediation-map "type")
+        (assoc :type (keyword (get remediation-map "type")))
+
+        (get remediation-map "replacement")
+        (assoc :replacement (get remediation-map "replacement"))
+
+        (get remediation-map "template")
+        (assoc :template (get remediation-map "template"))
+
+        (some? (get remediation-map "autoFixable"))
+        (assoc :auto-fixable-default (boolean (get remediation-map "autoFixable")))
+
+        (seq excludes)
+        (assoc :exclude-contexts excludes)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Field mapping transforms
 
@@ -410,21 +476,26 @@
   [filename content]
   (try
     (let [{:keys [frontmatter body]} (parse-mdc content)
+          fm           (group-dotted-keys frontmatter)
 
           ;; ── Identity ────────────────────────────────────────────────────
           slug         (str/replace filename #"\.mdc$" "")
           rule-id      (keyword "std" slug)
-          dewey        (get frontmatter "dewey" "000")
-          title        (or (get frontmatter "description")
+          dewey        (get fm "dewey" "000")
+          title        (or (get fm "description")
                            (slug->title slug))
           description  (str "Engineering standard (" dewey "): " title)
-          always-apply (true? (get frontmatter "alwaysApply"))
+          always-apply (true? (get fm "alwaysApply"))
 
           ;; ── Applicability ───────────────────────────────────────────────
           phases       (dewey->phases dewey)
-          globs        (normalize-globs (get frontmatter "globs"))
+          globs        (normalize-globs (get fm "globs"))
           applies-to   (cond-> {:phases phases}
                          (seq globs) (assoc :file-globs globs))
+
+          ;; ── Detection & remediation ─────────────────────────────────────
+          detection    (build-detection-config (get fm "detection"))
+          remediation  (build-remediation-config (get fm "remediation"))
 
           ;; ── Content extraction ──────────────────────────────────────────
           body-trimmed    (when-not (str/blank? body) (str/trim body))
@@ -438,12 +509,15 @@
                   :rule/severity    :info
                   :rule/category    dewey
                   :rule/applies-to  applies-to
-                  :rule/detection   {:type :custom}
+                  :rule/detection   detection
                   :rule/enforcement {:action  :audit
                                     :message (str "Standard: " title)}}
 
                  always-apply
                  (assoc :rule/always-inject? true)
+
+                 remediation
+                 (assoc :rule/remediation remediation)
 
                  body-trimmed
                  (assoc :rule/knowledge-content body-trimmed)

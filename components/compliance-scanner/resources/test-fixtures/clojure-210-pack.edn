@@ -1,0 +1,22 @@
+;; Minimal pack manifest for scan integration tests.
+;; Contains only the clojure Dewey-210 rule with detection + remediation config.
+{:pack/rules
+ [{:rule/id       :std/clojure
+   :rule/category "210"
+   :rule/title    "Nil-safe map access"
+   :rule/detection
+   {:type          :content-scan
+    :mode          :positive
+    :pattern       "\\(or \\((:[a-zA-Z][a-zA-Z0-9?!_*+<>-]*)\\s+([a-zA-Z][a-zA-Z0-9_-]*)\\)\\s+((?:nil|true|false|\"[^\"]*\"|-?\\d+(?:\\.\\d+)?|\\[\\]|\\{\\}|:[a-zA-Z][a-zA-Z0-9_-]*))\\)"}
+   :rule/applies-to
+   {:file-globs ["components/*/src/**/*.clj"
+                  "components/*/src/**/*.cljc"
+                  "bases/*/src/**/*.clj"
+                  "bases/*/src/**/*.cljc"]}
+   :rule/remediation
+   {:strategy             :mechanical
+    :replacement           "(get $2 $1 $3)"
+    :auto-fixable-default  true
+    :exclude-contexts
+    [{:path-contains "server/"}
+     {:current-contains [":type" ":priority" ":status" ";; JSON"]}]}}]}

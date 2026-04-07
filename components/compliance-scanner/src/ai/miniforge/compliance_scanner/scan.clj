@@ -20,13 +20,15 @@
   "Scan phase: load files, run detection, return violations.
 
    Layer 0: Per-file detection helpers
+   Layer 0.5: Pack-driven detection config (glob matching, suggest builder)
    Layer 1: Per-rule scanning
    Layer 2: Top-level scan-repo entry point"
-  (:require [ai.miniforge.compliance-scanner.factory          :as factory]
-            [ai.miniforge.compliance-scanner.messages         :as msg]
-            [ai.miniforge.compliance-scanner.scanner-registry :as scanner-registry]
-            [ai.miniforge.repo-index.interface                :as repo-index]
-            [clojure.string                                   :as str]))
+  (:require [ai.miniforge.compliance-scanner.factory  :as factory]
+            [ai.miniforge.compliance-scanner.messages :as msg]
+            [ai.miniforge.policy-pack.interface       :as policy-pack]
+            [ai.miniforge.repo-index.interface        :as repo-index]
+            [clojure.string                           :as str])
+  (:import [java.nio.file FileSystems Paths]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Per-file detection helpers
@@ -109,6 +111,106 @@
     :negative (violations-for-negative-rule rule-cfg file-path content)
     []))
 
+;------------------------------------------------------------------------------ Layer 0.5
+;; Pack-driven detection config
+
+(defn- globs->file-pred
+  "Convert a vector of glob patterns into a file-path predicate function.
+   Uses java.nio.file.PathMatcher for standard glob matching."
+  [globs]
+  (let [fs       (FileSystems/getDefault)
+        matchers (mapv #(.getPathMatcher fs (str "glob:" %)) globs)]
+    (fn [path]
+      (let [p (Paths/get path (into-array String []))]
+        (boolean (some #(.matches ^java.nio.file.PathMatcher % p) matchers))))))
+
+(defn- build-suggest-fn
+  "Build a suggest function from pack detection and remediation config.
+   Uses str/replace-first with $1/$2/$3 group references for mechanical fixes."
+  [detection remediation]
+  (let [replacement (get remediation :replacement)
+        pattern-str (get detection :pattern)]
+    (cond
+      replacement
+      (let [pat (re-pattern pattern-str)]
+        (fn [matched-text]
+          (when (and matched-text pat replacement)
+            (str/replace-first matched-text pat replacement))))
+
+      (= :prepend (get remediation :type))
+      (constantly nil)
+
+      :else
+      (constantly nil))))
+
+(defn- pack-rule->detection-config
+  "Convert a compiled pack rule into the detection config format used by scan-file.
+   Returns nil for rules without :content-scan detection."
+  [rule]
+  (let [detection   (get rule :rule/detection)
+        remediation (get rule :rule/remediation)
+        globs       (get-in rule [:rule/applies-to :file-globs])]
+    (when (= :content-scan (get detection :type))
+      (cond->
+        {:rule/id       (get rule :rule/id)
+         :rule/category (get rule :rule/category)
+         :title         (get rule :rule/title)
+         :pattern       (re-pattern (get detection :pattern))
+         :file-pred     (globs->file-pred (or globs ["**/*"]))
+         :suggest-fn    (build-suggest-fn detection remediation)
+         :detect-mode   (get detection :mode :positive)}
+
+        (get detection :email-pattern)
+        (assoc :email-pattern (re-pattern (get detection :email-pattern)))
+
+        remediation
+        (assoc :remediation remediation)))))
+
+(defn- filter-pack-rules
+  "Filter compiled pack rules to those with content-scan detection,
+   further filtered by the :rules option.
+   :all and :always-apply both return all scannable rules."
+  [pack-rules opts]
+  (let [raw       (get opts :rules :always-apply)
+        requested (if (string? raw) (keyword (subs raw 1)) raw)
+        scannable (filter #(= :content-scan (get-in % [:rule/detection :type])) pack-rules)]
+    (cond
+      (contains? #{:all :always-apply} requested) scannable
+      (keyword? requested)  (filter #(= requested (:rule/id %)) scannable)
+      (set? requested)      (filter #(contains? requested (:rule/id %)) scannable)
+      :else                 scannable)))
+
+(defn- load-pack-detection-configs
+  "Load compiled pack from standards-path and convert rules to detection configs.
+   Returns vector of detection config maps, or nil if pack unavailable."
+  [standards-path opts]
+  (try
+    (let [result (policy-pack/compile-standards-pack standards-path)]
+      (when (:success? result)
+        (let [rules     (get-in result [:pack :pack/rules])
+              filtered  (filter-pack-rules rules opts)
+              configs   (keep pack-rule->detection-config filtered)]
+          (when (seq configs)
+            (vec configs)))))
+    (catch Exception _ nil)))
+
+(defn- enrich-violation
+  "Attach remediation metadata from the pack rule to a violation map.
+   Downstream classify and execute phases use these fields."
+  [violation remediation]
+  (cond-> violation
+    (get remediation :type)
+    (assoc :remediation-type (get remediation :type))
+
+    (get remediation :template)
+    (assoc :remediation-template (get remediation :template))
+
+    (some? (get remediation :auto-fixable-default))
+    (assoc :auto-fixable-default (get remediation :auto-fixable-default))
+
+    (get remediation :exclude-contexts)
+    (assoc :exclude-contexts (get remediation :exclude-contexts))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Per-rule scanning
 
@@ -134,26 +236,46 @@
          (mapcat (partial scan-file-record rule-cfg index))
          vec)))
 
+(defn- get-rule-configs
+  "Resolve detection configs from opts :pack or by compiling from standards-path.
+   Returns vector of detection config maps, or nil if none found."
+  [opts standards-path]
+  (or (when-let [pack (get opts :pack)]
+        (let [rules    (get pack :pack/rules)
+              filtered (filter-pack-rules rules opts)]
+          (when (seq filtered)
+            (vec (keep pack-rule->detection-config filtered)))))
+      (load-pack-detection-configs standards-path opts)))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Top-level entry point
 
 (defn scan-repo
   "Scan a repo for violations across all configured rules.
 
+   Compiles the policy pack from standards-path and uses detection
+   config declared in MDC frontmatter. Only rules with :content-scan
+   detection type are scanned.
+
    Arguments:
    - repo-path      - string path to repo root
-   - standards-path - string path to .standards dir (not used in M1)
+   - standards-path - string path to .standards dir
    - opts           - map with:
-       :rules  - set of :rule/id keywords to run, or :all (default)
+       :rules  - set of :rule/id keywords to run, :all, or :always-apply (default)
        :since  - git ref (optional, ignored in M1)
+       :pack   - pre-compiled PackManifest (optional, bypasses compilation)
 
    Returns ScanResult map."
-  [repo-path _standards-path opts]
+  [repo-path standards-path opts]
   (let [start-ms   (System/currentTimeMillis)
         index      (repo-index/build-index repo-path)
-        rule-cfgs  (scanner-registry/enabled-rule-configs opts)
+        rule-cfgs  (or (get-rule-configs opts standards-path) [])
         all-violations (->> rule-cfgs
-                            (mapcat #(scan-rule % index))
+                            (mapcat (fn [cfg]
+                                      (let [viols (scan-rule cfg index)]
+                                        (if-let [rem (get cfg :remediation)]
+                                          (mapv #(enrich-violation % rem) viols)
+                                          viols))))
                             vec)
         end-ms     (System/currentTimeMillis)
         file-count (get index :file-count 0)

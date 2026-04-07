@@ -21,19 +21,23 @@
 
    Covers Dewey 210 regex correctness and integration with a temp repo."
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.edn  :as edn]
             [clojure.java.io :as io]
-            [ai.miniforge.compliance-scanner.scanner-registry :as scanner-registry]
-            [ai.miniforge.compliance-scanner.scan             :as scan]))
+            [ai.miniforge.compliance-scanner.scan :as scan]))
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers
 
 (def ^:private d210-pattern
-  "Pull the compiled pattern directly from scanner-registry for white-box tests."
-  (get-in scanner-registry/registry [:std/clojure :pattern]))
+  "Canonical Dewey 210 detection pattern from .standards/languages/clojure.mdc."
+  (re-pattern "\\(or \\((:[a-zA-Z][a-zA-Z0-9?!_*+<>-]*)\\s+([a-zA-Z][a-zA-Z0-9_-]*)\\)\\s+((?:nil|true|false|\"[^\"]*\"|-?\\d+(?:\\.\\d+)?|\\[\\]|\\{\\}|:[a-zA-Z][a-zA-Z0-9_-]*))\\)"))
 
 (defn- matches? [pattern s]
   (boolean (re-find pattern s)))
+
+(def ^:private test-pack
+  "Pre-compiled pack fixture for integration tests."
+  (edn/read-string (slurp (io/resource "test-fixtures/clojure-210-pack.edn"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Dewey 210 regex tests
@@ -118,7 +122,12 @@
           "components/foo/test/core_test.clj"
           "(ns core-test)\n(or (:k m) nil)\n")
 
-        (let [result (scan/scan-repo (.getAbsolutePath tmp-dir) "" {:rules #{:std/clojure}})]
+        ;; Pass pre-compiled pack via opts — detection config lives in
+        ;; resources/test-fixtures/clojure-210-pack.edn
+        (let [result (scan/scan-repo (.getAbsolutePath tmp-dir)
+                                     (.getAbsolutePath tmp-dir)
+                                     {:rules #{:std/clojure}
+                                      :pack  test-pack})]
           (is (map? result))
           (is (= [:std/clojure] (:rules-scanned result)))
           (is (>= (:files-scanned result) 0))
