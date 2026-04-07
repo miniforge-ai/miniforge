@@ -29,15 +29,15 @@
 
 (deftest load-from-resource-test
   (testing "Load workflow from resource"
-    (let [workflow (loader/load-from-resource :canonical-sdlc-v1 "1.0.0")]
+    (let [workflow (loader/load-from-resource :canonical-sdlc "2.0.0")]
       (is (some? workflow) "Should load workflow from resource")
-      (is (= :canonical-sdlc-v1 (:workflow/id workflow))
+      (is (= :canonical-sdlc (:workflow/id workflow))
           "Should have correct workflow ID")
-      (is (= "1.0.0" (:workflow/version workflow))
+      (is (= "2.0.0" (:workflow/version workflow))
           "Should have correct version")
-      (is (vector? (:workflow/phases workflow))
+      (is (vector? (:workflow/pipeline workflow))
           "Should have phases vector")
-      (is (seq (:workflow/phases workflow))
+      (is (seq (:workflow/pipeline workflow))
           "Should have at least one phase")))
 
   (testing "Load non-existent workflow returns nil"
@@ -54,7 +54,7 @@
 
 (deftest load-workflow-test
   (testing "Load workflow with validation"
-    (let [result (loader/load-workflow :canonical-sdlc-v1 "1.0.0" {})]
+    (let [result (loader/load-workflow :canonical-sdlc "2.0.0" {})]
       (is (some? result) "Should return result map")
       (is (= :resource (:source result))
           "First load should be from resource")
@@ -67,8 +67,8 @@
 
   (testing "Load workflow with caching"
     (loader/clear-cache!)  ; Clear cache for this test
-    (let [result1 (loader/load-workflow :canonical-sdlc-v1 "1.0.0" {})
-          result2 (loader/load-workflow :canonical-sdlc-v1 "1.0.0" {})]
+    (let [result1 (loader/load-workflow :canonical-sdlc "2.0.0" {})
+          result2 (loader/load-workflow :canonical-sdlc "2.0.0" {})]
       (is (= :resource (:source result1))
           "First load should be from resource")
       (is (= :cache (:source result2))
@@ -78,8 +78,8 @@
 
   (testing "Load workflow with skip-cache option"
     (loader/clear-cache!)  ; Clear cache for this test
-    (let [result1 (loader/load-workflow :canonical-sdlc-v1 "1.0.0" {})
-          result2 (loader/load-workflow :canonical-sdlc-v1 "1.0.0" {:skip-cache? true})]
+    (let [result1 (loader/load-workflow :canonical-sdlc "2.0.0" {})
+          result2 (loader/load-workflow :canonical-sdlc "2.0.0" {:skip-cache? true})]
       (is (= :resource (:source result1))
           "First load should be from resource")
       (is (= :resource (:source result2))
@@ -93,7 +93,7 @@
 
 (deftest load-workflow-validation-test
   (testing "Load workflow with skip-validation"
-    (let [result (loader/load-workflow :canonical-sdlc-v1 "1.0.0" {:skip-validation? true})]
+    (let [result (loader/load-workflow :canonical-sdlc "2.0.0" {:skip-validation? true})]
       (is (some? result) "Should return result")
       (is (true? (get-in result [:validation :valid?]))
           "Should report valid when validation skipped")
@@ -109,29 +109,25 @@
           "All workflows should have IDs")
       (is (every? #(contains? % :workflow/version) workflows)
           "All workflows should have versions")
-      (is (some #(= :canonical-sdlc-v1 (:workflow/id %)) workflows)
+      (is (some #(= :canonical-sdlc (:workflow/id %)) workflows)
           "Should include canonical SDLC workflow")
       (is (some #(= :simple-test-v1 (:workflow/id %)) workflows)
           "Should include simple test workflow")))
 
   (testing "Workflow metadata includes expected fields"
     (let [workflows (loader/list-available-workflows)
-          canonical (first (filter #(= :canonical-sdlc-v1 (:workflow/id %)) workflows))]
+          canonical (first (filter #(= :canonical-sdlc (:workflow/id %)) workflows))]
       (is (some? canonical) "Should find canonical workflow")
-      (is (= "1.0.0" (:workflow/version canonical))
+      (is (= "2.0.0" (:workflow/version canonical))
           "Should have version")
-      (is (= :feature (:workflow/type canonical))
-          "Should have type")
       (is (string? (:workflow/description canonical))
-          "Should have description")
-      (is (map? (:workflow/metadata canonical))
-          "Should have metadata"))))
+          "Should have description"))))
 
 (deftest cache-management-test
   (testing "Clear cache removes all cached workflows"
     ;; Load and cache workflow
-    (loader/load-workflow :canonical-sdlc-v1 "1.0.0" {})
-    (let [result1 (loader/load-workflow :canonical-sdlc-v1 "1.0.0" {})]
+    (loader/load-workflow :canonical-sdlc "2.0.0" {})
+    (let [result1 (loader/load-workflow :canonical-sdlc "2.0.0" {})]
       (is (= :cache (:source result1))
           "Should load from cache"))
 
@@ -139,7 +135,7 @@
     (loader/clear-cache!)
 
     ;; Load again - should be from resource
-    (let [result2 (loader/load-workflow :canonical-sdlc-v1 "1.0.0" {})]
+    (let [result2 (loader/load-workflow :canonical-sdlc "2.0.0" {})]
       (is (= :resource (:source result2))
           "Should load from resource after cache clear")))
 
@@ -147,7 +143,7 @@
     (loader/clear-cache!)  ; Clear cache for this test
     ;; This is a conceptual test - in reality we only have one version
     ;; But the cache key includes version, so different versions would be cached separately
-    (let [result1 (loader/load-workflow :canonical-sdlc-v1 "1.0.0" {})
+    (let [result1 (loader/load-workflow :canonical-sdlc "2.0.0" {})
           result2 (loader/load-workflow :simple-test-v1 "1.0.0" {})]
       (is (= :resource (:source result1))
           "First workflow should load from resource")
@@ -155,7 +151,7 @@
           "Second workflow should load from resource")
 
       ;; Both should now be cached
-      (let [result3 (loader/load-workflow :canonical-sdlc-v1 "1.0.0" {})
+      (let [result3 (loader/load-workflow :canonical-sdlc "2.0.0" {})
             result4 (loader/load-workflow :simple-test-v1 "1.0.0" {})]
         (is (= :cache (:source result3))
             "First workflow should load from cache")

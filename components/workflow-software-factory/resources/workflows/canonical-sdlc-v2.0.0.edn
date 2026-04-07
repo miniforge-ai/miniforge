@@ -1,0 +1,32 @@
+;; Canonical SDLC Workflow v2.0.0 (Interceptor-based)
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; Waterfall pipeline: explore → plan → implement → verify → review → release.
+;; Single pass, sequential phases, one spec in / one PR out.
+;;
+;; Phase behavior is defined by registry defaults. Override only what differs.
+
+{:workflow/id :canonical-sdlc
+ :workflow/version "2.0.0"
+ :workflow/name "Canonical SDLC Workflow"
+ :workflow/description "Waterfall SDLC: explore -> plan -> implement -> verify -> review -> release -> observe"
+ :workflow/task-types [:feature :component :refactor :bugfix :chore :docs :test :performance]
+
+ :workflow/pipeline
+ [{:phase :explore}
+  {:phase :plan}
+  {:phase :implement
+   :gates [:syntax :lint :no-secrets]
+   :budget {:tokens 50000}}
+  {:phase :verify
+   :on-fail :implement}
+  {:phase :review
+   :on-fail :implement}
+  {:phase :release}
+  {:phase :observe}
+  {:phase :done}]
+
+ :workflow/config
+ {:max-tokens 150000
+  :max-iterations 50
+  :failure-strategy :retry}}

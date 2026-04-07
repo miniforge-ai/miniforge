@@ -10,8 +10,6 @@
 ;;   mf run examples/workflows/diagnose-hanging-tests.edn
 
 {:workflow/spec-version "1.0.0"
- :workflow/type :diagnostic-and-fix
- :workflow/version "1.0.0"
 
  :spec/title "Diagnose and fix hanging test"
  :spec/description

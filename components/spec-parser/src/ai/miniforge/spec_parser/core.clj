@@ -204,7 +204,7 @@
            :spec/intent           (or intent {:type :general})
            :spec/constraints      (or constraints [])
            :spec/tags             (or tags [])
-           :spec/workflow-type    (or (some-> type keyword) :canonical-sdlc-v1)
+           :spec/workflow-type    (or (some-> type keyword) :canonical-sdlc)
            :spec/workflow-version (or version "latest")
            :spec/raw-data         spec}
     acceptance-criteria (assoc :spec/acceptance-criteria acceptance-criteria)

@@ -9,8 +9,6 @@
 ;;   mf run examples/workflows/implement-llm-streaming-hookup.edn
 
 {:workflow/spec-version "1.0.0"
- :workflow/type :standard-sdlc
- :workflow/version "2.0.0"
 
  :spec/title "Implement LLM Streaming Hookup"
  :spec/description

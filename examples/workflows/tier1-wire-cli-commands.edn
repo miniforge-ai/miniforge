@@ -9,8 +9,6 @@
 ;;   mf run examples/workflows/tier1-wire-cli-commands.edn
 
 {:workflow/spec-version "1.0.0"
- :workflow/type :full-sdlc
- :workflow/version "1.0.0"
 
  :task/title "Wire missing CLI commands for all component interfaces"
  :task/description

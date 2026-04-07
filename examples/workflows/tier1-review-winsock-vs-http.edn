@@ -8,8 +8,6 @@
 ;;   mf run examples/workflows/tier1-review-winsock-vs-http.edn
 
 {:workflow/spec-version "1.0.0"
- :workflow/type :research
- :workflow/version "1.0.0"
 
  :task/title "Audit winsock vs HTTP transport compliance with N3/N5/N8"
  :task/description

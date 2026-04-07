@@ -117,7 +117,7 @@ If even partial changes are needed, proceed with normal code generation.
 ## CRITICAL: Do NOT Re-Read Files Already In This Prompt
 
 The 'Existing Files' section below contains the FULL SOURCE CODE of every file you need.
-**Do NOT use Read, context_read, or any tool to re-read files whose content is already here.**
+**Do NOT use Read, mcp__context__context_read, or any tool to re-read files whose content is already here.**
 Start writing code IMMEDIATELY based on what is provided. If you need one additional file
 not listed, read it — but your FIRST tool call should be writing code or calling submit,
 not reading files you already have.

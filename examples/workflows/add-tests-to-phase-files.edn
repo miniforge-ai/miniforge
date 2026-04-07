@@ -9,8 +9,6 @@
 ;;   mf run examples/workflows/add-tests-to-phase-files.edn
 
 {:workflow/spec-version "1.0.0"
- :workflow/type :test-only
- :workflow/version "2.0.0"
 
  :spec/title "Add tests for verify, review, and release phases"
  :spec/description

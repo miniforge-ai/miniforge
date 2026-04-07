@@ -260,9 +260,9 @@
       (is (= "Only frontmatter" (:spec/description result))))))
 
 (deftest normalize-workflow-type-default-test
-  (testing "workflow-type defaults to :canonical-sdlc-v1 when not provided"
+  (testing "workflow-type defaults to :canonical-sdlc when not provided"
     (let [result (spec-parser/normalize-spec {:spec/title "T" :spec/description "D"})]
-      (is (= :canonical-sdlc-v1 (:spec/workflow-type result)))))
+      (is (= :canonical-sdlc (:spec/workflow-type result)))))
 
   (testing "workflow-type from :workflow/type key is used when provided"
     (let [result (spec-parser/normalize-spec
@@ -281,7 +281,7 @@
           normalized (spec-parser/normalize-spec parsed)
           validation (spec-parser/validate-spec normalized)]
       (is (= "Compliance Scanner" (:spec/title normalized)))
-      (is (= :canonical-sdlc-v1 (:spec/workflow-type normalized)))
+      (is (= :canonical-sdlc (:spec/workflow-type normalized)))
       (is (str/includes? (:spec/description normalized) "Build a scanner"))
       (is (str/includes? (:spec/description normalized) "Detailed design goes here"))
       (is (= [:compliance :scanner] (:spec/tags normalized)))

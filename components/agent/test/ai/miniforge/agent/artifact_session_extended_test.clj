@@ -241,7 +241,7 @@
       (is (vector? (:args result)))
       (is (some #(= "--artifact-dir" %) (:args result)))
       (is (some #(= "/tmp/artifacts" %) (:args result)))
-      (is (some #(= "mcp-serve" %) (:args result))))))
+      (is (some #(= "mcp-context-server" %) (:args result))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; resolve-miniforge-command tests
@@ -268,10 +268,6 @@
 
 (deftest mcp-tool-names-test
   (testing "contains expected tool names"
-    (is (some #{"submit_code_artifact"} session/mcp-tool-names))
-    (is (some #{"submit_test_artifact"} session/mcp-tool-names))
-    (is (some #{"submit_plan"} session/mcp-tool-names))
-    (is (some #{"submit_release_artifact"} session/mcp-tool-names))
     (is (some #{"context_read"} session/mcp-tool-names))
     (is (some #{"context_grep"} session/mcp-tool-names))
     (is (some #{"context_glob"} session/mcp-tool-names)))

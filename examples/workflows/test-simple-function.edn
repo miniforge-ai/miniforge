@@ -8,8 +8,6 @@
 ;;   mf run examples/workflows/test-simple-function.edn
 
 {:workflow/spec-version "1.0.0"
- :workflow/type :test-only
- :workflow/version "2.0.0"
 
  :spec/title "Generate tests for string utility functions"
  :spec/description

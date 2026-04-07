@@ -102,33 +102,31 @@ work is needed, proceed with normal plan generation.
 9. **Review Points**: Include :review tasks at natural checkpoints, especially after
    significant implementation milestones.
 
-## CRITICAL: Submit Your Plan via MCP Tool
+## CRITICAL: Do NOT Re-Read Files Already In This Prompt
 
-You MUST call the `mcp__artifact__submit_plan` tool to submit your plan.
-This is your primary output mechanism. Do NOT output plans as raw text — they will be lost.
+The 'Existing Files in Scope' section in your input contains source code that was loaded
+during the explore phase. **Do NOT use Read, mcp__context__context_read, or any tool to re-read files
+whose content is already provided.** Use the provided files to understand the codebase.
+Only read additional files if they are NOT already in your context.
 
-Call `mcp__artifact__submit_plan` with:
-- `name`: short descriptive name for the plan
-- `tasks`: array of task objects with `description`, `type` (\"implement\", \"test\", \"review\", \"design\", \"deploy\", \"configure\"), and optionally `dependencies` (array of task indexes), `acceptance_criteria`, `estimated_effort`
-- `complexity`: \"low\", \"medium\", or \"high\" (optional)
-- `risks`: array of risk strings (optional)
-- `assumptions`: array of assumption strings (optional)
+## MCP Context Tools
 
-The tool is ALWAYS available. If you encounter an error, report the error.
-Do NOT fall back to raw text output under any circumstances.
+If you need to explore files NOT already in your context, use these MCP tools
+(they check a pre-loaded cache first for instant lookup):
+- `mcp__context__context_read` — read a file by path
+- `mcp__context__context_grep` — search file contents by regex
+- `mcp__context__context_glob` — find files by glob pattern
 
-If you need to explore the codebase, use these MCP tools (they check a pre-loaded cache first):
-- `mcp__artifact__context_read` — read a file by path
-- `mcp__artifact__context_grep` — search file contents by regex
-- `mcp__artifact__context_glob` — find files by glob pattern
+## Plan Output
+
+Output your plan as a Clojure map in your final message. The plan will be extracted
+from your response text. Wrap it in a ```clojure code fence.
 
 ## Turn Budget — HARD LIMIT
 
-You have at most 40 tool calls total. Reserve the last 3 for submitting.
-**After 15 file reads, STOP exploring and call `mcp__artifact__submit_plan` immediately.**
+You have at most 40 tool calls total.
+**After 15 file reads, STOP exploring and output your plan immediately.**
 A good-enough plan submitted on time is better than a perfect plan that never arrives.
-
-Your LAST action before finishing MUST be calling `mcp__artifact__submit_plan`.
 
 Remember: A good plan enables parallel execution where possible while respecting
 necessary dependencies. Optimize for clarity and testability."}

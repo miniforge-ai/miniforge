@@ -74,8 +74,8 @@
         (let [config-str (slurp (:mcp-config-path s))
               config (json/parse-string config-str true)]
           (is (map? config))
-          (is (= "bb" (get-in config [:mcpServers :artifact :command])))
-          (let [args (get-in config [:mcpServers :artifact :args])]
+          (is (= "bb" (get-in config [:mcpServers :context :command])))
+          (let [args (get-in config [:mcpServers :context :args])]
             (is (vector? args))
             (is (some #(= "--artifact-dir" %) args))
             (is (some #(= (:dir s) %) args))))
@@ -90,7 +90,7 @@
           (is (= (:mcp-config-path s) (:mcp-config-path result)))
           (is (= (:artifact-path s) (:artifact-path result)))
           (is (vector? (:mcp-allowed-tools result)))
-          (is (every? #(str/starts-with? % "mcp__artifact__") (:mcp-allowed-tools result))))
+          (is (every? #(str/starts-with? % "context_") (:mcp-allowed-tools result))))
         (finally
           (session/cleanup-session! s))))))
 

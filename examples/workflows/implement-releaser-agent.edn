@@ -17,8 +17,6 @@
 ;;   mf run examples/workflows/implement-releaser-agent.edn
 
 {:workflow/spec-version "1.0.0"
- :workflow/type :standard-sdlc
- :workflow/version "2.0.0"
 
  ;; Required root-level keys for spec validation
  :spec/title "Implement Releaser agent to enable autonomous PR creation"
