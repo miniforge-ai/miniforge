@@ -52,7 +52,7 @@
 
 (defn- successful-output [result]
   (when (zero? (:exit result))
-    (or (:out result) "")))
+    (get result :out "")
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Individual fetchers
