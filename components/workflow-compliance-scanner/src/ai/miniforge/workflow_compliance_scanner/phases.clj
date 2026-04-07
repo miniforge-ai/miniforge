@@ -40,10 +40,11 @@
 
 (defn- resolve-repo-path
   "Resolve the repository path from context.
-   Prefers :execution/worktree-path, then [:execution/input :repo-path], then '.'."
+   Prefers explicit [:execution/input :repo-path] when provided (cross-repo scan),
+   then :execution/worktree-path (isolation), then '.'."
   [ctx]
-  (or (get ctx :execution/worktree-path)
-      (get-in ctx [:execution/input :repo-path])
+  (or (get-in ctx [:execution/input :repo-path])
+      (get ctx :execution/worktree-path)
       "."))
 
 (defn- resolve-standards-path
