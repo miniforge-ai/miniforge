@@ -139,6 +139,39 @@
     (let [content "some content\n"]
       (is (= content (execute/patch-file-content content []))))))
 
+;------------------------------------------------------------------------------ PR doc generation
+
+(deftest build-pr-doc-contains-attribution-yaml
+  (testing "PR doc includes YAML attribution block with rule metadata"
+    (let [build-pr-doc #'execute/build-pr-doc
+          doc (build-pr-doc "fix/compliance-210-clojure-map-access" "210"
+                            "Clojure Map Access"
+                            ["components/foo/src/core.clj"]
+                            2
+                            [{:file "components/foo/src/core.clj" :line 10
+                              :current "(or (:k m) nil)" :suggested "(get m :k nil)"}
+                             {:file "components/foo/src/core.clj" :line 20
+                              :current "(or (:v m) 0)" :suggested "(get m :v 0)"}])]
+      (is (str/includes? doc "generated-by: miniforge-compliance-scanner"))
+      (is (str/includes? doc "rule-id: 210"))
+      (is (str/includes? doc "rule-title: \"Clojure Map Access\""))
+      (is (str/includes? doc "fix-type: mechanical"))
+      (is (str/includes? doc "violations-fixed: 2"))
+      (is (str/includes? doc "files-changed: 1"))
+      (is (str/includes? doc "**Branch:** `fix/compliance-210-clojure-map-access`"))
+      (is (str/includes? doc "| `components/foo/src/core.clj` | 10")))))
+
+(deftest build-pr-body-contains-attribution-yaml
+  (testing "PR body includes YAML attribution block"
+    (let [build-pr-body #'execute/build-pr-body
+          body (build-pr-body "210" "Clojure Map Access" 5 3
+                              "docs/pull-requests/2026-04-07-fix-210-clojure-map-access.md")]
+      (is (str/includes? body "generated-by: miniforge-compliance-scanner"))
+      (is (str/includes? body "rule-id: 210"))
+      (is (str/includes? body "violations-fixed: 5"))
+      (is (str/includes? body "files-changed: 3"))
+      (is (str/includes? body "docs/pull-requests/2026-04-07-fix-210-clojure-map-access.md")))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.compliance-scanner.execute-test)
