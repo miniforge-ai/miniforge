@@ -117,8 +117,8 @@
    Returns {:status keyword :passed [] :failed [] :pending []}"
   [checks]
   (let [grouped (group-by (fn [check]
-                            (let [state (keyword (str/lower-case (get check :state "")))
-                                  conclusion (keyword (str/lower-case (get check :conclusion "")))]
+                            (let [state (keyword (str/lower-case (or (:state check) "")))
+                                  conclusion (keyword (str/lower-case (or (:conclusion check) "")))]
                               (cond
                                 (= state :completed)
                                 (case conclusion
