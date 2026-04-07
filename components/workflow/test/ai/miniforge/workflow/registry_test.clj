@@ -34,7 +34,7 @@
                             set)]
       (is (contains? workflow-ids :financial-etl))
       (is (contains? workflow-ids :simple-test-v1))
-      (is (contains? workflow-ids :canonical-sdlc-v1)))))
+      (is (contains? workflow-ids :canonical-sdlc)))))
 
 (deftest initialize-registry!-test
   (testing "registry initialization no longer depends on a shared registry config file"
@@ -42,5 +42,5 @@
           workflow-ids (set (registry/list-workflow-ids))]
       (is (pos? count))
       (is (contains? workflow-ids :financial-etl))
-      (is (contains? workflow-ids :standard-sdlc))
+      (is (contains? workflow-ids :canonical-sdlc))
       (is (contains? workflow-ids :simple)))))

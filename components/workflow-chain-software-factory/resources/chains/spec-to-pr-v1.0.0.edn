@@ -14,7 +14,7 @@
 
  :chain/steps
  [{:step/id :execute
-   :step/workflow-id :standard-sdlc
+   :step/workflow-id :canonical-sdlc
    :step/input-bindings {:title       :chain/input.title
                          :description :chain/input.description
                          :intent      :chain/input.intent
