@@ -31,14 +31,6 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; File patch helpers
 
-(def ^:private md-copyright-header
-  "Standard copyright comment prepended to markdown files missing a header."
-  (str "<!--\n"
-       "  Title: Miniforge.ai\n"
-       "  Author: Christopher Lester (christopher@miniforge.ai)\n"
-       "  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.\n"
-       "-->\n"))
-
 (defn- apply-line-replacement
   "Replace the first occurrence of :current with :suggested on the violation's line.
    lines is a vector of strings (0-indexed). line numbers in violations are 1-indexed."
@@ -50,26 +42,35 @@
       (update lines idx str/replace-first current suggested)
       lines)))
 
-(defn- apply-copyright-prepend
-  "Prepend the standard markdown copyright header to a content string."
-  [content]
-  (str md-copyright-header "\n" content))
+(defn- prepend-violation?
+  "Return true if a violation is a prepend-type remediation."
+  [violation]
+  (or (= :prepend (get violation :remediation-type))
+      (= :std/header-copyright (get violation :rule/id))))
+
+(defn- apply-prepend
+  "Prepend content from the violation's remediation template."
+  [content violation]
+  (let [template (get violation :remediation-template)]
+    (if template
+      (str template "\n" content)
+      content)))
 
 (defn patch-file-content
   "Apply all violations for one file to its string content. Pure — no I/O.
 
    Line-replacement violations are applied bottom-up (descending line number) so
-   prior edits do not shift subsequent line indices. Copyright header violations
-   are prepended after all line edits, since they add a line at position 0."
+   prior edits do not shift subsequent line indices. Prepend violations
+   are applied after all line edits, since they add content at position 0."
   [content violations]
-  (let [copyright-viols (filter #(= :std/header-copyright (get % :rule/id)) violations)
-        line-viols      (remove #(= :std/header-copyright (get % :rule/id)) violations)
+  (let [prepend-viols (filter prepend-violation? violations)
+        line-viols    (remove prepend-violation? violations)
         ;; Preserve trailing newline: split with limit -1 keeps trailing empty segment
-        lines           (str/split content #"\n" -1)
-        patched-lines   (reduce apply-line-replacement lines (sort-by :line > line-viols))
-        patched         (str/join "\n" patched-lines)]
-    (if (seq copyright-viols)
-      (apply-copyright-prepend patched)
+        lines         (str/split content #"\n" -1)
+        patched-lines (reduce apply-line-replacement lines (sort-by :line > line-viols))
+        patched       (str/join "\n" patched-lines)]
+    (if (seq prepend-viols)
+      (apply-prepend patched (first prepend-viols))
       patched)))
 
 (defn- patch-file!

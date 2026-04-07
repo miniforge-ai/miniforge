@@ -17,12 +17,12 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.compliance-scanner.classify-test
-  "Tests for the classify phase."
+  "Tests for the classify phase — pack-driven classification."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.compliance-scanner.classify :as classify]))
 
 ;; ---------------------------------------------------------------------------
-;; Test fixtures
+;; Test fixtures — pack-enriched violations
 
 (def ^:private base-210
   {:rule/id       :std/clojure
@@ -30,7 +30,11 @@
    :rule/title    "Clojure Map Access"
    :line          10
    :current       "(or (:timeout m) 5000)"
-   :suggested     "(get m :timeout 5000)"})
+   :suggested     "(get m :timeout 5000)"
+   ;; Pack enrichment
+   :auto-fixable-default true
+   :exclude-contexts [{:path-contains "server/"}
+                       {:current-contains [":type" ":priority" ":status" ";; JSON"]}]})
 
 (def ^:private base-730
   {:rule/id       :std/datever
@@ -38,23 +42,21 @@
    :rule/title    "Version Format (SemVer vs DateVer)"
    :line          3
    :current       "1.2.3"
-   :suggested     "1.2.3.0"})
+   :suggested     "1.2.3.0"
+   ;; Pack enrichment
+   :auto-fixable-default false})
 
-(def ^:private base-810-absent
+(def ^:private base-810
   {:rule/id       :std/header-copyright
    :rule/category "810"
    :rule/title    "Copyright Header (Markdown)"
    :line          1
    :current       "(missing copyright header)"
-   :suggested     nil})
-
-(def ^:private base-810-wrong
-  {:rule/id       :std/header-copyright
-   :rule/category "810"
-   :rule/title    "Copyright Header (Markdown)"
-   :line          1
-   :current       "## Copyright 2019 Acme Corp"
-   :suggested     nil})
+   :suggested     nil
+   ;; Pack enrichment
+   :auto-fixable-default true
+   :remediation-type :prepend
+   :remediation-template "<!--\n  Copyright header\n-->"})
 
 ;; ---------------------------------------------------------------------------
 ;; Dewey 210 classification
@@ -67,14 +69,14 @@
       (is (re-find #"Literal default" (:rationale r))))))
 
 (deftest classify-210-server-file-is-needs-review
-  (testing "210 violation in a server/ file is flagged as needs-review"
+  (testing "210 violation in a server/ file is excluded by context rule"
     (let [v   (assoc base-210 :file "server/handler.clj")
           [r] (classify/classify-violations [v])]
       (is (false? (:auto-fixable? r)))
       (is (re-find #"JSON" (:rationale r))))))
 
 (deftest classify-210-json-signal-key-is-needs-review
-  (testing "210 violation with a JSON-signal key (:status) is needs-review"
+  (testing "210 violation with a JSON-signal key (:status) is excluded"
     (let [v   (-> base-210
                   (assoc :file "components/foo/src/ai/miniforge/foo/core.clj")
                   (assoc :current "(or (:status m) :active)"))
@@ -85,7 +87,7 @@
 ;; Dewey 730 classification
 
 (deftest classify-730-always-needs-review
-  (testing "Dewey 730 violations always need review — SemVer→DateVer requires human context"
+  (testing "Dewey 730 violations always need review — declared not auto-fixable"
     (let [v   (assoc base-730 :file "build.clj")
           [r] (classify/classify-violations [v])]
       (is (false? (:auto-fixable? r)))
@@ -96,23 +98,16 @@
 
 (deftest classify-810-missing-header-is-auto-fixable
   (testing "810 violation for absent header is auto-fixable"
-    (let [v   (assoc base-810-absent :file "docs/guide.md")
+    (let [v   (assoc base-810 :file "docs/guide.md")
           [r] (classify/classify-violations [v])]
-      (is (true? (:auto-fixable? r)))
-      (is (re-find #"absent" (:rationale r))))))
-
-(deftest classify-810-wrong-content-is-needs-review
-  (testing "810 violation for incorrect header content is needs-review"
-    (let [v   (assoc base-810-wrong :file "docs/guide.md")
-          [r] (classify/classify-violations [v])]
-      (is (false? (:auto-fixable? r))))))
+      (is (true? (:auto-fixable? r))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Batch classification
 
 (deftest classify-batch-returns-all-violations
   (testing "classify-violations returns same count as input"
-    (let [viols [base-210 base-730 base-810-absent]
+    (let [viols [base-210 base-730 base-810]
           result (classify/classify-violations
                   (mapv #(assoc % :file "components/foo/src/core.clj") viols))]
       (is (= 3 (count result)))

@@ -22,15 +22,14 @@
    Covers Dewey 210 regex correctness and integration with a temp repo."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io]
-            [ai.miniforge.compliance-scanner.scanner-registry :as scanner-registry]
-            [ai.miniforge.compliance-scanner.scan             :as scan]))
+            [ai.miniforge.compliance-scanner.scan :as scan]))
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers
 
 (def ^:private d210-pattern
-  "Pull the compiled pattern directly from scanner-registry for white-box tests."
-  (get-in scanner-registry/registry [:std/clojure :pattern]))
+  "Canonical Dewey 210 detection pattern from .standards/languages/clojure.mdc."
+  (re-pattern "\\(or \\((:[a-zA-Z][a-zA-Z0-9?!_*+<>-]*)\\s+([a-zA-Z][a-zA-Z0-9_-]*)\\)\\s+((?:nil|true|false|\"[^\"]*\"|-?\\d+(?:\\.\\d+)?|\\[\\]|\\{\\}|:[a-zA-Z][a-zA-Z0-9_-]*))\\)"))
 
 (defn- matches? [pattern s]
   (boolean (re-find pattern s)))
@@ -118,7 +117,16 @@
           "components/foo/test/core_test.clj"
           "(ns core-test)\n(or (:k m) nil)\n")
 
-        (let [result (scan/scan-repo (.getAbsolutePath tmp-dir) "" {:rules #{:std/clojure}})]
+        ;; Set up a minimal .standards dir with the clojure MDC so the
+        ;; pack-driven scanner can compile detection config.
+        (let [standards-dir (io/file tmp-dir ".standards" "languages")]
+          (io/make-parents (io/file standards-dir "clojure.mdc"))
+          (io/copy (io/file ".standards/languages/clojure.mdc")
+                   (io/file standards-dir "clojure.mdc")))
+
+        (let [result (scan/scan-repo (.getAbsolutePath tmp-dir)
+                                     (str (.getAbsolutePath tmp-dir) "/.standards")
+                                     {:rules #{:std/clojure}})]
           (is (map? result))
           (is (= [:std/clojure] (:rules-scanned result)))
           (is (>= (:files-scanned result) 0))

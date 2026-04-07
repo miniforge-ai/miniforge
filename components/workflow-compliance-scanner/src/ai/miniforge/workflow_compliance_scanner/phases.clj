@@ -20,7 +20,7 @@
   "Phase interceptors for the compliance scan and execute workflows.
 
    Four pure-code phases — no LLM invocation:
-     :compliance-scan     — scan repo for violations via scanner-registry
+     :compliance-scan     — scan repo for violations via compiled policy pack
      :compliance-classify — classify each violation as auto-fixable or needs-review
      :compliance-plan     — generate delta report + remediation work spec
      :compliance-execute  — apply auto-fixable fixes, commit, open PRs per rule

@@ -79,6 +79,37 @@
   "Schema for approver type enum."
   (into [:enum] approver-types))
 
+;; Detection and Remediation schemas (for pack-driven compliance scanning)
+
+(def DetectionMode
+  "Detection mode: :positive means a match IS a violation,
+   :negative means absence of a match IS a violation."
+  [:enum :positive :negative])
+
+(def RemediationStrategy
+  "How a violation should be remediated."
+  [:enum :mechanical :semantic :manual])
+
+(def RemediationType
+  "Type of mechanical remediation."
+  [:enum :regex-replace :prepend :append])
+
+(def ExcludeContext
+  "Context rule that excludes a violation from auto-fixing."
+  [:map
+   [:path-contains {:optional true} string?]
+   [:current-contains {:optional true} [:or string? [:vector string?]]]])
+
+(def RuleRemediation
+  "Remediation config for a rule — how to fix violations mechanically."
+  [:map
+   [:strategy RemediationStrategy]
+   [:type {:optional true} RemediationType]
+   [:replacement {:optional true} string?]
+   [:template {:optional true} string?]
+   [:auto-fixable-default {:optional true} boolean?]
+   [:exclude-contexts {:optional true} [:vector ExcludeContext]]])
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Rule component schemas
 
@@ -109,7 +140,9 @@
    [:pattern {:optional true} [:or string? [:fn {:error/message "should be a regex pattern"} #(instance? java.util.regex.Pattern %)]]]
    [:patterns {:optional true} [:vector [:or string? [:fn {:error/message "should be a regex pattern"} #(instance? java.util.regex.Pattern %)]]]]
    [:context-lines {:optional true} pos-int?]
-   [:custom-fn {:optional true} symbol?]])
+   [:custom-fn {:optional true} symbol?]
+   [:mode {:optional true} DetectionMode]
+   [:email-pattern {:optional true} string?]])
 
 (def RuleEnforcementConfig
   "Schema for what happens when a rule is violated.
@@ -178,6 +211,9 @@
 
    ;; What happens when violated
    [:rule/enforcement RuleEnforcementConfig]
+
+   ;; Remediation config (pack-driven compliance scanning)
+   [:rule/remediation {:optional true} RuleRemediation]
 
    ;; Examples (for documentation and testing)
    [:rule/examples {:optional true} [:vector RuleExample]]

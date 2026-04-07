@@ -25,7 +25,8 @@
    [ai.miniforge.policy-pack.interface.checking :as checking]
    [ai.miniforge.policy-pack.interface.loading :as loading]
    [ai.miniforge.policy-pack.interface.registry :as registry]
-   [ai.miniforge.policy-pack.interface.schema :as schema]))
+   [ai.miniforge.policy-pack.interface.schema :as schema]
+   [ai.miniforge.policy-pack.mdc-compiler :as mdc-compiler]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema and registry API
@@ -92,3 +93,11 @@
 (def approval-enforcement builders/approval-enforcement)
 (def resolve-rules builders/resolve-rules)
 (def merge-rules builders/merge-rules)
+
+;------------------------------------------------------------------------------ Layer 3
+;; MDC compilation
+
+(def compile-standards-pack
+  "Compile all MDC files under a standards directory into a PackManifest.
+   Delegates to mdc-compiler/compile-standards-pack."
+  mdc-compiler/compile-standards-pack)
