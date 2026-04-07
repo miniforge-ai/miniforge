@@ -21,6 +21,7 @@
 
    Covers Dewey 210 regex correctness and integration with a temp repo."
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.edn  :as edn]
             [clojure.java.io :as io]
             [ai.miniforge.compliance-scanner.scan :as scan]))
 
@@ -33,6 +34,10 @@
 
 (defn- matches? [pattern s]
   (boolean (re-find pattern s)))
+
+(def ^:private test-pack
+  "Pre-compiled pack fixture for integration tests."
+  (edn/read-string (slurp (io/resource "test-fixtures/clojure-210-pack.edn"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Dewey 210 regex tests
@@ -117,16 +122,12 @@
           "components/foo/test/core_test.clj"
           "(ns core-test)\n(or (:k m) nil)\n")
 
-        ;; Set up a minimal .standards dir with the clojure MDC so the
-        ;; pack-driven scanner can compile detection config.
-        (let [standards-dir (io/file tmp-dir ".standards" "languages")]
-          (io/make-parents (io/file standards-dir "clojure.mdc"))
-          (io/copy (io/file ".standards/languages/clojure.mdc")
-                   (io/file standards-dir "clojure.mdc")))
-
+        ;; Pass pre-compiled pack via opts — detection config lives in
+        ;; resources/test-fixtures/clojure-210-pack.edn
         (let [result (scan/scan-repo (.getAbsolutePath tmp-dir)
-                                     (str (.getAbsolutePath tmp-dir) "/.standards")
-                                     {:rules #{:std/clojure}})]
+                                     (.getAbsolutePath tmp-dir)
+                                     {:rules #{:std/clojure}
+                                      :pack  test-pack})]
           (is (map? result))
           (is (= [:std/clojure] (:rules-scanned result)))
           (is (>= (:files-scanned result) 0))

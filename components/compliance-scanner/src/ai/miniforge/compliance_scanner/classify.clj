@@ -30,17 +30,27 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Context exclusion matching
 
+(defn- has-path-exclusion?
+  "Return true if the violation's file path matches a :path-contains exclusion."
+  [violation ctx-rule]
+  (when-let [p (get ctx-rule :path-contains)]
+    (str/includes? (get violation :file "") p)))
+
+(defn- has-content-exclusion?
+  "Return true if the violation's :current text matches a :current-contains exclusion."
+  [violation ctx-rule]
+  (when-let [cs (get ctx-rule :current-contains)]
+    (let [current (get violation :current "")]
+      (if (vector? cs)
+        (boolean (some #(str/includes? current %) cs))
+        (str/includes? current cs)))))
+
 (defn- matches-exclude-context?
   "Return true if a violation matches an exclusion context rule.
    Exclusion contexts are declared in MDC remediation config."
   [violation ctx-rule]
-  (or (when-let [p (get ctx-rule :path-contains)]
-        (str/includes? (get violation :file "") p))
-      (when-let [cs (get ctx-rule :current-contains)]
-        (let [current (get violation :current "")]
-          (if (vector? cs)
-            (boolean (some #(str/includes? current %) cs))
-            (str/includes? current cs))))))
+  (or (has-path-exclusion? violation ctx-rule)
+      (has-content-exclusion? violation ctx-rule)))
 
 (defn- classify-one
   "Classify a single violation using pack-enriched metadata.

@@ -134,9 +134,8 @@
       replacement
       (let [pat (re-pattern pattern-str)]
         (fn [matched-text]
-          (try
-            (str/replace-first (str matched-text) pat replacement)
-            (catch Exception _ nil))))
+          (when (and matched-text pat replacement)
+            (str/replace-first matched-text pat replacement))))
 
       (= :prepend (get remediation :type))
       (constantly nil)
@@ -237,6 +236,17 @@
          (mapcat (partial scan-file-record rule-cfg index))
          vec)))
 
+(defn- get-rule-configs
+  "Resolve detection configs from opts :pack or by compiling from standards-path.
+   Returns vector of detection config maps, or nil if none found."
+  [opts standards-path]
+  (or (when-let [pack (get opts :pack)]
+        (let [rules    (get pack :pack/rules)
+              filtered (filter-pack-rules rules opts)]
+          (when (seq filtered)
+            (vec (keep pack-rule->detection-config filtered)))))
+      (load-pack-detection-configs standards-path opts)))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Top-level entry point
 
@@ -259,13 +269,7 @@
   [repo-path standards-path opts]
   (let [start-ms   (System/currentTimeMillis)
         index      (repo-index/build-index repo-path)
-        rule-cfgs  (or (when-let [pack (get opts :pack)]
-                         (let [rules    (get pack :pack/rules)
-                               filtered (filter-pack-rules rules opts)]
-                           (when (seq filtered)
-                             (vec (keep pack-rule->detection-config filtered)))))
-                       (load-pack-detection-configs standards-path opts)
-                       [])
+        rule-cfgs  (or (get-rule-configs opts standards-path) [])
         all-violations (->> rule-cfgs
                             (mapcat (fn [cfg]
                                       (let [viols (scan-rule cfg index)]
