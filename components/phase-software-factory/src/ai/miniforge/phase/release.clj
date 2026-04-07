@@ -200,9 +200,12 @@
                    (log/create-logger {:min-level :debug :output :human}))
         ;; Emit phase-started telemetry event
         _ (phase/emit-phase-started! ctx :release)]
-    ;; Short-circuit: skip release only when implement was already-implemented
-    ;; AND there are no git changes from other phases (tests, docs, specs, etc.)
-    (if (and (= :already-implemented impl-status)
+    ;; Short-circuit: skip release when there is nothing to release.
+    ;; This covers:
+    ;; - implement returned :already-implemented (no new code)
+    ;; - plan returned :already-satisfied (DAG had 0 tasks, no implement ran)
+    ;; In both cases, only skip if there are also no git changes from other phases.
+    (if (and (#{:already-implemented :already-satisfied nil} impl-status)
              (empty? (git-dirty-files (ctx-worktree-path ctx))))
       (-> (phase-result/enter-context ctx :release nil gates budget start-time
                                       (phase-result/skipped :already-implemented))
@@ -262,7 +265,7 @@
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
-        duration-ms (- end-time start-time)
+        duration-ms (if start-time (- end-time start-time) 0)
         result (get-in ctx [:phase :result])
         release-data (when (= :success (:status result)) (:output result))
         release-metrics (get release-data :release/metrics {})
