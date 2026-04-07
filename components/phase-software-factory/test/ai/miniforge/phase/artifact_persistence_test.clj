@@ -103,14 +103,14 @@
             (is (= :verify (:phase data)))
             (is (some? (:hint data)))))))))
 
-(deftest test-release-fails-when-no-implement-result
-  (testing "release phase throws when implement phase result is absent"
+(deftest test-release-skips-when-no-implement-result
+  (testing "release phase skips when implement phase result is absent and worktree is clean"
     (let [ctx (-> (create-base-context)
                   ;; No implement result in phase-results (phase never ran)
-                  (assoc :worktree-path *test-worktree*))]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Release phase has no code artifact"
-                            (execute-phase-enter :release ctx))))))
+                  (assoc :worktree-path *test-worktree*))
+          result (execute-phase-enter :release ctx)]
+      (is (= :completed (get-in result [:phase :status]))
+          "Release should skip (complete) when implement status is nil and no dirty files"))))
 
 (deftest test-release-fails-with-failed-implement
   (testing "release phase throws when implement result shows failure status"
