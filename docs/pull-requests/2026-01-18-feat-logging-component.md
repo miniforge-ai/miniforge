@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # feat: Add Logging Component with Structured EDN Logging
 
 **PR**: [#2](https://github.com/miniforge-ai/miniforge/pull/2)

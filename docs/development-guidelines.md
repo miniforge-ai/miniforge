@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # Development Guidelines
 
 > These guidelines apply to the Miniforge monorepo, which houses three products: **MiniForge Core** (the governed
