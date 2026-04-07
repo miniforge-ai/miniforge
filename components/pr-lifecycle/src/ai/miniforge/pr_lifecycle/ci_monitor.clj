@@ -105,6 +105,14 @@
       (dag/ok {:raw (:output (:data result))})
       result)))
 
+;------------------------------------------------------------------------------ Layer 0.5
+;; Value coercion
+
+(defn- keywordize-val
+  "Coerce a map value to a lower-case keyword, returning `default` when nil."
+  [m k default]
+  (or (some-> (get m k) str/lower-case keyword) default))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Status computation
 
@@ -117,8 +125,8 @@
    Returns {:status keyword :passed [] :failed [] :pending []}"
   [checks]
   (let [grouped (group-by (fn [check]
-                            (let [state (keyword (str/lower-case (get check :state "")))
-                                  conclusion (keyword (str/lower-case (get check :conclusion "")))]
+                            (let [state      (keywordize-val check :state :unknown)
+                                  conclusion (keywordize-val check :conclusion :unknown)]
                               (cond
                                 (= state :completed)
                                 (case conclusion
