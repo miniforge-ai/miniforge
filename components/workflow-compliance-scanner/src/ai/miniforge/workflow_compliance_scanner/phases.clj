@@ -17,17 +17,19 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.workflow-compliance-scanner.phases
-  "Phase interceptors for the compliance scan workflow.
+  "Phase interceptors for the compliance scan and execute workflows.
 
-   Three pure-code phases — no LLM invocation:
+   Four pure-code phases — no LLM invocation:
      :compliance-scan     — scan repo for violations via scanner-registry
      :compliance-classify — classify each violation as auto-fixable or needs-review
      :compliance-plan     — generate delta report + remediation work spec
+     :compliance-execute  — apply auto-fixable fixes, commit, open PRs per rule
 
    Context threading:
      :compliance-scan     stores :output at [:execution/phase-results :compliance-scan :result :output]
      :compliance-classify reads from that path, stores classified violations
-     :compliance-plan     reads classified violations, writes files, stores plan"
+     :compliance-plan     reads classified violations, writes files, stores plan
+     :compliance-execute  reads plan, applies fixes, commits, creates PRs"
   (:require
    [ai.miniforge.compliance-scanner.interface :as compliance-scanner]
    [ai.miniforge.phase.phase-result           :as phase-result]
@@ -75,10 +77,16 @@
    :gates []
    :budget {:tokens 5000 :iterations 1 :time-seconds 120}})
 
+(def default-execute-config
+  {:agent nil
+   :gates []
+   :budget {:tokens 5000 :iterations 1 :time-seconds 1800}})
+
 ;; Register defaults on load
 (registry/register-phase-defaults! :compliance-scan     default-scan-config)
 (registry/register-phase-defaults! :compliance-classify default-classify-config)
 (registry/register-phase-defaults! :compliance-plan     default-plan-config)
+(registry/register-phase-defaults! :compliance-execute  default-execute-config)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; :compliance-scan interceptor
@@ -216,6 +224,52 @@
       (assoc-in [:phase :status] :failed)
       (assoc-in [:phase :error] (phase-result/exception-error ex))))
 
+;------------------------------------------------------------------------------ Layer 1
+;; :compliance-execute interceptor
+
+(defn enter-compliance-execute
+  "Execute compliance execute phase.
+   Reads the plan from phase results, applies auto-fixable violations to files
+   in the worktree, commits per rule, and opens one GitHub PR per rule."
+  [ctx]
+  (let [start-time (System/currentTimeMillis)
+        repo-path  (resolve-repo-path ctx)
+        plan       (get-in ctx [:execution/phase-results :compliance-plan :result :output :plan])
+        result     (compliance-scanner/execute! plan repo-path)]
+    (phase-result/enter-context ctx :compliance-execute nil [] default-execute-config start-time
+                                {:status :success :output result})))
+
+(defn leave-compliance-execute
+  "Post-processing for compliance execute phase.
+   Records PR count and violations-fixed in metrics."
+  [ctx]
+  (let [start-time       (get-in ctx [:phase :started-at])
+        end-time         (System/currentTimeMillis)
+        duration-ms      (- end-time start-time)
+        output           (get-in ctx [:phase :result :output])
+        pr-count         (count (get output :prs []))
+        violations-fixed (get output :violations-fixed 0)
+        files-changed    (get output :files-changed 0)]
+    (-> ctx
+        (assoc-in [:phase :ended-at] end-time)
+        (assoc-in [:phase :duration-ms] duration-ms)
+        (assoc-in [:phase :status] :completed)
+        (assoc-in [:phase :metrics] {:pr-count         pr-count
+                                     :violations-fixed violations-fixed
+                                     :files-changed    files-changed
+                                     :duration-ms      duration-ms})
+        (assoc-in [:execution/phase-results :compliance-execute :result]
+                  (get-in ctx [:phase :result]))
+        (update-in [:execution :phases-completed] (fnil conj []) :compliance-execute)
+        (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
+
+(defn error-compliance-execute
+  "Handle compliance execute phase errors."
+  [ctx ex]
+  (-> ctx
+      (assoc-in [:phase :status] :failed)
+      (assoc-in [:phase :error] (phase-result/exception-error ex))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Registry methods
 
@@ -246,16 +300,27 @@
      :leave  leave-compliance-plan
      :error  error-compliance-plan}))
 
+(defmethod registry/get-phase-interceptor :compliance-execute
+  [config]
+  (let [merged (registry/merge-with-defaults config)]
+    {:name   ::compliance-execute
+     :config merged
+     :enter  (fn [ctx] (enter-compliance-execute (assoc ctx :phase-config merged)))
+     :leave  leave-compliance-execute
+     :error  error-compliance-execute}))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Check registered defaults
   (registry/phase-defaults :compliance-scan)
   (registry/phase-defaults :compliance-classify)
   (registry/phase-defaults :compliance-plan)
+  (registry/phase-defaults :compliance-execute)
 
   ;; Get interceptors
   (registry/get-phase-interceptor {:phase :compliance-scan})
   (registry/get-phase-interceptor {:phase :compliance-classify})
   (registry/get-phase-interceptor {:phase :compliance-plan})
+  (registry/get-phase-interceptor {:phase :compliance-execute})
 
   :leave-this-here)
