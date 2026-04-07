@@ -87,17 +87,18 @@
       (try
         ;; Set up a minimal git repo with a committed file so repo-index
         ;; can build an index (scanner uses `git ls-tree HEAD`).
-        ;; Clear GIT_DIR/GIT_WORK_TREE so pre-commit hook env doesn't
+        ;; Clear ALL GIT_* env vars so pre-commit hook env doesn't
         ;; bleed into the child git processes.
         (let [run! (fn [& cmd]
                      (let [pb (doto (ProcessBuilder. ^java.util.List (vec cmd))
                                 (.directory tmp-dir))
-                           env (.environment pb)]
-                       (.remove env "GIT_DIR")
-                       (.remove env "GIT_WORK_TREE")
-                       (.remove env "GIT_INDEX_FILE")
+                           env (.environment pb)
+                           git-keys (filterv #(re-find #"^GIT_" %) (keys env))]
+                       (doseq [k git-keys] (.remove env k))
                        (.waitFor (.start pb))))]
           (run! "git" "init")
+          ;; Disable GPG/SSH signing — 1Password agent blocks in subprocess contexts
+          (run! "git" "config" "commit.gpgsign" "false")
           (run! "git" "-c" "user.email=test@test.com" "-c" "user.name=Test"
                 "commit" "--allow-empty" "-m" "init")
 
