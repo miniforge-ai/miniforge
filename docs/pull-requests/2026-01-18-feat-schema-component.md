@@ -1,9 +1,3 @@
-<!--
-  Title: Miniforge.ai
-  Author: Christopher Lester (christopher@miniforge.ai)
-  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
--->
-
 # feat: Add Schema Component with Malli Schemas
 
 **PR**: [#1](https://github.com/miniforge-ai/miniforge/pull/1)

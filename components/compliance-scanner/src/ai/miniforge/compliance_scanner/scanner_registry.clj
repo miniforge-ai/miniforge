@@ -134,13 +134,12 @@
 
 (defn enabled-rule-configs
   "Return the detection configs to run.
-   opts may contain :rules — a set of :rule/id keywords, :all, or :always-apply (default)."
+   opts may contain :rules — a set of :rule/id keywords, or :all (default)."
   [opts]
-  (let [raw       (get opts :rules :always-apply)
-        requested (if (string? raw) (keyword (subs raw 1)) raw)]
-    (if (contains? #{:all :always-apply} requested)
+  (let [requested (get opts :rules :all)]
+    (if (= requested :all)
       (vals registry)
-      (->> (if (keyword? requested) #{requested} requested)
+      (->> requested
            (map #(get registry %))
            (filter some?)))))
 

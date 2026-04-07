@@ -1,9 +1,3 @@
-<!--
-  Title: Miniforge.ai
-  Author: Christopher Lester (christopher@miniforge.ai)
-  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
--->
-
 # Intelligent Model Selection
 
 > Model selection is a **Miniforge SDLC** feature that leverages MiniForge Core's agent protocol to choose the optimal

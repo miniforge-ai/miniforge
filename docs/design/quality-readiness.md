@@ -1,9 +1,3 @@
-<!--
-  Title: Miniforge.ai
-  Author: Christopher Lester (christopher@miniforge.ai)
-  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
--->
-
 ---
 title: Quality Readiness Assessment Workflow
 description: Build a Miniforge workflow that evaluates a repository against a 9-domain quality-readiness rubric,

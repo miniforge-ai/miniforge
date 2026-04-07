@@ -1,9 +1,3 @@
-<!--
-  Title: Miniforge.ai
-  Author: Christopher Lester (christopher@miniforge.ai)
-  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
--->
-
 # Gap Analysis: Current State vs. Normative Specs (N1-N9)
 
 > The normative specs (N1-N9) define the **MiniForge Core** engine contract; **Miniforge SDLC** serves as the reference
