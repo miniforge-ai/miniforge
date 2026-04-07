@@ -112,8 +112,23 @@
 ;; ---------------------------------------------------------------------------
 ;; enabled-rule-configs
 
-(deftest enabled-rule-configs-returns-all-by-default
+(deftest enabled-rule-configs-returns-all-for-all-keyword
   (let [cfgs (registry/enabled-rule-configs {:rules :all})]
+    (is (= 3 (count cfgs)))
+    (is (every? :rule/id cfgs))))
+
+(deftest enabled-rule-configs-returns-all-for-always-apply-keyword
+  (let [cfgs (registry/enabled-rule-configs {:rules :always-apply})]
+    (is (= 3 (count cfgs)))
+    (is (every? :rule/id cfgs))))
+
+(deftest enabled-rule-configs-returns-all-for-always-apply-string
+  (let [cfgs (registry/enabled-rule-configs {:rules ":always-apply"})]
+    (is (= 3 (count cfgs)))
+    (is (every? :rule/id cfgs))))
+
+(deftest enabled-rule-configs-returns-all-when-no-rules-key
+  (let [cfgs (registry/enabled-rule-configs {})]
     (is (= 3 (count cfgs)))
     (is (every? :rule/id cfgs))))
 

@@ -60,7 +60,7 @@
   "Classify a :std/datever violation (DateVer version format standard)."
   [violation]
   (assoc violation
-         :auto-fixable? true
+         :auto-fixable? false
          :rationale     (msg/t :classify/datever)))
 
 (defn- classify-copyright-header
