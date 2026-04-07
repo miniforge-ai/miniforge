@@ -448,3 +448,47 @@
   (testing "already-failed state passes through branch creation"
     (let [state {:failure {:type :prior :message "x"}}]
       (is (= state (sut/step-create-branch state))))))
+
+;; ============================================================================
+;; PR doc generation tests
+;; ============================================================================
+
+(deftest pr-doc-filename-test
+  (testing "generates date-prefixed slugified filename"
+    (let [filename (#'sut/pr-doc-filename "feat: add auth middleware")]
+      (is (str/starts-with? filename "2026-"))
+      (is (str/ends-with? filename ".md"))
+      (is (str/includes? filename "feat-add-auth-middleware"))))
+
+  (testing "handles nil title"
+    (let [filename (#'sut/pr-doc-filename nil)]
+      (is (str/ends-with? filename ".md"))
+      (is (str/includes? filename "untitled")))))
+
+(deftest render-pr-doc-test
+  (testing "renders markdown with YAML attribution header"
+    (let [doc (#'sut/render-pr-doc
+               {:release/pr-title "feat: add auth"
+                :release/pr-description "## Summary\nAdded auth."
+                :release/commit-message "feat: add auth"}
+               {:pr-number 42
+                :pr-url "https://github.com/org/repo/pull/42"
+                :branch "feat/add-auth"})]
+      (is (str/includes? doc "Christopher Lester"))
+      (is (str/includes? doc "# feat: add auth"))
+      (is (str/includes? doc "#42"))
+      (is (str/includes? doc "feat/add-auth"))
+      (is (str/includes? doc "## Summary"))))
+
+  (testing "renders without PR info when not available"
+    (let [doc (#'sut/render-pr-doc
+               {:release/pr-title "fix: bug"
+                :release/pr-description "Fixed it."
+                :release/commit-message "fix: bug"}
+               {:pr-number nil :pr-url nil :branch nil})]
+      (is (str/includes? doc "# fix: bug"))
+      (is (str/includes? doc "Fixed it."))))
+
+  (testing "step-write-pr-doc passes through on failure"
+    (let [state {:failure {:type :prior :message "x"}}]
+      (is (= state (sut/step-write-pr-doc state))))))
