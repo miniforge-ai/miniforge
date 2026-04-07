@@ -181,7 +181,7 @@
   (def viols
     [{:rule/id :std/clojure :rule/category "210" :rule/title "Clojure Map Access"
       :file "components/foo/src/core.clj" :line 10
-      :current "(or (:k m) nil)" :suggested "(get m :k nil)"
+      :current "(get m :k nil)" :suggested "(get m :k nil)"
       :auto-fixable? true :rationale "Literal default"}
      {:rule/id :std/header-copyright :rule/category "810" :rule/title "Copyright Header (Markdown)"
       :file "components/foo/src/core.clj" :line 1

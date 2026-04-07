@@ -204,9 +204,9 @@ at `docs/compliance/` for the full list.
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (patch-file-content
-   "(or (:timeout m) 5000)"
+   "(get m :timeout 5000)"
    [{:rule/id :std/clojure :line 1
-     :current "(or (:timeout m) 5000)" :suggested "(get m :timeout 5000)"
+     :current "(get m :timeout 5000)" :suggested "(get m :timeout 5000)"
      :auto-fixable? true}])
 
   (patch-file-content
