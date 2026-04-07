@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # Dogfooding Session #2 - 2026-01-28
 
 **Objective:** Complete interceptor-based workflow migration and wire up agent invocation
