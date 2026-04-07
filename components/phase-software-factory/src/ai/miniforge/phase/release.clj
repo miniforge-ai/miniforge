@@ -205,7 +205,7 @@
     ;; - implement returned :already-implemented (no new code)
     ;; - plan returned :already-satisfied (DAG had 0 tasks, no implement ran)
     ;; In both cases, only skip if there are also no git changes from other phases.
-    (if (and (#{:already-implemented :already-satisfied nil} impl-status)
+    (if (and (contains? #{:already-implemented :already-satisfied nil} impl-status)
              (empty? (git-dirty-files (ctx-worktree-path ctx))))
       (-> (phase-result/enter-context ctx :release nil gates budget start-time
                                       (phase-result/skipped :already-implemented))
