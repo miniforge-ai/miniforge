@@ -332,6 +332,51 @@
           (is (= "release chunk" (:chunk/delta (first chunk-events))))
           (is (= :release (:agent/id (first chunk-events)))))))))
 
+;------------------------------------------------------------------------------ Regression: already-satisfied / nil implement status
+
+(deftest release-skips-when-plan-already-satisfied-test
+  (testing "release phase skips without NPE when plan returned already-satisfied (0 DAG tasks)"
+    ;; When the planner detects specs are already satisfied, the DAG runs with
+    ;; 0 tasks. The implement result has nil :status. The release phase must
+    ;; short-circuit cleanly instead of throwing :release/zero-files and then
+    ;; NPE-ing in leave-release on (- end-time nil).
+    (let [ctx {:execution/id (random-uuid)
+               :execution/input {:description "Already done" :title "Noop"}
+               :execution/metrics {:tokens 0 :duration-ms 0}
+               :execution/phase-results {:implement {:result {:status nil}}}
+               :worktree-path *test-worktree*}
+          ctx-with-config (assoc ctx :phase-config {:phase :release})
+          interceptor (registry/get-phase-interceptor {:phase :release})
+          result ((:enter interceptor) ctx-with-config)]
+      (is (= :completed (get-in result [:phase :status]))
+          "Release should complete (skip) when implement status is nil and no dirty files"))))
+
+(deftest release-skips-when-implement-already-implemented-test
+  (testing "release phase skips when implement returned :already-implemented"
+    (let [ctx {:execution/id (random-uuid)
+               :execution/input {:description "Already done" :title "Noop"}
+               :execution/metrics {:tokens 0 :duration-ms 0}
+               :execution/phase-results {:implement {:result {:status :already-implemented}}}
+               :worktree-path *test-worktree*}
+          ctx-with-config (assoc ctx :phase-config {:phase :release})
+          interceptor (registry/get-phase-interceptor {:phase :release})
+          result ((:enter interceptor) ctx-with-config)]
+      (is (= :completed (get-in result [:phase :status]))
+          "Release should complete (skip) when implement status is :already-implemented"))))
+
+(deftest leave-release-handles-nil-start-time-test
+  (testing "leave-release does not NPE when :started-at is nil"
+    ;; When enter-release throws before setting :started-at, leave-release
+    ;; must handle nil start-time gracefully.
+    (let [interceptor (registry/get-phase-interceptor {:phase :release})
+          ctx {:phase {:result {:status :error}
+                       :budget {:iterations 2}}
+               :execution/metrics {:tokens 0 :duration-ms 0}}
+          result ((:leave interceptor) ctx)]
+      (is (some? result) "leave-release should not throw")
+      (is (= 0 (get-in result [:phase :duration-ms]))
+          "Duration should default to 0 when start-time is nil"))))
+
 ;------------------------------------------------------------------------------ Layer 2: Interceptor Leave Tests
 
 (deftest leave-release-records-metrics-test
