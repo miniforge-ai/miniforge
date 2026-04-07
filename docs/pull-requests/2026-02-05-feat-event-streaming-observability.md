@@ -1,9 +1,3 @@
-<!--
-  Title: Miniforge.ai
-  Author: Christopher Lester (christopher@miniforge.ai)
-  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
--->
-
 # feat(event-stream): Add real-time workflow observability
 
 **Date:** 2026-02-05

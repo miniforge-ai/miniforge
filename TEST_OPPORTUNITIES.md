@@ -1,9 +1,3 @@
-<!--
-  Title: Miniforge.ai
-  Author: Christopher Lester (christopher@miniforge.ai)
-  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
--->
-
 # Fast Iteration Test Opportunities
 
 > These test opportunities target **Miniforge SDLC** components and their integration points.

@@ -1,9 +1,3 @@
-<!--
-  Title: Miniforge.ai
-  Author: Christopher Lester (christopher@miniforge.ai)
-  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
--->
-
 # GitHub App Setup for Homebrew Automation
 
 This guide explains how to set up a GitHub App for automated Homebrew formula updates instead of using a personal access token.

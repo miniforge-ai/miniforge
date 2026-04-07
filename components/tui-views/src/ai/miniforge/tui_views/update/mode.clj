@@ -160,7 +160,7 @@
     :status (some-> (:status wf) name)
     :name   (:name wf)
     :phase  (some-> (:phase wf) name)
-    (get wf :error "")
+    :error  (or (:error wf) "")
     ""))
 
 (defn workflow-matches-query?
@@ -169,7 +169,7 @@
   [wf parsed]
   (let [{:keys [fields text]} parsed
         text-match? (or (str/blank? text)
-                        (get wf :name "")
+                        (str/includes? (str/lower-case (or (:name wf) ""))
                                        (str/lower-case text)))
         fields-match? (every? (fn [[field-kw values]]
                                 (let [val (str/lower-case (or (workflow-field-value wf field-kw) ""))]

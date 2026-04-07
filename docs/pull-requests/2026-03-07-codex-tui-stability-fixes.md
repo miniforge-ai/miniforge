@@ -1,9 +1,3 @@
-<!--
-  Title: Miniforge.ai
-  Author: Christopher Lester (christopher@miniforge.ai)
-  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
--->
-
 # PR: TUI stability fixes for exit, PR freshness, and workflow detail hydration
 
 **Branch:** `codex/tui-stability-fixes`  

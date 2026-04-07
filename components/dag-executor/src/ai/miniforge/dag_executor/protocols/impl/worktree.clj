@@ -77,51 +77,25 @@
       {:available? false
        :reason "git not found"})))
 
-(def ^:private worktree-lock
-  "JVM-level lock for git worktree add commands.
-   Git uses a config.lock file internally — concurrent worktree adds from
-   multiple threads hit this lock and fail silently. Serializing creation at
-   the JVM level prevents the conflict. Tasks still run in parallel once their
-   worktrees are acquired."
-  (Object.))
-
 (defn create-worktree
   "Create a git worktree for the task.
 
-   Serializes creation through worktree-lock to prevent concurrent git
-   config.lock conflicts when multiple sub-workflows acquire environments
-   simultaneously.
-
-   Attempts in order:
-   1. git worktree add -b <name> <path> <branch>  — new branch from branch tip
-   2. Clean up stale branch/directory and retry step 1
-   3. git worktree add --detach <path>             — detached HEAD (last resort)"
+   First tries to create a new branch, then falls back to using existing branch."
   [base-path repo-path worktree-name branch]
-  (locking worktree-lock
-    (let [worktree-path (str base-path "/" worktree-name)]
-      (ensure-directory base-path)
-      (let [result (run-git "-C" repo-path
-                            "worktree" "add" "-b" worktree-name
-                            worktree-path branch)]
-        (if (zero? (:exit result))
-          (result/ok {:worktree-path worktree-path})
-          ;; Failed — clean up stale branch/directory from a prior run and retry
-          (do
-            (run-shell "rm" "-rf" worktree-path)
-            (run-git "-C" repo-path "worktree" "prune")
-            (run-git "-C" repo-path "branch" "-D" worktree-name)
-            (let [result2 (run-git "-C" repo-path
-                                   "worktree" "add" "-b" worktree-name
-                                   worktree-path branch)]
-              (if (zero? (:exit result2))
-                (result/ok {:worktree-path worktree-path})
-                ;; Still failing — detached HEAD as last resort
-                (let [result3 (run-git "-C" repo-path
-                                       "worktree" "add" "--detach"
-                                       worktree-path)]
-                  (if (zero? (:exit result3))
-                    (result/ok {:worktree-path worktree-path})
-                    (result/err :worktree-create-failed (:err result3))))))))))))
+  (let [worktree-path (str base-path "/" worktree-name)]
+    (ensure-directory base-path)
+    ;; Try creating with a new branch first
+    (let [result (run-git "-C" repo-path
+                          "worktree" "add" "-b" worktree-name
+                          worktree-path branch)]
+      (if (zero? (:exit result))
+        (result/ok {:worktree-path worktree-path})
+        ;; Branch might exist, try without -b
+        (let [result2 (run-git "-C" repo-path
+                               "worktree" "add" worktree-path branch)]
+          (if (zero? (:exit result2))
+            (result/ok {:worktree-path worktree-path})
+            (result/err :worktree-create-failed (:err result2))))))))
 
 (defn remove-worktree
   "Remove a git worktree."
