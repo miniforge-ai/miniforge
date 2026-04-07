@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 ---
 title: Miniforge Compliance Execute
 description: Scan, classify, plan, and auto-fix policy violations. Opens one PR per rule for auto-fixable violations.

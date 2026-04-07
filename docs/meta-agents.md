@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # Meta-Agent Architecture
 
 > Meta-agents are a **Miniforge SDLC** feature, built on top of the MiniForge Core workflow engine.

@@ -1,3 +1,9 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
 # Miniforge Dogfooding Guide
 
 > This guide is for dogfooding **Miniforge SDLC** — using the autonomous software factory to build and improve itself.
