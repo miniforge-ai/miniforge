@@ -43,11 +43,15 @@
 
 (defn- positive-matches
   "Find all lines in content matching pattern.
-   Returns seq of {:line int :text string}."
+   Returns seq of {:line int :text string :match string}."
   [pattern content]
   (->> (str/split-lines content)
-       (map-indexed (fn [idx line] {:line (inc idx) :text line}))
-       (filter (fn [{:keys [text]}] (re-find pattern text)))))
+       (map-indexed (fn [idx line]
+                      (let [m (re-find pattern line)]
+                        {:line  (inc idx)
+                         :text  line
+                         :match (if (string? m) m (first m))})))
+       (filter :match)))
 
 (defn- violations-for-positive-rule
   "Scan a single file with a positive-match rule (pattern = violation).
@@ -60,15 +64,15 @@
         pattern  (get rule-cfg :pattern)
         suggest  (get rule-cfg :suggest-fn)
         matches  (positive-matches pattern content)]
-    (mapv (fn [{:keys [line text]}]
+    (mapv (fn [{:keys [line match]}]
             (factory/->violation
              rule-id
              rule-cat
              title
              file-path
              line
-             (str/trim text)
-             (suggest (str/trim text))
+             match
+             (suggest match)
              false          ; classify phase fills this in
              ""))           ; classify phase fills this in
           matches)))

@@ -121,6 +121,19 @@
       (is (= content patched)
           "Content should be unchanged when suggested is nil and not copyright"))))
 
+(deftest embedded-pattern-replaces-only-match-test
+  (testing "patch-file-content replaces only the matched substring, not the whole line"
+    (let [content  "  (let [state (keyword (str/lower-case (or (:state check) \"\")))]\n"
+          v        {:rule/id       :std/clojure
+                    :rule/category "210"
+                    :line          1
+                    :current       "(or (:state check) \"\")"
+                    :suggested     "(get check :state \"\")"
+                    :auto-fixable? true}
+          patched  (execute/patch-file-content content [v])]
+      (is (= "  (let [state (keyword (str/lower-case (get check :state \"\")))]\n" patched)
+          "Only the matched (or ...) form should be replaced, preserving surrounding code"))))
+
 (deftest empty-violations-returns-content-unchanged-test
   (testing "patch-file-content with empty violations returns content unchanged"
     (let [content "some content\n"]
