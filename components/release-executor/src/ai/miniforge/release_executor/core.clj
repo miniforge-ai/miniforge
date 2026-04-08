@@ -13,6 +13,7 @@
    [ai.miniforge.release-executor.metadata :as metadata]
    [ai.miniforge.release-executor.result :as result]
    [ai.miniforge.release-executor.sandbox :as sandbox]
+   [clojure.java.io :as io]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -201,6 +202,70 @@
                :pr-url (:pr-url result))
         (fail state :pr-create-failed (:error result))))))
 
+(defn- pr-doc-filename
+  "Generate a docs/pull-requests/ filename from the PR title.
+   Format: YYYY-MM-DD-<slugified-title>.md"
+  [pr-title]
+  (let [date (.format (java.time.LocalDate/now)
+                      (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd"))
+        slug (-> (or pr-title "untitled")
+                 str/lower-case
+                 (str/replace #"[^a-z0-9]+" "-")
+                 (str/replace #"^-|-$" ""))]
+    (str date "-" slug ".md")))
+
+(defn- render-pr-doc
+  "Render a docs/pull-requests/ markdown file from release metadata."
+  [{:keys [release/pr-title release/pr-description release/commit-message]}
+   {:keys [pr-number pr-url branch]}]
+  (str "<!--\n"
+       "  Title: Miniforge.ai\n"
+       "  Author: Christopher Lester (christopher@miniforge.ai)\n"
+       "  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.\n"
+       "-->\n\n"
+       "# " (or commit-message pr-title "Release") "\n\n"
+       (when pr-url
+         (str "**PR:** [#" pr-number "](" pr-url ")\n"
+              "**Branch:** `" branch "`\n\n"))
+       (or pr-description "") "\n"))
+
+(defn step-write-pr-doc
+  "Write a docs/pull-requests/ markdown file, stage it, and amend the commit.
+   Runs after step-create-pr so PR number/URL are available."
+  [state]
+  (if (failed? state)
+    state
+    (let [{:keys [worktree-path release-meta pr-number pr-url branch
+                  executor environment-id logger]} state
+          filename (pr-doc-filename (:release/pr-title release-meta))
+          doc-dir (io/file worktree-path "docs" "pull-requests")
+          doc-file (io/file doc-dir filename)
+          content (render-pr-doc release-meta
+                                 {:pr-number pr-number
+                                  :pr-url pr-url
+                                  :branch branch})]
+      (try
+        (io/make-parents doc-file)
+        (spit doc-file content)
+        (when logger
+          (log/info logger :release-executor :pr-doc-written
+                    {:data {:path (str "docs/pull-requests/" filename)}}))
+        ;; Stage the doc and amend the commit to include it
+        (sandbox/exec! executor environment-id
+                       (str "git add docs/pull-requests/" filename))
+        (sandbox/exec! executor environment-id
+                       "git commit --amend --no-edit --no-verify")
+        ;; Force-push since we amended
+        (sandbox/exec! executor environment-id
+                       "git push --force-with-lease")
+        state
+      (catch Exception e
+        (when logger
+          (log/warn logger :release-executor :pr-doc-write-failed
+                    {:message (.getMessage e)}))
+        ;; Non-fatal: continue pipeline even if doc write fails
+        state)))))
+
 (defn step-build-artifact [state]
   (if (failed? state)
     state
@@ -312,6 +377,7 @@
         step-commit
         step-push
         step-create-pr
+        step-write-pr-doc
         step-build-artifact
         step-save-artifact
         pipeline->result)))
