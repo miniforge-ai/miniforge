@@ -429,6 +429,31 @@
           [image-key (ensure-image! docker-path image-key :force? force?)])))
 
 ;; ============================================================================
+;; Workspace Bootstrap (N11 §4.2)
+;; ============================================================================
+
+(defn- bootstrap-workspace!
+  "Clone a git repository into the container workspace after creation.
+   Runs git clone, configures git identity, and checks out the target branch.
+   No-op when repo-url is nil (local mode / pre-existing workspace)."
+  [docker-path container-name workdir env-config]
+  (when-let [repo-url (:repo-url env-config)]
+    (let [branch (or (:branch env-config) "main")
+          exec!  (fn [cmd]
+                   (let [r (exec-in-container docker-path container-name cmd
+                                              {:workdir "/"})]
+                     (when-not (zero? (get-in r [:data :exit-code] 1))
+                       (throw (ex-info (str "Workspace bootstrap failed: " cmd)
+                                       {:cmd cmd
+                                        :stderr (get-in r [:data :stderr])
+                                        :exit   (get-in r [:data :exit-code])})))))
+          clone-cmd (str "git clone --branch " branch " --single-branch "
+                         repo-url " " workdir)]
+      (exec! clone-cmd)
+      (exec! (str "git config --global user.email 'miniforge@miniforge.ai'"))
+      (exec! (str "git config --global user.name 'miniforge'")))))
+
+;; ============================================================================
 ;; DockerExecutor Record
 ;; ============================================================================
 
@@ -454,9 +479,12 @@
                                           (:resources env-config)
                                           network)]
       (if (result/ok? create-result)
-        (result/ok (proto/create-environment-record
-                    container-name :docker task-id workdir
-                    (assoc env-config :metadata (:data create-result))))
+        (do
+          ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
+          (bootstrap-workspace! docker-path container-name workdir env-config)
+          (result/ok (proto/create-environment-record
+                      container-name :docker task-id workdir
+                      (assoc env-config :metadata (:data create-result)))))
         create-result)))
 
   (execute! [_this environment-id command opts]

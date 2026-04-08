@@ -24,7 +24,7 @@
    [ai.miniforge.llm.interface.protocols.llm-client :as p]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]))
 
-(defrecord CLIClient [config logger exec-fn]
+(defrecord CLIClient [config logger exec-fn stream-exec-fn]
   p/LLMClient
   (complete* [this request]
     (impl/complete-impl this request))
@@ -51,11 +51,12 @@
      (create-client {:backend :cursor})
      (create-client {:backend :claude :logger my-logger})"
   ([] (create-client {}))
-  ([{:keys [backend logger exec-fn] :or {backend :codex}}]
+  ([{:keys [backend logger exec-fn stream-exec-fn] :or {backend :codex}}]
    (when-not (contains? impl/backends backend)
      (throw (ex-info (str "Unknown backend: " backend)
                      {:backend backend
                       :available (keys impl/backends)})))
    (->CLIClient {:backend backend}
                 logger
-                (or exec-fn impl/default-exec-fn))))
+                (or exec-fn impl/default-exec-fn)
+                stream-exec-fn)))

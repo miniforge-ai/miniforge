@@ -419,6 +419,90 @@
             (spit f (json/generate-string config' {:pretty true}))))
         (catch Exception _ nil)))))
 
+;------------------------------------------------------------------------------ Layer 2.5
+;; Capsule-aware session lifecycle (N11 §6.3-6.4)
+
+(defn create-capsule-session!
+  "Create an artifact session inside a task capsule.
+   Session directory is created inside the capsule's workspace via executor.
+   Returns session map with capsule-relative paths."
+  [executor env-id workdir]
+  (let [exec!      (requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)
+        session-dir (str workdir "/.miniforge-session")
+        _           (exec! executor env-id (str "mkdir -p " session-dir) {:workdir workdir})]
+    {:dir             session-dir
+     :mcp-config-path (str session-dir "/mcp-config.json")
+     :artifact-path   (str session-dir "/artifact.edn")
+     :capsule?        true
+     :executor        executor
+     :environment-id  env-id
+     :workdir         workdir}))
+
+(defn write-capsule-mcp-config!
+  "Write MCP config and Claude settings inside the capsule.
+   The server command resolves to capsule-local bb/miniforge binary."
+  [session]
+  (let [exec!       (requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)
+        executor    (:executor session)
+        env-id      (:environment-id session)
+        session-dir (:dir session)
+        ;; Inside the capsule, bb and miniforge are available directly
+        srv-cmd     {:command "bb" :args ["miniforge" "mcp-context-server"
+                                          "--artifact-dir" session-dir]}
+        mcp-config  (json/generate-string
+                     {"mcpServers" {"context" {"command" (:command srv-cmd)
+                                               "args"    (:args srv-cmd)}}}
+                     {:pretty true})
+        hook-cmd    "bb miniforge hook-eval"
+        settings    (json/generate-string
+                     {"hooks" {"PreToolUse" [{"type" "command" "command" hook-cmd}]}}
+                     {:pretty true})]
+    ;; Write configs inside capsule
+    (exec! executor env-id (str "cat > " (:mcp-config-path session) " << 'MCPEOF'\n" mcp-config "\nMCPEOF")
+           {:workdir (:workdir session)})
+    (exec! executor env-id (str "cat > " session-dir "/claude-settings.json << 'SETTINGSEOF'\n" settings "\nSETTINGSEOF")
+           {:workdir (:workdir session)})
+    (assoc session
+           :mcp-allowed-tools mcp-tool-names
+           :supervision {:hook-eval-cmd hook-cmd
+                         :settings-path (str session-dir "/claude-settings.json")
+                         :policy :workspace-write})))
+
+(defn read-capsule-artifact
+  "Read artifact EDN from inside the capsule via executor."
+  [session]
+  (let [exec!    (requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)
+        result   (exec! (:executor session) (:environment-id session)
+                        (str "cat " (:artifact-path session)) {:workdir (:workdir session)})
+        content  (get-in result [:data :stdout] "")]
+    (when (seq content)
+      (try
+        (clojure.edn/read-string content)
+        (catch Exception _ nil)))))
+
+(defn cleanup-capsule-session!
+  "Remove the session directory inside the capsule."
+  [session]
+  (let [exec! (requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)]
+    (try
+      (exec! (:executor session) (:environment-id session)
+             (str "rm -rf " (:dir session)) {:workdir (:workdir session)})
+      (catch Exception _ nil))))
+
+(defmacro with-capsule-artifact-session
+  "Execute body with a capsule-aware artifact session (N11 §6.3).
+   Like with-artifact-session but session files live inside the task capsule."
+  [[session-sym executor env-id workdir] & body]
+  `(let [session# (-> (create-capsule-session! ~executor ~env-id ~workdir)
+                       write-capsule-mcp-config!)
+         ~session-sym session#]
+     (try
+       (let [result# (do ~@body)]
+         {:llm-result result#
+          :artifact (read-capsule-artifact session#)})
+       (finally
+         (cleanup-capsule-session! session#)))))
+
 (defn cleanup-session!
   "Delete the temporary session directory and clean up injected MCP configs.
 

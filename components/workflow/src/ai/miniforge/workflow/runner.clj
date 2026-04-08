@@ -27,6 +27,7 @@
    Provides the main run-pipeline entry point."
   (:require [ai.miniforge.dag-executor.executor :as dag-exec]
             [ai.miniforge.dag-executor.result :as dag-result]
+            [ai.miniforge.llm.protocols.impl.llm-client :as llm-impl]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.response.interface :as response]
@@ -241,10 +242,12 @@
                      :hint (messages/t :governed/no-capsule-hint)}))))
 
 (defn- build-env-record
-  "Acquire environment from executor and build the result map."
-  [executor workflow-id mode {:keys [acquire-env! result-ok? result-unwrap]}]
+  "Acquire environment from executor and build the result map.
+   Forwards env-config (repo-url, branch, etc.) to the executor so it can
+   bootstrap the workspace inside the capsule (N11 §4.2)."
+  [executor workflow-id mode env-config {:keys [acquire-env! result-ok? result-unwrap]}]
   (let [task-id    (if (uuid? workflow-id) workflow-id (random-uuid))
-        env-result (acquire-env! executor task-id {})]
+        env-result (acquire-env! executor task-id env-config)]
     (when (result-ok? env-result)
       (let [env (result-unwrap env-result)]
         {:executor       executor
@@ -261,16 +264,19 @@
 
    Returns map with :executor, :environment-id, :worktree-path, :execution-mode,
    or nil if acquisition fails (:local) / throws (:governed)."
-  [workflow-id {:keys [_repo-url _branch execution-mode executor-config]}]
+  [workflow-id {:keys [repo-url branch execution-mode executor-config]}]
   (let [mode (get {:governed :governed} execution-mode :local)]
     (try
       (let [fns      (dag-executor-fns)
             config   (registry-config-for-mode mode executor-config)
             registry ((:create-registry fns) config)
-            executor (select-capsule-executor registry mode fns)]
+            executor (select-capsule-executor registry mode fns)
+            env-config (cond-> {}
+                         repo-url (assoc :repo-url repo-url)
+                         branch   (assoc :branch branch))]
         (assert-executor-for-mode! executor mode)
         (when executor
-          (build-env-record executor workflow-id mode fns)))
+          (build-env-record executor workflow-id mode env-config fns)))
       (catch Exception e
         (when (= :governed mode) (throw e))
         (println (messages/t :warn/publish-event
@@ -518,12 +524,27 @@
                                            (cb ctx interceptor result)))}
 
          skip-lifecycle? (:skip-lifecycle-events opts)
+         ;; Build capsule-aware exec-fn for governed mode (N11 §6.2)
+         governed?       (and (= :governed (get opts :execution-mode))
+                              (get opts :executor)
+                              (get opts :environment-id))
+         capsule-exec-fn (when governed?
+                           (llm-impl/capsule-exec-fn
+                            dag-exec/execute!
+                            (get opts :executor)
+                            (get opts :environment-id)
+                            (or (:worktree-path opts) "/workspace")))
+
          initial-ctx (-> (ctx/create-context workflow input opts)
                          (assoc :execution/executor (get opts :executor)
                                 :execution/environment-id (get opts :environment-id)
                                 :execution/worktree-path (or (:worktree-path opts)
                                                              (:sandbox-workdir opts))
                                 :execution/mode (get opts :execution-mode :local)
+                                ;; Pass execute! so downstream phases can call it without
+                                ;; requiring dag-executor (N11 §6.2, §9.3)
+                                :execution/execute-fn (when governed? dag-exec/execute!)
+                                :execution/exec-fn capsule-exec-fn
                                 ;; Injected so dag-orchestrator can call back into the
                                 ;; runner without a circular namespace dependency.
                                 :execution/run-pipeline-fn run-pipeline))]

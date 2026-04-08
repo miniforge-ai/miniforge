@@ -53,6 +53,12 @@
 ;------------------------------------------------------------------------------ Layer 0.5
 ;; Test execution helpers
 
+(defn- test-error-result
+  "Build a test-results map representing an error (exception, unparseable output, etc.)."
+  [message]
+  {:passed? false :test-count 0 :assertion-count 0
+   :fail-count 0 :error-count 1 :output message})
+
 (defn parse-test-output
   "Parse test summary output. Handles Clojure (bb test) and Rust (cargo test) formats.
 
@@ -90,8 +96,7 @@
            :fail-count fail-count
            :error-count error-count
            :output output})
-        {:passed? false :test-count 0 :assertion-count 0
-         :fail-count 0 :error-count 0 :parse-error? true :output output}))))
+        (assoc (test-error-result output) :error-count 0 :parse-error? true)))))
 
 (defn infer-test-command
   "Infer the test command from the repo structure.
@@ -117,8 +122,21 @@
         (parse-test-output (str (:out result "") "\n" (:err result ""))
                            (:exit result 1)))
       (catch Exception e
-        {:passed? false :test-count 0 :assertion-count 0
-         :fail-count 0 :error-count 1 :output (.getMessage e)}))))
+        (test-error-result (.getMessage e))))))
+
+(defn run-tests-in-capsule!
+  "Run tests inside a task capsule via execute-fn (N11 §6).
+   Routes the test command through the executor instead of host process/shell.
+   execute-fn is dag-exec/execute! passed through context to avoid cross-component requires."
+  [execute-fn executor env-id worktree-path & {:keys [test-cmd]}]
+  (let [cmd (or test-cmd "bb test")]
+    (try
+      (let [result (execute-fn executor env-id cmd {:workdir worktree-path})
+            data   (:data result)]
+        (parse-test-output (str (get data :stdout "") "\n" (get data :stderr ""))
+                           (get data :exit-code 1)))
+      (catch Exception e
+        (test-error-result (.getMessage e))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
@@ -151,8 +169,17 @@
         test-cmd (or (get-in ctx [:execution/input :spec/test-command])
                      (get-in ctx [:execution/input :test-command]))
 
-        ;; Run the test suite directly in the executor environment
-        test-results (run-tests! worktree-path :test-cmd test-cmd)
+        ;; Run the test suite — inside capsule for governed mode, on host otherwise
+        execute-fn (get ctx :execution/execute-fn)
+        test-results (if (and (= :governed (get ctx :execution/mode))
+                              execute-fn
+                              (get ctx :execution/executor))
+                       (run-tests-in-capsule! execute-fn
+                                              (get ctx :execution/executor)
+                                              (get ctx :execution/environment-id)
+                                              worktree-path
+                                              :test-cmd test-cmd)
+                       (run-tests! worktree-path :test-cmd test-cmd))
 
         ;; Phase result carries environment reference and test metrics (N6 environment model).
         ;; No serialized code — changes live in the environment's worktree.
