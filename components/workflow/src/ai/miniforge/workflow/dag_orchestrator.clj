@@ -282,7 +282,11 @@
         pr-info (extract-pr-info-from-result result task-def)]
     (if (phase/succeeded? result)
       (cond-> (workflow-success (first artifacts) metrics)
-        pr-info (assoc :pr-info pr-info))
+        pr-info (assoc :pr-info pr-info)
+        ;; Carry sub-workflow's worktree path so apply-dag-success can
+        ;; merge changes back into the parent worktree for release.
+        (:execution/worktree-path result)
+        (assoc :worktree-path (:execution/worktree-path result)))
       (workflow-failure (extract-sub-workflow-error result) metrics))))
 
 (defn workflow-result->dag-result [task-id description wf-result]
@@ -358,11 +362,13 @@
   (let [results (vals all-results)
         artifacts (->> results (mapcat #(get-in % [:data :artifacts] [])))
         pr-infos (->> results (keep #(get-in % [:data :pr-info])) vec)
+        worktree-paths (->> results (keep #(get-in % [:data :worktree-path])) vec)
         total-tokens (->> results (map #(get-in % [:data :metrics :tokens] 0)) (reduce + 0))
         total-cost (->> results (map #(get-in % [:data :metrics :cost-usd] 0.0)) (reduce + 0.0))
         total-duration (->> results (map #(get-in % [:data :metrics :duration-ms] 0)) (reduce + 0))]
     (cond-> {:artifacts artifacts :total-tokens total-tokens :total-cost total-cost :total-duration total-duration}
-      (seq pr-infos) (assoc :pr-infos pr-infos))))
+      (seq pr-infos) (assoc :pr-infos pr-infos)
+      (seq worktree-paths) (assoc :worktree-paths worktree-paths))))
 
 (defn has-failed-dependency?
   "Check if a task depends on any task in the failed set."
