@@ -1,0 +1,158 @@
+;; =============================================================================
+;; Spec: Repository Config & User Profile
+;; =============================================================================
+;;
+;; Three-layer configuration for miniforge:
+;;
+;; 1. User profile (~/.miniforge/profile.edn)
+;;    - Git tokens per provider (GitHub, GitLab, Bitbucket)
+;;    - Identity (name, email) for commits inside capsules
+;;    - Default preferences (agent CLI, execution mode)
+;;    - Aero #or/#env readers for environment variable overrides
+;;
+;; 2. Repo config (.miniforge/config.edn)
+;;    - Git host kind (:github, :gitlab, :bitbucket, :custom)
+;;    - Test command override
+;;    - Agent CLI preference
+;;    - Policy pack references
+;;    - Repo-specific extensions (custom agents, rules)
+;;
+;; 3. Environment overrides
+;;    - MINIFORGE_GIT_TOKEN (universal), GH_TOKEN, GITLAB_TOKEN
+;;    - MINIFORGE_AGENT, MINIFORGE_EXECUTION_MODE
+;;    - Aero #env in profile.edn handles the merge
+;;
+;; Discovered during N11 dogfooding: token resolution was guessing from URL
+;; patterns and trying multiple env vars. Repo config declares host kind,
+;; profile maps kind to token. Clean separation of concerns.
+
+{:spec/title "Repository config and user profile"
+
+ :spec/description
+ "Implement the three-layer configuration system for miniforge. User profile
+  stores tokens and identity. Repo config declares git host, test command,
+  agent preference, and policy packs. Environment variables override via Aero.
+
+  The repo config (.miniforge/config.edn) is the extension point for
+  repo-specific customization — agents, rules, and workflows can be declared
+  here without modifying the miniforge codebase.
+
+  `bb miniforge init` bootstraps .miniforge/config.edn with inferred defaults
+  (git remote -> host kind, language detection -> test command). Profile
+  creation is interactive: prompts for tokens, validates, writes."
+
+ :spec/intent {:type :feature
+               :scope ["components/config"
+                       "bases/cli"
+                       "components/dag-executor"]}
+
+ :spec/constraints
+ ["Profile lives at ~/.miniforge/profile.edn — never in a repo"
+  "Repo config lives at .miniforge/config.edn — checked into the repo"
+  "Aero is the config reader — supports #env #or #profile #include"
+  "Tokens must never appear in logs, error messages, or event streams"
+  "Backward compatible — missing profile or repo config falls back to env vars and inference"
+  "bb miniforge init must be idempotent — safe to re-run"
+  "Profile schema must be validated on load with clear error messages"]
+
+ :spec/acceptance-criteria
+ ["bb miniforge init creates .miniforge/config.edn with inferred host kind and test command"
+  "bb miniforge profile creates ~/.miniforge/profile.edn interactively"
+  "Token resolution reads repo config for host kind, looks up token in profile"
+  "Docker bootstrap uses resolved token — no more guessing from URL patterns"
+  "Missing profile falls back to env vars (MINIFORGE_GIT_TOKEN, GH_TOKEN, GITLAB_TOKEN)"
+  "bb miniforge config shows merged effective config (profile + repo + env)"
+  "Profile tokens are validated on save (gh auth status / glab auth status)"
+  "Repo config supports :repo/agent for agent CLI selection"]
+
+ :workflow/type :canonical-sdlc
+
+ :plan/tasks
+ [{:task/id :profile-schema-and-reader
+   :task/description
+   "Define the user profile schema and Aero-based reader.
+
+    Profile schema:
+    {:tokens    {:github  #or [#env MINIFORGE_GIT_TOKEN #env GH_TOKEN nil]
+                 :gitlab  #or [#env MINIFORGE_GIT_TOKEN #env GITLAB_TOKEN nil]}
+     :identity  {:email string? :name string?}
+     :defaults  {:agent keyword? :execution-mode keyword?}}
+
+    Implementation:
+    - New namespace ai.miniforge.config.profile (or extend existing config component)
+    - load-profile reads ~/.miniforge/profile.edn with Aero
+    - validate-profile checks schema, returns {:valid? bool :errors [...]}
+    - resolve-token [profile host-kind] returns the token for a host kind"
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :repo-config-schema-and-reader
+   :task/description
+   "Define the repo config schema and reader.
+
+    Repo config schema:
+    {:repo/host         #{:github :gitlab :bitbucket :custom}
+     :repo/test-command string?  ;; optional, inferred if missing
+     :repo/agent        {:cli keyword?}  ;; optional, profile default
+     :repo/policy-packs [string?]  ;; optional
+     :repo/branch       string?  ;; default branch, default 'main'}
+
+    Implementation:
+    - New namespace ai.miniforge.config.repo-config
+    - load-repo-config reads .miniforge/config.edn from repo root
+    - infer-host-kind [repo-url] -> :github/:gitlab/:bitbucket/:custom
+    - infer-test-command [repo-root] -> string (reuse verify phase logic)"
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :init-command
+   :task/description
+   "Implement `bb miniforge init` CLI command.
+
+    - Detect git remote URL, infer host kind
+    - Detect repo language, infer test command
+    - Write .miniforge/config.edn with inferred values
+    - Print summary of what was created
+    - Idempotent: if config exists, show current config and ask to overwrite
+
+    Also implement `bb miniforge profile` for interactive profile creation:
+    - Prompt for GitHub token (validate with gh auth status)
+    - Prompt for GitLab token (validate with glab auth status)
+    - Prompt for identity (name, email)
+    - Write ~/.miniforge/profile.edn"
+   :task/type :implement
+   :task/dependencies [:profile-schema-and-reader
+                        :repo-config-schema-and-reader]}
+
+  {:task/id :wire-token-resolution
+   :task/description
+   "Replace URL-guessing token resolution in docker.clj with config-based lookup.
+
+    Current: resolve-git-token guesses from URL host, tries multiple env vars
+    Target: read repo config for :repo/host, look up token in profile
+
+    - docker.clj bootstrap-workspace! calls config/resolve-git-token
+    - resolve-git-token reads repo config + profile + env var fallback
+    - Remove ssh-url->https-url URL-guessing logic
+    - Token sanitization preserved"
+   :task/type :implement
+   :task/dependencies [:profile-schema-and-reader
+                        :repo-config-schema-and-reader]}
+
+  {:task/id :integration-test
+   :task/description
+   "Verify the full config resolution pipeline:
+    1. bb miniforge init creates valid .miniforge/config.edn
+    2. Profile loads and validates correctly
+    3. Token resolution uses repo config -> profile -> env var chain
+    4. Docker bootstrap uses resolved token
+    5. Missing config falls back gracefully"
+   :task/type :test
+   :task/dependencies [:init-command :wire-token-resolution]}]
+
+ :dependencies
+ {:profile-schema-and-reader []
+  :repo-config-schema-and-reader []
+  :init-command [:profile-schema-and-reader :repo-config-schema-and-reader]
+  :wire-token-resolution [:profile-schema-and-reader :repo-config-schema-and-reader]
+  :integration-test [:init-command :wire-token-resolution]}}

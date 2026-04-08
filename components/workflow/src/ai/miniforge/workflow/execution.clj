@@ -349,18 +349,42 @@
              (not (:disable-dag-execution ctx)))
     (extract-plan-from-phase-result phase-result)))
 
+(defn- merge-sub-worktree-changes!
+  "Copy changed files from DAG sub-worktrees into the parent worktree.
+   Each sub-workflow wrote to its own isolated worktree. For the release
+   phase to find dirty files, we need to merge those changes back."
+  [parent-worktree sub-worktree-paths]
+  (doseq [sub-wt sub-worktree-paths]
+    (try
+      (let [{:keys [out]} (clojure.java.shell/sh
+                            "git" "diff" "--name-only" "HEAD"
+                            :dir sub-wt)
+            changed-files (remove clojure.string/blank?
+                                  (clojure.string/split-lines (or out "")))]
+        (doseq [f changed-files]
+          (let [src (clojure.java.io/file sub-wt f)
+                dst (clojure.java.io/file parent-worktree f)]
+            (when (.exists src)
+              (clojure.java.io/make-parents dst)
+              (clojure.java.io/copy src dst)))))
+      (catch Exception _e nil))))
+
 (defn apply-dag-success
   "Apply a successful DAG result to the execution context.
-   Merges artifact provenance, synthesizes an :implement phase result in the
-   new environment-model shape (no :code/files), and advances past implement.
-
-   Code changes live in the environment's worktree; provenance is captured
-   at release time via PR diff."
+   Merges artifact provenance, copies sub-worktree file changes into the
+   parent worktree, synthesizes an :implement phase result, and advances
+   past implement to verify → review → release."
   [ctx dag-result pipeline transition-to-completed-fn]
   (let [artifacts  (:artifacts dag-result)
         task-count (count artifacts)
+        ;; Merge sub-worktree changes into parent worktree so the release
+        ;; phase can discover dirty files via git status.
+        parent-wt  (or (get ctx :execution/worktree-path)
+                       (System/getProperty "user.dir"))
+        sub-wt-paths (:worktree-paths dag-result)
+        _  (when (and parent-wt (seq sub-wt-paths))
+             (merge-sub-worktree-changes! parent-wt sub-wt-paths))
         ;; Synthesize new-style implement phase result.
-        ;; Code is in the environment's worktree — no :code/files serialization.
         synthesized-implement-result
         {:name   :implement
          :status :completed
