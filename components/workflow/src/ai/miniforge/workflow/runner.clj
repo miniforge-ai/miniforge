@@ -28,6 +28,7 @@
   (:require [ai.miniforge.dag-executor.executor :as dag-exec]
             [ai.miniforge.dag-executor.result :as dag-result]
             [ai.miniforge.llm.protocols.impl.llm-client :as llm-impl]
+            [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.response.interface :as response]
@@ -36,6 +37,9 @@
             [ai.miniforge.workflow.messages :as messages]
             [ai.miniforge.workflow.monitoring :as monitoring]
             [cheshire.core :as json]))
+
+(defonce ^:private runner-logger
+  (log/create-logger {:min-level :debug :output :human}))
 
 ;------------------------------------------------------------------------------ Layer -1: Event publishing
 
@@ -340,13 +344,16 @@
 
         ;; Handle pause - wait until resumed
         _ (when (:paused state)
-            (println (messages/t :status/paused))
+            (log/debug runner-logger :system :workflow/execution-paused
+                       {:message (messages/t :status/paused)})
             (while (:paused @control-state)
               (Thread/sleep 1000)))
 
         ;; Check for stop command
         _ (when (:stopped state)
-            (println (messages/t :status/stopped-dashboard))
+            (log/warn runner-logger :system :workflow/execution-stopped
+                      {:message (messages/t :status/stopped-dashboard)
+                       :data {:reason :dashboard-stop}})
             (throw (ex-info (messages/t :status/stopped-control) {:reason :dashboard-stop})))
 
         ;; Check workflow health via meta-agents

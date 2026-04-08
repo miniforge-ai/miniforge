@@ -192,7 +192,7 @@
                              (not= workdir "/tmp"))
                         (conj workdir))]
     (mapcat (fn [path]
-              ["--tmpfs" (str path ":rw,nosuid,nodev,size=64m")])
+              ["--tmpfs" (str path ":rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000")])
             scratch-paths)))
 
 ;; ============================================================================
@@ -432,26 +432,74 @@
 ;; Workspace Bootstrap (N11 §4.2)
 ;; ============================================================================
 
+(defn- ssh-url->https-url
+  "Convert git@host:owner/repo.git to https://host/owner/repo.git.
+   Works for any git host (GitHub, GitLab, Bitbucket, etc.).
+   Returns the URL unchanged if it's already HTTPS or not a recognized SSH URL."
+  [url]
+  (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" url)]
+    (str "https://" host "/" path)
+    url))
+
+(defn- resolve-git-token
+  "Resolve a git access token for capsule clone.
+   One canonical env var per provider:
+   - MINIFORGE_GIT_TOKEN — universal override (any host)
+   - GITLAB_TOKEN — GitLab hosts
+   - GH_TOKEN — GitHub hosts (fallback: `gh auth token` CLI)"
+  [host]
+  (let [raw (or (System/getenv "MINIFORGE_GIT_TOKEN")
+                (if (str/includes? (str host) "gitlab")
+                  (System/getenv "GITLAB_TOKEN")
+                  (or (System/getenv "GH_TOKEN")
+                      (try (str/trim (:out (clojure.java.shell/sh "gh" "auth" "token")))
+                           (catch Exception _ nil)))))]
+    (when (and raw (seq (str/trim raw)))
+      (str/trim raw))))
+
+(defn- authenticated-https-url
+  "Inject token credentials into an HTTPS git URL.
+   Uses the host-appropriate token format (GitHub vs GitLab)."
+  [https-url token]
+  (let [gitlab? (str/includes? https-url "gitlab")]
+    (str/replace https-url #"https://"
+                 (if gitlab?
+                   (str "https://oauth2:" token "@")
+                   (str "https://x-access-token:" token "@")))))
+
 (defn- bootstrap-workspace!
   "Clone a git repository into the container workspace after creation.
    Runs git clone, configures git identity, and checks out the target branch.
-   No-op when repo-url is nil (local mode / pre-existing workspace)."
+   No-op when repo-url is nil (local mode / pre-existing workspace).
+   Prefers HTTPS clone with token auth inside containers where SSH agents
+   are not available. Supports GitHub, GitLab, and other git hosts."
   [docker-path container-name workdir env-config]
   (when-let [repo-url (:repo-url env-config)]
-    (let [branch (or (:branch env-config) "main")
+    (let [branch    (or (:branch env-config) "main")
+          https-url (ssh-url->https-url repo-url)
+          host      (second (re-find #"https://([^/]+)" https-url))
+          token     (resolve-git-token host)
+          clone-url (if token
+                      (authenticated-https-url https-url token)
+                      repo-url)
           exec!  (fn [cmd]
                    (let [r (exec-in-container docker-path container-name cmd
                                               {:workdir "/"})]
                      (when-not (zero? (get-in r [:data :exit-code] 1))
-                       (throw (ex-info (str "Workspace bootstrap failed: " cmd)
-                                       {:cmd cmd
-                                        :stderr (get-in r [:data :stderr])
-                                        :exit   (get-in r [:data :exit-code])})))))
+                       ;; Sanitize token from error messages
+                       (let [safe-cmd (clojure.string/replace (str cmd) #"x-access-token:[^\s@]+" "x-access-token:***")
+                             stderr  (clojure.string/replace (or (get-in r [:data :stderr]) "") #"x-access-token:[^\s@]+" "x-access-token:***")]
+                         (throw (ex-info (str "Workspace bootstrap failed: " safe-cmd
+                                              (when (seq stderr) (str "\n" stderr)))
+                                         {:cmd    safe-cmd
+                                          :stderr stderr
+                                          :exit   (get-in r [:data :exit-code])}))))))
           clone-cmd (str "git clone --branch " branch " --single-branch "
-                         repo-url " " workdir)]
+                         clone-url " " workdir)]
       (exec! clone-cmd)
-      (exec! (str "git config --global user.email 'miniforge@miniforge.ai'"))
-      (exec! (str "git config --global user.name 'miniforge'")))))
+      ;; Use --local (not --global) since container rootfs is read-only
+      (exec! (str "git -C " workdir " config user.email 'miniforge@miniforge.ai'"))
+      (exec! (str "git -C " workdir " config user.name 'miniforge'")))))
 
 ;; ============================================================================
 ;; DockerExecutor Record

@@ -72,7 +72,8 @@
         (workflow-runner/run-workflow-from-spec!
          parsed-spec
          (cond-> {:output :pretty :quiet false}
-           (:backend opts) (assoc :backend (:backend opts))))))))
+           (:backend opts)         (assoc :backend (:backend opts))
+           (:execution-mode opts)  (assoc :execution-mode (keyword (:execution-mode opts)))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Run command

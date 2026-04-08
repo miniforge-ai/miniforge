@@ -1,0 +1,28 @@
+{:spec/title "Migrate workflow runner println calls to structured logging"
+
+ :spec/description
+ "The workflow runner (components/workflow/src/ai/miniforge/workflow/runner.clj)
+  uses bare println calls for warnings and status messages. These should use
+  the structured logging component (ai.miniforge.logging.interface) instead, so
+  they appear in the event stream and are visible to the TUI dashboard.
+
+  The runner already requires logging.interface but only uses it for the logger
+  parameter passed to phases. The println calls in the event publishing helpers
+  should use log/warn with appropriate event keywords.
+  Debug println calls should use log/debug."
+
+ :spec/intent {:type :refactor
+               :scope ["components/workflow/src/ai/miniforge/workflow/runner.clj"]}
+
+ :spec/constraints
+ ["Only modify runner.clj"
+  "Use ai.miniforge.logging.interface (already required as log)"
+  "Preserve existing error handling behavior"
+  "Use log/warn for error-path println, log/debug for status println"
+  "All existing tests must continue to pass"]
+
+ :spec/acceptance-criteria
+ ["No println calls remain in runner.clj"
+  "All warnings use log/warn with :workflow category"
+  "Debug output uses log/debug"
+  "Existing tests pass without modification"]}
