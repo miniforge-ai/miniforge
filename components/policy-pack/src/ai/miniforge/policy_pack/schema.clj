@@ -219,10 +219,10 @@
    [:rule/examples {:optional true} [:vector RuleExample]]
 
    ;; Prompt template for LLM-based semantic repair (pack-bundled).
-   ;; Uses {{variable}} interpolation: {{file}}, {{line}}, {{current}},
-   ;; {{rationale}}, {{rule-title}}, {{knowledge-content}}.
-   ;; Overrides pack-level :repair-prompt template when present.
    [:rule/repair-prompt-template {:optional true} string?]
+
+   ;; Enabled flag — when false, rule is skipped during evaluation.
+   [:rule/enabled? {:optional true} boolean?]
 
    ;; Metadata
    [:rule/version {:optional true} string?]
@@ -261,6 +261,14 @@
   [:map
    [:taxonomy/id keyword?]
    [:taxonomy/min-version string?]])
+
+(def PackOverride
+  "Schema for an overlay pack rule override.
+   Only :rule/severity and :rule/enabled? are overridable per N4 spec."
+  [:map
+   [:rule/id keyword?]
+   [:rule/severity {:optional true} RuleSeverity]
+   [:rule/enabled? {:optional true} boolean?]])
 
 (def PackManifest
   "Schema for a policy pack manifest.
@@ -309,6 +317,9 @@
 
    ;; Dependencies
    [:pack/extends {:optional true} [:vector PackDependency]]
+
+   ;; Rule overrides (overlay packs — N4 §2.5)
+   [:pack/overrides {:optional true} [:vector PackOverride]]
 
    ;; Organization
    [:pack/categories [:vector PackCategory]]

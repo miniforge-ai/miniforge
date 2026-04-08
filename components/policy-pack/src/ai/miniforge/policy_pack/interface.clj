@@ -65,6 +65,7 @@
 (def load-pack loading/load-pack)
 (def load-pack-from-file loading/load-pack-from-file)
 (def load-pack-from-directory loading/load-pack-from-directory)
+(def resolve-overlay loading/resolve-overlay)
 (def discover-packs loading/discover-packs)
 (def load-all-packs loading/load-all-packs)
 (def write-pack-to-file loading/write-pack-to-file)
