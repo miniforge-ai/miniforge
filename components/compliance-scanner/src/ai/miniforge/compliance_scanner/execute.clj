@@ -48,6 +48,11 @@
   (or (= :prepend (get violation :remediation-type))
       (= :std/header-copyright (get violation :rule/id))))
 
+(defn- append-violation?
+  "Return true if a violation is an append-type remediation."
+  [violation]
+  (= :append (get violation :remediation-type)))
+
 (defn- apply-prepend
   "Prepend content from the violation's remediation template."
   [content violation]
@@ -56,22 +61,62 @@
       (str template "\n" content)
       content)))
 
+(defn- apply-append
+  "Append content from the violation's remediation template."
+  [content violation]
+  (let [template (get violation :remediation-template)]
+    (if template
+      (if (str/ends-with? content "\n")
+        (str content template "\n")
+        (str content "\n" template "\n"))
+      content)))
+
 (defn patch-file-content
   "Apply all violations for one file to its string content. Pure — no I/O.
 
    Line-replacement violations are applied bottom-up (descending line number) so
    prior edits do not shift subsequent line indices. Prepend violations
-   are applied after all line edits, since they add content at position 0."
+   are applied after all line edits (they add content at position 0). Append
+   violations are applied last (they add content at end of file)."
   [content violations]
   (let [prepend-viols (filter prepend-violation? violations)
-        line-viols    (remove prepend-violation? violations)
+        append-viols  (filter append-violation? violations)
+        line-viols    (remove #(or (prepend-violation? %) (append-violation? %)) violations)
         ;; Preserve trailing newline: split with limit -1 keeps trailing empty segment
         lines         (str/split content #"\n" -1)
         patched-lines (reduce apply-line-replacement lines (sort-by :line > line-viols))
-        patched       (str/join "\n" patched-lines)]
-    (if (seq prepend-viols)
-      (apply-prepend patched (first prepend-viols))
-      patched)))
+        patched       (str/join "\n" patched-lines)
+        ;; Apply prepends then appends
+        patched       (if (seq prepend-viols)
+                        (apply-prepend patched (first prepend-viols))
+                        patched)
+        patched       (if (seq append-viols)
+                        (reduce apply-append patched append-viols)
+                        patched)]
+    patched))
+
+(defn build-semantic-repair-prompt
+  "Build a structured prompt for LLM-based semantic repair of a violation.
+
+   This is the dispatch path for :semantic remediation strategy violations.
+   The actual LLM call is deferred — this function produces the prompt.
+
+   Arguments:
+   - violation — Violation map with :rule/id, :file, :line, :current, :rationale
+   - rule      — Full rule map with :rule/knowledge-content
+
+   Returns:
+   - {:role :user :content string}"
+  [violation rule]
+  {:role    :user
+   :content (str "Fix the following code violation.\n\n"
+                 "**Rule:** " (get rule :rule/title (name (get violation :rule/id))) "\n"
+                 "**File:** " (get violation :file) ":" (get violation :line) "\n"
+                 "**Current code:** `" (get violation :current "") "`\n"
+                 "**Issue:** " (get violation :rationale "") "\n"
+                 (when-let [kc (get rule :rule/knowledge-content)]
+                   (str "\n**Reference:**\n" kc "\n"))
+                 "\nProvide the corrected code only, no explanation.")})
 
 (defn- patch-file!
   "Apply auto-fixable violations to a file on disk. No-op if content is unchanged.
