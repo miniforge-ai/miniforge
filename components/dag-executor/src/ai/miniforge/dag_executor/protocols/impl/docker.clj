@@ -192,7 +192,7 @@
                              (not= workdir "/tmp"))
                         (conj workdir))]
     (mapcat (fn [path]
-              ["--tmpfs" (str path ":rw,nosuid,nodev,size=64m")])
+              ["--tmpfs" (str path ":rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000")])
             scratch-paths)))
 
 ;; ============================================================================
@@ -466,16 +466,19 @@
                                               {:workdir "/"})]
                      (when-not (zero? (get-in r [:data :exit-code] 1))
                        ;; Sanitize token from error messages
-                       (let [safe-cmd (clojure.string/replace (str cmd) #"x-access-token:[^\s@]+" "x-access-token:***")]
-                         (throw (ex-info (str "Workspace bootstrap failed: " safe-cmd)
+                       (let [safe-cmd (clojure.string/replace (str cmd) #"x-access-token:[^\s@]+" "x-access-token:***")
+                             stderr  (clojure.string/replace (or (get-in r [:data :stderr]) "") #"x-access-token:[^\s@]+" "x-access-token:***")]
+                         (throw (ex-info (str "Workspace bootstrap failed: " safe-cmd
+                                              (when (seq stderr) (str "\n" stderr)))
                                          {:cmd    safe-cmd
-                                          :stderr (get-in r [:data :stderr])
+                                          :stderr stderr
                                           :exit   (get-in r [:data :exit-code])}))))))
           clone-cmd (str "git clone --branch " branch " --single-branch "
                          clone-url " " workdir)]
       (exec! clone-cmd)
-      (exec! (str "git config --global user.email 'miniforge@miniforge.ai'"))
-      (exec! (str "git config --global user.name 'miniforge'")))))
+      ;; Use --local (not --global) since container rootfs is read-only
+      (exec! (str "git -C " workdir " config user.email 'miniforge@miniforge.ai'"))
+      (exec! (str "git -C " workdir " config user.name 'miniforge'")))))
 
 ;; ============================================================================
 ;; DockerExecutor Record
