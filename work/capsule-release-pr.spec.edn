@@ -1,0 +1,36 @@
+{:spec/title "Release phase creates PR from inside capsule"
+
+ :spec/description
+ "The release phase must create git branches and PRs from inside the task
+  capsule in governed mode. Currently, git push and gh pr create run on the
+  host via shell/sh. In governed mode, these must route through execute-fn.
+
+  The GitHub token (resolved via config/resolve-git-token) must be injected
+  into the capsule's git credential config so git push works. The gh CLI
+  inside the capsule must be authenticated via GH_TOKEN env var.
+
+  The bootstrap-workspace! function already injects the token into the clone
+  URL. For push, git needs the token configured as a credential helper or
+  the remote URL must include the token (already the case from clone)."
+
+ :spec/intent {:type :refactor
+               :scope ["components/phase-software-factory/src/ai/miniforge/phase/release.clj"
+                       "components/release-executor/src/ai/miniforge/release_executor/core.clj"]}
+
+ :spec/constraints
+ ["All changes gated on :execution/mode :governed — local mode unchanged"
+  "Token must never appear in logs or error messages (use sanitize-token)"
+  "Use :execution/execute-fn from context — do not require dag-executor"
+  "gh CLI authentication via GH_TOKEN env var injected at container creation"
+  "Release executor must detect governed mode and route git/gh through executor"
+  "Existing release tests must continue to pass"]
+
+ :spec/acceptance-criteria
+ ["In governed mode, git push runs inside capsule via execute-fn"
+  "In governed mode, gh pr create runs inside capsule via execute-fn"
+  "GH_TOKEN injected into container env during acquire-environment!"
+  "PR URL returned in release result"
+  "Local mode behavior unchanged"
+  "Token sanitized in all error paths"]
+
+ :workflow/type :canonical-sdlc}

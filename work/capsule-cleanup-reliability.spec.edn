@@ -1,0 +1,30 @@
+{:spec/title "Reliable capsule cleanup on failure"
+
+ :spec/description
+ "Docker containers from governed-mode runs linger after pipeline errors or
+  timeouts. The runner's release-execution-environment! must be called in all
+  exit paths — success, failure, exception, and timeout.
+
+  Currently the runner has a try/finally but the environment release may not
+  cover all DAG sub-workflow capsules. Each capsule created by the DAG
+  orchestrator must also be cleaned up."
+
+ :spec/intent {:type :fix
+               :scope ["components/workflow/src/ai/miniforge/workflow/runner.clj"
+                       "components/workflow/src/ai/miniforge/workflow/dag_orchestrator.clj"
+                       "components/workflow/src/ai/miniforge/workflow/dag_task_runner.clj"]}
+
+ :spec/constraints
+ ["release-execution-environment! must be called in finally blocks"
+  "DAG sub-workflow capsules must be tracked and cleaned up"
+  "Cleanup must not throw — wrap in try/catch"
+  "Log cleanup actions at debug level"
+  "Do not change the public API of run-pipeline"]
+
+ :spec/acceptance-criteria
+ ["No lingering miniforge-task-* containers after pipeline success"
+  "No lingering containers after pipeline failure"
+  "No lingering containers after pipeline timeout"
+  "docker ps --filter name=miniforge-task returns empty after any run"]
+
+ :workflow/type :canonical-sdlc}
