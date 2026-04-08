@@ -433,33 +433,59 @@
 ;; ============================================================================
 
 (defn- ssh-url->https-url
-  "Convert git@github.com:owner/repo.git to https://github.com/owner/repo.git.
+  "Convert git@host:owner/repo.git to https://host/owner/repo.git.
+   Works for any git host (GitHub, GitLab, Bitbucket, etc.).
    Returns the URL unchanged if it's already HTTPS or not a recognized SSH URL."
   [url]
   (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" url)]
     (str "https://" host "/" path)
     url))
 
+(defn- resolve-git-token
+  "Resolve a git access token from environment or CLI tools.
+   Tries host-specific env vars first, then generic ones, then CLI tools."
+  [host]
+  (let [raw (cond
+              ;; GitLab-specific
+              (str/includes? (str host) "gitlab")
+              (or (System/getenv "GITLAB_TOKEN")
+                  (System/getenv "GL_TOKEN")
+                  (try (str/trim (:out (clojure.java.shell/sh "glab" "auth" "token")))
+                       (catch Exception _ nil)))
+
+              ;; GitHub (default)
+              :else
+              (or (System/getenv "GH_TOKEN")
+                  (System/getenv "GITHUB_TOKEN")
+                  (try (str/trim (:out (clojure.java.shell/sh "gh" "auth" "token")))
+                       (catch Exception _ nil))))]
+    (when (and raw (seq (str/trim raw)))
+      (str/trim raw))))
+
+(defn- authenticated-https-url
+  "Inject token credentials into an HTTPS git URL.
+   Uses the host-appropriate token format (GitHub vs GitLab)."
+  [https-url token]
+  (let [gitlab? (str/includes? https-url "gitlab")]
+    (str/replace https-url #"https://"
+                 (if gitlab?
+                   (str "https://oauth2:" token "@")
+                   (str "https://x-access-token:" token "@")))))
+
 (defn- bootstrap-workspace!
   "Clone a git repository into the container workspace after creation.
    Runs git clone, configures git identity, and checks out the target branch.
    No-op when repo-url is nil (local mode / pre-existing workspace).
-   Prefers HTTPS clone with GH_TOKEN for authentication inside containers
-   where SSH agents are not available."
+   Prefers HTTPS clone with token auth inside containers where SSH agents
+   are not available. Supports GitHub, GitLab, and other git hosts."
   [docker-path container-name workdir env-config]
   (when-let [repo-url (:repo-url env-config)]
-    (let [branch   (or (:branch env-config) "main")
-          gh-token (or (System/getenv "GH_TOKEN")
-                       (System/getenv "GITHUB_TOKEN")
-                       (try (:out (clojure.java.shell/sh "gh" "auth" "token"))
-                            (catch Exception _ nil)))
-          gh-token (when gh-token (clojure.string/trim gh-token))
-          ;; Use HTTPS with token when available (SSH agents aren't in containers)
-          clone-url (if gh-token
-                      (let [https-url (ssh-url->https-url repo-url)]
-                        (clojure.string/replace https-url
-                                                #"https://"
-                                                (str "https://x-access-token:" gh-token "@")))
+    (let [branch    (or (:branch env-config) "main")
+          https-url (ssh-url->https-url repo-url)
+          host      (second (re-find #"https://([^/]+)" https-url))
+          token     (resolve-git-token host)
+          clone-url (if token
+                      (authenticated-https-url https-url token)
                       repo-url)
           exec!  (fn [cmd]
                    (let [r (exec-in-container docker-path container-name cmd
