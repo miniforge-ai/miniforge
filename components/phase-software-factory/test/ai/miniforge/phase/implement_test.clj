@@ -204,6 +204,59 @@
         (is (= :implement (first (get-in final-result [:execution :phases-completed])))
             "Implement should be added to phases-completed")))))
 
+;------------------------------------------------------------------------------ Layer 3: Capsule File Loading
+
+(deftest load-files-from-capsule-reads-via-execute-fn-test
+  (testing "load-files-from-capsule reads files via execute-fn"
+    (let [execute-fn (fn [_executor _env-id cmd _opts]
+                       (cond
+                         (= cmd "cat /workspace/src/core.clj")
+                         {:data {:stdout "(ns core)" :exit-code 0}}
+
+                         (= cmd "cat /workspace/src/util.clj")
+                         {:data {:stdout "(ns util)" :exit-code 0}}
+
+                         :else
+                         {:data {:stdout "" :exit-code 1}}))
+          result (#'implement/load-files-from-capsule
+                  execute-fn :mock-executor :mock-env-id "/workspace"
+                  ["src/core.clj" "src/util.clj"])]
+      (is (= 2 (count result)))
+      (is (= "src/core.clj" (:path (first result))))
+      (is (= "(ns core)" (:content (first result))))
+      (is (= "(ns util)" (:content (second result)))))))
+
+(deftest load-files-from-capsule-skips-missing-files-test
+  (testing "load-files-from-capsule skips files that don't exist in capsule"
+    (let [execute-fn (fn [_executor _env-id cmd _opts]
+                       (if (= cmd "cat /workspace/src/exists.clj")
+                         {:data {:stdout "(ns exists)" :exit-code 0}}
+                         {:data {:stdout "" :exit-code 1}}))
+          result (#'implement/load-files-from-capsule
+                  execute-fn :mock-executor :mock-env-id "/workspace"
+                  ["src/exists.clj" "src/missing.clj"])]
+      (is (= 1 (count result)))
+      (is (= "src/exists.clj" (:path (first result)))))))
+
+(deftest load-files-from-capsule-returns-nil-for-empty-scope-test
+  (testing "load-files-from-capsule returns nil when no files in scope"
+    (is (nil? (#'implement/load-files-from-capsule
+               (fn [& _] nil) :x :y "/w" [])))))
+
+(deftest resolve-existing-files-uses-capsule-in-governed-mode-test
+  (testing "resolve-existing-files prefers capsule path when execute-fn is on context"
+    (let [capsule-called (atom false)
+          execute-fn (fn [_executor _env-id cmd _opts]
+                       (reset! capsule-called true)
+                       {:data {:stdout "(ns capsule)" :exit-code 0}})
+          ctx {:execution/execute-fn execute-fn
+               :execution/executor :mock
+               :execution/environment-id :mock-env}
+          result (#'implement/resolve-existing-files
+                  ctx nil "/workspace" ["src/a.clj"])]
+      (is @capsule-called "Should have called execute-fn")
+      (is (= 1 (count result))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 
 (comment
