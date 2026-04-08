@@ -274,12 +274,42 @@
     (schema/validate-pack pack))
 
   (verify-signature [_this pack]
-    ;; Signature verification is a paid feature - stub implementation
-    (if (:pack/signature pack)
-      {:verified? false
-       :reason "Signature verification not implemented (paid feature)"
-       :signer (:pack/signed-by pack)
-       :timestamp (:pack/signed-at pack)}
+    (if-let [sig-str (:pack/signature pack)]
+      (try
+        (let [decoder    (java.util.Base64/getDecoder)
+              sig-bytes  (.decode decoder ^String sig-str)
+              pub-key-str (:pack/signed-by pack)
+              ;; Compute content hash (pack without signature fields)
+              signable   (dissoc pack :pack/signature :pack/signed-by :pack/signed-at)
+              content    (pr-str (into (sorted-map) signable))
+              content-bytes (.getBytes content "UTF-8")
+              ;; Verify using Ed25519 via reflection (GraalVM-safe — avoids
+              ;; direct class reference to EdECPublicKeySpec which is Java 15+
+              ;; and not available in Babashka)
+              pub-bytes  (when pub-key-str (.decode decoder ^String pub-key-str))
+              named-spec (Class/forName "java.security.spec.NamedParameterSpec")
+              edec-point (Class/forName "java.security.spec.EdECPoint")
+              edec-spec  (Class/forName "java.security.spec.EdECPublicKeySpec")
+              param      (.getConstructor named-spec (into-array Class [String]))
+              ed-param   (.newInstance param (into-array Object ["Ed25519"]))
+              point-ctor (.getConstructor edec-point (into-array Class [Boolean/TYPE java.math.BigInteger]))
+              point      (.newInstance point-ctor (into-array Object [false (java.math.BigInteger. 1 ^bytes pub-bytes)]))
+              spec-ctor  (.getConstructor edec-spec (into-array Class [named-spec edec-point]))
+              key-spec   (.newInstance spec-ctor (into-array Object [ed-param point]))
+              kf         (java.security.KeyFactory/getInstance "EdDSA")
+              public-key (.generatePublic kf key-spec)
+              verifier   (doto (java.security.Signature/getInstance "Ed25519")
+                           (.initVerify public-key)
+                           (.update content-bytes))
+              verified?  (.verify verifier sig-bytes)]
+          {:verified? verified?
+           :signer    pub-key-str
+           :timestamp (:pack/signed-at pack)})
+        (catch Exception e
+          {:verified? false
+           :reason    (.getMessage e)
+           :signer    (:pack/signed-by pack)
+           :timestamp (:pack/signed-at pack)}))
       {:verified? false
        :reason "Pack is not signed"}))
 

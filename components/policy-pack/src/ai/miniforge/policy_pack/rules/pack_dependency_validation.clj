@@ -268,27 +268,56 @@
          vec)))
 
 (defn detect-trust-violations
-  "Detect trust level constraint violations.
-   Per N4 §2.4.2: untrusted packs cannot require trusted dependencies.
+  "Detect trust level constraint violations per N4 §2.4.2.
 
-   Note: This is a placeholder for trust validation. Full implementation
-   requires PR14 (Transitive Trust Rules) to be merged first.
+   Checks:
+   1. Untrusted pack with instruction authority depending on trusted pack = violation
+   2. Tainted pack as dependency of any non-tainted pack = violation
 
    Returns vector of violation maps:
    [{:type :trust-violation
      :pack-id string
      :dependency string
      :message string}]"
-  [_graph _by-id]
-  ;; Placeholder - trust levels not yet implemented (PR14)
-  ;; When PR14 is merged, check:
-  ;; 1. If pack has :pack/trust-level :untrusted
-  ;; 2. And dependency has :pack/trust-level :trusted
-  ;; 3. And dependency has :pack/authority :instruction
-  ;; 4. Then this is a violation
+  [_graph by-id]
+  (let [packs (vals by-id)]
+    (reduce
+     (fn [violations pack]
+       (let [pack-id    (get pack :pack/id)
+             trust      (get pack :pack/trust-level :untrusted)
+             authority  (get pack :pack/authority :authority/data)
+             deps       (get pack :pack/extends [])]
+         (reduce
+          (fn [vs dep]
+            (let [dep-id     (get dep :pack-id)
+                  dep-pack   (get by-id dep-id)
+                  dep-trust  (get dep-pack :pack/trust-level :untrusted)]
+              (cond-> vs
+                ;; Tainted pack used as dependency of non-tainted pack
+                (and dep-pack
+                     (= :tainted dep-trust)
+                     (not= :tainted trust))
+                (conj {:type       :trust-violation
+                       :pack-id    pack-id
+                       :dependency dep-id
+                       :message    (str "Tainted dependency " dep-id
+                                        " cannot be used by non-tainted pack " pack-id)})
 
-  ;; For now, return empty vector
-  [])
+                ;; Untrusted pack with instruction authority depending on trusted
+                (and dep-pack
+                     (= :untrusted trust)
+                     (= :authority/instruction authority)
+                     (= :trusted dep-trust))
+                (conj {:type       :trust-violation
+                       :pack-id    pack-id
+                       :dependency dep-id
+                       :message    (str "Untrusted pack " pack-id
+                                        " with instruction authority cannot depend on "
+                                        "trusted pack " dep-id)}))))
+          violations
+          deps)))
+     []
+     packs)))
 
 (defn calculate-pack-depths
   "Calculate maximum depth for each pack using bottom-up traversal.
