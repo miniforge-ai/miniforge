@@ -26,7 +26,6 @@
    - resources/executor/docker/Dockerfile.task-runner       (minimal Alpine)
    - resources/executor/docker/Dockerfile.task-runner-clojure (with Clojure tooling)"
   (:require
-   [ai.miniforge.config.interface :as config]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [clojure.java.io]
@@ -433,6 +432,27 @@
 ;; Workspace Bootstrap (N11 §4.2)
 ;; ============================================================================
 
+(defn- infer-host-kind
+  "Infer the git hosting provider from a repository URL.
+   Returns :github, :gitlab, or :generic."
+  [repo-url]
+  (cond
+    (str/includes? repo-url "github.com")  :github
+    (str/includes? repo-url "gitlab.com")  :gitlab
+    (str/includes? repo-url "gitlab")      :gitlab
+    :else                                  :generic))
+
+(defn- resolve-git-token
+  "Resolve a git authentication token from environment variables.
+   Checks provider-specific env vars first, then falls back to GITHUB_TOKEN."
+  [_repo-url {:keys [host-kind]}]
+  (case host-kind
+    :github (or (System/getenv "GITHUB_TOKEN")
+                (System/getenv "GH_TOKEN"))
+    :gitlab (or (System/getenv "GITLAB_TOKEN")
+                (System/getenv "GL_TOKEN"))
+    (System/getenv "GITHUB_TOKEN")))
+
 (defn- sanitize-token
   "Remove token credentials from a string for safe logging.
    Handles both GitHub (x-access-token) and GitLab (oauth2) auth formats."
@@ -461,8 +481,8 @@
   (when-let [repo-url (:repo-url env-config)]
     (let [branch    (or (:branch env-config) "main")
           host-kind (or (:host-kind env-config)
-                        (config/infer-host-kind repo-url))
-          token     (config/resolve-git-token repo-url {:host-kind host-kind})
+                        (infer-host-kind repo-url))
+          token     (resolve-git-token repo-url {:host-kind host-kind})
           ;; Convert SSH URL to HTTPS (containers lack SSH agent)
           https-url (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" repo-url)]
                       (str "https://" host "/" path)
