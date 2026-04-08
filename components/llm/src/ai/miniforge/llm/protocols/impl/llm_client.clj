@@ -487,11 +487,12 @@
 (defn stream-exec-fn
   ([cmd on-line]
    (stream-exec-fn cmd on-line {}))
-  ([cmd on-line {:keys [progress-monitor]}]
+  ([cmd on-line {:keys [progress-monitor workdir]}]
    (let [monitor (or progress-monitor (default-progress-monitor))
          empty-stdin (ByteArrayInputStream. (byte-array 0))
          process (apply p/process (cond-> {:err :string :in empty-stdin}
-                                          (clean-env) (assoc :env (clean-env))) cmd)
+                                          (clean-env) (assoc :env (clean-env))
+                                          workdir     (assoc :dir workdir)) cmd)
          out-reader (java.io.BufferedReader.
                      (java.io.InputStreamReader. (:out process)))
          {:keys [lines timeout]} (process-stream-lines out-reader monitor on-line)
@@ -622,7 +623,8 @@
     (let [result (stream-fn
                   full-cmd
                   (stream-with-parser stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost accumulated-tools)
-                  {:progress-monitor progress-monitor})
+                  {:progress-monitor progress-monitor
+                   :workdir (:workdir request)})
           exit-code (:exit result)
           timeout-info (:timeout result)
           final-content @accumulated-content
