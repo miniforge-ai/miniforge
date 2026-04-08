@@ -26,6 +26,7 @@
    - resources/executor/docker/Dockerfile.task-runner       (minimal Alpine)
    - resources/executor/docker/Dockerfile.task-runner-clojure (with Clojure tooling)"
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [clojure.java.io]
@@ -432,63 +433,50 @@
 ;; Workspace Bootstrap (N11 §4.2)
 ;; ============================================================================
 
-(defn- ssh-url->https-url
-  "Convert git@host:owner/repo.git to https://host/owner/repo.git.
-   Works for any git host (GitHub, GitLab, Bitbucket, etc.).
-   Returns the URL unchanged if it's already HTTPS or not a recognized SSH URL."
-  [url]
-  (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" url)]
-    (str "https://" host "/" path)
-    url))
-
-(defn- resolve-git-token
-  "Resolve a git access token for capsule clone.
-   One canonical env var per provider:
-   - MINIFORGE_GIT_TOKEN — universal override (any host)
-   - GITLAB_TOKEN — GitLab hosts
-   - GH_TOKEN — GitHub hosts (fallback: `gh auth token` CLI)"
-  [host]
-  (let [raw (or (System/getenv "MINIFORGE_GIT_TOKEN")
-                (if (str/includes? (str host) "gitlab")
-                  (System/getenv "GITLAB_TOKEN")
-                  (or (System/getenv "GH_TOKEN")
-                      (try (str/trim (:out (clojure.java.shell/sh "gh" "auth" "token")))
-                           (catch Exception _ nil)))))]
-    (when (and raw (seq (str/trim raw)))
-      (str/trim raw))))
+(defn- sanitize-token
+  "Remove token credentials from a string for safe logging.
+   Handles both GitHub (x-access-token) and GitLab (oauth2) auth formats."
+  [s]
+  (-> s
+      (str/replace #"x-access-token:[^\s@]+" "x-access-token:***")
+      (str/replace #"oauth2:[^\s@]+" "oauth2:***")))
 
 (defn- authenticated-https-url
   "Inject token credentials into an HTTPS git URL.
-   Uses the host-appropriate token format (GitHub vs GitLab)."
-  [https-url token]
-  (let [gitlab? (str/includes? https-url "gitlab")]
-    (str/replace https-url #"https://"
-                 (if gitlab?
-                   (str "https://oauth2:" token "@")
-                   (str "https://x-access-token:" token "@")))))
+   Uses the host-appropriate token format based on host-kind."
+  [https-url token host-kind]
+  (str/replace https-url #"https://"
+               (if (= host-kind :gitlab)
+                 (str "https://oauth2:" token "@")
+                 (str "https://x-access-token:" token "@"))))
 
 (defn- bootstrap-workspace!
   "Clone a git repository into the container workspace after creation.
    Runs git clone, configures git identity, and checks out the target branch.
    No-op when repo-url is nil (local mode / pre-existing workspace).
-   Prefers HTTPS clone with token auth inside containers where SSH agents
-   are not available. Supports GitHub, GitLab, and other git hosts."
+   Uses config-based token resolution (profile + env fallback) rather than
+   URL-guessing. Converts SSH URLs to HTTPS for containers where SSH agents
+   are not available."
   [docker-path container-name workdir env-config]
   (when-let [repo-url (:repo-url env-config)]
     (let [branch    (or (:branch env-config) "main")
-          https-url (ssh-url->https-url repo-url)
-          host      (second (re-find #"https://([^/]+)" https-url))
-          token     (resolve-git-token host)
+          host-kind (or (:host-kind env-config)
+                        (config/infer-host-kind repo-url))
+          token     (config/resolve-git-token repo-url {:host-kind host-kind})
+          ;; Convert SSH URL to HTTPS (containers lack SSH agent)
+          https-url (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" repo-url)]
+                      (str "https://" host "/" path)
+                      repo-url)
           clone-url (if token
-                      (authenticated-https-url https-url token)
+                      (authenticated-https-url https-url token host-kind)
                       repo-url)
           exec!  (fn [cmd]
                    (let [r (exec-in-container docker-path container-name cmd
                                               {:workdir "/"})]
                      (when-not (zero? (get-in r [:data :exit-code] 1))
                        ;; Sanitize token from error messages
-                       (let [safe-cmd (clojure.string/replace (str cmd) #"x-access-token:[^\s@]+" "x-access-token:***")
-                             stderr  (clojure.string/replace (or (get-in r [:data :stderr]) "") #"x-access-token:[^\s@]+" "x-access-token:***")]
+                       (let [safe-cmd (sanitize-token (str cmd))
+                             stderr   (sanitize-token (or (get-in r [:data :stderr]) ""))]
                          (throw (ex-info (str "Workspace bootstrap failed: " safe-cmd
                                               (when (seq stderr) (str "\n" stderr)))
                                          {:cmd    safe-cmd
@@ -517,6 +505,12 @@
         (result/ok {:available? false :reason (.getMessage e)}))))
 
   (acquire-environment! [_this task-id env-config]
+    ;; Lazy image build: ensure the image exists locally before creating the container.
+    ;; Looks up image in task-runner-images by name; builds from bundled Dockerfile if missing.
+    (when-not (image-exists? docker-path image)
+      (when-let [image-key (->> task-runner-images
+                                (some (fn [[k v]] (when (= image (:image v)) k))))]
+        (ensure-image! docker-path image-key)))
     (let [container-name (str "miniforge-task-" (subs (str task-id) 0 8))
           workdir (or (:workdir env-config) default-workdir)
           create-result (create-container docker-path

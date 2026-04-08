@@ -115,11 +115,34 @@
   (or (get-in input [:context :files-in-scope])
       (get-in input [:intent :scope])))
 
+(defn- load-files-from-capsule
+  "Read scope files from inside a task capsule via execute-fn.
+   Returns seq of {:path :content} maps, same shape as file-ctx/load-files-in-scope."
+  [execute-fn executor env-id worktree-path files-in-scope]
+  (when (seq files-in-scope)
+    (->> files-in-scope
+         (keep (fn [path]
+                 (try
+                   (let [full-path (str worktree-path "/" path)
+                         result (execute-fn executor env-id (str "cat " full-path)
+                                           {:workdir worktree-path})
+                         content (get-in result [:data :stdout])]
+                     (when (and content (zero? (get-in result [:data :exit-code] 1)))
+                       {:path path :content content}))
+                   (catch Exception _ nil))))
+         vec)))
+
 (defn- resolve-existing-files
-  "Load existing files from cache, context pack, or disk."
+  "Load existing files from cache, context pack, capsule, or disk."
   [ctx pack-ctx worktree-path files-in-scope]
   (or (get-in ctx [:execution/cached-files])
       (:existing-files pack-ctx)
+      ;; In governed mode, read files from inside the capsule
+      (when-let [execute-fn (get ctx :execution/execute-fn)]
+        (load-files-from-capsule execute-fn
+                                 (get ctx :execution/executor)
+                                 (get ctx :execution/environment-id)
+                                 worktree-path files-in-scope))
       (file-ctx/load-files-in-scope worktree-path files-in-scope)))
 
 (defn- resolve-review-feedback
