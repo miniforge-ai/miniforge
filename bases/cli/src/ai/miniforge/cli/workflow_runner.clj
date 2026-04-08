@@ -270,7 +270,11 @@
           ;; Infer repo URL and branch for execution environment (Docker clone / worktree).
           ;; Reuses sandbox helpers which fall back to `git remote get-url origin`.
           repo-url (sandbox/infer-repo-url spec enriched-spec)
-          branch   (sandbox/infer-branch spec enriched-spec)
+          ;; In governed mode, always clone main — the capsule creates a fresh
+          ;; working copy, not a checkout of the host worktree's branch.
+          branch   (if (= :governed (:execution-mode opts))
+                     (or (:spec/branch spec) "main")
+                     (sandbox/infer-branch spec enriched-spec))
           workflow-input (context/spec->workflow-input enriched-spec)
           artifact-store (create-artifact-store quiet)
           event-stream (es/create-event-stream)
