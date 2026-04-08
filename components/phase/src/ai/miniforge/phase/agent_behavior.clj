@@ -51,6 +51,22 @@
        (map :rule/agent-behavior)
        (filterv some?)))
 
+(defn extract-knowledge-content
+  "Extract non-nil :rule/knowledge-content strings from a seq of rules.
+
+   Arguments:
+   - rules - Seq of rule maps
+
+   Returns:
+   - Vector of {:rule/id keyword :rule/title string :content string}"
+  [rules]
+  (->> rules
+       (filter :rule/knowledge-content)
+       (mapv (fn [r]
+               {:rule/id    (:rule/id r)
+                :rule/title (:rule/title r)
+                :content    (:rule/knowledge-content r)}))))
+
 (defn format-behavior-addendum
   "Format behavior strings as a numbered markdown section for prompt injection.
 
@@ -65,6 +81,23 @@
          (->> behaviors
               (map-indexed (fn [i b] (str (inc i) ". " b)))
               (str/join "\n"))
+         "\n")))
+
+(defn format-knowledge-addendum
+  "Format knowledge content as a reference material section for prompt injection.
+
+   Arguments:
+   - knowledge - Seq of {:rule/id :rule/title :content} maps
+
+   Returns:
+   - Formatted string or nil if no knowledge"
+  [knowledge]
+  (when (seq knowledge)
+    (str "\n\n## Reference Material\n\n"
+         (->> knowledge
+              (map (fn [{:keys [rule/title content]}]
+                     (str "### " (or title "Standard") "\n\n" content)))
+              (str/join "\n\n"))
          "\n")))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -202,8 +235,12 @@
                                    (or context-gated [])))
 
           filtered  (into always-matched other-matched)
-          behaviors (extract-agent-behaviors filtered)]
-      (format-behavior-addendum behaviors))
+          behaviors (extract-agent-behaviors filtered)
+          knowledge (extract-knowledge-content filtered)
+          behavior-section  (format-behavior-addendum behaviors)
+          knowledge-section (format-knowledge-addendum knowledge)]
+      (when (or behavior-section knowledge-section)
+        (str behavior-section knowledge-section)))
     (catch Exception _
       nil)))
 

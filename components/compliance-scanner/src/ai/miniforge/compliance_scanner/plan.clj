@@ -145,10 +145,18 @@
        (msg/t :plan/needs-review-summary)
        ""
        (if (seq review-viols)
-         (str/join "\n"
+         (str/join "\n\n"
            (map (fn [v]
-                  (str "- `" (get v :file) "` L" (get v :line)
-                       " (" (get v :rule/category) "): " (get v :rationale)))
+                  (str "**[" (str/upper-case (name (get v :rule/severity :info)))
+                       "]** Rule: " (get v :rule/title (name (get v :rule/id :unknown)))
+                       "\n\n"
+                       "  Problem: " (get v :rationale) "\n"
+                       "  Location: `" (get v :file) ":" (get v :line) "`\n"
+                       "  Current: `" (get v :current "") "`\n"
+                       (when-let [suggested (get v :suggested)]
+                         (str "  Fix: `" suggested "`\n"))
+                       (when-let [refs (get v :rule/references)]
+                         (str "  Docs: " (str/join ", " refs) "\n"))))
                 review-viols))
          (msg/t :plan/no-review))
        ""

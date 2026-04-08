@@ -16,18 +16,14 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-(ns ai.miniforge.policy-pack.interface.loading
-  "Pack loading and serialization helpers."
+(ns ai.miniforge.policy-pack.interface.intent
+  "Semantic intent validation — declared intent vs actual resource changes."
   (:require
-   [ai.miniforge.policy-pack.loader :as loader]))
+   [ai.miniforge.policy-pack.intent :as intent]))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Loading operations
-
-(def load-pack loader/load-pack)
-(def load-pack-from-file loader/load-pack-from-file)
-(def load-pack-from-directory loader/load-pack-from-directory)
-(def resolve-overlay loader/resolve-overlay)
-(def discover-packs loader/discover-packs)
-(def load-all-packs loader/load-all-packs)
-(def write-pack-to-file loader/write-pack-to-file)
+(def intent-types intent/intent-types)
+(def infer-intent intent/infer-intent)
+(def intent-matches? intent/intent-matches?)
+(def semantic-intent-check intent/semantic-intent-check)
+(def parse-terraform-plan-counts intent/parse-terraform-plan-counts)
+(def parse-k8s-diff-counts intent/parse-k8s-diff-counts)

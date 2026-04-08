@@ -26,6 +26,9 @@
    [ai.miniforge.policy-pack.interface.loading :as loading]
    [ai.miniforge.policy-pack.interface.registry :as registry]
    [ai.miniforge.policy-pack.interface.schema :as schema]
+   [ai.miniforge.policy-pack.interface.taxonomy :as taxonomy]
+   [ai.miniforge.policy-pack.interface.mapping :as mapping]
+   [ai.miniforge.policy-pack.interface.intent :as intent]
    [ai.miniforge.policy-pack.mdc-compiler :as mdc-compiler]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -63,6 +66,7 @@
 (def load-pack loading/load-pack)
 (def load-pack-from-file loading/load-pack-from-file)
 (def load-pack-from-directory loading/load-pack-from-directory)
+(def resolve-overlay loading/resolve-overlay)
 (def discover-packs loading/discover-packs)
 (def load-all-packs loading/load-all-packs)
 (def write-pack-to-file loading/write-pack-to-file)
@@ -95,9 +99,49 @@
 (def merge-rules builders/merge-rules)
 
 ;------------------------------------------------------------------------------ Layer 3
+;; Taxonomy API
+
+(def Taxonomy taxonomy/Taxonomy)
+(def TaxonomyCategory taxonomy/TaxonomyCategory)
+(def TaxonomyRef taxonomy/TaxonomyRef)
+(def valid-taxonomy? taxonomy/valid-taxonomy?)
+(def validate-taxonomy taxonomy/validate-taxonomy)
+(def load-taxonomy taxonomy/load-taxonomy)
+(def load-taxonomy-from-classpath taxonomy/load-taxonomy-from-classpath)
+(def category-by-id taxonomy/category-by-id)
+(def resolve-alias taxonomy/resolve-alias)
+(def category-title taxonomy/category-title)
+(def category-order taxonomy/category-order)
+
+;------------------------------------------------------------------------------ Layer 3
+;; Mapping API
+
+(def MappingArtifact mapping/MappingArtifact)
+(def MappingEntry mapping/MappingEntry)
+(def valid-mapping? mapping/valid-mapping?)
+(def validate-mapping mapping/validate-mapping)
+(def load-mapping mapping/load-mapping)
+(def resolve-mapping mapping/resolve-mapping)
+(def project-report mapping/project-report)
+
+;------------------------------------------------------------------------------ Layer 3
+;; Intent validation API
+
+(def infer-intent intent/infer-intent)
+(def intent-matches? intent/intent-matches?)
+(def semantic-intent-check intent/semantic-intent-check)
+(def parse-terraform-plan-counts intent/parse-terraform-plan-counts)
+(def parse-k8s-diff-counts intent/parse-k8s-diff-counts)
+
+;------------------------------------------------------------------------------ Layer 3
 ;; MDC compilation
 
 (def compile-standards-pack
   "Compile all MDC files under a standards directory into a PackManifest.
    Delegates to mdc-compiler/compile-standards-pack."
   mdc-compiler/compile-standards-pack)
+
+(def export-canonical-taxonomy
+  "Export the compiler's dewey-ranges as a first-class Taxonomy artifact.
+   Delegates to mdc-compiler/export-canonical-taxonomy."
+  mdc-compiler/export-canonical-taxonomy)

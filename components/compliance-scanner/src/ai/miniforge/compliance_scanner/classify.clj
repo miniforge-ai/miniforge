@@ -52,16 +52,25 @@
   (or (has-path-exclusion? violation ctx-rule)
       (has-content-exclusion? violation ctx-rule)))
 
+(defn- semantic-strategy?
+  "Return true if the violation has a :semantic remediation strategy."
+  [violation]
+  (= :semantic (get-in violation [:remediation :strategy]
+                       (get violation :remediation-strategy))))
+
 (defn- classify-one
   "Classify a single violation using pack-enriched metadata.
-   Uses :auto-fixable-default and :exclude-contexts from the pack rule."
+   Uses :auto-fixable-default and :exclude-contexts from the pack rule.
+   Violations with :semantic remediation strategy are always not auto-fixable."
   [violation]
   (let [auto-default (get violation :auto-fixable-default true)
         excludes     (get violation :exclude-contexts [])
-        excluded?    (boolean (some #(matches-exclude-context? violation %) excludes))]
+        excluded?    (boolean (some #(matches-exclude-context? violation %) excludes))
+        semantic?    (semantic-strategy? violation)]
     (assoc violation
-           :auto-fixable? (and auto-default (not excluded?))
+           :auto-fixable? (and auto-default (not excluded?) (not semantic?))
            :rationale     (cond
+                            semantic?    "Requires LLM semantic review"
                             excluded?    (msg/t :classify/json-context)
                             auto-default (msg/t :classify/literal-default)
                             :else        (msg/t :classify/datever)))))

@@ -218,6 +218,10 @@
    ;; Examples (for documentation and testing)
    [:rule/examples {:optional true} [:vector RuleExample]]
 
+   ;; Enabled flag — when false, rule is skipped during evaluation.
+   ;; Overlay packs may override this to disable inherited rules.
+   [:rule/enabled? {:optional true} boolean?]
+
    ;; Metadata
    [:rule/version {:optional true} string?]
    [:rule/author {:optional true} string?]
@@ -248,6 +252,21 @@
    - :authority/instruction - May shape agent plans (requires :trusted)
    - :authority/data        - Reference material only (any trust level)"
   [:enum :authority/instruction :authority/data])
+
+(def TaxonomyRef
+  "Schema for a taxonomy reference within a pack manifest.
+   Packs declare which taxonomy they target and the minimum version required."
+  [:map
+   [:taxonomy/id keyword?]
+   [:taxonomy/min-version string?]])
+
+(def PackOverride
+  "Schema for an overlay pack rule override.
+   Only :rule/severity and :rule/enabled? are overridable per N4 spec."
+  [:map
+   [:rule/id keyword?]
+   [:rule/severity {:optional true} RuleSeverity]
+   [:rule/enabled? {:optional true} boolean?]])
 
 (def PackManifest
   "Schema for a policy pack manifest.
@@ -283,11 +302,17 @@
    [:pack/trust-level {:optional true} TrustLevel]
    [:pack/authority {:optional true} AuthorityChannel]
 
+   ;; Taxonomy reference (N4 §2.1)
+   [:pack/taxonomy-ref {:optional true} TaxonomyRef]
+
    ;; Config overrides (governance config tuning from trusted packs)
    [:pack/config-overrides {:optional true} [:map-of :keyword :map]]
 
    ;; Dependencies
    [:pack/extends {:optional true} [:vector PackDependency]]
+
+   ;; Rule overrides (overlay packs — N4 §2.5)
+   [:pack/overrides {:optional true} [:vector PackOverride]]
 
    ;; Organization
    [:pack/categories [:vector PackCategory]]

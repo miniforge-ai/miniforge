@@ -1,0 +1,57 @@
+;; Pack Trust Policy Pack — trust chain and provenance validation.
+;; Reference: N4 Policy Packs & Gates Standard §2.2, N1 §2.10.2
+;; Dewey category: 001 (Foundations & Core Principles)
+
+{:pack/id          "miniforge/pack-trust"
+ :pack/name        "Pack Trust"
+ :pack/version     "1.0.0"
+ :pack/description "Trust chain validation rules for policy packs: signature verification, publisher allowlisting, and minimum trust-level enforcement."
+ :pack/author      "miniforge.ai"
+ :pack/license     "Apache-2.0"
+ :pack/trust-level :trusted
+ :pack/authority   :authority/instruction
+ :pack/taxonomy-ref {:taxonomy/id :miniforge/dewey :taxonomy/min-version "1.0.0"}
+
+ :pack/categories
+ [{:category/id   "001"
+   :category/name "Pack Trust"
+   :category/rules [:trust/require-signature
+                    :trust/publisher-allowlist
+                    :trust/minimum-trust-level]}]
+
+ :pack/rules
+ [{:rule/id          :trust/require-signature
+   :rule/title       "Require Pack Signature"
+   :rule/description "Validates that instruction-authority packs carry a cryptographic signature. Unsigned packs with :authority/instruction must not be loaded, preventing supply-chain injection of untrusted behavioral directives."
+   :rule/severity    :critical
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:plan :implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Pack with instruction authority is missing a cryptographic signature. Only signed packs may provide agent behavioral directives."
+                      :remediation "Sign the pack using the miniforge pack-signing tool before distribution."}}
+
+  {:rule/id          :trust/publisher-allowlist
+   :rule/title       "Publisher Allowlist"
+   :rule/description "Verifies that the pack publisher is on the organization's approved publisher list. Packs from unapproved publishers are rejected to prevent unauthorized policy injection."
+   :rule/severity    :critical
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:plan :implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Pack publisher is not in the approved publisher allowlist. Contact your administrator to approve this publisher."
+                      :remediation "Add the publisher to the organization's pack publisher allowlist."}}
+
+  {:rule/id          :trust/minimum-trust-level
+   :rule/title       "Minimum Trust Level"
+   :rule/description "Enforces that packs loaded for instruction authority meet the minimum trust level (:trusted). Untrusted or tainted packs are restricted to data-only authority, preventing trust escalation."
+   :rule/severity    :critical
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:plan :implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Pack trust level is below the required minimum for its declared authority channel. Untrusted packs cannot provide instruction authority."
+                      :remediation "Promote the pack to :trusted via the platform trust workflow, or downgrade its authority to :authority/data."}}]
+
+ :pack/created-at #inst "2026-04-08T00:00:00Z"
+ :pack/updated-at #inst "2026-04-08T00:00:00Z"}

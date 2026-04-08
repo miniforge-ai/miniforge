@@ -21,12 +21,14 @@
 
    Layer 0: Per-file detection helpers
    Layer 0.5: Pack-driven detection config (glob matching, suggest builder)
+   Layer 0.6: Diff/plan detection helpers
    Layer 1: Per-rule scanning
    Layer 2: Top-level scan-repo entry point"
   (:require [ai.miniforge.compliance-scanner.factory  :as factory]
             [ai.miniforge.compliance-scanner.messages :as msg]
             [ai.miniforge.policy-pack.interface       :as policy-pack]
             [ai.miniforge.repo-index.interface        :as repo-index]
+            [clojure.java.io                          :as io]
             [clojure.string                           :as str])
   (:import [java.nio.file FileSystems Paths]))
 
@@ -166,18 +168,67 @@
         remediation
         (assoc :remediation remediation)))))
 
+(def ^:private scannable-types
+  "Detection types the compliance scanner can process."
+  #{:content-scan :diff-analysis :plan-output})
+
+(def ^:private canonical-taxonomy-cache
+  "Cached canonical taxonomy for category resolution. Loaded once on first use."
+  (delay (policy-pack/export-canonical-taxonomy)))
+
+(defn- category-matches?
+  "Check if a rule's category matches a category selector keyword.
+   Supports exact match by name (e.g. :mf.cat/languages matches rule category
+   where dewey->category-id returns \"languages\").
+   Uses the canonical taxonomy for resolution."
+  [rule cat-kw]
+  (let [cat-name (name cat-kw)
+        rule-cat (:rule/category rule)
+        taxonomy @canonical-taxonomy-cache]
+    (or (= cat-name rule-cat)
+        ;; Check if rule's Dewey code falls in the category's range
+        (when-let [cat (policy-pack/category-by-id taxonomy
+                                                     (policy-pack/resolve-alias taxonomy cat-kw))]
+            (let [code-str  (:category/code cat)
+                  ;; Parse range "200-299" → [200 299]
+                  range-parts (str/split code-str #"-")]
+              (when (= 2 (count range-parts))
+                (try
+                  (let [lo (Integer/parseInt (first range-parts))
+                        hi (Integer/parseInt (second range-parts))
+                        rule-code (Integer/parseInt (str rule-cat))]
+                    (and (<= lo rule-code) (<= rule-code hi)))
+                  (catch Exception _ false))))))))
+
+(defn- rule-matches-selector?
+  "Check if a rule matches a selector element (keyword — rule ID or category ID)."
+  [rule selector-kw]
+  (or (= selector-kw (:rule/id rule))
+      (category-matches? rule selector-kw)))
+
 (defn- filter-pack-rules
-  "Filter compiled pack rules to those with content-scan detection,
-   further filtered by the :rules option.
-   :all and :always-apply both return all scannable rules."
+  "Filter compiled pack rules by the :rules option.
+
+   Supported selectors:
+   - :all / :always-apply — all rules with scannable detection types
+   - keyword — single rule ID match
+   - set of keywords — matches rule IDs OR category IDs
+     e.g. #{:std/clojure :mf.cat/workflows}
+
+   Only rules with scannable detection types (content-scan, diff-analysis,
+   plan-output) pass through."
   [pack-rules opts]
   (let [raw       (get opts :rules :always-apply)
         requested (if (string? raw) (keyword (subs raw 1)) raw)
-        scannable (filter #(= :content-scan (get-in % [:rule/detection :type])) pack-rules)]
+        scannable (filter #(contains? scannable-types
+                                      (get-in % [:rule/detection :type]))
+                          pack-rules)]
     (cond
       (contains? #{:all :always-apply} requested) scannable
       (keyword? requested)  (filter #(= requested (:rule/id %)) scannable)
-      (set? requested)      (filter #(contains? requested (:rule/id %)) scannable)
+      (set? requested)      (filter (fn [rule]
+                                      (some #(rule-matches-selector? rule %) requested))
+                                    scannable)
       :else                 scannable)))
 
 (defn- load-pack-detection-configs
@@ -210,6 +261,88 @@
 
     (get remediation :exclude-contexts)
     (assoc :exclude-contexts (get remediation :exclude-contexts))))
+
+;------------------------------------------------------------------------------ Layer 0.6
+;; Diff/plan detection and incremental mode helpers
+
+(defn- git-diff
+  "Run git diff and return the output string."
+  [repo-path since-ref]
+  (try
+    (let [pb (ProcessBuilder. ^java.util.List
+              ["git" "diff" (str since-ref "..HEAD")])
+          _  (.directory pb (io/file repo-path))
+          proc (.start pb)
+          out  (slurp (.getInputStream proc))]
+      (.waitFor proc)
+      (when-not (str/blank? out) out))
+    (catch Exception _ nil)))
+
+(defn- git-diff-name-only
+  "Run git diff --name-only and return set of changed file paths."
+  [repo-path since-ref]
+  (try
+    (let [pb (ProcessBuilder. ^java.util.List
+              ["git" "diff" "--name-only" (str since-ref "..HEAD")])
+          _  (.directory pb (io/file repo-path))
+          proc (.start pb)
+          out  (slurp (.getInputStream proc))]
+      (.waitFor proc)
+      (when-not (str/blank? out)
+        (set (str/split-lines (str/trim out)))))
+    (catch Exception _ nil)))
+
+(defn- scan-diff-rule
+  "Scan a git diff for violations using a diff-analysis rule.
+   Returns vector of Violation maps."
+  [rule-cfg diff-content]
+  (let [rule-id  (:rule/id rule-cfg)
+        rule-cat (:rule/category rule-cfg)
+        title    (:rule/title rule-cfg)
+        pattern  (re-pattern (get-in rule-cfg [:rule/detection :pattern]))
+        matches  (positive-matches pattern diff-content)]
+    (mapv (fn [{:keys [line match]}]
+            (factory/->violation
+             rule-id rule-cat title
+             "<diff>"     ; file is the entire diff
+             line match
+             nil          ; no suggestion for diff violations
+             false ""))
+          matches)))
+
+(defn- scan-plan-rule
+  "Scan plan output for violations using a plan-output rule.
+   Uses the policy-pack detect-violation dispatcher for resource-level analysis.
+   Returns vector of Violation maps."
+  [rule-cfg plan-output]
+  (let [rule-id  (:rule/id rule-cfg)
+        rule-cat (:rule/category rule-cfg)
+        title    (:rule/title rule-cfg)
+        ;; Build rule and artifact maps for the detection dispatcher
+        rule-map {:rule/id         rule-id
+                  :rule/detection  (get rule-cfg :rule/detection)
+                  :rule/applies-to (get rule-cfg :rule/applies-to {})
+                  :rule/enforcement {:action :warn :message title}}
+        artifact {:artifact/content plan-output}
+        context  {:terraform-plan plan-output}
+        result   (policy-pack/detect-violation rule-map artifact context)]
+    (if result
+      (let [resources (:resource-violations result [])]
+        (if (seq resources)
+          (mapv (fn [{:keys [resource action line]}]
+                  (factory/->violation
+                   rule-id rule-cat title
+                   (str resource)
+                   0
+                   (str action " " resource " — " (str/trim (or line "")))
+                   nil false ""))
+                resources)
+          [(factory/->violation
+            rule-id rule-cat title
+            "<plan-output>" 0
+            (:message result)
+            nil false "")]))
+      [])))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Per-rule scanning
@@ -250,36 +383,98 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Top-level entry point
 
+(defn- scan-content-rules
+  "Scan content-scan rules across the repo index.
+   When :since ref is provided, limits scanning to changed files only."
+  [content-cfgs index changed-files]
+  (->> content-cfgs
+       (mapcat (fn [cfg]
+                 (let [viols (if changed-files
+                               ;; Incremental: only scan changed files
+                               (let [file-pred (get cfg :file-pred (constantly false))
+                                     changed   (filter (fn [f]
+                                                         (and (contains? changed-files (:path f))
+                                                              (file-pred (:path f))))
+                                                       (repo-index/find-files index identity))]
+                                 (mapcat #(scan-file-record cfg index %) changed))
+                               ;; Full scan
+                               (scan-rule cfg index))]
+                   (if-let [rem (get cfg :remediation)]
+                     (mapv #(enrich-violation % rem) viols)
+                     viols))))
+       vec))
+
+(defn- scan-diff-rules
+  "Scan diff-analysis rules against a git diff."
+  [diff-rules diff-content]
+  (when diff-content
+    (->> diff-rules
+         (mapcat #(scan-diff-rule % diff-content))
+         vec)))
+
+(defn- scan-plan-rules
+  "Scan plan-output rules against terraform plan output."
+  [plan-rules plan-output]
+  (when plan-output
+    (->> plan-rules
+         (mapcat #(scan-plan-rule % plan-output))
+         vec)))
+
 (defn scan-repo
   "Scan a repo for violations across all configured rules.
 
-   Compiles the policy pack from standards-path and uses detection
-   config declared in MDC frontmatter. Only rules with :content-scan
-   detection type are scanned.
+   Supports multiple detection types:
+   - :content-scan — regex matching against file content
+   - :diff-analysis — regex matching against git diff (requires :since)
+   - :plan-output — terraform plan resource analysis (requires :terraform-plan)
 
    Arguments:
    - repo-path      - string path to repo root
    - standards-path - string path to .standards dir
    - opts           - map with:
-       :rules  - set of :rule/id keywords to run, :all, or :always-apply (default)
-       :since  - git ref (optional, ignored in M1)
-       :pack   - pre-compiled PackManifest (optional, bypasses compilation)
+       :rules           - selector: :all, :always-apply, keyword, or set of keywords
+       :since           - git ref for incremental mode + diff-analysis
+       :pack            - pre-compiled PackManifest (optional, bypasses compilation)
+       :terraform-plan  - plan output string for :plan-output rules
 
    Returns ScanResult map."
   [repo-path standards-path opts]
   (let [start-ms   (System/currentTimeMillis)
         index      (repo-index/build-index repo-path)
-        rule-cfgs  (or (get-rule-configs opts standards-path) [])
-        all-violations (->> rule-cfgs
-                            (mapcat (fn [cfg]
-                                      (let [viols (scan-rule cfg index)]
-                                        (if-let [rem (get cfg :remediation)]
-                                          (mapv #(enrich-violation % rem) viols)
-                                          viols))))
-                            vec)
+        since-ref  (get opts :since)
+        plan-text  (get opts :terraform-plan)
+
+        ;; Resolve all rule configs (now including diff/plan rules)
+        all-cfgs   (or (get-rule-configs opts standards-path) [])
+
+        ;; Content-scan rules use the detection config format (from pack-rule->detection-config)
+        content-cfgs (filterv #(contains? % :detect-mode) all-cfgs)
+
+        ;; Diff/plan rules use pack rule format directly
+        pack-rules   (when-let [pack (or (get opts :pack)
+                                         (when-let [r (policy-pack/compile-standards-pack standards-path)]
+                                           (when (:success? r) (:pack r))))]
+                       (filter-pack-rules (:pack/rules pack) opts))
+        diff-rules   (filterv #(= :diff-analysis (get-in % [:rule/detection :type])) (or pack-rules []))
+        plan-rules   (filterv #(= :plan-output (get-in % [:rule/detection :type])) (or pack-rules []))
+
+        ;; Incremental: get changed files if :since is provided
+        changed-files (when since-ref (git-diff-name-only repo-path since-ref))
+        diff-content  (when (and since-ref (seq diff-rules))
+                        (git-diff repo-path since-ref))
+
+        ;; Run all detection types
+        content-violations (scan-content-rules content-cfgs index changed-files)
+        diff-violations    (scan-diff-rules diff-rules diff-content)
+        plan-violations    (scan-plan-rules plan-rules plan-text)
+
+        all-violations (vec (concat content-violations
+                                    (or diff-violations [])
+                                    (or plan-violations [])))
         end-ms     (System/currentTimeMillis)
         file-count (get index :file-count 0)
-        rule-ids   (mapv :rule/id rule-cfgs)]
+        rule-ids   (into (mapv :rule/id content-cfgs)
+                         (map :rule/id (concat diff-rules plan-rules)))]
     (factory/->scan-result
      all-violations
      rule-ids

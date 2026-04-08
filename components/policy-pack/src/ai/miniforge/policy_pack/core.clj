@@ -186,7 +186,8 @@
         task-type (get-in context [:task :task/intent :intent/type])
         phase (:phase context)]
     (filterv (fn [rule]
-               (and (rule-applies-to-artifact? rule artifact)
+               (and (get rule :rule/enabled? true)
+                    (rule-applies-to-artifact? rule artifact)
                     (rule-applies-to-task? rule task-type)
                     (rule-applies-to-phase? rule phase)))
              rules)))
@@ -458,6 +459,32 @@
   {:action :require-approval
    :message message
    :approvers approvers})
+
+;------------------------------------------------------------------------------ Layer 2
+;; Validation layer ordering (N4 §3, five-layer model)
+
+(defn ordered-validation
+  "Apply validation layers in strict order: L0 → L1 → L2 → L3 → L4.
+   A failure at a lower layer short-circuits higher layers.
+
+   Arguments:
+   - layers — Vector of {:layer keyword :validate-fn (fn [] -> {:passed? bool ...})}
+
+   Returns:
+   - {:passed? bool :results [{:layer :passed? :violations ...}] :short-circuited-at keyword?}"
+  [layers]
+  (loop [[{:keys [layer validate-fn]} & remaining] layers
+         results []]
+    (if (nil? layer)
+      {:passed? (every? :passed? results)
+       :results results}
+      (let [result (assoc (validate-fn) :layer layer)
+            results' (conj results result)]
+        (if (:passed? result)
+          (recur remaining results')
+          {:passed?            false
+           :results            results'
+           :short-circuited-at layer})))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

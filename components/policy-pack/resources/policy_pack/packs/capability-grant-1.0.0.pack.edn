@@ -1,0 +1,70 @@
+;; Capability Grant Policy Pack — capability-based access control for agents.
+;; Reference: N4 Policy Packs & Gates Standard §2.2, §2.3
+;; Dewey category: 001 (Foundations & Core Principles)
+
+{:pack/id          "miniforge/capability-grant"
+ :pack/name        "Capability Grant"
+ :pack/version     "1.0.0"
+ :pack/description "Capability-based access control rules for agents: declaration requirements, default-deny writes, scope enforcement, and reapproval workflows."
+ :pack/author      "miniforge.ai"
+ :pack/license     "Apache-2.0"
+ :pack/trust-level :trusted
+ :pack/authority   :authority/instruction
+ :pack/taxonomy-ref {:taxonomy/id :miniforge/dewey :taxonomy/min-version "1.0.0"}
+
+ :pack/categories
+ [{:category/id   "001"
+   :category/name "Capability Grant"
+   :category/rules [:cap/require-declaration
+                    :cap/deny-default-writes
+                    :cap/enforce-scope
+                    :cap/require-reapproval]}]
+
+ :pack/rules
+ [{:rule/id          :cap/require-declaration
+   :rule/title       "Require Capability Declaration"
+   :rule/description "Ensures agents declare all required capabilities before task execution begins. Undeclared capabilities cannot be exercised, enforcing the principle of least privilege at the declaration layer."
+   :rule/severity    :critical
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:plan}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Agent has not declared required capabilities. All capabilities must be declared before execution."
+                      :remediation "Add a complete capability declaration to the agent's task manifest."}}
+
+  {:rule/id          :cap/deny-default-writes
+   :rule/title       "Deny Default Write Access"
+   :rule/description "Enforces default-deny for write operations. Agents must explicitly request and be granted write capabilities; implicit write access is never assumed."
+   :rule/severity    :critical
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Write operation attempted without explicit write capability grant. Write access is deny-by-default."
+                      :remediation "Grant write capability explicitly in the task specification, scoped to the required paths."}}
+
+  {:rule/id          :cap/enforce-scope
+   :rule/title       "Enforce Capability Scope"
+   :rule/description "Validates that exercised capabilities remain within their granted scope boundaries. A capability granted for path A must not be used to operate on path B."
+   :rule/severity    :critical
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Capability exercised outside its granted scope. Operations must remain within the boundaries of the granted capability."
+                      :remediation "Restrict operations to the scope of the granted capability, or request an expanded grant."}}
+
+  {:rule/id          :cap/require-reapproval
+   :rule/title       "Require Reapproval for Scope Changes"
+   :rule/description "Requires human reapproval when an agent's capability scope changes mid-task. Prevents incremental scope creep by requiring explicit human acknowledgement of expanded access."
+   :rule/severity    :major
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :require-approval
+                      :message "Capability scope change detected mid-task. Scope expansions require human reapproval."
+                      :approvers [:human]
+                      :remediation "Submit a scope-change request through the approval workflow before proceeding."}}]
+
+ :pack/created-at #inst "2026-04-08T00:00:00Z"
+ :pack/updated-at #inst "2026-04-08T00:00:00Z"}
