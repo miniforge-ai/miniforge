@@ -27,6 +27,7 @@
    Provides the main run-pipeline entry point."
   (:require [ai.miniforge.dag-executor.executor :as dag-exec]
             [ai.miniforge.dag-executor.result :as dag-result]
+            [ai.miniforge.llm.protocols.impl.llm-client :as llm-impl]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.response.interface :as response]
@@ -524,10 +525,15 @@
 
          skip-lifecycle? (:skip-lifecycle-events opts)
          ;; Build capsule-aware exec-fn for governed mode (N11 §6.2)
-         capsule-exec-fn (when (and (= :governed (get opts :execution-mode))
-                                    (get opts :executor)
-                                    (get opts :environment-id))
-                           (requiring-resolve 'ai.miniforge.llm.protocols.impl.llm-client/capsule-exec-fn))
+         governed?       (and (= :governed (get opts :execution-mode))
+                              (get opts :executor)
+                              (get opts :environment-id))
+         capsule-exec-fn (when governed?
+                           (llm-impl/capsule-exec-fn
+                            dag-exec/execute!
+                            (get opts :executor)
+                            (get opts :environment-id)
+                            (or (:worktree-path opts) "/workspace")))
 
          initial-ctx (-> (ctx/create-context workflow input opts)
                          (assoc :execution/executor (get opts :executor)
@@ -535,12 +541,10 @@
                                 :execution/worktree-path (or (:worktree-path opts)
                                                              (:sandbox-workdir opts))
                                 :execution/mode (get opts :execution-mode :local)
-                                :execution/exec-fn (when capsule-exec-fn
-                                                     (capsule-exec-fn
-                                                      dag-exec/execute!
-                                                      (get opts :executor)
-                                                      (get opts :environment-id)
-                                                      (or (:worktree-path opts) "/workspace")))
+                                ;; Pass execute! so downstream phases can call it without
+                                ;; requiring dag-executor (N11 §6.2, §9.3)
+                                :execution/execute-fn (when governed? dag-exec/execute!)
+                                :execution/exec-fn capsule-exec-fn
                                 ;; Injected so dag-orchestrator can call back into the
                                 ;; runner without a circular namespace dependency.
                                 :execution/run-pipeline-fn run-pipeline))]

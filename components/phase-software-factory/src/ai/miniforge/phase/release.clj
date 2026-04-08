@@ -116,31 +116,31 @@
     (catch Exception _ [])))
 
 (defn- git-dirty-files-capsule
-  "Scan git working tree inside a task capsule via executor-execute! (N11 §9.3).
-   Used for K8s executors where the filesystem is not locally accessible."
-  [executor env-id root-path]
+  "Scan git working tree inside a task capsule via execute-fn (N11 §9.3).
+   Used for K8s executors where the filesystem is not locally accessible.
+   execute-fn is dag-exec/execute! passed through context to avoid cross-component requires."
+  [execute-fn executor env-id root-path]
   (try
-    (let [exec!  (requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)
-          result (exec! executor env-id "git status --porcelain -uall" {:workdir root-path})
+    (let [result (execute-fn executor env-id "git status --porcelain -uall" {:workdir root-path})
           out    (get-in result [:data :stdout] "")
           lines  (->> (str/split-lines out) (remove str/blank?))]
       (->> lines
            (keep (fn [line]
                    (when (>= (count line) 3)
-                     (let [xy   (subs line 0 2)
-                           path (str/trim (subs line 3))]
+                     (let [status (str/trim (subs line 0 2))
+                           path   (str/trim (subs line 3))]
                        (cond
-                         (str/includes? xy "D")
+                         (str/includes? status "D")
                          {:path path :content "" :action :delete}
 
                          :else
                          ;; Read file content via executor
-                         (let [cat-result (exec! executor env-id (str "cat " root-path "/" path)
-                                                 {:workdir root-path})
+                         (let [cat-result (execute-fn executor env-id (str "cat " root-path "/" path)
+                                                     {:workdir root-path})
                                content (get-in cat-result [:data :stdout] "")]
                            {:path    path
                             :content content
-                            :action  (if (str/starts-with? (str/trim xy) "?") :create :modify)}))))))
+                            :action  (if (= "??" status) :create :modify)}))))))
            vec))
     (catch Exception _ [])))
 
@@ -172,10 +172,11 @@
     ;; In governed mode with a non-local executor, use capsule-aware git (N11 §9.3).
     (let [worktree-path (ctx-worktree-path ctx)
           governed?     (= :governed (get ctx :execution/mode))
+          execute-fn    (get ctx :execution/execute-fn)
           executor      (get ctx :execution/executor)
           env-id        (get ctx :execution/environment-id)
-          files         (or (not-empty (if (and governed? executor env-id)
-                                         (git-dirty-files-capsule executor env-id worktree-path)
+          files         (or (not-empty (if (and governed? execute-fn executor env-id)
+                                         (git-dirty-files-capsule execute-fn executor env-id worktree-path)
                                          (git-dirty-files worktree-path)))
                             (throw (ex-info (messages/t :release/zero-files)
                                             {:phase          :release
@@ -241,11 +242,12 @@
     ;; - plan returned :already-satisfied (DAG had 0 tasks, no implement ran)
     ;; In both cases, only skip if there are also no git changes from other phases.
     (if (and (contains? #{:already-implemented :already-satisfied nil} impl-status)
-             (let [wt (ctx-worktree-path ctx)
-                   executor (get ctx :execution/executor)
-                   env-id   (get ctx :execution/environment-id)]
-               (empty? (if (and (= :governed (get ctx :execution/mode)) executor env-id)
-                         (git-dirty-files-capsule executor env-id wt)
+             (let [wt         (ctx-worktree-path ctx)
+                   execute-fn (get ctx :execution/execute-fn)
+                   executor   (get ctx :execution/executor)
+                   env-id     (get ctx :execution/environment-id)]
+               (empty? (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
+                         (git-dirty-files-capsule execute-fn executor env-id wt)
                          (git-dirty-files wt)))))
       (-> (phase-result/enter-context ctx :release nil gates budget start-time
                                       (phase-result/skipped :already-implemented))
