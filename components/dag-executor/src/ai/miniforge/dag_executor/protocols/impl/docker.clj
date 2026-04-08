@@ -432,23 +432,47 @@
 ;; Workspace Bootstrap (N11 §4.2)
 ;; ============================================================================
 
+(defn- ssh-url->https-url
+  "Convert git@github.com:owner/repo.git to https://github.com/owner/repo.git.
+   Returns the URL unchanged if it's already HTTPS or not a recognized SSH URL."
+  [url]
+  (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" url)]
+    (str "https://" host "/" path)
+    url))
+
 (defn- bootstrap-workspace!
   "Clone a git repository into the container workspace after creation.
    Runs git clone, configures git identity, and checks out the target branch.
-   No-op when repo-url is nil (local mode / pre-existing workspace)."
+   No-op when repo-url is nil (local mode / pre-existing workspace).
+   Prefers HTTPS clone with GH_TOKEN for authentication inside containers
+   where SSH agents are not available."
   [docker-path container-name workdir env-config]
   (when-let [repo-url (:repo-url env-config)]
-    (let [branch (or (:branch env-config) "main")
+    (let [branch   (or (:branch env-config) "main")
+          gh-token (or (System/getenv "GH_TOKEN")
+                       (System/getenv "GITHUB_TOKEN")
+                       (try (:out (clojure.java.shell/sh "gh" "auth" "token"))
+                            (catch Exception _ nil)))
+          gh-token (when gh-token (clojure.string/trim gh-token))
+          ;; Use HTTPS with token when available (SSH agents aren't in containers)
+          clone-url (if gh-token
+                      (let [https-url (ssh-url->https-url repo-url)]
+                        (clojure.string/replace https-url
+                                                #"https://"
+                                                (str "https://x-access-token:" gh-token "@")))
+                      repo-url)
           exec!  (fn [cmd]
                    (let [r (exec-in-container docker-path container-name cmd
                                               {:workdir "/"})]
                      (when-not (zero? (get-in r [:data :exit-code] 1))
-                       (throw (ex-info (str "Workspace bootstrap failed: " cmd)
-                                       {:cmd cmd
-                                        :stderr (get-in r [:data :stderr])
-                                        :exit   (get-in r [:data :exit-code])})))))
+                       ;; Sanitize token from error messages
+                       (let [safe-cmd (clojure.string/replace (str cmd) #"x-access-token:[^\s@]+" "x-access-token:***")]
+                         (throw (ex-info (str "Workspace bootstrap failed: " safe-cmd)
+                                         {:cmd    safe-cmd
+                                          :stderr (get-in r [:data :stderr])
+                                          :exit   (get-in r [:data :exit-code])}))))))
           clone-cmd (str "git clone --branch " branch " --single-branch "
-                         repo-url " " workdir)]
+                         clone-url " " workdir)]
       (exec! clone-cmd)
       (exec! (str "git config --global user.email 'miniforge@miniforge.ai'"))
       (exec! (str "git config --global user.name 'miniforge'")))))

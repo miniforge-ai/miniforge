@@ -302,10 +302,11 @@
    {:cmds ["run"]
     :fn run-cmd
     :args->opts [:spec]
-    :spec {:interactive {:coerce :boolean :alias :i}
-           :worktree    {:alias :w}
-           :resume      {:alias :r}
-           :backend     {:coerce :keyword :alias :b}}}
+    :spec {:interactive     {:coerce :boolean :alias :i}
+           :worktree        {:alias :w}
+           :resume          {:alias :r}
+           :backend         {:coerce :keyword :alias :b}
+           :execution-mode  {:coerce :keyword :alias :m}}}
 
    ;; Status command
    {:cmds ["status"]
