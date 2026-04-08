@@ -1,0 +1,81 @@
+;; Task Scope Policy Pack — agent task boundary enforcement.
+;; Reference: N4 Policy Packs & Gates Standard §2.2, §2.3
+;; Dewey category: 001 (Foundations & Core Principles)
+
+{:pack/id          "miniforge/task-scope"
+ :pack/name        "Task Scope"
+ :pack/version     "1.0.0"
+ :pack/description "Agent task scope enforcement: capabilities declaration, tool invocation boundaries, file path restrictions, knowledge scope limits, and execution timeouts."
+ :pack/author      "miniforge.ai"
+ :pack/license     "Apache-2.0"
+ :pack/trust-level :trusted
+ :pack/authority   :authority/instruction
+ :pack/taxonomy-ref {:taxonomy/id :miniforge/dewey :taxonomy/min-version "1.0.0"}
+
+ :pack/categories
+ [{:category/id   "001"
+   :category/name "Task Scope"
+   :category/rules [:scope/require-capabilities
+                    :scope/enforce-tool-scope
+                    :scope/enforce-path-scope
+                    :scope/enforce-knowledge-scope
+                    :scope/enforce-timeout]}]
+
+ :pack/rules
+ [{:rule/id          :scope/require-capabilities
+   :rule/title       "Require Capabilities Declaration"
+   :rule/description "Ensures every agent task declares its required capabilities before execution. Tasks without capability declarations cannot be verified against the principle of least privilege."
+   :rule/severity    :critical
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:plan :implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Task is missing a capabilities declaration. All tasks must declare the capabilities they require."
+                      :remediation "Add a :task/capabilities vector to the task specification listing all required capabilities."}}
+
+  {:rule/id          :scope/enforce-tool-scope
+   :rule/title       "Enforce Tool Invocation Scope"
+   :rule/description "Validates that agent tool invocations remain within the scope granted by the task's capability declaration. Tool calls outside declared scope indicate a potential prompt injection or scope creep."
+   :rule/severity    :critical
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Tool invocation outside declared task scope. The agent attempted to use a tool not granted by its capability declaration."
+                      :remediation "Either add the tool to the task's capability declaration or remove the out-of-scope tool call."}}
+
+  {:rule/id          :scope/enforce-path-scope
+   :rule/title       "Enforce File Path Scope"
+   :rule/description "Validates that file operations target only paths within the task's declared path scope. Prevents agents from reading or modifying files outside their assigned workspace."
+   :rule/severity    :critical
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:implement :review}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "File operation targets a path outside the declared task scope. Agents may only access files within their assigned path boundaries."
+                      :remediation "Restrict file operations to the paths declared in the task scope, or expand the scope with appropriate approval."}}
+
+  {:rule/id          :scope/enforce-knowledge-scope
+   :rule/title       "Enforce Knowledge Scope"
+   :rule/description "Validates that agents only access policy packs and knowledge bases granted to the current task. Prevents cross-task information leakage and unauthorized pack consumption."
+   :rule/severity    :major
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:plan :implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :require-approval
+                      :message "Agent attempted to access knowledge outside its declared scope. Knowledge access must be constrained to the task's granted packs."
+                      :remediation "Add the required pack to the task's knowledge scope declaration."}}
+
+  {:rule/id          :scope/enforce-timeout
+   :rule/title       "Enforce Execution Timeout"
+   :rule/description "Monitors agent execution time against the task's declared timeout. Runaway agents that exceed their time budget must be halted to prevent resource exhaustion and cost overruns."
+   :rule/severity    :major
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Agent execution has exceeded the task timeout. The task will be terminated to prevent resource exhaustion."
+                      :remediation "Increase the task timeout if the workload genuinely requires more time, or decompose into smaller tasks."}}]
+
+ :pack/created-at #inst "2026-04-08T00:00:00Z"
+ :pack/updated-at #inst "2026-04-08T00:00:00Z"}

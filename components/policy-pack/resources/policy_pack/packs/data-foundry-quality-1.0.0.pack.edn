@@ -1,0 +1,163 @@
+;; Data Foundry Quality Policy Pack — data quality and integrity validation rules.
+;; Reference: N4 Policy Packs & Gates Standard §2.2, §2.3
+;; Dewey category: 400 (Testing & Quality)
+
+{:pack/id          "miniforge/data-foundry-quality"
+ :pack/name        "Data Foundry Quality"
+ :pack/version     "1.0.0"
+ :pack/description "Data quality and integrity rules for data foundry pipelines: financial accounting invariants, macro-level distribution checks, cross-table valuation consistency, and time-series completeness."
+ :pack/author      "miniforge.ai"
+ :pack/license     "Apache-2.0"
+ :pack/trust-level :trusted
+ :pack/authority   :authority/instruction
+ :pack/taxonomy-ref {:taxonomy/id :miniforge/dewey :taxonomy/min-version "1.0.0"}
+
+ :pack/categories
+ [{:category/id   "400"
+   :category/name "Financial Integrity"
+   :category/rules [:dfq/accounting-equation
+                    :dfq/gaap-receivables
+                    :dfq/inventory-non-negative
+                    :dfq/material-account]}
+  {:category/id   "400"
+   :category/name "Macro Quality"
+   :category/rules [:dfq/distribution-drift
+                    :dfq/row-count-stability
+                    :dfq/temporal-continuity]}
+  {:category/id   "400"
+   :category/name "Valuation Consistency"
+   :category/rules [:dfq/cross-table-sum
+                    :dfq/derivation-chain
+                    :dfq/timestamp-ordering]}
+  {:category/id   "400"
+   :category/name "Time Series Completeness"
+   :category/rules [:dfq/no-missing-periods]}]
+
+ :pack/rules
+ [;; --- Financial Integrity ---
+  {:rule/id          :dfq/accounting-equation
+   :rule/title       "Accounting Equation Balance"
+   :rule/description "Validates that Assets = Liabilities + Equity holds across all financial datasets. The fundamental accounting equation must balance within a configurable tolerance to detect data corruption or transformation errors."
+   :rule/severity    :critical
+   :rule/category    "400"
+   :rule/applies-to  {:phases #{:verify}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Accounting equation imbalance detected (Assets != Liabilities + Equity). Financial data integrity is compromised."
+                      :remediation "Investigate the source of the imbalance. Check recent ETL transformations for dropped or duplicated records."}}
+
+  {:rule/id          :dfq/gaap-receivables
+   :rule/title       "GAAP Receivables Validation"
+   :rule/description "Validates accounts receivable entries against GAAP recognition criteria: revenue must be recognized when earned, receivables must have matching revenue entries, and allowance for doubtful accounts must be maintained."
+   :rule/severity    :critical
+   :rule/category    "400"
+   :rule/applies-to  {:phases #{:verify}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "GAAP receivables validation failed. Receivables do not meet recognition criteria."
+                      :remediation "Review receivable entries for GAAP compliance: matching revenue recognition, proper aging, and doubtful account allowances."}}
+
+  {:rule/id          :dfq/inventory-non-negative
+   :rule/title       "Inventory Non-Negative"
+   :rule/description "Ensures inventory quantities and valuations are never negative. Negative inventory indicates a data error, incorrect adjustment, or missing receipt transaction."
+   :rule/severity    :critical
+   :rule/category    "400"
+   :rule/applies-to  {:phases #{:verify}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Negative inventory detected. Inventory quantities and valuations must be non-negative."
+                      :remediation "Identify the transactions causing negative inventory and correct the data or add missing receipt entries."}}
+
+  {:rule/id          :dfq/material-account
+   :rule/title       "Material Account Variance"
+   :rule/description "Flags material account balances that deviate beyond a configurable threshold from the prior period. Sudden large variances may indicate data pipeline errors, misclassifications, or fraud."
+   :rule/severity    :major
+   :rule/category    "400"
+   :rule/applies-to  {:phases #{:verify}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :require-approval
+                      :message "Material account variance exceeds threshold. Review the variance before publishing."
+                      :remediation "Investigate the cause of the variance. If legitimate, document the business reason and approve."}}
+
+  ;; --- Macro Quality ---
+  {:rule/id          :dfq/distribution-drift
+   :rule/title       "Distribution Drift Detection"
+   :rule/description "Detects statistical distribution drift between consecutive data loads. Column-level distribution changes (mean, stddev, percentiles) beyond configured thresholds indicate upstream schema changes or data quality degradation."
+   :rule/severity    :major
+   :rule/category    "400"
+   :rule/applies-to  {:phases #{:verify}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :require-approval
+                      :message "Distribution drift detected. Column statistics deviate significantly from the baseline."
+                      :remediation "Compare the current distribution against the baseline. Investigate upstream changes if drift is unexpected."}}
+
+  {:rule/id          :dfq/row-count-stability
+   :rule/title       "Row Count Stability"
+   :rule/description "Validates that row counts for incremental loads fall within expected bounds based on historical patterns. Sudden drops or spikes indicate data loss, duplication, or upstream failures."
+   :rule/severity    :major
+   :rule/category    "400"
+   :rule/applies-to  {:phases #{:verify}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :require-approval
+                      :message "Row count outside expected bounds. Current load deviates significantly from historical pattern."
+                      :remediation "Verify the source system is operating normally. Check for data loss or duplication in the pipeline."}}
+
+  {:rule/id          :dfq/temporal-continuity
+   :rule/title       "Temporal Continuity"
+   :rule/description "Ensures time-partitioned data has no gaps or overlaps between partitions. Missing partitions indicate incomplete loads; overlapping partitions indicate duplicate processing."
+   :rule/severity    :major
+   :rule/category    "400"
+   :rule/applies-to  {:phases #{:verify}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :require-approval
+                      :message "Temporal discontinuity detected. Data partitions have gaps or overlaps."
+                      :remediation "Backfill missing partitions or deduplicate overlapping partitions."}}
+
+  ;; --- Valuation Consistency ---
+  {:rule/id          :dfq/cross-table-sum
+   :rule/title       "Cross-Table Sum Reconciliation"
+   :rule/description "Validates that aggregate sums across related tables reconcile within tolerance. Detail tables must sum to their corresponding summary tables; orphaned or missing records break this invariant."
+   :rule/severity    :critical
+   :rule/category    "400"
+   :rule/applies-to  {:phases #{:verify}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Cross-table sum reconciliation failed. Detail records do not sum to the summary total."
+                      :remediation "Identify mismatched records between detail and summary tables. Check for orphaned or dropped records."}}
+
+  {:rule/id          :dfq/derivation-chain
+   :rule/title       "Derivation Chain Integrity"
+   :rule/description "Validates that derived/computed columns maintain consistency with their source columns. When source values change, all downstream derivations must be recalculated. Stale derivations indicate broken refresh logic."
+   :rule/severity    :major
+   :rule/category    "400"
+   :rule/applies-to  {:phases #{:verify}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :require-approval
+                      :message "Derivation chain inconsistency detected. Derived values do not match their source inputs."
+                      :remediation "Trigger a full recalculation of derived columns or investigate the broken derivation step."}}
+
+  {:rule/id          :dfq/timestamp-ordering
+   :rule/title       "Timestamp Ordering"
+   :rule/description "Validates that temporal ordering invariants hold: created_at <= updated_at, start_time <= end_time, and event timestamps are monotonically increasing within a partition. Violations indicate clock skew or processing errors."
+   :rule/severity    :major
+   :rule/category    "400"
+   :rule/applies-to  {:phases #{:verify}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :require-approval
+                      :message "Timestamp ordering violation detected. Temporal ordering invariants are broken."
+                      :remediation "Investigate clock skew or out-of-order event processing. Correct timestamps or reprocess the affected partition."}}
+
+  ;; --- Time Series Completeness ---
+  {:rule/id          :dfq/no-missing-periods
+   :rule/title       "No Missing Periods"
+   :rule/description "Validates that time-series datasets contain data for every expected period (hour, day, week, month) with no gaps. Missing periods break downstream aggregations, dashboards, and forecasting models."
+   :rule/severity    :major
+   :rule/category    "400"
+   :rule/applies-to  {:phases #{:verify}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :require-approval
+                      :message "Missing time-series periods detected. Expected periods are absent from the dataset."
+                      :remediation "Backfill the missing periods from the source system or insert placeholder records if data is genuinely absent."}}]
+
+ :pack/created-at #inst "2026-04-08T00:00:00Z"
+ :pack/updated-at #inst "2026-04-08T00:00:00Z"}

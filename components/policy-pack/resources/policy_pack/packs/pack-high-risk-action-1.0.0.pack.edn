@@ -1,0 +1,58 @@
+;; High Risk Action Policy Pack — governance for dangerous operations.
+;; Reference: N4 Policy Packs & Gates Standard §2.2, §2.3
+;; Dewey category: 001 (Foundations & Core Principles)
+
+{:pack/id          "miniforge/high-risk-action"
+ :pack/name        "High Risk Action"
+ :pack/version     "1.0.0"
+ :pack/description "Governance rules for high-risk agent actions: justification requirements, production environment restrictions, and audit logging for connector-mediated operations."
+ :pack/author      "miniforge.ai"
+ :pack/license     "Apache-2.0"
+ :pack/trust-level :trusted
+ :pack/authority   :authority/instruction
+ :pack/taxonomy-ref {:taxonomy/id :miniforge/dewey :taxonomy/min-version "1.0.0"}
+
+ :pack/categories
+ [{:category/id   "001"
+   :category/name "High Risk Action"
+   :category/rules [:risk/require-justification
+                    :risk/production-restrictions
+                    :risk/audit-connector-actions]}]
+
+ :pack/rules
+ [{:rule/id          :risk/require-justification
+   :rule/title       "Require Justification for High-Risk Actions"
+   :rule/description "Mandates that agents provide an explicit justification before executing high-risk actions such as destructive operations, privilege escalation, or external service mutations. The justification is recorded in the audit trail."
+   :rule/severity    :critical
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :require-approval
+                      :message "High-risk action requires a justification. Provide a rationale before proceeding."
+                      :approvers [:human :senior-engineer]
+                      :remediation "Include a :justification field explaining why this high-risk action is necessary."}}
+
+  {:rule/id          :risk/production-restrictions
+   :rule/title       "Production Environment Restrictions"
+   :rule/description "Enforces additional controls when agents operate against production environments. Production mutations require elevated approval and are subject to blast-radius limits."
+   :rule/severity    :critical
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:implement :review}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Production environment operation detected. Production mutations require elevated approval and blast-radius controls."
+                      :remediation "Route this operation through the production change-management workflow."}}
+
+  {:rule/id          :risk/audit-connector-actions
+   :rule/title       "Audit Connector Actions"
+   :rule/description "Ensures all connector-mediated external actions (API calls, database writes, messaging) are recorded in the immutable audit log. Connector actions without audit trail are rejected."
+   :rule/severity    :major
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :require-approval
+                      :message "Connector action must be recorded in the audit trail. Ensure audit logging is enabled for this connector."
+                      :remediation "Enable audit logging for the connector before executing external actions."}}]
+
+ :pack/created-at #inst "2026-04-08T00:00:00Z"
+ :pack/updated-at #inst "2026-04-08T00:00:00Z"}

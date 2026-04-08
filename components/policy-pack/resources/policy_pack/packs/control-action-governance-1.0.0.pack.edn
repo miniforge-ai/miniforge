@@ -1,0 +1,70 @@
+;; Control Action Governance Policy Pack — RBAC, multi-party approval, audit, and risk classification.
+;; Reference: N4 Policy Packs & Gates Standard §2.2, §2.3
+;; Dewey category: 001 (Foundations & Core Principles)
+
+{:pack/id          "miniforge/control-action-governance"
+ :pack/name        "Control Action Governance"
+ :pack/version     "1.0.0"
+ :pack/description "Control-plane action governance: role-based access control, multi-party approval for sensitive operations, immutable audit logging, and risk classification of control actions."
+ :pack/author      "miniforge.ai"
+ :pack/license     "Apache-2.0"
+ :pack/trust-level :trusted
+ :pack/authority   :authority/instruction
+ :pack/taxonomy-ref {:taxonomy/id :miniforge/dewey :taxonomy/min-version "1.0.0"}
+
+ :pack/categories
+ [{:category/id   "001"
+   :category/name "Control Action Governance"
+   :category/rules [:ctrl/require-rbac
+                    :ctrl/multi-party-approval
+                    :ctrl/audit-logging
+                    :ctrl/risk-classification]}]
+
+ :pack/rules
+ [{:rule/id          :ctrl/require-rbac
+   :rule/title       "Require Role-Based Access Control"
+   :rule/description "Ensures all control-plane actions are gated by RBAC. Actions without a valid role binding are rejected. Prevents unauthorized agents or humans from executing administrative operations."
+   :rule/severity    :critical
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:plan :implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Control action lacks RBAC authorization. The actor does not have a role binding for this operation."
+                      :remediation "Assign the appropriate role to the actor via the RBAC configuration."}}
+
+  {:rule/id          :ctrl/multi-party-approval
+   :rule/title       "Multi-Party Approval"
+   :rule/description "Mandates that sensitive control-plane actions (policy changes, trust promotions, environment modifications) require approval from multiple parties. Prevents single-actor compromise from modifying governance controls."
+   :rule/severity    :critical
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :require-approval
+                      :message "Sensitive control action requires multi-party approval. At least two authorized approvers must sign off."
+                      :approvers [:human :security]
+                      :remediation "Submit the control action through the multi-party approval workflow."}}
+
+  {:rule/id          :ctrl/audit-logging
+   :rule/title       "Audit Logging"
+   :rule/description "Ensures every control-plane action is recorded in the immutable audit log with actor identity, timestamp, action type, and outcome. Audit log gaps are treated as critical violations."
+   :rule/severity    :critical
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Control action was not recorded in the audit log. All control-plane actions must produce an immutable audit record."
+                      :remediation "Ensure the audit logging subsystem is operational and the action emits a complete audit event."}}
+
+  {:rule/id          :ctrl/risk-classification
+   :rule/title       "Risk Classification"
+   :rule/description "Classifies control actions by risk level (low, medium, high, critical) and applies proportional governance controls. Higher-risk actions require stronger authentication, additional approvals, and tighter blast-radius limits."
+   :rule/severity    :major
+   :rule/category    "001"
+   :rule/applies-to  {:phases #{:plan}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :warn
+                      :message "Control action risk classification could not be determined. Classify the action's risk level to apply appropriate governance controls."
+                      :remediation "Add a risk classification (:low, :medium, :high, :critical) to the control action metadata."}}]
+
+ :pack/created-at #inst "2026-04-08T00:00:00Z"
+ :pack/updated-at #inst "2026-04-08T00:00:00Z"}

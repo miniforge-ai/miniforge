@@ -1,0 +1,93 @@
+;; Terraform AWS Policy Pack — AWS-specific infrastructure compliance rules.
+;; Reference: N4 Policy Packs & Gates Standard §2.2, §2.3
+;; Dewey category: 500 (Operations & Infrastructure)
+
+{:pack/id          "miniforge/terraform-aws"
+ :pack/name        "Terraform AWS"
+ :pack/version     "1.0.0"
+ :pack/description "AWS-specific Terraform compliance rules covering S3 bucket security, encryption, network ingress, VPC placement, and instance type governance."
+ :pack/author      "miniforge.ai"
+ :pack/license     "Apache-2.0"
+ :pack/trust-level :trusted
+ :pack/authority   :authority/instruction
+ :pack/taxonomy-ref {:taxonomy/id :miniforge/dewey :taxonomy/min-version "1.0.0"}
+
+ :pack/categories
+ [{:category/id   "500"
+   :category/name "Terraform AWS"
+   :category/rules [:tf-aws/no-public-s3
+                    :tf-aws/require-encryption
+                    :tf-aws/no-open-ingress
+                    :tf-aws/require-vpc
+                    :tf-aws/approved-instance-types]}]
+
+ :pack/rules
+ [{:rule/id          :tf-aws/no-public-s3
+   :rule/title       "No Public S3 Buckets"
+   :rule/description "Prevents S3 buckets from being configured with public-read ACL. Public S3 buckets are a leading cause of data breaches."
+   :rule/severity    :critical
+   :rule/category    "500"
+   :rule/applies-to  {:file-globs ["**/*.tf"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type :content-scan
+                      :pattern "acl\\s*=\\s*\"public-read\""}
+   :rule/enforcement {:action :hard-halt
+                      :message "S3 bucket has public-read ACL. All S3 buckets must use private ACL with explicit access policies."
+                      :remediation "Set acl = \"private\" and use S3 bucket policies or IAM for access control."}}
+
+  {:rule/id          :tf-aws/require-encryption
+   :rule/title       "Require Encryption Configuration"
+   :rule/description "Ensures all storage and data resources include an encryption_configuration block. Data at rest must be encrypted per security baseline."
+   :rule/severity    :critical
+   :rule/category    "500"
+   :rule/applies-to  {:file-globs ["**/*.tf"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type    :content-scan
+                      :mode    :negative
+                      :pattern "encryption_configuration"}
+   :rule/enforcement {:action :hard-halt
+                      :message "Resource is missing encryption_configuration. All data-at-rest must be encrypted."
+                      :remediation "Add an encryption_configuration block using AWS KMS or AES-256."}}
+
+  {:rule/id          :tf-aws/no-open-ingress
+   :rule/title       "No Open Ingress (0.0.0.0/0)"
+   :rule/description "Detects security group rules that allow ingress from 0.0.0.0/0. Open ingress exposes services to the public internet."
+   :rule/severity    :critical
+   :rule/category    "500"
+   :rule/applies-to  {:file-globs ["**/*.tf"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type :content-scan
+                      :pattern "cidr_blocks\\s*=\\s*\\[\"0\\.0\\.0\\.0/0\"\\]"}
+   :rule/enforcement {:action :hard-halt
+                      :message "Security group allows ingress from 0.0.0.0/0. Restrict CIDR blocks to known IP ranges."
+                      :remediation "Replace 0.0.0.0/0 with specific CIDR ranges for your network."}}
+
+  {:rule/id          :tf-aws/require-vpc
+   :rule/title       "Require VPC Placement"
+   :rule/description "Ensures compute and database resources include a vpc_id or subnet_id reference. Resources outside a VPC lack network-level isolation."
+   :rule/severity    :major
+   :rule/category    "500"
+   :rule/applies-to  {:file-globs ["**/*.tf"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type    :content-scan
+                      :mode    :negative
+                      :pattern "(?:vpc_id|subnet_id|subnet_ids)"}
+   :rule/enforcement {:action :require-approval
+                      :message "Resource appears to lack VPC placement (no vpc_id or subnet_id). All compute and data resources must reside within a VPC."
+                      :remediation "Add a vpc_id or subnet_id argument referencing an appropriate VPC."}}
+
+  {:rule/id          :tf-aws/approved-instance-types
+   :rule/title       "Approved Instance Types Only"
+   :rule/description "Detects EC2 instance types outside the approved list. Unapproved instance types may violate cost or compliance constraints."
+   :rule/severity    :major
+   :rule/category    "500"
+   :rule/applies-to  {:file-globs ["**/*.tf"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type :content-scan
+                      :pattern "instance_type\\s*=\\s*\"(?!t3\\.|t4g\\.|m5\\.|m6i\\.|c5\\.|c6i\\.|r5\\.|r6i\\.)"}
+   :rule/enforcement {:action :require-approval
+                      :message "Instance type is not in the approved list (t3, t4g, m5, m6i, c5, c6i, r5, r6i families)."
+                      :remediation "Use an instance type from the approved families: t3, t4g, m5, m6i, c5, c6i, r5, r6i."}}]
+
+ :pack/created-at #inst "2026-04-08T00:00:00Z"
+ :pack/updated-at #inst "2026-04-08T00:00:00Z"}
