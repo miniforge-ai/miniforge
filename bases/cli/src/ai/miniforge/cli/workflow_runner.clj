@@ -297,11 +297,9 @@
                            ;; acquire-execution-environment! can clone into Docker
                            ;; or create a worktree from the correct branch.
                            (assoc :repo-url repo-url :branch branch)
-                           ;; Pass execution mode for N11 capsule isolation.
-                           (cond-> (or (:execution-mode opts)
-                                       (:spec/execution-mode spec))
-                             (assoc :execution-mode (or (:execution-mode opts)
-                                                        (:spec/execution-mode spec)))))
+                           ;; Pass execution mode for N11 capsule isolation (CLI flag only).
+                           (cond-> (:execution-mode opts)
+                             (assoc :execution-mode (:execution-mode opts))))
           sandbox? (or (:sandbox opts) (:spec/sandbox spec))
           [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)
           progress-cleanup (display/start-progress! event-stream quiet)]
