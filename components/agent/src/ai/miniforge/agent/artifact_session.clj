@@ -107,10 +107,14 @@
 (defn create-session!
   "Create a new artifact session with a temporary directory.
 
+   Optionally accepts a workdir override (e.g., a git worktree path) for
+   the pre-session snapshot. Defaults to the JVM's current working directory.
+
    Returns:
    - {:dir <path>, :mcp-config-path <path>, :artifact-path <path>}"
-  []
-  (let [working-dir (System/getProperty "user.dir")
+  ([] (create-session! nil))
+  ([{:keys [workdir]}]
+  (let [working-dir (or workdir (System/getProperty "user.dir"))
         dir (str (Files/createTempDirectory
                   "miniforge-artifact-"
                   (into-array FileAttribute [])))
@@ -122,7 +126,7 @@
      :pre-session-snapshot (try
                              (file-artifacts/snapshot-working-dir working-dir)
                              (catch Exception _
-                               (file-artifacts/empty-snapshot)))}))
+                               (file-artifacts/empty-snapshot)))})))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; MCP server command
