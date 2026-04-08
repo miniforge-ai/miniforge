@@ -605,6 +605,7 @@
 
 (defn handle-streaming [client request on-chunk backend-config progress-monitor]
   (let [{:keys [logger config]} client
+        stream-fn (or (:stream-exec-fn client) stream-exec-fn)
         {:keys [backend]} config
         {:keys [cmd args-fn stream-parser]} backend-config
         prompt (build-request-prompt request)
@@ -618,7 +619,7 @@
       (log/debug logger :system :agent/streaming-prompt-sent
                  {:data {:backend backend
                          :prompt-length (count prompt)}}))
-    (let [result (stream-exec-fn
+    (let [result (stream-fn
                   full-cmd
                   (stream-with-parser stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost accumulated-tools)
                   {:progress-monitor progress-monitor})
@@ -676,6 +677,28 @@
     {:out (:out result)
      :err (:err result)
      :exit (:exit result)}))
+
+(defn capsule-exec-fn
+  "Returns an exec-fn that routes CLI commands through a task capsule executor.
+   Used in governed mode so the agent CLI runs inside the Docker/K8s container
+   instead of on the host (N11 §6.2).
+
+   Arguments:
+   - execute-fn  - function [executor env-id command opts] -> result map
+   - executor    - TaskExecutor instance
+   - env-id      - environment/container ID
+   - workdir     - workspace directory inside capsule"
+  [execute-fn executor env-id workdir]
+  (fn [cmd]
+    (let [command-str (clojure.string/join " " cmd)
+          result (execute-fn executor env-id command-str {:workdir workdir})]
+      (if (and (map? result) (:data result))
+        {:out (get-in result [:data :stdout] "")
+         :err (get-in result [:data :stderr] "")
+         :exit (get-in result [:data :exit-code] 0)}
+        {:out ""
+         :err (str "Capsule exec error: " result)
+         :exit 1}))))
 
 (defn mock-exec-fn [output & {:keys [exit] :or {exit 0}}]
   (fn [_cmd]

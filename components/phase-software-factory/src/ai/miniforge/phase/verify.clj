@@ -120,6 +120,21 @@
         {:passed? false :test-count 0 :assertion-count 0
          :fail-count 0 :error-count 1 :output (.getMessage e)}))))
 
+(defn run-tests-in-capsule!
+  "Run tests inside a task capsule via executor-execute! (N11 §6).
+   Routes the test command through the executor instead of host process/shell."
+  [executor env-id worktree-path & {:keys [test-cmd]}]
+  (let [cmd  (or test-cmd "bb test")
+        exec! (requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)]
+    (try
+      (let [result (exec! executor env-id cmd {:workdir worktree-path})
+            data   (:data result)]
+        (parse-test-output (str (get data :stdout "") "\n" (get data :stderr ""))
+                           (get data :exit-code 1)))
+      (catch Exception e
+        {:passed? false :test-count 0 :assertion-count 0
+         :fail-count 0 :error-count 1 :output (.getMessage e)}))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
@@ -151,8 +166,14 @@
         test-cmd (or (get-in ctx [:execution/input :spec/test-command])
                      (get-in ctx [:execution/input :test-command]))
 
-        ;; Run the test suite directly in the executor environment
-        test-results (run-tests! worktree-path :test-cmd test-cmd)
+        ;; Run the test suite — inside capsule for governed mode, on host otherwise
+        test-results (if (and (= :governed (get ctx :execution/mode))
+                              (get ctx :execution/executor))
+                       (run-tests-in-capsule! (get ctx :execution/executor)
+                                              (get ctx :execution/environment-id)
+                                              worktree-path
+                                              :test-cmd test-cmd)
+                       (run-tests! worktree-path :test-cmd test-cmd))
 
         ;; Phase result carries environment reference and test metrics (N6 environment model).
         ;; No serialized code — changes live in the environment's worktree.
