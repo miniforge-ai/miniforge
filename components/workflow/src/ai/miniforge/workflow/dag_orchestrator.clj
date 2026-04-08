@@ -167,17 +167,19 @@
   "Build a sub-workflow config for a single DAG task.
 
    Derives pipeline from the parent workflow, removing explore/plan phases
-   (the plan already exists — we're executing it). Keeps :release so each
-   DAG task produces its own PR."
+   (the plan already exists — we're executing it) and release/observe phases
+   (release happens once at the top level after all DAG tasks complete, via
+   apply-dag-success which synthesizes an implement result and resumes the
+   parent pipeline at the post-implement phase)."
   [task-def context]
   (let [parent-workflow (:execution/workflow context)
         parent-pipeline (get parent-workflow :workflow/pipeline [])
         sub-phases (->> parent-pipeline
-                        (remove #(#{:explore :plan} (:phase %)))
+                        (remove #(#{:explore :plan :release :observe} (:phase %)))
                         vec)
         sub-pipeline (if (seq sub-phases)
                        sub-phases
-                       [{:phase :implement} {:phase :release} {:phase :done}])]
+                       [{:phase :implement} {:phase :done}])]
     {:workflow/id (keyword (str "dag-task-" (:task/id task-def)))
      :workflow/version "2.0.0"
      :workflow/name (str "DAG sub-task: " (subs (str (:task/description task-def "task"))

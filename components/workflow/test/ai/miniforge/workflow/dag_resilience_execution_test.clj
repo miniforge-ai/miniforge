@@ -402,8 +402,8 @@
                      {:phase :done}]}}
           sub-wf (dag-orch/task-sub-workflow task-def context)
           phase-names (mapv :phase (:workflow/pipeline sub-wf))]
-      (is (= [:implement :verify :review :release :done] phase-names)
-          "Sub-workflow should strip :explore and :plan but keep :release")))
+      (is (= [:implement :verify :review :done] phase-names)
+          "Sub-workflow should strip :explore, :plan, :release, and :observe")))
 
   (testing "sub-workflow with no parent pipeline falls back to minimal"
     (let [task-def {:task/id (random-uuid)
@@ -411,4 +411,4 @@
           context {:execution/workflow {:workflow/pipeline []}}
           sub-wf (dag-orch/task-sub-workflow task-def context)
           phase-names (mapv :phase (:workflow/pipeline sub-wf))]
-      (is (= [:implement :release :done] phase-names)))))
+      (is (= [:implement :done] phase-names)))))
