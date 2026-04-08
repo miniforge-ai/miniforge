@@ -443,15 +443,20 @@
     :else                                  :generic))
 
 (defn- resolve-git-token
-  "Resolve a git authentication token from environment variables.
-   Checks provider-specific env vars first, then falls back to GITHUB_TOKEN."
+  "Resolve a git authentication token for capsule clone.
+   One canonical env var per provider:
+   - MINIFORGE_GIT_TOKEN — universal override (any host)
+   - GITLAB_TOKEN — GitLab hosts
+   - GH_TOKEN — GitHub hosts (fallback: `gh auth token` CLI)"
   [_repo-url {:keys [host-kind]}]
-  (case host-kind
-    :github (or (System/getenv "GITHUB_TOKEN")
-                (System/getenv "GH_TOKEN"))
-    :gitlab (or (System/getenv "GITLAB_TOKEN")
-                (System/getenv "GL_TOKEN"))
-    (System/getenv "GITHUB_TOKEN")))
+  (or (System/getenv "MINIFORGE_GIT_TOKEN")
+      (case host-kind
+        :gitlab (System/getenv "GITLAB_TOKEN")
+        (or (System/getenv "GH_TOKEN")
+            (try (let [r (clojure.java.shell/sh "gh" "auth" "token")]
+                   (when (zero? (:exit r))
+                     (str/trim (:out r))))
+                 (catch Exception _ nil))))))
 
 (defn- sanitize-token
   "Remove token credentials from a string for safe logging.
