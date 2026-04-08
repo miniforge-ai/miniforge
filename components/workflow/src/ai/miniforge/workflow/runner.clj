@@ -225,7 +225,8 @@
   [mode executor-config]
   (case mode
     :governed (merge (select-keys (or executor-config {}) [:docker :kubernetes])
-                     (when-not executor-config {:docker {}}))
+                     (when-not executor-config
+                       {:docker {:image "miniforge/task-runner-clojure:latest"}}))
     {:worktree {}}))
 
 (defn- select-capsule-executor
