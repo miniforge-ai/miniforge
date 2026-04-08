@@ -17,10 +17,18 @@
 
 ;; --------------------------------------------------------------------------- Poly integration
 
+(def ^:private clean-git-env
+  "Environment with GIT_INDEX_FILE stripped.
+   Prevents worktree-specific index from leaking into subprocesses that
+   run git commands (Polylith, Clojure test JVM). Without this, git
+   operations inside subprocesses can corrupt the committing worktree's
+   index, causing empty or wrong-tree commits."
+  (dissoc (into {} (System/getenv)) "GIT_INDEX_FILE"))
+
 (defn poly-changed-names
   "Query poly for changed brick names since main. Returns a vector of strings."
   [key]
-  (let [{:keys [out]} (p/sh {:out :string}
+  (let [{:keys [out]} (p/sh {:out :string :env clean-git-env}
                              "poly" "ws" (str "get:changes:" key) "since:main")
         trimmed (str/trim out)]
     (if (or (str/blank? trimmed) (= trimmed "nil") (= trimmed "[]"))
@@ -144,7 +152,14 @@
           (println (str "    " brick " (" (count nses) " namespaces)"))
           (doseq [ns nses] (println (str "      " ns))))
         (let [expr (build-test-expr brick-groups)
-              {:keys [exit]} (deref (p/process {:out :inherit :err :inherit}
+              ;; Strip GIT_INDEX_FILE from the test JVM's environment.
+              ;; When committing from a git worktree, GIT_INDEX_FILE points to
+              ;; the worktree-specific index. Test subprocesses that run git
+              ;; commands (e.g., create-worktree in runner tests) can corrupt
+              ;; this index, causing the commit to produce an empty tree.
+              test-env (dissoc (into {} (System/getenv)) "GIT_INDEX_FILE")
+              {:keys [exit]} (deref (p/process {:out :inherit :err :inherit
+                                                :env test-env}
                                                "clojure" "-M:dev:test" "-e" expr))]
           (when-not (zero? exit)
             (println "❌ Tests failed with exit code:" exit)
