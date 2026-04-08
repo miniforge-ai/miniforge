@@ -506,7 +506,8 @@
                                          :unreached unreached)
                    :tasks-unreached unreached
                    :sub-workflow-ids (vec sub-workflow-ids))
-      (:pr-infos metrics-agg) (assoc :pr-infos (:pr-infos metrics-agg)))))
+      (:pr-infos metrics-agg) (assoc :pr-infos (:pr-infos metrics-agg))
+      (:worktree-paths metrics-agg) (assoc :worktree-paths (:worktree-paths metrics-agg)))))
 
 (defn execute-dag-loop [tasks-map context logger]
   (let [{:keys [on-task-start on-task-complete]} context
