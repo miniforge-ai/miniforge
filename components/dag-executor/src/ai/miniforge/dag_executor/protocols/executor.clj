@@ -100,7 +100,32 @@
      Returns result with:
      {:status keyword           ; :running, :stopped, :error, :unknown
       :created-at inst
-      :resource-usage map}"))
+      :resource-usage map}")
+
+  (persist-workspace! [this environment-id opts]
+    "Persist workspace state so it survives capsule destruction.
+     For Docker: git add/commit/push to a task branch.
+     For K8s/Fleet: upload to object store (future).
+
+     Arguments:
+     - environment-id: ID from acquire-environment!
+     - opts: {:branch string         ; task branch name
+              :message string         ; commit message
+              :workdir string}        ; workspace directory
+
+     Returns result with {:persisted? bool :commit-sha string}")
+
+  (restore-workspace! [this environment-id opts]
+    "Restore workspace state from a previously persisted snapshot.
+     For Docker: git fetch/checkout the task branch.
+     For K8s/Fleet: download from object store (future).
+
+     Arguments:
+     - environment-id: ID from acquire-environment!
+     - opts: {:branch string         ; task branch to restore
+              :workdir string}        ; workspace directory
+
+     Returns result with {:restored? bool :commit-sha string}"))
 
 ;; ============================================================================
 ;; Environment Record

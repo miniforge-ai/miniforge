@@ -55,6 +55,8 @@
 (def copy-from! proto/copy-from!)
 (def release-environment! proto/release-environment!)
 (def environment-status proto/environment-status)
+(def persist-workspace! proto/persist-workspace!)
+(def restore-workspace! proto/restore-workspace!)
 
 (def create-environment-record
   "Create an environment record."

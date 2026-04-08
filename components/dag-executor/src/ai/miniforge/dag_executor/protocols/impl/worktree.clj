@@ -287,7 +287,15 @@
     (let [worktree-path (str base-path "/" environment-id)]
       (if (.exists (File. ^String worktree-path))
         (result/ok {:status :running})
-        (result/ok {:status :stopped})))))
+        (result/ok {:status :stopped}))))
+
+  (persist-workspace! [_this _environment-id _opts]
+    ;; Worktree files are already on host — no persistence needed
+    (result/ok {:persisted? false :no-changes? true}))
+
+  (restore-workspace! [_this _environment-id _opts]
+    ;; Worktree files are already on host — no restore needed
+    (result/ok {:restored? false})))
 
 ;; ============================================================================
 ;; Factory

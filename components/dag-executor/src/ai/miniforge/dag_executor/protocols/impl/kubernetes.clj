@@ -358,7 +358,40 @@
     (try
       (get-job-status kubectl-path namespace environment-id)
       (catch Exception e
-        (result/ok {:status :unknown :error (.getMessage e)})))))
+        (result/ok {:status :unknown :error (.getMessage e)}))))
+
+  ;; K8s persistence: git push (same as Docker). Fleet tier will use object store.
+  (persist-workspace! [this environment-id opts]
+    (let [workdir (or (:workdir opts) "/workspace")
+          branch  (or (:branch opts) "task/unknown")
+          message (or (:message opts) "phase checkpoint")]
+      (try
+        (let [exec! (fn [cmd] (proto/execute! this environment-id cmd {:workdir workdir}))
+              _ (exec! "git add -A")
+              status-r (exec! "git status --porcelain")
+              has-changes? (seq (clojure.string/trim (get-in status-r [:data :stdout] "")))]
+          (if has-changes?
+            (let [_ (exec! (str "git commit -m '" message "'"))
+                  _ (exec! (str "git push origin HEAD:" branch " --force"))
+                  sha-r (exec! "git rev-parse HEAD")
+                  sha   (clojure.string/trim (get-in sha-r [:data :stdout] ""))]
+              (result/ok {:persisted? true :commit-sha sha :branch branch}))
+            (result/ok {:persisted? false :no-changes? true})))
+        (catch Exception e
+          (result/err :persist-failed (.getMessage e))))))
+
+  (restore-workspace! [this environment-id opts]
+    (let [workdir (or (:workdir opts) "/workspace")
+          branch  (or (:branch opts) "task/unknown")]
+      (try
+        (let [exec! (fn [cmd] (proto/execute! this environment-id cmd {:workdir workdir}))
+              _ (exec! (str "git fetch origin " branch))
+              _ (exec! (str "git checkout " branch))
+              sha-r (exec! "git rev-parse HEAD")
+              sha   (clojure.string/trim (get-in sha-r [:data :stdout] ""))]
+          (result/ok {:restored? true :commit-sha sha :branch branch}))
+        (catch Exception e
+          (result/err :restore-failed (.getMessage e)))))))
 
 ;; ============================================================================
 ;; Factory

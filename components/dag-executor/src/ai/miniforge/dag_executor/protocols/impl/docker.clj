@@ -512,7 +512,11 @@
       (exec! clone-cmd)
       ;; Use --local (not --global) since container rootfs is read-only
       (exec! (str "git -C " workdir " config user.email 'miniforge@miniforge.ai'"))
-      (exec! (str "git -C " workdir " config user.name 'miniforge'")))))
+      (exec! (str "git -C " workdir " config user.name 'miniforge'"))
+      ;; Set push URL with token so persist-workspace! can push
+      (when token
+        (exec! (str "git -C " workdir " remote set-url --push origin "
+                    (authenticated-https-url https-url token host-kind)))))))
 
 ;; ============================================================================
 ;; DockerExecutor Record
@@ -583,7 +587,47 @@
     (try
       (inspect-container docker-path environment-id)
       (catch Exception e
-        (result/ok {:status :unknown :error (.getMessage e)})))))
+        (result/ok {:status :unknown :error (.getMessage e)}))))
+
+  (persist-workspace! [_this environment-id opts]
+    (let [workdir (or (:workdir opts) default-workdir)
+          branch  (or (:branch opts) "task/unknown")
+          message (or (:message opts) "phase checkpoint")]
+      (try
+        (let [exec! (fn [cmd]
+                      (exec-in-container docker-path environment-id cmd
+                                         {:workdir workdir}))
+              ;; Stage all changes
+              _ (exec! "git add -A")
+              ;; Check if there are changes to commit
+              status-r (exec! "git status --porcelain")
+              has-changes? (seq (str/trim (get-in status-r [:data :stdout] "")))]
+          (if has-changes?
+            (let [_ (exec! (str "git commit -m '" message "'"))
+                  ;; Push to task branch (create if needed)
+                  push-r (exec! (str "git push origin HEAD:" branch " --force"))
+                  ;; Get commit SHA
+                  sha-r  (exec! "git rev-parse HEAD")
+                  sha    (str/trim (get-in sha-r [:data :stdout] ""))]
+              (result/ok {:persisted? true :commit-sha sha :branch branch}))
+            (result/ok {:persisted? false :commit-sha nil :no-changes? true})))
+        (catch Exception e
+          (result/err :persist-failed (.getMessage e))))))
+
+  (restore-workspace! [_this environment-id opts]
+    (let [workdir (or (:workdir opts) default-workdir)
+          branch  (or (:branch opts) "task/unknown")]
+      (try
+        (let [exec! (fn [cmd]
+                      (exec-in-container docker-path environment-id cmd
+                                         {:workdir workdir}))
+              _ (exec! (str "git fetch origin " branch))
+              _ (exec! (str "git checkout " branch))
+              sha-r (exec! "git rev-parse HEAD")
+              sha   (str/trim (get-in sha-r [:data :stdout] ""))]
+          (result/ok {:restored? true :commit-sha sha :branch branch}))
+        (catch Exception e
+          (result/err :restore-failed (.getMessage e)))))))
 
 ;; ============================================================================
 ;; Factory

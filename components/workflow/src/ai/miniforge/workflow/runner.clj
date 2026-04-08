@@ -372,6 +372,21 @@
                                                    ctx/transition-to-completed
                                                    ctx/transition-to-failed)
                           (monitoring/clear-transient-state))
+            ;; Persist workspace after phase completes (governed mode only).
+            ;; Git commit + push to task branch so changes survive capsule destruction.
+            _ (when-let [executor (get context :execution/executor)]
+                (when (= :governed (get context :execution/mode))
+                  (let [env-id (get context :execution/environment-id)
+                        branch (get context :execution/task-branch)
+                        phase  (or (:execution/current-phase phase-ctx) "unknown")]
+                    (try
+                      (dag-exec/persist-workspace! executor env-id
+                                                   {:branch  branch
+                                                    :message (str phase " phase completed")
+                                                    :workdir (get context :execution/worktree-path)})
+                      (catch Exception e
+                        (log/warn runner-logger :workflow :workflow/persist-failed
+                                  {:message (str "Workspace persist failed: " (ex-message e))}))))))
             ;; Check if phase failed due to rate limiting — if so, stop retrying
             ;; and bubble the error up to the DAG orchestrator's resilience module
             current-phase (:execution/current-phase phase-ctx)
@@ -553,6 +568,10 @@
                                 ;; requiring dag-executor (N11 §6.2, §9.3)
                                 :execution/execute-fn (when governed? dag-exec/execute!)
                                 :execution/exec-fn capsule-exec-fn
+                                ;; Task branch for workspace persistence (git push between phases)
+                                :execution/task-branch (when governed?
+                                                         (str "task/" (or (get opts :environment-id)
+                                                                         (subs (str (random-uuid)) 0 8))))
                                 ;; Injected so dag-orchestrator can call back into the
                                 ;; runner without a circular namespace dependency.
                                 :execution/run-pipeline-fn run-pipeline))]
