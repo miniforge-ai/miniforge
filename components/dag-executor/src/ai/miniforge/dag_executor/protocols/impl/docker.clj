@@ -442,23 +442,18 @@
     url))
 
 (defn- resolve-git-token
-  "Resolve a git access token from environment or CLI tools.
-   Tries host-specific env vars first, then generic ones, then CLI tools."
+  "Resolve a git access token for capsule clone.
+   One canonical env var per provider:
+   - MINIFORGE_GIT_TOKEN — universal override (any host)
+   - GITLAB_TOKEN — GitLab hosts
+   - GH_TOKEN — GitHub hosts (fallback: `gh auth token` CLI)"
   [host]
-  (let [raw (cond
-              ;; GitLab-specific
-              (str/includes? (str host) "gitlab")
-              (or (System/getenv "GITLAB_TOKEN")
-                  (System/getenv "GL_TOKEN")
-                  (try (str/trim (:out (clojure.java.shell/sh "glab" "auth" "token")))
-                       (catch Exception _ nil)))
-
-              ;; GitHub (default)
-              :else
-              (or (System/getenv "GH_TOKEN")
-                  (System/getenv "GITHUB_TOKEN")
-                  (try (str/trim (:out (clojure.java.shell/sh "gh" "auth" "token")))
-                       (catch Exception _ nil))))]
+  (let [raw (or (System/getenv "MINIFORGE_GIT_TOKEN")
+                (if (str/includes? (str host) "gitlab")
+                  (System/getenv "GITLAB_TOKEN")
+                  (or (System/getenv "GH_TOKEN")
+                      (try (str/trim (:out (clojure.java.shell/sh "gh" "auth" "token")))
+                           (catch Exception _ nil)))))]
     (when (and raw (seq (str/trim raw)))
       (str/trim raw))))
 
