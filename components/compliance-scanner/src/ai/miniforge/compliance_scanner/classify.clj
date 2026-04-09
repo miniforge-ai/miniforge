@@ -70,7 +70,7 @@
     (assoc violation
            :auto-fixable? (and auto-default (not excluded?) (not semantic?))
            :rationale     (cond
-                            semantic?    "Requires LLM semantic review"
+                            semantic?    (msg/t :classify/semantic-review)
                             excluded?    (msg/t :classify/json-context)
                             auto-default (msg/t :classify/literal-default)
                             :else        (msg/t :classify/datever)))))

@@ -28,6 +28,7 @@
   :classify/datever         "SemVer X.Y.Z found where DateVer X.Y.Z.N is required; append build count .0"
   :classify/header-absent   "Copyright header absent; can be prepended"
   :classify/header-incorrect "Copyright header content incorrect; manual correction required"
+  :classify/semantic-review  "Requires LLM semantic review"
   :classify/unknown-rule    "Unknown rule; manual review required"
 
   ;; Scan phase — violation current-value labels

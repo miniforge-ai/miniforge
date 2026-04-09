@@ -95,6 +95,17 @@
                         patched)]
     patched))
 
+(def ^:private semantic-repair-template
+  "Template for LLM semantic repair prompts.
+   Pack-bundled templates (PR #463) will supersede this when wired."
+  (str "Fix the following code violation.\n\n"
+       "**Rule:** %s\n"
+       "**File:** %s:%s\n"
+       "**Current code:** `%s`\n"
+       "**Issue:** %s\n"
+       "%s\n"
+       "\nProvide the corrected code only, no explanation."))
+
 (defn build-semantic-repair-prompt
   "Build a structured prompt for LLM-based semantic repair of a violation.
 
@@ -108,15 +119,16 @@
    Returns:
    - {:role :user :content string}"
   [violation rule]
-  {:role    :user
-   :content (str "Fix the following code violation.\n\n"
-                 "**Rule:** " (get rule :rule/title (name (get violation :rule/id))) "\n"
-                 "**File:** " (get violation :file) ":" (get violation :line) "\n"
-                 "**Current code:** `" (get violation :current "") "`\n"
-                 "**Issue:** " (get violation :rationale "") "\n"
-                 (when-let [kc (get rule :rule/knowledge-content)]
-                   (str "\n**Reference:**\n" kc "\n"))
-                 "\nProvide the corrected code only, no explanation.")})
+  (let [reference (when-let [kc (get rule :rule/knowledge-content)]
+                    (str "\n**Reference:**\n" kc))]
+    {:role    :user
+     :content (format semantic-repair-template
+                      (get rule :rule/title (name (get violation :rule/id)))
+                      (get violation :file "")
+                      (get violation :line "")
+                      (get violation :current "")
+                      (get violation :rationale "")
+                      (or reference ""))}))
 
 (defn- patch-file!
   "Apply auto-fixable violations to a file on disk. No-op if content is unchanged.
