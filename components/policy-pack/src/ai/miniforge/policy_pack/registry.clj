@@ -23,6 +23,7 @@
    Layer 1: In-memory registry implementation
    Layer 2: Registry constructors"
   (:require
+   [ai.miniforge.policy-pack.crypto :as crypto]
    [ai.miniforge.policy-pack.schema :as schema]
    [clojure.string :as str]))
 
@@ -274,12 +275,16 @@
     (schema/validate-pack pack))
 
   (verify-signature [_this pack]
-    ;; Signature verification is a paid feature - stub implementation
-    (if (:pack/signature pack)
-      {:verified? false
-       :reason "Signature verification not implemented (paid feature)"
-       :signer (:pack/signed-by pack)
-       :timestamp (:pack/signed-at pack)}
+    (if-let [sig-str (:pack/signature pack)]
+      (let [decoder       (java.util.Base64/getDecoder)
+            content-bytes (crypto/pack-signable-bytes pack)
+            sig-bytes     (.decode decoder ^String sig-str)
+            pub-key-str   (:pack/signed-by pack)
+            pub-bytes     (when pub-key-str (.decode decoder ^String pub-key-str))
+            result        (crypto/verify-ed25519 content-bytes sig-bytes pub-bytes)]
+        (assoc result
+               :signer    pub-key-str
+               :timestamp (:pack/signed-at pack)))
       {:verified? false
        :reason "Pack is not signed"}))
 
