@@ -18,7 +18,12 @@
    :category/rules [:foundations/no-hardcoded-secrets
                     :foundations/require-resource-tags
                     :foundations/enforce-naming-convention
-                    :foundations/no-public-resources]}]
+                    :foundations/no-public-resources
+                    :foundations/no-unsafe-rust
+                    :foundations/no-unwrap-in-lib
+                    :foundations/no-force-unwrap-swift
+                    :foundations/no-force-cast-swift
+                    :foundations/no-todo-fixme]}]
 
  :pack/rules
  [{:rule/id          :foundations/no-hardcoded-secrets
@@ -26,10 +31,21 @@
    :rule/description "Detects hardcoded API keys, passwords, tokens, and secrets in source files. Credentials must be injected via environment variables or a secrets manager."
    :rule/severity    :critical
    :rule/category    "001"
-   :rule/applies-to  {:file-globs ["**/*.tf" "**/*.yaml" "**/*.yml" "**/*.json" "**/*.clj" "**/*.py" "**/*.ts" "**/*.js"]
+   :rule/applies-to  {:file-globs ["**/*.rs" "**/*.swift" "**/*.go" "**/*.java" "**/*.kt"
+                                    "**/*.rb" "**/*.py" "**/*.js" "**/*.ts" "**/*.clj"
+                                    "**/*.tf" "**/*.yaml" "**/*.yml" "**/*.json"
+                                    "**/*.toml" "**/*.cfg" "**/*.ini" "**/*.properties"
+                                    "**/*.env.example" "**/*.sh"]
                        :phases #{:implement :review}}
    :rule/detection   {:type :content-scan
                       :pattern "(?i)(password|secret|api[._-]?key|token)\\s*[:=]\\s*[\"'][^\"']{8,}"}
+   :rule/remediation {:strategy :manual
+                      :auto-fixable-default true
+                      :exclude-contexts
+                      [{:current-contains ["$(openssl" "$(random" "${" "$(" "env(" "ENV["
+                                           "os.environ" "std::env" "process.env"
+                                           "System.getenv" "var(" "getenv"
+                                           "\"$" "'$"]}]}
    :rule/enforcement {:action :hard-halt
                       :message "Hardcoded secret detected. Use environment variables or a secrets manager instead."
                       :remediation "Replace the literal value with a reference to a secrets manager or environment variable."}}
@@ -72,7 +88,94 @@
                       :pattern "(?i)acl\\s*=\\s*\"public"}
    :rule/enforcement {:action :hard-halt
                       :message "Public ACL detected. Cloud resources must not be publicly accessible without explicit security review."
-                      :remediation "Remove the public ACL or replace with 'private'. If public access is required, obtain security approval."}}]
+                      :remediation "Remove the public ACL or replace with 'private'. If public access is required, obtain security approval."}}
+
+  ;; ── Rust rules ──────────────────────────────────────────────────────────
+
+  {:rule/id          :foundations/no-unsafe-rust
+   :rule/title       "No Unsafe Rust"
+   :rule/description "Detects unsafe blocks in Rust code. Unsafe bypasses borrow checker guarantees and must be explicitly justified and reviewed."
+   :rule/severity    :major
+   :rule/category    "001"
+   :rule/applies-to  {:file-globs ["**/*.rs"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type :content-scan
+                      :pattern "unsafe\\s*\\{"}
+   :rule/remediation {:strategy :manual
+                      :auto-fixable-default false}
+   :rule/enforcement {:action :require-approval
+                      :message "Unsafe block detected. Unsafe Rust requires explicit justification and safety review."
+                      :remediation "Replace with safe abstractions, or add a // SAFETY: comment documenting the invariants."}}
+
+  {:rule/id          :foundations/no-unwrap-in-lib
+   :rule/title       "No Unwrap in Library Code"
+   :rule/description "Detects .unwrap() calls in Rust library code. Panicking on None/Err is acceptable in tests and examples but not in library functions."
+   :rule/severity    :minor
+   :rule/category    "001"
+   :rule/applies-to  {:file-globs ["**/src/**/*.rs"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type :content-scan
+                      :pattern "\\.unwrap\\(\\)"}
+   :rule/remediation {:strategy :manual
+                      :auto-fixable-default true
+                      :exclude-contexts
+                      [{:path-contains "/tests/"}
+                       {:path-contains "/examples/"}
+                       {:path-contains "/benches/"}
+                       {:current-contains ["// OK:" "// SAFETY:" "#[test]" "#[cfg(test)]"]}]}
+   :rule/enforcement {:action :warn
+                      :message ".unwrap() in library code. Use ? operator or handle the error explicitly."
+                      :remediation "Replace .unwrap() with ? for propagation, .unwrap_or_default(), or explicit match."}}
+
+  ;; ── Swift rules ─────────────────────────────────────────────────────────
+
+  {:rule/id          :foundations/no-force-unwrap-swift
+   :rule/title       "No Force Unwrap in Swift"
+   :rule/description "Detects force-unwrap (!) on optionals in Swift. Force-unwrap crashes at runtime when the value is nil."
+   :rule/severity    :major
+   :rule/category    "001"
+   :rule/applies-to  {:file-globs ["**/*.swift"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type :content-scan
+                      :pattern "[a-zA-Z0-9_\\)\\]]!\\s*[^=]"}
+   :rule/remediation {:strategy :manual
+                      :auto-fixable-default true
+                      :exclude-contexts
+                      [{:path-contains "Tests/"}
+                       {:path-contains "Preview"}
+                       {:current-contains ["IBOutlet" "@IBAction" "as!" "try!"]}]}
+   :rule/enforcement {:action :warn
+                      :message "Force-unwrap detected. Use if-let, guard-let, or nil-coalescing (??) instead."
+                      :remediation "Replace ! with optional binding (if let/guard let) or provide a default with ??."}}
+
+  {:rule/id          :foundations/no-force-cast-swift
+   :rule/title       "No Force Cast in Swift"
+   :rule/description "Detects force casts (as!) in Swift. Force casts crash at runtime when the type doesn't match."
+   :rule/severity    :major
+   :rule/category    "001"
+   :rule/applies-to  {:file-globs ["**/*.swift"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type :content-scan
+                      :pattern "\\bas!\\s+"}
+   :rule/enforcement {:action :warn
+                      :message "Force cast (as!) detected. Use conditional cast (as?) with optional binding instead."
+                      :remediation "Replace as! with as? and handle the nil case."}}
+
+  ;; ── Universal rules ─────────────────────────────────────────────────────
+
+  {:rule/id          :foundations/no-todo-fixme
+   :rule/title       "No TODO/FIXME in Production"
+   :rule/description "Detects TODO and FIXME comments that should be resolved before shipping."
+   :rule/severity    :info
+   :rule/category    "001"
+   :rule/applies-to  {:file-globs ["**/*.rs" "**/*.swift" "**/*.go" "**/*.java" "**/*.kt"
+                                    "**/*.rb" "**/*.py" "**/*.js" "**/*.ts" "**/*.clj"]
+                       :phases #{:review}}
+   :rule/detection   {:type :content-scan
+                      :pattern "(?i)(TODO|FIXME|HACK|XXX)\\s*[:(]"}
+   :rule/enforcement {:action :audit
+                      :message "TODO/FIXME comment found. Resolve before release or convert to a tracked issue."
+                      :remediation "Resolve the TODO, or create an issue and reference it in the comment."}}]
 
  :pack/created-at #inst "2026-04-08T00:00:00Z"
  :pack/updated-at #inst "2026-04-08T00:00:00Z"}

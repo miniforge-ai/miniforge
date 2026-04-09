@@ -73,7 +73,8 @@
                             semantic?    (msg/t :classify/semantic-review)
                             excluded?    (msg/t :classify/json-context)
                             auto-default (msg/t :classify/literal-default)
-                            :else        (msg/t :classify/datever)))))
+                            :else        (str (get violation :rule/title "Manual review")
+                                              " — manual review required")))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Top-level entry point
