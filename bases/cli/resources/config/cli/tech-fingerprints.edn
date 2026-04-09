@@ -9,6 +9,12 @@
 ;;     :type          — :file or :directory
 ;;     :content       — String that must appear in the file (optional, for content-based detection)
 ;;   :tech/packs      — Policy pack names to apply when detected (optional)
+;;   :tech/linter     — Linter integration (optional)
+;;     :command       — CLI command name
+;;     :args          — Arguments for lint mode (structured output)
+;;     :fix-args      — Arguments for auto-fix mode (optional)
+;;     :parser        — Parser keyword for output format
+;;     :check-cmd     — Command to verify linter is installed (optional)
 ;;
 ;; Sorted alphabetically by :tech/id.
 
@@ -21,7 +27,11 @@
   :tech/extensions ["c" "h"]}
 
  {:tech/id         :clojure
-  :tech/extensions ["clj" "cljs" "cljc" "edn"]}
+  :tech/extensions ["clj" "cljs" "cljc" "edn"]
+  :tech/linter     {:command   "clj-kondo"
+                    :args      ["--lint" "src" "--config" "{:output {:format :edn}}"]
+                    :parser    :clj-kondo
+                    :check-cmd ["clj-kondo" "--version"]}}
 
  {:tech/id         :cpp
   :tech/extensions ["cpp" "cc" "cxx" "hpp" "hxx"]}
@@ -48,7 +58,12 @@
   :tech/extensions ["fs" "fsx" "fsi"]}
 
  {:tech/id         :go
-  :tech/extensions ["go"]}
+  :tech/extensions ["go"]
+  :tech/linter     {:command   "golangci-lint"
+                    :args      ["run" "--out-format=json"]
+                    :fix-args  ["run" "--fix"]
+                    :parser    :golangci-lint
+                    :check-cmd ["golangci-lint" "--version"]}}
 
  {:tech/id         :groovy
   :tech/extensions ["groovy" "gvy"]}
@@ -60,7 +75,12 @@
   :tech/extensions ["java"]}
 
  {:tech/id         :javascript
-  :tech/extensions ["js" "mjs" "cjs" "jsx"]}
+  :tech/extensions ["js" "mjs" "cjs" "jsx"]
+  :tech/linter     {:command   "eslint"
+                    :args      ["--format=json" "."]
+                    :fix-args  ["--fix" "."]
+                    :parser    :eslint
+                    :check-cmd ["eslint" "--version"]}}
 
  {:tech/id         :json
   :tech/extensions ["json"]}
@@ -96,7 +116,12 @@
   :tech/extensions ["purs"]}
 
  {:tech/id         :python
-  :tech/extensions ["py" "pyi"]}
+  :tech/extensions ["py" "pyi"]
+  :tech/linter     {:command   "ruff"
+                    :args      ["check" "--output-format=json" "."]
+                    :fix-args  ["check" "--fix" "."]
+                    :parser    :ruff
+                    :check-cmd ["ruff" "--version"]}}
 
  {:tech/id         :r
   :tech/extensions ["r" "R" "Rmd"]}
@@ -108,7 +133,12 @@
   :tech/extensions ["rb" "rake"]}
 
  {:tech/id         :rust
-  :tech/extensions ["rs"]}
+  :tech/extensions ["rs"]
+  :tech/linter     {:command   "cargo"
+                    :args      ["clippy" "--message-format=json" "--" "-D" "warnings"]
+                    :fix-args  ["clippy" "--fix" "--allow-dirty"]
+                    :parser    :clippy
+                    :check-cmd ["cargo" "clippy" "--version"]}}
 
  {:tech/id         :scala
   :tech/extensions ["scala" "sc"]}
@@ -123,7 +153,12 @@
   :tech/extensions ["sql"]}
 
  {:tech/id         :swift
-  :tech/extensions ["swift"]}
+  :tech/extensions ["swift"]
+  :tech/linter     {:command   "swiftlint"
+                    :args      ["lint" "--reporter" "json"]
+                    :fix-args  ["lint" "--fix"]
+                    :parser    :swiftlint
+                    :check-cmd ["swiftlint" "version"]}}
 
  {:tech/id         :terraform
   :tech/extensions ["tf" "tfvars"]
@@ -133,7 +168,12 @@
   :tech/extensions ["toml"]}
 
  {:tech/id         :typescript
-  :tech/extensions ["ts" "tsx"]}
+  :tech/extensions ["ts" "tsx"]
+  :tech/linter     {:command   "eslint"
+                    :args      ["--format=json" "."]
+                    :fix-args  ["--fix" "."]
+                    :parser    :eslint
+                    :check-cmd ["eslint" "--version"]}}
 
  {:tech/id         :v
   :tech/extensions ["v"]}

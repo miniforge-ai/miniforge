@@ -14,6 +14,7 @@
    Layer 2: Pack selection and full analysis"
   (:require
    [babashka.fs :as fs]
+   [babashka.process :as process]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]))
@@ -99,8 +100,10 @@
   "Detect git host from remote URL."
   [repo-path]
   (try
-    (let [url (:out (clojure.java.shell/sh "git" "remote" "get-url" "origin"
-                                            :dir (str repo-path)))]
+    (let [url (:out (process/sh {:cmd ["git" "remote" "get-url" "origin"]
+                                    :dir (str repo-path)
+                                    :continue true
+                                    :out :string :err :string}))]
       (cond
         (str/includes? url "github.com")    :github
         (str/includes? url "gitlab")        :gitlab
