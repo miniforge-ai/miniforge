@@ -179,9 +179,9 @@
   "Get the sort order for a category ID, resolving aliases.
    Returns the order integer, or Integer/MAX_VALUE if not found."
   [taxonomy category-id]
-  (let [resolved (resolve-alias taxonomy category-id)]
-    (or (:category/order (category-by-id taxonomy resolved))
-        Integer/MAX_VALUE)))
+  (let [resolved (resolve-alias taxonomy category-id)
+        cat      (category-by-id taxonomy resolved)]
+    (get cat :category/order Integer/MAX_VALUE)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
