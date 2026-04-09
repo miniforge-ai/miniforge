@@ -18,6 +18,28 @@
    :rule/detection {:type :custom}
    :rule/enforcement {:action :audit
                       :message "Agent should check existing files before implementing"}
-   :rule/agent-behavior "BEFORE generating any code, carefully examine all existing files provided in the context. If the task described is already fully implemented in those files (all acceptance criteria met, no missing functionality), respond with {:status :already-implemented :summary \"...\"} instead of generating new code. Only generate code when changes are actually needed."}]
+   :rule/agent-behavior "BEFORE generating any code, carefully examine all existing files provided in the context. If the task described is already fully implemented in those files (all acceptance criteria met, no missing functionality), respond with {:status :already-implemented :summary \"...\"} instead of generating new code. Only generate code when changes are actually needed."}
+
+  {:rule/id :410-test-coverage-required
+   :rule/title "New Code Must Include Tests"
+   :rule/description "Requires implementer agents to write tests for all new functions and modified code paths. Prevents untested code from reaching review."
+   :rule/severity :warning
+   :rule/category "900"
+   :rule/applies-to {:phases [:implement :review]}
+   :rule/detection {:type :custom}
+   :rule/enforcement {:action :audit
+                      :message "New or modified code must have proportional test coverage"}
+   :rule/agent-behavior "Every new function (public or private) and every modified code path MUST have a corresponding test. When you add or modify source files, also add or update test files in the same commit. If you modify N source files, you should modify or create at least one test file. Tests must cover: (1) the happy path for each new function, (2) error/edge cases for functions that handle failure, (3) any new branches in conditional logic. Reviewers: reject implementations that add functions without tests."}
+
+  {:rule/id :420-structural-validity
+   :rule/title "Validate Structural Correctness Before Submitting"
+   :rule/description "Requires implementer agents to verify that code compiles and has balanced delimiters before declaring implementation complete."
+   :rule/severity :error
+   :rule/category "900"
+   :rule/applies-to {:phases [:implement]}
+   :rule/detection {:type :custom}
+   :rule/enforcement {:action :audit
+                      :message "Code must compile without syntax errors before submission"}
+   :rule/agent-behavior "BEFORE declaring implementation complete, verify structural correctness: (1) All parentheses, brackets, and braces are balanced — count opening and closing delimiters in every modified file. (2) All namespace requires resolve — no typos in namespace names. (3) No circular dependencies — if you add a require to file A that references file B, verify B does not already require A. (4) Run the linter or compiler check if available. Report any structural issues and fix them before submitting."}]
  :pack/created-at #inst "2026-02-12T00:00:00.000Z"
  :pack/updated-at #inst "2026-02-12T00:00:00.000Z"}
