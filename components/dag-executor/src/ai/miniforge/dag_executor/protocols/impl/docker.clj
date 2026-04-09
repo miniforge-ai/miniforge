@@ -27,6 +27,7 @@
    - resources/executor/docker/Dockerfile.task-runner-clojure (with Clojure tooling)"
   (:require
    [ai.miniforge.dag-executor.result :as result]
+   [ai.miniforge.dag-executor.workspace :as workspace]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [clojure.java.io]
    [clojure.java.shell :as shell]
@@ -612,40 +613,14 @@
         (result/ok {:status :unknown :error (.getMessage e)}))))
 
   (persist-workspace! [_this environment-id opts]
-    (let [workdir (or (:workdir opts) default-workdir)
-          branch  (or (:branch opts) "task/unknown")
-          message (or (:message opts) "phase checkpoint")]
-      (try
-        (let [exec! (container-exec-fn docker-path environment-id workdir)
-              ;; Stage all changes
-              _ (exec! "git add -A")
-              ;; Check if there are changes to commit
-              status-r (exec! "git status --porcelain")
-              has-changes? (seq (str/trim (get-in status-r [:data :stdout] "")))]
-          (if has-changes?
-            (let [_ (exec! (str "git commit -m '" message "'"))
-                  ;; Push to task branch (create if needed)
-                  push-r (exec! (str "git push origin HEAD:" branch " --force"))
-                  ;; Get commit SHA
-                  sha-r  (exec! "git rev-parse HEAD")
-                  sha    (str/trim (get-in sha-r [:data :stdout] ""))]
-              (result/ok {:persisted? true :commit-sha sha :branch branch}))
-            (result/ok {:persisted? false :commit-sha nil :no-changes? true})))
-        (catch Exception e
-          (result/err :persist-failed (.getMessage e))))))
+    (let [exec! (container-exec-fn docker-path environment-id
+                                    (or (:workdir opts) default-workdir))]
+      (workspace/git-persist! exec! opts)))
 
   (restore-workspace! [_this environment-id opts]
-    (let [workdir (or (:workdir opts) default-workdir)
-          branch  (or (:branch opts) "task/unknown")]
-      (try
-        (let [exec! (container-exec-fn docker-path environment-id workdir)
-              _ (exec! (str "git fetch origin " branch))
-              _ (exec! (str "git checkout " branch))
-              sha-r (exec! "git rev-parse HEAD")
-              sha   (str/trim (get-in sha-r [:data :stdout] ""))]
-          (result/ok {:restored? true :commit-sha sha :branch branch}))
-        (catch Exception e
-          (result/err :restore-failed (.getMessage e)))))))
+    (let [exec! (container-exec-fn docker-path environment-id
+                                    (or (:workdir opts) default-workdir))]
+      (workspace/git-restore! exec! opts))))
 
 ;; ============================================================================
 ;; Factory
