@@ -172,39 +172,32 @@
   "Detection types the compliance scanner can process."
   #{:content-scan :diff-analysis :plan-output})
 
-(def ^:private canonical-taxonomy-cache
-  "Cached canonical taxonomy for category resolution. Loaded once on first use.
-   Returns nil when the taxonomy API is not yet available."
-  (delay (try
-           (when-let [export-fn (resolve 'ai.miniforge.policy-pack.interface/export-canonical-taxonomy)]
-             (export-fn))
-           (catch Exception _ nil))))
+(def ^:private category-dewey-ranges
+  "Category keyword name to Dewey code range [lo hi].
+   Static data — no runtime dependency on taxonomy component."
+  {"foundations"   [0 99]
+   "tools"         [100 199]
+   "languages"     [200 299]
+   "frameworks"    [300 399]
+   "testing"       [400 499]
+   "operations"    [500 599]
+   "documentation" [600 699]
+   "workflows"     [700 799]
+   "project"       [800 899]
+   "meta"          [900 999]})
 
 (defn- category-matches?
-  "Check if a rule's category matches a category selector keyword.
-   Supports exact match by name (e.g. :mf.cat/languages matches rule category
-   where dewey->category-id returns \"languages\").
-   Uses the canonical taxonomy for resolution when available."
+  "Check if a rule's Dewey category falls in a category selector's range.
+   Uses static range lookup — no cross-layer dependency."
   [rule cat-kw]
   (let [cat-name (name cat-kw)
-        rule-cat (:rule/category rule)
-        taxonomy @canonical-taxonomy-cache]
+        rule-cat (:rule/category rule)]
     (or (= cat-name rule-cat)
-        ;; Check if rule's Dewey code falls in the category's range
-        (when taxonomy
-          (when-let [resolve-alias-fn (resolve 'ai.miniforge.policy-pack.interface/resolve-alias)]
-            (when-let [cat-by-id-fn (resolve 'ai.miniforge.policy-pack.interface/category-by-id)]
-              (when-let [cat (cat-by-id-fn taxonomy (resolve-alias-fn taxonomy cat-kw))]
-                (let [code-str  (:category/code cat)
-                      ;; Parse range "200-299" → [200 299]
-                      range-parts (str/split code-str #"-")]
-                  (when (= 2 (count range-parts))
-                    (try
-                      (let [lo (Integer/parseInt (first range-parts))
-                            hi (Integer/parseInt (second range-parts))
-                            rule-code (Integer/parseInt (str rule-cat))]
-                        (and (<= lo rule-code) (<= rule-code hi)))
-                      (catch Exception _ false)))))))))))
+        (when-let [[lo hi] (get category-dewey-ranges cat-name)]
+          (try
+            (let [code (Integer/parseInt (str rule-cat))]
+              (and (<= lo code) (<= code hi)))
+            (catch Exception _ false))))))
 
 (defn- rule-matches-selector?
   "Check if a rule matches a selector element (keyword — rule ID or category ID)."
@@ -389,25 +382,33 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Top-level entry point
 
+(defn- scan-changed-files
+  "Scan only files present in the changed-files set for a single rule config."
+  [cfg index changed-files]
+  (let [file-pred (get cfg :file-pred (constantly false))
+        matching  (->> (repo-index/find-files index identity)
+                       (filter (fn [f]
+                                 (and (contains? changed-files (:path f))
+                                      (file-pred (:path f))))))]
+    (mapcat #(scan-file-record cfg index %) matching)))
+
+(defn- scan-and-enrich
+  "Scan a single rule config (full or incremental) and enrich violations."
+  [cfg index changed-files]
+  (let [viols (if changed-files
+                (scan-changed-files cfg index changed-files)
+                (scan-rule cfg index))
+        rem   (get cfg :remediation)]
+    (if rem
+      (mapv #(enrich-violation % rem) viols)
+      viols)))
+
 (defn- scan-content-rules
   "Scan content-scan rules across the repo index.
-   When :since ref is provided, limits scanning to changed files only."
+   When changed-files is non-nil, limits scanning to those files only."
   [content-cfgs index changed-files]
   (->> content-cfgs
-       (mapcat (fn [cfg]
-                 (let [viols (if changed-files
-                               ;; Incremental: only scan changed files
-                               (let [file-pred (get cfg :file-pred (constantly false))
-                                     changed   (filter (fn [f]
-                                                         (and (contains? changed-files (:path f))
-                                                              (file-pred (:path f))))
-                                                       (repo-index/find-files index identity))]
-                                 (mapcat #(scan-file-record cfg index %) changed))
-                               ;; Full scan
-                               (scan-rule cfg index))]
-                   (if-let [rem (get cfg :remediation)]
-                     (mapv #(enrich-violation % rem) viols)
-                     viols))))
+       (mapcat #(scan-and-enrich % index changed-files))
        vec))
 
 (defn- scan-diff-rules
