@@ -34,20 +34,36 @@
 ;; Pack resolution
 
 (def ^:private default-standards-path ".standards")
+(def ^:private repo-config-path ".miniforge/config.edn")
 
 (defn- resolve-pack
   "Resolve a pack by name or path. Returns the loaded pack map or nil."
   [pack-ref]
   (cond
-    ;; File path
     (fs/exists? pack-ref)
     (edn/read-string (slurp (str pack-ref)))
 
-    ;; Reference pack name — load from classpath
     :else
     (let [resource-path (str "policy_pack/packs/" pack-ref ".pack.edn")]
       (when-let [url (io/resource resource-path)]
         (edn/read-string (slurp url))))))
+
+(defn- load-repo-config
+  "Load .miniforge/config.edn from the repo root. Returns nil if absent."
+  [repo-path]
+  (let [path (fs/path repo-path repo-config-path)]
+    (when (fs/exists? path)
+      (edn/read-string (slurp (str path))))))
+
+(defn- resolve-packs-from-config
+  "Load all packs declared in :repo/packs. Returns merged pack or nil."
+  [repo-config]
+  (let [pack-names (get repo-config :repo/packs [])]
+    (when (seq pack-names)
+      (let [packs (keep resolve-pack pack-names)
+            rules (vec (mapcat :pack/rules packs))]
+        (when (seq rules)
+          {:pack/rules rules})))))
 
 (defn- resolve-rules-selector
   "Parse the --rules option into a selector value."
@@ -62,11 +78,15 @@
 ;; Pipeline steps
 
 (defn- build-scan-opts
-  "Build scan options from CLI opts."
-  [opts]
-  (let [pack  (when-let [p (get opts :pack)] (resolve-pack p))
-        rules (resolve-rules-selector (get opts :rules))
-        since (get opts :since)]
+  "Build scan options from CLI opts and repo config.
+   Priority: --pack flag > repo config :repo/packs > no pack."
+  [repo-path opts]
+  (let [explicit-pack (when-let [p (get opts :pack)] (resolve-pack p))
+        repo-config   (when-not explicit-pack (load-repo-config repo-path))
+        config-pack   (when repo-config (resolve-packs-from-config repo-config))
+        pack          (or explicit-pack config-pack)
+        rules         (resolve-rules-selector (get opts :rules))
+        since         (get opts :since)]
     (cond-> {:rules rules}
       pack  (assoc :pack pack)
       since (assoc :since since))))
@@ -114,7 +134,7 @@
   "Execute the scan→classify→plan→execute pipeline."
   [repo-path opts]
   (let [standards  (get opts :standards default-standards-path)
-        scan-opts  (build-scan-opts opts)
+        scan-opts  (build-scan-opts repo-path opts)
         report?    (get opts :report false)
         execute?   (get opts :execute false)]
     (display/print-info (str "Scanning " repo-path " ..."))
