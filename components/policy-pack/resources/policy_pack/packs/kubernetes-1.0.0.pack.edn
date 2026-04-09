@@ -27,7 +27,11 @@
    :rule/description "Detects container images using the :latest tag. Mutable tags make deployments non-reproducible and break rollback guarantees."
    :rule/severity    :major
    :rule/category    "320"
-   :rule/applies-to  {:file-globs ["**/*.yaml" "**/*.yml"]
+   :rule/applies-to  {:file-globs ["**/k8s/**/*.yaml" "**/k8s/**/*.yml"
+                                    "**/kubernetes/**/*.yaml" "**/kubernetes/**/*.yml"
+                                    "**/deploy/**/*.yaml" "**/deploy/**/*.yml"
+                                    "**/manifests/**/*.yaml" "**/manifests/**/*.yml"
+                                    "**/helm/**/*.yaml" "**/helm/**/*.yml"]
                        :phases #{:implement :review}}
    :rule/detection   {:type :content-scan
                       :pattern "image:\\s*\\S+:latest"}
@@ -40,7 +44,11 @@
    :rule/description "Ensures all containers declare CPU and memory limits. Missing limits allow unbounded resource consumption and noisy-neighbor failures."
    :rule/severity    :major
    :rule/category    "320"
-   :rule/applies-to  {:file-globs ["**/*.yaml" "**/*.yml"]
+   :rule/applies-to  {:file-globs ["**/k8s/**/*.yaml" "**/k8s/**/*.yml"
+                                    "**/kubernetes/**/*.yaml" "**/kubernetes/**/*.yml"
+                                    "**/deploy/**/*.yaml" "**/deploy/**/*.yml"
+                                    "**/manifests/**/*.yaml" "**/manifests/**/*.yml"
+                                    "**/helm/**/*.yaml" "**/helm/**/*.yml"]
                        :phases #{:implement :review}}
    :rule/detection   {:type    :content-scan
                       :mode    :negative
@@ -54,7 +62,11 @@
    :rule/description "Detects containers running in privileged mode. Privileged containers bypass kernel security boundaries and can compromise the host."
    :rule/severity    :critical
    :rule/category    "320"
-   :rule/applies-to  {:file-globs ["**/*.yaml" "**/*.yml"]
+   :rule/applies-to  {:file-globs ["**/k8s/**/*.yaml" "**/k8s/**/*.yml"
+                                    "**/kubernetes/**/*.yaml" "**/kubernetes/**/*.yml"
+                                    "**/deploy/**/*.yaml" "**/deploy/**/*.yml"
+                                    "**/manifests/**/*.yaml" "**/manifests/**/*.yml"
+                                    "**/helm/**/*.yaml" "**/helm/**/*.yml"]
                        :phases #{:implement :review}}
    :rule/detection   {:type :content-scan
                       :pattern "privileged:\\s*true"}
@@ -67,7 +79,11 @@
    :rule/description "Ensures containers declare liveness and readiness probes. Missing probes prevent Kubernetes from detecting and recovering from failures."
    :rule/severity    :major
    :rule/category    "320"
-   :rule/applies-to  {:file-globs ["**/*.yaml" "**/*.yml"]
+   :rule/applies-to  {:file-globs ["**/k8s/**/*.yaml" "**/k8s/**/*.yml"
+                                    "**/kubernetes/**/*.yaml" "**/kubernetes/**/*.yml"
+                                    "**/deploy/**/*.yaml" "**/deploy/**/*.yml"
+                                    "**/manifests/**/*.yaml" "**/manifests/**/*.yml"
+                                    "**/helm/**/*.yaml" "**/helm/**/*.yml"]
                        :phases #{:implement :review}}
    :rule/detection   {:type    :content-scan
                       :mode    :negative
@@ -81,7 +97,11 @@
    :rule/description "Detects pods using hostNetwork: true. Host networking bypasses pod network isolation and exposes all host ports to the container."
    :rule/severity    :critical
    :rule/category    "320"
-   :rule/applies-to  {:file-globs ["**/*.yaml" "**/*.yml"]
+   :rule/applies-to  {:file-globs ["**/k8s/**/*.yaml" "**/k8s/**/*.yml"
+                                    "**/kubernetes/**/*.yaml" "**/kubernetes/**/*.yml"
+                                    "**/deploy/**/*.yaml" "**/deploy/**/*.yml"
+                                    "**/manifests/**/*.yaml" "**/manifests/**/*.yml"
+                                    "**/helm/**/*.yaml" "**/helm/**/*.yml"]
                        :phases #{:implement :review}}
    :rule/detection   {:type :content-scan
                       :pattern "hostNetwork:\\s*true"}

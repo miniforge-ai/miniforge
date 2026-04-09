@@ -47,6 +47,7 @@
    [ai.miniforge.cli.main.commands.fleet :as cmd-fleet]
    [ai.miniforge.cli.main.commands.pr :as cmd-pr]
    [ai.miniforge.cli.main.commands.control-plane :as cmd-cp]
+   [ai.miniforge.cli.main.commands.scan :as cmd-scan]
    [ai.miniforge.agent.tool-supervisor :as tool-supervisor]
    [ai.miniforge.mcp-context-server.interface :as mcp-context-server]
    [ai.miniforge.lsp-mcp-bridge.main :as lsp-bridge]
@@ -191,6 +192,7 @@
 
 ;; Delegated commands
 (defn run-cmd [m] (cmd-run/run-cmd (get-opts m)))
+(defn scan-cmd [m] (cmd-scan/scan-cmd (get-opts m)))
 (defn web-cmd [m] (cmd-monitoring/web-cmd (get-opts m)))
 (defn tui-cmd [m] (cmd-monitoring/tui-cmd (get-opts m)))
 (defn fleet-start-cmd [m] (cmd-fleet/fleet-start-cmd (get-opts m)))
@@ -297,6 +299,17 @@
    {:cmds ["lsp" "status"] :fn lsp-status-cmd}
    {:cmds ["lsp" "install"] :fn lsp-install-cmd}
    {:cmds ["lsp" "setup"] :fn lsp-setup-cmd}
+
+   ;; Scan command — compliance scanner
+   {:cmds ["scan"]
+    :fn scan-cmd
+    :args->opts [:repo]
+    :spec {:pack      {:alias :p}
+           :rules     {:alias :r}
+           :since     {:alias :s}
+           :standards {:default ".standards"}
+           :execute   {:coerce :boolean :alias :x}
+           :report    {:coerce :boolean :default true}}}
 
    ;; Run command
    {:cmds ["run"]
