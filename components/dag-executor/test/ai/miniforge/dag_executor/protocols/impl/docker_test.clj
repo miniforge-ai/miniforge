@@ -20,6 +20,8 @@
   "Tests for Docker executor: token sanitization, URL auth, image management."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [clojure.string]
+   [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.docker :as docker]))
 
 ;; Private fn accessor helper
@@ -71,6 +73,72 @@
 (deftest image-exists-nonexistent-test
   (testing "image-exists? returns false for nonexistent image"
     (is (false? (docker/image-exists? nil "nonexistent/image:never")))))
+
+;; ============================================================================
+;; persist-workspace!
+;; ============================================================================
+
+(deftest persist-workspace-with-changes-test
+  (testing "persist-workspace! commits and pushes when there are dirty files"
+    (let [commands (atom [])
+          executor (docker/create-docker-executor {:image "test:latest"})]
+      (with-redefs [docker/exec-in-container
+                    (fn [_docker-path _env-id cmd _opts]
+                      (swap! commands conj cmd)
+                      (cond
+                        (= cmd "git status --porcelain")
+                        {:data {:exit-code 0 :stdout "M src/core.clj\n"}}
+
+                        (= cmd "git rev-parse HEAD")
+                        {:data {:exit-code 0 :stdout "abc123\n"}}
+
+                        :else
+                        {:data {:exit-code 0 :stdout "" :stderr ""}}))]
+        (let [result (proto/persist-workspace! executor "container-1"
+                                               {:branch "task/test-123"
+                                                :message "implement completed"
+                                                :workdir "/workspace"})]
+          (is (true? (get-in result [:data :persisted?])))
+          (is (= "abc123" (get-in result [:data :commit-sha])))
+          (is (some #(= "git add -A" %) @commands))
+          (is (some #(clojure.string/includes? % "git commit") @commands))
+          (is (some #(clojure.string/includes? % "git push") @commands)))))))
+
+(deftest persist-workspace-no-changes-test
+  (testing "persist-workspace! returns {:persisted? false} when no dirty files"
+    (let [executor (docker/create-docker-executor {:image "test:latest"})]
+      (with-redefs [docker/exec-in-container
+                    (fn [_docker-path _env-id cmd _opts]
+                      (if (= cmd "git status --porcelain")
+                        {:data {:exit-code 0 :stdout ""}}
+                        {:data {:exit-code 0 :stdout "" :stderr ""}}))]
+        (let [result (proto/persist-workspace! executor "container-1"
+                                               {:branch "task/test-123"
+                                                :workdir "/workspace"})]
+          (is (false? (get-in result [:data :persisted?])))
+          (is (true? (get-in result [:data :no-changes?]))))))))
+
+;; ============================================================================
+;; restore-workspace!
+;; ============================================================================
+
+(deftest restore-workspace-test
+  (testing "restore-workspace! fetches and checks out task branch"
+    (let [commands (atom [])
+          executor (docker/create-docker-executor {:image "test:latest"})]
+      (with-redefs [docker/exec-in-container
+                    (fn [_docker-path _env-id cmd _opts]
+                      (swap! commands conj cmd)
+                      (if (= cmd "git rev-parse HEAD")
+                        {:data {:exit-code 0 :stdout "def456\n"}}
+                        {:data {:exit-code 0 :stdout "" :stderr ""}}))]
+        (let [result (proto/restore-workspace! executor "container-1"
+                                               {:branch "task/test-123"
+                                                :workdir "/workspace"})]
+          (is (true? (get-in result [:data :restored?])))
+          (is (= "def456" (get-in result [:data :commit-sha])))
+          (is (some #(clojure.string/includes? % "git fetch") @commands))
+          (is (some #(clojure.string/includes? % "git checkout") @commands)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

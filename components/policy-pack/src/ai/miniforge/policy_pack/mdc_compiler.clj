@@ -624,18 +624,20 @@
                 categories (build-categories sorted-rules)
                 now        (java.time.Instant/now)
 
-                pack {:pack/id          "miniforge/standards"
-                      :pack/name        "Miniforge Engineering Standards"
-                      :pack/version     (format-pack-version)
-                      :pack/description "Shared engineering standards compiled from .standards/ MDC files"
-                      :pack/author      "miniforge.ai"
-                      :pack/license     "Apache-2.0"
-                      :pack/trust-level :trusted
-                      :pack/authority   :authority/instruction
-                      :pack/categories  categories
-                      :pack/rules       sorted-rules
-                      :pack/created-at  now
-                      :pack/updated-at  now}
+                pack {:pack/id           "miniforge/standards"
+                      :pack/name         "Miniforge Engineering Standards"
+                      :pack/version      (format-pack-version)
+                      :pack/description  "Shared engineering standards compiled from .standards/ MDC files"
+                      :pack/author       "miniforge.ai"
+                      :pack/license      "Apache-2.0"
+                      :pack/trust-level  :trusted
+                      :pack/authority    :authority/instruction
+                      :pack/taxonomy-ref {:taxonomy/id      :miniforge/dewey
+                                          :taxonomy/min-version "1.0.0"}
+                      :pack/categories   categories
+                      :pack/rules        sorted-rules
+                      :pack/created-at   now
+                      :pack/updated-at   now}
 
                 ;; Collect warnings
                 warnings (cond-> []
@@ -654,6 +656,40 @@
             (schema/success :pack pack {:warnings       warnings
                                         :compiled-count (count successes)
                                         :failed-count   (count failures)})))))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Canonical taxonomy export
+
+(defn export-canonical-taxonomy
+  "Export the compiler's dewey-ranges as a first-class Taxonomy artifact.
+
+   This bridges the compiler's internal category table to the N4 four-artifact
+   model. The exported taxonomy is the authoritative source of truth; the
+   bundled EDN resource at resources/taxonomies/miniforge-dewey-1.0.0.edn
+   should match this output.
+
+   Returns:
+   - A valid Taxonomy map per taxonomy/Taxonomy schema."
+  []
+  {:taxonomy/id      :miniforge/dewey
+   :taxonomy/version "1.0.0"
+   :taxonomy/title   "Miniforge Dewey Taxonomy"
+   :taxonomy/description
+   "Dewey-decimal-inspired category tree for miniforge engineering standards.
+    Ten top-level ranges (000-999) covering foundations, tools, languages,
+    frameworks, testing, operations, documentation, workflows, project, and meta."
+   :taxonomy/categories
+   (mapv (fn [{:keys [lo id label]}]
+           {:category/id    (keyword "mf.cat" id)
+            :category/code  (format "%03d-%03d" lo (+ lo 99))
+            :category/title label
+            :category/order lo})
+         dewey-ranges)
+   :taxonomy/aliases
+   (mapv (fn [{:keys [id]}]
+           {:alias/name   (keyword id)
+            :alias/target (keyword "mf.cat" id)})
+         dewey-ranges)})
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

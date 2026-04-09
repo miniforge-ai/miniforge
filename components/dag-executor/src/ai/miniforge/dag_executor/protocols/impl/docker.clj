@@ -27,6 +27,7 @@
    - resources/executor/docker/Dockerfile.task-runner-clojure (with Clojure tooling)"
   (:require
    [ai.miniforge.dag-executor.result :as result]
+   [ai.miniforge.dag-executor.workspace :as workspace]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [clojure.java.io]
    [clojure.java.shell :as shell]
@@ -429,6 +430,43 @@
           [image-key (ensure-image! docker-path image-key :force? force?)])))
 
 ;; ============================================================================
+;; Container command execution helper
+;; ============================================================================
+
+(defn- sanitize-token
+  "Remove token credentials from a string for safe logging.
+   Handles both GitHub (x-access-token) and GitLab (oauth2) auth formats."
+  [s]
+  (-> s
+      (str/replace #"x-access-token:[^\s@]+" "x-access-token:***")
+      (str/replace #"oauth2:[^\s@]+" "oauth2:***")))
+
+(defn- container-exec-fn
+  "Build a function that executes commands inside a container.
+   Returns (fn [cmd] -> result-map).
+
+   Options:
+   - :throw-on-error? — throw ex-info on non-zero exit (default false)
+   - :error-prefix — prefix for thrown error messages
+   - :sanitize? — sanitize tokens in error messages (default false)"
+  [docker-path container-id workdir
+   & {:keys [throw-on-error? error-prefix sanitize?]
+      :or {throw-on-error? false error-prefix "Command failed" sanitize? false}}]
+  (fn [cmd]
+    (let [r (exec-in-container docker-path container-id cmd {:workdir workdir})]
+      (when (and throw-on-error?
+                 (not (zero? (get-in r [:data :exit-code] 1))))
+        (let [safe-cmd (if sanitize? (sanitize-token (str cmd)) (str cmd))
+              stderr   (if sanitize?
+                         (sanitize-token (or (get-in r [:data :stderr]) ""))
+                         (or (get-in r [:data :stderr]) ""))]
+          (throw (ex-info (str error-prefix ": " safe-cmd
+                               (when (seq stderr) (str "\n" stderr)))
+                          {:cmd safe-cmd :stderr stderr
+                           :exit (get-in r [:data :exit-code])}))))
+      r)))
+
+;; ============================================================================
 ;; Workspace Bootstrap (N11 §4.2)
 ;; ============================================================================
 
@@ -458,13 +496,6 @@
                      (str/trim (:out r))))
                  (catch Exception _ nil))))))
 
-(defn- sanitize-token
-  "Remove token credentials from a string for safe logging.
-   Handles both GitHub (x-access-token) and GitLab (oauth2) auth formats."
-  [s]
-  (-> s
-      (str/replace #"x-access-token:[^\s@]+" "x-access-token:***")
-      (str/replace #"oauth2:[^\s@]+" "oauth2:***")))
 
 (defn- authenticated-https-url
   "Inject token credentials into an HTTPS git URL.
@@ -495,24 +526,20 @@
           clone-url (if token
                       (authenticated-https-url https-url token host-kind)
                       repo-url)
-          exec!  (fn [cmd]
-                   (let [r (exec-in-container docker-path container-name cmd
-                                              {:workdir "/"})]
-                     (when-not (zero? (get-in r [:data :exit-code] 1))
-                       ;; Sanitize token from error messages
-                       (let [safe-cmd (sanitize-token (str cmd))
-                             stderr   (sanitize-token (or (get-in r [:data :stderr]) ""))]
-                         (throw (ex-info (str "Workspace bootstrap failed: " safe-cmd
-                                              (when (seq stderr) (str "\n" stderr)))
-                                         {:cmd    safe-cmd
-                                          :stderr stderr
-                                          :exit   (get-in r [:data :exit-code])}))))))
+          exec!  (container-exec-fn docker-path container-name "/"
+                                    :throw-on-error? true
+                                    :error-prefix "Workspace bootstrap failed"
+                                    :sanitize? true)
           clone-cmd (str "git clone --branch " branch " --single-branch "
                          clone-url " " workdir)]
       (exec! clone-cmd)
       ;; Use --local (not --global) since container rootfs is read-only
       (exec! (str "git -C " workdir " config user.email 'miniforge@miniforge.ai'"))
-      (exec! (str "git -C " workdir " config user.name 'miniforge'")))))
+      (exec! (str "git -C " workdir " config user.name 'miniforge'"))
+      ;; Set push URL with token so persist-workspace! can push
+      (when token
+        (exec! (str "git -C " workdir " remote set-url --push origin "
+                    (authenticated-https-url https-url token host-kind)))))))
 
 ;; ============================================================================
 ;; DockerExecutor Record
@@ -583,7 +610,17 @@
     (try
       (inspect-container docker-path environment-id)
       (catch Exception e
-        (result/ok {:status :unknown :error (.getMessage e)})))))
+        (result/ok {:status :unknown :error (.getMessage e)}))))
+
+  (persist-workspace! [_this environment-id opts]
+    (let [exec! (container-exec-fn docker-path environment-id
+                                    (or (:workdir opts) default-workdir))]
+      (workspace/git-persist! exec! opts)))
+
+  (restore-workspace! [_this environment-id opts]
+    (let [exec! (container-exec-fn docker-path environment-id
+                                    (or (:workdir opts) default-workdir))]
+      (workspace/git-restore! exec! opts))))
 
 ;; ============================================================================
 ;; Factory

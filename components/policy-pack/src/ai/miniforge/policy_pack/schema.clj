@@ -249,6 +249,13 @@
    - :authority/data        - Reference material only (any trust level)"
   [:enum :authority/instruction :authority/data])
 
+(def TaxonomyRef
+  "Schema for a taxonomy reference within a pack manifest.
+   Packs declare which taxonomy they target and the minimum version required."
+  [:map
+   [:taxonomy/id keyword?]
+   [:taxonomy/min-version string?]])
+
 (def PackManifest
   "Schema for a policy pack manifest.
 
@@ -282,6 +289,9 @@
    ;; Trust and authority (N1 §2.10.2)
    [:pack/trust-level {:optional true} TrustLevel]
    [:pack/authority {:optional true} AuthorityChannel]
+
+   ;; Taxonomy reference (N4 §2.1)
+   [:pack/taxonomy-ref {:optional true} TaxonomyRef]
 
    ;; Config overrides (governance config tuning from trusted packs)
    [:pack/config-overrides {:optional true} [:map-of :keyword :map]]

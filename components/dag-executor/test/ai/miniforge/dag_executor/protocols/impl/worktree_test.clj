@@ -20,6 +20,7 @@
   "Tests for the worktree executor: concurrent-add lock and fallback strategy."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]
    [ai.miniforge.dag-executor.result :as result]))
 
@@ -96,3 +97,25 @@
   (testing "worktree-lock is an Object used to serialize concurrent git add calls"
     (is (some? @#'worktree/worktree-lock))
     (is (instance? Object @#'worktree/worktree-lock))))
+
+;; ============================================================================
+;; persist-workspace! / restore-workspace! (no-op for worktree)
+;; ============================================================================
+
+(deftest persist-workspace-noop-test
+  (testing "worktree persist-workspace! is a no-op — files are already on host"
+    (let [executor (worktree/create-worktree-executor {})]
+      (with-redefs [worktree/run-git   (fn [& _] {:exit 0 :out "" :err ""})
+                    worktree/run-shell (fn [& _] {:exit 0 :out "" :err ""})]
+        (let [r (proto/persist-workspace! executor "env-1" {:branch "task/x"})]
+          (is (result/ok? r))
+          (is (false? (get-in r [:data :persisted?]))))))))
+
+(deftest restore-workspace-noop-test
+  (testing "worktree restore-workspace! is a no-op"
+    (let [executor (worktree/create-worktree-executor {})]
+      (with-redefs [worktree/run-git   (fn [& _] {:exit 0 :out "" :err ""})
+                    worktree/run-shell (fn [& _] {:exit 0 :out "" :err ""})]
+        (let [r (proto/restore-workspace! executor "env-1" {:branch "task/x"})]
+          (is (result/ok? r))
+          (is (false? (get-in r [:data :restored?]))))))))

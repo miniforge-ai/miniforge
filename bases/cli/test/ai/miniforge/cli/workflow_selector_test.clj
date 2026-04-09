@@ -125,7 +125,7 @@
   (testing "Multi-phase implementation rule matches"
     (let [features (ws/analyze-spec multi-phase-refactor-spec)
           result (ws/match-rule features)]
-      (is (= :canonical-sdlc-v1 (:workflow-type result)))
+      (is (= :canonical-sdlc (:workflow-type result)))
       (is (= :comprehensive (:selection-profile result)))
       (is (= :high (:confidence result)))
       (is (string? (:reason result)))))
@@ -133,35 +133,35 @@
   (testing "Refactoring with stratification rule matches"
     (let [features (ws/analyze-spec refactor-with-rule-210-spec)
           result (ws/match-rule features)]
-      (is (= :canonical-sdlc-v1 (:workflow-type result)))
+      (is (= :canonical-sdlc (:workflow-type result)))
       (is (= :comprehensive (:selection-profile result)))
       (is (= :high (:confidence result)))))
 
   (testing "Bug fix rule matches"
     (let [features (ws/analyze-spec bugfix-spec)
           result (ws/match-rule features)]
-      (is (= :lean-sdlc-v1 (:workflow-type result)))
+      (is (= :quick-fix (:workflow-type result)))
       (is (= :fast (:selection-profile result)))
       (is (= :high (:confidence result)))))
 
   (testing "Docs only rule matches"
     (let [features (ws/analyze-spec docs-spec)
           result (ws/match-rule features)]
-      (is (= :lean-sdlc-v1 (:workflow-type result)))
+      (is (= :quick-fix (:workflow-type result)))
       (is (= :fast (:selection-profile result)))
       (is (= :high (:confidence result)))))
 
   (testing "Large feature rule matches"
     (let [features (ws/analyze-spec large-feature-spec)
           result (ws/match-rule features)]
-      (is (= :canonical-sdlc-v1 (:workflow-type result)))
+      (is (= :canonical-sdlc (:workflow-type result)))
       (is (= :comprehensive (:selection-profile result)))
       (is (= :medium (:confidence result)))))
 
-  (testing "Unknown defaults to lean-sdlc-v1"
+  (testing "Unknown defaults to canonical-sdlc (default profile)"
     (let [features (ws/analyze-spec unknown-spec)
           result (ws/match-rule features)]
-      (is (= :lean-sdlc-v1 (:workflow-type result)))
+      (is (= :canonical-sdlc (:workflow-type result)))
       (is (= :default (:selection-profile result)))
       (is (= :low (:confidence result))))))
 
@@ -171,7 +171,7 @@
 (deftest select-workflow-test
   (testing "select-workflow returns complete result for multi-phase refactor"
     (let [result (ws/select-workflow multi-phase-refactor-spec)]
-      (is (= :canonical-sdlc-v1 (:workflow-type result)))
+      (is (= :canonical-sdlc (:workflow-type result)))
       (is (= :comprehensive (:selection-profile result)))
       (is (= :high (:confidence result)))
       (is (string? (:reason result)))
@@ -180,48 +180,48 @@
 
   (testing "select-workflow handles bugfix"
     (let [result (ws/select-workflow bugfix-spec)]
-      (is (= :lean-sdlc-v1 (:workflow-type result)))
+      (is (= :quick-fix (:workflow-type result)))
       (is (= :fast (:selection-profile result)))
       (is (= :high (:confidence result)))))
 
   (testing "select-workflow handles docs-only"
     (let [result (ws/select-workflow docs-spec)]
-      (is (= :lean-sdlc-v1 (:workflow-type result)))
+      (is (= :quick-fix (:workflow-type result)))
       (is (= :fast (:selection-profile result)))
       (is (= :high (:confidence result)))))
 
   (testing "select-workflow handles large feature"
     (let [result (ws/select-workflow large-feature-spec)]
-      (is (= :canonical-sdlc-v1 (:workflow-type result)))
+      (is (= :canonical-sdlc (:workflow-type result)))
       (is (= :comprehensive (:selection-profile result)))
       (is (= :medium (:confidence result)))))
 
   (testing "select-workflow handles unknown with safe default"
     (let [result (ws/select-workflow unknown-spec)]
-      (is (= :lean-sdlc-v1 (:workflow-type result)))
+      (is (= :canonical-sdlc (:workflow-type result)))
       (is (= :default (:selection-profile result)))
       (is (= :low (:confidence result))))))
 
 (deftest explain-selection-test
   (testing "explain-selection generates user-facing explanation"
     (let [reason (messages/t :selector/reason-multi-phase {:pr-count 6})
-          selection {:workflow-type :canonical-sdlc-v1
+          selection {:workflow-type :canonical-sdlc
                      :confidence :high
                      :reason reason}
           explanation (ws/explain-selection selection)]
       (is (string? explanation))
-      (is (.contains explanation "canonical-sdlc-v1"))
+      (is (.contains explanation "canonical-sdlc"))
       (is (.contains explanation reason))
       (is (.contains explanation (messages/t :selector/override-hint)))))
 
   (testing "explain-selection shows confidence markers"
-    (let [high-conf (ws/explain-selection {:workflow-type :canonical-sdlc-v1
+    (let [high-conf (ws/explain-selection {:workflow-type :canonical-sdlc
                                            :confidence :high
                                            :reason "Test"})
-          medium-conf (ws/explain-selection {:workflow-type :lean-sdlc-v1
+          medium-conf (ws/explain-selection {:workflow-type :quick-fix
                                              :confidence :medium
                                              :reason "Test"})
-          low-conf (ws/explain-selection {:workflow-type :lean-sdlc-v1
+          low-conf (ws/explain-selection {:workflow-type :quick-fix
                                           :confidence :low
                                           :reason "Test"})]
       (is (not (.contains high-conf "confidence")))
@@ -234,12 +234,12 @@
 (deftest workflow-selection-integration-test
   (testing "Emojui-style multi-phase refactor selects canonical-sdlc-v1"
     (let [result (ws/select-workflow multi-phase-refactor-spec)]
-      (is (= :canonical-sdlc-v1 (:workflow-type result)))
+      (is (= :canonical-sdlc (:workflow-type result)))
       (is (= :high (:confidence result)))))
 
   (testing "Bug fix selects lean-sdlc-v1"
     (let [result (ws/select-workflow bugfix-spec)]
-      (is (= :lean-sdlc-v1 (:workflow-type result)))
+      (is (= :quick-fix (:workflow-type result)))
       (is (= :high (:confidence result)))))
 
   (testing "Explicit workflow-type should be checked by caller first"
@@ -252,14 +252,14 @@
 ;------------------------------------------------------------------------------ Edge Cases
 
 (deftest edge-cases-test
-  (testing "Empty spec defaults to lean-sdlc-v1"
+  (testing "Empty spec defaults to canonical-sdlc (default profile)"
     (let [result (ws/select-workflow {})]
-      (is (= :lean-sdlc-v1 (:workflow-type result)))
+      (is (= :canonical-sdlc (:workflow-type result)))
       (is (= :low (:confidence result)))))
 
-  (testing "Spec with only title defaults to lean-sdlc-v1"
+  (testing "Spec with only title defaults to canonical-sdlc (default profile)"
     (let [result (ws/select-workflow {:spec/title "Test"})]
-      (is (= :lean-sdlc-v1 (:workflow-type result)))
+      (is (= :canonical-sdlc (:workflow-type result)))
       (is (= :low (:confidence result)))))
 
   (testing "Refactor keyword in title triggers refactoring detection"
@@ -273,11 +273,12 @@
                      :pr-3 {:branch "c"}
                      :pr-4 {:branch "d"}
                      :pr-5 {:branch "e"}}}})]
-      (is (= :canonical-sdlc-v1 (:workflow-type result)))
+      (is (= :canonical-sdlc (:workflow-type result)))
       (is (= :high (:confidence result)))))
 
-  (testing "Small feature with 'simple' keyword stays lean"
+  (testing "Small feature with 'simple' keyword falls to default profile"
     (let [result (ws/select-workflow small-feature-spec)]
-      ;; Even though it's a feature, the small size and 'simple' keyword
-      ;; should prevent it from being canonical
-      (is (not= :canonical-sdlc-v1 (:workflow-type result))))))
+      ;; Small feature doesn't match large-feature or bugfix rules,
+      ;; falls to default profile which is :canonical-sdlc
+      (is (= :default (:selection-profile result)))
+      (is (= :low (:confidence result))))))
