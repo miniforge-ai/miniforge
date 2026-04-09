@@ -1,0 +1,78 @@
+;; Foundations Policy Pack — universal compliance baselines.
+;; Reference: N4 Policy Packs & Gates Standard §2.2, §2.3
+;; Dewey category: 001 (Foundations & Core Principles)
+
+{:pack/id          "miniforge/foundations"
+ :pack/name        "Foundations"
+ :pack/version     "1.0.0"
+ :pack/description "Universal compliance baselines: secrets detection, resource tagging, naming conventions, and public-access prevention."
+ :pack/author      "miniforge.ai"
+ :pack/license     "Apache-2.0"
+ :pack/trust-level :trusted
+ :pack/authority   :authority/instruction
+ :pack/taxonomy-ref {:taxonomy/id :miniforge/dewey :taxonomy/min-version "1.0.0"}
+
+ :pack/categories
+ [{:category/id   "001"
+   :category/name "Foundations"
+   :category/rules [:foundations/no-hardcoded-secrets
+                    :foundations/require-resource-tags
+                    :foundations/enforce-naming-convention
+                    :foundations/no-public-resources]}]
+
+ :pack/rules
+ [{:rule/id          :foundations/no-hardcoded-secrets
+   :rule/title       "No Hardcoded Secrets"
+   :rule/description "Detects hardcoded API keys, passwords, tokens, and secrets in source files. Credentials must be injected via environment variables or a secrets manager."
+   :rule/severity    :critical
+   :rule/category    "001"
+   :rule/applies-to  {:file-globs ["**/*.tf" "**/*.yaml" "**/*.yml" "**/*.json" "**/*.clj" "**/*.py" "**/*.ts" "**/*.js"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type :content-scan
+                      :pattern "(?i)(password|secret|api[._-]?key|token)\\s*[:=]\\s*[\"'][^\"']{8,}"}
+   :rule/enforcement {:action :hard-halt
+                      :message "Hardcoded secret detected. Use environment variables or a secrets manager instead."
+                      :remediation "Replace the literal value with a reference to a secrets manager or environment variable."}}
+
+  {:rule/id          :foundations/require-resource-tags
+   :rule/title       "Require Resource Tags"
+   :rule/description "Ensures Terraform resources include a tags block. Untagged resources violate cost-allocation and ownership-tracking policies."
+   :rule/severity    :major
+   :rule/category    "001"
+   :rule/applies-to  {:file-globs ["**/*.tf"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type    :content-scan
+                      :mode    :negative
+                      :pattern "tags\\s*="}
+   :rule/enforcement {:action :require-approval
+                      :message "Terraform resource is missing a tags block. All cloud resources must be tagged for cost allocation and ownership."
+                      :remediation "Add a tags = { ... } block with at minimum: Environment, Team, and ManagedBy."}}
+
+  {:rule/id          :foundations/enforce-naming-convention
+   :rule/title       "Enforce Naming Convention"
+   :rule/description "Scans for Terraform resource names that do not follow snake_case convention. Consistent naming prevents confusion across modules."
+   :rule/severity    :minor
+   :rule/category    "001"
+   :rule/applies-to  {:file-globs ["**/*.tf"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type :content-scan
+                      :pattern "resource\\s+\"[^\"]+\"\\s+\"[^\"]*[A-Z-][^\"]*\""}
+   :rule/enforcement {:action :warn
+                      :message "Resource name does not follow snake_case convention."
+                      :remediation "Rename the resource using lowercase letters and underscores only."}}
+
+  {:rule/id          :foundations/no-public-resources
+   :rule/title       "No Public Resources"
+   :rule/description "Prevents cloud resources from being configured with public access. Public ACLs and open access policies must be explicitly approved."
+   :rule/severity    :critical
+   :rule/category    "001"
+   :rule/applies-to  {:file-globs ["**/*.tf" "**/*.yaml" "**/*.yml"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type :content-scan
+                      :pattern "(?i)acl\\s*=\\s*\"public"}
+   :rule/enforcement {:action :hard-halt
+                      :message "Public ACL detected. Cloud resources must not be publicly accessible without explicit security review."
+                      :remediation "Remove the public ACL or replace with 'private'. If public access is required, obtain security approval."}}]
+
+ :pack/created-at #inst "2026-04-08T00:00:00Z"
+ :pack/updated-at #inst "2026-04-08T00:00:00Z"}

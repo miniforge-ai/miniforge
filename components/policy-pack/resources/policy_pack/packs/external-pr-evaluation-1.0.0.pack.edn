@@ -1,0 +1,57 @@
+;; External PR Evaluation Policy Pack — governance for external pull request handling.
+;; Reference: N4 Policy Packs & Gates Standard §2.2, §2.3
+;; Dewey category: 700 (Workflows & Processes)
+
+{:pack/id          "miniforge/external-pr-evaluation"
+ :pack/name        "External PR Evaluation"
+ :pack/version     "1.0.0"
+ :pack/description "Governance rules for external pull request evaluation: policy compliance checks, trigger-based governance, and feedback loop governance."
+ :pack/author      "miniforge.ai"
+ :pack/license     "Apache-2.0"
+ :pack/trust-level :trusted
+ :pack/authority   :authority/instruction
+ :pack/taxonomy-ref {:taxonomy/id :miniforge/dewey :taxonomy/min-version "1.0.0"}
+
+ :pack/categories
+ [{:category/id   "700"
+   :category/name "External PR Evaluation"
+   :category/rules [:extpr/policy-check
+                    :extpr/trigger-governance
+                    :extpr/feedback-governance]}]
+
+ :pack/rules
+ [{:rule/id          :extpr/policy-check
+   :rule/title       "External PR Policy Check"
+   :rule/description "Validates that external pull requests pass all applicable policy pack rules before merge eligibility. PRs from outside the organization receive the full policy evaluation pipeline."
+   :rule/severity    :critical
+   :rule/category    "700"
+   :rule/applies-to  {:phases #{:review}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "External PR has not passed all required policy checks. All policy rules must pass before the PR is eligible for merge."
+                      :remediation "Resolve all policy violations identified in the PR review before requesting re-evaluation."}}
+
+  {:rule/id          :extpr/trigger-governance
+   :rule/title       "Trigger Governance"
+   :rule/description "Ensures PR evaluation triggers (webhooks, scheduled scans, manual invocations) are authorized and follow the configured trigger policy. Prevents unauthorized or spoofed evaluation triggers."
+   :rule/severity    :major
+   :rule/category    "700"
+   :rule/applies-to  {:phases #{:review}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :require-approval
+                      :message "PR evaluation trigger does not match the authorized trigger policy. Verify the trigger source and authorization."
+                      :remediation "Use an authorized trigger mechanism (webhook secret, GitHub App, or configured CI pipeline)."}}
+
+  {:rule/id          :extpr/feedback-governance
+   :rule/title       "Feedback Governance"
+   :rule/description "Governs how evaluation feedback is communicated back to PR authors. Ensures feedback follows the configured format, includes actionable remediation guidance, and does not leak internal policy details to external contributors."
+   :rule/severity    :minor
+   :rule/category    "700"
+   :rule/applies-to  {:phases #{:review}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :warn
+                      :message "PR feedback does not conform to the feedback governance policy. Review the feedback format and content."
+                      :remediation "Ensure feedback uses the configured template, includes remediation hints, and redacts internal policy implementation details."}}]
+
+ :pack/created-at #inst "2026-04-08T00:00:00Z"
+ :pack/updated-at #inst "2026-04-08T00:00:00Z"}

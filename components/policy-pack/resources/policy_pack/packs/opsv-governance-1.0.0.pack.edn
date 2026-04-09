@@ -1,0 +1,94 @@
+;; OPSV Governance Policy Pack — observe-plan-stabilize-verify lifecycle gates.
+;; Reference: N4 Policy Packs & Gates Standard §2.2, §2.3
+;; Dewey category: 500 (Operations & Infrastructure)
+
+{:pack/id          "miniforge/opsv-governance"
+ :pack/name        "OPSV Governance"
+ :pack/version     "1.0.0"
+ :pack/description "Observe-Plan-Stabilize-Verify lifecycle gates: instrumentation, environment promotion, blast-radius control, abort conditions, actuation authorization, and evidence completeness."
+ :pack/author      "miniforge.ai"
+ :pack/license     "Apache-2.0"
+ :pack/trust-level :trusted
+ :pack/authority   :authority/instruction
+ :pack/taxonomy-ref {:taxonomy/id :miniforge/dewey :taxonomy/min-version "1.0.0"}
+
+ :pack/categories
+ [{:category/id   "500"
+   :category/name "OPSV Governance"
+   :category/rules [:opsv/instrumentation-gate
+                    :opsv/environment-gate
+                    :opsv/blast-radius-gate
+                    :opsv/abort-gate
+                    :opsv/actuation-gate
+                    :opsv/evidence-completeness]}]
+
+ :pack/rules
+ [{:rule/id          :opsv/instrumentation-gate
+   :rule/title       "Instrumentation Gate"
+   :rule/description "Validates that the target environment has adequate observability instrumentation (metrics, logs, traces) before any change is applied. Changes to unmonitored environments are blocked."
+   :rule/severity    :critical
+   :rule/category    "500"
+   :rule/applies-to  {:phases #{:plan :implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Target environment lacks required instrumentation. Deploy observability infrastructure before applying changes."
+                      :remediation "Ensure metrics, logging, and tracing are configured and healthy in the target environment."}}
+
+  {:rule/id          :opsv/environment-gate
+   :rule/title       "Environment Promotion Gate"
+   :rule/description "Enforces the environment promotion order (dev -> staging -> production). Changes must pass lower environments before promotion. Skipping environments requires explicit override."
+   :rule/severity    :critical
+   :rule/category    "500"
+   :rule/applies-to  {:phases #{:implement :review}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Environment promotion order violated. Changes must pass through lower environments before production deployment."
+                      :remediation "Deploy to the next environment in the promotion chain, or request an explicit environment-skip override."}}
+
+  {:rule/id          :opsv/blast-radius-gate
+   :rule/title       "Blast Radius Gate"
+   :rule/description "Evaluates the potential blast radius of a change and enforces graduated rollout controls. Changes affecting more than the configured threshold of resources require canary or blue-green deployment."
+   :rule/severity    :critical
+   :rule/category    "500"
+   :rule/applies-to  {:phases #{:plan :implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :require-approval
+                      :message "Change blast radius exceeds threshold. Use canary or blue-green deployment strategy."
+                      :approvers [:senior-engineer]
+                      :remediation "Reduce the change scope or configure a graduated rollout strategy (canary, blue-green, or feature flag)."}}
+
+  {:rule/id          :opsv/abort-gate
+   :rule/title       "Abort Condition Gate"
+   :rule/description "Validates that rollback/abort conditions are defined before deployment proceeds. Every deployment must have a clear abort signal (error rate, latency, health check) and automated rollback trigger."
+   :rule/severity    :major
+   :rule/category    "500"
+   :rule/applies-to  {:phases #{:plan}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :require-approval
+                      :message "Deployment is missing abort conditions. Define rollback triggers (error rate threshold, latency SLO, health check failures) before proceeding."
+                      :remediation "Add abort-condition configuration specifying the metrics thresholds that trigger automated rollback."}}
+
+  {:rule/id          :opsv/actuation-gate
+   :rule/title       "Actuation Authorization Gate"
+   :rule/description "Ensures that the actor (human or agent) performing the deployment has the required authorization for the target environment and change type. Separates planning authorization from actuation authorization."
+   :rule/severity    :critical
+   :rule/category    "500"
+   :rule/applies-to  {:phases #{:implement}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :hard-halt
+                      :message "Actuation not authorized. The actor does not have deployment authorization for this environment and change type."
+                      :remediation "Obtain actuation authorization from the environment owner or use an authorized deployment identity."}}
+
+  {:rule/id          :opsv/evidence-completeness
+   :rule/title       "Evidence Completeness"
+   :rule/description "Validates that all required evidence artifacts (plan output, approval records, test results, observability baseline) are present before marking a deployment as complete. Incomplete evidence blocks phase transition."
+   :rule/severity    :major
+   :rule/category    "500"
+   :rule/applies-to  {:phases #{:review :verify}}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action :require-approval
+                      :message "Deployment evidence is incomplete. All required artifacts must be collected before phase completion."
+                      :remediation "Collect and attach the missing evidence artifacts (plan output, approval records, test results, observability baseline)."}}]
+
+ :pack/created-at #inst "2026-04-08T00:00:00Z"
+ :pack/updated-at #inst "2026-04-08T00:00:00Z"}

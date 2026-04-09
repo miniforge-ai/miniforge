@@ -1,0 +1,93 @@
+;; Kubernetes Policy Pack — container and workload security rules.
+;; Reference: N4 Policy Packs & Gates Standard §2.2, §2.3
+;; Dewey category: 320 (Frameworks & Platforms — Kubernetes)
+
+{:pack/id          "miniforge/kubernetes"
+ :pack/name        "Kubernetes"
+ :pack/version     "1.0.0"
+ :pack/description "Kubernetes workload compliance rules covering image tagging, resource limits, privilege escalation, health probes, and network isolation."
+ :pack/author      "miniforge.ai"
+ :pack/license     "Apache-2.0"
+ :pack/trust-level :trusted
+ :pack/authority   :authority/instruction
+ :pack/taxonomy-ref {:taxonomy/id :miniforge/dewey :taxonomy/min-version "1.0.0"}
+
+ :pack/categories
+ [{:category/id   "320"
+   :category/name "Kubernetes"
+   :category/rules [:k8s/no-latest-tag
+                    :k8s/require-resource-limits
+                    :k8s/no-privileged
+                    :k8s/require-probes
+                    :k8s/no-host-network]}]
+
+ :pack/rules
+ [{:rule/id          :k8s/no-latest-tag
+   :rule/title       "No Latest Image Tag"
+   :rule/description "Detects container images using the :latest tag. Mutable tags make deployments non-reproducible and break rollback guarantees."
+   :rule/severity    :major
+   :rule/category    "320"
+   :rule/applies-to  {:file-globs ["**/*.yaml" "**/*.yml"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type :content-scan
+                      :pattern "image:\\s*\\S+:latest"}
+   :rule/enforcement {:action :require-approval
+                      :message "Container image uses :latest tag. Pin images to a specific digest or immutable version tag."
+                      :remediation "Replace :latest with a specific version tag (e.g., v1.2.3) or SHA256 digest."}}
+
+  {:rule/id          :k8s/require-resource-limits
+   :rule/title       "Require Resource Limits"
+   :rule/description "Ensures all containers declare CPU and memory limits. Missing limits allow unbounded resource consumption and noisy-neighbor failures."
+   :rule/severity    :major
+   :rule/category    "320"
+   :rule/applies-to  {:file-globs ["**/*.yaml" "**/*.yml"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type    :content-scan
+                      :mode    :negative
+                      :pattern "resources:\\s*\\n\\s+limits:"}
+   :rule/enforcement {:action :require-approval
+                      :message "Container is missing resource limits. All containers must declare CPU and memory limits."
+                      :remediation "Add a resources.limits block specifying cpu and memory limits."}}
+
+  {:rule/id          :k8s/no-privileged
+   :rule/title       "No Privileged Containers"
+   :rule/description "Detects containers running in privileged mode. Privileged containers bypass kernel security boundaries and can compromise the host."
+   :rule/severity    :critical
+   :rule/category    "320"
+   :rule/applies-to  {:file-globs ["**/*.yaml" "**/*.yml"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type :content-scan
+                      :pattern "privileged:\\s*true"}
+   :rule/enforcement {:action :hard-halt
+                      :message "Privileged container detected. Containers must not run in privileged mode."
+                      :remediation "Remove privileged: true or set privileged: false. Use specific capabilities instead."}}
+
+  {:rule/id          :k8s/require-probes
+   :rule/title       "Require Health Probes"
+   :rule/description "Ensures containers declare liveness and readiness probes. Missing probes prevent Kubernetes from detecting and recovering from failures."
+   :rule/severity    :major
+   :rule/category    "320"
+   :rule/applies-to  {:file-globs ["**/*.yaml" "**/*.yml"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type    :content-scan
+                      :mode    :negative
+                      :pattern "(?:livenessProbe|readinessProbe):"}
+   :rule/enforcement {:action :warn
+                      :message "Container is missing liveness or readiness probes. Both probes should be defined for production workloads."
+                      :remediation "Add livenessProbe and readinessProbe configurations with appropriate HTTP, TCP, or exec checks."}}
+
+  {:rule/id          :k8s/no-host-network
+   :rule/title       "No Host Network"
+   :rule/description "Detects pods using hostNetwork: true. Host networking bypasses pod network isolation and exposes all host ports to the container."
+   :rule/severity    :critical
+   :rule/category    "320"
+   :rule/applies-to  {:file-globs ["**/*.yaml" "**/*.yml"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type :content-scan
+                      :pattern "hostNetwork:\\s*true"}
+   :rule/enforcement {:action :hard-halt
+                      :message "Pod uses host networking. Host network access must be avoided to maintain network isolation."
+                      :remediation "Remove hostNetwork: true. Use standard pod networking with NetworkPolicies for access control."}}]
+
+ :pack/created-at #inst "2026-04-08T00:00:00Z"
+ :pack/updated-at #inst "2026-04-08T00:00:00Z"}
