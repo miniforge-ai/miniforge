@@ -4,16 +4,17 @@
    In the environment model, code changes live in the executor's git worktree.
    The release phase stages dirty files, commits, pushes, and creates a PR.
    No file writes from code artifacts — the implement agent already wrote files
-   to the worktree during the implement phase."
+   to the worktree during the implement phase.
+
+   All git/gh operations route through the DAG executor (sandbox module) so
+   that governed-mode capsules never shell out to the host."
   (:require
    [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.release-executor.git :as git]
    [ai.miniforge.release-executor.messages :as msg]
    [ai.miniforge.release-executor.metadata :as metadata]
    [ai.miniforge.release-executor.result :as result]
    [ai.miniforge.release-executor.sandbox :as sandbox]
-   [clojure.java.io :as io]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -33,6 +34,15 @@
     (assoc state :failure
            (cond-> {:type error-type :message error-msg}
              hint (assoc :hint hint)))))
+
+(defn- gh-exec-opts
+  "Build executor opts with GH_TOKEN env var when github-token is present.
+   The token is required for gh CLI commands (gh pr create, gh auth status)
+   inside the capsule where the host's gh auth context is not available."
+  [state]
+  (if-let [token (:github-token state)]
+    {:env {"GH_TOKEN" token}}
+    {}))
 
 (defn extract-code-artifacts
   "Extract code artifacts from workflow artifacts (used for PR metadata generation)."
@@ -68,7 +78,8 @@
     (failed? state) state
     (not (:create-pr? state)) state
     :else
-    (let [gh-auth (sandbox/check-gh-auth! (:executor state) (:environment-id state))]
+    (let [gh-auth (sandbox/check-gh-auth! (:executor state) (:environment-id state)
+                                           (gh-exec-opts state))]
       (if (:authenticated? gh-auth)
         state
         (fail state :gh-auth-failed (:error gh-auth)
@@ -141,13 +152,15 @@
 
 (defn step-validate-diff
   "Validate staged diff is not destructive before committing.
-   Rejects changes that delete more tests than they add or that empty files."
+   Rejects changes that delete more tests than they add or that empty files.
+   Routes through the executor (sandbox) so governed-mode capsules never
+   shell out to the host."
   [state]
   (if (failed? state)
     state
-    (let [{:keys [worktree-path logger]} state
-          diff-stats  (git/diff-stats worktree-path)
-          test-counts (git/count-test-defs worktree-path)]
+    (let [{:keys [executor environment-id logger]} state
+          diff-stats  (sandbox/diff-stats executor environment-id)
+          test-counts (sandbox/count-test-defs executor environment-id)]
       (cond
         (net-negative-tests? test-counts)
         (let [data {:added (:added test-counts) :removed (:removed test-counts)}]
@@ -181,7 +194,8 @@
     (not (:create-pr? state)) state
     :else
     (let [{:keys [branch executor environment-id]} state
-          result (sandbox/push-branch! executor environment-id branch)]
+          result (sandbox/push-branch! executor environment-id branch
+                                       (gh-exec-opts state))]
       (if (result/succeeded? result)
         state
         (fail state :push-failed (:error result))))))
@@ -195,7 +209,8 @@
           result (sandbox/create-pr! executor environment-id
                                      {:title (:release/pr-title release-meta)
                                       :body (:release/pr-description release-meta)
-                                      :base-branch base-branch})]
+                                      :base-branch base-branch}
+                                     (gh-exec-opts state))]
       (if (result/succeeded? result)
         (assoc state
                :pr-number (:pr-number result)
@@ -231,33 +246,39 @@
 
 (defn step-write-pr-doc
   "Write a docs/pull-requests/ markdown file, stage it, and amend the commit.
-   Runs after step-create-pr so PR number/URL are available."
+   Runs after step-create-pr so PR number/URL are available.
+   Skipped when :create-pr? is false (no PR → no PR doc needed).
+   All I/O routes through the executor so governed-mode capsules never
+   touch the host filesystem."
   [state]
-  (if (failed? state)
-    state
+  (cond
+    (failed? state) state
+    (not (:create-pr? state)) state
+    :else
     (let [{:keys [worktree-path release-meta pr-number pr-url branch
                   executor environment-id logger]} state
           filename (pr-doc-filename (:release/pr-title release-meta))
-          doc-dir (io/file worktree-path "docs" "pull-requests")
-          doc-file (io/file doc-dir filename)
+          rel-path (str "docs/pull-requests/" filename)
+          full-path (str worktree-path "/" rel-path)
           content (render-pr-doc release-meta
                                  {:pr-number pr-number
                                   :pr-url pr-url
                                   :branch branch})]
       (try
-        (io/make-parents doc-file)
-        (spit doc-file content)
+        ;; Write via executor (governed) — never touch host filesystem
+        (sandbox/write-file! executor environment-id full-path content)
         (when logger
           (log/info logger :release-executor :pr-doc-written
-                    {:data {:path (str "docs/pull-requests/" filename)}}))
+                    {:data {:path rel-path}}))
         ;; Stage the doc and amend the commit to include it
         (sandbox/exec! executor environment-id
-                       (str "git add docs/pull-requests/" filename))
+                       (str "git add " rel-path))
         (sandbox/exec! executor environment-id
                        "git commit --amend --no-edit --no-verify")
-        ;; Force-push since we amended
+        ;; Force-push since we amended — route through executor with token
         (sandbox/exec! executor environment-id
-                       "git push --force-with-lease")
+                       "git push --force-with-lease"
+                       (gh-exec-opts state))
         state
       (catch Exception e
         (when logger
@@ -333,10 +354,15 @@
    Requires an executor environment (worktree) acquired before this phase.
    Stages dirty files in the worktree, commits, pushes, and creates a PR.
 
+   All git/gh operations route through the sandbox module (DAG executor)
+   so that governed-mode capsules never shell out to the host. The GitHub
+   token (when provided via :github-token in context) is injected as the
+   GH_TOKEN env var for gh CLI commands inside the capsule.
+
    Arguments:
    - workflow-state - Workflow state with :workflow/artifacts
    - context        - Execution context with :worktree-path, :executor,
-                      :environment-id, :logger, etc.
+                      :environment-id, :github-token, :logger, etc.
    - opts           - Options with :releaser (optional), :release-meta (optional)
 
    Returns:
@@ -359,7 +385,8 @@
                                :code-artifacts (extract-code-artifacts workflow-artifacts)
                                :workflow-data (extract-workflow-data workflow-artifacts)
                                :executor executor
-                               :environment-id environment-id}
+                               :environment-id environment-id
+                               :github-token (:github-token context)}
                         (:release-meta opts) (assoc :release-meta (:release-meta opts)))]
 
     (when logger

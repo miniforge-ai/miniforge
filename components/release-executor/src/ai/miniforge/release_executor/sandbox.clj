@@ -21,7 +21,10 @@
 
    Mirrors the git.clj API but routes commands through the DAG executor's
    Docker backend. Used when the workflow runs in sandbox mode, where the
-   container serves as an isolated workspace for file I/O, git ops, and PR creation."
+   container serves as an isolated workspace for file I/O, git ops, and PR creation.
+
+   All commands are governed — they execute inside the task capsule via
+   dag/executor-execute!, never through host-side shell/sh."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.release-executor.result :as result]
@@ -32,26 +35,33 @@
 
 (defn exec!
   "Execute a command in the sandbox environment.
-   Returns {:success? bool :output string :error string}."
-  [executor env-id command]
-  (let [r (dag/executor-execute! executor env-id command {:capture-output? true})]
-    (if (dag/ok? r)
-      (let [{:keys [exit-code stdout stderr]} (:data r)]
-        (if (zero? exit-code)
-          (result/shell-success {:output (str/trim (or stdout ""))})
-          (result/shell-failure (str/trim (or stderr "")) {:output (str/trim (or stdout ""))})))
-      (result/shell-failure (str "Executor error: " (:error r))))))
+   Returns {:success? bool :output string :error string}.
+   Optional opts map is merged with {:capture-output? true} and
+   forwarded to the executor (supports :env, :timeout-ms, :workdir)."
+  ([executor env-id command] (exec! executor env-id command {}))
+  ([executor env-id command opts]
+   (let [r (dag/executor-execute! executor env-id command
+                                  (merge {:capture-output? true} opts))]
+     (if (dag/ok? r)
+       (let [{:keys [exit-code stdout stderr]} (:data r)]
+         (if (zero? exit-code)
+           (result/shell-success {:output (str/trim (or stdout ""))})
+           (result/shell-failure (str/trim (or stderr ""))
+                                 {:output (str/trim (or stdout ""))})))
+       (result/shell-failure (str "Executor error: " (:error r)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Git / GH operations (mirrors git.clj)
 
 (defn check-gh-auth!
-  "Check if gh CLI is available and authenticated inside the container."
-  [executor env-id]
-  (let [r (exec! executor env-id "gh auth status")]
-    (if (result/succeeded? r)
-      {:available? true :authenticated? true :user "container-token"}
-      {:available? true :authenticated? false :error (:error r)})))
+  "Check if gh CLI is available and authenticated inside the container.
+   Optional opts supports :env for injecting GH_TOKEN."
+  ([executor env-id] (check-gh-auth! executor env-id {}))
+  ([executor env-id opts]
+   (let [r (exec! executor env-id "gh auth status" opts)]
+     (if (result/succeeded? r)
+       {:available? true :authenticated? true :user "container-token"}
+       {:available? true :authenticated? false :error (:error r)}))))
 
 (defn detect-default-branch
   "Detect the default branch from the remote."
@@ -124,28 +134,62 @@
       (result/shell-failure (:error commit-r) {:commit-sha nil}))))
 
 (defn push-branch!
-  "Push branch to origin inside the sandbox container."
-  [executor env-id branch-name]
-  (exec! executor env-id (str "git push -u origin " branch-name)))
+  "Push branch to origin inside the sandbox container.
+   Optional opts supports :env for credential injection."
+  ([executor env-id branch-name] (push-branch! executor env-id branch-name {}))
+  ([executor env-id branch-name opts]
+   (exec! executor env-id (str "git push -u origin " branch-name) opts)))
 
 (defn create-pr!
   "Create a pull request using gh CLI inside the sandbox container.
+   Optional exec-opts supports :env for GH_TOKEN injection.
    Returns {:success? bool :pr-number int :pr-url string :error string}"
-  [executor env-id {:keys [title body base-branch]}]
-  (let [base (or base-branch "main")
-        escaped-title (str/replace title "'" "'\\''")
-        escaped-body (str/replace (or body "") "'" "'\\''")
-        cmd (str "gh pr create"
-                 " --title '" escaped-title "'"
-                 " --body '" escaped-body "'"
-                 " --base " base)
-        r (exec! executor env-id cmd)]
-    (if (result/succeeded? r)
-      (let [pr-url (str/trim (:output r ""))
-            pr-num (when-let [match (re-find #"/pull/(\d+)" pr-url)]
-                     (parse-long (second match)))]
-        (result/shell-success {:pr-url pr-url :pr-number pr-num}))
-      (result/shell-failure (:error r) {:pr-url nil :pr-number nil}))))
+  ([executor env-id pr-opts] (create-pr! executor env-id pr-opts {}))
+  ([executor env-id {:keys [title body base-branch]} exec-opts]
+   (let [base (or base-branch "main")
+         escaped-title (str/replace title "'" "'\\''")
+         escaped-body (str/replace (or body "") "'" "'\\''")
+         cmd (str "gh pr create"
+                  " --title '" escaped-title "'"
+                  " --body '" escaped-body "'"
+                  " --base " base)
+         r (exec! executor env-id cmd exec-opts)]
+     (if (result/succeeded? r)
+       (let [pr-url (str/trim (:output r ""))
+             pr-num (when-let [match (re-find #"/pull/(\d+)" pr-url)]
+                      (parse-long (second match)))]
+         (result/shell-success {:pr-url pr-url :pr-number pr-num}))
+       (result/shell-failure (:error r) {:pr-url nil :pr-number nil})))))
+
+;------------------------------------------------------------------------------ Layer 1.5
+;; Diff inspection (governed equivalents of git/diff-stats, git/count-test-defs)
+
+(defn diff-stats
+  "Get staged diff stats via executor. Mirrors git/diff-stats.
+   Returns {:additions N :deletions N :files N} or nil."
+  [executor env-id]
+  (let [r (exec! executor env-id "git diff --cached --numstat")]
+    (when (result/succeeded? r)
+      (let [lines (remove str/blank? (str/split-lines (str/trim (:output r ""))))
+            parsed (keep (fn [line]
+                           (when-let [[_ adds dels] (re-matches #"(\d+)\t(\d+)\t.*" line)]
+                             {:additions (parse-long adds)
+                              :deletions (parse-long dels)}))
+                         lines)]
+        {:additions (reduce + 0 (map :additions parsed))
+         :deletions (reduce + 0 (map :deletions parsed))
+         :files (count parsed)}))))
+
+(defn count-test-defs
+  "Count deftest forms in staged changes via executor. Mirrors git/count-test-defs.
+   Returns {:added N :removed N} or nil."
+  [executor env-id]
+  (let [r (exec! executor env-id "git diff --cached -U0")]
+    (when (result/succeeded? r)
+      (let [diff-text (:output r "")
+            added   (count (re-seq #"(?m)^\+.*\(deftest " diff-text))
+            removed (count (re-seq #"(?m)^-.*\(deftest " diff-text))]
+        {:added added :removed removed}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; File batch operations (mirrors files.clj write-and-stage-files!)
