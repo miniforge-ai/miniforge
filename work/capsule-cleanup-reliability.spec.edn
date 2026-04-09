@@ -9,7 +9,7 @@
   cover all DAG sub-workflow capsules. Each capsule created by the DAG
   orchestrator must also be cleaned up."
 
- :spec/intent {:type :fix
+ :spec/intent {:type :bugfix
                :scope ["components/workflow/src/ai/miniforge/workflow/runner.clj"
                        "components/workflow/src/ai/miniforge/workflow/dag_orchestrator.clj"
                        "components/workflow/src/ai/miniforge/workflow/dag_task_runner.clj"]}
