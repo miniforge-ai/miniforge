@@ -59,7 +59,7 @@
       (is (= "Pack: {{current}}" (sut/resolve-repair-template rule pack)))))
 
   (testing "default used when neither rule nor pack provides"
-    (is (= sut/default-repair-prompt (sut/resolve-repair-template {} {})))))
+    (is (= @sut/default-repair-prompt (sut/resolve-repair-template {} {})))))
 
 (deftest resolve-behavior-template-test
   (testing "pack-level template wins"
@@ -67,7 +67,7 @@
       (is (= "Custom: {{behaviors}}" (sut/resolve-behavior-template pack)))))
 
   (testing "default used when pack has none"
-    (is (= sut/default-behavior-section (sut/resolve-behavior-template {})))))
+    (is (= @sut/default-behavior-section (sut/resolve-behavior-template {})))))
 
 ;; ============================================================================
 ;; Layer 2 — Rendering tests

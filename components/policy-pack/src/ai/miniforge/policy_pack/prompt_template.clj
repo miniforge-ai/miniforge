@@ -25,7 +25,9 @@
    Layer 0: Interpolation engine
    Layer 1: Default templates (built-in fallbacks)
    Layer 2: Template resolution (rule → pack → default)"
-  (:require [clojure.string :as str]))
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Interpolation
@@ -52,32 +54,36 @@
                             ""))))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Default templates
+;; Default templates (loaded from EDN resource)
+
+(def ^:private default-templates-resource
+  "Classpath resource path for default prompt templates."
+  "policy_pack/templates/defaults.edn")
+
+(def ^:private loaded-defaults
+  "Default templates loaded from classpath EDN resource. Delay for lazy loading."
+  (delay
+    (try
+      (when-let [resource (io/resource default-templates-resource)]
+        (edn/read-string (slurp resource)))
+      (catch Exception _ {}))))
+
+(defn- default-template
+  "Get a default template by key. Returns empty string if not found."
+  [k]
+  (get @loaded-defaults k ""))
 
 (def default-repair-prompt
-  "Default prompt template for LLM-based semantic repair.
-   Used when neither rule nor pack provides a :repair-prompt template."
-  "Fix the following code violation.
-
-**Rule:** {{rule-title}}
-**File:** {{file}}:{{line}}
-**Current code:** `{{current}}`
-**Issue:** {{rationale}}
-{{#knowledge-content}}
-
-**Reference:**
-{{knowledge-content}}
-{{/knowledge-content}}
-
-Provide the corrected code only, no explanation.")
+  "Default prompt template for LLM-based semantic repair."
+  (delay (default-template :repair-prompt)))
 
 (def default-behavior-section
-  "Default template for the behavior rules section injected into agent prompts."
-  "\n\n## Policy Rules \u2014 Required Behaviors\n\n{{behaviors}}\n")
+  "Default template for the behavior rules section."
+  (delay (default-template :behavior-section)))
 
 (def default-knowledge-section
-  "Default template for the reference material section injected into agent prompts."
-  "\n\n## Reference Material\n\n{{knowledge}}\n")
+  "Default template for the reference material section."
+  (delay (default-template :knowledge-section)))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Template resolution
@@ -99,7 +105,7 @@ Provide the corrected code only, no explanation.")
   [rule pack]
   (or (:rule/repair-prompt-template rule)
       (get-in pack [:pack/prompt-templates :repair-prompt])
-      default-repair-prompt))
+      @default-repair-prompt))
 
 (defn resolve-behavior-template
   "Resolve the behavior section template.
@@ -115,7 +121,7 @@ Provide the corrected code only, no explanation.")
    - Template string"
   [pack]
   (or (get-in pack [:pack/prompt-templates :behavior-section])
-      default-behavior-section))
+      @default-behavior-section))
 
 (defn resolve-knowledge-template
   "Resolve the knowledge section template.
@@ -131,7 +137,7 @@ Provide the corrected code only, no explanation.")
    - Template string"
   [pack]
   (or (get-in pack [:pack/prompt-templates :knowledge-section])
-      default-knowledge-section))
+      @default-knowledge-section))
 
 (defn render-repair-prompt
   "Render a complete repair prompt for a violation.
