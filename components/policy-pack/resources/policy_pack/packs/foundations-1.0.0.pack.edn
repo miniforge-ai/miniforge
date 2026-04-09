@@ -24,7 +24,8 @@
                     :foundations/no-force-unwrap-swift
                     :foundations/no-force-cast-swift
                     :foundations/no-todo-fixme
-                    :foundations/no-requiring-resolve]}]
+                    :foundations/no-requiring-resolve
+                    :foundations/no-inline-anon-fns]}]
 
  :pack/rules
  [{:rule/id          :foundations/no-hardcoded-secrets
@@ -191,7 +192,22 @@
                       :auto-fixable-default false}
    :rule/enforcement {:action :warn
                       :message "requiring-resolve detected. Use direct require unless the dependency is a genuine plugin/extension point."
-                      :remediation "Replace (requiring-resolve 'ns/fn) with a direct (:require [ns :as alias]) and call alias/fn."}}]
+                      :remediation "Replace (requiring-resolve 'ns/fn) with a direct (:require [ns :as alias]) and call alias/fn."}}
+
+  {:rule/id          :foundations/no-inline-anon-fns
+   :rule/title       "No Inline Anonymous Functions in Pipelines"
+   :rule/description "Detects multi-line anonymous functions passed to map, keep, filter, mapcat, reduce. Extract to named defn- for testability and readability."
+   :rule/severity    :minor
+   :rule/category    "001"
+   :rule/applies-to  {:file-globs ["**/*.clj" "**/*.cljc"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type :content-scan
+                      :pattern "(?:map|keep|filter|mapcat|remove|reduce)\\s+\\(fn\\s+\\["}
+   :rule/remediation {:strategy :manual
+                      :auto-fixable-default false}
+   :rule/enforcement {:action :audit
+                      :message "Anonymous function in pipeline. Extract to named defn- for independent testability."
+                      :remediation "Extract the anonymous function to a named private function (defn-) and pass it by name."}}]
 
  :pack/created-at #inst "2026-04-08T00:00:00Z"
  :pack/updated-at #inst "2026-04-08T00:00:00Z"}

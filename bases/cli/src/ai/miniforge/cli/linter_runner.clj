@@ -32,9 +32,8 @@
   "Check if a linter CLI is available on PATH."
   [check-cmd]
   (try
-    (let [result (process/sh {:cmd check-cmd :continue true
-                              :out :string :err :string})]
-      (zero? (:exit result)))
+    (zero? (:exit (process/sh {:cmd check-cmd :continue true
+                               :out :string :err :string})))
     (catch Exception _ false)))
 
 (defn- run-linter
@@ -42,12 +41,11 @@
    Returns {:exit int :out string :err string}."
   [repo-path command args]
   (try
-    (let [result (process/sh {:cmd (into [command] args)
-                              :dir (str repo-path)
-                              :continue true
-                              :out :string
-                              :err :string})]
-      result)
+    (process/sh {:cmd (into [command] args)
+                 :dir (str repo-path)
+                 :continue true
+                 :out :string
+                 :err :string})
     (catch Exception e
       {:exit -1 :out "" :err (.getMessage e)})))
 
@@ -81,123 +79,141 @@
 
 ;; ── Clippy (Rust) ───────────────────────────────────────────────────────────
 
+(defn- clippy-line->violation
+  "Convert a single clippy JSON line to a violation, or nil if not a compiler message."
+  [line]
+  (when-let [msg (parse-json-safe line)]
+    (when (= "compiler-message" (get msg :reason))
+      (let [m    (get msg :message)
+            span (first (get m :spans))
+            code (get-in m [:code :code])]
+        (when (and span code)
+          (make-violation :clippy
+                          (get span :file_name)
+                          (get span :line_start)
+                          (get span :column_start)
+                          (get m :message)
+                          code
+                          (severity-from-level (get m :level))))))))
+
 (defn- parse-clippy
-  "Parse cargo clippy --message-format=json output.
-   Each line is a separate JSON object. Filter for compiler-message types."
+  "Parse cargo clippy --message-format=json output."
   [output]
   (->> (str/split-lines output)
-       (keep (fn [line]
-               (when-let [msg (parse-json-safe line)]
-                 (when (= "compiler-message" (get msg :reason))
-                   (let [m    (get msg :message)
-                         span (first (get m :spans))
-                         code (get-in m [:code :code])]
-                     (when (and span code)
-                       (make-violation
-                        :clippy
-                        (get span :file_name)
-                        (get span :line_start)
-                        (get span :column_start)
-                        (get m :message)
-                        code
-                        (severity-from-level (get m :level)))))))))
+       (keep clippy-line->violation)
        vec))
 
 ;; ── clj-kondo (Clojure) ────────────────────────────────────────────────────
 
+(defn- kondo-finding->violation
+  "Convert a single clj-kondo finding to a violation."
+  [finding]
+  (make-violation :clj-kondo
+                  (get finding :filename)
+                  (get finding :row)
+                  (get finding :col)
+                  (get finding :message)
+                  (name (get finding :type :unknown))
+                  (severity-from-level (name (get finding :level :warning)))))
+
 (defn- parse-clj-kondo
-  "Parse clj-kondo EDN output. Output is a map with :findings vector."
+  "Parse clj-kondo EDN output."
   [output]
   (try
-    (let [data     (edn/read-string output)
-          findings (get data :findings [])]
-      (mapv (fn [f]
-              (make-violation
-               :clj-kondo
-               (get f :filename)
-               (get f :row)
-               (get f :col)
-               (get f :message)
-               (name (get f :type :unknown))
-               (severity-from-level (name (get f :level :warning)))))
-            findings))
+    (let [findings (get (edn/read-string output) :findings [])]
+      (mapv kondo-finding->violation findings))
     (catch Exception _ [])))
 
 ;; ── ESLint (JavaScript/TypeScript) ──────────────────────────────────────────
 
+(defn- eslint-severity->keyword
+  "Convert ESLint numeric severity (1=warn, 2=error) to keyword."
+  [severity]
+  (if (= 2 severity) :major :minor))
+
+(defn- eslint-message->violation
+  "Convert a single ESLint message to a violation, given the parent file path."
+  [filepath msg]
+  (make-violation :eslint
+                  filepath
+                  (get msg :line)
+                  (get msg :column)
+                  (get msg :message)
+                  (get msg :ruleId)
+                  (eslint-severity->keyword (get msg :severity))))
+
+(defn- eslint-file->violations
+  "Extract violations from a single ESLint file result."
+  [file-result]
+  (let [filepath (get file-result :filePath)]
+    (mapv #(eslint-message->violation filepath %) (get file-result :messages []))))
+
 (defn- parse-eslint
-  "Parse eslint --format=json output. Array of file results."
+  "Parse eslint --format=json output."
   [output]
-  (let [results (parse-json-safe output)]
+  (when-let [results (parse-json-safe output)]
     (when (sequential? results)
-      (->> results
-           (mapcat (fn [file-result]
-                     (let [filepath (get file-result :filePath)]
-                       (map (fn [msg]
-                              (make-violation
-                               :eslint
-                               filepath
-                               (get msg :line)
-                               (get msg :column)
-                               (get msg :message)
-                               (get msg :ruleId)
-                               (if (= 2 (get msg :severity)) :major :minor)))
-                            (get file-result :messages [])))))
-           vec))))
+      (vec (mapcat eslint-file->violations results)))))
 
 ;; ── Ruff (Python) ──────────────────────────────────────────────────────────
 
+(defn- ruff-violation->violation
+  "Convert a single ruff violation object to a standard violation."
+  [v]
+  (make-violation :ruff
+                  (get v :filename)
+                  (get-in v [:location :row])
+                  (get-in v [:location :column])
+                  (get v :message)
+                  (get v :code)
+                  (severity-from-level (get v :type "warning"))))
+
 (defn- parse-ruff
-  "Parse ruff check --output-format=json output. Array of violation objects."
+  "Parse ruff check --output-format=json output."
   [output]
-  (let [results (parse-json-safe output)]
+  (when-let [results (parse-json-safe output)]
     (when (sequential? results)
-      (mapv (fn [v]
-              (make-violation
-               :ruff
-               (get v :filename)
-               (get-in v [:location :row])
-               (get-in v [:location :column])
-               (get v :message)
-               (get v :code)
-               (severity-from-level (get v :type "warning"))))
-            results))))
+      (mapv ruff-violation->violation results))))
 
 ;; ── SwiftLint (Swift) ──────────────────────────────────────────────────────
 
+(defn- swiftlint-violation->violation
+  "Convert a single SwiftLint violation object to a standard violation."
+  [v]
+  (make-violation :swiftlint
+                  (get v :file)
+                  (get v :line)
+                  (get v :character)
+                  (get v :reason)
+                  (get v :rule_id)
+                  (severity-from-level (get v :severity "warning"))))
+
 (defn- parse-swiftlint
-  "Parse swiftlint lint --reporter json output. Array of violation objects."
+  "Parse swiftlint lint --reporter json output."
   [output]
-  (let [results (parse-json-safe output)]
+  (when-let [results (parse-json-safe output)]
     (when (sequential? results)
-      (mapv (fn [v]
-              (make-violation
-               :swiftlint
-               (get v :file)
-               (get v :line)
-               (get v :character)
-               (get v :reason)
-               (get v :rule_id)
-               (severity-from-level (get v :severity "warning"))))
-            results))))
+      (mapv swiftlint-violation->violation results))))
 
 ;; ── golangci-lint (Go) ─────────────────────────────────────────────────────
+
+(defn- golangci-issue->violation
+  "Convert a single golangci-lint issue to a standard violation."
+  [issue]
+  (make-violation :golangci-lint
+                  (get-in issue [:Pos :Filename])
+                  (get-in issue [:Pos :Line])
+                  (get-in issue [:Pos :Column])
+                  (get issue :Text)
+                  (get issue :FromLinter)
+                  (severity-from-level (get issue :Severity "warning"))))
 
 (defn- parse-golangci-lint
   "Parse golangci-lint run --out-format=json output."
   [output]
-  (let [data (parse-json-safe output)]
+  (when-let [data (parse-json-safe output)]
     (when (map? data)
-      (->> (get data :Issues [])
-           (mapv (fn [issue]
-                   (make-violation
-                    :golangci-lint
-                    (get-in issue [:Pos :Filename])
-                    (get-in issue [:Pos :Line])
-                    (get-in issue [:Pos :Column])
-                    (get issue :Text)
-                    (get issue :FromLinter)
-                    (severity-from-level (get issue :Severity "warning")))))))))
+      (mapv golangci-issue->violation (get data :Issues [])))))
 
 ;; ── Parser dispatch ─────────────────────────────────────────────────────────
 
@@ -228,8 +244,7 @@
         start-ms   (System/currentTimeMillis)]
     (if-not available?
       {:tech id :violations [] :available? false :duration-ms 0}
-      (let [result     (run-linter repo-path command args)
-            output     (str (:out result))
+      (let [output     (str (:out (run-linter repo-path command args)))
             violations (parse-output parser output)
             end-ms     (System/currentTimeMillis)]
         {:tech        id
@@ -237,33 +252,41 @@
          :available?  true
          :duration-ms (- end-ms start-ms)}))))
 
+(defn- lintable-techs
+  "Filter fingerprints to those with linters that are in the detected set."
+  [fingerprints detected-techs]
+  (->> fingerprints
+       (filter :tech/linter)
+       (filter #(contains? detected-techs (:tech/id %)))))
+
 (defn run-all-linters
   "Run linters for all detected technologies that have a linter configured.
-   Returns {:linter-results [...] :total-violations int :total-duration-ms int}."
+   Returns {:linter-results [...] :total-violations int :total-duration-ms int :violations [...]}."
   [repo-path fingerprints detected-techs]
-  (let [lintable (->> fingerprints
-                      (filter :tech/linter)
-                      (filter #(contains? detected-techs (:tech/id %))))
-        results  (mapv #(run-linter-for-tech repo-path %) lintable)
-        all-viols (mapcat :violations results)]
+  (let [results   (mapv #(run-linter-for-tech repo-path %) (lintable-techs fingerprints detected-techs))
+        all-viols (vec (mapcat :violations results))]
     {:linter-results    results
      :total-violations  (count all-viols)
      :total-duration-ms (reduce + 0 (map :duration-ms results))
-     :violations        (vec all-viols)}))
+     :violations        all-viols}))
+
+(defn- try-fix-tech
+  "Attempt to run a linter's fix command. Returns {:tech id :exit code} or nil."
+  [repo-path {:keys [tech/id tech/linter]}]
+  (let [{:keys [command fix-args check-cmd]} linter]
+    (when (linter-available? (or check-cmd [command "--version"]))
+      {:tech id :exit (:exit (run-linter repo-path command fix-args))})))
+
+(defn- fixable-techs
+  "Filter fingerprints to those with fix-args that are in the detected set."
+  [fingerprints detected-techs]
+  (->> fingerprints
+       (filter :tech/linter)
+       (filter #(get-in % [:tech/linter :fix-args]))
+       (filter #(contains? detected-techs (:tech/id %)))))
 
 (defn run-linter-fixes
   "Run linter fix commands for all detected technologies.
-   Returns {:fixed [...] :failed [...]}."
+   Returns {:fixed [...]}."
   [repo-path fingerprints detected-techs]
-  (let [fixable (->> fingerprints
-                     (filter :tech/linter)
-                     (filter #(get-in % [:tech/linter :fix-args]))
-                     (filter #(contains? detected-techs (:tech/id %))))]
-    {:fixed
-     (vec
-      (keep (fn [{:keys [tech/id tech/linter]}]
-              (let [{:keys [command fix-args check-cmd]} linter]
-                (when (linter-available? (or check-cmd [command "--version"]))
-                  (let [result (run-linter repo-path command fix-args)]
-                    {:tech id :exit (:exit result)}))))
-            fixable))}))
+  {:fixed (vec (keep #(try-fix-tech repo-path %) (fixable-techs fingerprints detected-techs)))})
