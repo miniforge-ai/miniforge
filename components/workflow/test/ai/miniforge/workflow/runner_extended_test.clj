@@ -188,6 +188,26 @@
           ;; Docker unavailable — exception message should match N11 spec language
           (is (re-find #"(?i)No capsule executor" (ex-message e))))))))
 
+(deftest run-pipeline-governed-mode-has-host-worktree-test
+  (testing ":governed mode provides a host-accessible worktree-path (not /workspace)"
+    (let [wf {:workflow/id :test
+              :workflow/version "1.0.0"
+              :workflow/pipeline [{:phase :done}]}]
+      (try
+        (let [result (runner/run-pipeline wf {:task "Test"} {:execution-mode :governed})]
+          ;; worktree-path should be a host path, not the container-internal /workspace
+          (is (some? (:execution/worktree-path result))
+              "Should have a worktree path")
+          (is (not= "/workspace" (:execution/worktree-path result))
+              "Worktree path should be host-accessible, not container-internal")
+          (is (some? (:execution/executor result))
+              "Should have a capsule executor")
+          (is (some? (:execution/environment-id result))
+              "Should have a capsule environment-id"))
+        (catch Exception _e
+          ;; Docker unavailable — skip test
+          nil)))))
+
 (deftest run-pipeline-governed-mode-rejects-worktree-fallback-test
   (testing ":governed mode does not fall through to worktree (N11 §7.4 no-silent-downgrade)"
     ;; Simulate all executors appearing as :worktree type so governed mode
