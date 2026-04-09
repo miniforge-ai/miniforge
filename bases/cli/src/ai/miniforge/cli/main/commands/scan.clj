@@ -26,8 +26,10 @@
    [babashka.fs :as fs]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
+   [ai.miniforge.cli.linter-runner :as linter]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.cli.repo-analyzer :as analyzer]
    [ai.miniforge.compliance-scanner.interface :as scanner]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -130,21 +132,77 @@
             " violation(s) across "
             (get exec-result :files-changed 0) " file(s)")))))
 
+(defn- run-linters
+  "Run language-specific linters for detected technologies.
+   Returns vector of linter violations."
+  [repo-path repo-config]
+  (let [detected (get repo-config :repo/technologies #{})
+        fps      @analyzer/fingerprints]
+    (when (seq detected)
+      (let [result (linter/run-all-linters repo-path fps detected)]
+        (doseq [{:keys [tech available? violations duration-ms]} (:linter-results result)]
+          (cond
+            (not available?)
+            (display/print-info (str "  " (name tech) ": linter not installed (skipped)"))
+
+            (seq violations)
+            (display/print-info (str "  " (name tech) ": " (count violations)
+                                     " finding(s) (" duration-ms "ms)"))
+
+            :else
+            (display/print-info (str "  " (name tech) ": clean (" duration-ms "ms)"))))
+        (:violations result)))))
+
+(defn- run-linter-fixes!
+  "Run linter --fix for detected technologies."
+  [repo-path repo-config]
+  (let [detected (get repo-config :repo/technologies #{})
+        fps      @analyzer/fingerprints
+        result   (linter/run-linter-fixes repo-path fps detected)]
+    (doseq [{:keys [tech exit]} (:fixed result)]
+      (display/print-info (str "  " (name tech) ": fix " (if (zero? exit) "applied" "failed"))))))
+
 (defn- run-scan
-  "Execute the scan→classify→plan→execute pipeline."
+  "Execute the scan→linters→classify→plan→execute pipeline."
   [repo-path opts]
-  (let [standards  (get opts :standards default-standards-path)
-        scan-opts  (build-scan-opts repo-path opts)
-        report?    (get opts :report false)
-        execute?   (get opts :execute false)]
+  (let [standards   (get opts :standards default-standards-path)
+        scan-opts   (build-scan-opts repo-path opts)
+        report?     (get opts :report false)
+        execute?    (get opts :execute false)
+        no-lint?    (get opts :no-lint false)
+        repo-config (load-repo-config repo-path)]
+
+    ;; Phase 1: Policy pack scan
     (display/print-info (str "Scanning " repo-path " ..."))
-    (let [scan-result (-> (scanner/scan repo-path standards scan-opts)
-                          print-scan-summary)
-          violations  (:violations scan-result)]
-      (when (seq violations)
-        (let [classified  (classify-and-report violations)
+    (let [scan-result     (-> (scanner/scan repo-path standards scan-opts)
+                              print-scan-summary)
+          policy-viols    (:violations scan-result)
+
+          ;; Phase 1b: Linter scan
+          linter-viols    (when-not no-lint?
+                            (when repo-config
+                              (display/print-info "Running linters...")
+                              (run-linters repo-path repo-config)))
+
+          ;; Merge violations
+          all-violations  (vec (concat policy-viols (or linter-viols [])))]
+
+      (when (and (seq linter-viols) (seq policy-viols))
+        (display/print-info
+         (str "Combined: " (count all-violations) " total ("
+              (count policy-viols) " policy + "
+              (count linter-viols) " linter)")))
+
+      (when (seq all-violations)
+        (let [classified  (classify-and-report all-violations)
               plan-result (plan-and-print classified repo-path report?)]
-          (execute-if-requested plan-result repo-path execute?))))))
+
+          ;; Execute: run both linter fixes and policy auto-fixes
+          (when execute?
+            (when (and repo-config (not no-lint?))
+              (display/print-info "Running linter fixes...")
+              (run-linter-fixes! repo-path repo-config))
+            (execute-if-requested plan-result repo-path true)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Command entry point
