@@ -53,26 +53,40 @@
 
 (def ^:private framework-markers
   "File/directory markers that indicate a framework."
-  [{:marker "components"     :test #(fs/directory? %) :framework :polylith}
-   {:marker "workspace.edn"  :test #(fs/exists? %)    :framework :polylith}
-   {:marker "Dockerfile"     :test #(fs/exists? %)    :framework :docker}
-   {:marker "docker-compose.yml" :test #(fs/exists? %) :framework :docker-compose}
-   {:marker "Chart.yaml"     :test #(fs/exists? %)    :framework :helm}
-   {:marker "kustomization.yaml" :test #(fs/exists? %) :framework :kustomize}])
+  [{:marker "components"          :test #(fs/directory? %) :framework :polylith}
+   {:marker "workspace.edn"       :test #(fs/exists? %)    :framework :polylith}
+   {:marker "Dockerfile"          :test #(fs/exists? %)    :framework :docker}
+   {:marker "docker-compose.yml"  :test #(fs/exists? %)    :framework :docker-compose}
+   {:marker "docker-compose.yaml" :test #(fs/exists? %)    :framework :docker-compose}
+   {:marker "Chart.yaml"          :test #(fs/exists? %)    :framework :helm}
+   {:marker "kustomization.yaml"  :test #(fs/exists? %)    :framework :kustomize}
+   {:marker "serverless.yml"      :test #(fs/exists? %)    :framework :serverless}
+   {:marker "angular.json"        :test #(fs/exists? %)    :framework :angular}
+   {:marker "next.config.js"      :test #(fs/exists? %)    :framework :nextjs}
+   {:marker "next.config.mjs"     :test #(fs/exists? %)    :framework :nextjs}])
 
 (def ^:private build-markers
   "File markers for build systems."
-  [{:marker "deps.edn"       :build :deps-edn}
-   {:marker "project.clj"    :build :leiningen}
-   {:marker "bb.edn"         :build :babashka}
-   {:marker "package.json"   :build :npm}
-   {:marker "Cargo.toml"     :build :cargo}
-   {:marker "go.mod"         :build :go-mod}
-   {:marker "pom.xml"        :build :maven}
-   {:marker "build.gradle"   :build :gradle}
-   {:marker "Makefile"       :build :make}
-   {:marker "pyproject.toml" :build :pyproject}
-   {:marker "setup.py"       :build :setuptools}
+  [{:marker "deps.edn"        :build :deps-edn}
+   {:marker "project.clj"     :build :leiningen}
+   {:marker "bb.edn"          :build :babashka}
+   {:marker "package.json"    :build :npm}
+   {:marker "yarn.lock"       :build :yarn}
+   {:marker "pnpm-lock.yaml"  :build :pnpm}
+   {:marker "Cargo.toml"      :build :cargo}
+   {:marker "go.mod"          :build :go-mod}
+   {:marker "pom.xml"         :build :maven}
+   {:marker "build.gradle"    :build :gradle}
+   {:marker "build.gradle.kts" :build :gradle}
+   {:marker "BUILD"           :build :bazel}
+   {:marker "WORKSPACE"       :build :bazel}
+   {:marker "BUILD.bazel"     :build :bazel}
+   {:marker "Makefile"        :build :make}
+   {:marker "CMakeLists.txt"  :build :cmake}
+   {:marker "pyproject.toml"  :build :pyproject}
+   {:marker "setup.py"        :build :setuptools}
+   {:marker "requirements.txt" :build :pip}
+   {:marker "Pipfile"         :build :pipenv}
    {:marker "Gemfile"        :build :bundler}])
 
 (defn- detect-by-markers [repo-path markers key-field]
