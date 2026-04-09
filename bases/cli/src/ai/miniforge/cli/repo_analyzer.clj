@@ -52,43 +52,70 @@
 ;; Framework and build system detection
 
 (def ^:private framework-markers
-  "File/directory markers that indicate a framework."
-  [{:marker "components"          :test #(fs/directory? %) :framework :polylith}
-   {:marker "workspace.edn"       :test #(fs/exists? %)    :framework :polylith}
-   {:marker "Dockerfile"          :test #(fs/exists? %)    :framework :docker}
-   {:marker "docker-compose.yml"  :test #(fs/exists? %)    :framework :docker-compose}
-   {:marker "docker-compose.yaml" :test #(fs/exists? %)    :framework :docker-compose}
-   {:marker "Chart.yaml"          :test #(fs/exists? %)    :framework :helm}
-   {:marker "kustomization.yaml"  :test #(fs/exists? %)    :framework :kustomize}
-   {:marker "serverless.yml"      :test #(fs/exists? %)    :framework :serverless}
+  "File/directory markers that indicate a framework. Sorted by :framework."
+  [;; :angular
    {:marker "angular.json"        :test #(fs/exists? %)    :framework :angular}
+   ;; :docker
+   {:marker "Dockerfile"          :test #(fs/exists? %)    :framework :docker}
+   ;; :docker-compose
+   {:marker "docker-compose.yaml" :test #(fs/exists? %)    :framework :docker-compose}
+   {:marker "docker-compose.yml"  :test #(fs/exists? %)    :framework :docker-compose}
+   ;; :helm
+   {:marker "Chart.yaml"          :test #(fs/exists? %)    :framework :helm}
+   ;; :kustomize
+   {:marker "kustomization.yaml"  :test #(fs/exists? %)    :framework :kustomize}
+   ;; :nextjs
    {:marker "next.config.js"      :test #(fs/exists? %)    :framework :nextjs}
-   {:marker "next.config.mjs"     :test #(fs/exists? %)    :framework :nextjs}])
+   {:marker "next.config.mjs"     :test #(fs/exists? %)    :framework :nextjs}
+   ;; :polylith
+   {:marker "components"          :test #(fs/directory? %) :framework :polylith}
+   {:marker "workspace.edn"       :test #(fs/exists? %)    :framework :polylith}
+   ;; :serverless
+   {:marker "serverless.yml"      :test #(fs/exists? %)    :framework :serverless}])
 
 (def ^:private build-markers
-  "File markers for build systems."
-  [{:marker "deps.edn"        :build :deps-edn}
-   {:marker "project.clj"     :build :leiningen}
-   {:marker "bb.edn"          :build :babashka}
-   {:marker "package.json"    :build :npm}
-   {:marker "yarn.lock"       :build :yarn}
-   {:marker "pnpm-lock.yaml"  :build :pnpm}
-   {:marker "Cargo.toml"      :build :cargo}
-   {:marker "go.mod"          :build :go-mod}
-   {:marker "pom.xml"         :build :maven}
-   {:marker "build.gradle"    :build :gradle}
+  "File markers for build systems. Sorted by :build."
+  [;; :babashka
+   {:marker "bb.edn"           :build :babashka}
+   ;; :bazel
+   {:marker "BUILD"            :build :bazel}
+   {:marker "BUILD.bazel"      :build :bazel}
+   {:marker "WORKSPACE"        :build :bazel}
+   ;; :bundler
+   {:marker "Gemfile"          :build :bundler}
+   ;; :cargo
+   {:marker "Cargo.toml"       :build :cargo}
+   ;; :cmake
+   {:marker "CMakeLists.txt"   :build :cmake}
+   ;; :deps-edn
+   {:marker "deps.edn"         :build :deps-edn}
+   ;; :go-mod
+   {:marker "go.mod"            :build :go-mod}
+   ;; :gradle
+   {:marker "build.gradle"     :build :gradle}
    {:marker "build.gradle.kts" :build :gradle}
-   {:marker "BUILD"           :build :bazel}
-   {:marker "WORKSPACE"       :build :bazel}
-   {:marker "BUILD.bazel"     :build :bazel}
-   {:marker "Makefile"        :build :make}
-   {:marker "CMakeLists.txt"  :build :cmake}
-   {:marker "pyproject.toml"  :build :pyproject}
-   {:marker "setup.py"        :build :setuptools}
+   ;; :leiningen
+   {:marker "project.clj"      :build :leiningen}
+   ;; :make
+   {:marker "Makefile"          :build :make}
+   ;; :maven
+   {:marker "pom.xml"           :build :maven}
+   ;; :npm
+   {:marker "package.json"     :build :npm}
+   ;; :pip
    {:marker "requirements.txt" :build :pip}
-   {:marker "Pipfile"         :build :pipenv}
-   {:marker "poetry.lock"    :build :poetry}
-   {:marker "Gemfile"        :build :bundler}])
+   ;; :pipenv
+   {:marker "Pipfile"           :build :pipenv}
+   ;; :pnpm
+   {:marker "pnpm-lock.yaml"   :build :pnpm}
+   ;; :poetry
+   {:marker "poetry.lock"      :build :poetry}
+   ;; :pyproject
+   {:marker "pyproject.toml"   :build :pyproject}
+   ;; :setuptools
+   {:marker "setup.py"          :build :setuptools}
+   ;; :yarn
+   {:marker "yarn.lock"         :build :yarn}])
 
 (defn- detect-by-markers [repo-path markers key-field]
   (->> markers
