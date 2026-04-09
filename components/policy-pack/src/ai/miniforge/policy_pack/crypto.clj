@@ -24,7 +24,10 @@
    that are not available in GraalVM/Babashka native-image.
 
    Layer 0: Ed25519 signature verification
-   Layer 1: Pack content hashing")
+   Layer 1: Pack content hashing
+
+   Note: If byte-level parsing expands beyond signature verification,
+   consider adopting gloss for structured binary codec work.")
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Ed25519 verification via reflection
