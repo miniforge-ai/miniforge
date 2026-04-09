@@ -256,6 +256,10 @@
    {:lo 800 :hi 899 :id "project"       :label "Project-Specific"                  :phases #{:implement :review}}
    {:lo 900 :hi 999 :id "meta"          :label "Meta & Templates"                  :phases #{}}])
 
+(def ^:private canonical-taxonomy-version
+  "Version of the canonical miniforge Dewey taxonomy."
+  "1.0.0")
+
 (def ^:private default-phases
   "Fallback phases when Dewey code is outside defined ranges or unparseable."
   #{:implement :review})
@@ -633,7 +637,7 @@
                       :pack/trust-level  :trusted
                       :pack/authority    :authority/instruction
                       :pack/taxonomy-ref {:taxonomy/id      :miniforge/dewey
-                                          :taxonomy/min-version "1.0.0"}
+                                          :taxonomy/min-version canonical-taxonomy-version}
                       :pack/categories   categories
                       :pack/rules        sorted-rules
                       :pack/created-at   now
@@ -672,7 +676,7 @@
    - A valid Taxonomy map per taxonomy/Taxonomy schema."
   []
   {:taxonomy/id      :miniforge/dewey
-   :taxonomy/version "1.0.0"
+   :taxonomy/version canonical-taxonomy-version
    :taxonomy/title   "Miniforge Dewey Taxonomy"
    :taxonomy/description
    "Dewey-decimal-inspired category tree for miniforge engineering standards.
