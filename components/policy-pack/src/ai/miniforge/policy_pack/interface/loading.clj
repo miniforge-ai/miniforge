@@ -27,6 +27,7 @@
 (def load-pack loader/load-pack)
 (def load-pack-from-file loader/load-pack-from-file)
 (def load-pack-from-directory loader/load-pack-from-directory)
+(def resolve-overlay loader/resolve-overlay)
 (def discover-packs loader/discover-packs)
 (def load-all-packs loader/load-all-packs)
 (def write-pack-to-file loader/write-pack-to-file)

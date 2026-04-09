@@ -41,6 +41,7 @@
    [clojure.java.io :as io]
    [clojure.edn :as edn]
    [clojure.pprint :as pprint]
+   [clojure.set]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -257,6 +258,109 @@
 
       :else
       (schema/failure-with-errors :pack [{:path path :error "Unknown path type"}]))))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Overlay pack resolution (N4 §2.5)
+
+(defn- validate-no-rule-id-collisions
+  "Verify that overlay rules don't collide with inherited rule IDs."
+  [inherited-ids overlay-rules]
+  (let [overlay-ids  (set (map :rule/id overlay-rules))
+        collisions   (clojure.set/intersection inherited-ids overlay-ids)]
+    (when (seq collisions)
+      (mapv #(str "Rule ID collision in overlay: " %) collisions))))
+
+(defn- apply-overrides
+  "Apply :pack/overrides to a rule set.
+   Only :rule/severity and :rule/enabled? are overridable per N4 spec."
+  [rules overrides]
+  (if (empty? overrides)
+    rules
+    (let [override-map (zipmap (map :rule/id overrides) overrides)]
+      (mapv (fn [rule]
+              (if-let [ov (get override-map (:rule/id rule))]
+                (cond-> rule
+                  (contains? ov :rule/severity) (assoc :rule/severity (:rule/severity ov))
+                  (contains? ov :rule/enabled?) (assoc :rule/enabled? (:rule/enabled? ov)))
+                rule))
+            rules))))
+
+(defn- validate-taxonomy-refs
+  "Validate that overlay and base pack taxonomy refs don't conflict."
+  [base-packs overlay-pack]
+  (let [refs (->> (conj base-packs overlay-pack)
+                  (keep :pack/taxonomy-ref)
+                  (map :taxonomy/id)
+                  distinct)]
+    (when (> (count refs) 1)
+      [(str "Conflicting taxonomy refs: " (pr-str refs))])))
+
+(defn- resolve-base-packs
+  "Look up each base pack from the store in declaration order."
+  [extends pack-store]
+  (mapv (fn [{:keys [pack-id]}]
+          (get pack-store pack-id))
+        extends))
+
+(defn- find-missing-base-packs
+  "Return error strings for any base pack refs that resolved to nil."
+  [extends base-packs]
+  (keep-indexed (fn [i bp]
+                  (when (nil? bp)
+                    (str "Base pack not found: "
+                         (:pack-id (nth extends i)))))
+                base-packs))
+
+(defn- compose-resolved-pack
+  "Merge inherited + overlay rules, apply overrides, inherit taxonomy ref."
+  [overlay-pack base-packs inherited-rules overlay-rules]
+  (let [combined-rules (into inherited-rules overlay-rules)
+        overrides      (:pack/overrides overlay-pack [])
+        final-rules    (apply-overrides combined-rules overrides)
+        base-tax-ref   (some :pack/taxonomy-ref (filterv some? base-packs))
+        final-tax-ref  (or (:pack/taxonomy-ref overlay-pack) base-tax-ref)
+        resolved-pack  (cond-> (assoc overlay-pack :pack/rules final-rules)
+                         final-tax-ref (assoc :pack/taxonomy-ref final-tax-ref))]
+    (schema/success :pack resolved-pack {})))
+
+(defn resolve-overlay
+  "Resolve an overlay pack by merging inherited rules from base packs.
+
+   Resolution order (per N4 §2.5):
+   1. Inherited rules merged from all :pack/extends entries in declaration order
+   2. Overlay :pack/rules appended (IDs MUST NOT collide with inherited)
+   3. :pack/overrides apply last (only :rule/severity and :rule/enabled?)
+   4. Taxonomy ref inherited from base pack(s); conflicting refs invalid
+
+   Arguments:
+   - overlay-pack - The overlay pack with :pack/extends
+   - pack-store   - Map of pack-id -> PackManifest for base pack resolution
+
+   Returns:
+   - {:success? true :pack <resolved PackManifest>}
+   - {:success? false :errors [...]}"
+  [overlay-pack pack-store]
+  (let [extends    (:pack/extends overlay-pack [])
+        base-packs (resolve-base-packs extends pack-store)
+        missing    (find-missing-base-packs extends base-packs)]
+
+    (if (seq missing)
+      (schema/failure-with-errors :pack (vec missing))
+
+      (let [tax-errors (validate-taxonomy-refs (filterv some? base-packs) overlay-pack)]
+
+        (if (seq tax-errors)
+          (schema/failure-with-errors :pack tax-errors)
+
+          (let [inherited-rules  (vec (mapcat :pack/rules (filterv some? base-packs)))
+                inherited-ids    (set (map :rule/id inherited-rules))
+                overlay-rules    (:pack/rules overlay-pack [])
+                collision-errors (validate-no-rule-id-collisions inherited-ids overlay-rules)]
+
+            (if (seq collision-errors)
+              (schema/failure-with-errors :pack collision-errors)
+              (compose-resolved-pack overlay-pack base-packs
+                                     inherited-rules overlay-rules))))))))
 
 (defn discover-packs
   "Discover all packs in a directory.
