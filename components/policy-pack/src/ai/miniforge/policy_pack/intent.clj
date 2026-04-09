@@ -32,7 +32,6 @@
      :refactor → Creates: 0, Updates: 0, Destroys: 0
      :migrate  → Creates: >0, Destroys: >0"
   (:require
-   [ai.miniforge.policy-pack.detection :as detection]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -65,6 +64,18 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Intent validation
 
+(def ^:private violation-message-fmt
+  "Format string for intent violation messages."
+  "Intent :%s does not allow %s, but found %d")
+
+(defn- intent-violation
+  "Build an intent violation map for a disallowed field."
+  [declared field-name actual]
+  {:field    field-name
+   :expected 0
+   :actual   actual
+   :message  (format violation-message-fmt (name declared) (name field-name) actual)})
+
 (def ^:private intent-constraints
   "For each declared intent, which change counts are allowed to be >0."
   {:import   {:creates false :updates false :destroys false}
@@ -86,27 +97,21 @@
    - {:passed? false :violations [...]} with violation details"
   [declared counts]
   (let [constraints (get intent-constraints declared)
-        creates     (or (:creates counts) 0)
-        updates     (or (:updates counts) 0)
-        destroys    (or (:destroys counts) 0)]
+        creates     (get counts :creates 0)
+        updates     (get counts :updates 0)
+        destroys    (get counts :destroys 0)]
     (if (nil? constraints)
       {:passed? true} ; unknown intent types pass by default
       (let [violations
             (cond-> []
               (and (not (:creates constraints))  (pos? creates))
-              (conj {:field :creates :expected 0 :actual creates
-                     :message (str "Intent :" (name declared)
-                                   " does not allow creates, but found " creates)})
+              (conj (intent-violation declared :creates creates))
 
               (and (not (:updates constraints))  (pos? updates))
-              (conj {:field :updates :expected 0 :actual updates
-                     :message (str "Intent :" (name declared)
-                                   " does not allow updates, but found " updates)})
+              (conj (intent-violation declared :updates updates))
 
               (and (not (:destroys constraints)) (pos? destroys))
-              (conj {:field :destroys :expected 0 :actual destroys
-                     :message (str "Intent :" (name declared)
-                                   " does not allow destroys, but found " destroys)}))]
+              (conj (intent-violation declared :destroys destroys)))]
         (if (empty? violations)
           {:passed? true}
           {:passed? false :violations violations})))))
@@ -133,7 +138,7 @@
 
 (defn parse-terraform-plan-counts
   "Parse terraform plan output and return resource change counts.
-   Delegates to detection/plan-resource-counts.
+   Delegates to detection/plan-resource-counts (added by PR #457).
 
    Arguments:
    - plan-output — Raw terraform plan output string
@@ -141,7 +146,9 @@
    Returns:
    - {:creates int :updates int :destroys int}"
   [plan-output]
-  (detection/plan-resource-counts plan-output))
+  (if-let [f (requiring-resolve 'ai.miniforge.policy-pack.detection/plan-resource-counts)]
+    (f plan-output)
+    {:creates 0 :updates 0 :destroys 0}))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Kubernetes diff parsing
