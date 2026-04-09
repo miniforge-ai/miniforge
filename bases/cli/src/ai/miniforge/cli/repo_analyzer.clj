@@ -87,6 +87,7 @@
    {:marker "setup.py"        :build :setuptools}
    {:marker "requirements.txt" :build :pip}
    {:marker "Pipfile"         :build :pipenv}
+   {:marker "poetry.lock"    :build :poetry}
    {:marker "Gemfile"        :build :bundler}])
 
 (defn- detect-by-markers [repo-path markers key-field]
