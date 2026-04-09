@@ -264,8 +264,10 @@
   "Acquire an isolated execution environment before pipeline starts.
 
    Execution mode (from opts):
-   - :local (default) — worktree; agent-on-host model; correct for current architecture.
-   - :governed — Docker or Kubernetes capsule required; throws if unavailable (N11 §7).
+   - :local (default) — worktree only; agent-on-host model.
+   - :governed — host worktree for agent file I/O + Docker/K8s capsule for
+     governed command execution. Agent writes to the worktree; commands
+     (tests, git, builds) are dispatched into the capsule.
 
    Returns map with :executor, :environment-id, :worktree-path, :execution-mode,
    or nil if acquisition fails (:local) / throws (:governed)."
@@ -281,11 +283,31 @@
                          branch   (assoc :branch branch))]
         (assert-executor-for-mode! executor mode)
         (when executor
-          (build-env-record executor workflow-id mode env-config fns)))
+          (if (= :governed mode)
+            ;; Governed: acquire BOTH a host worktree (for agent file I/O)
+            ;; and a capsule (for governed commands). The agent writes to the
+            ;; worktree; persist-workspace! syncs to the capsule/remote.
+            (let [worktree-fns (assoc fns
+                                      :create-registry (:create-registry fns)
+                                      :select-exec (:select-exec fns))
+                  wt-registry  ((:create-registry fns) {:worktree {}})
+                  wt-executor  ((:select-exec fns) wt-registry :preferred :worktree)
+                  wt-result    (when wt-executor
+                                 (build-env-record wt-executor workflow-id mode env-config fns))
+                  capsule      (build-env-record executor workflow-id mode env-config fns)]
+              (when (and wt-result capsule)
+                (assoc capsule
+                       ;; Agent uses host worktree for file I/O
+                       :worktree-path (:worktree-path wt-result)
+                       ;; Keep capsule executor + env-id for governed commands
+                       :worktree-executor wt-executor
+                       :worktree-environment-id (:environment-id wt-result))))
+            ;; Local: worktree only
+            (build-env-record executor workflow-id mode env-config fns))))
       (catch Exception e
         (when (= :governed mode) (throw e))
-        (println (messages/t :warn/publish-event
-                             {:error (str "Environment acquisition failed: " (ex-message e))}))
+        (log/warn runner-logger :workflow :workflow/env-acquisition-failed
+                  {:message (str "Environment acquisition failed: " (ex-message e))})
         nil))))
 
 (defn- release-execution-environment!

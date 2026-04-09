@@ -285,25 +285,25 @@
           ;; Create workflow-specific LLM client for execution
           llm-client (context/create-llm-client workflow spec quiet backend-override)
           callbacks (create-phase-callbacks quiet)
-          base-context (-> (context/create-workflow-context {:callbacks callbacks
-                                                            :artifact-store artifact-store
-                                                            :event-stream event-stream
-                                                            :workflow-id workflow-id
-                                                            :workflow-type workflow-type
-                                                            :workflow-version workflow-version
-                                                            :llm-client llm-client
-                                                            :quiet quiet
-                                                            :spec-title (:spec/title spec)
-                                                            :control-state control-state
-                                                            :skip-lifecycle-events true
-                                                            :execution-opts (:execution-opts opts)})
-                           ;; Pass inferred repo-url and branch so runner.clj's
-                           ;; acquire-execution-environment! can clone into Docker
-                           ;; or create a worktree from the correct branch.
-                           (assoc :repo-url repo-url :branch branch)
-                           ;; Pass execution mode for N11 capsule isolation (CLI flag only).
-                           (cond-> (:execution-mode opts)
-                             (assoc :execution-mode (:execution-mode opts))))
+          base-context (let [ctx (context/create-workflow-context
+                             {:callbacks callbacks
+                              :artifact-store artifact-store
+                              :event-stream event-stream
+                              :workflow-id workflow-id
+                              :workflow-type workflow-type
+                              :workflow-version workflow-version
+                              :llm-client llm-client
+                              :quiet quiet
+                              :spec-title (:spec/title spec)
+                              :control-state control-state
+                              :skip-lifecycle-events true
+                              :execution-opts (:execution-opts opts)})]
+                        ;; Assoc repo-url, branch, and (optionally) execution-mode
+                        ;; so runner.clj can clone into Docker or create a worktree.
+                        (assoc ctx
+                               :repo-url repo-url
+                               :branch branch
+                               :execution-mode (or (:execution-mode opts) :local)))
           sandbox? (or (:sandbox opts) (:spec/sandbox spec))
           [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)
           progress-cleanup (display/start-progress! event-stream quiet)]
