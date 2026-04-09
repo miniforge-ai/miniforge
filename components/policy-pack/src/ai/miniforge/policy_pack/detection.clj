@@ -32,6 +32,7 @@
    - :custom - Custom detection function"
   (:require
    [ai.miniforge.policy-pack.ast :as ast]
+   [ai.miniforge.policy-pack.schema :as schema]
    [clojure.data :as data]
    [clojure.string :as str]))
 
@@ -266,7 +267,7 @@
       (when (and content query)
         (let [ext    (ast/file-extension path)
               result (ast/run-query content (str query) lang ext)]
-          (when (and (:success? result) (seq (:matches result)))
+          (when (and (schema/succeeded? result) (seq (:matches result)))
             {:type          :ast-analysis
              :rule-id       (:rule/id rule)
              :matches       (:matches result)

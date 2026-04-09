@@ -27,6 +27,7 @@
    Layer 1: Query execution and output parsing
    Layer 2: Match-to-violation conversion"
   (:require
+   [ai.miniforge.policy-pack.schema :as schema]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -147,13 +148,12 @@
             _    (.waitFor proc)
             exit (.exitValue proc)]
         (if (zero? exit)
-          {:success? true
-           :matches  (or (parse-query-output out) [])}
-          {:success? false
-           :error    (str "tree-sitter query failed (exit " exit "): "
-                          (str/trim err))}))
+          (schema/success :matches (or (parse-query-output out) []) {})
+          (schema/failure :matches
+                          (str "tree-sitter query failed (exit " exit "): "
+                               (str/trim err)))))
       (catch Exception e
-        {:success? false :error (.getMessage e)})
+        (schema/failure :matches (.getMessage e)))
       (finally
         (.delete query-file)
         (.delete source-file)))))
