@@ -29,6 +29,12 @@
  {:tech/id         :csharp
   :tech/extensions ["cs" "csx"]}
 
+ {:tech/id         :clojurescript
+  :tech/extensions ["cljs"]}
+
+ {:tech/id         :coffeescript
+  :tech/extensions ["coffee" "litcoffee"]}
+
  {:tech/id         :dart
   :tech/extensions ["dart"]}
 
@@ -43,6 +49,9 @@
 
  {:tech/id         :go
   :tech/extensions ["go"]}
+
+ {:tech/id         :groovy
+  :tech/extensions ["groovy" "gvy"]}
 
  {:tech/id         :haskell
   :tech/extensions ["hs" "lhs"]}
@@ -68,6 +77,12 @@
  {:tech/id         :markdown
   :tech/extensions ["md" "markdown"]}
 
+ {:tech/id         :nim
+  :tech/extensions ["nim" "nims"]}
+
+ {:tech/id         :objective-c
+  :tech/extensions ["m" "mm"]}
+
  {:tech/id         :ocaml
   :tech/extensions ["ml" "mli"]}
 
@@ -77,20 +92,35 @@
  {:tech/id         :php
   :tech/extensions ["php"]}
 
+ {:tech/id         :purescript
+  :tech/extensions ["purs"]}
+
  {:tech/id         :python
   :tech/extensions ["py" "pyi"]}
 
  {:tech/id         :r
   :tech/extensions ["r" "R" "Rmd"]}
 
+ {:tech/id         :racket
+  :tech/extensions ["rkt"]}
+
  {:tech/id         :ruby
-  :tech/extensions ["rb"]}
+  :tech/extensions ["rb" "rake"]}
 
  {:tech/id         :rust
   :tech/extensions ["rs"]}
 
  {:tech/id         :scala
   :tech/extensions ["scala" "sc"]}
+
+ {:tech/id         :scheme
+  :tech/extensions ["scm" "ss"]}
+
+ {:tech/id         :solidity
+  :tech/extensions ["sol"]}
+
+ {:tech/id         :sql
+  :tech/extensions ["sql"]}
 
  {:tech/id         :swift
   :tech/extensions ["swift"]}
@@ -99,8 +129,23 @@
   :tech/extensions ["tf" "tfvars"]
   :tech/packs      ["terraform-aws-1.0.0"]}
 
+ {:tech/id         :toml
+  :tech/extensions ["toml"]}
+
  {:tech/id         :typescript
   :tech/extensions ["ts" "tsx"]}
+
+ {:tech/id         :v
+  :tech/extensions ["v"]}
+
+ {:tech/id         :vhdl
+  :tech/extensions ["vhd" "vhdl"]}
+
+ {:tech/id         :wasm
+  :tech/extensions ["wasm" "wat"]}
+
+ {:tech/id         :xml
+  :tech/extensions ["xml" "xsl" "xslt"]}
 
  {:tech/id         :yaml
   :tech/extensions ["yaml" "yml"]}
@@ -176,6 +221,16 @@
  {:tech/id      :pyproject
   :tech/markers [{:path "pyproject.toml" :type :file}]}
 
+ {:tech/id      :rebar
+  :tech/markers [{:path "rebar.config" :type :file}]}
+
+ {:tech/id      :sbt
+  :tech/markers [{:path "build.sbt" :type :file}]}
+
+ {:tech/id      :spago
+  :tech/markers [{:path "spago.dhall" :type :file}
+                 {:path "spago.yaml" :type :file}]}
+
  {:tech/id      :setuptools
   :tech/markers [{:path "setup.py" :type :file}]}
 
@@ -193,6 +248,9 @@
  {:tech/id      :angular
   :tech/markers [{:path "angular.json" :type :file}]}
 
+ {:tech/id      :django
+  :tech/markers [{:path "manage.py" :type :file}]}
+
  {:tech/id      :docker
   :tech/markers [{:path "Dockerfile" :type :file}]}
 
@@ -200,8 +258,23 @@
   :tech/markers [{:path "docker-compose.yaml" :type :file}
                  {:path "docker-compose.yml" :type :file}]}
 
+ {:tech/id      :express
+  :tech/markers [{:path "package.json" :type :file :content "\"express\""}]}
+
+ {:tech/id      :fastapi
+  :tech/markers [{:path "requirements.txt" :type :file :content "fastapi"}
+                 {:path "pyproject.toml" :type :file :content "fastapi"}]}
+
+ {:tech/id      :flask
+  :tech/markers [{:path "requirements.txt" :type :file :content "flask"}
+                 {:path "pyproject.toml" :type :file :content "flask"}]}
+
  {:tech/id      :flutter
   :tech/markers [{:path "pubspec.yaml" :type :file}]}
+
+ {:tech/id      :gatsby
+  :tech/markers [{:path "gatsby-config.js" :type :file}
+                 {:path "gatsby-config.ts" :type :file}]}
 
  {:tech/id      :helm
   :tech/markers [{:path "Chart.yaml" :type :file}]
@@ -221,14 +294,44 @@
                  {:path "next.config.mjs" :type :file}
                  {:path "next.config.ts" :type :file}]}
 
+ {:tech/id      :nuxt
+  :tech/markers [{:path "nuxt.config.js" :type :file}
+                 {:path "nuxt.config.ts" :type :file}]}
+
  {:tech/id      :polylith
   :tech/markers [{:path "workspace.edn" :type :file}
                  {:path "components" :type :directory}]}
+
+ {:tech/id      :rails
+  :tech/markers [{:path "config/routes.rb" :type :file}
+                 {:path "Gemfile" :type :file :content "rails"}]}
+
+ {:tech/id      :react
+  :tech/markers [{:path "package.json" :type :file :content "\"react\""}]}
+
+ {:tech/id      :remix
+  :tech/markers [{:path "remix.config.js" :type :file}
+                 {:path "remix.config.ts" :type :file}]}
 
  {:tech/id      :serverless
   :tech/markers [{:path "serverless.yml" :type :file}
                  {:path "serverless.yaml" :type :file}]}
 
+ {:tech/id      :spring
+  :tech/markers [{:path "pom.xml" :type :file :content "spring-boot"}
+                 {:path "build.gradle" :type :file :content "spring-boot"}
+                 {:path "build.gradle.kts" :type :file :content "spring-boot"}]}
+
+ {:tech/id      :svelte
+  :tech/markers [{:path "svelte.config.js" :type :file}]}
+
+ {:tech/id      :sveltekit
+  :tech/markers [{:path "svelte.config.js" :type :file :content "sveltekit"}]}
+
  {:tech/id      :terraform-module
   :tech/markers [{:path "main.tf" :type :file}]
-  :tech/packs   ["terraform-aws-1.0.0"]}]
+  :tech/packs   ["terraform-aws-1.0.0"]}
+
+ {:tech/id      :vuejs
+  :tech/markers [{:path "package.json" :type :file :content "\"vue\""}
+                 {:path "vue.config.js" :type :file}]}]
