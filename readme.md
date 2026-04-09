@@ -8,223 +8,206 @@
 
 # Miniforge
 
-Autonomous software factory — a self-directing SDLC platform built on
-multi-agent cognition, powered by [MiniForge Core](#miniforge-core).
+Write a spec. Get a pull request.
 
-## Products
+Miniforge is an autonomous software factory. You describe what you want — in
+plain English or structured EDN — and miniforge plans the work, writes the code,
+runs the tests, reviews itself, and opens a PR. No prompt engineering. No
+copy-paste. Full SDLC.
 
-This repository is a Polylith monorepo that houses three layers:
+## Before and After
 
-| Layer | Description |
-|-------|-------------|
-| **MiniForge Core** | Governed workflow engine — DAG executor, phase registry, policy SDK, shared CLI base. Designed to be embedded in any product that needs a governed workflow runtime. |
-| **Miniforge** | Autonomous software factory — SDLC workflows, fleet management, PR lifecycle, multi-agent code generation. |
-| **Data Foundry** | ETL product — data extraction, transformation, and loading workflows built on the same governed runtime. |
-
-## Installation
-
-### For End Users
-
-Install Miniforge via Homebrew:
-
-```bash
-# Add the miniforge tap
-brew tap miniforge-ai/tap
-
-# Install miniforge
-brew install miniforge
-
-# Verify installation
-miniforge version
+```text
+BEFORE                              AFTER
+──────                              ─────
+1. Write a ticket                   1. Write a spec
+2. Create a branch                  2. mf run spec.edn
+3. Read the codebase                3. Review the PR
+4. Write code
+5. Run tests
+6. Fix failures
+7. Lint
+8. Fix lint
+9. Commit
+10. Push
+11. Open PR
+12. Write PR description
+13. Wait for review
+14. Address feedback
 ```
 
-Or download directly from [GitHub Releases](https://github.com/miniforge-ai/miniforge/releases).
+## How It Works
 
-### CLI Commands
-
-```bash
-miniforge status        # Show system status
-miniforge workflows     # List all workflows
-miniforge workflow <id> # Show workflow detail
-miniforge meta          # Show meta-loop status
-miniforge version       # Show version information
-miniforge help          # Show help message
+```text
+Spec ──> Explore ──> Plan ──> Implement ──> Verify ──> Review ──> Release ──> PR
+              │           │          │            │          │           │
+              │           │          │            │          │           └─ creates branch,
+              │           │          │            │          │              commits, pushes,
+              │           │          │            │          │              opens PR
+              │           │          │            │          │
+              │           │          │            │          └─ self-reviews diff
+              │           │          │            │             against spec + constraints
+              │           │          │            │
+              │           │          │            └─ runs gates: syntax, lint,
+              │           │          │               no-secrets, tests-pass
+              │           │          │
+              │           │          └─ generates code via LLM agent
+              │           │             inner loop: generate → validate → repair
+              │           │
+              │           └─ decomposes spec into a task DAG
+              │              with dependencies and acceptance criteria
+              │
+              └─ scans the codebase, loads relevant files,
+                 queries knowledge base
 ```
 
-Note: Full workflow and meta-loop features will be available as components are integrated.
+Each phase is driven by an autonomous agent backed by an LLM. Policy gates
+govern every transition — bad code never ships. All decisions are traceable
+via evidence bundles.
 
-### For Contributors
-
-If you want to contribute to Miniforge development, follow the Quick Start guide below.
-
-## Quick Start (Development)
+## Quickstart
 
 ### Prerequisites
 
-- [Homebrew](https://brew.sh/) — Package manager (macOS/Linux)
-- [Babashka](https://github.com/babashka/babashka#installation) (bb) — Clojure scripting
+- macOS or Linux
+- [Babashka](https://github.com/babashka/babashka#installation) (`brew install babashka/brew/babashka`)
+- An LLM backend: [Claude Code](https://claude.ai/claude-code) CLI,
+  [Codex](https://openai.com/codex) CLI, or an API key (Anthropic/OpenAI)
+
+### Install and Run
 
 ```bash
-# Install Babashka if not already installed
-brew install babashka/brew/babashka
-```
-
-### Bootstrap
-
-```bash
-# Clone the repository
-git clone git@github.com:miniforge-ai/miniforge.git
+git clone https://github.com/miniforge-ai/miniforge.git
 cd miniforge
-
-# Bootstrap: install all dependencies + configure environment
 bb bootstrap
+
+# If using an API key (not needed if Claude Code or Codex CLI is installed)
+# export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Run your first workflow
+mf run examples/workflows/simple-refactor.edn
 ```
 
-The `bb bootstrap` command will:
+See the [Quickstart Guide](docs/quickstart.md) for a detailed walkthrough.
 
-- Install all dependencies via Homebrew:
-  - Java (Temurin 21)
-  - Clojure CLI
-  - clj-kondo (linter)
-  - markdownlint-cli
-  - Polylith CLI
-- Configure git to use project hooks (`.githooks/`)
-- Verify your git email is set to `@miniforge.ai`
+### Write a Spec
 
-### Git Email
+A spec is a description of what you want. Two fields are required:
 
-All commits must use a `@miniforge.ai` email address. Configure it:
+```clojure
+{:spec/title "Add input validation to the signup form"
+
+ :spec/description
+ "The signup form accepts any input without validation. Add server-side
+  validation for email format, password strength (min 8 chars, 1 number),
+  and username uniqueness. Return structured error messages."
+
+ :spec/intent {:type :feature
+               :scope ["src/auth/signup.clj"]}
+
+ :spec/constraints
+ ["No breaking changes to existing API"
+  "All existing tests must pass"]
+
+ :spec/acceptance-criteria
+ ["Email validation rejects malformed addresses"
+  "Password validation enforces minimum requirements"
+  "Username uniqueness check queries the database"
+  "Error messages are structured maps, not strings"]}
+```
+
+Specs can also be written as Markdown with YAML frontmatter. See
+[Writing Specs](docs/user-guide/writing-specs.md).
+
+### Run the Demo
 
 ```bash
-git config user.email 'yourname@miniforge.ai'
+# Watch miniforge improve itself (dogfooding demo)
+bash examples/demo/run-demo.sh
 ```
 
-For automatic configuration across all miniforge repos, add to `~/.gitconfig`:
+See [Demo Guide](docs/demo.md) for a guided walkthrough.
 
-```ini
-[includeIf "gitdir:~/path/to/miniforge-repos/"]
-    path = ~/path/to/miniforge-repos/.gitconfig
-```
+## Workflow Types
 
-Then create `~/path/to/miniforge-repos/.gitconfig`:
+| Workflow | Phases | Use For |
+|----------|--------|---------|
+| **Canonical SDLC** | explore, plan, implement, verify, review, release | Features, refactors, bug fixes |
+| **Quick Fix** | implement, verify, done | Small, well-understood changes |
 
-```ini
-[user]
-    email = yourname@miniforge.ai
-```
+The workflow is selected automatically from the spec's intent, or overridden
+with `:workflow/type :quick-fix`.
 
-## Development
-
-### Local Development (Without Homebrew)
-
-For rapid development iteration, build and install locally:
+## Configuration
 
 ```bash
-# Build and install in one step (cleans old build automatically)
-bb install:local
+# LLM backend: auto-detected from installed CLIs
+# Claude Code or Codex CLI are used automatically if installed.
+# Otherwise, set an API key:
+export ANTHROPIC_API_KEY="sk-ant-..."
+# Or:
+export OPENAI_API_KEY="sk-..."
 
-# Now you can run miniforge locally
-mf version
-mf help
-mf fleet web
+# Tune execution
+export MINIFORGE_MAX_ITERATIONS=50     # max phase retries
+export MINIFORGE_MAX_TOKENS=150000     # token budget per workflow
 ```
 
-The `bb install:local` task:
-
-1. Removes old build (`rm -f dist/miniforge.jar`)
-2. Builds fresh uberjar (`bb build:cli`)
-3. Installs to `~/.local/bin/mf`
-
-**Note:** Make sure `~/.local/bin` is in your PATH:
-
-```bash
-# Add to ~/.zshrc or ~/.bashrc
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-### Available Tasks
-
-Run `bb` to see all available tasks:
-
-```bash
-bb                  # List all tasks
-
-# Bootstrap & Setup
-bb bootstrap        # Full bootstrap: install deps + configure env
-bb setup            # Alias for bootstrap
-bb install:deps     # Install all dependencies
-bb upgrade:deps     # Upgrade all dependencies
-
-# Linting & Formatting
-bb lint:clj         # Lint staged Clojure files
-bb lint:clj:all     # Lint all Clojure files
-bb fmt:md           # Format staged Markdown files
-
-# Testing
-bb test             # Run unit tests
-bb test:all         # Run all tests including integration
-
-# Building
-bb build:cli        # Build Miniforge CLI as uberscript
-bb build:jar <proj> # Build JVM uberjar for a project
-bb build:all        # Build all changed projects
-bb clean            # Clean build artifacts
-
-# Git Hooks
-bb pre-commit       # Run all pre-commit checks manually
-bb hooks:uninstall  # Reset git hooks to default
-```
-
-### Project Structure (Polylith)
-
-```text
-miniforge/
-├── bases/          # Entry points (CLI, servers)
-├── components/     # Reusable building blocks
-│   ├── workflow/               # MiniForge Core — shared workflow runtime
-│   ├── workflow-software-factory/  # Miniforge — SDLC workflows
-│   ├── workflow-financial-etl/     # Data Foundry — ETL workflows (financial is one family)
-│   ├── schema/     # Malli schemas for domain types
-│   └── logging/    # Structured EDN logging
-├── projects/       # Deployable artifacts
-│   ├── miniforge/      # Miniforge (software factory) project
-│   ├── miniforge-core/ # MiniForge Core (engine-only) project
-│   └── miniforge-tui/  # Terminal UI project
-├── development/    # Dev-time utilities
-└── docs/
-    └── specs/      # Product specifications
-```
-
-## MiniForge Core
-
-MiniForge Core is the shared governed workflow engine extracted from this
-repository. It provides:
-
-- DAG executor with profile seams
-- Generic workflow runtime, triggers, and publication
-- Generic phase registry
-- Policy-pack SDK surface
-- Shared CLI base with app/config/message seams
-
-The `projects/miniforge-core/` project composes only the kernel components,
-producing a standalone artifact suitable for embedding in other products
-(Data Foundry, Fleet, or any future governed workflow application).
-
-## Documentation
-
-- [Polylith Documentation](https://polylith.gitbook.io/polylith)
-- [Product Specs](docs/specs/) — Detailed specifications
+See [Configuration Guide](docs/user-guide/configuration.md) for all options.
 
 ## Architecture
 
-See [docs/specs/architecture.spec](docs/specs/architecture.spec) for the full architecture overview.
+Miniforge is built on a governed workflow engine with pluggable phases, agents,
+and policy packs.
+
+```text
+┌─────────────────────────────────────────────────────┐
+│                    CLI / TUI / Web                   │
+├─────────────────────────────────────────────────────┤
+│              Workflow Engine (DAG Executor)           │
+│  ┌──────┐ ┌──────┐ ┌───────┐ ┌──────┐ ┌─────────┐  │
+│  │Explore│ │ Plan │ │Implmnt│ │Verify│ │ Review  │  │
+│  └──────┘ └──────┘ └───────┘ └──────┘ └─────────┘  │
+│              ↕           ↕         ↕                 │
+│         ┌────────┐  ┌────────┐  ┌──────────┐        │
+│         │ Agents │  │ Gates  │  │ Policies │        │
+│         └────────┘  └────────┘  └──────────┘        │
+├─────────────────────────────────────────────────────┤
+│           LLM Backends (Claude, GPT, Local)          │
+└─────────────────────────────────────────────────────┘
+```
+
+- **Agents**: Planner, Implementer, Tester, Reviewer, Releaser — each
+  specialized for its phase
+- **Gates**: Syntax, lint, no-secrets, tests-pass, coverage — policy enforcement
+  at every transition
+- **DAG Executor**: Plans decompose into task graphs; tasks run in parallel
+  across isolated worktrees
+
+See [Architecture Overview](docs/user-guide/architecture.md) for details.
+See [Normative Specs](specs/normative/) for the full specification.
+
+## Project Status
+
+**Alpha** — actively developed, dogfooded daily. The pipeline (spec → PR) works
+end-to-end for Clojure projects. Multi-language support, fleet orchestration,
+and the web dashboard are in progress.
+
+## Documentation
+
+- [Quickstart](docs/quickstart.md) — Run your first workflow
+- [Demo](docs/demo.md) — 5-minute guided demo
+- [Writing Specs](docs/user-guide/writing-specs.md) — How to describe work
+- [Phases](docs/user-guide/phases.md) — What the pipeline does
+- [Configuration](docs/user-guide/configuration.md) — Tuning and backends
+- [Architecture](docs/user-guide/architecture.md) — How it works
+- [Contributing](CONTRIBUTING.md) — Development setup and guidelines
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, Polylith structure,
+git conventions, and the pre-commit hook.
 
 ## License
 
-Miniforge is licensed under the [Apache License 2.0](LICENSE).
-
-Title: Miniforge.ai
-Subtitle: An agentic SDLC / fleet-control platform
-Author: Christopher Lester
-Line: Founder, Miniforge.ai (project)
-Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+[Apache License 2.0](LICENSE)

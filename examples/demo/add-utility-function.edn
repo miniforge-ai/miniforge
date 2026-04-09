@@ -1,0 +1,46 @@
+;; Demo: Miniforge building itself
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; This spec asks miniforge to add a utility function to its own codebase.
+;; Watch the full pipeline: explore → plan → implement → verify → review → release.
+;;
+;; Usage:
+;;   mf run examples/demo/add-utility-function.edn
+
+{:spec/title "Add string normalization utility to logging component"
+
+ :spec/description
+ "Add a normalize-identifier function to the logging helpers module that
+  converts arbitrary strings into valid EDN keyword-safe identifiers.
+  This is needed by multiple components for consistent identifier formatting
+  in structured log entries (e.g., converting 'My Feature Name!' to
+  :my-feature-name).
+
+  The function should:
+  - Convert to lowercase
+  - Replace spaces and underscores with hyphens
+  - Strip characters that are not alphanumeric or hyphens
+  - Collapse consecutive hyphens
+  - Trim leading/trailing hyphens
+  - Return nil for nil input, empty string for empty input"
+
+ :spec/intent {:type :feature
+               :scope ["components/logging/src/ai/miniforge/logging/helpers.clj"
+                        "components/logging/test/ai/miniforge/logging/helpers_test.clj"]}
+
+ :spec/constraints
+ ["Pure function, no side effects"
+  "Add to components/logging/src/ai/miniforge/logging/helpers.clj"
+  "Expose via components/logging/src/ai/miniforge/logging/interface.clj"
+  "Include tests in components/logging/test/ai/miniforge/logging/helpers_test.clj"
+  "Handle nil, empty string, unicode, and already-valid input"
+  "All existing tests must continue to pass"
+  "Follow the existing code style and layer conventions in helpers.clj"]
+
+ :spec/acceptance-criteria
+ ["normalize-identifier exists in ai.miniforge.logging.helpers"
+  "normalize-identifier is exported via ai.miniforge.logging.interface"
+  "Tests cover: nil, empty, spaces, underscores, special chars, unicode"
+  "Tests cover: already-valid identifiers pass through unchanged"
+  "Tests cover: consecutive special chars collapse to single hyphen"
+  "All existing logging tests continue to pass"]}
