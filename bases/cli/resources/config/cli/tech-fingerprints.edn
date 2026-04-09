@@ -298,6 +298,10 @@
   :tech/markers [{:path "nuxt.config.js" :type :file}
                  {:path "nuxt.config.ts" :type :file}]}
 
+ {:tech/id      :pulumi
+  :tech/markers [{:path "Pulumi.yaml" :type :file}
+                 {:path "Pulumi.yml" :type :file}]}
+
  {:tech/id      :polylith
   :tech/markers [{:path "workspace.edn" :type :file}
                  {:path "components" :type :directory}]}
