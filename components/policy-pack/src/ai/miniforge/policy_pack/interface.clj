@@ -26,6 +26,7 @@
    [ai.miniforge.policy-pack.interface.loading :as loading]
    [ai.miniforge.policy-pack.interface.registry :as registry]
    [ai.miniforge.policy-pack.interface.schema :as schema]
+   [ai.miniforge.policy-pack.interface.taxonomy :as taxonomy]
    [ai.miniforge.policy-pack.mdc-compiler :as mdc-compiler]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -95,9 +96,37 @@
 (def merge-rules builders/merge-rules)
 
 ;------------------------------------------------------------------------------ Layer 3
+;; Taxonomy API
+
+(def Taxonomy taxonomy/Taxonomy)
+(def TaxonomyCategory taxonomy/TaxonomyCategory)
+(def TaxonomyRef taxonomy/TaxonomyRef)
+(def valid-taxonomy? taxonomy/valid-taxonomy?)
+(def validate-taxonomy taxonomy/validate-taxonomy)
+(def load-taxonomy taxonomy/load-taxonomy)
+(def load-taxonomy-from-classpath taxonomy/load-taxonomy-from-classpath)
+(def category-by-id taxonomy/category-by-id)
+(def resolve-alias taxonomy/resolve-alias)
+(def category-title taxonomy/category-title)
+(def category-order taxonomy/category-order)
+
+;------------------------------------------------------------------------------ Layer 3
+;; Mapping API
+
+
+;------------------------------------------------------------------------------ Layer 3
+;; Intent validation API
+
+
+;------------------------------------------------------------------------------ Layer 3
 ;; MDC compilation
 
 (def compile-standards-pack
   "Compile all MDC files under a standards directory into a PackManifest.
    Delegates to mdc-compiler/compile-standards-pack."
   mdc-compiler/compile-standards-pack)
+
+(def export-canonical-taxonomy
+  "Export the compiler's dewey-ranges as a first-class Taxonomy artifact.
+   Delegates to mdc-compiler/export-canonical-taxonomy."
+  mdc-compiler/export-canonical-taxonomy)
