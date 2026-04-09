@@ -153,11 +153,11 @@
 
 (defn- note-parent-records
   [handle config auth-headers cursor opts]
-  (mapcat (fn [{:keys [resource-key] :as scope}]
+  (letfn [(scope->parent-pairs [{:keys [resource-key] :as scope}]
             (let [resource-def (require-resource! (name resource-key))
                   records      (resource-records handle resource-def config auth-headers cursor opts)]
-              (map #(vector scope %) records)))
-          note-parent-scopes))
+              (map #(vector scope %) records)))]
+    (mapcat scope->parent-pairs note-parent-scopes)))
 
 (defn- enrich-note
   [scope parent note]

@@ -639,6 +639,33 @@
    :pipeline/created-at (java.time.Instant/now)
    :pipeline/updated-at (java.time.Instant/now)})
 
+(defn- issue->notes-spawn
+  "Build a spawn descriptor for notes-per-issue with an explicit connector-ref."
+  [issue]
+  {:spawn/name         (str "Notes for Issue #" (:iid issue))
+   :spawn/family       :ingest
+   :spawn/connector-ref conn-child
+   :spawn/config       {:gitlab/resource "notes"
+                         :gitlab/issue-iid (:iid issue)}})
+
+(defn- issue->notes-spawn-short
+  "Build a spawn descriptor with a shorter name label."
+  [issue]
+  {:spawn/name         (str "Notes #" (:iid issue))
+   :spawn/family       :ingest
+   :spawn/connector-ref conn-child
+   :spawn/config       {:gitlab/resource "notes"
+                         :gitlab/noteable-iid (:iid issue)}})
+
+(defn- issue->notes-spawn-inherit
+  "Build a spawn descriptor that omits :spawn/connector-ref (inherits from parent)."
+  [issue]
+  {:spawn/name   (str "Notes for Issue #" (:iid issue))
+   :spawn/family :ingest
+   :spawn/config {:gitlab/resource     "notes"
+                  :gitlab/noteable-kind "issues"
+                  :gitlab/noteable-iid  (:iid issue)}})
+
 (deftest execute-pipeline-spawn-creates-child-stages-test
   (testing "Spawn fn fires for each issue record, child stages run and complete"
     (let [issues-conn (->MockSourceConnector
@@ -653,13 +680,7 @@
                         :extract/has-more false
                         :extract/row-count 1})
           spawn-fn    (fn [records _config]
-                        (map (fn [issue]
-                               {:spawn/name         (str "Notes for Issue #" (:iid issue))
-                                :spawn/family       :ingest
-                                :spawn/connector-ref conn-child
-                                :spawn/config       {:gitlab/resource "notes"
-                                                     :gitlab/issue-iid (:iid issue)}})
-                             records))
+                        (map issue->notes-spawn records))
           result (runner/execute-pipeline
                   spawn-pipeline
                   {conn-parent issues-conn conn-child notes-conn}
@@ -693,13 +714,7 @@
                         :extract/row-count 1})
           failing-notes (->FailingSourceConnector)
           spawn-fn    (fn [records _config]
-                        (map (fn [issue]
-                               {:spawn/name         (str "Notes for Issue #" (:iid issue))
-                                :spawn/family       :ingest
-                                :spawn/connector-ref conn-child
-                                :spawn/config       {:gitlab/resource "notes"
-                                                     :gitlab/issue-iid (:iid issue)}})
-                             records))
+                        (map issue->notes-spawn records))
           result (runner/execute-pipeline
                   spawn-pipeline
                   {conn-parent issues-conn conn-child failing-notes}
@@ -770,13 +785,7 @@
                            {:publish/records-written (count records)
                             :publish/records-failed 0}))
           spawn-fn     (fn [records _config]
-                         (map (fn [issue]
-                                {:spawn/name         (str "Notes #" (:iid issue))
-                                 :spawn/family       :ingest
-                                 :spawn/connector-ref conn-child
-                                 :spawn/config       {:gitlab/resource "notes"
-                                                      :gitlab/noteable-iid (:iid issue)}})
-                              records))
+                         (map issue->notes-spawn-short records))
           result (runner/execute-pipeline
                   spawn-with-publish-pipeline
                   {conn-parent issues-conn conn-child notes-conn conn-sink sink-conn}
@@ -809,13 +818,7 @@
                         :extract/row-count 2})
           ;; Spawn fn omits :spawn/connector-ref — should inherit conn-parent
           spawn-fn    (fn [records _config]
-                        (map (fn [issue]
-                               {:spawn/name   (str "Notes for Issue #" (:iid issue))
-                                :spawn/family :ingest
-                                :spawn/config {:gitlab/resource     "notes"
-                                               :gitlab/noteable-kind "issues"
-                                               :gitlab/noteable-iid  (:iid issue)}})
-                             records))
+                        (map issue->notes-spawn-inherit records))
           result (runner/execute-pipeline
                   spawn-pipeline
                   ;; Parent connector also handles "notes" for the spawned stages

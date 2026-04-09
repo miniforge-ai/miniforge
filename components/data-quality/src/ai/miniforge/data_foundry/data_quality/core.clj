@@ -20,18 +20,20 @@
         (range)
         records))
 
+(defn- pass-record
+  "Return the record when all its evaluations pass error-severity rules, else nil."
+  [{:keys [record evaluations]}]
+  (let [has-error (some (fn [e]
+                          (and (not (:valid? e))
+                               (= :error (:severity e))))
+                        evaluations)]
+    (when-not has-error record)))
+
 (defn filter-passed
   "Return records that pass all :error-severity rules.
    Warnings do not cause filtering."
   [evaluation]
-  (vec
-   (keep (fn [{:keys [record evaluations]}]
-           (let [has-error (some (fn [e]
-                                  (and (not (:valid? e))
-                                       (= :error (:severity e))))
-                                evaluations)]
-             (when-not has-error record)))
-         evaluation)))
+  (vec (keep pass-record evaluation)))
 
 ;; -- Report helpers (decomposed from generate-report) --
 
@@ -44,15 +46,17 @@
          :when (not valid?)]
      (result/violation record-index id field severity message))))
 
+(defn- tally-field-violation
+  "Accumulate a violation count for a field, skipping nil fields."
+  [acc {:keys [field]}]
+  (if field
+    (update-in acc [field :violations] (fnil inc 0))
+    acc))
+
 (defn- compute-field-summary
   "Compute per-field violation counts and pass rates."
   [violations total]
-  (let [counts (reduce (fn [acc {:keys [field]}]
-                         (if field
-                           (update-in acc [field :violations] (fnil inc 0))
-                           acc))
-                       {}
-                       violations)]
+  (let [counts (reduce tally-field-violation {} violations)]
     (reduce-kv (fn [acc field {:keys [violations]}]
                  (assoc acc field
                         {:violations violations

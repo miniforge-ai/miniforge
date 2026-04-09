@@ -172,11 +172,10 @@
 (defn- collect-inputs
   "Collect input datasets and flattened records produced by upstream stages."
   [stage-def stage-map stage-outputs]
-  (let [datasets (into {}
-                       (keep (fn [dep-id]
-                               (when-let [recs (get stage-outputs dep-id)]
-                                 [(get-in stage-map [dep-id :stage/name]) recs])))
-                       (:stage/dependencies stage-def))]
+  (let [dep->dataset (fn [dep-id]
+                       (when-let [recs (get stage-outputs dep-id)]
+                         [(get-in stage-map [dep-id :stage/name]) recs]))
+        datasets    (into {} (keep dep->dataset) (:stage/dependencies stage-def))]
     {:datasets datasets
      :records  (vec (mapcat val datasets))}))
 
@@ -227,13 +226,20 @@
      :stage/input-datasets  []
      :stage/output-datasets (or (:spawn/output-datasets spawn) [])}))
 
+(defn- stage->task-def
+  "Convert a pipeline stage to a DAG task definition."
+  [{:stage/keys [id dependencies]}]
+  {:task/id id :task/deps (set dependencies)})
+
+(defn- depends-on?
+  "True when a stage-def's dependencies include the given parent-id."
+  [parent-id [_sid sd]]
+  (when (some #{parent-id} (:stage/dependencies sd)) _sid))
+
 (defn- downstream-stage-ids
   "Return the set of stage-map keys whose :stage/dependencies include parent-id."
   [stage-map parent-id]
-  (into #{}
-        (keep (fn [[sid sd]]
-                (when (some #{parent-id} (:stage/dependencies sd)) sid)))
-        stage-map))
+  (into #{} (keep #(depends-on? parent-id %)) stage-map))
 
 (defn- inject-spawned-stages!
   "Add spawned stage tasks to run-atom and return updated stage-map.
@@ -246,7 +252,9 @@
   [run-atom stage-map spawns parent-stage-def]
   (let [parent-id (:stage/id parent-stage-def)
         ds-ids    (downstream-stage-ids stage-map parent-id)]
-    (reduce (fn [sm spawn]
+    (letfn [(add-spawned-dep [sm' ds-id stage-id]
+              (update-in sm' [ds-id :stage/dependencies] conj stage-id))
+            (register-spawn [sm spawn]
               (let [stage-def (spawn->stage-def spawn parent-stage-def)
                     stage-id  (:stage/id stage-def)]
                 ;; Register the spawned task — depends on parent only.
@@ -258,12 +266,10 @@
                   (swap! run-atom update-in [:run/tasks ds-id :task/deps] conj stage-id))
                 ;; Mirror the dep-set update in the stage-map so collect-inputs
                 ;; can look up the spawned stage's records via its UUID.
-                (reduce (fn [sm' ds-id]
-                          (update-in sm' [ds-id :stage/dependencies] conj stage-id))
+                (reduce #(add-spawned-dep %1 %2 stage-id)
                         (assoc sm stage-id stage-def)
-                        ds-ids)))
-            stage-map
-            spawns)))
+                        ds-ids)))]
+      (reduce register-spawn stage-map spawns))))
 
 ;;------------------------------------------------------------------------------ Scheduling loop
 
@@ -331,9 +337,7 @@
                            :pipeline-run/mode (or mode :full-refresh)})
             pipeline-run (:pipeline-run run-result)
             stage-map    (into {} (map (juxt :stage/id identity)) stages)
-            task-defs    (map (fn [{:stage/keys [id dependencies]}]
-                                {:task/id id :task/deps (set dependencies)})
-                              stages)
+            task-defs    (map stage->task-def stages)
             run-atom     (dag/create-run-atom
                            (dag/create-dag-from-tasks (random-uuid) task-defs))
             {:keys [stage-runs cursors failed?]}

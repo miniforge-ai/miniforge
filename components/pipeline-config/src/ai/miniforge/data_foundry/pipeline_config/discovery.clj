@@ -24,14 +24,17 @@
     (catch Exception _
       {:path (.getAbsolutePath f) :name nil :version nil})))
 
+(defn- pipeline-files-in-dir
+  "Return pipeline EDN files found under dir."
+  [dir]
+  (->> (file-seq dir)
+       (filter pipeline-file?)))
+
 (defn discover-pipelines
   "Scan directories for pipeline EDN files.
    Returns schema/success with :pipelines key."
   [search-paths]
-  (let [dirs   (keep #(let [f (io/file %)] (when (.isDirectory f) f)) search-paths)
-        files  (mapcat (fn [dir]
-                         (->> (file-seq dir)
-                              (filter pipeline-file?)))
-                       dirs)
+  (let [dirs    (keep #(let [f (io/file %)] (when (.isDirectory f) f)) search-paths)
+        files   (mapcat pipeline-files-in-dir dirs)
         headers (mapv read-pipeline-header files)]
     (schema/success :pipelines headers)))

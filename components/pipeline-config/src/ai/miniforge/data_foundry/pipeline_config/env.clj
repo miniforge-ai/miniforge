@@ -44,13 +44,16 @@
     (catch Exception e
       (schema/exception-failure :env-config e))))
 
+(defn- connector-entry->type
+  "Extract [ref-name connector-type] from an env connector entry."
+  [[ref-name cfg]]
+  [ref-name (:connector/type cfg)])
+
 (defn extract-connector-types
   "Extract a {symbolic-ref → connector-type} map from env config.
    E.g., {:conn/file-src :file, :conn/file-sink :file}."
   [env-config]
-  (into {}
-        (map (fn [[ref-name cfg]] [ref-name (:connector/type cfg)]))
-        (:env/connectors env-config)))
+  (into {} (map connector-entry->type) (:env/connectors env-config)))
 
 (defn extract-stage-configs
   "Extract the stage config overrides map from env config."

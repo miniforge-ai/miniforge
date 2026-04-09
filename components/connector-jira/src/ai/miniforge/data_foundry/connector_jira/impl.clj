@@ -136,7 +136,7 @@
         {:keys [config auth-headers]} handle-state
         url          (resources/build-url (:jira/base-url config) resource-def config)
         params       (resources/build-query-params resource-def (:extract/cursor opts) opts config)
-        response-key (or (:response-key resource-def) :values)
+        response-key (get resource-def :response-key :values)
         raw-records  (fetch-all-pages handle url auth-headers params response-key)
         records      (schema/validate-records resource-key raw-records)
         cursor       (when (= :timestamp-watermark (:cursor-type resource-def))

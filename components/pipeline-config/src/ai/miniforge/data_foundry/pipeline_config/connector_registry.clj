@@ -16,10 +16,15 @@
   (swap! registry assoc type-kw {:factory-fn factory-fn :metadata metadata})
   nil)
 
+(defn- entry->metadata
+  "Extract [type-kw metadata] from a registry entry."
+  [[k v]]
+  [k (:metadata v)])
+
 (defn list-connectors
   "Return all registered connector types with metadata."
   [registry]
-  (into {} (map (fn [[k v]] [k (:metadata v)])) @registry))
+  (into {} (map entry->metadata) @registry))
 
 (defn instantiate-connectors
   "Given a registry and a map of {symbolic-ref → connector-type-keyword},

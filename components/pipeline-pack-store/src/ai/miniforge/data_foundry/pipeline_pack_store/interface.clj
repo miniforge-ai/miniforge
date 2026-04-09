@@ -1,7 +1,9 @@
 (ns ai.miniforge.data-foundry.pipeline-pack-store.interface
   "Public API for pipeline pack persistence.
 
-   Uses requiring-resolve to defer Datalevin loading."
+   Uses requiring-resolve to defer Datalevin (native dep) loading.
+   This is a legitimate extension point — Datalevin pulls in JNI
+   native libraries that should not load at namespace-require time."
   (:require
    [ai.miniforge.data-foundry.pipeline-pack-store.protocol :as proto]))
 

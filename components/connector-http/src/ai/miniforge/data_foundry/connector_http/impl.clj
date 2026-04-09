@@ -152,7 +152,7 @@
           has-more (page-has-more? pagination body offset (count records))
           next-val (next-cursor-value pagination body offset (count records))
           cursor   (when next-val
-                     {:cursor/type  (or (:type pagination) :offset)
+                     {:cursor/type  (get pagination :type :offset)
                       :cursor/value next-val})]
       {:records records :cursor cursor :has-more has-more})))
 
@@ -172,16 +172,16 @@
 
       (if-let [param-sets (:batch/param-sets config)]
         ;; Batch mode: pmap over param sets, enrich records with param keys
-        (let [all-records (vec (apply concat
-                                     (pmap (fn [params]
-                                             (let [{:keys [records]} (fetch-single
-                                                                      url headers
-                                                                      (merge base-qp params)
-                                                                      response-path pagination opts)]
-                                               (mapv #(merge % params) records)))
-                                           param-sets)))]
-          (touch-handle! handle)
-          (result/extract-result all-records nil false))
+        (letfn [(fetch-and-enrich [params]
+                  (let [{:keys [records]} (fetch-single
+                                           url headers
+                                           (merge base-qp params)
+                                           response-path pagination opts)]
+                    (mapv #(merge % params) records)))]
+          (let [all-records (vec (apply concat
+                                       (pmap fetch-and-enrich param-sets)))]
+            (touch-handle! handle)
+            (result/extract-result all-records nil false)))
 
         ;; Single mode: one fetch with pagination
         (do

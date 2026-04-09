@@ -36,6 +36,15 @@
   (when entity
     (into {} entity)))
 
+(defn- metric-group->latest-snapshot
+  "Given [metric-id rows] from a group-by, return the latest snapshot map."
+  [[metric-id rows]]
+  (let [latest (last (sort-by #(nth % 3) rows))]
+    {:snapshot/id        (nth latest 0)
+     :snapshot/metric-id metric-id
+     :snapshot/value     (nth latest 2)
+     :snapshot/as-of     (nth latest 3)}))
+
 (defrecord DatalevinPackStore [conn]
   proto/PackStore
 
@@ -74,12 +83,7 @@
       ;; Group by metric-id, take latest by as-of
       (->> results
            (group-by second)
-           (map (fn [[metric-id rows]]
-                  (let [latest (last (sort-by #(nth % 3) rows))]
-                    {:snapshot/id        (nth latest 0)
-                     :snapshot/metric-id metric-id
-                     :snapshot/value     (nth latest 2)
-                     :snapshot/as-of     (nth latest 3)})))
+           (map metric-group->latest-snapshot)
            vec)))
 
   (save-run [_this run]

@@ -43,8 +43,8 @@
   "Build query params for a GitHub API request, merging resource defaults,
    sort/direction, per_page, and incremental cursor value."
   [resource-def cursor opts]
-  (let [base-params  (or (:query-params resource-def) {})
-        per-page     (or (:extract/batch-size opts) (:per-page resource-def) 100)
+  (let [base-params  (get resource-def :query-params {})
+        per-page     (get opts :extract/batch-size (get resource-def :per-page 100))
         sort-param   (:sort-param resource-def)
         direction    (:direction-param resource-def)
         incr-param   (:incremental-param resource-def)
