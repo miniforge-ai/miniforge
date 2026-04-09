@@ -103,9 +103,8 @@
    Returns:
    - Template string"
   [rule pack]
-  (or (:rule/repair-prompt-template rule)
-      (get-in pack [:pack/prompt-templates :repair-prompt])
-      @default-repair-prompt))
+  (get rule :rule/repair-prompt-template
+       (get-in pack [:pack/prompt-templates :repair-prompt] @default-repair-prompt)))
 
 (defn resolve-behavior-template
   "Resolve the behavior section template.
@@ -120,8 +119,7 @@
    Returns:
    - Template string"
   [pack]
-  (or (get-in pack [:pack/prompt-templates :behavior-section])
-      @default-behavior-section))
+  (get-in pack [:pack/prompt-templates :behavior-section] @default-behavior-section))
 
 (defn resolve-knowledge-template
   "Resolve the knowledge section template.
@@ -136,8 +134,7 @@
    Returns:
    - Template string"
   [pack]
-  (or (get-in pack [:pack/prompt-templates :knowledge-section])
-      @default-knowledge-section))
+  (get-in pack [:pack/prompt-templates :knowledge-section] @default-knowledge-section))
 
 (defn render-repair-prompt
   "Render a complete repair prompt for a violation.
