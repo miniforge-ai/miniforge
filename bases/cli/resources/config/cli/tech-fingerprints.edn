@@ -1,0 +1,234 @@
+;; Technology fingerprints for repository analysis.
+;; Each entry declares how to detect a technology and which policy packs apply.
+;;
+;; Schema:
+;;   :tech/id         — Unique keyword identifier
+;;   :tech/extensions — File extensions that indicate this technology (optional)
+;;   :tech/markers    — File/directory presence markers (optional)
+;;     :path          — File or directory name to check
+;;     :type          — :file or :directory
+;;     :content       — String that must appear in the file (optional, for content-based detection)
+;;   :tech/packs      — Policy pack names to apply when detected (optional)
+;;
+;; Sorted alphabetically by :tech/id.
+
+[;; ── Languages ──────────────────────────────────────────────────────────────
+
+ {:tech/id         :bash
+  :tech/extensions ["sh" "bash"]}
+
+ {:tech/id         :c
+  :tech/extensions ["c" "h"]}
+
+ {:tech/id         :clojure
+  :tech/extensions ["clj" "cljs" "cljc" "edn"]}
+
+ {:tech/id         :cpp
+  :tech/extensions ["cpp" "cc" "cxx" "hpp" "hxx"]}
+
+ {:tech/id         :csharp
+  :tech/extensions ["cs" "csx"]}
+
+ {:tech/id         :dart
+  :tech/extensions ["dart"]}
+
+ {:tech/id         :elixir
+  :tech/extensions ["ex" "exs"]}
+
+ {:tech/id         :erlang
+  :tech/extensions ["erl" "hrl"]}
+
+ {:tech/id         :fsharp
+  :tech/extensions ["fs" "fsx" "fsi"]}
+
+ {:tech/id         :go
+  :tech/extensions ["go"]}
+
+ {:tech/id         :haskell
+  :tech/extensions ["hs" "lhs"]}
+
+ {:tech/id         :java
+  :tech/extensions ["java"]}
+
+ {:tech/id         :javascript
+  :tech/extensions ["js" "mjs" "cjs" "jsx"]}
+
+ {:tech/id         :json
+  :tech/extensions ["json"]}
+
+ {:tech/id         :julia
+  :tech/extensions ["jl"]}
+
+ {:tech/id         :kotlin
+  :tech/extensions ["kt" "kts"]}
+
+ {:tech/id         :lua
+  :tech/extensions ["lua"]}
+
+ {:tech/id         :markdown
+  :tech/extensions ["md" "markdown"]}
+
+ {:tech/id         :ocaml
+  :tech/extensions ["ml" "mli"]}
+
+ {:tech/id         :perl
+  :tech/extensions ["pl" "pm"]}
+
+ {:tech/id         :php
+  :tech/extensions ["php"]}
+
+ {:tech/id         :python
+  :tech/extensions ["py" "pyi"]}
+
+ {:tech/id         :r
+  :tech/extensions ["r" "R" "Rmd"]}
+
+ {:tech/id         :ruby
+  :tech/extensions ["rb"]}
+
+ {:tech/id         :rust
+  :tech/extensions ["rs"]}
+
+ {:tech/id         :scala
+  :tech/extensions ["scala" "sc"]}
+
+ {:tech/id         :swift
+  :tech/extensions ["swift"]}
+
+ {:tech/id         :terraform
+  :tech/extensions ["tf" "tfvars"]
+  :tech/packs      ["terraform-aws-1.0.0"]}
+
+ {:tech/id         :typescript
+  :tech/extensions ["ts" "tsx"]}
+
+ {:tech/id         :yaml
+  :tech/extensions ["yaml" "yml"]}
+
+ {:tech/id         :zig
+  :tech/extensions ["zig"]}
+
+ ;; ── Build systems ──────────────────────────────────────────────────────────
+
+ {:tech/id      :babashka
+  :tech/markers [{:path "bb.edn" :type :file}]}
+
+ {:tech/id      :bazel
+  :tech/markers [{:path "BUILD" :type :file}
+                 {:path "BUILD.bazel" :type :file}
+                 {:path "WORKSPACE" :type :file}
+                 {:path "WORKSPACE.bazel" :type :file}]}
+
+ {:tech/id      :bundler
+  :tech/markers [{:path "Gemfile" :type :file}]}
+
+ {:tech/id      :cabal
+  :tech/markers [{:path "*.cabal" :type :file}]}
+
+ {:tech/id      :cargo
+  :tech/markers [{:path "Cargo.toml" :type :file}]}
+
+ {:tech/id      :cmake
+  :tech/markers [{:path "CMakeLists.txt" :type :file}]}
+
+ {:tech/id      :deps-edn
+  :tech/markers [{:path "deps.edn" :type :file}]}
+
+ {:tech/id      :dotnet
+  :tech/markers [{:path "*.csproj" :type :file}
+                 {:path "*.fsproj" :type :file}
+                 {:path "*.sln" :type :file}]}
+
+ {:tech/id      :go-mod
+  :tech/markers [{:path "go.mod" :type :file}]}
+
+ {:tech/id      :gradle
+  :tech/markers [{:path "build.gradle" :type :file}
+                 {:path "build.gradle.kts" :type :file}]}
+
+ {:tech/id      :leiningen
+  :tech/markers [{:path "project.clj" :type :file}]}
+
+ {:tech/id      :make
+  :tech/markers [{:path "Makefile" :type :file}]}
+
+ {:tech/id      :maven
+  :tech/markers [{:path "pom.xml" :type :file}]}
+
+ {:tech/id      :mix
+  :tech/markers [{:path "mix.exs" :type :file}]}
+
+ {:tech/id      :npm
+  :tech/markers [{:path "package.json" :type :file}]}
+
+ {:tech/id      :pip
+  :tech/markers [{:path "requirements.txt" :type :file}]}
+
+ {:tech/id      :pipenv
+  :tech/markers [{:path "Pipfile" :type :file}]}
+
+ {:tech/id      :pnpm
+  :tech/markers [{:path "pnpm-lock.yaml" :type :file}]}
+
+ {:tech/id      :poetry
+  :tech/markers [{:path "poetry.lock" :type :file}]}
+
+ {:tech/id      :pyproject
+  :tech/markers [{:path "pyproject.toml" :type :file}]}
+
+ {:tech/id      :setuptools
+  :tech/markers [{:path "setup.py" :type :file}]}
+
+ {:tech/id      :stack
+  :tech/markers [{:path "stack.yaml" :type :file}]}
+
+ {:tech/id      :swift-pm
+  :tech/markers [{:path "Package.swift" :type :file}]}
+
+ {:tech/id      :yarn
+  :tech/markers [{:path "yarn.lock" :type :file}]}
+
+ ;; ── Frameworks ─────────────────────────────────────────────────────────────
+
+ {:tech/id      :angular
+  :tech/markers [{:path "angular.json" :type :file}]}
+
+ {:tech/id      :docker
+  :tech/markers [{:path "Dockerfile" :type :file}]}
+
+ {:tech/id      :docker-compose
+  :tech/markers [{:path "docker-compose.yaml" :type :file}
+                 {:path "docker-compose.yml" :type :file}]}
+
+ {:tech/id      :flutter
+  :tech/markers [{:path "pubspec.yaml" :type :file}]}
+
+ {:tech/id      :helm
+  :tech/markers [{:path "Chart.yaml" :type :file}]
+  :tech/packs   ["kubernetes-1.0.0"]}
+
+ {:tech/id      :kubernetes
+  :tech/markers [{:path "**/*.yaml" :type :file :content "apiVersion:"}
+                 {:path "**/*.yml"  :type :file :content "apiVersion:"}]
+  :tech/packs   ["kubernetes-1.0.0"]}
+
+ {:tech/id      :kustomize
+  :tech/markers [{:path "kustomization.yaml" :type :file}]
+  :tech/packs   ["kubernetes-1.0.0"]}
+
+ {:tech/id      :nextjs
+  :tech/markers [{:path "next.config.js" :type :file}
+                 {:path "next.config.mjs" :type :file}
+                 {:path "next.config.ts" :type :file}]}
+
+ {:tech/id      :polylith
+  :tech/markers [{:path "workspace.edn" :type :file}
+                 {:path "components" :type :directory}]}
+
+ {:tech/id      :serverless
+  :tech/markers [{:path "serverless.yml" :type :file}
+                 {:path "serverless.yaml" :type :file}]}
+
+ {:tech/id      :terraform-module
+  :tech/markers [{:path "main.tf" :type :file}]
+  :tech/packs   ["terraform-aws-1.0.0"]}]

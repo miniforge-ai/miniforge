@@ -28,9 +28,7 @@
 (defn- build-config
   "Build the .miniforge/config.edn map from analysis results."
   [analysis]
-  (cond-> {:repo/languages    (:languages analysis)
-           :repo/frameworks   (:frameworks analysis)
-           :repo/build-systems (:build-systems analysis)
+  (cond-> {:repo/technologies (:technologies analysis)
            :repo/packs        (:packs analysis)}
     (:git-host analysis)
     (assoc :repo/host (:git-host analysis))))
@@ -41,9 +39,7 @@
 (defn- print-analysis
   "Print the analysis results to the user."
   [analysis]
-  (display/print-info (str "  Languages:    " (pr-str (:languages analysis))))
-  (display/print-info (str "  Frameworks:   " (pr-str (:frameworks analysis))))
-  (display/print-info (str "  Build systems: " (pr-str (:build-systems analysis))))
+  (display/print-info (str "  Technologies: " (pr-str (:technologies analysis))))
   (display/print-info (str "  Git host:     " (or (:git-host analysis) "unknown")))
   (display/print-info (str "  Packs:        " (pr-str (:packs analysis)))))
 
