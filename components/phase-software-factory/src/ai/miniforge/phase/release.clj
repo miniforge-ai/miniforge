@@ -20,6 +20,9 @@
   "Release phase interceptor.
 
    Prepares release artifacts and creates PRs using the release-executor component.
+   All git/gh operations route through the DAG executor so governed-mode capsules
+   never shell out to the host. The GitHub token is resolved and injected into the
+   capsule as GH_TOKEN for gh CLI authentication.
    Agent: :releaser
    Default gates: [:release-ready]"
   (:require [clojure.java.io :as io]
@@ -197,8 +200,27 @@
                                                  (messages/t :default/task-description))}
        :workflow/artifacts code-artifacts})))
 
+(defn- resolve-github-token
+  "Resolve GitHub token for capsule PR operations.
+   Mirrors the resolution order from docker.clj's resolve-git-token:
+   1. Execution context (passed by task runner)
+   2. MINIFORGE_GIT_TOKEN env var (universal override)
+   3. GH_TOKEN env var (GitHub-specific)
+   4. `gh auth token` CLI fallback (host-side only, pre-capsule)"
+  [ctx]
+  (or (get-in ctx [:execution/opts :github-token])
+      (get-in ctx [:execution/github-token])
+      (System/getenv "MINIFORGE_GIT_TOKEN")
+      (System/getenv "GH_TOKEN")
+      (try (let [r (shell/sh "gh" "auth" "token")]
+             (when (zero? (:exit r))
+               (str/trim (:out r))))
+           (catch Exception _ nil))))
+
 (defn build-executor-context
-  "Build context for the release executor from phase context."
+  "Build context for the release executor from phase context.
+   Includes :github-token so the release executor can inject GH_TOKEN
+   into the capsule's environment for gh CLI authentication."
   [ctx config]
   (let [on-chunk (phase/create-streaming-callback ctx :release)]
     (cond-> {:worktree-path (or (get-in ctx [:execution/worktree-path])
@@ -214,7 +236,9 @@
              :event-stream (:event-stream ctx)
              ;; Allow disabling PR creation via config or execution opts
              :create-pr? (or (get-in ctx [:execution/opts :create-pr?])
-                             (get config :create-pr? true))}
+                             (get config :create-pr? true))
+             ;; Resolve and inject GitHub token for capsule gh CLI auth
+             :github-token (resolve-github-token ctx)}
       on-chunk (assoc :on-chunk on-chunk))))
 
 (defn enter-release
