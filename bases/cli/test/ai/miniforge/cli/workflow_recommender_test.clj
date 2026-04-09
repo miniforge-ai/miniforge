@@ -23,9 +23,9 @@
    [ai.miniforge.cli.workflow-recommender :as recommender]))
 
 (deftest build-recommendation-prompt-test
-  (let [available-workflows [{:workflow/id :lean-sdlc-v1
+  (let [available-workflows [{:workflow/id :quick-fix
                               :workflow/task-types [:bugfix :docs]}
-                             {:workflow/id :canonical-sdlc-v1
+                             {:workflow/id :canonical-sdlc
                               :workflow/task-types [:feature :refactoring]}]]
     (testing "configured prompt vocabulary is reflected in the assembled prompt"
       (let [prompt-config (cfg/recommendation-prompt-config)]
@@ -62,21 +62,21 @@
             (is (.contains prompt (get-in prompt-config [:summary-labels :has-testing])))))))))
 
 (deftest recommend-by-task-type-test
-  (let [available-workflows [{:workflow/id :lean-sdlc-v1
+  (let [available-workflows [{:workflow/id :quick-fix
                               :workflow/task-types [:bugfix :docs]}
-                             {:workflow/id :canonical-sdlc-v1
+                             {:workflow/id :canonical-sdlc
                               :workflow/task-types [:feature :refactoring]}]]
     (testing "matching task types win before profile fallback"
       (let [result (recommender/recommend-by-task-type
                     {:spec/workflow-type :bugfix}
                     available-workflows)]
-        (is (= :lean-sdlc-v1 (:workflow result)))
+        (is (= :quick-fix (:workflow result)))
         (is (= :fallback (:source result)))))
 
     (testing "missing task types fall back to the app-configured default workflow"
       (let [result (recommender/recommend-by-task-type
                     {:spec/workflow-type :unmapped-task}
                     available-workflows)]
-        (is (= :lean-sdlc-v1 (:workflow result)))
+        (is (= :canonical-sdlc (:workflow result)))
         (is (= :fallback (:source result)))
         (is (= 0.3 (:confidence result)))))))
