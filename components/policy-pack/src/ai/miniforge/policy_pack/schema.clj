@@ -218,6 +218,12 @@
    ;; Examples (for documentation and testing)
    [:rule/examples {:optional true} [:vector RuleExample]]
 
+   ;; Prompt template for LLM-based semantic repair (pack-bundled).
+   ;; Uses {{variable}} interpolation: {{file}}, {{line}}, {{current}},
+   ;; {{rationale}}, {{rule-title}}, {{knowledge-content}}.
+   ;; Overrides pack-level :repair-prompt template when present.
+   [:rule/repair-prompt-template {:optional true} string?]
+
    ;; Metadata
    [:rule/version {:optional true} string?]
    [:rule/author {:optional true} string?]
@@ -292,6 +298,11 @@
 
    ;; Taxonomy reference (N4 §2.1)
    [:pack/taxonomy-ref {:optional true} TaxonomyRef]
+
+   ;; Pack-bundled prompt templates (N4 §6).
+   ;; Keys: :behavior-section, :knowledge-section, :repair-prompt
+   ;; Templates use {{variable}} interpolation.
+   [:pack/prompt-templates {:optional true} [:map-of :keyword string?]]
 
    ;; Config overrides (governance config tuning from trusted packs)
    [:pack/config-overrides {:optional true} [:map-of :keyword :map]]
