@@ -247,6 +247,52 @@
       (is (str/includes? addendum "1. Check imports."))
       (is (str/includes? addendum "2. Validate schema.")))))
 
+;; ============================================================================
+;; Layer 0 — extract-knowledge-content tests
+;; ============================================================================
+
+(deftest extract-knowledge-content-test
+  (testing "extracts rules with :rule/knowledge-content"
+    (let [result (sut/extract-knowledge-content
+                  [{:rule/id :r1 :rule/title "Rule 1" :rule/knowledge-content "Content 1"}
+                   {:rule/id :r2 :rule/title "Rule 2"}
+                   {:rule/id :r3 :rule/title "Rule 3" :rule/knowledge-content "Content 3"}])]
+      (is (= 2 (count result)))
+      (is (= :r1 (:rule/id (first result))))
+      (is (= "Content 1" (:content (first result))))))
+
+  (testing "returns empty vector when no knowledge content"
+    (is (= [] (sut/extract-knowledge-content [{:rule/id :r1}]))))
+
+  (testing "returns empty vector for empty input"
+    (is (= [] (sut/extract-knowledge-content [])))))
+
+;; ============================================================================
+;; Layer 0 — format-knowledge-addendum tests
+;; ============================================================================
+
+(deftest format-knowledge-addendum-test
+  (testing "formats knowledge as Reference Material section"
+    (let [result (sut/format-knowledge-addendum
+                  [{:rule/title "Rule A" :content "Body A"}])]
+      (is (string? result))
+      (is (str/includes? result "## Reference Material"))
+      (is (str/includes? result "### Rule A"))
+      (is (str/includes? result "Body A"))))
+
+  (testing "formats multiple knowledge entries"
+    (let [result (sut/format-knowledge-addendum
+                  [{:rule/title "R1" :content "C1"}
+                   {:rule/title "R2" :content "C2"}])]
+      (is (str/includes? result "### R1"))
+      (is (str/includes? result "### R2"))))
+
+  (testing "returns nil for empty knowledge"
+    (is (nil? (sut/format-knowledge-addendum []))))
+
+  (testing "returns nil for nil knowledge"
+    (is (nil? (sut/format-knowledge-addendum nil)))))
+
 (deftest empty-rules-produce-nil-addendum-test
   (testing "no applicable rules → nil addendum (no empty section injected)"
     (let [behaviors (sut/extract-agent-behaviors [])
