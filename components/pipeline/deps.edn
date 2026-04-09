@@ -1,0 +1,7 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge/dag-primitives {:local/root "../../../miniforge/components/dag-primitives"}
+        ai.miniforge/dag-executor   {:local/root "../../../miniforge/components/dag-executor"}
+        ai.miniforge/schema         {:local/root "../../../miniforge/components/schema"}
+        ai.miniforge/workflow       {:local/root "../../../miniforge/components/workflow"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {}}}}

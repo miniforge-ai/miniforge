@@ -1,0 +1,14 @@
+{:pack/id          "simple-pack"
+ :pack/name        "Simple Test Pack"
+ :pack/version     "2026.03.17"
+ :pack/description "A minimal pipeline pack for testing"
+ :pack/author      "test"
+ :pack/trust-level :untrusted
+ :pack/authority   :authority/data
+ :pack/pipelines   ["pipelines/test-pipeline.edn"]
+ :pack/envs        ["envs/local.edn"]
+ :pack/metric-registry "metric-registry.edn"
+ :pack/connector-types #{:http :file}
+ :pack/extends     []
+ :pack/created-at  #inst "2026-03-17T00:00:00Z"
+ :pack/updated-at  #inst "2026-03-17T00:00:00Z"}

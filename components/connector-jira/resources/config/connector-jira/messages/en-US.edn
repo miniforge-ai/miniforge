@@ -1,0 +1,7 @@
+{:connector-jira/messages
+ {:jira/handle-not-found   "Handle not found: {handle}"
+  :jira/auth-invalid       "Invalid auth: {errors}"
+  :jira/site-required      "Jira config requires :jira/site (e.g. \"mycompany\")"
+  :jira/resource-unknown   "Unknown Jira resource: {resource}"
+  :jira/rate-limited       "Jira API rate limited"
+  :jira/request-failed     "Jira API request failed (HTTP {status}): {error}"}}

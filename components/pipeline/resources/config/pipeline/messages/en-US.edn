@@ -1,0 +1,25 @@
+{:pipeline/messages
+ {;; Pipeline validation (core.clj)
+  :pipeline/id-required              ":pipeline/id is required"
+  :pipeline/name-must-be-string      ":pipeline/name must be a string"
+  :pipeline/version-must-be-string   ":pipeline/version must be a string"
+  :pipeline/stages-must-be-vector    ":pipeline/stages must be a vector"
+  :pipeline/stages-must-not-be-empty ":pipeline/stages must not be empty"
+  :pipeline/mode-invalid             ":pipeline/mode must be one of {allowed}"
+  :pipeline/input-ds-must-be-vector  ":pipeline/input-datasets must be a vector"
+  :pipeline/output-ds-must-be-vector ":pipeline/output-datasets must be a vector"
+  :pipeline/stage-error              "Stage '{name}': {error}"
+  :pipeline/unknown-dependency       "Stage '{name}' references unknown dependency: {dep}"
+  :pipeline/cycle-detected           "Pipeline stages contain a cycle"
+
+  ;; Stage validation (stage.clj)
+  :stage/id-required                 ":stage/id is required"
+  :stage/name-must-be-string         ":stage/name must be a string"
+  :stage/family-invalid              ":stage/family must be one of {allowed}"
+  :stage/connector-ref-required      ":stage/connector-ref is required for {family} stages"
+  :stage/connector-ref-forbidden     ":stage/connector-ref must not be set for {family} stages"
+  :stage/ingest-no-input             "Ingest stages must not have input datasets"
+  :stage/publish-no-output           "Publish stages must not have output datasets"
+  :stage/must-have-input             "{family} stages must have at least one input dataset"
+  :stage/must-have-output            "{family} stages must have at least one output dataset"
+  :stage/deps-must-be-vector         ":stage/dependencies must be a vector"}}

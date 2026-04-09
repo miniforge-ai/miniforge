@@ -1,0 +1,5 @@
+{:env/name "test-local"
+ :env/connectors
+ {:conn/test-src {:connector/type :file}}
+ :env/stages
+ {"Ingest" {:file/path "test-data.json" :file/format :json}}}

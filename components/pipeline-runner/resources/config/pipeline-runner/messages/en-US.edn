@@ -1,0 +1,11 @@
+{:pipeline-runner/messages
+ {;; Pipeline run validation (core.clj)
+  :run/id-required          ":pipeline-run/id is required"
+  :run/pipeline-id-required ":pipeline-run/pipeline-id is required"
+  :run/version-required     ":pipeline-run/version is required"
+  :run/mode-invalid         ":pipeline-run/mode is invalid"
+  :run/status-invalid       ":pipeline-run/status is invalid"
+
+  ;; Execution errors (run.clj)
+  :run/connector-not-found  "No connector found for ref: {ref}"
+  :run/stage-failed         "Stage failed: {name}"}}

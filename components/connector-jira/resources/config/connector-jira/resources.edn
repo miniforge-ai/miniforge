@@ -1,0 +1,31 @@
+{:issues     {:endpoint          "/rest/api/3/search/jql"
+              :cursor-type       :timestamp-watermark
+              :per-page          100
+              :pagination        :offset
+              :response-key      :issues
+              :uses-jql          true
+              :default-fields    "id,key,summary,status,updated,created,assignee,description,issuetype,priority"}
+
+ :projects   {:endpoint          "/rest/api/3/project/search"
+              :cursor-type       nil
+              :per-page          50
+              :pagination        :offset
+              :response-key      :values}
+
+ :boards     {:endpoint          "/rest/agile/1.0/board"
+              :cursor-type       nil
+              :per-page          50
+              :pagination        :offset
+              :response-key      :values}
+
+ :sprints    {:endpoint          "/rest/agile/1.0/board/{board_id}/sprint"
+              :cursor-type       nil
+              :per-page          50
+              :pagination        :offset
+              :response-key      :values}
+
+ :comments   {:endpoint          "/rest/api/3/issue/{issue_key}/comment"
+              :cursor-type       nil
+              :per-page          100
+              :pagination        :offset
+              :response-key      :comments}}

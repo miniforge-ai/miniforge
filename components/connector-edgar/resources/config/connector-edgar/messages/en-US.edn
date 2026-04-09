@@ -1,0 +1,16 @@
+{:connector-edgar/messages
+ {;; Lifecycle
+  :edgar/connect-success   "Connected to EDGAR: {form-type}"
+  :edgar/close-success     "Closed EDGAR handle: {handle}"
+  :edgar/handle-not-found  "EDGAR handle not found: {handle}"
+
+  ;; Config validation
+  :edgar/form-type-required    ":edgar/form-type is required"
+  :edgar/user-agent-required   ":edgar/user-agent is required"
+  :edgar/aggregation-required  ":edgar/aggregation is required"
+
+  ;; Extract
+  :edgar/aggregation-unknown  "Unknown aggregation type: {agg}"
+  :edgar/search-failed     "EDGAR EFTS search failed: {error}"
+  :edgar/fetch-failed      "Failed to fetch filing {adsh}: {error}"
+  :edgar/parse-failed      "Failed to parse filing XML: {error}"}}

@@ -1,0 +1,10 @@
+{:connector-gitlab/messages
+ {:gitlab/connect-success     "Connected to GitLab API: {base-url}"
+  :gitlab/close-success       "Closed GitLab handle: {handle}"
+  :gitlab/handle-not-found    "GitLab handle not found: {handle}"
+  :gitlab/project-required    "GitLab connector requires :gitlab/project-id or :gitlab/project-path in config"
+  :gitlab/auth-invalid        "Auth validation failed: {errors}"
+  :gitlab/request-failed      "GitLab API request failed: {status} {error}"
+  :gitlab/rate-limited        "Rate limited by GitLab API (429)"
+  :gitlab/resource-unknown    "Unknown GitLab resource type: {resource}"
+  :gitlab/config-invalid      "GitLab config validation failed: {errors}"}}

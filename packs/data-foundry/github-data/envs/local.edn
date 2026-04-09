@@ -1,0 +1,47 @@
+;; GitHub Data Pack — Local Environment Config
+;;
+;; Requires env vars: GITHUB_TOKEN, GITHUB_ORG, GITHUB_REPO
+;; Usage:
+;;   export GITHUB_TOKEN=ghp_... GITHUB_ORG=myorg GITHUB_REPO=myrepo
+;;   data-foundry run-pack packs/github-data --env local
+{:env/name "local"
+
+ :env/connectors
+ {:conn/github {:connector/type :github}
+  :conn/output {:connector/type :pipeline-output}}
+
+ :env/stages
+ {"Ingest PRs"
+  {:github/owner        "${GITHUB_ORG}"
+   :github/repo         "${GITHUB_REPO}"
+   :auth/method         :api-key
+   :auth/credential-id  "${GITHUB_TOKEN}"}
+
+  "Ingest Issues"
+  {:github/owner        "${GITHUB_ORG}"
+   :github/repo         "${GITHUB_REPO}"
+   :auth/method         :api-key
+   :auth/credential-id  "${GITHUB_TOKEN}"}
+
+  "Ingest Comments"
+  {:github/owner        "${GITHUB_ORG}"
+   :github/repo         "${GITHUB_REPO}"
+   :auth/method         :api-key
+   :auth/credential-id  "${GITHUB_TOKEN}"}
+
+  "Ingest Commits"
+  {:github/owner        "${GITHUB_ORG}"
+   :github/repo         "${GITHUB_REPO}"
+   :auth/method         :api-key
+   :auth/credential-id  "${GITHUB_TOKEN}"}
+
+  "Ingest Reviews"
+  {:github/owner        "${GITHUB_ORG}"
+   :github/repo         "${GITHUB_REPO}"
+   :auth/method         :api-key
+   :auth/credential-id  "${GITHUB_TOKEN}"}
+
+  "Publish"
+  {:output/dir           "output/github-data"
+   :output/format        :edn
+   :output/pipeline-name "github-extract"}}}

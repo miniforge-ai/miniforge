@@ -1,0 +1,10 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge.data-foundry/connector     {:local/root "../connector"}
+        ai.miniforge.data-foundry/data-quality  {:local/root "../data-quality"}
+        ai.miniforge.data-foundry/dataset       {:local/root "../dataset"}
+        ai.miniforge.data-foundry/pipeline      {:local/root "../pipeline"}
+        ai.miniforge/dag-executor     {:local/root "../../../miniforge/components/dag-executor"}
+        ai.miniforge/event-stream     {:local/root "../../../miniforge/components/event-stream"}
+        ai.miniforge/schema           {:local/root "../../../miniforge/components/schema"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {}}}}

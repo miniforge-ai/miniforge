@@ -1,0 +1,10 @@
+{:data-quality/messages
+ {;; Rule violations
+  :violation/required       "Field \"{field}\" is required but missing or nil"
+  :violation/type-check     "Field \"{field}\" expected type {expected}, got {actual}"
+  :violation/range          "Field \"{field}\" value {value} is outside range [{min}, {max}]"
+  :violation/pattern        "Field \"{field}\" value \"{value}\" does not match pattern {pattern}"
+  :violation/custom         "Custom rule \"{rule}\" failed: {message}"
+
+  ;; Report
+  :report/no-rules          "No rules provided for evaluation"}}

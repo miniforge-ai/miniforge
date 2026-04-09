@@ -1,0 +1,18 @@
+{:registry/id      "test-metrics"
+ :registry/version "2026.03.17"
+ :registry/families
+ [{:family/id       :test-family
+   :family/name     "Test Metrics"
+   :family/metrics
+   [{:metric/id              "TEST_METRIC_1"
+     :metric/name            "Test Metric 1"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "TEST"
+     :metric/refresh-cadence :daily
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :percent}]}]
+ :registry/pipeline-metric-map
+ {"test-pipeline" ["TEST_METRIC_1"]}}

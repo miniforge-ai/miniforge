@@ -1,0 +1,351 @@
+{:registry/id      "risk-metrics"
+ :registry/version "2026.03.17"
+ :registry/families
+
+ [{:family/id       :yield-curve
+   :family/name     "Yield Curve & Credit Spreads"
+   :family/metrics
+   [{:metric/id              "T10Y2Y"
+     :metric/name            "10Y-2Y Treasury Spread"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :daily
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :percent}
+    {:metric/id              "T10Y3M"
+     :metric/name            "10Y-3M Treasury Spread"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :daily
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :percent}
+    {:metric/id              "BAMLH0A0HYM2"
+     :metric/name            "ICE BofA US High Yield OAS"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :daily
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :inverse
+     :metric/unit            :percent}
+    {:metric/id              "BAA10Y"
+     :metric/name            "Moody's Baa-10Y Treasury Spread"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :daily
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :inverse
+     :metric/unit            :percent}]}
+
+  {:family/id       :labor-market
+   :family/name     "Labor Market"
+   :family/metrics
+   [{:metric/id              "ICSA"
+     :metric/name            "Initial Jobless Claims"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :weekly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :inverse
+     :metric/unit            :count}
+    {:metric/id              "UNRATE"
+     :metric/name            "Unemployment Rate"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :monthly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :inverse
+     :metric/unit            :percent}
+    {:metric/id              "JTSJOL"
+     :metric/name            "Job Openings (JOLTS)"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :monthly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :count}]}
+
+  {:family/id       :inflation
+   :family/name     "Inflation & Expectations"
+   :family/metrics
+   [{:metric/id              "T5YIE"
+     :metric/name            "5-Year Breakeven Inflation"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :daily
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :percent}
+    {:metric/id              "T10YIE"
+     :metric/name            "10-Year Breakeven Inflation"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :daily
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :percent}
+    {:metric/id              "CPIAUCSL"
+     :metric/name            "CPI All Urban Consumers"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :monthly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :index}
+    {:metric/id              "CPILFESL"
+     :metric/name            "CPI Less Food & Energy (Core)"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :monthly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :index}
+    {:metric/id              "PCEPILFE"
+     :metric/name            "PCE Less Food & Energy (Core)"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :monthly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :index}]}
+
+  {:family/id       :monetary
+   :family/name     "Monetary & Liquidity"
+   :family/metrics
+   [{:metric/id              "M2SL"
+     :metric/name            "M2 Money Stock"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :monthly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :level}
+    {:metric/id              "STLFSI4"
+     :metric/name            "St. Louis Financial Stress Index"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :weekly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :inverse
+     :metric/unit            :index}]}
+
+  {:family/id       :lending-standards
+   :family/name     "Senior Loan Officer Survey (SLOS)"
+   :family/metrics
+   [{:metric/id              "DRTSCILM"
+     :metric/name            "SLOS: C&I Large/Middle-Market"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :quarterly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :inverse
+     :metric/unit            :percent}
+    {:metric/id              "DRTSCIS"
+     :metric/name            "SLOS: C&I Small Firms"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :quarterly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :inverse
+     :metric/unit            :percent}
+    {:metric/id              "SUBLPDRCSC"
+     :metric/name            "SLOS: CRE Construction & Land Dev"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :quarterly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :inverse
+     :metric/unit            :percent}
+    {:metric/id              "DRTSSP"
+     :metric/name            "SLOS: Residential (Subprime Mortgage)"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :quarterly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :inverse
+     :metric/unit            :percent}
+    {:metric/id              "DRTSCLCC"
+     :metric/name            "SLOS: Consumer (Credit Card)"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :quarterly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :inverse
+     :metric/unit            :percent}]}
+
+  {:family/id       :sentiment
+   :family/name     "Sentiment & Volatility"
+   :family/metrics
+   [{:metric/id              "UMCSENT"
+     :metric/name            "Michigan Consumer Sentiment"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :monthly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :index}
+    {:metric/id              "VIXCLS"
+     :metric/name            "CBOE Volatility Index (VIX)"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :daily
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :inverse
+     :metric/unit            :index}]}
+
+  {:family/id       :trade-shipping
+   :family/name     "Trade & Shipping"
+   :family/metrics
+   [{:metric/id              "IR"
+     :metric/name            "Import Price Index"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :monthly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :index}
+    {:metric/id              "ISRATIO"
+     :metric/name            "Inventory-to-Sales Ratio"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :monthly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :ratio}
+    {:metric/id              "FRGSHPUSM649NCIS"
+     :metric/name            "Global Supply Chain Pressure (Shipping)"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :monthly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :index}
+    {:metric/id              "FRGEXPUSM649NCIS"
+     :metric/name            "Global Supply Chain Pressure (Export Orders)"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :monthly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :index}]}
+
+  {:family/id       :corporate
+   :family/name     "Corporate & Flow of Funds"
+   :family/metrics
+   [{:metric/id              "BOGZ1FL663067003Q"
+     :metric/name            "Corporate Profits After Tax"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :quarterly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :level}
+    {:metric/id              "NCBEILQ027S"
+     :metric/name            "Nonfinancial Corporate Business Equity"
+     :metric/source-type     :public_canonical
+     :metric/source-system   "FRED"
+     :metric/refresh-cadence :quarterly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :level}]}
+
+  {:family/id       :house-factors
+   :family/name     "House Factors"
+   :family/metrics
+   [{:metric/id              "BUFFETT_INDICATOR"
+     :metric/name            "Buffett Indicator (Market Cap / GDP)"
+     :metric/source-type     :house_factor
+     :metric/source-system   "internal"
+     :metric/refresh-cadence :quarterly
+     :metric/implementation-mode :derive
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :inverse
+     :metric/unit            :ratio}
+    {:metric/id              "CAPE10"
+     :metric/name            "Shiller CAPE Ratio (P/E 10)"
+     :metric/source-type     :official_market
+     :metric/source-system   "Shiller"
+     :metric/refresh-cadence :monthly
+     :metric/implementation-mode :pull
+     :metric/license-required false
+     :metric/redistribution-risk :low
+     :metric/direction       :inverse
+     :metric/unit            :ratio}
+    {:metric/id              "INSIDER_BUY_SELL_RATIO"
+     :metric/name            "Insider Buy:Sell Ratio (SEC Form 4)"
+     :metric/source-type     :house_factor
+     :metric/source-system   "SEC-EDGAR"
+     :metric/refresh-cadence :monthly
+     :metric/implementation-mode :derive
+     :metric/license-required false
+     :metric/redistribution-risk :none
+     :metric/direction       :normal
+     :metric/unit            :ratio}]}]
+
+ :registry/pipeline-metric-map
+ {"fred-risk-data"
+  ["T10Y2Y" "T10Y3M" "BAMLH0A0HYM2" "BAA10Y"
+   "ICSA" "UNRATE" "JTSJOL"
+   "T5YIE" "T10YIE" "CPIAUCSL" "CPILFESL" "PCEPILFE"
+   "M2SL" "STLFSI4"
+   "DRTSCILM" "DRTSCIS" "SUBLPDRCSC" "DRTSSP" "DRTSCLCC"
+   "UMCSENT" "VIXCLS"
+   "IR" "ISRATIO" "FRGSHPUSM649NCIS" "FRGEXPUSM649NCIS"
+   "BOGZ1FL663067003Q" "NCBEILQ027S"
+   "BUFFETT_INDICATOR" "CAPE10" "INSIDER_BUY_SELL_RATIO"]}}

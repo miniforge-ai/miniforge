@@ -1,0 +1,5 @@
+{:metric-registry/messages
+ {;; Loading
+  :registry/file-not-found   "File not found: {path}"
+  :registry/invalid          "Invalid registry: {errors}"
+  :registry/read-error       "Error reading registry: {error}"}}

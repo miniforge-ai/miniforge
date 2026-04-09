@@ -1,0 +1,17 @@
+{:connector-http/messages
+ {;; Lifecycle
+  :http/connect-success    "Connected to HTTP endpoint: {url}"
+  :http/close-success      "Closed HTTP handle: {handle}"
+  :http/handle-not-found   "HTTP handle not found: {handle}"
+
+  ;; Config validation
+  :http/base-url-required  ":http/base-url is required"
+  :http/endpoint-required  ":http/endpoint is required"
+
+  ;; Extract
+  :http/request-failed     "HTTP request failed: {status} {error}"
+  :http/timeout            "HTTP request timed out for {url}"
+  :http/rate-limited       "Rate limited by server (429)"
+
+  ;; Auth
+  :http/auth-header-set    "Auth header configured for method {method}"}}

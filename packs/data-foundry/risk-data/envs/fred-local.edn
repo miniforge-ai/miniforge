@@ -1,0 +1,87 @@
+;; Risk Data Pipeline — Local Environment Config
+;;
+;; Requires FRED_API_KEY env var to be set.
+;; Usage:
+;;   export FRED_API_KEY=your_key_here
+;;   clojure -M:dev -m ai.miniforge.data-foundry.pipeline-cli.core run \
+;;     pipelines/fred-risk-data.edn --env pipelines/envs/fred-local.edn
+{:env/name "fred-local"
+
+ :env/connectors
+ {:conn/fred-api  {:connector/type :http}
+  :conn/cape-src  {:connector/type :excel}
+  :conn/edgar-src {:connector/type :edgar}
+  :conn/fred-sink {:connector/type :file}}
+
+ :env/stages
+ {"Ingest FRED Latest"
+  {:http/base-url      "https://api.stlouisfed.org"
+   :http/endpoint      "/fred/series/observations"
+   :http/query-params  {:api_key "${FRED_API_KEY}"
+                        :file_type "json"
+                        :sort_order "desc"
+                        :limit "1"}
+   :http/response-path [:observations]
+   :batch/param-sets   [{:series_id "T10Y2Y"}
+                        {:series_id "T10Y3M"}
+                        {:series_id "BAMLH0A0HYM2"}
+                        {:series_id "BAA10Y"}
+                        {:series_id "ICSA"}
+                        {:series_id "UNRATE"}
+                        {:series_id "T5YIE"}
+                        {:series_id "T10YIE"}
+                        ;; SLOS — Senior Loan Officer Survey (quarterly)
+                        {:series_id "DRTSCILM"}   ; C&I Large/Middle-Market
+                        {:series_id "DRTSCIS"}     ; C&I Small Firms
+                        {:series_id "SUBLPDRCSC"}  ; CRE Construction & Land Dev
+                        {:series_id "DRTSSP"}      ; Residential (Subprime Mortgage)
+                        {:series_id "DRTSCLCC"}    ; Consumer (Credit Card)
+                        ;; Sentiment proxies
+                        {:series_id "UMCSENT"}     ; Michigan Consumer Sentiment (→ AAII proxy)
+                        {:series_id "VIXCLS"}      ; VIX (→ CBOE P/C ratio proxy)
+                        {:series_id "STLFSI4"}]}   ; St. Louis Financial Stress Index
+
+  "Ingest FRED YoY"
+  {:http/base-url      "https://api.stlouisfed.org"
+   :http/endpoint      "/fred/series/observations"
+   :http/query-params  {:api_key "${FRED_API_KEY}"
+                        :file_type "json"
+                        :sort_order "desc"
+                        :limit "400"
+                        :observation_start "2025-01-01"}
+   :http/response-path [:observations]
+   :batch/param-sets   [{:series_id "M2SL"}
+                        {:series_id "CPIAUCSL"}
+                        {:series_id "CPILFESL"}
+                        {:series_id "PCEPILFE"}
+                        {:series_id "IR"}
+                        {:series_id "ISRATIO"}
+                        {:series_id "JTSJOL"}
+                        {:series_id "FRGSHPUSM649NCIS"}
+                        {:series_id "FRGEXPUSM649NCIS"}
+                        {:series_id "BOGZ1FL663067003Q"}
+                        {:series_id "NCBEILQ027S"}
+                        {:series_id "GDP"}]}
+
+  "Ingest Shiller CAPE"
+  {:excel/url            "https://img1.wsimg.com/blobby/go/e5e77e0b-59d1-44d9-ab25-4763ac982e53/downloads/3228b83a-7bad-4e69-b405-71e3a1ca6351/ie_data.xls"
+   :excel/sheet-name     "Data"
+   :excel/data-start-row 8
+   :excel/columns        {0 :date, 12 :value}
+   :excel/min-value      2020.0
+   :excel/date-format    :decimal-year
+   :excel/series-id      "CAPE10"}
+
+  "Ingest Insider Ratio"
+  {:edgar/form-type       "4"
+   :edgar/user-agent      "DataFoundry/1.0 chris@miniforge.ai"
+   :edgar/start-date      "2025-01-01"
+   :edgar/sample-size     200
+   :edgar/transaction-codes #{"P" "S"}
+   :edgar/aggregation     :monthly-buy-sell-ratio
+   :edgar/series-id       "INSIDER_BUY_SELL_RATIO"
+   :edgar/filing-filenames ["form4.xml" "ownership.xml" "primary_doc.xml"]}
+
+  "Publish"
+  {:file/path   "output/fred-risk-data.json"
+   :file/format :json}}}

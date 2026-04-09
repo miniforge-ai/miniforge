@@ -1,0 +1,11 @@
+{:connector-pipeline-output/messages
+ {;; Lifecycle
+  :output/handle-not-found    "Pipeline output handle not found: {handle}"
+
+  ;; Config validation
+  :output/dir-required        "Pipeline output requires :output/dir in config"
+  :output/format-unsupported  "Unsupported output format: {format}. Supported: edn, json"
+
+  ;; Write
+  :output/write-failed        "Failed to write pipeline output: {error}"
+  :output/manifest-written    "Pipeline output manifest written: {path}"}}

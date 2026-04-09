@@ -1,0 +1,34 @@
+{:repos    {:endpoint            "/orgs/{org}/repos"
+           :user-endpoint       "/users/{owner}/repos"
+           :sort-param          "updated"
+           :direction-param     "desc"
+           :per-page            100
+           :incremental-param   "since"
+           :cursor-type         :timestamp-watermark}
+ :issues   {:endpoint            "/repos/{owner}/{repo}/issues"
+            :sort-param          "updated"
+            :direction-param     "desc"
+            :per-page            100
+            :incremental-param   "since"
+            :cursor-type         :timestamp-watermark
+            :query-params        {:state "all"}}
+ :pulls    {:endpoint            "/repos/{owner}/{repo}/pulls"
+            :sort-param          "updated"
+            :direction-param     "desc"
+            :per-page            100
+            :incremental-param   "since"
+            :cursor-type         :timestamp-watermark
+            :query-params        {:state "all"}}
+ :reviews  {:endpoint            "/repos/{owner}/{repo}/pulls/{pull_number}/reviews"
+            :per-page            100
+            :cursor-type         :offset}
+ :commits  {:endpoint            "/repos/{owner}/{repo}/commits"
+            :per-page            100
+            :incremental-param   "since"
+            :cursor-type         :timestamp-watermark}
+ :comments {:endpoint            "/repos/{owner}/{repo}/issues/comments"
+            :sort-param          "updated"
+            :direction-param     "desc"
+            :per-page            100
+            :incremental-param   "since"
+            :cursor-type         :timestamp-watermark}}

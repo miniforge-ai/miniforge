@@ -1,0 +1,16 @@
+{:connector-file/messages
+ {;; Lifecycle
+  :file/connect-success    "Connected to file: {path}"
+  :file/close-success      "Closed file handle: {handle}"
+  :file/handle-not-found   "File handle not found: {handle}"
+
+  ;; Extract
+  :file/path-required      ":file/path is required"
+  :file/format-required    ":file/format is required"
+  :file/format-unsupported "Unsupported file format: {format}. Must be one of: csv, json, edn"
+  :file/not-found          "File not found: {path}"
+  :file/read-error         "Error reading file {path}: {error}"
+
+  ;; Publish
+  :file/write-error        "Error writing file {path}: {error}"
+  :file/publish-success    "Published {count} records to {path}"}}

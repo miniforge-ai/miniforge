@@ -1,0 +1,10 @@
+{:pipeline-pack/messages
+ {;; Loader errors
+  :pack/dir-not-found        "Directory not found: {path}"
+  :pack/manifest-not-found   "No pack.edn in: {path}"
+  :pack/manifest-read-error  "Failed to read pack.edn: {error}"
+  :pack/manifest-invalid     "Invalid manifest: {errors}"
+  :pack/registry-not-found   "Metric registry not found: {path}"
+
+  ;; Trust validation
+  :pack/trust-violation       "Pack '{id}' has :authority/instruction but trust level is {trust} (requires :trusted)"}}

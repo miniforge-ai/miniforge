@@ -1,0 +1,15 @@
+{:connector-excel/messages
+ {;; Lifecycle
+  :excel/connect-success   "Connected to Excel source: {url}"
+  :excel/close-success     "Closed Excel handle: {handle}"
+  :excel/handle-not-found  "Excel handle not found: {handle}"
+
+  ;; Config validation
+  :excel/url-required      ":excel/url is required"
+  :excel/sheet-required    ":excel/sheet-name is required"
+  :excel/columns-required  ":excel/columns mapping is required"
+
+  ;; Extract
+  :excel/download-failed   "Failed to download Excel file: {error}"
+  :excel/parse-failed      "Failed to parse Excel file: {error}"
+  :excel/sheet-not-found   "Sheet not found: {sheet}"}}

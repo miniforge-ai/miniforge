@@ -1,0 +1,14 @@
+{:pack/id          "risk-data"
+ :pack/name        "Risk Data Pipeline Pack"
+ :pack/version     "2026.03.17"
+ :pack/description "Market risk indicators from FRED, Shiller, SEC EDGAR"
+ :pack/author      "miniforge.ai"
+ :pack/trust-level :untrusted
+ :pack/authority   :authority/data
+ :pack/pipelines   ["pipelines/fred-risk-data.edn"]
+ :pack/envs        ["envs/fred-local.edn"]
+ :pack/metric-registry "metric-registry.edn"
+ :pack/connector-types #{:http :file :excel :edgar}
+ :pack/extends     []
+ :pack/created-at  #inst "2026-03-17T00:00:00Z"
+ :pack/updated-at  #inst "2026-03-17T00:00:00Z"}

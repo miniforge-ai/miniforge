@@ -1,0 +1,58 @@
+;; GitLab Data Pack — Local Environment Config
+;;
+;; Requires env vars: GITLAB_TOKEN, GITLAB_PROJECT
+;; GITLAB_PROJECT can be a numeric ID or URL-encoded path (e.g., "group%2Fsubgroup%2Frepo")
+;; Usage:
+;;   export GITLAB_TOKEN=glpat-... GITLAB_PROJECT=engrammicai/ixi-services/services/ixi
+;;   data-foundry run-pack packs/gitlab-data --env local
+{:env/name "local"
+
+ :env/connectors
+ {:conn/gitlab {:connector/type :gitlab}
+  :conn/output {:connector/type :pipeline-output}}
+
+ :env/stages
+ {"Ingest Merge Requests"
+  {:gitlab/project-path  "${GITLAB_PROJECT}"
+   :auth/method          :api-key
+   :auth/credential-id   "${GITLAB_TOKEN}"}
+
+  "Ingest Issues"
+  {:gitlab/project-path  "${GITLAB_PROJECT}"
+   :auth/method          :api-key
+   :auth/credential-id   "${GITLAB_TOKEN}"}
+
+  "Ingest Pipelines"
+  {:gitlab/project-path  "${GITLAB_PROJECT}"
+   :auth/method          :api-key
+   :auth/credential-id   "${GITLAB_TOKEN}"}
+
+  "Ingest Commits"
+  {:gitlab/project-path  "${GITLAB_PROJECT}"
+   :auth/method          :api-key
+   :auth/credential-id   "${GITLAB_TOKEN}"}
+
+  "Ingest Milestones"
+  {:gitlab/project-path  "${GITLAB_PROJECT}"
+   :auth/method          :api-key
+   :auth/credential-id   "${GITLAB_TOKEN}"}
+
+  "Ingest Iterations"
+  {:gitlab/project-path  "${GITLAB_PROJECT}"
+   :auth/method          :api-key
+   :auth/credential-id   "${GITLAB_TOKEN}"}
+
+  "Ingest Boards"
+  {:gitlab/project-path  "${GITLAB_PROJECT}"
+   :auth/method          :api-key
+   :auth/credential-id   "${GITLAB_TOKEN}"}
+
+  "Ingest Notes"
+  {:gitlab/project-path  "${GITLAB_PROJECT}"
+   :auth/method          :api-key
+   :auth/credential-id   "${GITLAB_TOKEN}"}
+
+  "Publish"
+  {:output/dir           "output/gitlab-data"
+   :output/format        :edn
+   :output/pipeline-name "gitlab-extract"}}}

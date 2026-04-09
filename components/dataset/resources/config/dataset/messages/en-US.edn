@@ -1,0 +1,28 @@
+{:dataset/messages
+ {;; Dataset validation (core.clj)
+  :dataset/id-required              ":dataset/id is required"
+  :dataset/name-must-be-string      ":dataset/name must be a string"
+  :dataset/name-pattern-mismatch    ":dataset/name must match {pattern}"
+  :dataset/type-invalid             ":dataset/type must be one of {allowed}"
+  :dataset/schema-required          ":dataset/schema is required"
+  :dataset/storage-location-required ":dataset/storage-location is required"
+  :dataset/version-required         ":dataset/version is required"
+  :dataset/lineage-required         ":dataset/lineage is required"
+  :dataset/content-hash-invalid     ":dataset/content-hash must be a valid SHA-256 hex string"
+
+  ;; Dataset version validation (version.clj)
+  :version/id-required              ":dataset-version/id is required"
+  :version/dataset-id-required      ":dataset-version/dataset-id is required"
+  :version/timestamp-required       ":dataset-version/timestamp is required"
+  :version/workflow-run-id-required ":dataset-version/workflow-run-id is required"
+  :version/content-hash-invalid     ":dataset-version/content-hash must be valid SHA-256"
+  :version/content-hash-required    ":dataset-version/content-hash is required"
+  :version/row-count-required       ":dataset-version/row-count is required"
+  :version/row-count-non-negative   ":dataset-version/row-count must be >= 0"
+  :version/schema-version-required  ":dataset-version/schema-version is required"
+
+  ;; Partition validation (partition.clj)
+  :partition/strategy-invalid       ":partition/strategy must be one of {allowed}"
+  :partition/keys-must-be-vector    ":partition/keys must be a vector"
+  :partition/keys-must-not-be-empty ":partition/keys must not be empty"
+  :partition/retention-days-range   ":partition/retention-days must be between {min} and {max}"}}
