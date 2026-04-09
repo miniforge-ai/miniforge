@@ -45,9 +45,9 @@
 (defn file-extension
   "Extract the file extension from a path (without the dot)."
   [path]
-  (let [name (str (last (str/split (str path) #"/")))]
-    (when-let [idx (str/last-index-of name ".")]
-      (subs name (inc idx)))))
+  (let [filename (.getName (java.io.File. (str path)))]
+    (when-let [idx (str/last-index-of filename ".")]
+      (subs filename (inc idx)))))
 
 (def ^:private extension->lang
   "Map file extensions to tree-sitter language names."
