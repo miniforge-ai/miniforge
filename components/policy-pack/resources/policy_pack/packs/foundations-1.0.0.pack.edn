@@ -23,7 +23,8 @@
                     :foundations/no-unwrap-in-lib
                     :foundations/no-force-unwrap-swift
                     :foundations/no-force-cast-swift
-                    :foundations/no-todo-fixme]}]
+                    :foundations/no-todo-fixme
+                    :foundations/no-requiring-resolve]}]
 
  :pack/rules
  [{:rule/id          :foundations/no-hardcoded-secrets
@@ -175,7 +176,22 @@
                       :pattern "(?i)(TODO|FIXME|HACK|XXX)\\s*[:(]"}
    :rule/enforcement {:action :audit
                       :message "TODO/FIXME comment found. Resolve before release or convert to a tracked issue."
-                      :remediation "Resolve the TODO, or create an issue and reference it in the comment."}}]
+                      :remediation "Resolve the TODO, or create an issue and reference it in the comment."}}
+
+  {:rule/id          :foundations/no-requiring-resolve
+   :rule/title       "No requiring-resolve in Clojure"
+   :rule/description "Detects requiring-resolve calls. Direct namespace requires are preferred — requiring-resolve is only appropriate for true plugin/extension points where the dependency is genuinely optional at the module level."
+   :rule/severity    :minor
+   :rule/category    "001"
+   :rule/applies-to  {:file-globs ["**/*.clj" "**/*.cljc"]
+                       :phases #{:implement :review}}
+   :rule/detection   {:type :content-scan
+                      :pattern "\\(requiring-resolve\\s"}
+   :rule/remediation {:strategy :manual
+                      :auto-fixable-default false}
+   :rule/enforcement {:action :warn
+                      :message "requiring-resolve detected. Use direct require unless the dependency is a genuine plugin/extension point."
+                      :remediation "Replace (requiring-resolve 'ns/fn) with a direct (:require [ns :as alias]) and call alias/fn."}}]
 
  :pack/created-at #inst "2026-04-08T00:00:00Z"
  :pack/updated-at #inst "2026-04-08T00:00:00Z"}
