@@ -30,6 +30,7 @@
    resources/executor/kubernetes/job-template.yaml"
   (:require
    [ai.miniforge.dag-executor.result :as result]
+   [ai.miniforge.dag-executor.workspace :as workspace]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
@@ -358,7 +359,18 @@
     (try
       (get-job-status kubectl-path namespace environment-id)
       (catch Exception e
-        (result/ok {:status :unknown :error (.getMessage e)})))))
+        (result/ok {:status :unknown :error (.getMessage e)}))))
+
+  ;; K8s persistence: git push (same as Docker). Fleet tier will use object store.
+  (persist-workspace! [this environment-id opts]
+    (let [exec! (fn [cmd] (proto/execute! this environment-id cmd
+                                          {:workdir (or (:workdir opts) "/workspace")}))]
+      (workspace/git-persist! exec! opts)))
+
+  (restore-workspace! [this environment-id opts]
+    (let [exec! (fn [cmd] (proto/execute! this environment-id cmd
+                                          {:workdir (or (:workdir opts) "/workspace")}))]
+      (workspace/git-restore! exec! opts))))
 
 ;; ============================================================================
 ;; Factory
