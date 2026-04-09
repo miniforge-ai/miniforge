@@ -26,6 +26,7 @@
    [ai.miniforge.policy-pack.interface.loading :as loading]
    [ai.miniforge.policy-pack.interface.registry :as registry]
    [ai.miniforge.policy-pack.interface.schema :as schema]
+   [ai.miniforge.policy-pack.interface.mapping :as mapping]
    [ai.miniforge.policy-pack.mdc-compiler :as mdc-compiler]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -93,6 +94,17 @@
 (def approval-enforcement builders/approval-enforcement)
 (def resolve-rules builders/resolve-rules)
 (def merge-rules builders/merge-rules)
+
+;------------------------------------------------------------------------------ Layer 3
+;; Mapping API
+
+(def MappingArtifact mapping/MappingArtifact)
+(def MappingEntry mapping/MappingEntry)
+(def valid-mapping? mapping/valid-mapping?)
+(def validate-mapping mapping/validate-mapping)
+(def load-mapping mapping/load-mapping)
+(def resolve-mapping mapping/resolve-mapping)
+(def project-report mapping/project-report)
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; MDC compilation
