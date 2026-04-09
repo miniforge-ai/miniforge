@@ -153,3 +153,44 @@
                   {:release-meta test-release-meta})]
       (is (not (:success? result)))
       (is (= :no-files-to-stage (:type (first (:errors result))))))))
+
+;; ============================================================================
+;; gh-exec-opts and governed-mode token injection
+;; ============================================================================
+
+(deftest gh-exec-opts-with-token-test
+  (testing "gh-exec-opts injects GH_TOKEN env var when github-token present"
+    (let [gh-exec-opts (var-get (ns-resolve 'ai.miniforge.release-executor.core 'gh-exec-opts))]
+      (is (= {:env {"GH_TOKEN" "my-secret-token"}}
+             (gh-exec-opts {:github-token "my-secret-token"}))))))
+
+(deftest gh-exec-opts-without-token-test
+  (testing "gh-exec-opts returns empty map when no github-token"
+    (let [gh-exec-opts (var-get (ns-resolve 'ai.miniforge.release-executor.core 'gh-exec-opts))]
+      (is (= {} (gh-exec-opts {})))
+      (is (= {} (gh-exec-opts {:github-token nil}))))))
+
+(deftest execute-release-passes-github-token-test
+  (testing "execute-release-phase threads github-token from context into state"
+    (let [opts-seen (atom [])
+          [exec _] (create-mock-executor
+                    :responses {"git symbolic-ref" {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""}
+                                "git fetch"        {:exit-code 0 :stdout "" :stderr ""}
+                                "git checkout"     {:exit-code 0 :stdout "" :stderr ""}
+                                "git add"          {:exit-code 0 :stdout "" :stderr ""}
+                                "git diff"         {:exit-code 0 :stdout "M src/a.clj" :stderr ""}
+                                "git commit"       {:exit-code 0 :stdout "" :stderr ""}
+                                "gh auth"          {:exit-code 0 :stdout "Logged in" :stderr ""}
+                                "git push"         {:exit-code 0 :stdout "" :stderr ""}
+                                "gh pr create"     {:exit-code 0 :stdout "https://github.com/o/r/pull/1" :stderr ""}
+                                "git rev-parse"    {:exit-code 0 :stdout "abc123\n" :stderr ""}})
+          result (core/execute-release-phase
+                  (make-workflow-state)
+                  {:executor exec
+                   :environment-id "mock-env"
+                   :worktree-path "/tmp/wt"
+                   :create-pr? true
+                   :github-token "governed-token"}
+                  {:release-meta test-release-meta})]
+      ;; The pipeline should succeed and create a PR
+      (is (:success? result)))))

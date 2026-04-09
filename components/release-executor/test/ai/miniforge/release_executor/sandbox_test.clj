@@ -82,6 +82,21 @@
       (is (:available? result))
       (is (not (:authenticated? result))))))
 
+(deftest check-gh-auth-with-token-opts-test
+  (testing "check-gh-auth! accepts opts for GH_TOKEN injection"
+    (let [[exec _cmds] (create-mock-executor
+                        :responses {"gh auth status" {:exit-code 0 :stdout "Logged in" :stderr ""}})
+          result (sandbox/check-gh-auth! exec "env-1" {:env {"GH_TOKEN" "test-token"}})]
+      (is (:available? result))
+      (is (:authenticated? result)))))
+
+(deftest check-gh-auth-two-arity-backward-compatible-test
+  (testing "check-gh-auth! works with 2-arg call (no opts)"
+    (let [[exec _cmds] (create-mock-executor
+                        :responses {"gh auth status" {:exit-code 0 :stdout "Logged in" :stderr ""}})
+          result (sandbox/check-gh-auth! exec "env-1")]
+      (is (:authenticated? result)))))
+
 ;; ============================================================================
 ;; create-branch! tests
 ;; ============================================================================
