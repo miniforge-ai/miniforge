@@ -44,7 +44,10 @@
    [:task/type [:enum :implement :test :review :design :deploy :configure]]
    [:task/dependencies {:optional true} [:vector uuid?]]
    [:task/acceptance-criteria {:optional true} [:vector [:string {:min 1}]]]
-   [:task/estimated-effort {:optional true} [:enum :small :medium :large :xlarge]]])
+   [:task/estimated-effort {:optional true} [:enum :small :medium :large :xlarge]]
+   [:task/component {:optional true} [:string {:min 1}]]
+   [:task/exclusive-files {:optional true} [:vector [:string {:min 1}]]]
+   [:task/stratum {:optional true} [:int {:min 0}]]])
 
 (def Plan
   "Schema for the planner's output."

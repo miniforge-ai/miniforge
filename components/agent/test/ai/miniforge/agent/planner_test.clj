@@ -119,6 +119,42 @@
           result (planner/validate-plan self-dep-plan)]
       (is (not (:valid? result))))))
 
+;------------------------------------------------------------------------------ Layer 3.5
+;; Schema backward-compat & new-field tests
+
+(deftest validate-plan-new-fields-test
+  (testing "plan with task/component, exclusive-files, stratum validates"
+    (let [plan {:plan/id (random-uuid)
+                :plan/name "multi-component"
+                :plan/tasks [{:task/id (random-uuid)
+                              :task/description "Agent changes"
+                              :task/type :implement
+                              :task/component "agent"
+                              :task/exclusive-files ["components/agent/src/foo.clj"]
+                              :task/stratum 0}
+                             {:task/id (random-uuid)
+                              :task/description "Workflow changes"
+                              :task/type :implement
+                              :task/component "workflow"
+                              :task/exclusive-files ["components/workflow/src/bar.clj"]
+                              :task/stratum 0}]}
+          result (planner/validate-plan plan)]
+      (is (:valid? result))))
+
+  (testing "plan without new fields still validates (backward compat)"
+    (let [result (planner/validate-plan valid-plan)]
+      (is (:valid? result))))
+
+  (testing "invalid stratum type fails validation"
+    (let [plan {:plan/id (random-uuid)
+                :plan/name "bad-stratum"
+                :plan/tasks [{:task/id (random-uuid)
+                              :task/description "Task"
+                              :task/type :implement
+                              :task/stratum -1}]}
+          result (planner/validate-plan plan)]
+      (is (not (:valid? result))))))
+
 ;------------------------------------------------------------------------------ Layer 4
 ;; Utility tests
 

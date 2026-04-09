@@ -31,7 +31,8 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.phase.interface :as phase]
-   [ai.miniforge.workflow.dag-resilience :as resilience]))
+   [ai.miniforge.workflow.dag-resilience :as resilience]
+   [clojure.set :as set]))
 
 ;--- Layer 0: Result Constructors
 
@@ -144,22 +145,43 @@
   "Convert a single plan task to a DAG task with validated deps."
   [t valid-task-ids plan-id workflow-id context]
   (let [task-id (normalize-task-id (:task/id t))]
-  {:task/id task-id
-   :task/deps (validate-deps task-id
-                             (map normalize-task-id (:task/dependencies t []))
-                             valid-task-ids)
-   :task/description (:task/description t)
-   :task/type (:task/type t :implement)
-   :task/acceptance-criteria (:task/acceptance-criteria t [])
-   :task/context (merge {:parent-plan-id plan-id
-                         :parent-workflow-id workflow-id}
-                        (select-keys context [:llm-backend :artifact-store]))}))
+    (cond-> {:task/id task-id
+             :task/deps (validate-deps task-id
+                                       (map normalize-task-id (:task/dependencies t []))
+                                       valid-task-ids)
+             :task/description (:task/description t)
+             :task/type (:task/type t :implement)
+             :task/acceptance-criteria (:task/acceptance-criteria t [])
+             :task/context (merge {:parent-plan-id plan-id
+                                   :parent-workflow-id workflow-id}
+                                  (select-keys context [:llm-backend :artifact-store]))}
+      (:task/component t)      (assoc :task/component (:task/component t))
+      (:task/exclusive-files t) (assoc :task/exclusive-files (:task/exclusive-files t))
+      (:task/stratum t)         (assoc :task/stratum (:task/stratum t)))))
+
+(defn wire-stratum-deps
+  "Auto-wire dependencies from :task/stratum when explicit deps are absent.
+   All tasks at stratum N depend on all tasks at stratum N-1.
+   No-op when no tasks have :task/stratum set."
+  [dag-tasks]
+  (if-not (some :task/stratum dag-tasks)
+    dag-tasks
+    (let [by-stratum (group-by #(:task/stratum % 0) dag-tasks)]
+      (mapv (fn [task]
+              (let [s (:task/stratum task 0)]
+                (if (and (empty? (:task/deps task #{}))
+                         (pos? s))
+                  (let [prev-ids (set (map :task/id (get by-stratum (dec s) [])))]
+                    (assoc task :task/deps prev-ids))
+                  task)))
+            dag-tasks))))
 
 (defn plan->dag-tasks [plan context]
   (let [tasks (:plan/tasks plan [])
-        valid-task-ids (set (map (comp normalize-task-id :task/id) tasks))]
-    (mapv #(plan-task->dag-task % valid-task-ids (:plan/id plan) (:workflow-id context) context)
-          tasks)))
+        valid-task-ids (set (map (comp normalize-task-id :task/id) tasks))
+        dag-tasks (mapv #(plan-task->dag-task % valid-task-ids (:plan/id plan) (:workflow-id context) context)
+                        tasks)]
+    (wire-stratum-deps dag-tasks)))
 
 ;--- Layer 1: Sub-Workflow Construction
 
@@ -192,16 +214,20 @@
    pick it up directly. Includes task title and acceptance criteria for
    use by the release phase (PR title/body)."
   [task-def]
-  {:title (:task/description task-def "Implement task")
-   :description (:task/description task-def "Implement task")
-   :task/type (:task/type task-def :implement)
-   :task/acceptance-criteria (:task/acceptance-criteria task-def [])
-   :task/id (:task/id task-def)
-   ;; Provide the task as a single-task plan so the implement phase
-   ;; receives it without needing another plan phase
-   :plan/tasks [{:task/id (random-uuid)
-                 :task/description (:task/description task-def "Implement task")
-                 :task/type (:task/type task-def :implement)}]})
+  (cond-> {:title (:task/description task-def "Implement task")
+           :description (:task/description task-def "Implement task")
+           :task/type (:task/type task-def :implement)
+           :task/acceptance-criteria (:task/acceptance-criteria task-def [])
+           :task/id (:task/id task-def)
+           ;; Provide the task as a single-task plan so the implement phase
+           ;; receives it without needing another plan phase
+           :plan/tasks [{:task/id (random-uuid)
+                         :task/description (:task/description task-def "Implement task")
+                         :task/type (:task/type task-def :implement)}]}
+    (:task/exclusive-files task-def)
+    (assoc :files-in-scope (:task/exclusive-files task-def))
+    (:task/component task-def)
+    (assoc :task/component (:task/component task-def))))
 
 (defn task-sub-opts
   "Build execution opts for a DAG task's sub-workflow.
@@ -335,6 +361,26 @@
                  (and (not (contains? completed-ids task-id))
                       (not (contains? failed-ids task-id))
                       (every? #(contains? completed-ids %) (:task/deps task #{})))))))
+
+(defn select-non-conflicting-batch
+  "Select up to max-parallel ready tasks whose exclusive-files don't overlap.
+   Falls back to (take max-parallel) when no tasks declare exclusive-files."
+  [ready-tasks max-parallel]
+  (loop [candidates (seq ready-tasks)
+         selected []
+         claimed-files #{}]
+    (cond
+      (nil? candidates)                  selected
+      (>= (count selected) max-parallel) selected
+      :else
+      (let [[_tid task] (first candidates)
+            task-files (set (:task/exclusive-files task))]
+        (if (and (seq task-files)
+                 (seq (set/intersection claimed-files task-files)))
+          (recur (next candidates) selected claimed-files)
+          (recur (next candidates)
+                 (conj selected (first candidates))
+                 (into claimed-files task-files)))))))
 
 (defn execute-tasks-batch [tasks execute-fn context]
   (->> tasks
@@ -540,7 +586,7 @@
 
           ;; Execute next batch
           :else
-          (let [batch (take max-parallel ready-tasks)
+          (let [batch (select-non-conflicting-batch ready-tasks max-parallel)
                 _ (notify-batch-start batch on-task-start)
                 ctx (cond-> context
                       current-backend (assoc :current-backend current-backend))
@@ -573,8 +619,24 @@
                      current-backend
                      (inc iteration)))))))))
 
+(defn warn-potential-monolith
+  "Log a warning when a plan may be under-decomposed — single task but
+   multiple components or many files."
+  [plan logger]
+  (let [tasks (:plan/tasks plan [])
+        components (->> tasks (keep :task/component) distinct)
+        all-files (->> tasks (mapcat :task/exclusive-files) distinct)]
+    (when (and (<= (count tasks) 1)
+               (or (> (count components) 1)
+                   (> (count all-files) 5)))
+      (log/info logger :dag-orchestrator :plan/potential-monolith
+                {:data {:task-count (count tasks)
+                        :component-count (count components)
+                        :file-count (count all-files)}}))))
+
 (defn execute-plan-as-dag [plan context]
   (let [logger (or (:logger context) (log/create-logger {:min-level :info}))
+        _ (warn-potential-monolith plan logger)
         task-defs (plan->dag-tasks plan context)
         tasks-map (->> task-defs (map (fn [t] [(:task/id t) t])) (into {}))
         pre-completed (get context :pre-completed-ids #{})

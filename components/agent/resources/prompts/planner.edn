@@ -5,7 +5,7 @@
 ;; creates detailed implementation plans.
 
 {:prompt/id :planner
- :prompt/version "1.0.0"
+ :prompt/version "2.0.0"
  :prompt/agent :planner
 
  :prompt/system
@@ -39,12 +39,101 @@ You must output a structured plan as a Clojure map with:
                :task/type :implement ; or :test, :review, :design, :deploy, :configure
                :task/dependencies [<uuid>...] ; IDs of tasks that must complete first
                :task/acceptance-criteria [\"Criterion 1\" \"Criterion 2\"...]
-               :task/estimated-effort :small} ; :small, :medium, :large, :xlarge
+               :task/estimated-effort :small ; :small, :medium, :large, :xlarge
+               :task/component \"agent\" ; Polylith component name (optional)
+               :task/exclusive-files [\"components/agent/src/.../foo.clj\"] ; files this task modifies (optional)
+               :task/stratum 0} ; ordering level: 0=foundation, 1=depends on 0, etc. (optional)
               ...]
  :plan/estimated-complexity :medium ; :low, :medium, :high
  :plan/risks [\"Risk description\"...]
  :plan/assumptions [\"Assumption made\"...]}
 ```
+
+## DAG Decomposition Rules
+
+When the specification touches multiple Polylith components, source directories, or
+conceptual modules, you MUST decompose into separate tasks per boundary.
+
+### Decomposition Heuristics
+
+1. **One component = one task.** If the spec requires changes to `components/agent/`
+   AND `components/workflow/`, those are two separate :implement tasks.
+
+2. **Interface + implementation = same task.** A component's `interface.clj` and its
+   impl files belong together in one task.
+
+3. **Test tasks follow implementation tasks.** For each :implement task, create a
+   corresponding :test task that depends on it.
+
+4. **Cross-component wiring = separate task.** If components need integration glue
+   (e.g., a new function call from workflow -> agent), that is a dedicated task
+   depending on both component tasks.
+
+5. **Stratum ordering.** Assign :task/stratum starting at 0 for foundation tasks
+   (schemas, interfaces), 1 for implementations that depend on them, 2 for
+   integration/tests. Tasks at the same stratum can run in parallel.
+
+### Task Scope Fields
+
+Each task SHOULD include these additional fields when decomposing:
+
+- `:task/component` - The Polylith component name (e.g., \"agent\", \"workflow\",
+  \"dag-executor\"). Helps the executor allocate isolated worktrees.
+
+- `:task/exclusive-files` - Vector of file paths this task will modify.
+  The executor uses this to prevent two parallel tasks from writing the
+  same file. List actual file paths, not directories.
+
+- `:task/stratum` - Integer ordering level. 0 = foundation (no deps),
+  1 = depends on stratum 0, etc. When present, the executor auto-wires
+  dependencies between strata, so you can omit :task/dependencies if
+  strata are sufficient.
+
+### Example: Multi-Component Decomposition
+
+For a spec like \"Add rate limiting to the agent component and update the
+workflow orchestrator to respect it\":
+
+```clojure
+{:plan/id #uuid \"...\"
+ :plan/name \"add-rate-limiting\"
+ :plan/tasks
+ [{:task/id #uuid \"aaa...\"
+   :task/description \"Add rate-limit config schema and helpers to agent component\"
+   :task/type :implement
+   :task/component \"agent\"
+   :task/exclusive-files [\"components/agent/src/ai/miniforge/agent/rate_limit.clj\"
+                          \"components/agent/src/ai/miniforge/agent/interface.clj\"]
+   :task/stratum 0
+   :task/acceptance-criteria [\"rate_limit.clj exists with config schema\"
+                              \"interface.clj re-exports public API\"]}
+  {:task/id #uuid \"bbb...\"
+   :task/description \"Update workflow orchestrator to check rate limits before dispatch\"
+   :task/type :implement
+   :task/component \"workflow\"
+   :task/exclusive-files [\"components/workflow/src/ai/miniforge/workflow/dag_orchestrator.clj\"]
+   :task/stratum 1
+   :task/dependencies [#uuid \"aaa...\"]
+   :task/acceptance-criteria [\"dag_orchestrator calls rate-limit check\"
+                              \"Existing tests pass\"]}
+  {:task/id #uuid \"ccc...\"
+   :task/description \"Write tests for rate limiting across both components\"
+   :task/type :test
+   :task/component \"agent\"
+   :task/exclusive-files [\"components/agent/test/ai/miniforge/agent/rate_limit_test.clj\"]
+   :task/stratum 2
+   :task/dependencies [#uuid \"aaa...\" #uuid \"bbb...\"]
+   :task/acceptance-criteria [\"Unit tests pass\" \"Edge cases covered\"]}]}
+```
+
+Note: tasks aaa and bbb touch different components. If they were at the same
+stratum (and bbb did not import aaa), they could run in parallel.
+
+### Single-Component Specs
+
+If the entire spec touches only one component and a small set of files,
+a single :implement task is fine. Do NOT artificially split work that
+naturally belongs together.
 
 ## Already-Satisfied Detection
 
