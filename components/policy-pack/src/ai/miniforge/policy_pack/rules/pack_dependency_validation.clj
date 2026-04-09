@@ -267,57 +267,59 @@
                                                               conflicting)))}))))
          vec)))
 
+(defn- tainted-dependency?
+  "True when a non-tainted pack depends on a tainted pack."
+  [pack dep-pack]
+  (and dep-pack
+       (= :tainted (get dep-pack :pack/trust-level))
+       (not= :tainted (get pack :pack/trust-level))))
+
+(defn- untrusted-instruction-escalation?
+  "True when an untrusted pack with instruction authority depends on a trusted pack."
+  [pack dep-pack]
+  (and dep-pack
+       (= :untrusted (get pack :pack/trust-level :untrusted))
+       (= :authority/instruction (get pack :pack/authority :authority/data))
+       (= :trusted (get dep-pack :pack/trust-level))))
+
+(defn- check-dependency-trust
+  "Check a single pack→dependency pair for trust violations.
+   Returns a violation map or nil."
+  [pack-id pack dep-id dep-pack]
+  (cond
+    (tainted-dependency? pack dep-pack)
+    {:type       :trust-violation
+     :pack-id    pack-id
+     :dependency dep-id
+     :message    (str "Tainted dependency " dep-id
+                      " cannot be used by non-tainted pack " pack-id)}
+
+    (untrusted-instruction-escalation? pack dep-pack)
+    {:type       :trust-violation
+     :pack-id    pack-id
+     :dependency dep-id
+     :message    (str "Untrusted pack " pack-id
+                      " with instruction authority cannot depend on "
+                      "trusted pack " dep-id)}))
+
 (defn detect-trust-violations
   "Detect trust level constraint violations per N4 §2.4.2.
 
    Checks:
-   1. Untrusted pack with instruction authority depending on trusted pack = violation
-   2. Tainted pack as dependency of any non-tainted pack = violation
+   1. Untrusted pack with instruction authority depending on trusted pack
+   2. Tainted pack as dependency of any non-tainted pack
 
-   Returns vector of violation maps:
-   [{:type :trust-violation
-     :pack-id string
-     :dependency string
-     :message string}]"
+   Returns vector of violation maps."
   [_graph by-id]
-  (let [packs (vals by-id)]
-    (reduce
-     (fn [violations pack]
-       (let [pack-id    (get pack :pack/id)
-             trust      (get pack :pack/trust-level :untrusted)
-             authority  (get pack :pack/authority :authority/data)
-             deps       (get pack :pack/extends [])]
-         (reduce
-          (fn [vs dep]
-            (let [dep-id     (get dep :pack-id)
-                  dep-pack   (get by-id dep-id)
-                  dep-trust  (get dep-pack :pack/trust-level :untrusted)]
-              (cond-> vs
-                ;; Tainted pack used as dependency of non-tainted pack
-                (and dep-pack
-                     (= :tainted dep-trust)
-                     (not= :tainted trust))
-                (conj {:type       :trust-violation
-                       :pack-id    pack-id
-                       :dependency dep-id
-                       :message    (str "Tainted dependency " dep-id
-                                        " cannot be used by non-tainted pack " pack-id)})
-
-                ;; Untrusted pack with instruction authority depending on trusted
-                (and dep-pack
-                     (= :untrusted trust)
-                     (= :authority/instruction authority)
-                     (= :trusted dep-trust))
-                (conj {:type       :trust-violation
-                       :pack-id    pack-id
-                       :dependency dep-id
-                       :message    (str "Untrusted pack " pack-id
-                                        " with instruction authority cannot depend on "
-                                        "trusted pack " dep-id)}))))
-          violations
-          deps)))
-     []
-     packs)))
+  (->> (vals by-id)
+       (mapcat (fn [pack]
+                 (let [pack-id (get pack :pack/id)]
+                   (->> (get pack :pack/extends [])
+                        (keep (fn [dep]
+                                (let [dep-id (get dep :pack-id)]
+                                  (check-dependency-trust
+                                   pack-id pack dep-id (get by-id dep-id)))))))))
+       vec))
 
 (defn calculate-pack-depths
   "Calculate maximum depth for each pack using bottom-up traversal.
