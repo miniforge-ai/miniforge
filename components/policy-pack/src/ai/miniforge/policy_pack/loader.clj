@@ -295,6 +295,34 @@
     (when (> (count refs) 1)
       [(str "Conflicting taxonomy refs: " (pr-str refs))])))
 
+(defn- resolve-base-packs
+  "Look up each base pack from the store in declaration order."
+  [extends pack-store]
+  (mapv (fn [{:keys [pack-id]}]
+          (get pack-store pack-id))
+        extends))
+
+(defn- find-missing-base-packs
+  "Return error strings for any base pack refs that resolved to nil."
+  [extends base-packs]
+  (keep-indexed (fn [i bp]
+                  (when (nil? bp)
+                    (str "Base pack not found: "
+                         (:pack-id (nth extends i)))))
+                base-packs))
+
+(defn- compose-resolved-pack
+  "Merge inherited + overlay rules, apply overrides, inherit taxonomy ref."
+  [overlay-pack base-packs inherited-rules overlay-rules]
+  (let [combined-rules (into inherited-rules overlay-rules)
+        overrides      (:pack/overrides overlay-pack [])
+        final-rules    (apply-overrides combined-rules overrides)
+        base-tax-ref   (some :pack/taxonomy-ref (filterv some? base-packs))
+        final-tax-ref  (or (:pack/taxonomy-ref overlay-pack) base-tax-ref)
+        resolved-pack  (cond-> (assoc overlay-pack :pack/rules final-rules)
+                         final-tax-ref (assoc :pack/taxonomy-ref final-tax-ref))]
+    (schema/success :pack resolved-pack {})))
+
 (defn resolve-overlay
   "Resolve an overlay pack by merging inherited rules from base packs.
 
@@ -312,53 +340,27 @@
    - {:success? true :pack <resolved PackManifest>}
    - {:success? false :errors [...]}"
   [overlay-pack pack-store]
-  (let [extends (:pack/extends overlay-pack [])
-
-        ;; Load base packs in declaration order
-        base-packs (mapv (fn [{:keys [pack-id]}]
-                           (get pack-store pack-id))
-                         extends)
-        missing    (keep-indexed (fn [i bp]
-                                  (when (nil? bp)
-                                    (str "Base pack not found: "
-                                         (:pack-id (nth extends i)))))
-                                base-packs)]
+  (let [extends    (:pack/extends overlay-pack [])
+        base-packs (resolve-base-packs extends pack-store)
+        missing    (find-missing-base-packs extends base-packs)]
 
     (if (seq missing)
       (schema/failure-with-errors :pack (vec missing))
 
-      (let [;; Taxonomy ref validation
-            tax-errors (validate-taxonomy-refs (filterv some? base-packs) overlay-pack)]
+      (let [tax-errors (validate-taxonomy-refs (filterv some? base-packs) overlay-pack)]
 
         (if (seq tax-errors)
           (schema/failure-with-errors :pack tax-errors)
 
-          (let [;; Merge inherited rules (declaration order)
-                inherited-rules (vec (mapcat :pack/rules (filterv some? base-packs)))
-                inherited-ids   (set (map :rule/id inherited-rules))
-
-                ;; Check for collisions with overlay's own rules
-                overlay-rules   (:pack/rules overlay-pack [])
+          (let [inherited-rules  (vec (mapcat :pack/rules (filterv some? base-packs)))
+                inherited-ids    (set (map :rule/id inherited-rules))
+                overlay-rules    (:pack/rules overlay-pack [])
                 collision-errors (validate-no-rule-id-collisions inherited-ids overlay-rules)]
 
             (if (seq collision-errors)
               (schema/failure-with-errors :pack collision-errors)
-
-              (let [;; Combine: inherited + overlay rules
-                    combined-rules (into inherited-rules overlay-rules)
-
-                    ;; Apply overrides last
-                    overrides      (:pack/overrides overlay-pack [])
-                    final-rules    (apply-overrides combined-rules overrides)
-
-                    ;; Inherit taxonomy-ref from base if overlay doesn't have one
-                    base-tax-ref   (some :pack/taxonomy-ref (filterv some? base-packs))
-                    final-tax-ref  (or (:pack/taxonomy-ref overlay-pack) base-tax-ref)
-
-                    resolved-pack  (cond-> (assoc overlay-pack :pack/rules final-rules)
-                                     final-tax-ref (assoc :pack/taxonomy-ref final-tax-ref))]
-
-                (schema/success :pack resolved-pack {})))))))))
+              (compose-resolved-pack overlay-pack base-packs
+                                     inherited-rules overlay-rules))))))))
 
 (defn discover-packs
   "Discover all packs in a directory.
