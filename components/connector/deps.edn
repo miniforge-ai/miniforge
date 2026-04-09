@@ -1,8 +1,8 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge.data-foundry/connector-auth  {:local/root "../connector-auth"}
         ai.miniforge.data-foundry/connector-retry {:local/root "../connector-retry"}
-        ai.miniforge/event-stream       {:local/root "../../../miniforge/components/event-stream"}
-        ai.miniforge/schema             {:local/root "../../../miniforge/components/schema"}
-        ai.miniforge/tool               {:local/root "../../../miniforge/components/tool"}}
+        ai.miniforge/event-stream       {:local/root "../event-stream"}
+        ai.miniforge/schema             {:local/root "../schema"}
+        ai.miniforge/tool               {:local/root "../tool"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}
