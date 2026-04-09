@@ -318,7 +318,9 @@
                        "components/metric-registry/test"
                        "components/pipeline/test"
                        "components/pipeline-config/test"
+                       "components/pipeline-config/test/resources"
                        "components/pipeline-pack/test"
+                       "components/pipeline-pack/test/resources"
                        "components/pipeline-pack-store/test"
                        "components/pipeline-runner/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}

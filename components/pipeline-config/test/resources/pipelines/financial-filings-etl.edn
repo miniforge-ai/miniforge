@@ -1,0 +1,47 @@
+;; Financial Filings ETL Pipeline — Phase 1.5 integration test config
+;;
+;; Connector refs and dataset refs use symbolic names resolved at load time.
+;; Quality pack rules reference rule types resolved by the loader.
+{:pipeline/name    "Financial Filings ETL"
+ :pipeline/version "1.0.0"
+ :pipeline/mode    :full-refresh
+
+ :pipeline/stages
+ [{:stage/name           "Ingest Filings"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/file-src
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/raw]
+   :stage/dependencies    []}
+
+  {:stage/name           "Enrich from API"
+   :stage/family         :enrich
+   :stage/input-datasets  [:ds/raw]
+   :stage/output-datasets [:ds/enriched]
+   :stage/dependencies    ["Ingest Filings"]}
+
+  {:stage/name           "Normalize"
+   :stage/family         :normalize
+   :stage/input-datasets  [:ds/enriched]
+   :stage/output-datasets [:ds/norm]
+   :stage/dependencies    ["Enrich from API"]}
+
+  {:stage/name           "Validate Quality"
+   :stage/family         :validate
+   :stage/input-datasets  [:ds/norm]
+   :stage/output-datasets [:ds/valid]
+   :stage/dependencies    ["Normalize"]
+   :stage/config          {:stage/quality-pack
+                           {:pack/id :financial-filings-quality
+                            :pack/rules [{:rule/type :required :rule/field :cik}
+                                         {:rule/type :custom   :rule/id :range-market_cap}]}}}
+
+  {:stage/name           "Publish Results"
+   :stage/family         :publish
+   :stage/connector-ref  :conn/file-sink
+   :stage/input-datasets  [:ds/valid]
+   :stage/output-datasets []
+   :stage/dependencies    ["Validate Quality"]}]
+
+ :pipeline/input-datasets  []
+ :pipeline/output-datasets []}
