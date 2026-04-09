@@ -45,6 +45,12 @@
     (and (re-find name-pattern first-10)
          (re-find email-pattern first-10))))
 
+(defn- pattern-present?
+  "Return true if pattern appears anywhere in content.
+   Generic negative-mode check (not header-specific)."
+  [content pattern]
+  (boolean (re-find pattern content)))
+
 (defn- positive-matches
   "Find all lines in content matching pattern.
    Returns seq of {:line int :text string :match string}."
@@ -90,8 +96,14 @@
         title    (get rule-cfg :title)
         pattern  (get rule-cfg :pattern)
         suggest  (get rule-cfg :suggest-fn)
-        ep       (get rule-cfg :email-pattern)]
-    (if (header-present? content pattern ep)
+        ep       (get rule-cfg :email-pattern)
+        present? (if ep
+                   (header-present? content pattern ep)
+                   (pattern-present? content pattern))
+        absence-msg (if ep
+                      (msg/t :scan/missing-header)
+                      (str "(missing: " title ")"))]
+    (if present?
       []
       [(factory/->violation
         rule-id
@@ -99,10 +111,10 @@
         title
         file-path
         1
-        (msg/t :scan/missing-header)
+        absence-msg
         (suggest nil)
-        false   ; classify phase fills this in
-        "")]))) ; classify phase fills this in
+        false
+        "")])))
 
 (defn- scan-file
   "Dispatch to the appropriate scanner for a rule config.
