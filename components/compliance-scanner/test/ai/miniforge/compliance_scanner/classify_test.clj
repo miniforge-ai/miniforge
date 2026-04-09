@@ -103,6 +103,23 @@
       (is (true? (:auto-fixable? r))))))
 
 ;; ---------------------------------------------------------------------------
+;; Manual-review rules (auto-fixable-default false)
+
+(deftest classify-manual-review-uses-rule-title
+  (testing "rules with auto-fixable-default false use rule title in rationale"
+    (let [v   {:rule/id :foundations/no-unsafe-rust
+               :rule/category "001"
+               :rule/title "No Unsafe Rust"
+               :file "src/ffi.rs"
+               :line 42
+               :current "unsafe {"
+               :auto-fixable-default false}
+          [r] (classify/classify-violations [v])]
+      (is (false? (:auto-fixable? r)))
+      (is (clojure.string/includes? (:rationale r) "No Unsafe Rust"))
+      (is (not (clojure.string/includes? (:rationale r) "SemVer"))))))
+
+;; ---------------------------------------------------------------------------
 ;; Batch classification
 
 (deftest classify-batch-returns-all-violations
