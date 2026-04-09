@@ -1,0 +1,11 @@
+;; Default prompt templates for pack-bundled template system.
+;; Packs may override these via :pack/prompt-templates.
+
+{:repair-prompt
+ "Fix the following code violation.\n\n**Rule:** {{rule-title}}\n**File:** {{file}}:{{line}}\n**Current code:** `{{current}}`\n**Issue:** {{rationale}}\n\n{{knowledge-content}}\n\nProvide the corrected code only, no explanation."
+
+ :behavior-section
+ "\n\n## Policy Rules \u2014 Required Behaviors\n\n{{behaviors}}\n"
+
+ :knowledge-section
+ "\n\n## Reference Material\n\n{{knowledge}}\n"}

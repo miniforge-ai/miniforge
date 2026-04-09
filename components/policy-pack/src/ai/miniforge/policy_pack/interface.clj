@@ -28,6 +28,7 @@
    [ai.miniforge.policy-pack.interface.schema :as schema]
    [ai.miniforge.policy-pack.interface.intent :as intent]
    [ai.miniforge.policy-pack.interface.mapping :as mapping]
+   [ai.miniforge.policy-pack.interface.prompt-template :as prompt-template]
    [ai.miniforge.policy-pack.interface.taxonomy :as taxonomy]
    [ai.miniforge.policy-pack.mdc-compiler :as mdc-compiler]))
 
@@ -111,6 +112,13 @@
 (def load-mapping mapping/load-mapping)
 (def resolve-mapping mapping/resolve-mapping)
 (def project-report mapping/project-report)
+
+;------------------------------------------------------------------------------ Prompt templates
+
+(def interpolate prompt-template/interpolate)
+(def render-repair-prompt prompt-template/render-repair-prompt)
+(def render-behavior-section prompt-template/render-behavior-section)
+(def render-knowledge-section prompt-template/render-knowledge-section)
 
 ;------------------------------------------------------------------------------ MDC compilation
 
