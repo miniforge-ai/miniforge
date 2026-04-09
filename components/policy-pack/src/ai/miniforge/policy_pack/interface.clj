@@ -26,6 +26,7 @@
    [ai.miniforge.policy-pack.interface.loading :as loading]
    [ai.miniforge.policy-pack.interface.registry :as registry]
    [ai.miniforge.policy-pack.interface.schema :as schema]
+   [ai.miniforge.policy-pack.interface.intent :as intent]
    [ai.miniforge.policy-pack.mdc-compiler :as mdc-compiler]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -93,6 +94,15 @@
 (def approval-enforcement builders/approval-enforcement)
 (def resolve-rules builders/resolve-rules)
 (def merge-rules builders/merge-rules)
+
+;------------------------------------------------------------------------------ Layer 3
+;; Intent validation API
+
+(def infer-intent intent/infer-intent)
+(def intent-matches? intent/intent-matches?)
+(def semantic-intent-check intent/semantic-intent-check)
+(def parse-terraform-plan-counts intent/parse-terraform-plan-counts)
+(def parse-k8s-diff-counts intent/parse-k8s-diff-counts)
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; MDC compilation

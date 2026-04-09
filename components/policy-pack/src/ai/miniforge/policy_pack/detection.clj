@@ -236,6 +236,21 @@
            :resource-violations (vec resource-violations)
            :message (get-in rule [:rule/enforcement :message])})))))
 
+(defn plan-resource-counts
+  "Aggregate resource change counts from terraform plan output.
+   Returns {:creates int :updates int :destroys int}."
+  [plan-output]
+  (let [resources (parse-plan-resources plan-output)]
+    (reduce (fn [acc {:keys [action]}]
+              (case action
+                :create  (update acc :creates inc)
+                :destroy (update acc :destroys inc)
+                :update  (update acc :updates inc)
+                :replace (-> acc (update :creates inc) (update :destroys inc))
+                acc))
+            {:creates 0 :updates 0 :destroys 0}
+            resources)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Custom detection
 
