@@ -27,8 +27,13 @@
    - :content-scan - Regex against artifact content
    - :diff-analysis - Regex against git diff
    - :plan-output - Parse terraform plan output
+   - :ast-analysis - Structural pattern matching via tree-sitter CLI
+   - :state-comparison - Drift detection via clojure.data/diff
    - :custom - Custom detection function"
   (:require
+   [ai.miniforge.policy-pack.ast :as ast]
+   [ai.miniforge.policy-pack.schema :as schema]
+   [clojure.data :as data]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -237,6 +242,83 @@
            :message (get-in rule [:rule/enforcement :message])})))))
 
 ;------------------------------------------------------------------------------ Layer 1
+;; AST analysis detection (tree-sitter CLI)
+
+(defn detect-ast-analysis
+  "Detect violations by structural pattern matching via tree-sitter.
+
+   Requires the tree-sitter CLI to be available on PATH.
+   Falls back to nil (no violation) if tree-sitter is unavailable.
+
+   Arguments:
+   - rule - Rule with :rule/detection containing :query (tree-sitter S-expression pattern)
+   - artifact - Artifact with :artifact/content and :artifact/path
+   - context - Execution context (may contain :lang override)
+
+   Returns:
+   - Violation map if detected, nil otherwise"
+  [rule artifact context]
+  (when (ast/tree-sitter-available?)
+    (let [detection (:rule/detection rule)
+          query     (or (:query detection) (first (extract-patterns detection)))
+          content   (:artifact/content artifact)
+          path      (:artifact/path artifact "")
+          lang      (ast/detect-language path (:lang context))]
+      (when (and content query)
+        (let [ext    (ast/file-extension path)
+              result (ast/run-query content (str query) lang ext)]
+          (when (and (schema/succeeded? result) (seq (:matches result)))
+            {:type          :ast-analysis
+             :rule-id       (:rule/id rule)
+             :matches       (:matches result)
+             :artifact-path path
+             :message       (get-in rule [:rule/enforcement :message])}))))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; State comparison detection
+
+(defn detect-state-comparison
+  "Detect violations by comparing desired state to current state.
+
+   Uses clojure.data/diff to find structural drift between two EDN maps.
+   Detects keys/values present in desired state but different or missing
+   in current state.
+
+   Arguments:
+   - rule - Rule with :rule/detection config
+   - artifact - Artifact (unused for state comparison)
+   - context - Context with :desired-state and :current-state maps
+
+   Returns:
+   - Violation map if drift detected, nil otherwise"
+  [rule _artifact context]
+  (let [desired (:desired-state context)
+        current (:current-state context)]
+    (when (and desired current)
+      (let [[only-desired only-current _both] (data/diff desired current)]
+        (when (or (seq only-desired) (seq only-current))
+          {:type          :state-comparison
+           :rule-id       (:rule/id rule)
+           :drift         {:desired-only only-desired
+                           :current-only only-current}
+           :message       (get-in rule [:rule/enforcement :message])})))))
+
+(defn plan-resource-counts
+  "Aggregate resource change counts from terraform plan output.
+   Returns {:creates int :updates int :destroys int}."
+  [plan-output]
+  (let [resources (parse-plan-resources plan-output)]
+    (reduce (fn [acc {:keys [action]}]
+              (case action
+                :create  (update acc :creates inc)
+                :destroy (update acc :destroys inc)
+                :update  (update acc :updates inc)
+                :replace (-> acc (update :creates inc) (update :destroys inc))
+                acc))
+            {:creates 0 :updates 0 :destroys 0}
+            resources)))
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Custom detection
 
 (defn detect-custom
@@ -299,9 +381,8 @@
       :diff-analysis (detect-diff-analysis rule artifact context)
       :plan-output (detect-plan-output rule artifact context)
       :custom (detect-custom rule artifact context)
-      ;; Unsupported types
-      :state-comparison nil  ; Not implemented
-      :ast-analysis nil       ; Not implemented
+      :state-comparison (detect-state-comparison rule artifact context)
+      :ast-analysis (detect-ast-analysis rule artifact context)
       nil)))
 
 (defn check-rules
