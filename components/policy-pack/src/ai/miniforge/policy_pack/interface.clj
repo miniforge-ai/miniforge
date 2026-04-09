@@ -27,10 +27,10 @@
    [ai.miniforge.policy-pack.interface.registry :as registry]
    [ai.miniforge.policy-pack.interface.schema :as schema]
    [ai.miniforge.policy-pack.interface.mapping :as mapping]
+   [ai.miniforge.policy-pack.interface.taxonomy :as taxonomy]
    [ai.miniforge.policy-pack.mdc-compiler :as mdc-compiler]))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Schema and registry API
+;------------------------------------------------------------------------------ Schema and registry API
 
 (def Rule schema/Rule)
 (def PackManifest schema/PackManifest)
@@ -58,8 +58,7 @@
 (def glob-matches? registry/glob-matches?)
 (def compare-versions registry/compare-versions)
 
-;------------------------------------------------------------------------------ Layer 1
-;; Loading and checking API
+;------------------------------------------------------------------------------ Loading and checking API
 
 (def load-pack loading/load-pack)
 (def load-pack-from-file loading/load-pack-from-file)
@@ -78,8 +77,7 @@
 (def violation->error checking/violation->error)
 (def violation->warning checking/violation->warning)
 
-;------------------------------------------------------------------------------ Layer 2
-;; Builders and rule resolution
+;------------------------------------------------------------------------------ Builders and rule resolution
 
 (def create-pack builders/create-pack)
 (def create-rule builders/create-rule)
@@ -95,8 +93,7 @@
 (def resolve-rules builders/resolve-rules)
 (def merge-rules builders/merge-rules)
 
-;------------------------------------------------------------------------------ Layer 3
-;; Mapping API
+;------------------------------------------------------------------------------ Mapping API
 
 (def MappingArtifact mapping/MappingArtifact)
 (def MappingEntry mapping/MappingEntry)
@@ -106,10 +103,14 @@
 (def resolve-mapping mapping/resolve-mapping)
 (def project-report mapping/project-report)
 
-;------------------------------------------------------------------------------ Layer 3
-;; MDC compilation
+;------------------------------------------------------------------------------ MDC compilation
 
 (def compile-standards-pack
   "Compile all MDC files under a standards directory into a PackManifest.
    Delegates to mdc-compiler/compile-standards-pack."
   mdc-compiler/compile-standards-pack)
+
+(def export-canonical-taxonomy
+  "Export the compiler's dewey-ranges as a first-class Taxonomy artifact.
+   Delegates to mdc-compiler/export-canonical-taxonomy."
+  mdc-compiler/export-canonical-taxonomy)

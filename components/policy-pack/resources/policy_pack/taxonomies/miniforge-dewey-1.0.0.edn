@@ -1,0 +1,78 @@
+;; Miniforge Dewey Taxonomy — canonical category tree for engineering standards.
+;;
+;; This is the authoritative taxonomy artifact referenced by miniforge policy packs.
+;; Category IDs are stable keywords (immutable after publication). Dewey code strings
+;; are display convenience only, never used as data keys.
+;;
+;; See: specs/normative/N4-policy-packs.md §2.1
+
+{:taxonomy/id      :miniforge/dewey
+ :taxonomy/version "1.0.0"
+ :taxonomy/title   "Miniforge Dewey Taxonomy"
+ :taxonomy/description
+ "Dewey-decimal-inspired category tree for miniforge engineering standards.
+  Ten top-level ranges (000-999) covering foundations, tools, languages,
+  frameworks, testing, operations, documentation, workflows, project, and meta."
+
+ :taxonomy/categories
+ [{:category/id    :mf.cat/foundations
+   :category/code  "000-099"
+   :category/title "Foundations & Core Principles"
+   :category/order 0}
+
+  {:category/id    :mf.cat/tools
+   :category/code  "100-199"
+   :category/title "Development Environment & Tools"
+   :category/order 100}
+
+  {:category/id    :mf.cat/languages
+   :category/code  "200-299"
+   :category/title "Languages"
+   :category/order 200}
+
+  {:category/id    :mf.cat/frameworks
+   :category/code  "300-399"
+   :category/title "Frameworks & Platforms"
+   :category/order 300}
+
+  {:category/id    :mf.cat/testing
+   :category/code  "400-499"
+   :category/title "Testing & Quality"
+   :category/order 400}
+
+  {:category/id    :mf.cat/operations
+   :category/code  "500-599"
+   :category/title "Operations & Infrastructure"
+   :category/order 500}
+
+  {:category/id    :mf.cat/documentation
+   :category/code  "600-699"
+   :category/title "Documentation"
+   :category/order 600}
+
+  {:category/id    :mf.cat/workflows
+   :category/code  "700-799"
+   :category/title "Workflows & Processes"
+   :category/order 700}
+
+  {:category/id    :mf.cat/project
+   :category/code  "800-899"
+   :category/title "Project-Specific"
+   :category/order 800}
+
+  {:category/id    :mf.cat/meta
+   :category/code  "900-999"
+   :category/title "Meta & Templates"
+   :category/order 900}]
+
+ :taxonomy/aliases
+ [{:alias/name :foundations   :alias/target :mf.cat/foundations}
+  {:alias/name :tools         :alias/target :mf.cat/tools}
+  {:alias/name :languages     :alias/target :mf.cat/languages}
+  {:alias/name :frameworks    :alias/target :mf.cat/frameworks}
+  {:alias/name :testing       :alias/target :mf.cat/testing}
+  {:alias/name :operations    :alias/target :mf.cat/operations}
+  {:alias/name :documentation :alias/target :mf.cat/documentation}
+  {:alias/name :workflows     :alias/target :mf.cat/workflows}
+  {:alias/name :project       :alias/target :mf.cat/project}
+  {:alias/name :meta          :alias/target :mf.cat/meta}]}
