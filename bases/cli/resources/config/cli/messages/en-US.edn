@@ -3,6 +3,8 @@
   :help/usage "Usage: {binary} <command> [options]"
   :help/command-lines
   ["Commands:"
+   "  init [repo-path]    Analyze repo and write .miniforge/config.edn"
+   ""
    "  run <file>          Execute a workflow (spec, DAG, or plan file)"
    "    --interactive     Interactive mode (chat-based)"
    "    --worktree <path> Custom worktree path"

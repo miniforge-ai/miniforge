@@ -58,20 +58,20 @@
 
 (deftest build-scan-opts-test
   (testing "defaults to :all rules"
-    (let [opts (build-scan-opts {})]
+    (let [opts (build-scan-opts "." {})]
       (is (= :all (:rules opts)))))
 
   (testing "includes pack when provided"
-    (let [opts (build-scan-opts {:pack "foundations-1.0.0"})]
+    (let [opts (build-scan-opts "." {:pack "foundations-1.0.0"})]
       (is (some? (:pack opts)))
       (is (= :all (:rules opts)))))
 
   (testing "includes since ref when provided"
-    (let [opts (build-scan-opts {:since "HEAD~5"})]
+    (let [opts (build-scan-opts "." {:since "HEAD~5"})]
       (is (= "HEAD~5" (:since opts)))))
 
   (testing "passes rules selector through"
-    (let [opts (build-scan-opts {:rules "always-apply"})]
+    (let [opts (build-scan-opts "." {:rules "always-apply"})]
       (is (= :always-apply (:rules opts))))))
 
 ;; ============================================================================
