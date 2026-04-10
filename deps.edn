@@ -113,6 +113,8 @@
                        "components/patterns/resources"
                        "bases/cli/src"
                        "bases/cli/resources"
+                       "components/connector-linter/src"
+                       "components/connector-linter/resources"
                        "bases/lsp-mcp-bridge/src"
                        ;; Data Foundry components
                        "components/connector/src"
@@ -235,7 +237,8 @@
                      ai.miniforge.data-foundry/pipeline-config {:local/root "components/pipeline-config"}
                      ai.miniforge.data-foundry/pipeline-pack {:local/root "components/pipeline-pack"}
                      ai.miniforge.data-foundry/pipeline-pack-store {:local/root "components/pipeline-pack-store"}
-                     ai.miniforge.data-foundry/pipeline-runner {:local/root "components/pipeline-runner"}}}
+                     ai.miniforge.data-foundry/pipeline-runner {:local/root "components/pipeline-runner"}
+                     ai.miniforge/connector-linter {:local/root "components/connector-linter"}}}
 
   :test {:extra-paths ["development/test"
                        "components/schema/test"
@@ -322,7 +325,9 @@
                        "components/pipeline-pack/test"
                        "components/pipeline-pack/test/resources"
                        "components/pipeline-pack-store/test"
-                       "components/pipeline-runner/test"]
+                       "components/pipeline-runner/test"
+                       "components/connector-linter/test"
+                       "bases/lsp-mcp-bridge/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
