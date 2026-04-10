@@ -140,6 +140,29 @@
           (is (some #(clojure.string/includes? % "git fetch") @commands))
           (is (some #(clojure.string/includes? % "git checkout") @commands)))))))
 
+;; ============================================================================
+;; container-image-digest
+;; ============================================================================
+
+(deftest container-image-digest-success-test
+  (testing "returns trimmed digest when docker inspect succeeds"
+    (with-redefs [docker/run-docker (fn [_docker-path & _args]
+                                      {:exit 0 :out "sha256:abc123\n"})]
+      (is (= "sha256:abc123"
+             (docker/container-image-digest nil "myimage:latest"))))))
+
+(deftest container-image-digest-failure-test
+  (testing "returns nil when docker inspect fails (non-zero exit)"
+    (with-redefs [docker/run-docker (fn [_docker-path & _args]
+                                      {:exit 1 :out "" :err "not found"})]
+      (is (nil? (docker/container-image-digest nil "nonexistent:latest"))))))
+
+(deftest container-image-digest-exception-test
+  (testing "returns nil when docker/run-docker throws an exception"
+    (with-redefs [docker/run-docker (fn [_docker-path & _args]
+                                      (throw (ex-info "docker not installed" {})))]
+      (is (nil? (docker/container-image-digest nil "myimage:latest"))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.dag-executor.protocols.impl.docker-test)
