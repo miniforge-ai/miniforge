@@ -357,6 +357,19 @@
   (let [result (run-docker docker-path "image" "inspect" image)]
     (zero? (:exit result))))
 
+(defn container-image-digest
+  "Return the repo-digest (sha256:…) string for a local Docker image,
+   or nil when the image is not found or Docker is unavailable."
+  [docker-path image]
+  (try
+    (let [result (run-docker docker-path
+                             "image" "inspect" image
+                             "--format" "{{index .RepoDigests 0}}")]
+      (when (zero? (:exit result))
+        (some-> (:out result) clojure.string/trim not-empty)))
+    (catch Exception _e
+      nil)))
+
 (defn find-dockerfile-path
   "Find the Dockerfile resource on the classpath or filesystem.
    Returns absolute path to the Dockerfile."
