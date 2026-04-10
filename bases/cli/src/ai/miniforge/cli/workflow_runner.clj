@@ -305,6 +305,46 @@
       (println (display/colorize :red (messages/t :workflow-runner/list-failed {:error (ex-message e)})))
       (throw e))))
 
+;------------------------------------------------------------------------------ Layer 1.5
+;; Meta-loop signal integration
+
+(defn create-meta-loop-signal-fn
+  "Create a (fn [signal]) callback that runs one meta-loop cycle per signal.
+
+   Uses requiring-resolve to lazily load the reliability, diagnosis,
+   improvement, and meta-loop namespaces so the CLI doesn't hard-depend
+   on those components at compile time.
+
+   Returns nil when any required namespace is unavailable (e.g., in
+   lightweight builds that omit the operator stack)."
+  [event-stream]
+  (try
+    (let [create-engine     @(requiring-resolve 'ai.miniforge.reliability.interface/create-engine)
+          create-deg-mgr    @(requiring-resolve 'ai.miniforge.reliability.interface/create-degradation-manager)
+          create-pipeline   @(requiring-resolve 'ai.miniforge.improvement.interface/create-pipeline)
+          create-ml-ctx     @(requiring-resolve 'ai.miniforge.agent.meta.loop/create-meta-loop-context)
+          run-ml-cycle!     @(requiring-resolve 'ai.miniforge.agent.meta.loop/run-meta-loop-cycle!)
+
+          engine            (create-engine event-stream)
+          deg-mgr           (create-deg-mgr event-stream)
+          pipeline          (create-pipeline)
+          ml-ctx            (create-ml-ctx {:reliability-engine  engine
+                                            :degradation-manager deg-mgr
+                                            :improvement-pipeline pipeline
+                                            :event-stream        event-stream})]
+      (fn [signal]
+        (try
+          (let [metrics        (select-keys signal [:workflow-metrics :phase-metrics
+                                                     :gate-metrics :tool-metrics
+                                                     :failure-events :context-metrics])
+                diagnosis-data (select-keys signal [:slo-checks :failure-events
+                                                     :training-examples :phase-metrics])]
+            (run-ml-cycle! ml-ctx metrics diagnosis-data))
+          (catch Exception _e nil))))
+    (catch Exception _e
+      ;; Namespace not on classpath — meta-loop unavailable; no-op
+      nil)))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Spec-driven execution
 
@@ -336,6 +376,7 @@
           ;; Create workflow-specific LLM client for execution
           llm-client (context/create-llm-client workflow spec quiet backend-override)
           callbacks (create-phase-callbacks quiet)
+          observe-signal-fn (create-meta-loop-signal-fn event-stream)
           base-context (let [ctx (context/create-workflow-context
                              {:callbacks callbacks
                               :artifact-store artifact-store
@@ -351,10 +392,11 @@
                               :execution-opts (:execution-opts opts)})]
                         ;; Assoc repo-url, branch, and (optionally) execution-mode
                         ;; so runner.clj can clone into Docker or create a worktree.
-                        (assoc ctx
-                               :repo-url repo-url
-                               :branch branch
-                               :execution-mode (get opts :execution-mode :local)))
+                        (cond-> (assoc ctx
+                                       :repo-url repo-url
+                                       :branch branch
+                                       :execution-mode (get opts :execution-mode :local))
+                          observe-signal-fn (assoc :observe-signal-fn observe-signal-fn)))
           sandbox? (or (:sandbox opts) (:spec/sandbox spec))
           [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)
           progress-cleanup (display/start-progress! event-stream quiet)]

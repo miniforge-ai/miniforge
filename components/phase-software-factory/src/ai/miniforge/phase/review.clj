@@ -28,6 +28,7 @@
             [ai.miniforge.phase.phase-result :as phase-result]
             [ai.miniforge.phase.knowledge-helpers :as kb-helpers]
             [ai.miniforge.agent.interface :as agent]
+            [ai.miniforge.agent.file-artifacts :as file-artifacts]
             [ai.miniforge.knowledge.interface :as knowledge]
             [ai.miniforge.response.interface :as response]))
 
@@ -49,6 +50,26 @@
   [ctx phase-name]
   (phase/create-streaming-callback ctx phase-name))
 
+(defn- resolve-implement-artifact
+  "Resolve the implement-phase artifact using three strategies:
+   1. Serialized :artifact key in the implement result (legacy model)
+   2. The result itself when it already contains :code/files (it IS the artifact)
+   3. Fall back to collecting all changed files from the worktree on disk
+      (environment-promotion model where the agent writes directly to the worktree)"
+  [implement-result ctx]
+  (or
+   ;; Strategy 1 — explicit :artifact in result
+   (:artifact implement-result)
+   ;; Strategy 2 — result already is the artifact (has :code/files)
+   (when (:code/files implement-result)
+     implement-result)
+   ;; Strategy 3 — read changed files from worktree (env-promotion model)
+   (let [worktree-path (or (get ctx :execution/worktree-path)
+                           (get ctx :worktree-path))]
+     (when worktree-path
+       (file-artifacts/collect-written-files (file-artifacts/empty-snapshot)
+                                            worktree-path)))))
+
 (defn- build-review-task
   "Build the task map for the reviewer agent from execution context.
    Returns {:task task-map :rules-manifest manifest-or-nil}."
@@ -58,14 +79,14 @@
         verify-result (get-in ctx [:execution/phase-results :verify :result :output])
         {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
                                        (:knowledge-store ctx) :reviewer (get input :tags []))
+        artifact (resolve-implement-artifact implement-result ctx)
         task (cond-> {:task/id (random-uuid)
                       :task/type :review
                       :task/description (:description input)
                       :task/title (:title input)
                       :task/intent (:intent input)
                       :task/constraints (:constraints input)
-                      :task/artifact (or (:artifact implement-result)
-                                         implement-result)
+                      :task/artifact artifact
                       :task/tests verify-result}
                formatted
                (assoc :task/knowledge-context formatted))]
