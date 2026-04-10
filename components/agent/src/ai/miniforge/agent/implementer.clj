@@ -447,11 +447,7 @@
                 (artifact-session/write-context-cache-for-session! session files-map)))
             (let [budget-usd (budget/resolve-cost-budget-usd :implementer config context)
                   max-turns (get @implementer-prompt-data :prompt/max-turns 10)
-                  mcp-opts (cond-> {:mcp-config (:mcp-config-path session)
-                                    :mcp-allowed-tools (:mcp-allowed-tools session)
-                                    :supervision (:supervision session)
-                                    :budget-usd budget-usd
-                                    :max-turns max-turns}
+                  mcp-opts (cond-> (artifact-session/session->mcp-opts session budget-usd max-turns)
                              working-dir (assoc :workdir working-dir))]
               (if on-chunk
                 (llm/chat-stream llm-client user-prompt on-chunk

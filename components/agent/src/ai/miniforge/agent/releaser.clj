@@ -234,11 +234,7 @@
                   (artifact-session/with-session context
                     (fn [session]
                       (let [budget-usd (budget/resolve-cost-budget-usd :releaser config context)
-                            mcp-opts {:mcp-config (:mcp-config-path session)
-                                      :mcp-allowed-tools (:mcp-allowed-tools session)
-                                      :supervision (:supervision session)
-                                      :budget-usd budget-usd
-                                      :max-turns 15}]
+                            mcp-opts (artifact-session/session->mcp-opts session budget-usd 15)]
                         (if on-chunk
                           (llm/chat-stream llm-client user-prompt on-chunk
                                            (merge {:system @releaser-system-prompt} mcp-opts))

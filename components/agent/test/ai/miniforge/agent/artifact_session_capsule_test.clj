@@ -21,6 +21,7 @@
    Verifies with-session dispatches correctly between host and capsule modes."
   (:require
    [clojure.test :refer [deftest testing is]]
+   [clojure.string :as str]
    [ai.miniforge.agent.artifact-session :as session]
    [ai.miniforge.dag-executor.executor :as executor]))
 
@@ -41,7 +42,7 @@
   [_executor _env-id command & [_opts]]
   (when *exec-log*
     (swap! *exec-log* conj command))
-  (if (and (string? command) (.startsWith command "cat ") (.contains command "artifact.edn"))
+  (if (and (string? command) (str/starts-with? command "cat ") (str/includes? command "artifact.edn"))
     {:ok? true :data {:stdout "{:code/id \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\" :code/description \"test\"}"
                       :stderr "" :exit-code 0}}
     {:ok? true :data {:stdout "" :stderr "" :exit-code 0}}))

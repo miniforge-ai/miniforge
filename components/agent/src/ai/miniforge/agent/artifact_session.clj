@@ -294,12 +294,11 @@
    Capsule variant of write-context-cache! for governed mode."
   [session files]
   (when (seq files)
-    (let [exec!   (requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)
-          path    (str (:dir session) "/context-cache.edn")
+    (let [path    (str (:dir session) "/context-cache.edn")
           content (pr-str {:files files})]
-      (exec! (:executor session) (:environment-id session)
-             (str "cat > " path " << 'CACHEEOF'\n" content "\nCACHEEOF")
-             {:workdir (:workdir session)})))
+      ((:exec! session) (:executor session) (:environment-id session)
+                        (str "cat > " path " << 'CACHEEOF'\n" content "\nCACHEEOF")
+                        {:workdir (:workdir session)})))
   session)
 
 (defn write-context-cache-for-session!
@@ -447,18 +446,25 @@
 ;------------------------------------------------------------------------------ Layer 2.5
 ;; Capsule-aware session lifecycle (N11 §6.3-6.4)
 
+(defn- resolve-exec!
+  "Resolve the executor execute! function once. All capsule functions
+   use the :exec! key on the session instead of repeated requiring-resolve."
+  []
+  @(requiring-resolve 'ai.miniforge.dag-executor.executor/execute!))
+
 (defn create-capsule-session!
   "Create an artifact session inside a task capsule.
    Session directory is created inside the capsule's workspace via executor.
-   Returns session map with capsule-relative paths."
+   Returns session map with capsule-relative paths and resolved exec! fn."
   [executor env-id workdir]
-  (let [exec!      (requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)
+  (let [exec!       (resolve-exec!)
         session-dir (str workdir "/.miniforge-session")
         _           (exec! executor env-id (str "mkdir -p " session-dir) {:workdir workdir})]
     {:dir             session-dir
      :mcp-config-path (str session-dir "/mcp-config.json")
      :artifact-path   (str session-dir "/artifact.edn")
      :capsule?        true
+     :exec!           exec!
      :executor        executor
      :environment-id  env-id
      :workdir         workdir}))
@@ -467,7 +473,7 @@
   "Write MCP config and Claude settings inside the capsule.
    The server command resolves to capsule-local bb/miniforge binary."
   [session]
-  (let [exec!       (requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)
+  (let [exec!       (:exec! session)
         executor    (:executor session)
         env-id      (:environment-id session)
         session-dir (:dir session)
@@ -497,7 +503,7 @@
   "Read artifact EDN from inside the capsule via executor.
    Applies parse-uuid-strings to match host read-artifact behavior."
   [session]
-  (let [exec!    (requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)
+  (let [exec!    (:exec! session)
         result   (exec! (:executor session) (:environment-id session)
                         (str "cat " (:artifact-path session)) {:workdir (:workdir session)})
         content  (get-in result [:data :stdout] "")]
@@ -511,11 +517,10 @@
 (defn cleanup-capsule-session!
   "Remove the session directory inside the capsule."
   [session]
-  (let [exec! (requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)]
-    (try
-      (exec! (:executor session) (:environment-id session)
-             (str "rm -rf " (:dir session)) {:workdir (:workdir session)})
-      (catch Exception _ nil))))
+  (try
+    ((:exec! session) (:executor session) (:environment-id session)
+                      (str "rm -rf " (:dir session)) {:workdir (:workdir session)})
+    (catch Exception _ nil)))
 
 (defmacro with-capsule-artifact-session
   "Execute body with a capsule-aware artifact session (N11 §6.3).
@@ -575,8 +580,35 @@
        (finally
          (cleanup-session! session#)))))
 
+;------------------------------------------------------------------------------ Layer 2.75
+;; Session → MCP opts
+
+(defn session->mcp-opts
+  "Build the base MCP options map from a session for LLM chat calls.
+   Callers merge role-specific keys (e.g. :model, :disallowed-tools, :workdir)."
+  [session budget-usd max-turns]
+  {:mcp-config        (:mcp-config-path session)
+   :mcp-allowed-tools (:mcp-allowed-tools session)
+   :supervision       (:supervision session)
+   :budget-usd        budget-usd
+   :max-turns         max-turns})
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Unified session dispatch (N11 §6.3)
+
+(defn- run-session
+  "Execute body-fn with session, read artifacts, and clean up.
+   Shared lifecycle for both host and capsule sessions."
+  [session body-fn read-artifact-fn cleanup-fn mode]
+  (try
+    (let [result (body-fn session)]
+      {:llm-result result
+       :artifact (read-artifact-fn session)
+       :context-misses (when (= :host mode) (read-context-misses session))
+       :pre-session-snapshot (when (= :host mode) (:pre-session-snapshot session))
+       :session-mode mode})
+    (finally
+      (cleanup-fn session))))
 
 (defn with-session
   "Execute body-fn with the appropriate artifact session for the execution mode.
@@ -602,28 +634,12 @@
             workdir  (or (:execution/worktree-path context) "/workspace")
             session  (-> (create-capsule-session! executor env-id workdir)
                          write-capsule-mcp-config!)]
-        (try
-          (let [result (body-fn session)]
-            {:llm-result result
-             :artifact (read-capsule-artifact session)
-             :context-misses nil
-             :pre-session-snapshot nil
-             :session-mode :capsule})
-          (finally
-            (cleanup-capsule-session! session))))
+        (run-session session body-fn read-capsule-artifact cleanup-capsule-session! :capsule))
       (let [session (-> (create-session!
                           {:workdir (or (:execution/worktree-path context)
                                         (System/getProperty "user.dir"))})
                         write-mcp-config!)]
-        (try
-          (let [result (body-fn session)]
-            {:llm-result result
-             :artifact (read-artifact session)
-             :context-misses (read-context-misses session)
-             :pre-session-snapshot (:pre-session-snapshot session)
-             :session-mode :host})
-          (finally
-            (cleanup-session! session)))))))
+        (run-session session body-fn read-artifact cleanup-session! :host)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

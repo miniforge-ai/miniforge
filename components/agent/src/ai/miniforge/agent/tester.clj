@@ -325,12 +325,8 @@
                         (artifact-session/write-context-cache-for-session! session files-map))
                       (let [budget-usd (budget/resolve-cost-budget-usd :tester config context)
                             max-turns (get @tester-prompt-data :prompt/max-turns 10)
-                            mcp-opts {:mcp-config (:mcp-config-path session)
-                                      :mcp-allowed-tools (:mcp-allowed-tools session)
-                                      :disallowed-tools ["Read" "Grep" "Glob" "WebSearch" "WebFetch" "LS"]
-                                      :supervision (:supervision session)
-                                      :budget-usd budget-usd
-                                      :max-turns max-turns}]
+                            mcp-opts (assoc (artifact-session/session->mcp-opts session budget-usd max-turns)
+                                            :disallowed-tools ["Read" "Grep" "Glob" "WebSearch" "WebFetch" "LS"])]
                         (if on-chunk
                           (llm/chat-stream llm-client user-prompt on-chunk
                                            (merge {:system @tester-system-prompt} mcp-opts))
