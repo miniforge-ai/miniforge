@@ -161,6 +161,15 @@
          (result/shell-success {:pr-url pr-url :pr-number pr-num}))
        (result/shell-failure (:error r) {:pr-url nil :pr-number nil})))))
 
+(defn edit-pr-body!
+  "Update the body of an existing PR using gh CLI.
+   Used to replace the initial stub body with the full PR doc content."
+  ([executor env-id pr-number body] (edit-pr-body! executor env-id pr-number body {}))
+  ([executor env-id pr-number body exec-opts]
+   (let [escaped-body (str/replace (or body "") "'" "'\\''")
+         cmd (str "gh pr edit " pr-number " --body '" escaped-body "'")]
+     (exec! executor env-id cmd exec-opts))))
+
 ;------------------------------------------------------------------------------ Layer 1.5
 ;; Diff inspection (governed equivalents of git/diff-stats, git/count-test-defs)
 
