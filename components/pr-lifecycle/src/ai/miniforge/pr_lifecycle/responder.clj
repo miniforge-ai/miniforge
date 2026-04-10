@@ -108,11 +108,15 @@
 ;; Orchestration
 
 (defn- fix-succeeded?
-  "True when a workflow result indicates success."
+  "True when a workflow result indicates success or partial success.
+   A DAG workflow may fail overall but still produce PRs for completed tasks.
+   We consider it a success if the status is not :failed OR if the DAG
+   produced at least one PR (partial success)."
   [result]
   (and (map? result)
        (not (:error result))
-       (not= :failed (get result :execution/status))))
+       (or (not= :failed (get result :execution/status))
+           (seq (get-in result [:execution/dag-result :pr-infos])))))
 
 (defn- run-fix-for-group
   "Run a fix workflow for a comment group. Returns result map or {:error msg}."

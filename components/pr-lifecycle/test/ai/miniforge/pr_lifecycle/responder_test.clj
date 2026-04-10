@@ -184,6 +184,41 @@
         (is (nil? (get-in result [:fixes 0 :replied?])))
         (is (false? (:pushed? result)))))))
 
+(deftest respond-to-comments-partial-success-test
+  (testing "treats DAG partial success (failed status but PRs produced) as success"
+    (with-redefs [poller/fetch-pr-comments
+                  (fn [_ _] (dag/ok {:comments [review-comment]}))
+                  github/reply-to-comment
+                  (fn [_ _ _ _] (dag/ok {:reply-id 1}))
+                  github/get-thread-id
+                  (fn [_ _ _] (dag/ok {:thread-id "PRRT_123"}))
+                  github/resolve-conversation
+                  (fn [_ _] (dag/ok {:resolved true}))]
+      (let [result (responder/respond-to-comments!
+                    "https://github.com/org/repo/pull/1"
+                    "/tmp/worktree"
+                    (fn [_ _] {:execution/status :failed
+                               :execution/dag-result {:pr-infos [{:pr-number 491}]}})
+                    (fn [] true)
+                    {})]
+        (is (true? (get-in result [:fixes 0 :succeeded?])))
+        (is (true? (get-in result [:fixes 0 :replied?])))
+        (is (true? (:pushed? result)))))))
+
+(deftest respond-to-comments-total-failure-test
+  (testing "treats DAG failure with no PRs as failure"
+    (with-redefs [poller/fetch-pr-comments
+                  (fn [_ _] (dag/ok {:comments [review-comment]}))]
+      (let [result (responder/respond-to-comments!
+                    "https://github.com/org/repo/pull/1"
+                    "/tmp/worktree"
+                    (fn [_ _] {:execution/status :failed
+                               :execution/dag-result {:pr-infos []}})
+                    (fn [] true)
+                    {})]
+        (is (false? (get-in result [:fixes 0 :succeeded?])))
+        (is (false? (:pushed? result)))))))
+
 (deftest respond-to-comments-invalid-url-test
   (testing "throws on unparseable PR URL"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Could not parse"
