@@ -582,7 +582,7 @@
                             dag-exec/execute!
                             (get opts :executor)
                             (get opts :environment-id)
-                            (or (:worktree-path opts) "/workspace")))
+                            (get opts :worktree-path "/workspace")))
 
          initial-ctx (-> (ctx/create-context workflow input opts)
                          (assoc :execution/executor (get opts :executor)

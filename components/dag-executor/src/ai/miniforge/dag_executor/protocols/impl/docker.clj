@@ -540,7 +540,7 @@
    are not available."
   [docker-path container-name workdir env-config]
   (when-let [repo-url (:repo-url env-config)]
-    (let [branch    (or (:branch env-config) "main")
+    (let [branch    (get env-config :branch "main")
           host-kind (or (:host-kind env-config)
                         (infer-host-kind repo-url))
           token     (resolve-git-token repo-url {:host-kind host-kind})

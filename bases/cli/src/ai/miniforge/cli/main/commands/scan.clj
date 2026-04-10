@@ -26,7 +26,7 @@
    [babashka.fs :as fs]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [ai.miniforge.cli.linter-runner :as linter]
+   [ai.miniforge.connector-linter.interface :as linter]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.repo-analyzer :as analyzer]
@@ -142,7 +142,7 @@
   (let [detected (get repo-config :repo/technologies #{})
         fps      @analyzer/fingerprints]
     (when (seq detected)
-      (let [result (linter/run-all-linters repo-path fps detected)]
+      (let [result (linter/run-all repo-path fps detected)]
         (doseq [{:keys [tech available? violations duration-ms]} (:linter-results result)]
           (cond
             (not available?)
@@ -161,7 +161,7 @@
   [repo-path repo-config]
   (let [detected (get repo-config :repo/technologies #{})
         fps      @analyzer/fingerprints
-        result   (linter/run-linter-fixes repo-path fps detected)]
+        result   (linter/run-fixes repo-path fps detected)]
     (doseq [{:keys [tech exit]} (:fixed result)]
       (display/print-info (str "  " (name tech) ": fix " (if (zero? exit) "applied" "failed"))))))
 
@@ -179,20 +179,28 @@
             (:files-analyzed result) " files, "
             (:duration-ms result) "ms)")))))
 
+(defn- rule-has-matching-files?
+  "True when a rule's file globs match at least one file in the repo."
+  [repo-path rule]
+  (seq (semantic/select-files-for-rule repo-path rule)))
+
 (defn- run-semantic-analysis
   "Run LLM-based semantic analysis on behavioral rules in parallel.
-   Returns vector of semantic violations."
+   Only runs rules that have matching files in the repo."
   [repo-path standards-path]
   (try
-    (let [;; Try repo's .standards/ first, fall back to bundled standards pack
-          compile-result (let [r (policy-pack/compile-standards-pack standards-path)]
+    (let [compile-result (let [r (policy-pack/compile-standards-pack standards-path)]
                            (if (:success? r)
                              r
-                             ;; Load bundled pack from classpath
                              (when-let [url (io/resource "packs/miniforge-standards.pack.edn")]
                                {:success? true :pack (edn/read-string (slurp url))})))]
       (when (:success? compile-result)
-        (let [rules (semantic/behavioral-rules (get-in compile-result [:pack :pack/rules]))]
+        (let [all-rules   (semantic/behavioral-rules (get-in compile-result [:pack :pack/rules]))
+              ;; Only run rules that have matching files — skip wrong-language rules
+              rules       (filterv #(rule-has-matching-files? repo-path %) all-rules)
+              skipped     (- (count all-rules) (count rules))]
+          (when (pos? skipped)
+            (display/print-info (str "  Skipped " skipped " rule(s) with no matching files")))
           (when (seq rules)
             (let [client  (llm/create-client)
                   _       (display/print-info

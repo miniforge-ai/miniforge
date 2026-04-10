@@ -364,12 +364,12 @@
   ;; K8s persistence: git push (same as Docker). Fleet tier will use object store.
   (persist-workspace! [this environment-id opts]
     (let [exec! (fn [cmd] (proto/execute! this environment-id cmd
-                                          {:workdir (or (:workdir opts) "/workspace")}))]
+                                          {:workdir (get opts :workdir "/workspace")}))]
       (workspace/git-persist! exec! opts)))
 
   (restore-workspace! [this environment-id opts]
     (let [exec! (fn [cmd] (proto/execute! this environment-id cmd
-                                          {:workdir (or (:workdir opts) "/workspace")}))]
+                                          {:workdir (get opts :workdir "/workspace")}))]
       (workspace/git-restore! exec! opts))))
 
 ;; ============================================================================
