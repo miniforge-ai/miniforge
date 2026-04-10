@@ -596,6 +596,14 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Unified session dispatch (N11 §6.3)
 
+(defn governed?
+  "True when the execution context requires governed (capsule) mode.
+   Checks :execution/mode is :governed and executor + environment-id are present."
+  [context]
+  (and (= :governed (:execution/mode context))
+       (some? (:execution/executor context))
+       (some? (:execution/environment-id context))))
+
 (defn- run-session
   "Execute body-fn with session, read artifacts, and clean up.
    Shared lifecycle for both host and capsule sessions."
@@ -625,21 +633,18 @@
    Returns normalized map:
    {:llm-result :artifact :context-misses :pre-session-snapshot :session-mode}"
   [context body-fn]
-  (let [governed? (and (= :governed (:execution/mode context))
-                       (:execution/executor context)
-                       (:execution/environment-id context))]
-    (if governed?
-      (let [executor (:execution/executor context)
-            env-id   (:execution/environment-id context)
-            workdir  (or (:execution/worktree-path context) "/workspace")
-            session  (-> (create-capsule-session! executor env-id workdir)
-                         write-capsule-mcp-config!)]
-        (run-session session body-fn read-capsule-artifact cleanup-capsule-session! :capsule))
-      (let [session (-> (create-session!
-                          {:workdir (or (:execution/worktree-path context)
-                                        (System/getProperty "user.dir"))})
-                        write-mcp-config!)]
-        (run-session session body-fn read-artifact cleanup-session! :host)))))
+  (if (governed? context)
+    (let [executor (:execution/executor context)
+          env-id   (:execution/environment-id context)
+          workdir  (or (:execution/worktree-path context) "/workspace")
+          session  (-> (create-capsule-session! executor env-id workdir)
+                       write-capsule-mcp-config!)]
+      (run-session session body-fn read-capsule-artifact cleanup-capsule-session! :capsule))
+    (let [session (-> (create-session!
+                        {:workdir (or (:execution/worktree-path context)
+                                      (System/getProperty "user.dir"))})
+                      write-mcp-config!)]
+      (run-session session body-fn read-artifact cleanup-session! :host))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
