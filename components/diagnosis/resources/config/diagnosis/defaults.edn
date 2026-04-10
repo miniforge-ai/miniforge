@@ -1,8 +1,17 @@
-;; Diagnosis signal extraction thresholds
+;; Diagnosis configuration — thresholds and mappings
 {:min-failure-count     3
  :min-training-examples 10
  :iteration-threshold   3
  :quality-regression-threshold 0.1
  :confidence-per-signal 0.3
  :min-proposal-confidence 0.3
- :min-samples-for-significance 10}
+ :min-samples-for-significance 10
+
+ ;; Maps failure class → default affected heuristic when no explicit
+ ;; heuristic is attached to the signal. Used by infer-affected-heuristic.
+ :failure-class->heuristic
+ {:failure.class/agent-error :agent-prompt/implementer
+  :failure.class/task-code   :agent-prompt/tester
+  :failure.class/policy      :gate-threshold/policy
+  :failure.class/timeout     :threshold/timeout
+  :failure.class/resource    :threshold/budget}}

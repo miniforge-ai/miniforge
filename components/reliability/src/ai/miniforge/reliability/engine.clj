@@ -20,8 +20,6 @@
    state          ; atom: {:slis [...] :slo-checks [...] :budgets {...} :mode :nominal}
    config])       ; {:windows [:7d] :tiers [:standard :critical]}
 
-(def ^:private inverted-slis #{:SLI-6})
-
 (defn create-engine
   "Create a ReliabilityEngine.
 
@@ -91,7 +89,7 @@
                         [[name tier window]
                          (merge
                           (budget/compute-error-budget actual target
-                                                      (contains? inverted-slis name))
+                                                      (contains? slo/inverted-slis name))
                           {:error-budget/tier tier
                            :error-budget/sli name
                            :error-budget/window window

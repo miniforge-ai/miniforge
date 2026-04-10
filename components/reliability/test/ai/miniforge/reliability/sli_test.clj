@@ -3,7 +3,8 @@
 (ns ai.miniforge.reliability.sli-test
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.reliability.interface :as rel]))
+   [ai.miniforge.reliability.interface :as rel]
+   [ai.miniforge.event-stream.interface.stream :as stream]))
 
 (def now (java.util.Date.))
 
@@ -148,7 +149,7 @@
 
 (deftest engine-test
   (testing "compute-cycle! returns expected structure"
-    (let [stream (atom {:events [] :subscribers {} :filters {} :sequence-numbers {} :sinks []})
+    (let [stream (stream/create-event-stream {:sinks []})
           eng (rel/create-engine stream {:windows [:7d] :tiers [:standard]})
           metrics {:workflow-metrics [{:status :completed :timestamp now}
                                      {:status :completed :timestamp now}

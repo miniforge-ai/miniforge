@@ -6,9 +6,23 @@
    Takes correlated signal clusters and produces diagnostic hypotheses
    with suggested improvement types.
 
-   Layer 0: Diagnosis logic (pure functions)")
+   Layer 0: Config
+   Layer 1: Diagnosis logic (pure functions)"
+  (:require
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Config
+
+(def ^:private config
+  (-> (io/resource "config/diagnosis/defaults.edn") slurp edn/read-string))
+
+(def ^:private failure-class->heuristic
+  "Maps failure class to default affected heuristic. Loaded from config."
+  (:failure-class->heuristic config))
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Improvement type inference
 
 (defn- infer-improvement-type
@@ -38,13 +52,7 @@
   (or (some :signal/affected-heuristic signals)
       ;; If no explicit heuristic, infer from failure class
       (when-let [failure-class (some #(get-in % [:signal/evidence :failure-class]) signals)]
-        (case failure-class
-          :failure.class/agent-error :agent-prompt/implementer
-          :failure.class/task-code   :agent-prompt/tester
-          :failure.class/policy      :gate-threshold/policy
-          :failure.class/timeout     :threshold/timeout
-          :failure.class/resource    :threshold/budget
-          nil))))
+        (get failure-class->heuristic failure-class))))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Diagnosis

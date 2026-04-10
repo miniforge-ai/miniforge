@@ -3,10 +3,11 @@
 (ns ai.miniforge.reliability.degradation-test
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.reliability.interface :as rel]))
+   [ai.miniforge.reliability.interface :as rel]
+   [ai.miniforge.event-stream.interface.stream :as stream]))
 
 (defn- make-stream []
-  (atom {:events [] :subscribers {} :filters {} :sequence-numbers {} :sinks []}))
+  (stream/create-event-stream {:sinks []}))
 
 ;; ---------------------------------------------------------------------------- Basic lifecycle
 

@@ -24,7 +24,7 @@
       slurp
       edn/read-string))
 
-(def ^:private inverted-slis
+(def inverted-slis
   "SLIs where lower is better (the target is a ceiling, not a floor)."
   (:inverted-slis defaults))
 

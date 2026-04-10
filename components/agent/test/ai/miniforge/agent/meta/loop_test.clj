@@ -11,13 +11,14 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.agent.meta.loop :as meta-loop]
    [ai.miniforge.reliability.interface :as rel]
-   [ai.miniforge.improvement.interface :as imp]))
+   [ai.miniforge.improvement.interface :as imp]
+   [ai.miniforge.event-stream.interface.stream :as stream]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test factories
 
 (defn- make-stream []
-  (atom {:events [] :subscribers {} :filters {} :sequence-numbers {} :sinks []}))
+  (stream/create-event-stream {:sinks []}))
 
 (defn- make-timestamp [] (java.util.Date.))
 
