@@ -155,12 +155,22 @@
   (try
     (load-and-validate-workflow load-workflow workflow-type workflow-version)
     (catch Exception e
-      (if (= workflow-type :test-only)
+      (case workflow-type
+        :test-only
         {:workflow/id :test-only
          :workflow/version "inline"
          :workflow/name "Test Generation"
          :workflow/pipeline [{:phase :verify} {:phase :done}]
          :workflow/config {:max-tokens 20000 :max-iterations 10}}
+
+        :comment-fix
+        {:workflow/id :comment-fix
+         :workflow/version "inline"
+         :workflow/name "Comment Fix"
+         :workflow/pipeline [{:phase :implement :gates [:syntax :lint :no-secrets]}
+                             {:phase :done}]
+         :workflow/config {:max-tokens 20000 :max-iterations 5}}
+
         (throw e)))))
 
 (defn execute-workflow-pipeline [run-pipeline workflow input callbacks artifact-store event-stream]

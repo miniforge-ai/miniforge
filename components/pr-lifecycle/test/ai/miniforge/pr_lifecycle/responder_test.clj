@@ -121,7 +121,7 @@
                  :comment-ids [123]}
           context {:diff "diff content" :files [{:path "src/foo.clj" :content "(ns foo)"}]}
           spec (responder/build-fix-spec group context)]
-      (is (= :canonical-sdlc (:workflow/type spec)))
+      (is (= :comment-fix (:workflow/type spec)))
       (is (= :fix (get-in spec [:spec/intent :type])))
       (is (= ["src/foo.clj"] (get-in spec [:spec/intent :scope])))
       (is (str/includes? (:spec/description spec) "Extract this function"))
