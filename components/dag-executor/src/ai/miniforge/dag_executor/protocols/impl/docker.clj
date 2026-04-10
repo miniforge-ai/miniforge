@@ -327,7 +327,7 @@
       (result/ok {:status :unknown :error (:err result)}))))
 
 (defn container-image-digest
-  "Return the SHA256 image digest for a running container, or nil on failure."
+  "Return the SHA256 image digest for a container, or nil on failure."
   [docker-path container-name]
   (try
     (let [inspect-result (run-docker docker-path
@@ -357,7 +357,7 @@
   (let [result (run-docker docker-path "image" "inspect" image)]
     (zero? (:exit result))))
 
-(defn container-image-digest
+(defn image-repo-digest
   "Return the repo-digest (sha256:…) string for a local Docker image,
    or nil when the image is not found or Docker is unavailable."
   [docker-path image]
@@ -601,6 +601,7 @@
         (do
           ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
           (bootstrap-workspace! docker-path container-name workdir env-config)
+          ;; Capture image SHA256 digest for evidence record (N11 §11 SHOULD)
           (let [image-digest (container-image-digest docker-path container-name)
                 metadata (cond-> (get create-result :data {})
                            image-digest (assoc :image-digest image-digest))]

@@ -252,6 +252,13 @@
    ;; Rules Applied (knowledge base rules injected into agents)
    (optional-key :evidence/rules-applied) vector?
 
+   ;; Execution Evidence (N11 §9.1)
+   (optional-key :evidence/execution-mode) keyword?
+   (optional-key :evidence/runtime-class) keyword?
+   (optional-key :evidence/task-started-at) inst?
+   (optional-key :evidence/task-finished-at) inst?
+   (optional-key :evidence/image-digest) string?
+
    ;; Outcome
    :evidence/outcome map?
 

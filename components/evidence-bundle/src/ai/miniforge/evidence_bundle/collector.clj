@@ -310,11 +310,37 @@
           :outcome/error-phase (:phase error-info)
           :outcome/error-details error-info})))))
 
+;------------------------------------------------------------------------------ Layer 4.5
+;; Execution Evidence (N11 §9.1)
+
+(defn collect-execution-evidence
+  "Extract N11 §9.1 execution evidence fields from workflow state.
+   Looks in :execution/output for evidence fields produced by runner/extract-output.
+   Returns a map of evidence keys to merge into the bundle, or empty map."
+  [workflow-state]
+  (let [output (get workflow-state :execution/output {})]
+    (cond-> {}
+      (contains? output :evidence/execution-mode)
+      (assoc :evidence/execution-mode (:evidence/execution-mode output))
+
+      (contains? output :evidence/runtime-class)
+      (assoc :evidence/runtime-class (:evidence/runtime-class output))
+
+      (contains? output :evidence/task-started-at)
+      (assoc :evidence/task-started-at (:evidence/task-started-at output))
+
+      (contains? output :evidence/task-finished-at)
+      (assoc :evidence/task-finished-at (:evidence/task-finished-at output))
+
+      (contains? output :evidence/image-digest)
+      (assoc :evidence/image-digest (:evidence/image-digest output)))))
+
 ;------------------------------------------------------------------------------ Layer 5
 ;; Complete Bundle Assembly
 
 (defn assemble-evidence-bundle
   "Assemble complete evidence bundle from workflow state and context.
+   Merges N11 §9.1 execution evidence fields from :execution/output.
    Returns evidence bundle ready for storage."
   [workflow-id workflow-state artifact-store & [opts]]
   (let [workflow-spec (:workflow/spec workflow-state)
@@ -328,6 +354,9 @@
         rules-applied (collect-rules-applied workflow-state)
         supervision-decisions (collect-supervision-decisions event-stream workflow-id)
         control-actions (collect-control-actions event-stream workflow-id)
+
+        ;; N11 §9.1: extract execution evidence from workflow result
+        execution-evidence (collect-execution-evidence workflow-state)
 
         ;; Get artifacts for semantic validation
         artifacts (when artifact-store
@@ -352,7 +381,8 @@
                       :evidence/intent intent
                       :evidence/policy-checks policy-checks
                       :evidence/outcome outcome}
-                     phase-evidence)
+                     phase-evidence
+                     execution-evidence)
         bundle (cond-> base-bundle
                  (seq tool-invocations)
                  (assoc :evidence/tool-invocations tool-invocations)
