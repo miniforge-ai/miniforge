@@ -164,6 +164,17 @@
     (doseq [{:keys [tech exit]} (:fixed result)]
       (display/print-info (str "  " (name tech) ": fix " (if (zero? exit) "applied" "failed"))))))
 
+(defn- analyze-and-report-rule
+  "Analyze a single behavioral rule and print results. Returns violations."
+  [client complete-fn repo-path rule]
+  (let [result (semantic/analyze-rule client complete-fn repo-path rule)]
+    (display/print-info
+     (str "  " (name (get rule :rule/id)) ": "
+          (count (:violations result)) " finding(s) ("
+          (:files-analyzed result) " files, "
+          (:duration-ms result) "ms)"))
+    (:violations result)))
+
 (defn- run-semantic-analysis
   "Run LLM-based semantic analysis on behavioral rules.
    Returns vector of semantic violations."
@@ -171,22 +182,16 @@
   (try
     (let [compile-result (policy-pack/compile-standards-pack standards-path)]
       (when (:success? compile-result)
-        (let [rules     (semantic/behavioral-rules (get-in compile-result [:pack :pack/rules]))
-              llm       (requiring-resolve 'ai.miniforge.llm.interface/create-client)
-              complete  (requiring-resolve 'ai.miniforge.llm.interface/complete)]
-          (when (and llm complete (seq rules))
-            (let [client (llm)]
+        (let [rules      (semantic/behavioral-rules (get-in compile-result [:pack :pack/rules]))
+              ;; LLM client uses requiring-resolve — legitimate extension point
+              ;; because the LLM component may not be on the Babashka classpath
+              create-llm (requiring-resolve 'ai.miniforge.llm.interface/create-client)
+              complete   (requiring-resolve 'ai.miniforge.llm.interface/complete)]
+          (when (and create-llm complete (seq rules))
+            (let [client (create-llm)]
               (display/print-info (str "  Analyzing " (count rules) " behavioral rule(s)..."))
-              (->> rules
-                   (mapcat (fn [rule]
-                             (let [result (semantic/analyze-rule client complete repo-path rule)]
-                               (display/print-info
-                                (str "  " (name (get rule :rule/id)) ": "
-                                     (count (:violations result)) " finding(s) ("
-                                     (:files-analyzed result) " files, "
-                                     (:duration-ms result) "ms)"))
-                               (:violations result))))
-                   vec))))))
+              (vec (mapcat #(analyze-and-report-rule client complete repo-path %)
+                           rules)))))))
     (catch Exception e
       (display/print-info (str "  Semantic analysis unavailable: " (.getMessage e)))
       [])))
