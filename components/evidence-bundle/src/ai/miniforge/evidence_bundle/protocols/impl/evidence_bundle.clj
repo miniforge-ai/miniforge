@@ -58,8 +58,30 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Bundle Creation
 
+(defn- extract-execution-evidence
+  "Extract N11 §9.1 evidence fields from the workflow result's :execution/output.
+   Returns a map of evidence keys to merge into the bundle, or empty map."
+  [workflow-state]
+  (let [output (get workflow-state :execution/output {})]
+    (cond-> {}
+      (contains? output :evidence/execution-mode)
+      (assoc :evidence/execution-mode (:evidence/execution-mode output))
+
+      (contains? output :evidence/runtime-class)
+      (assoc :evidence/runtime-class (:evidence/runtime-class output))
+
+      (contains? output :evidence/task-started-at)
+      (assoc :evidence/task-started-at (:evidence/task-started-at output))
+
+      (contains? output :evidence/task-finished-at)
+      (assoc :evidence/task-finished-at (:evidence/task-finished-at output))
+
+      (contains? output :evidence/image-digest)
+      (assoc :evidence/image-digest (:evidence/image-digest output)))))
+
 (defn create-bundle-impl
   "Create evidence bundle from workflow state.
+   Merges N11 §9.1 execution evidence fields from :execution/output.
    Returns [bundle updated-bundles-atom-value]"
   [bundles _artifact-store logger workflow-id opts]
   (let [workflow-state (:workflow-state opts)
@@ -82,6 +104,9 @@
         collect-all-fn (requiring-resolve 'ai.miniforge.evidence-bundle.collector/collect-all-phases)
         phase-evidence (collect-all-fn workflow-state)
 
+        ;; N11 §9.1: extract execution evidence from workflow result
+        execution-evidence (extract-execution-evidence workflow-state)
+
         bundle-id (random-uuid)
         bundle (merge
                 (schema/create-evidence-bundle-template)
@@ -92,7 +117,8 @@
                  :evidence/semantic-validation semantic-validation
                  :evidence/policy-checks policy-checks
                  :evidence/outcome outcome}
-                phase-evidence)
+                phase-evidence
+                execution-evidence)
         bundle (cond-> bundle
                  (seq tool-invocations)
                  (assoc :evidence/tool-invocations tool-invocations))

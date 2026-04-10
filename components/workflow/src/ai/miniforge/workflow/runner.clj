@@ -249,16 +249,18 @@
 (defn- build-env-record
   "Acquire environment from executor and build the result map.
    Forwards env-config (repo-url, branch, etc.) to the executor so it can
-   bootstrap the workspace inside the capsule (N11 §4.2)."
+   bootstrap the workspace inside the capsule (N11 §4.2).
+   Propagates environment metadata (including :image-digest for N11 §11)."
   [executor workflow-id mode env-config {:keys [acquire-env! result-ok? result-unwrap]}]
   (let [task-id    (if (uuid? workflow-id) workflow-id (random-uuid))
         env-result (acquire-env! executor task-id env-config)]
     (when (result-ok? env-result)
       (let [env (result-unwrap env-result)]
-        {:executor       executor
-         :environment-id (:environment-id env)
-         :worktree-path  (:workdir env)
-         :execution-mode mode}))))
+        {:executor             executor
+         :environment-id       (:environment-id env)
+         :worktree-path        (:workdir env)
+         :execution-mode       mode
+         :environment-metadata (:metadata env)}))))
 
 (defn- acquire-execution-environment!
   "Acquire an isolated execution environment before pipeline starts.
@@ -446,16 +448,39 @@
 (defn extract-output
   "Synthesize :execution/output from completed pipeline context.
    Provides a stable interface for chaining: downstream consumers
-   read :execution/output instead of reaching into phase-results."
+   read :execution/output instead of reaching into phase-results.
+
+   Includes N11 §9.1 evidence fields:
+   - :evidence/execution-mode  — :local or :governed
+   - :evidence/runtime-class   — :docker, :worktree, or nil
+   - :evidence/task-started-at — from execution context
+   - :evidence/task-finished-at — captured at extraction time
+   - :evidence/image-digest    — Docker image SHA256 (SHOULD per N11 §11)"
   [ctx]
   (let [phase-results (:execution/phase-results ctx)
         current-phase (:execution/current-phase ctx)
-        last-result (get phase-results current-phase)]
+        last-result   (get phase-results current-phase)
+        ;; N11 §9.1 evidence fields
+        execution-mode (get ctx :execution/mode :local)
+        runtime-class  (when-let [executor (:execution/executor ctx)]
+                         (try
+                           (dag-exec/executor-type executor)
+                           (catch Exception _ nil)))
+        started-at     (:execution/started-at ctx)
+        finished-at    (java.time.Instant/now)
+        image-digest   (get-in ctx [:execution/environment-metadata :image-digest])]
     (assoc ctx :execution/output
-           {:artifacts (:execution/artifacts ctx)
-            :phase-results phase-results
-            :last-phase-result last-result
-            :status (:execution/status ctx)})))
+           (cond-> {:artifacts          (:execution/artifacts ctx)
+                    :phase-results      phase-results
+                    :last-phase-result  last-result
+                    :status             (:execution/status ctx)
+                    ;; N11 §9.1 evidence record
+                    :evidence/execution-mode  execution-mode
+                    :evidence/runtime-class   runtime-class
+                    :evidence/task-started-at started-at
+                    :evidence/task-finished-at finished-at}
+             image-digest
+             (assoc :evidence/image-digest image-digest)))))
 
 ;------------------------------------------------------------------------------ Layer 1.75: Post-execution hooks
 
@@ -590,6 +615,9 @@
                                 :execution/worktree-path (or (:worktree-path opts)
                                                              (:sandbox-workdir opts))
                                 :execution/mode (get opts :execution-mode :local)
+                                :execution/started-at (java.time.Instant/now)
+                                ;; Propagate Docker image-digest from environment metadata (N11 §11)
+                                :execution/environment-metadata (get opts :environment-metadata)
                                 ;; Pass execute! so downstream phases can call it without
                                 ;; requiring dag-executor (N11 §6.2, §9.3)
                                 :execution/execute-fn (when governed? dag-exec/execute!)
