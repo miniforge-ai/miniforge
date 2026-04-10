@@ -10,5 +10,6 @@
 (def build-judge-prompt core/build-judge-prompt)
 (def analyze-file core/analyze-file)
 (def analyze-rule core/analyze-rule)
+(def analyze-rules-parallel core/analyze-rules-parallel)
 (def select-files-for-rule core/select-files-for-rule)
 (def behavioral-rules core/behavioral-rules)

@@ -164,19 +164,22 @@
     (doseq [{:keys [tech exit]} (:fixed result)]
       (display/print-info (str "  " (name tech) ": fix " (if (zero? exit) "applied" "failed"))))))
 
-(defn- analyze-and-report-rule
-  "Analyze a single behavioral rule and print results. Returns violations."
-  [client complete-fn repo-path rule]
-  (let [result (semantic/analyze-rule client complete-fn repo-path rule)]
-    (display/print-info
-     (str "  " (name (get rule :rule/id)) ": "
-          (count (:violations result)) " finding(s) ("
-          (:files-analyzed result) " files, "
-          (:duration-ms result) "ms)"))
-    (:violations result)))
+(defn- print-rule-result
+  "Print a single rule's analysis result."
+  [result]
+  (let [rule-name (name (get result :rule/id :unknown))
+        status    (get result :status :completed)]
+    (case status
+      :timeout  (display/print-info (str "  " rule-name ": timeout (skipped)"))
+      :error    (display/print-info (str "  " rule-name ": error — " (get result :error)))
+      (display/print-info
+       (str "  " rule-name ": "
+            (count (:violations result)) " finding(s) ("
+            (:files-analyzed result) " files, "
+            (:duration-ms result) "ms)")))))
 
 (defn- run-semantic-analysis
-  "Run LLM-based semantic analysis on behavioral rules.
+  "Run LLM-based semantic analysis on behavioral rules in parallel.
    Returns vector of semantic violations."
   [repo-path standards-path]
   (try
@@ -188,10 +191,15 @@
               create-llm (requiring-resolve 'ai.miniforge.llm.interface/create-client)
               complete   (requiring-resolve 'ai.miniforge.llm.interface/complete)]
           (when (and create-llm complete (seq rules))
-            (let [client (create-llm)]
-              (display/print-info (str "  Analyzing " (count rules) " behavioral rule(s)..."))
-              (vec (mapcat #(analyze-and-report-rule client complete repo-path %)
-                           rules)))))))
+            (let [client  (create-llm)
+                  _       (display/print-info
+                           (str "  Analyzing " (count rules)
+                                " behavioral rule(s) in parallel..."))
+                  results (semantic/analyze-rules-parallel
+                           client complete repo-path rules
+                           {:timeout-ms 120000 :max-parallel 4})]
+              (doseq [r results] (print-rule-result r))
+              (vec (mapcat :violations results)))))))
     (catch Exception e
       (display/print-info (str "  Semantic analysis unavailable: " (.getMessage e)))
       [])))
