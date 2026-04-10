@@ -1,3 +1,4 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/policy-pack {:local/root "../policy-pack"}}
+ :deps {ai.miniforge/policy-pack {:local/root "../policy-pack"}
+        ai.miniforge/compliance-scanner {:local/root "../compliance-scanner"}}
  :aliases {:test {:extra-paths ["test"]}}}

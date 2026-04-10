@@ -214,3 +214,37 @@
       (is (vector? (:violations result)))
       (is (pos? (:files-analyzed result)))
       (is (pos? @call-count)))))
+
+(def ^:private base-rule
+  {:rule/id :std/test
+   :rule/title "Test"
+   :rule/category "001"
+   :rule/severity :minor
+   :rule/knowledge-content "Test rule."
+   :rule/applies-to {:file-globs ["components/semantic-analyzer/test/**/*.clj"]}})
+
+;; ============================================================================
+;; Parallel execution with timeouts
+;; ============================================================================
+
+(deftest analyze-rules-parallel-test
+  (testing "runs multiple rules in parallel and collects results"
+    (let [rules [(assoc base-rule :rule/id :std/r1)
+                 (assoc base-rule :rule/id :std/r2)
+                 (assoc base-rule :rule/id :std/r3)]
+          mock-complete (fn [_client _request]
+                          {:success true :content "[]"})
+          results (sut/analyze-rules-parallel :mock mock-complete "." rules
+                                              {:timeout-ms 30000 :max-parallel 3})]
+      (is (= 3 (count results)))
+      (is (every? #(= :completed (:status %)) results))))
+
+  (testing "timed-out rules return timeout status"
+    (let [slow-rule    (assoc base-rule :rule/id :std/slow :rule/title "Slow")
+          mock-complete (fn [_client _request]
+                          (Thread/sleep 10000)
+                          {:success true :content "[]"})
+          results (sut/analyze-rules-parallel :mock mock-complete "." [slow-rule]
+                                              {:timeout-ms 1000 :max-parallel 1})]
+      (is (= 1 (count results)))
+      (is (= :timeout (:status (first results)))))))

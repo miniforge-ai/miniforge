@@ -12,6 +12,7 @@
    Layer 1: LLM invocation and response parsing
    Layer 2: File selection and batch analysis"
   (:require
+   [ai.miniforge.compliance-scanner.factory :as factory]
    [ai.miniforge.policy-pack.prompt-template :as pt]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -70,21 +71,19 @@
         []))
     (catch Exception _ [])))
 
-;; NOTE: This mirrors compliance-scanner.factory/->violation.
-;; The violation shape should be extracted to a shared component
-;; (e.g., schema or response) to eliminate this duplication.
 (defn- raw->violation
-  "Convert a single raw LLM violation to canonical shape."
+  "Convert a single raw LLM violation to canonical shape via factory."
   [rule file-path v]
-  {:rule/id       (get rule :rule/id)
-   :rule/category (get rule :rule/category "000")
-   :rule/title    (get rule :rule/title)
-   :file          file-path
-   :line          (get v :line 0)
-   :current       (get v :current "")
-   :suggested     nil
-   :auto-fixable? false
-   :rationale     (get v :message "Semantic analysis violation")})
+  (factory/->violation
+   (get rule :rule/id)
+   (get rule :rule/category "000")
+   (get rule :rule/title)
+   file-path
+   (get v :line 0)
+   (get v :current "")
+   nil
+   false
+   (get v :message "Semantic analysis violation")))
 
 (defn- judge-response->violations
   "Convert parsed judge response to canonical violation maps."
@@ -120,8 +119,9 @@
   50000)
 
 (def ^:private max-files-per-rule
-  "Maximum number of files to analyze per rule to control LLM costs."
-  20)
+  "Maximum number of files to analyze per rule.
+   Kept low to stay within per-rule timeout when using CLI backends."
+  5)
 
 ;; NOTE: This mirrors compliance-scanner.scan/globs->file-pred.
 ;; Glob matching should be extracted to repo-index component.
@@ -164,6 +164,11 @@
         content  (slurp f)]
     (analyze-file llm-client complete-fn rule rel-path content)))
 
+(def ^:private default-rule-timeout-ms
+  "Maximum time to spend analyzing one rule before giving up.
+   5 files × ~30s per CLI backend call = ~150s, so 300s gives headroom."
+  300000)
+
 (defn analyze-rule
   "Analyze all matching files against a single behavioral rule.
 
@@ -174,7 +179,7 @@
    - rule — Behavioral rule with :rule/knowledge-content
 
    Returns:
-   - {:rule/id keyword :violations [...] :files-analyzed int :duration-ms int}"
+   - {:rule/id keyword :violations [...] :files-analyzed int :duration-ms int :status keyword}"
   [llm-client complete-fn repo-path rule]
   (let [start-ms (System/currentTimeMillis)
         files    (select-files-for-rule repo-path rule)
@@ -184,7 +189,56 @@
     {:rule/id        (get rule :rule/id)
      :violations     viols
      :files-analyzed (count files)
-     :duration-ms    (- end-ms start-ms)}))
+     :duration-ms    (- end-ms start-ms)
+     :status         :completed}))
+
+(defn- analyze-rule-with-timeout
+  "Run analyze-rule with a timeout. Returns result or timeout marker."
+  [llm-client complete-fn repo-path rule timeout-ms]
+  (let [fut (future (analyze-rule llm-client complete-fn repo-path rule))]
+    (try
+      (let [result (deref fut timeout-ms ::timeout)]
+        (if (= result ::timeout)
+          (do (future-cancel fut)
+              {:rule/id      (get rule :rule/id)
+               :violations   []
+               :files-analyzed 0
+               :duration-ms  timeout-ms
+               :status       :timeout})
+          result))
+      (catch Exception e
+        {:rule/id      (get rule :rule/id)
+         :violations   []
+         :files-analyzed 0
+         :duration-ms  0
+         :status       :error
+         :error        (.getMessage e)}))))
+
+(defn analyze-rules-parallel
+  "Analyze all behavioral rules in parallel with per-rule timeouts.
+
+   Arguments:
+   - llm-client — LLM client
+   - complete-fn — LLM completion function
+   - repo-path — Repository root path
+   - rules — Vector of behavioral rules
+   - opts — Options map:
+     :timeout-ms — Per-rule timeout (default 120000)
+     :max-parallel — Max concurrent rules (default 4)
+
+   Returns:
+   - Vector of per-rule result maps"
+  [llm-client complete-fn repo-path rules opts]
+  (let [timeout-ms   (get opts :timeout-ms default-rule-timeout-ms)
+        max-parallel (get opts :max-parallel 4)
+        partitions   (partition-all max-parallel rules)]
+    (->> partitions
+         (mapcat (fn [batch]
+                   (let [futures (mapv #(future (analyze-rule-with-timeout
+                                                 llm-client complete-fn repo-path % timeout-ms))
+                                      batch)]
+                     (mapv deref futures))))
+         vec)))
 
 (defn behavioral-rules
   "Filter rules to those with :rule/knowledge-content (behavioral/semantic rules).
