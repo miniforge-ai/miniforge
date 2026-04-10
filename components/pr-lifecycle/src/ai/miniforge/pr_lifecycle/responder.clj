@@ -102,8 +102,9 @@
 ;; Fix spec generation
 
 (defn build-fix-spec
-  "Build a workflow spec from a group of review comments on a file.
-   Includes pre-gathered file contents so the explore phase can skip."
+  "Build a lightweight workflow spec from review comments on a file.
+   Uses :comment-fix workflow (implement + gates only) instead of full SDLC.
+   Includes pre-gathered file contents so the explore phase is skipped."
   [{:keys [path description]} context]
   (let [file-content (some #(when (= path (:path %)) (:content %)) (:files context))]
     (cond-> {:spec/title (str "Fix review comments on " path)
@@ -114,7 +115,7 @@
              :spec/constraints ["Only modify the specific code referenced by the review comments"
                                 "Do not change unrelated code"
                                 "Maintain existing tests"]
-             :workflow/type :canonical-sdlc}
+             :workflow/type :comment-fix}
       file-content
       (assoc :task/existing-files [{:path path :content file-content}]))))
 
