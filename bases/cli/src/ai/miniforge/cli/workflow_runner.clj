@@ -344,7 +344,7 @@
                         (assoc ctx
                                :repo-url repo-url
                                :branch branch
-                               :execution-mode (or (:execution-mode opts) :local)))
+                               :execution-mode (get opts :execution-mode :local)))
           sandbox? (or (:sandbox opts) (:spec/sandbox spec))
           [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)
           progress-cleanup (display/start-progress! event-stream quiet)]

@@ -40,7 +40,7 @@
   "Print the analysis results to the user."
   [analysis]
   (display/print-info (str "  Technologies: " (pr-str (:technologies analysis))))
-  (display/print-info (str "  Git host:     " (or (:git-host analysis) "unknown")))
+  (display/print-info (str "  Git host:     " (get analysis :git-host "unknown")))
   (display/print-info (str "  Packs:        " (pr-str (:packs analysis)))))
 
 (defn- write-config!

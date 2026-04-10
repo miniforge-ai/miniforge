@@ -90,7 +90,7 @@
   (classify-violations
    [{:rule/id :std/clojure :rule/category "210"
      :file    "components/foo/src/ai/miniforge/foo/core.clj"
-     :current "(or (:timeout m) 5000)"}
+     :current "(get m :timeout 5000)"}
     {:rule/id :std/clojure :rule/category "210"
      :file    "server/handler.clj"
      :current "(or (:status m) :pending)"}
