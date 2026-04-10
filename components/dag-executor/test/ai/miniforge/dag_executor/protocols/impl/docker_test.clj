@@ -75,6 +75,39 @@
     (is (false? (docker/image-exists? nil "nonexistent/image:never")))))
 
 ;; ============================================================================
+;; container-image-digest
+;; ============================================================================
+
+(deftest container-image-digest-returns-sha-on-success-test
+  (testing "returns trimmed digest string when docker inspect succeeds"
+    (with-redefs [docker/run-docker
+                  (fn [_docker-path & _args]
+                    {:exit 0 :out "sha256:abc123def456\n" :err ""})]
+      (is (= "sha256:abc123def456"
+             (docker/container-image-digest "/usr/bin/docker" "my-container"))))))
+
+(deftest container-image-digest-returns-nil-on-nonzero-exit-test
+  (testing "returns nil when docker inspect exits non-zero"
+    (with-redefs [docker/run-docker
+                  (fn [_docker-path & _args]
+                    {:exit 1 :out "" :err "No such container"})]
+      (is (nil? (docker/container-image-digest "/usr/bin/docker" "missing"))))))
+
+(deftest container-image-digest-returns-nil-on-empty-output-test
+  (testing "returns nil when inspect output is blank"
+    (with-redefs [docker/run-docker
+                  (fn [_docker-path & _args]
+                    {:exit 0 :out "  \n" :err ""})]
+      (is (nil? (docker/container-image-digest "/usr/bin/docker" "empty-out"))))))
+
+(deftest container-image-digest-returns-nil-on-exception-test
+  (testing "returns nil when run-docker throws"
+    (with-redefs [docker/run-docker
+                  (fn [_docker-path & _args]
+                    (throw (ex-info "Docker not found" {})))]
+      (is (nil? (docker/container-image-digest nil "any-container"))))))
+
+;; ============================================================================
 ;; persist-workspace!
 ;; ============================================================================
 
