@@ -65,3 +65,13 @@
     {:signals signals
      :correlations correlations
      :diagnoses diagnoses}))
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  (run-diagnosis
+   {:slo-checks [{:breached? true :sli/name :SLI-1
+                   :slo/target 0.85 :slo/actual 0.70 :slo/tier :standard}]
+    :failure-events (repeat 5 {:failure/class :failure.class/timeout
+                                :timestamp (java.util.Date.)})})
+
+  :leave-this-here)

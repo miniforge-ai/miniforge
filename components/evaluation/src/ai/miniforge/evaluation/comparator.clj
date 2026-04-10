@@ -79,3 +79,11 @@
                        (and significant? (pos? lift)) :promote
                        significant?                   :reject
                        :else                          :needs-more-data)}))
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  (compare-results (concat (repeat 10 0.7) (repeat 10 0.8))
+                   (concat (repeat 10 0.85) (repeat 10 0.95)))
+  ;; => {:significant? true :lift ... :recommendation :promote}
+
+  :leave-this-here)

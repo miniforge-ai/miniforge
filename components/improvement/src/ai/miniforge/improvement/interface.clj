@@ -27,8 +27,34 @@
   "Create an improvement pipeline store."
   pipeline/create-pipeline)
 
-(def store-proposal! pipeline/store-proposal!)
-(def get-proposals pipeline/get-proposals)
-(def approve-proposal! pipeline/approve-proposal!)
-(def deploy-proposal! pipeline/deploy-proposal!)
-(def rollback-proposal! pipeline/rollback-proposal!)
+(def store-proposal!
+  "Store a new improvement proposal in the pipeline."
+  pipeline/store-proposal!)
+
+(def get-proposals
+  "Get proposals, optionally filtered by status keyword."
+  pipeline/get-proposals)
+
+(def approve-proposal!
+  "Mark a proposal as approved for deployment."
+  pipeline/approve-proposal!)
+
+(def deploy-proposal!
+  "Mark an approved proposal as deployed."
+  pipeline/deploy-proposal!)
+
+(def rollback-proposal!
+  "Mark a deployed proposal as rolled back with reason."
+  pipeline/rollback-proposal!)
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  (def pipeline (create-pipeline))
+  (def p (generate-proposal {:diagnosis/id (random-uuid)
+                              :diagnosis/confidence 0.7
+                              :diagnosis/hypothesis "Test"}))
+  (store-proposal! pipeline p)
+  (approve-proposal! pipeline (:improvement/id p))
+  (get-proposals pipeline :approved)
+
+  :leave-this-here)

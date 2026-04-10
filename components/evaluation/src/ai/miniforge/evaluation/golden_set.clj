@@ -80,3 +80,13 @@
      :failed failed
      :pass-rate (if (zero? total) 0.0 (double (/ passed total)))
      :results results}))
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  (def gs (-> (create-golden-set {:id "test" :version "1.0.0"})
+              (add-entry {:entry/id "e1" :entry/input {:x 1}
+                           :entry/pass-criteria [:non-nil]})))
+  (entry-count gs)
+  (run-golden-set gs (fn [input] {:result (:x input)}) (fn [_ actual] (some? actual)))
+
+  :leave-this-here)

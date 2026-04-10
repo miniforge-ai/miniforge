@@ -42,3 +42,14 @@
   "Returns true if this status can be promoted further."
   [status]
   (contains? #{:draft :shadow :canary} status))
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  (valid-transition? :draft :shadow)      ;; => true
+  (valid-transition? :active :draft)      ;; => false
+  (transition :draft :shadow)             ;; => :shadow
+  (transition :active :draft)             ;; => nil
+  (can-serve-traffic? :canary)            ;; => true
+  (promotable? :active)                   ;; => false
+
+  :leave-this-here)

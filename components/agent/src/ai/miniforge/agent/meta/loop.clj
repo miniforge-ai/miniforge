@@ -6,8 +6,14 @@
    Wires the complete closed loop:
      reliability → diagnosis → improvement → evaluation → deployment → learning
 
-   Layer 0: Cycle context
-   Layer 1: Meta-loop cycle (stateful)")
+   Layer 0: Cycle context and pipeline stages (pure where possible)
+   Layer 1: Meta-loop cycle (stateful)"
+  (:require
+   [ai.miniforge.reliability.interface :as reliability]
+   [ai.miniforge.diagnosis.interface :as diagnosis]
+   [ai.miniforge.improvement.interface :as improvement]
+   [ai.miniforge.event-stream.interface.stream :as stream]
+   [ai.miniforge.event-stream.interface.events :as events]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Cycle context
@@ -25,20 +31,53 @@
   [opts]
   (merge {:cycle-count (atom 0)} opts))
 
+;------------------------------------------------------------------------------ Layer 0
+;; Pipeline stages
+
+(defn- compute-reliability
+  "Step 1: Compute SLIs, check SLOs, update error budgets."
+  [reliability-engine metrics]
+  (when reliability-engine
+    (reliability/compute-cycle! reliability-engine metrics)))
+
+(defn- evaluate-degradation
+  "Step 2: Evaluate budget state and transition degradation mode if warranted."
+  [degradation-manager reliability-result]
+  (when (and degradation-manager reliability-result)
+    (reliability/evaluate-degradation! degradation-manager (:budgets reliability-result))))
+
+(defn- run-diagnosis
+  "Steps 3-4: Extract signals, correlate symptoms, generate diagnoses."
+  [diagnosis-data reliability-result diagnosis-config]
+  (let [input (merge diagnosis-data
+                     (when reliability-result
+                       {:slo-checks (:slo-checks reliability-result)}))]
+    (diagnosis/run-diagnosis input diagnosis-config)))
+
+(defn- generate-proposals
+  "Steps 5-6: Generate improvement proposals and store in pipeline.
+   Skipped when in safe-mode."
+  [diagnoses degradation-mode improvement-pipeline]
+  (when (and (not= degradation-mode :safe-mode)
+             (seq diagnoses))
+    (let [props (improvement/generate-proposals diagnoses)]
+      (when improvement-pipeline
+        (doseq [p props]
+          (improvement/store-proposal! improvement-pipeline p)))
+      props)))
+
+(defn- emit-cycle-event
+  "Step 7: Emit :meta-loop/cycle-completed summary event."
+  [event-stream summary]
+  (when event-stream
+    (stream/publish! event-stream
+                     (events/meta-loop-cycle-completed event-stream summary))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Meta-loop cycle
 
 (defn run-meta-loop-cycle!
   "Execute one complete meta-loop cycle.
-
-   Steps:
-   1. Compute reliability state (SLIs, SLOs, error budgets)
-   2. Evaluate degradation mode transitions
-   3. Extract improvement signals
-   4. Correlate symptoms → generate diagnoses
-   5. Generate improvement proposals
-   6. Store proposals in pipeline
-   7. Return cycle summary
 
    Arguments:
      ctx     - meta-loop context from create-meta-loop-context
@@ -60,63 +99,44 @@
                 diagnosis-config improvement-pipeline
                 event-stream cycle-count]} ctx
 
-        cycle-num (swap! cycle-count inc)
+        cycle-num          (swap! cycle-count inc)
+        reliability-result (compute-reliability reliability-engine metrics)
+        deg-mode           (evaluate-degradation degradation-manager reliability-result)
+        diag-result        (run-diagnosis diagnosis-data reliability-result diagnosis-config)
+        proposals          (generate-proposals (:diagnoses diag-result)
+                                              (or deg-mode :nominal)
+                                              improvement-pipeline)
+        summary            {:cycle-number    cycle-num
+                            :reliability     reliability-result
+                            :degradation-mode (or deg-mode :nominal)
+                            :signals         (count (:signals diag-result))
+                            :correlations    (count (:correlations diag-result))
+                            :diagnoses       (count (:diagnoses diag-result))
+                            :proposals       (count (or proposals []))}]
 
-        ;; Step 1: Compute reliability (uses requiring-resolve to avoid circular deps)
-        reliability-result
-        (when reliability-engine
-          (let [compute-cycle! (requiring-resolve 'ai.miniforge.reliability.interface/compute-cycle!)]
-            (compute-cycle! reliability-engine metrics)))
-
-        ;; Step 2: Evaluate degradation
-        degradation-mode
-        (when (and degradation-manager reliability-result)
-          (let [evaluate! (requiring-resolve 'ai.miniforge.reliability.interface/evaluate-degradation!)]
-            (evaluate! degradation-manager (:budgets reliability-result))))
-
-        ;; Step 3-4: Diagnosis (skip deployment if in safe-mode)
-        diagnosis-input (merge diagnosis-data
-                               (when reliability-result
-                                 {:slo-checks (:slo-checks reliability-result)}))
-
-        diagnosis-result
-        (let [run-diagnosis (requiring-resolve 'ai.miniforge.diagnosis.interface/run-diagnosis)]
-          (run-diagnosis diagnosis-input diagnosis-config))
-
-        {:keys [signals correlations diagnoses]} diagnosis-result
-
-        ;; Step 5-6: Generate proposals (skip if degraded/safe-mode)
-        proposals
-        (when (and (not= degradation-mode :safe-mode)
-                   (seq diagnoses))
-          (let [gen-proposals (requiring-resolve 'ai.miniforge.improvement.interface/generate-proposals)
-                store-proposal! (requiring-resolve 'ai.miniforge.improvement.interface/store-proposal!)]
-            (let [props (gen-proposals diagnoses)]
-              (when improvement-pipeline
-                (doseq [p props]
-                  (store-proposal! improvement-pipeline p)))
-              props)))
-
-        ;; Step 7: Emit summary event
-        summary {:cycle-number cycle-num
-                 :reliability reliability-result
-                 :degradation-mode (or degradation-mode :nominal)
-                 :signals (count signals)
-                 :correlations (count correlations)
-                 :diagnoses (count diagnoses)
-                 :proposals (count (or proposals []))}]
-
-    ;; Emit meta-loop cycle event
-    (when event-stream
-      (let [publish! (requiring-resolve 'ai.miniforge.event-stream.core/publish!)
-            cycle-event (requiring-resolve 'ai.miniforge.event-stream.core/meta-loop-cycle-completed)]
-        (publish! event-stream (cycle-event event-stream summary))))
-
+    (emit-cycle-event event-stream summary)
     summary))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; Integration example (requires all components wired up)
-  ;; See tests for a working example
+  ;; Create context with all components wired up
+  (def stream (stream/create-event-stream {:sinks []}))
+  (def engine (reliability/create-engine stream))
+  (def deg-mgr (reliability/create-degradation-manager stream))
+  (def pipeline (improvement/create-pipeline))
+
+  (def ctx (create-meta-loop-context
+            {:reliability-engine engine
+             :degradation-manager deg-mgr
+             :improvement-pipeline pipeline
+             :event-stream stream}))
+
+  ;; Run one cycle with sample metrics
+  (run-meta-loop-cycle!
+   ctx
+   {:workflow-metrics [{:status :completed :timestamp (java.util.Date.)}
+                       {:status :failed :timestamp (java.util.Date.)}]}
+   {:failure-events [{:failure/class :failure.class/timeout
+                      :timestamp (java.util.Date.)}]})
 
   :leave-this-here)

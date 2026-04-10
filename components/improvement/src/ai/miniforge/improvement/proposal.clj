@@ -42,3 +42,13 @@
   (->> diagnoses
        (filter #(>= (or (:diagnosis/confidence %) 0) min-confidence))
        (mapv generate-proposal)))
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  (generate-proposal {:diagnosis/id (random-uuid)
+                       :diagnosis/confidence 0.7
+                       :diagnosis/hypothesis "Recurring timeouts"
+                       :diagnosis/affected-heuristic :threshold/timeout
+                       :diagnosis/suggested-improvement-type :threshold-adjustment})
+
+  :leave-this-here)

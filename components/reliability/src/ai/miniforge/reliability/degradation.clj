@@ -12,7 +12,8 @@
    Layer 1: DegradationManager (stateful)"
   (:require
    [ai.miniforge.fsm.interface :as fsm]
-   [ai.miniforge.event-stream.core :as events]))
+   [ai.miniforge.event-stream.interface.stream :as stream]
+   [ai.miniforge.event-stream.interface.events :as events]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; FSM definition
@@ -80,7 +81,7 @@
     (when (not= old-mode new-mode)
       (reset! (:fsm-state manager) new-state)
       (when-let [stream (:event-stream manager)]
-        (events/publish! stream
+        (stream/publish! stream
                          (events/degradation-mode-changed stream
                                                          old-mode new-mode trigger-str))))
     new-mode))
@@ -145,7 +146,7 @@
         (transition! manager event-kw (or details (name trigger)))
         ;; Emit safe-mode/entered event
         (when-let [stream (:event-stream manager)]
-          (events/publish! stream
+          (stream/publish! stream
                            (events/safe-mode-entered stream trigger details))))))
   (current-mode manager))
 
@@ -164,7 +165,7 @@
       (let [new-mode (transition! manager :operator-exit
                                   (str principal ": " justification))]
         (when-let [stream (:event-stream manager)]
-          (events/publish! stream
+          (stream/publish! stream
                            (events/safe-mode-exited stream principal justification 0 0)))
         new-mode))))
 

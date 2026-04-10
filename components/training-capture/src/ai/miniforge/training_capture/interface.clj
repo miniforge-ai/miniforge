@@ -52,3 +52,20 @@
 (def example-count
   "Get the total number of stored examples."
   capture/example-count)
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  (def store (create-store))
+
+  (store-example! store
+                  (create-training-record
+                   {:agent-role :implementer
+                    :workflow-id (random-uuid)
+                    :phase :implement
+                    :feedback {:validation-result :passed :iterations-to-pass 1}
+                    :outcome {:phase-succeeded? true}}))
+
+  (example-count store) ;; => 1
+  (get-examples store {:min-quality 0.8})
+
+  :leave-this-here)

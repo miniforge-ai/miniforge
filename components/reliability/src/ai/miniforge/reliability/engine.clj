@@ -9,7 +9,8 @@
    [ai.miniforge.reliability.sli :as sli]
    [ai.miniforge.reliability.slo :as slo]
    [ai.miniforge.reliability.budget :as budget]
-   [ai.miniforge.event-stream.core :as events]))
+   [ai.miniforge.event-stream.interface.stream :as stream]
+   [ai.miniforge.event-stream.interface.events :as events]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Engine record
@@ -114,7 +115,7 @@
     (when event-stream
       ;; SLI computed events
       (doseq [sli-result all-slis]
-        (events/publish! event-stream
+        (stream/publish! event-stream
                          (events/sli-computed event-stream
                                              (:sli/name sli-result)
                                              (:sli/value sli-result)
@@ -122,12 +123,12 @@
 
       ;; SLO breach events
       (doseq [{:keys [sli/name slo/target slo/actual slo/tier slo/window]} breaches]
-        (events/publish! event-stream
+        (stream/publish! event-stream
                          (events/slo-breach event-stream name target actual tier window)))
 
       ;; Error budget updates
       (doseq [[_ b] budgets]
-        (events/publish! event-stream
+        (stream/publish! event-stream
                          (events/error-budget-update event-stream
                                                     (:error-budget/tier b)
                                                     (:error-budget/sli b)

@@ -3,136 +3,119 @@
 (ns ai.miniforge.agent.meta.loop-test
   "Integration test for the meta-agent loop.
 
-   Tests the full closed-loop cycle: reliability → diagnosis → improvement."
+   Tests the full closed-loop cycle: reliability → diagnosis → improvement.
+
+   Layer 0: Test factories
+   Layer 1: Tests"
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.agent.meta.loop :as meta-loop]
    [ai.miniforge.reliability.interface :as rel]
-   [ai.miniforge.diagnosis.interface :as diag]
-   [ai.miniforge.improvement.interface :as imp]
-   [ai.miniforge.event-stream.core :as events]))
+   [ai.miniforge.improvement.interface :as imp]))
 
-(def now (java.util.Date.))
+;------------------------------------------------------------------------------ Layer 0
+;; Test factories
 
 (defn- make-stream []
   (atom {:events [] :subscribers {} :filters {} :sequence-numbers {} :sinks []}))
 
-;; ---------------------------------------------------------------------------- Full cycle test
+(defn- make-timestamp [] (java.util.Date.))
+
+(defn- make-workflow-metrics
+  "Create workflow metrics with the given statuses."
+  [statuses]
+  (let [ts (make-timestamp)]
+    (mapv (fn [s] {:status s :timestamp ts}) statuses)))
+
+(defn- make-failure-events
+  "Create n failure events of the given class."
+  [failure-class n]
+  (let [ts (make-timestamp)]
+    (vec (repeat n {:failure/class failure-class :timestamp ts}))))
+
+(defn- make-phase-metrics
+  "Create phase metrics with given iterations."
+  [phase iterations-list]
+  (let [ts (make-timestamp)]
+    (mapv (fn [iters] {:phase phase :iterations iters :timestamp ts
+                       :success? (<= iters 3)})
+          iterations-list)))
+
+(defn- make-full-context
+  "Create a fully wired meta-loop context."
+  [stream]
+  (meta-loop/create-meta-loop-context
+   {:reliability-engine (rel/create-engine stream {:windows [:7d] :tiers [:standard]})
+    :degradation-manager (rel/create-degradation-manager stream)
+    :improvement-pipeline (imp/create-pipeline)
+    :event-stream stream}))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Tests
 
 (deftest meta-loop-cycle-test
   (testing "full meta-loop cycle with unhealthy metrics"
     (let [stream (make-stream)
-          engine (rel/create-engine stream {:windows [:7d] :tiers [:standard]})
-          deg-mgr (rel/create-degradation-manager stream)
-          pipeline (imp/create-pipeline)
-          ctx (meta-loop/create-meta-loop-context
-               {:reliability-engine engine
-                :degradation-manager deg-mgr
-                :improvement-pipeline pipeline
-                :event-stream stream})
-
-          ;; Simulate unhealthy fleet: 50% failure rate + recurring timeouts
-          metrics {:workflow-metrics [{:status :completed :timestamp now}
-                                     {:status :failed :timestamp now}
-                                     {:status :failed :timestamp now}
-                                     {:status :completed :timestamp now}]}
-
-          failure-events (repeat 5 {:failure/class :failure.class/timeout
-                                     :timestamp now})
-
+          ctx (make-full-context stream)
+          metrics {:workflow-metrics (make-workflow-metrics [:completed :failed :failed :completed])}
           result (meta-loop/run-meta-loop-cycle!
-                  ctx
-                  metrics
-                  {:failure-events failure-events
-                   :phase-metrics [{:phase :implement :iterations 5 :timestamp now}
-                                   {:phase :implement :iterations 4 :timestamp now}]})]
+                  ctx metrics
+                  {:failure-events (make-failure-events :failure.class/timeout 5)
+                   :phase-metrics (make-phase-metrics :implement [5 4])})]
 
-      ;; Should complete successfully
       (is (= 1 (:cycle-number result)))
       (is (map? (:reliability result)))
       (is (keyword? (:degradation-mode result)))
-
-      ;; Should detect signals from the bad metrics
       (is (pos? (:signals result)))
-
-      ;; Should generate diagnoses
       (is (pos? (:diagnoses result)))
-
-      ;; Should generate proposals
       (is (pos? (:proposals result)))
-
-      ;; Pipeline should have stored proposals
-      (is (pos? (count (imp/get-proposals pipeline))))
-
-      ;; Events should have been emitted (SLIs + meta-loop summary)
+      (is (pos? (count (imp/get-proposals (:improvement-pipeline ctx)))))
       (is (pos? (count (:events @stream)))))))
 
 (deftest meta-loop-healthy-cycle-test
-  (testing "healthy metrics with no failures produce fewer signals"
+  (testing "healthy metrics produce fewer signals than unhealthy"
     (let [stream (make-stream)
-          engine (rel/create-engine stream {:windows [:7d] :tiers [:standard]})
-          ctx (meta-loop/create-meta-loop-context
-               {:reliability-engine engine
-                :event-stream stream})
+          ctx (make-full-context stream)
+          ts (make-timestamp)
+          healthy-metrics {:workflow-metrics (make-workflow-metrics (repeat 10 :completed))
+                           :gate-metrics (vec (repeat 10 {:passed? true :timestamp ts}))
+                           :tool-metrics (vec (repeat 10 {:success? true :timestamp ts}))}
+          healthy-result (meta-loop/run-meta-loop-cycle!
+                          ctx healthy-metrics
+                          {:failure-events []
+                           :phase-metrics (make-phase-metrics :implement (repeat 10 1))})
 
-          ;; All successful, good gate pass, no failures
-          metrics {:workflow-metrics (repeat 10 {:status :completed :timestamp now})
-                   :gate-metrics (repeat 10 {:passed? true :timestamp now})
-                   :tool-metrics (repeat 10 {:success? true :timestamp now})}
+          unhealthy-stream (make-stream)
+          unhealthy-ctx (make-full-context unhealthy-stream)
+          unhealthy-result (meta-loop/run-meta-loop-cycle!
+                            unhealthy-ctx
+                            {:workflow-metrics (make-workflow-metrics [:failed :failed])}
+                            {:failure-events (make-failure-events :failure.class/timeout 5)})]
 
-          result (meta-loop/run-meta-loop-cycle!
-                  ctx
-                  metrics
-                  {:failure-events []
-                   :phase-metrics (repeat 10 {:phase :implement :iterations 1
-                                               :success? true :timestamp now})})]
-
-      (is (= 1 (:cycle-number result)))
-      ;; With all-green metrics, no SLO breaches, no failure patterns
-      ;; Fewer or no signals expected
-      (is (<= (:signals result) (:signals
-                                  (meta-loop/run-meta-loop-cycle!
-                                   (meta-loop/create-meta-loop-context {:event-stream (make-stream)})
-                                   {:workflow-metrics [{:status :failed :timestamp now}
-                                                       {:status :failed :timestamp now}]}
-                                   {:failure-events (repeat 5 {:failure/class :failure.class/timeout
-                                                                :timestamp now})})))))))
+      (is (<= (:signals healthy-result) (:signals unhealthy-result))))))
 
 (deftest meta-loop-safe-mode-skips-proposals-test
   (testing "safe-mode skips proposal generation"
     (let [stream (make-stream)
-          engine (rel/create-engine stream {:windows [:7d] :tiers [:critical]})
           deg-mgr (rel/create-degradation-manager stream)
-          pipeline (imp/create-pipeline)
-
-          ;; Force safe-mode
           _ (rel/enter-safe-mode! deg-mgr :emergency-stop "Test")
-
           ctx (meta-loop/create-meta-loop-context
-               {:reliability-engine engine
+               {:reliability-engine (rel/create-engine stream {:windows [:7d] :tiers [:critical]})
                 :degradation-manager deg-mgr
-                :improvement-pipeline pipeline
+                :improvement-pipeline (imp/create-pipeline)
                 :event-stream stream})
-
-          metrics {:workflow-metrics [{:status :failed :timestamp now}
-                                     {:status :failed :timestamp now}]}
-
           result (meta-loop/run-meta-loop-cycle!
                   ctx
-                  metrics
-                  {:failure-events (repeat 5 {:failure/class :failure.class/timeout
-                                               :timestamp now})})]
+                  {:workflow-metrics (make-workflow-metrics [:failed :failed])}
+                  {:failure-events (make-failure-events :failure.class/timeout 5)})]
 
-      ;; Signals and diagnoses should still be generated
       (is (pos? (:signals result)))
-      ;; But proposals should be zero (safe-mode blocks deployment)
       (is (zero? (:proposals result)))
       (is (= :safe-mode (:degradation-mode result))))))
 
 (deftest meta-loop-increments-cycle-count-test
   (testing "cycle count increments across calls"
-    (let [stream (make-stream)
-          ctx (meta-loop/create-meta-loop-context {:event-stream stream})
+    (let [ctx (meta-loop/create-meta-loop-context {:event-stream (make-stream)})
           r1 (meta-loop/run-meta-loop-cycle! ctx {} {})
           r2 (meta-loop/run-meta-loop-cycle! ctx {} {})
           r3 (meta-loop/run-meta-loop-cycle! ctx {} {})]

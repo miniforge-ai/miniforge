@@ -25,8 +25,40 @@
    (and (= :slo-breach (:signal/type s1))
         (= :recurring-failure (:signal/type s2)))))
 
+(defn- build-cluster
+  "Build a correlation map from a cluster of signals."
+  [cluster-signals]
+  (let [types (set (map :signal/type cluster-signals))
+        confidence (min 1.0 (* 0.3 (count cluster-signals)))]
+    {:correlation/signals cluster-signals
+     :correlation/type (cond
+                         (contains? types :slo-breach) :slo-driven
+                         (contains? types :recurring-failure) :failure-pattern
+                         (contains? types :quality-regression) :quality-decline
+                         :else :mixed)
+     :correlation/confidence confidence
+     :correlation/hypothesis
+     (cond
+       (and (contains? types :slo-breach)
+            (contains? types :recurring-failure))
+       "SLO breach correlated with recurring failure pattern — likely systemic issue"
+
+       (contains? types :recurring-failure)
+       (str "Recurring "
+            (get-in (first cluster-signals) [:signal/evidence :failure-class] "unknown")
+            " failures suggest targeted fix needed")
+
+       (contains? types :high-iteration-count)
+       "High iteration counts suggest prompt/heuristic refinement needed"
+
+       :else
+       "Correlated signals detected — investigate for common root cause")}))
+
 (defn correlate-symptoms
   "Group related signals into correlated clusters.
+
+   Uses greedy clustering via reduce — each signal is either absorbed
+   into an existing cluster or starts a new one.
 
    Arguments:
      signals - vector of signal maps from signal/extract-signals
@@ -39,47 +71,23 @@
   [signals]
   (if (empty? signals)
     []
-    ;; Simple greedy clustering: for each signal, find related signals
-    (let [used (atom #{})
-          clusters (atom [])]
-      (doseq [[i signal] (map-indexed vector signals)]
-        (when-not (contains? @used i)
-          (let [related (->> (map-indexed vector signals)
-                             (filter (fn [[j s]]
-                                       (and (not= i j)
-                                            (not (contains? @used j))
-                                            (signals-related? signal s))))
-                             (map first))
-                cluster-indices (cons i related)]
-            (swap! used into cluster-indices)
-            (let [cluster-signals (mapv #(nth signals %) cluster-indices)
-                  types (set (map :signal/type cluster-signals))
-                  confidence (min 1.0 (* 0.3 (count cluster-signals)))]
-              (swap! clusters conj
-                     {:correlation/signals cluster-signals
-                      :correlation/type (cond
-                                          (contains? types :slo-breach) :slo-driven
-                                          (contains? types :recurring-failure) :failure-pattern
-                                          (contains? types :quality-regression) :quality-decline
-                                          :else :mixed)
-                      :correlation/confidence confidence
-                      :correlation/hypothesis
-                      (cond
-                        (and (contains? types :slo-breach)
-                             (contains? types :recurring-failure))
-                        "SLO breach correlated with recurring failure pattern — likely systemic issue"
-
-                        (contains? types :recurring-failure)
-                        (str "Recurring "
-                             (get-in (first cluster-signals) [:signal/evidence :failure-class] "unknown")
-                             " failures suggest targeted fix needed")
-
-                        (contains? types :high-iteration-count)
-                        "High iteration counts suggest prompt/heuristic refinement needed"
-
-                        :else
-                        "Correlated signals detected — investigate for common root cause")})))))
-      @clusters)))
+    (->> (reduce
+          (fn [{:keys [clusters used]} [i signal]]
+            (if (contains? used i)
+              {:clusters clusters :used used}
+              (let [related-indices (->> (map-indexed vector signals)
+                                        (keep (fn [[j s]]
+                                                (when (and (not= i j)
+                                                           (not (contains? used j))
+                                                           (signals-related? signal s))
+                                                  j))))
+                    all-indices (cons i related-indices)
+                    cluster-signals (mapv #(nth signals %) all-indices)]
+                {:clusters (conj clusters (build-cluster cluster-signals))
+                 :used (into used all-indices)})))
+          {:clusters [] :used #{}}
+          (map-indexed vector signals))
+         :clusters)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

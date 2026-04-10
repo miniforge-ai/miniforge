@@ -90,3 +90,9 @@
       (first all-heuristics) (first all-heuristics)
 
       :else nil)))
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  (select-heuristic :implementer-prompt {})
+
+  :leave-this-here)

@@ -66,3 +66,11 @@
                    (assoc-in [:proposals proposal-id :improvement/rollback-reason] reason)
                    (update :rolled-back conj proposal-id))))
       (get-in @pipeline [:proposals proposal-id]))))
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  (def p (create-pipeline))
+  (store-proposal! p {:improvement/id (random-uuid) :improvement/status :proposed})
+  (get-proposals p :proposed)
+
+  :leave-this-here)
