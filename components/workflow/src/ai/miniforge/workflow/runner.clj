@@ -660,7 +660,12 @@
       (finally
         (when acquired-env
           (release-execution-environment! (:executor acquired-env)
-                                          (:environment-id acquired-env))))))))
+                                          (:environment-id acquired-env))
+          ;; Governed mode acquires a separate host worktree — release it too.
+          ;; release-execution-environment! is nil-safe, so this is a no-op
+          ;; when :worktree-executor / :worktree-environment-id are absent (local mode).
+          (release-execution-environment! (:worktree-executor acquired-env)
+                                          (:worktree-environment-id acquired-env))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -102,7 +102,11 @@
 (defn execute-single-task
   "Run a single DAG task. When an :llm-backend is present in context,
    spins up a mini-workflow (agent + generate/repair loop). Otherwise
-   returns a placeholder result."
+   returns a placeholder result.
+
+   Handles InterruptedException separately to restore the thread's
+   interrupt flag — essential when the DAG orchestrator cancels futures
+   during batch cleanup so the thread terminates cleanly."
   [task-def context]
   (let [task-id (:task/id task-def)
         description (:task/description task-def "Implement task")]
@@ -110,6 +114,12 @@
       (if (:llm-backend context)
         (workflow-result->dag-result task-id description (run-mini-workflow task-def context))
         (placeholder-result task-id description))
+      (catch InterruptedException ie
+        ;; Restore interrupt flag so the cancelled future terminates cleanly.
+        (.interrupt (Thread/currentThread))
+        (dag/err :task-cancelled
+                 (str "Task cancelled: " (.getMessage ie))
+                 {:task-id task-id}))
       (catch Exception e
         (dag/err :task-execution-failed
                  (str "Task failed: " (.getMessage e))
