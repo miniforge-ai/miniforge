@@ -43,6 +43,32 @@
           config)))
 
 ;------------------------------------------------------------------------------ Layer 1
+;; Pipeline stages
+
+(defn- check-all-slos-across-tiers
+  "Check SLOs for all SLI results across all tier/window combinations."
+  [all-slis tiers windows slo-targets]
+  (vec
+   (for [tier tiers
+         window windows
+         :let [window-slis (filter #(= window (:sli/window %)) all-slis)
+               checks (slo/check-all-slos window-slis tier slo-targets)]
+         check checks]
+     (assoc check :slo/tier tier))))
+
+(defn- compute-budgets
+  "Compute error budgets for all enforced SLO checks."
+  [all-slo-checks]
+  (into {}
+        (for [{:keys [sli/name slo/actual slo/target slo/tier slo/window]}
+              all-slo-checks
+              :let [{:keys [error-budget/remaining error-budget/burn-rate]}
+                    (budget/compute-error-budget actual target
+                                                (contains? slo/inverted-slis name))]]
+          [[name tier window]
+           (budget/error-budget remaining burn-rate tier name window)])))
+
+;------------------------------------------------------------------------------ Layer 2
 ;; Compute cycle
 
 (defn compute-cycle!
@@ -72,25 +98,11 @@
         all-slis (vec (mapcat #(sli/compute-all-slis metrics %) windows))
 
         ;; 2. Check SLOs for each tier
-        all-slo-checks (vec
-                        (for [tier tiers
-                              window windows
-                              :let [window-slis (filter #(= window (:sli/window %)) all-slis)
-                                    checks (slo/check-all-slos window-slis tier slo-targets)]
-                              check checks]
-                          (assoc check :slo/tier tier)))
-
+        all-slo-checks (check-all-slos-across-tiers all-slis tiers windows slo-targets)
         breaches (slo/breached-slos all-slo-checks)
 
         ;; 3. Compute error budgets for enforced SLOs
-        budgets (into {}
-                      (for [{:keys [sli/name slo/actual slo/target slo/tier slo/window]}
-                            all-slo-checks
-                            :let [{:keys [error-budget/remaining error-budget/burn-rate]}
-                                  (budget/compute-error-budget actual target
-                                                              (contains? slo/inverted-slis name))]]
-                        [[name tier window]
-                         (budget/error-budget remaining burn-rate tier name window)]))
+        budgets (compute-budgets all-slo-checks)
 
         ;; 4. Determine degradation recommendation
         any-critical-exhausted? (budget/critical-budget-exhausted? budgets)
