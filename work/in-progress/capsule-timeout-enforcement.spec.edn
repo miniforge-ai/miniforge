@@ -1,0 +1,40 @@
+{:spec/title "Capsule self-terminates on timeout expiry"
+
+ :spec/description
+ "Per N11 §2.2, capsules must be self-terminating on timeout expiry. Currently
+  the timeout is passed to Docker resource config but there is no enforcement
+  mechanism — a runaway container will not be killed.
+
+  Implementation:
+  1. In docker.clj create-container, add --stop-timeout flag to set Docker's
+     built-in stop timeout. This handles ungraceful shutdown.
+  2. In runner.clj, wrap the pipeline execution loop in a future with
+     deref timeout. If the timeout fires:
+     - Log a warning with the workflow-id and elapsed time
+     - Call release-execution-environment! to kill the capsule
+     - Return a :timeout failure result
+  3. The timeout value should come from the workflow config or phase budget:
+     - (:budget :time-seconds) from phase config, or
+     - A global default of 30 minutes for the full pipeline
+  4. For DAG sub-workflows, each task inherits the parent timeout budget
+     divided by task count (floor), with a minimum of 5 minutes."
+
+ :spec/intent {:type :feature
+               :scope ["components/workflow/src/ai/miniforge/workflow/runner.clj"
+                       "components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/docker.clj"]}
+
+ :spec/constraints
+ ["Only enforce timeout in governed mode — local mode relies on user interrupt"
+  "Timeout must not leave orphan containers"
+  "Use future + deref-with-timeout, not Thread/sleep"
+  "Log elapsed time and timeout value on expiry"
+  "Existing tests must pass"]
+
+ :spec/acceptance-criteria
+ ["Governed pipeline that exceeds timeout returns :timeout failure"
+  "Container is killed when timeout fires"
+  "Timeout value comes from workflow/phase config"
+  "DAG sub-workflows respect timeout budget"
+  "Local mode is unaffected"]
+
+ :workflow/type :canonical-sdlc}

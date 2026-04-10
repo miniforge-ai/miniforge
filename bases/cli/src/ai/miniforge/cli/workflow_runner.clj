@@ -18,6 +18,7 @@
 
 (ns ai.miniforge.cli.workflow-runner
   (:require
+   [babashka.fs :as fs]
    [clojure.string :as str]
    [clojure.edn :as edn]
    [cheshire.core :as json]
@@ -31,6 +32,46 @@
    [ai.miniforge.phase.interface :as phase]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Work spec kanban lifecycle
+
+(def ^:private work-dirs
+  "Kanban folder structure under work/."
+  {:in-progress "work/in-progress"
+   :done        "work/done"
+   :failed      "work/failed"})
+
+(defn- work-spec?
+  "True when the spec provenance points to a file under work/."
+  [provenance]
+  (when-let [source (:source-file provenance)]
+    (str/starts-with? (str source) "work/")))
+
+(defn- move-spec!
+  "Move a work spec file to the target kanban folder.
+   No-op if the spec isn't under work/ or the file doesn't exist."
+  [provenance target-key]
+  (when (work-spec? provenance)
+    (let [source (str (:source-file provenance))
+          target-dir (get work-dirs target-key)]
+      (when (and target-dir (fs/exists? source))
+        (fs/create-dirs target-dir)
+        (let [target (str target-dir "/" (fs/file-name source))]
+          (fs/move source target {:replace-existing true})
+          target)))))
+
+(defn move-spec-to-in-progress!
+  "Move a work spec to in-progress when execution starts."
+  [provenance]
+  (move-spec! provenance :in-progress))
+
+(defn move-spec-on-completion!
+  "Move a work spec to done or failed based on workflow result."
+  [provenance result]
+  (if (phase/succeeded? result)
+    (move-spec! provenance :done)
+    (move-spec! provenance :failed)))
+
+;------------------------------------------------------------------------------ Layer 0.5
 ;; Workflow interface resolution and pipeline helpers
 
 (defn resolve-workflow-interface []
@@ -310,19 +351,23 @@
       (when-not quiet
         (display/print-workflow-header (keyword (str "adhoc-" (hash spec))) "adhoc" quiet))
       (dashboard/print-dashboard-status! quiet)
-      (try
-        (execute-with-events {:run-pipeline run-pipeline
-                              :workflow workflow
-                              :workflow-input workflow-input
-                              :context context
-                              :artifact-store artifact-store
-                              :event-stream event-stream
-                              :workflow-id workflow-id
-                              :sandbox-cleanup sandbox-cleanup
-                              :opts opts})
-        (finally
-          (progress-cleanup)
-          (when command-poller-cleanup (command-poller-cleanup)))))
+      (let [provenance (:spec/provenance enriched-spec)]
+        (move-spec-to-in-progress! provenance)
+        (try
+          (let [result (execute-with-events {:run-pipeline run-pipeline
+                                             :workflow workflow
+                                             :workflow-input workflow-input
+                                             :context context
+                                             :artifact-store artifact-store
+                                             :event-stream event-stream
+                                             :workflow-id workflow-id
+                                             :sandbox-cleanup sandbox-cleanup
+                                             :opts opts})]
+            (move-spec-on-completion! provenance result)
+            result)
+          (finally
+            (progress-cleanup)
+            (when command-poller-cleanup (command-poller-cleanup))))))
     (catch Exception e
       (when-not quiet
         (println (display/colorize :red (messages/t :workflow-runner/spec-execution-failed {:error (ex-message e)}))))
