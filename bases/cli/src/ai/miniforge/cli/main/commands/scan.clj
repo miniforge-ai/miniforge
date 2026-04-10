@@ -26,7 +26,7 @@
    [babashka.fs :as fs]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [ai.miniforge.cli.linter-runner :as linter]
+   [ai.miniforge.connector-linter.interface :as linter]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.repo-analyzer :as analyzer]
@@ -142,7 +142,7 @@
   (let [detected (get repo-config :repo/technologies #{})
         fps      @analyzer/fingerprints]
     (when (seq detected)
-      (let [result (linter/run-all-linters repo-path fps detected)]
+      (let [result (linter/run-all repo-path fps detected)]
         (doseq [{:keys [tech available? violations duration-ms]} (:linter-results result)]
           (cond
             (not available?)
@@ -161,7 +161,7 @@
   [repo-path repo-config]
   (let [detected (get repo-config :repo/technologies #{})
         fps      @analyzer/fingerprints
-        result   (linter/run-linter-fixes repo-path fps detected)]
+        result   (linter/run-fixes repo-path fps detected)]
     (doseq [{:keys [tech exit]} (:fixed result)]
       (display/print-info (str "  " (name tech) ": fix " (if (zero? exit) "applied" "failed"))))))
 
