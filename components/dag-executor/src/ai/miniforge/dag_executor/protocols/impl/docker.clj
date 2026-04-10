@@ -327,7 +327,7 @@
       (result/ok {:status :unknown :error (:err result)}))))
 
 (defn container-image-digest
-  "Return the SHA256 image digest for a running container, or nil on failure."
+  "Return the SHA256 image digest for a container, or nil on failure."
   [docker-path container-name]
   (try
     (let [inspect-result (run-docker docker-path

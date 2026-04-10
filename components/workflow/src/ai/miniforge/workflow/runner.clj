@@ -445,6 +445,14 @@
 
 ;------------------------------------------------------------------------------ Layer 1.5: Output extraction
 
+(defn- resolve-runtime-class
+  "Return the executor's runtime class (:docker, :worktree, etc.) or nil."
+  [executor]
+  (when executor
+    (try
+      (dag-exec/executor-type executor)
+      (catch Exception _ nil))))
+
 (defn extract-output
   "Synthesize :execution/output from completed pipeline context.
    Provides a stable interface for chaining: downstream consumers
@@ -462,10 +470,7 @@
         last-result   (get phase-results current-phase)
         ;; N11 §9.1 evidence fields
         execution-mode (get ctx :execution/mode :local)
-        runtime-class  (when-let [executor (:execution/executor ctx)]
-                         (try
-                           (dag-exec/executor-type executor)
-                           (catch Exception _ nil)))
+        runtime-class  (resolve-runtime-class (:execution/executor ctx))
         started-at     (:execution/started-at ctx)
         finished-at    (java.time.Instant/now)
         image-digest   (get-in ctx [:execution/environment-metadata :image-digest])]
