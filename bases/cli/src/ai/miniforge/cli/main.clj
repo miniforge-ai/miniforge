@@ -317,7 +317,8 @@
            :standards {:default ".standards"}
            :execute   {:coerce :boolean :alias :x}
            :report    {:coerce :boolean :default true}
-           :no-lint   {:coerce :boolean}}}
+           :no-lint   {:coerce :boolean}
+           :semantic  {:coerce :boolean}}}
 
    ;; Run command
    {:cmds ["run"]

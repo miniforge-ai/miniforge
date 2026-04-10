@@ -30,7 +30,9 @@
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.repo-analyzer :as analyzer]
-   [ai.miniforge.compliance-scanner.interface :as scanner]))
+   [ai.miniforge.compliance-scanner.interface :as scanner]
+   [ai.miniforge.policy-pack.interface :as policy-pack]
+   [ai.miniforge.semantic-analyzer.interface :as semantic]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pack resolution
@@ -162,14 +164,42 @@
     (doseq [{:keys [tech exit]} (:fixed result)]
       (display/print-info (str "  " (name tech) ": fix " (if (zero? exit) "applied" "failed"))))))
 
+(defn- run-semantic-analysis
+  "Run LLM-based semantic analysis on behavioral rules.
+   Returns vector of semantic violations."
+  [repo-path standards-path]
+  (try
+    (let [compile-result (policy-pack/compile-standards-pack standards-path)]
+      (when (:success? compile-result)
+        (let [rules     (semantic/behavioral-rules (get-in compile-result [:pack :pack/rules]))
+              llm       (requiring-resolve 'ai.miniforge.llm.interface/create-client)
+              complete  (requiring-resolve 'ai.miniforge.llm.interface/complete)]
+          (when (and llm complete (seq rules))
+            (let [client (llm)]
+              (display/print-info (str "  Analyzing " (count rules) " behavioral rule(s)..."))
+              (->> rules
+                   (mapcat (fn [rule]
+                             (let [result (semantic/analyze-rule client complete repo-path rule)]
+                               (display/print-info
+                                (str "  " (name (get rule :rule/id)) ": "
+                                     (count (:violations result)) " finding(s) ("
+                                     (:files-analyzed result) " files, "
+                                     (:duration-ms result) "ms)"))
+                               (:violations result))))
+                   vec))))))
+    (catch Exception e
+      (display/print-info (str "  Semantic analysis unavailable: " (.getMessage e)))
+      [])))
+
 (defn- run-scan
-  "Execute the scan→linters→classify→plan→execute pipeline."
+  "Execute the scan→linters→semantic→classify→plan→execute pipeline."
   [repo-path opts]
   (let [standards   (get opts :standards default-standards-path)
         scan-opts   (build-scan-opts repo-path opts)
         report?     (get opts :report false)
         execute?    (get opts :execute false)
         no-lint?    (get opts :no-lint false)
+        semantic?   (get opts :semantic false)
         repo-config (load-repo-config repo-path)]
 
     ;; Phase 1: Policy pack scan
@@ -184,14 +214,23 @@
                               (display/print-info "Running linters...")
                               (run-linters repo-path repo-config)))
 
-          ;; Merge violations
-          all-violations  (vec (concat policy-viols (or linter-viols [])))]
+          ;; Phase 1c: Semantic analysis (LLM-as-judge)
+          semantic-viols  (when semantic?
+                            (display/print-info "Running semantic analysis...")
+                            (run-semantic-analysis repo-path standards))
 
-      (when (and (seq linter-viols) (seq policy-viols))
-        (display/print-info
-         (str "Combined: " (count all-violations) " total ("
-              (count policy-viols) " policy + "
-              (count linter-viols) " linter)")))
+          ;; Merge violations
+          all-violations  (vec (concat policy-viols
+                                       (or linter-viols [])
+                                       (or semantic-viols [])))]
+
+      (display/print-info
+       (str "Total: " (count all-violations) " violation(s)"
+            (when (or (seq linter-viols) (seq semantic-viols))
+              (str " (" (count policy-viols) " policy"
+                   (when (seq linter-viols) (str " + " (count linter-viols) " linter"))
+                   (when (seq semantic-viols) (str " + " (count semantic-viols) " semantic"))
+                   ")"))))
 
       (when (seq all-violations)
         (let [classified  (classify-and-report all-violations)
