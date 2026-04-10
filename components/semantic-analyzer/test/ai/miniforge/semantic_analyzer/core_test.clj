@@ -12,7 +12,7 @@
 ;; Access private functions
 (def parse-judge-response (var-get #'sut/parse-judge-response))
 (def strip-code-fences (var-get #'sut/strip-code-fences))
-(def raw-violation->canonical (var-get #'sut/raw-violation->canonical))
+(def raw->violation (var-get #'sut/raw->violation))
 (def under-size-limit? (var-get #'sut/under-size-limit?))
 (def file-matches-globs? (var-get #'sut/file-matches-globs?))
 
@@ -92,16 +92,16 @@
 ;; Violation canonicalization
 ;; ============================================================================
 
-(deftest raw-violation->canonical-test
+(deftest raw->violation-test
   (testing "produces canonical violation shape"
     (let [rule {:rule/id :std/test :rule/category "001"
                 :rule/title "Test Rule" :rule/severity :major}
           v    {:line 42 :current "(bad code)" :message "This is bad"}
-          result (raw-violation->canonical rule "src/foo.clj" v)]
+          result (raw->violation rule "src/foo.clj" v)]
       (is (= :std/test (:rule/id result)))
       (is (= "001" (:rule/category result)))
       (is (= "Test Rule" (:rule/title result)))
-      (is (= :major (:rule/severity result)))
+      (is (= "This is bad" (:rationale result)))
       (is (= "src/foo.clj" (:file result)))
       (is (= 42 (:line result)))
       (is (= "(bad code)" (:current result)))
@@ -109,7 +109,7 @@
       (is (= "This is bad" (:rationale result)))))
 
   (testing "defaults for missing fields"
-    (let [result (raw-violation->canonical {} "f.clj" {})]
+    (let [result (raw->violation {} "f.clj" {})]
       (is (= 0 (:line result)))
       (is (= "" (:current result)))
       (is (= "Semantic analysis violation" (:rationale result))))))
@@ -155,7 +155,7 @@
       (is (= :std/stratified-design (:rule/id (first result))))
       (is (= "src/foo.clj" (:file (first result))))
       (is (= 15 (:line (first result))))
-      (is (= :major (:rule/severity (first result)))))))
+      (is (= "Cross-layer dependency" (:rationale (first result)))))))
 
 (deftest analyze-file-clean-test
   (testing "returns empty violations when LLM says code is clean"

@@ -70,13 +70,15 @@
         []))
     (catch Exception _ [])))
 
-(defn- raw-violation->canonical
-  "Convert a single raw violation from LLM response to canonical shape."
+;; NOTE: This mirrors compliance-scanner.factory/->violation.
+;; The violation shape should be extracted to a shared component
+;; (e.g., schema or response) to eliminate this duplication.
+(defn- raw->violation
+  "Convert a single raw LLM violation to canonical shape."
   [rule file-path v]
   {:rule/id       (get rule :rule/id)
    :rule/category (get rule :rule/category "000")
    :rule/title    (get rule :rule/title)
-   :rule/severity (get rule :rule/severity :info)
    :file          file-path
    :line          (get v :line 0)
    :current       (get v :current "")
@@ -87,7 +89,7 @@
 (defn- judge-response->violations
   "Convert parsed judge response to canonical violation maps."
   [rule file-path raw-violations]
-  (mapv #(raw-violation->canonical rule file-path %) raw-violations))
+  (mapv #(raw->violation rule file-path %) raw-violations))
 
 (defn analyze-file
   "Analyze a single file against a behavioral rule using the LLM.
@@ -121,6 +123,8 @@
   "Maximum number of files to analyze per rule to control LLM costs."
   20)
 
+;; NOTE: This mirrors compliance-scanner.scan/globs->file-pred.
+;; Glob matching should be extracted to repo-index component.
 (defn- glob-matcher
   "Create a PathMatcher for a glob pattern."
   [glob]
