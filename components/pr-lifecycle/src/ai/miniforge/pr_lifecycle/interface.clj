@@ -46,7 +46,8 @@
    [ai.miniforge.pr-lifecycle.monitor-events :as mevents]
    [ai.miniforge.pr-lifecycle.monitor-loop :as monitor]
    [ai.miniforge.pr-lifecycle.monitor-budget :as mbudget]
-   [ai.miniforge.pr-lifecycle.pr-poller :as poller]))
+   [ai.miniforge.pr-lifecycle.pr-poller :as poller]
+   [ai.miniforge.pr-lifecycle.responder :as responder]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Events
@@ -685,3 +686,37 @@
   ; => {:comments-received 5 :comments-addressed 3 :fixes-pushed [...] ...}
 
   :leave-this-here)
+
+;------------------------------------------------------------------------------ Layer 7
+;; PR Comment Responder
+
+(def parse-pr-url
+  "Extract owner, repo, and PR number from a GitHub PR URL.
+   Returns {:owner :repo :number} or nil."
+  responder/parse-pr-url)
+
+(def respond-to-comments!
+  "Fetch review comments, fix them, push, reply, and resolve.
+
+   Arguments:
+   - pr-url: GitHub PR URL
+   - worktree-path: Path to local git checkout on the PR branch
+   - run-fix-fn: (fn [spec opts] result) — runs a fix workflow
+   - push-fn: (fn [] bool) — pushes changes to remote
+   - opts: Additional options passed to run-fix-fn
+
+   Returns:
+   {:pr-number :comments-found :files-processed :fixes :pushed?}
+
+   Example:
+     (respond-to-comments!
+       \"https://github.com/org/repo/pull/123\"
+       \"/path/to/worktree\"
+       (fn [spec opts] (run-workflow-from-spec! spec opts))
+       (fn [] (zero? (:exit (sh \"git\" \"push\"))))
+       {:quiet true})"
+  responder/respond-to-comments!)
+
+(def build-fix-spec
+  "Build a workflow spec from a group of review comments on a file."
+  responder/build-fix-spec)
