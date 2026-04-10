@@ -221,3 +221,79 @@
              (runner/run-pipeline wf {:task "Test"}
                                   {:execution-mode :governed})))))))
 
+;; ---------------------------------------------------------------------------- persist-workspace-at-phase-boundary!
+
+(def ^:private persist-fn
+  "Var accessor for private persist-workspace-at-phase-boundary!."
+  (var-get (ns-resolve 'ai.miniforge.workflow.runner
+                       'persist-workspace-at-phase-boundary!)))
+
+(deftest persist-workspace-noop-when-no-executor-test
+  (testing "returns nil when context has no :execution/executor"
+    (let [context {:execution/mode :governed
+                   :execution/environment-id "env-1"
+                   :execution/task-branch "task/branch"}
+          phase-ctx {:execution/current-phase :implement}]
+      (is (nil? (persist-fn context phase-ctx))))))
+
+(deftest persist-workspace-noop-when-not-governed-test
+  (testing "returns nil when execution mode is :local (not :governed)"
+    (let [called (atom false)
+          context {:execution/executor :stub
+                   :execution/mode :local
+                   :execution/environment-id "env-1"
+                   :execution/task-branch "task/branch"}
+          phase-ctx {:execution/current-phase :implement}]
+      (with-redefs [dag-exec/persist-workspace!
+                    (fn [& _] (reset! called true))]
+        (persist-fn context phase-ctx)
+        (is (false? @called))))))
+
+(deftest persist-workspace-calls-executor-in-governed-mode-test
+  (testing "calls dag-exec/persist-workspace! with correct args in governed mode"
+    (let [call-args (atom nil)
+          context {:execution/executor :mock-executor
+                   :execution/mode :governed
+                   :execution/environment-id "env-42"
+                   :execution/task-branch "task/abc"
+                   :execution/worktree-path "/workspace"}
+          phase-ctx {:execution/current-phase :implement}]
+      (with-redefs [dag-exec/persist-workspace!
+                    (fn [executor env-id opts]
+                      (reset! call-args {:executor executor
+                                         :env-id env-id
+                                         :opts opts}))]
+        (persist-fn context phase-ctx)
+        (is (some? @call-args))
+        (is (= :mock-executor (:executor @call-args)))
+        (is (= "env-42" (:env-id @call-args)))
+        (is (= "task/abc" (get-in @call-args [:opts :branch])))
+        (is (= "/workspace" (get-in @call-args [:opts :workdir])))
+        (is (= "implement phase completed" (get-in @call-args [:opts :message])))))))
+
+(deftest persist-workspace-uses-unknown-when-no-phase-test
+  (testing "uses 'unknown' when phase-ctx has no :execution/current-phase"
+    (let [call-args (atom nil)
+          context {:execution/executor :mock
+                   :execution/mode :governed
+                   :execution/environment-id "env-1"
+                   :execution/task-branch "b"}
+          phase-ctx {}]
+      (with-redefs [dag-exec/persist-workspace!
+                    (fn [_exec _env-id opts]
+                      (reset! call-args opts))]
+        (persist-fn context phase-ctx)
+        (is (= "unknown phase completed" (:message @call-args)))))))
+
+(deftest persist-workspace-catches-exceptions-test
+  (testing "catches exceptions from persist-workspace! without propagating"
+    (let [context {:execution/executor :mock
+                   :execution/mode :governed
+                   :execution/environment-id "env-1"
+                   :execution/task-branch "b"}
+          phase-ctx {:execution/current-phase :release}]
+      (with-redefs [dag-exec/persist-workspace!
+                    (fn [& _] (throw (ex-info "Docker gone" {})))]
+        ;; Should not throw
+        (is (nil? (persist-fn context phase-ctx)))))))
+
