@@ -23,6 +23,22 @@
   (:budget-critical-threshold defaults))
 
 ;------------------------------------------------------------------------------ Layer 1
+;; Factory
+
+(defn error-budget
+  "Factory: create an error budget map."
+  ([remaining burn-rate]
+   {:error-budget/remaining remaining
+    :error-budget/burn-rate burn-rate})
+  ([remaining burn-rate tier sli window]
+   {:error-budget/remaining   remaining
+    :error-budget/burn-rate   burn-rate
+    :error-budget/tier        tier
+    :error-budget/sli         sli
+    :error-budget/window      window
+    :error-budget/computed-at (java.util.Date.)}))
+
+;------------------------------------------------------------------------------ Layer 2
 ;; Budget computation
 
 (defn compute-error-budget
@@ -40,32 +56,27 @@
    When remaining is 0.0, the budget is exhausted.
    Burn-rate > 1.0 means the budget is being consumed faster than it should."
   [sli-value slo-target inverted?]
-  (if inverted?
-    ;; Inverted: target is a ceiling (e.g., unknown rate < 0.10)
-    ;; Budget = how much room we have before hitting the ceiling
-    (let [headroom (- slo-target sli-value)  ; positive = budget remaining
-          budget-total slo-target
-          remaining (if (pos? budget-total)
-                      (max 0.0 (min 1.0 (/ headroom budget-total)))
-                      0.0)
-          burn-rate (if (pos? budget-total)
-                      (/ sli-value budget-total)
-                      0.0)]
-      {:error-budget/remaining remaining
-       :error-budget/burn-rate burn-rate})
-    ;; Normal: target is a floor (e.g., success rate >= 0.85)
-    ;; Budget = how much we can miss before breaching target
-    (let [error-rate (- 1.0 sli-value)
-          error-budget-total (- 1.0 slo-target)  ; max allowed errors
-          remaining (if (pos? error-budget-total)
-                      (max 0.0 (min 1.0 (/ (- error-budget-total error-rate)
-                                            error-budget-total)))
-                      0.0)
-          burn-rate (if (pos? error-budget-total)
-                      (/ error-rate error-budget-total)
-                      0.0)]
-      {:error-budget/remaining remaining
-       :error-budget/burn-rate burn-rate})))
+  (let [[remaining burn-rate]
+        (if inverted?
+          ;; Inverted: target is a ceiling (e.g., unknown rate < 0.10)
+          (let [headroom (- slo-target sli-value)]
+            [(if (pos? slo-target)
+               (max 0.0 (min 1.0 (/ headroom slo-target)))
+               0.0)
+             (if (pos? slo-target)
+               (/ sli-value slo-target)
+               0.0)])
+          ;; Normal: target is a floor (e.g., success rate >= 0.85)
+          (let [error-rate         (- 1.0 sli-value)
+                error-budget-total (- 1.0 slo-target)]
+            [(if (pos? error-budget-total)
+               (max 0.0 (min 1.0 (/ (- error-budget-total error-rate)
+                                     error-budget-total)))
+               0.0)
+             (if (pos? error-budget-total)
+               (/ error-rate error-budget-total)
+               0.0)]))]
+    (error-budget remaining burn-rate)))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Predicates

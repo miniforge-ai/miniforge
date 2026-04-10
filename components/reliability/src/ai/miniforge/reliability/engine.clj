@@ -85,15 +85,12 @@
         ;; 3. Compute error budgets for enforced SLOs
         budgets (into {}
                       (for [{:keys [sli/name slo/actual slo/target slo/tier slo/window]}
-                            all-slo-checks]
+                            all-slo-checks
+                            :let [{:keys [error-budget/remaining error-budget/burn-rate]}
+                                  (budget/compute-error-budget actual target
+                                                              (contains? slo/inverted-slis name))]]
                         [[name tier window]
-                         (merge
-                          (budget/compute-error-budget actual target
-                                                      (contains? slo/inverted-slis name))
-                          {:error-budget/tier tier
-                           :error-budget/sli name
-                           :error-budget/window window
-                           :error-budget/computed-at (java.util.Date.)})]))
+                         (budget/error-budget remaining burn-rate tier name window)]))
 
         ;; 4. Determine degradation recommendation
         any-critical-exhausted? (budget/critical-budget-exhausted? budgets)

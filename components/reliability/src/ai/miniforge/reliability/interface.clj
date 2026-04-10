@@ -54,6 +54,12 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Error budgets (pure)
 
+(def error-budget
+  "Factory: create an error budget map.
+   (error-budget remaining burn-rate) or
+   (error-budget remaining burn-rate tier sli window)"
+  budget/error-budget)
+
 (def compute-error-budget budget/compute-error-budget)
 (def budget-exhausted? budget/budget-exhausted?)
 (def budget-critical? budget/budget-critical?)
