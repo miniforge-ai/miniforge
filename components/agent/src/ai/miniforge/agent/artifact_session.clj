@@ -289,6 +289,27 @@
       (spit path (pr-str {:files files}))))
   session)
 
+(defn write-capsule-context-cache!
+  "Write context cache EDN inside the capsule via executor.
+   Capsule variant of write-context-cache! for governed mode."
+  [session files]
+  (when (seq files)
+    (let [exec!   (requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)
+          path    (str (:dir session) "/context-cache.edn")
+          content (pr-str {:files files})]
+      (exec! (:executor session) (:environment-id session)
+             (str "cat > " path " << 'CACHEEOF'\n" content "\nCACHEEOF")
+             {:workdir (:workdir session)})))
+  session)
+
+(defn write-context-cache-for-session!
+  "Write context cache to the appropriate location based on session type.
+   Dispatches to capsule or host variant based on :capsule? flag."
+  [session files]
+  (if (:capsule? session)
+    (write-capsule-context-cache! session files)
+    (write-context-cache! session files)))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Artifact reading
 
@@ -473,7 +494,8 @@
                          :policy :workspace-write})))
 
 (defn read-capsule-artifact
-  "Read artifact EDN from inside the capsule via executor."
+  "Read artifact EDN from inside the capsule via executor.
+   Applies parse-uuid-strings to match host read-artifact behavior."
   [session]
   (let [exec!    (requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)
         result   (exec! (:executor session) (:environment-id session)
@@ -481,7 +503,9 @@
         content  (get-in result [:data :stdout] "")]
     (when (seq content)
       (try
-        (clojure.edn/read-string content)
+        (-> content
+            clojure.edn/read-string
+            parse-uuid-strings)
         (catch Exception _ nil)))))
 
 (defn cleanup-capsule-session!
@@ -550,6 +574,56 @@
           :pre-session-snapshot (:pre-session-snapshot session#)})
        (finally
          (cleanup-session! session#)))))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Unified session dispatch (N11 §6.3)
+
+(defn with-session
+  "Execute body-fn with the appropriate artifact session for the execution mode.
+
+   In governed mode (context has :execution/executor, :execution/environment-id,
+   and :execution/mode :governed), creates a capsule session inside the Docker
+   container so the MCP server and hooks run inside the capsule boundary.
+   Otherwise, creates a host session on the local filesystem.
+
+   Arguments:
+   - context - Execution context map (from workflow runner)
+   - body-fn - (fn [session] ...) that receives the session and returns LLM result
+
+   Returns normalized map:
+   {:llm-result :artifact :context-misses :pre-session-snapshot :session-mode}"
+  [context body-fn]
+  (let [governed? (and (= :governed (:execution/mode context))
+                       (:execution/executor context)
+                       (:execution/environment-id context))]
+    (if governed?
+      (let [executor (:execution/executor context)
+            env-id   (:execution/environment-id context)
+            workdir  (or (:execution/worktree-path context) "/workspace")
+            session  (-> (create-capsule-session! executor env-id workdir)
+                         write-capsule-mcp-config!)]
+        (try
+          (let [result (body-fn session)]
+            {:llm-result result
+             :artifact (read-capsule-artifact session)
+             :context-misses nil
+             :pre-session-snapshot nil
+             :session-mode :capsule})
+          (finally
+            (cleanup-capsule-session! session))))
+      (let [session (-> (create-session!
+                          {:workdir (or (:execution/worktree-path context)
+                                        (System/getProperty "user.dir"))})
+                        write-mcp-config!)]
+        (try
+          (let [result (body-fn session)]
+            {:llm-result result
+             :artifact (read-artifact session)
+             :context-misses (read-context-misses session)
+             :pre-session-snapshot (:pre-session-snapshot session)
+             :session-mode :host})
+          (finally
+            (cleanup-session! session)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

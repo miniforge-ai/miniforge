@@ -331,19 +331,20 @@
           (if llm-client
             ;; Use the real LLM with artifact session for MCP tool support
             (let [{:keys [llm-result artifact]}
-                  (artifact-session/with-artifact-session [session]
-                    (let [budget-usd (budget/resolve-cost-budget-usd :planner config context)
-                          mcp-opts {:model (model/default-model-for-role :planner)
-                                    :mcp-config (:mcp-config-path session)
-                                    :mcp-allowed-tools (:mcp-allowed-tools session)
-                                    :supervision (:supervision session)
-                                    :budget-usd budget-usd
-                                    :max-turns 40}]
-                      (if on-chunk
-                        (llm/chat-stream llm-client user-prompt on-chunk
-                                         (merge {:system @planner-system-prompt} mcp-opts))
-                        (llm/chat llm-client user-prompt
-                                  (merge {:system @planner-system-prompt} mcp-opts)))))
+                  (artifact-session/with-session context
+                    (fn [session]
+                      (let [budget-usd (budget/resolve-cost-budget-usd :planner config context)
+                            mcp-opts {:model (model/default-model-for-role :planner)
+                                      :mcp-config (:mcp-config-path session)
+                                      :mcp-allowed-tools (:mcp-allowed-tools session)
+                                      :supervision (:supervision session)
+                                      :budget-usd budget-usd
+                                      :max-turns 40}]
+                        (if on-chunk
+                          (llm/chat-stream llm-client user-prompt on-chunk
+                                           (merge {:system @planner-system-prompt} mcp-opts))
+                          (llm/chat llm-client user-prompt
+                                    (merge {:system @planner-system-prompt} mcp-opts))))))
                   llm-response llm-result
                   tokens (get llm-response :tokens 0)]
               (log/info logger :planner :planner/llm-called
