@@ -1,14 +1,27 @@
 ;; Failure classification rules per N1 §5.3.3
 ;; All data — no code. Loaded and compiled by classifier.clj.
 ;;
-;; :message-rules  — ordered list of [pattern-strings failure-class].
-;;                   Earlier entries take priority. Patterns are case-insensitive regexes.
-;; :exception-map  — maps Java exception class name (or prefix) to failure class.
-;;                   nil means "fall through to message-level classification."
-;; :anomaly-map    — maps anomaly category keyword to failure class.
-;;                   nil means "fall through to next strategy."
+;; :failure-classes — canonical set. Single source of truth.
+;; :message-rules   — ordered [{:patterns [...] :class keyword}].
+;;                    Earlier entries take priority. Patterns are case-insensitive regexes.
+;; :exception-map   — maps Java exception class name (or prefix) to failure class.
+;;                    nil means "fall through to message-level classification."
+;; :anomaly-map     — maps anomaly category keyword to failure class.
+;;                    nil means "fall through to next strategy."
 
-{:message-rules
+{:failure-classes
+ #{:failure.class/agent-error       ; Agent logic defect, prompt failure, hallucination
+   :failure.class/task-code         ; User code, spec, or test failure
+   :failure.class/tool-error        ; Tool returned error or unexpected result
+   :failure.class/external          ; Third-party service unavailable or errored
+   :failure.class/policy            ; Policy gate or validation rejected execution
+   :failure.class/resource          ; Budget exhausted (tokens, time, retries, cost)
+   :failure.class/timeout           ; Wall-clock or capability TTL exceeded
+   :failure.class/concurrency       ; Deadlock, lock contention, merge conflict
+   :failure.class/data-integrity    ; Hash mismatch, stale context, schema violation
+   :failure.class/unknown}          ; Unclassified — treat as SLI incident
+
+ :message-rules
  [;; Timeout
   {:patterns ["timeout" "timed?\\s*out" "deadline\\s*exceeded"
               "ttl\\s*expired" "wall.?clock\\s*limit"]
