@@ -120,8 +120,9 @@
   50000)
 
 (def ^:private max-files-per-rule
-  "Maximum number of files to analyze per rule to control LLM costs."
-  20)
+  "Maximum number of files to analyze per rule.
+   Kept low to stay within per-rule timeout when using CLI backends."
+  5)
 
 ;; NOTE: This mirrors compliance-scanner.scan/globs->file-pred.
 ;; Glob matching should be extracted to repo-index component.
@@ -165,8 +166,9 @@
     (analyze-file llm-client complete-fn rule rel-path content)))
 
 (def ^:private default-rule-timeout-ms
-  "Maximum time to spend analyzing one rule before giving up."
-  120000)
+  "Maximum time to spend analyzing one rule before giving up.
+   5 files × ~30s per CLI backend call = ~150s, so 300s gives headroom."
+  300000)
 
 (defn analyze-rule
   "Analyze all matching files against a single behavioral rule.

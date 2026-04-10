@@ -31,6 +31,7 @@
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.repo-analyzer :as analyzer]
    [ai.miniforge.compliance-scanner.interface :as scanner]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.policy-pack.interface :as policy-pack]
    [ai.miniforge.semantic-analyzer.interface :as semantic]))
 
@@ -183,20 +184,22 @@
    Returns vector of semantic violations."
   [repo-path standards-path]
   (try
-    (let [compile-result (policy-pack/compile-standards-pack standards-path)]
+    (let [;; Try repo's .standards/ first, fall back to bundled standards pack
+          compile-result (let [r (policy-pack/compile-standards-pack standards-path)]
+                           (if (:success? r)
+                             r
+                             ;; Load bundled pack from classpath
+                             (when-let [url (io/resource "packs/miniforge-standards.pack.edn")]
+                               {:success? true :pack (edn/read-string (slurp url))})))]
       (when (:success? compile-result)
-        (let [rules      (semantic/behavioral-rules (get-in compile-result [:pack :pack/rules]))
-              ;; LLM client uses requiring-resolve — legitimate extension point
-              ;; because the LLM component may not be on the Babashka classpath
-              create-llm (requiring-resolve 'ai.miniforge.llm.interface/create-client)
-              complete   (requiring-resolve 'ai.miniforge.llm.interface/complete)]
-          (when (and create-llm complete (seq rules))
-            (let [client  (create-llm)
+        (let [rules (semantic/behavioral-rules (get-in compile-result [:pack :pack/rules]))]
+          (when (seq rules)
+            (let [client  (llm/create-client)
                   _       (display/print-info
                            (str "  Analyzing " (count rules)
                                 " behavioral rule(s) in parallel..."))
                   results (semantic/analyze-rules-parallel
-                           client complete repo-path rules
+                           client llm/complete repo-path rules
                            {:timeout-ms 120000 :max-parallel 4})]
               (doseq [r results] (print-rule-result r))
               (vec (mapcat :violations results)))))))
