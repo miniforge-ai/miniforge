@@ -339,6 +339,13 @@
       (if (:llm-backend context)
         (workflow-result->dag-result task-id description (run-mini-workflow task-def context))
         (placeholder-result task-id description))
+      (catch InterruptedException ie
+        ;; Restore interrupt flag so the cancelled future terminates cleanly
+        ;; and the DAG batch cleanup can proceed.
+        (.interrupt (Thread/currentThread))
+        (dag/err :task-cancelled
+                 (str "Task cancelled: " (.getMessage ie))
+                 {:task-id task-id}))
       (catch Exception e
         (dag/err :task-execution-failed
                  (str "Task failed: " (.getMessage e))
@@ -382,12 +389,28 @@
                  (conj selected (first candidates))
                  (into claimed-files task-files)))))))
 
-(defn execute-tasks-batch [tasks execute-fn context]
-  (->> tasks
-       (map (fn [[task-id task]] [task-id (future (execute-fn task context))]))
-       doall
-       (map (fn [[task-id f]] [task-id @f]))
-       (into {})))
+(defn execute-tasks-batch
+  "Execute a batch of tasks in parallel via futures.
+   Ensures all futures are cancelled on failure so that sub-workflow
+   finally blocks can release their execution environments (Docker
+   containers, worktrees). Without cancellation, abandoned futures
+   keep capsules alive until the JVM exits."
+  [tasks execute-fn context]
+  (let [task-futures (doall
+                      (map (fn [[task-id task]]
+                             [task-id (future (execute-fn task context))])
+                           tasks))]
+    (try
+      (->> task-futures
+           (map (fn [[task-id f]] [task-id @f]))
+           (into {}))
+      (catch Throwable t
+        ;; Cancel outstanding futures so their sub-workflow finally blocks
+        ;; run and release any acquired execution environments.
+        (doseq [[_ f] task-futures]
+          (when-not (future-done? f)
+            (future-cancel f)))
+        (throw t)))))
 
 (defn notify-batch-start [batch on-task-start]
   (when on-task-start
