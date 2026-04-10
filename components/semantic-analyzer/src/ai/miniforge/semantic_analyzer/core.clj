@@ -12,6 +12,7 @@
    Layer 1: LLM invocation and response parsing
    Layer 2: File selection and batch analysis"
   (:require
+   [ai.miniforge.compliance-scanner.factory :as factory]
    [ai.miniforge.policy-pack.prompt-template :as pt]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -70,21 +71,19 @@
         []))
     (catch Exception _ [])))
 
-;; NOTE: This mirrors compliance-scanner.factory/->violation.
-;; The violation shape should be extracted to a shared component
-;; (e.g., schema or response) to eliminate this duplication.
 (defn- raw->violation
-  "Convert a single raw LLM violation to canonical shape."
+  "Convert a single raw LLM violation to canonical shape via factory."
   [rule file-path v]
-  {:rule/id       (get rule :rule/id)
-   :rule/category (get rule :rule/category "000")
-   :rule/title    (get rule :rule/title)
-   :file          file-path
-   :line          (get v :line 0)
-   :current       (get v :current "")
-   :suggested     nil
-   :auto-fixable? false
-   :rationale     (get v :message "Semantic analysis violation")})
+  (factory/->violation
+   (get rule :rule/id)
+   (get rule :rule/category "000")
+   (get rule :rule/title)
+   file-path
+   (get v :line 0)
+   (get v :current "")
+   nil
+   false
+   (get v :message "Semantic analysis violation")))
 
 (defn- judge-response->violations
   "Convert parsed judge response to canonical violation maps."
