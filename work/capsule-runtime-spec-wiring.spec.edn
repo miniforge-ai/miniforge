@@ -1,0 +1,46 @@
+{:spec/title "Wire runtime spec network-policy and secrets to Docker executor"
+
+ :spec/description
+ "Per N11 §5.1, the runtime specification declares :network-policy and :secrets
+  that should be applied to the capsule. Currently these fields exist in the
+  spec but are not read by the runner or passed to the Docker executor.
+
+  Implementation:
+  1. In runner.clj acquire-execution-environment!, read :runtime-spec from
+     the workflow opts or workflow config. Pass it to the executor's
+     acquire-environment! as part of env-config.
+  2. In docker.clj acquire-environment!, read :network-policy from env-config:
+     - :deny-all (default) → --network=none (already implemented)
+     - :allow [{:host \"api.anthropic.com\" :port 443}...] → build iptables
+       rules or use a custom Docker network with allowed endpoints
+     - For initial implementation, support :deny-all and :allow-all only.
+       Per-endpoint allow-listing is deferred to a follow-up.
+  3. In docker.clj acquire-environment!, read :secrets from env-config:
+     - Each secret has {:name :scope :source}
+     - :scope :env → inject as -e NAME=VALUE on container create
+     - :scope :file → write to capsule filesystem during bootstrap
+     - :source :env → read from host environment
+     - :source :config → read from user profile config
+  4. Never log secret values. Log secret names only."
+
+ :spec/intent {:type :feature
+               :scope ["components/workflow/src/ai/miniforge/workflow/runner.clj"
+                       "components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/docker.clj"]}
+
+ :spec/constraints
+ ["Only applies to governed mode with Docker executor"
+  "Default network policy is :deny-all (already the case)"
+  "Per-endpoint network allow-listing is deferred — support :deny-all and :allow-all only"
+  "Secret values must never appear in logs, error messages, or evidence"
+  "Use existing -e flag mechanism for env-scoped secrets"
+  "Existing tests must pass"]
+
+ :spec/acceptance-criteria
+ [":runtime-spec from workflow config flows to Docker executor"
+  ":network-policy :deny-all applies --network=none (existing behavior, now explicit)"
+  ":network-policy :allow-all removes --network=none"
+  "Secrets with :scope :env are injected as container env vars"
+  "Secret names (not values) are logged at debug level"
+  "Local mode ignores runtime-spec (no capsule to configure)"]
+
+ :workflow/type :canonical-sdlc}
