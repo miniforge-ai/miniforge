@@ -357,6 +357,25 @@
   [context]
   (or (registry/succeeded? context) (registry/failed? context)))
 
+(defn- persist-workspace-at-boundary!
+  "Persist workspace after a phase boundary (governed mode only).
+   Git commit + push to task branch so changes survive capsule destruction.
+   No-op when no executor or mode is not :governed."
+  [context phase-ctx]
+  (when-let [executor (get context :execution/executor)]
+    (when (= :governed (get context :execution/mode))
+      (let [env-id (get context :execution/environment-id)
+            branch (get context :execution/task-branch)
+            phase  (or (:execution/current-phase phase-ctx) "unknown")]
+        (try
+          (dag-exec/persist-workspace! executor env-id
+                                       {:branch  branch
+                                        :message (str phase " phase completed")
+                                        :workdir (get context :execution/worktree-path)})
+          (catch Exception e
+            (log/warn runner-logger :workflow :workflow/persist-failed
+                      {:message (str "Workspace persist failed: " (ex-message e))})))))))
+
 (defn execute-single-iteration
   "Execute single pipeline iteration: health check -> phase execution -> cleanup.
 
@@ -396,19 +415,7 @@
                           (monitoring/clear-transient-state))
             ;; Persist workspace after phase completes (governed mode only).
             ;; Git commit + push to task branch so changes survive capsule destruction.
-            _ (when-let [executor (get context :execution/executor)]
-                (when (= :governed (get context :execution/mode))
-                  (let [env-id (get context :execution/environment-id)
-                        branch (get context :execution/task-branch)
-                        phase  (or (:execution/current-phase phase-ctx) "unknown")]
-                    (try
-                      (dag-exec/persist-workspace! executor env-id
-                                                   {:branch  branch
-                                                    :message (str phase " phase completed")
-                                                    :workdir (get context :execution/worktree-path)})
-                      (catch Exception e
-                        (log/warn runner-logger :workflow :workflow/persist-failed
-                                  {:message (str "Workspace persist failed: " (ex-message e))}))))))
+            _ (persist-workspace-at-boundary! context phase-ctx)
             ;; Check if phase failed due to rate limiting — if so, stop retrying
             ;; and bubble the error up to the DAG orchestrator's resilience module
             current-phase (:execution/current-phase phase-ctx)
