@@ -179,20 +179,28 @@
             (:files-analyzed result) " files, "
             (:duration-ms result) "ms)")))))
 
+(defn- rule-has-matching-files?
+  "True when a rule's file globs match at least one file in the repo."
+  [repo-path rule]
+  (seq (semantic/select-files-for-rule repo-path rule)))
+
 (defn- run-semantic-analysis
   "Run LLM-based semantic analysis on behavioral rules in parallel.
-   Returns vector of semantic violations."
+   Only runs rules that have matching files in the repo."
   [repo-path standards-path]
   (try
-    (let [;; Try repo's .standards/ first, fall back to bundled standards pack
-          compile-result (let [r (policy-pack/compile-standards-pack standards-path)]
+    (let [compile-result (let [r (policy-pack/compile-standards-pack standards-path)]
                            (if (:success? r)
                              r
-                             ;; Load bundled pack from classpath
                              (when-let [url (io/resource "packs/miniforge-standards.pack.edn")]
                                {:success? true :pack (edn/read-string (slurp url))})))]
       (when (:success? compile-result)
-        (let [rules (semantic/behavioral-rules (get-in compile-result [:pack :pack/rules]))]
+        (let [all-rules   (semantic/behavioral-rules (get-in compile-result [:pack :pack/rules]))
+              ;; Only run rules that have matching files — skip wrong-language rules
+              rules       (filterv #(rule-has-matching-files? repo-path %) all-rules)
+              skipped     (- (count all-rules) (count rules))]
+          (when (pos? skipped)
+            (display/print-info (str "  Skipped " skipped " rule(s) with no matching files")))
           (when (seq rules)
             (let [client  (llm/create-client)
                   _       (display/print-info
