@@ -21,9 +21,24 @@
   (:require
    [babashka.process :as process]
    [cheshire.core :as json]
+   [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Shell helpers
+
+(defn- sh! [& args]
+  (apply process/sh args))
+
+(defn- checkout-pr! [pr-number]
+  (let [r (sh! "gh" "pr" "checkout" (str pr-number))]
+    (when (zero? (:exit r))
+      (str/trim (:out (sh! "git" "branch" "--show-current"))))))
+
+(defn- push! []
+  (zero? (:exit (sh! "git" "push"))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; PR commands
@@ -59,7 +74,6 @@
                                     " " title
                                     " (" (:login author "unknown") ")"))))))
               (catch Exception _
-                ;; Fallback to simple text output if JSON parsing fails
                 (let [result2 (process/sh "gh" "pr" "list" "--repo" r "--limit" "10")]
                   (if (zero? (:exit result2))
                     (println (:out result2))
@@ -80,9 +94,29 @@
   (let [{:keys [url]} opts]
     (if-not url
       (display/print-error (messages/t :pr/respond-usage {:command (app-config/command-string "pr respond <pr-url>")}))
-      (do
-        (display/print-info (messages/t :pr/responding {:url url}))
-        (println (messages/t :pr/respond-todo))))))
+      (let [parse-url (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/parse-pr-url)
+            respond!  (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/respond-to-comments!)
+            run-spec  (requiring-resolve 'ai.miniforge.cli.workflow-runner/run-workflow-from-spec!)
+            {:keys [number]} (parse-url url)]
+        (when-not number
+          (display/print-error "Could not parse PR number from URL")
+          (System/exit 1))
+        (display/print-info (str "Checking out PR #" number "..."))
+        (let [branch (checkout-pr! number)]
+          (when-not branch
+            (display/print-error "Failed to checkout PR branch")
+            (System/exit 1))
+          (display/print-info (str "On branch: " branch))
+          (let [cwd (System/getProperty "user.dir")
+                result (respond! url cwd
+                                 (fn [spec run-opts] (run-spec spec (merge {:quiet true} run-opts)))
+                                 push!
+                                 opts)]
+            (display/print-info
+             (str "\nDone: " (:comments-found result) " comment(s), "
+                  (:files-processed result) " file(s) processed, "
+                  (count (filter :succeeded? (:fixes result))) " fixed"
+                  (when (:pushed? result) ", pushed")))))))))
 
 (defn pr-merge-cmd
   [opts]
