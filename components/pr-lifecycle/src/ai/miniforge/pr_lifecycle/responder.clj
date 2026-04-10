@@ -21,12 +21,15 @@
    push, reply, and resolve conversation threads.
 
    Layer 0: PR URL parsing and comment filtering
-   Layer 1: Fix spec generation
-   Layer 2: Orchestration (respond-to-comments!)"
+   Layer 1: Context gathering (diff + file contents)
+   Layer 2: Fix spec generation
+   Layer 3: Reply and resolution
+   Layer 4: Orchestration (respond-to-comments!)"
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.github :as github]
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]
+   [babashka.process :as process]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -68,21 +71,54 @@
                 :comment-ids (mapv :comment/id cs)}))))
 
 ;------------------------------------------------------------------------------ Layer 1
+;; Context gathering
+
+(defn- fetch-pr-diff
+  "Fetch the PR diff once for all comment groups."
+  [worktree-path pr-number]
+  (let [r (process/sh "gh" "pr" "diff" (str pr-number) :dir worktree-path)]
+    (when (zero? (:exit r)) (:out r))))
+
+(defn- read-file-content
+  "Read a file's content from the worktree. Returns nil if missing."
+  [worktree-path path]
+  (try
+    (slurp (str worktree-path "/" path))
+    (catch Exception _ nil)))
+
+(defn gather-context
+  "Gather PR diff and file contents for all comment groups upfront.
+   Returns {:diff string :files [{:path :content}]}."
+  [worktree-path pr-number groups]
+  (let [diff (fetch-pr-diff worktree-path pr-number)
+        paths (distinct (map :path groups))
+        files (->> paths
+                   (map (fn [p] {:path p :content (read-file-content worktree-path p)}))
+                   (filter :content)
+                   vec)]
+    {:diff diff :files files}))
+
+;------------------------------------------------------------------------------ Layer 2
 ;; Fix spec generation
 
 (defn build-fix-spec
   "Build a workflow spec from a group of review comments on a file.
-   The spec drives the canonical-sdlc workflow to implement the fix."
-  [{:keys [path description]}]
-  {:spec/title (str "Fix review comments on " path)
-   :spec/description (str "Review comments to address on " path ":\n\n" description)
-   :spec/intent {:type :fix :scope [path]}
-   :spec/constraints ["Only modify the specific code referenced by the review comments"
-                      "Do not change unrelated code"
-                      "Maintain existing tests"]
-   :workflow/type :canonical-sdlc})
+   Includes pre-gathered file contents so the explore phase can skip."
+  [{:keys [path description]} context]
+  (let [file-content (some #(when (= path (:path %)) (:content %)) (:files context))]
+    (cond-> {:spec/title (str "Fix review comments on " path)
+             :spec/description (str "Review comments to address on " path ":\n\n" description
+                                    (when (:diff context)
+                                      (str "\n\n## PR Diff\n```\n" (:diff context) "\n```")))
+             :spec/intent {:type :fix :scope [path]}
+             :spec/constraints ["Only modify the specific code referenced by the review comments"
+                                "Do not change unrelated code"
+                                "Maintain existing tests"]
+             :workflow/type :canonical-sdlc}
+      file-content
+      (assoc :task/existing-files [{:path path :content file-content}]))))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 3
 ;; Reply and resolution
 
 (defn reply-and-resolve!
@@ -91,7 +127,6 @@
   [worktree-path pr-number comment-id message]
   (let [reply-result (github/reply-to-comment worktree-path pr-number comment-id message)
         replied? (dag/ok? reply-result)
-        ;; Resolve the thread if reply succeeded
         resolve-result (when replied?
                          (let [thread-result (github/get-thread-id worktree-path pr-number comment-id)]
                            (when (dag/ok? thread-result)
@@ -104,14 +139,12 @@
      :error (when-not replied?
               (get-in reply-result [:error :message] "Reply failed"))}))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Orchestration
+;------------------------------------------------------------------------------ Layer 4
+;; Orchestration primitives
 
 (defn- fix-succeeded?
   "True when a workflow result indicates success or partial success.
-   A DAG workflow may fail overall but still produce PRs for completed tasks.
-   We consider it a success if the status is not :failed OR if the DAG
-   produced at least one PR (partial success)."
+   A DAG workflow may fail overall but still produce PRs for completed tasks."
   [result]
   (and (map? result)
        (not (:error result))
@@ -120,8 +153,8 @@
 
 (defn- run-fix-for-group
   "Run a fix workflow for a comment group. Returns result map or {:error msg}."
-  [run-fix-fn group opts]
-  (let [spec (build-fix-spec group)]
+  [run-fix-fn group context opts]
+  (let [spec (build-fix-spec group context)]
     (try
       (run-fix-fn spec opts)
       (catch Exception e
@@ -129,10 +162,12 @@
 
 (defn- reply-to-fixed-comments
   "Reply and resolve all comments in a group after a successful fix."
-  [worktree-path pr-number comment-ids]
-  (mapv #(reply-and-resolve! worktree-path pr-number %
-                             "Fixed in latest push. Changes address the review feedback.")
-        comment-ids))
+  [worktree-path pr-number comment-ids fix-pr-url]
+  (let [message (if fix-pr-url
+                  (str "Fixed in " fix-pr-url)
+                  "Fixed in latest push. Changes address the review feedback.")]
+    (mapv #(reply-and-resolve! worktree-path pr-number % message)
+          comment-ids)))
 
 (defn- fix-result
   "Build a normalized fix result map."
@@ -146,12 +181,13 @@
 
 (defn- process-comment-group
   "Fix one file's comments, reply on success. Returns fix result map."
-  [worktree-path pr-number run-fix-fn opts {:keys [path comment-ids] :as group}]
-  (let [result (run-fix-for-group run-fix-fn group opts)
-        succeeded? (fix-succeeded? result)]
+  [worktree-path pr-number run-fix-fn context opts {:keys [path comment-ids] :as group}]
+  (let [result (run-fix-for-group run-fix-fn group context opts)
+        succeeded? (fix-succeeded? result)
+        fix-pr-url (first (keep #(get % :pr-url) (get-in result [:execution/dag-result :pr-infos])))]
     (if succeeded?
       (fix-result path comment-ids true
-                  (reply-to-fixed-comments worktree-path pr-number comment-ids) nil)
+                  (reply-to-fixed-comments worktree-path pr-number comment-ids fix-pr-url) nil)
       (fix-result path comment-ids false nil (get result :error)))))
 
 (defn- fetch-actionable-comments
@@ -177,8 +213,15 @@
    :fixes fixes
    :pushed? pushed?})
 
+;------------------------------------------------------------------------------ Layer 5
+;; Main entry point
+
 (defn respond-to-comments!
-  "Fetch review comments, generate fixes, push, reply, and resolve.
+  "Fetch review comments, generate fixes in parallel, push, reply, and resolve.
+
+   Comment groups (one per file) are processed in parallel via futures.
+   PR diff and file contents are gathered once upfront and shared across
+   all parallel fix workflows.
 
    Arguments:
    - pr-url: GitHub PR URL
@@ -200,6 +243,11 @@
     (let [{:keys [comments groups]} (fetch-actionable-comments worktree-path number)]
       (if (empty? groups)
         (respond-result number 0 0 [] false)
-        (let [fixes (mapv #(process-comment-group worktree-path number run-fix-fn opts %) groups)
+        (let [context (gather-context worktree-path number groups)
+              ;; Process comment groups in parallel
+              fix-futures (mapv #(future (process-comment-group
+                                         worktree-path number run-fix-fn context opts %))
+                                groups)
+              fixes (mapv deref fix-futures)
               pushed? (if (some :succeeded? fixes) (push-fn) false)]
           (respond-result number (count comments) (count groups) fixes pushed?))))))
