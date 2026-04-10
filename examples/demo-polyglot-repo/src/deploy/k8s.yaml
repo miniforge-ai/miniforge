@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portfolio-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: portfolio-api
+  template:
+    metadata:
+      labels:
+        app: portfolio-api
+    spec:
+      # VIOLATION: hostNetwork
+      hostNetwork: true
+      containers:
+      - name: api
+        # VIOLATION: :latest tag
+        image: portfolio-api:latest
+        ports:
+        - containerPort: 8080
+        # VIOLATION: no resource limits
+        # VIOLATION: no liveness/readiness probes
+        # VIOLATION: privileged container
+        securityContext:
+          privileged: true
