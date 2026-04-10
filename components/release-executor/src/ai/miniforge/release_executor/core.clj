@@ -287,6 +287,38 @@
         ;; Non-fatal: continue pipeline even if doc write fails
         state)))))
 
+(defn step-update-pr-body
+  "Update the GitHub PR body with the full PR doc content.
+   The initial PR body from step-create-pr may be minimal (agent-generated
+   or fallback). The PR doc has the canonical, standards-compliant content.
+   Runs after step-write-pr-doc so the doc is available."
+  [state]
+  (cond
+    (failed? state) state
+    (not (:create-pr? state)) state
+    (not (:pr-number state)) state
+    :else
+    (let [{:keys [release-meta pr-number pr-url branch
+                  executor environment-id logger]} state
+          doc-content (render-pr-doc release-meta
+                                    {:pr-number pr-number
+                                     :pr-url pr-url
+                                     :branch branch})]
+      (try
+        (sandbox/edit-pr-body! executor environment-id
+                               pr-number doc-content
+                               (gh-exec-opts state))
+        (when logger
+          (log/info logger :release-executor :pr-body-updated
+                    {:data {:pr-number pr-number}}))
+        state
+        (catch Exception e
+          (when logger
+            (log/warn logger :release-executor :pr-body-update-failed
+                      {:message (.getMessage e)}))
+          ;; Non-fatal: PR exists, just has the original body
+          state)))))
+
 (defn step-build-artifact [state]
   (if (failed? state)
     state
@@ -405,6 +437,7 @@
         step-push
         step-create-pr
         step-write-pr-doc
+        step-update-pr-body
         step-build-artifact
         step-save-artifact
         pipeline->result)))
