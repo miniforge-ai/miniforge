@@ -12,6 +12,7 @@
    Layer 1: DegradationManager (stateful)"
   (:require
    [ai.miniforge.fsm.interface :as fsm]
+   [ai.miniforge.reliability.budget :as budget]
    [ai.miniforge.event-stream.interface.stream :as stream]
    [ai.miniforge.event-stream.interface.events :as events]))
 
@@ -97,14 +98,8 @@
    Returns: current degradation mode."
   [manager budget-state]
   (let [current (current-mode manager)
-        any-critical-exhausted? (some (fn [[_ b]]
-                                        (and (= :critical (:error-budget/tier b))
-                                             (<= (:error-budget/remaining b) 0.0)))
-                                      budget-state)
-        any-critical-low? (some (fn [[_ b]]
-                                  (and (= :critical (:error-budget/tier b))
-                                       (< (:error-budget/remaining b) 0.25)))
-                                budget-state)]
+        any-critical-exhausted? (budget/critical-budget-exhausted? budget-state)
+        any-critical-low? (budget/critical-budget-low? budget-state)]
     (case current
       :nominal
       (cond

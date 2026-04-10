@@ -82,6 +82,24 @@
   ([budget threshold]
    (< (:error-budget/remaining budget) threshold)))
 
+(defn critical-budget-exhausted?
+  "Returns true if any critical-tier budget in the budget map is exhausted.
+   budget-state is a map of {[sli tier window] -> budget-map}."
+  [budget-state]
+  (some (fn [[_ b]]
+          (and (= :critical (:error-budget/tier b))
+               (budget-exhausted? b)))
+        budget-state))
+
+(defn critical-budget-low?
+  "Returns true if any critical-tier budget in the budget map is below threshold.
+   budget-state is a map of {[sli tier window] -> budget-map}."
+  [budget-state]
+  (some (fn [[_ b]]
+          (and (= :critical (:error-budget/tier b))
+               (budget-critical? b)))
+        budget-state))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; SLI-1 at 0.90 with 0.85 target: healthy budget

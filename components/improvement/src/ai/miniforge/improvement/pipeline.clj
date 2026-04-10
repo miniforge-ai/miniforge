@@ -34,12 +34,32 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Lifecycle operations
 
+(defn- mark-approved
+  "Pure state update: mark a proposal as approved."
+  [state proposal-id]
+  (update-in state [:proposals proposal-id]
+             assoc :improvement/status :approved
+                   :improvement/approved-at (java.util.Date.)))
+
+(defn- mark-deployed
+  "Pure state update: mark a proposal as deployed and track it."
+  [state proposal-id]
+  (-> state
+      (assoc-in [:proposals proposal-id :improvement/status] :deployed)
+      (update :deployed conj proposal-id)))
+
+(defn- mark-rolled-back
+  "Pure state update: mark a proposal as rolled back with reason."
+  [state proposal-id reason]
+  (-> state
+      (assoc-in [:proposals proposal-id :improvement/status] :rolled-back)
+      (assoc-in [:proposals proposal-id :improvement/rollback-reason] reason)
+      (update :rolled-back conj proposal-id)))
+
 (defn approve-proposal!
   "Mark a proposal as approved for deployment."
   [pipeline proposal-id]
-  (swap! pipeline update-in [:proposals proposal-id]
-         assoc :improvement/status :approved
-               :improvement/approved-at (java.util.Date.))
+  (swap! pipeline mark-approved proposal-id)
   (get-in @pipeline [:proposals proposal-id]))
 
 (defn deploy-proposal!
@@ -47,11 +67,7 @@
   [pipeline proposal-id]
   (let [proposal (get-in @pipeline [:proposals proposal-id])]
     (when proposal
-      (swap! pipeline
-             (fn [s]
-               (-> s
-                   (assoc-in [:proposals proposal-id :improvement/status] :deployed)
-                   (update :deployed conj proposal-id))))
+      (swap! pipeline mark-deployed proposal-id)
       (get-in @pipeline [:proposals proposal-id]))))
 
 (defn rollback-proposal!
@@ -59,12 +75,7 @@
   [pipeline proposal-id reason]
   (let [proposal (get-in @pipeline [:proposals proposal-id])]
     (when proposal
-      (swap! pipeline
-             (fn [s]
-               (-> s
-                   (assoc-in [:proposals proposal-id :improvement/status] :rolled-back)
-                   (assoc-in [:proposals proposal-id :improvement/rollback-reason] reason)
-                   (update :rolled-back conj proposal-id))))
+      (swap! pipeline mark-rolled-back proposal-id reason)
       (get-in @pipeline [:proposals proposal-id]))))
 
 ;------------------------------------------------------------------------------ Rich Comment

@@ -48,11 +48,10 @@
 
    Returns: {:entry/id :passed? :criteria-results [...]}"
   [entry actual criteria-fn]
-  (let [criteria (:entry/pass-criteria entry [])
-        results (mapv (fn [criterion]
-                        {:criterion criterion
-                         :passed? (boolean (criteria-fn criterion actual))})
-                      criteria)
+  (let [criteria    (:entry/pass-criteria entry [])
+        check       (fn [criterion] {:criterion criterion
+                                     :passed? (boolean (criteria-fn criterion actual))})
+        results     (mapv check criteria)
         all-passed? (every? :passed? results)]
     {:entry/id (:entry/id entry)
      :passed? all-passed?
@@ -68,13 +67,12 @@
 
    Returns: {:total :passed :failed :regressions :pass-rate :results [...]}"
   [golden-set execute-fn criteria-fn]
-  (let [results (mapv (fn [entry]
-                        (let [actual (execute-fn (:entry/input entry))]
-                          (evaluate-entry entry actual criteria-fn)))
-                      (:golden-set/entries golden-set))
-        passed (count (filter :passed? results))
-        failed (count (remove :passed? results))
-        total (count results)]
+  (let [run-entry (fn [entry]
+                    (evaluate-entry entry (execute-fn (:entry/input entry)) criteria-fn))
+        results   (mapv run-entry (:golden-set/entries golden-set))
+        passed    (count (filter :passed? results))
+        failed    (count (remove :passed? results))
+        total     (count results)]
     {:total total
      :passed passed
      :failed failed

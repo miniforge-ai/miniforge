@@ -49,6 +49,17 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Diagnosis
 
+(defn- correlation->diagnosis
+  "Convert a single correlation cluster into a diagnosis map."
+  [correlation]
+  {:diagnosis/id (random-uuid)
+   :diagnosis/hypothesis (:correlation/hypothesis correlation)
+   :diagnosis/confidence (:correlation/confidence correlation)
+   :diagnosis/affected-heuristic (infer-affected-heuristic correlation)
+   :diagnosis/suggested-improvement-type (infer-improvement-type correlation)
+   :diagnosis/signals (:correlation/signals correlation)
+   :diagnosis/created-at (java.util.Date.)})
+
 (defn diagnose
   "Generate diagnostic hypotheses from correlated symptom clusters.
 
@@ -65,14 +76,7 @@
       :diagnosis/created-at inst}"
   [correlations]
   (->> correlations
-       (mapv (fn [correlation]
-               {:diagnosis/id (random-uuid)
-                :diagnosis/hypothesis (:correlation/hypothesis correlation)
-                :diagnosis/confidence (:correlation/confidence correlation)
-                :diagnosis/affected-heuristic (infer-affected-heuristic correlation)
-                :diagnosis/suggested-improvement-type (infer-improvement-type correlation)
-                :diagnosis/signals (:correlation/signals correlation)
-                :diagnosis/created-at (java.util.Date.)}))
+       (mapv correlation->diagnosis)
        (sort-by :diagnosis/confidence >)
        vec))
 

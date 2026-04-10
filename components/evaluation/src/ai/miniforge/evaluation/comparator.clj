@@ -23,12 +23,17 @@
 (defn- mean [vals]
   (if (empty? vals) 0.0 (/ (reduce + vals) (count vals))))
 
+(defn- squared-deviation
+  "Compute the squared deviation of a value from the mean."
+  [m x]
+  (Math/pow (- x m) 2))
+
 (defn- variance [vals]
   (if (< (count vals) 2)
     0.0
     (let [m (mean vals)
           n (count vals)]
-      (/ (reduce + (map #(Math/pow (- % m) 2) vals)) (dec n)))))
+      (/ (reduce + (map #(squared-deviation m %) vals)) (dec n)))))
 
 (defn- std-dev [vals]
   (Math/sqrt (variance vals)))

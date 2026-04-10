@@ -98,14 +98,8 @@
                            :error-budget/computed-at (java.util.Date.)})]))
 
         ;; 4. Determine degradation recommendation
-        any-critical-exhausted? (some (fn [[_ b]]
-                                        (and (= :critical (:error-budget/tier b))
-                                             (budget/budget-exhausted? b)))
-                                      budgets)
-        any-critical-low? (some (fn [[_ b]]
-                                  (and (= :critical (:error-budget/tier b))
-                                       (budget/budget-critical? b)))
-                                budgets)
+        any-critical-exhausted? (budget/critical-budget-exhausted? budgets)
+        any-critical-low? (budget/critical-budget-low? budgets)
         recommendation (cond
                          any-critical-exhausted? :safe-mode
                          any-critical-low?       :degraded

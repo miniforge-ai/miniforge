@@ -58,19 +58,37 @@
          :by-workflow {}
          :by-agent {}}))
 
+(defn- index-example
+  "Pure state update: add example to store with workflow and agent indexes."
+  [state example]
+  (-> state
+      (update :examples conj example)
+      (update-in [:by-workflow (get-in example [:training/provenance :workflow-id])]
+                 (fnil conj []) (:training/id example))
+      (update-in [:by-agent (:training/agent-role example)]
+                 (fnil conj []) (:training/id example))))
+
 (defn store-example!
   "Store a training example in the store.
    Maintains indexes by workflow-id and agent-role."
   [store example]
-  (swap! store
-         (fn [s]
-           (-> s
-               (update :examples conj example)
-               (update-in [:by-workflow (get-in example [:training/provenance :workflow-id])]
-                          (fnil conj []) (:training/id example))
-               (update-in [:by-agent (:training/agent-role example)]
-                          (fnil conj []) (:training/id example)))))
+  (swap! store index-example example)
   example)
+
+(defn- matches-agent-role?
+  "Returns true if the example matches the given agent role."
+  [agent-role example]
+  (= agent-role (:training/agent-role example)))
+
+(defn- meets-quality-threshold?
+  "Returns true if the example meets the minimum quality score."
+  [min-quality example]
+  (>= (get-in example [:training/labels :quality-score]) min-quality))
+
+(defn- matches-label?
+  "Returns true if the example matches the given label."
+  [label example]
+  (= label (get-in example [:training/labels :example-type])))
 
 (defn get-examples
   "Get training examples with optional filters.
@@ -83,9 +101,9 @@
   [store & [opts]]
   (let [{:keys [agent-role min-quality label limit]} opts]
     (cond->> (:examples @store)
-      agent-role (filter #(= agent-role (:training/agent-role %)))
-      min-quality (filter #(>= (get-in % [:training/labels :quality-score]) min-quality))
-      label (filter #(= label (get-in % [:training/labels :example-type])))
+      agent-role  (filter #(matches-agent-role? agent-role %))
+      min-quality (filter #(meets-quality-threshold? min-quality %))
+      label       (filter #(matches-label? label %))
       true (take (or limit 100))
       true vec)))
 

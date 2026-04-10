@@ -46,6 +46,16 @@
           idx (min (dec n) (int (Math/floor (* p (dec n)))))]
       (double (nth sorted-vals idx)))))
 
+(defn- terminal-workflow?
+  "Returns true if the workflow has reached a terminal status."
+  [workflow]
+  (#{:completed :failed :escalated} (:status workflow)))
+
+(defn- successful-workflow?
+  "Returns true if the workflow completed successfully or escalated."
+  [workflow]
+  (#{:completed :escalated} (:status workflow)))
+
 ;------------------------------------------------------------------------------ Layer 0
 ;; SLI-1: Workflow Success Rate
 
@@ -54,20 +64,25 @@
    Computation: count(completed + escalated) / count(terminal)"
   [workflow-metrics window]
   (let [windowed (filter-by-window workflow-metrics window)
-        terminal (filter #(#{:completed :failed :escalated} (:status %)) windowed)
+        terminal (filter terminal-workflow? windowed)
         total (count terminal)
-        successful (count (filter #(#{:completed :escalated} (:status %)) terminal))]
+        successful (count (filter successful-workflow? terminal))]
     (safe-ratio successful total)))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; SLI-2: Phase Completion Latency
+
+(defn- has-duration?
+  "Returns the duration-ms metric if present, nil otherwise."
+  [metric]
+  (get-in metric [:metrics :duration-ms]))
 
 (defn compute-phase-latency
   "Wall-clock duration per phase type. Returns {:p50 :p95 :p99} in ms."
   [phase-metrics window]
   (let [windowed (filter-by-window phase-metrics window)
         durations (->> windowed
-                       (map #(get-in % [:metrics :duration-ms]))
+                       (map has-duration?)
                        (filter some?)
                        sort
                        vec)]
@@ -123,11 +138,12 @@
         total (count windowed)]
     (if (zero? total)
       {}
-      (->> windowed
-           (map :failure/class)
-           frequencies
-           (map (fn [[cls cnt]] [cls (safe-ratio cnt total)]))
-           (into {})))))
+      (let [class-fraction (fn [[cls cnt]] [cls (safe-ratio cnt total)])]
+        (->> windowed
+             (map :failure/class)
+             frequencies
+             (map class-fraction)
+             (into {}))))))
 
 (defn compute-unknown-failure-rate
   "Convenience: extract the :failure.class/unknown rate from distribution.

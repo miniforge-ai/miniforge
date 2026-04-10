@@ -24,23 +24,42 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Signal extraction
 
+(defn- breach-to-signal
+  "Convert a single SLO breach check into a signal map."
+  [{:keys [sli/name slo/target slo/actual slo/tier]}]
+  {:signal/type :slo-breach
+   :signal/severity (if (= :critical tier) :critical :high)
+   :signal/evidence {:sli-name name
+                     :target target
+                     :actual actual
+                     :tier tier}
+   :signal/message (msg/t :signal/slo-breach
+                          {:name (clojure.core/name name)
+                           :actual (format "%.2f" (double actual))
+                           :target (format "%.2f" (double target))
+                           :tier (clojure.core/name tier)})})
+
 (defn- extract-slo-breach-signals
   "Extract signals from SLO breaches."
   [slo-checks]
   (->> slo-checks
        (filter :breached?)
-       (mapv (fn [{:keys [sli/name slo/target slo/actual slo/tier]}]
-               {:signal/type :slo-breach
-                :signal/severity (if (= :critical tier) :critical :high)
-                :signal/evidence {:sli-name name
-                                  :target target
-                                  :actual actual
-                                  :tier tier}
-                :signal/message (msg/t :signal/slo-breach
-                                      {:name (clojure.core/name name)
-                                       :actual (format "%.2f" (double actual))
-                                       :target (format "%.2f" (double target))
-                                       :tier (clojure.core/name tier)})}))))
+       (mapv breach-to-signal)))
+
+(defn- failure-to-signal
+  "Convert a failure class frequency pair into a signal map."
+  [min-count [cls cnt]]
+  {:signal/type :recurring-failure
+   :signal/severity (if (>= cnt (* 2 min-count)) :high :medium)
+   :signal/evidence {:failure-class cls :count cnt}
+   :signal/message (msg/t :signal/recurring-failure
+                          {:class (clojure.core/name cls)
+                           :count (str cnt)})})
+
+(defn- meets-failure-threshold?
+  "Returns true if the failure count meets the minimum threshold."
+  [min-count [_ cnt]]
+  (>= cnt min-count))
 
 (defn- extract-failure-pattern-signals
   "Extract signals from recurring failure patterns."
@@ -50,14 +69,17 @@
                       (filter some?)
                       frequencies)]
     (->> by-class
-         (filter (fn [[_ cnt]] (>= cnt min-count)))
-         (mapv (fn [[cls cnt]]
-                 {:signal/type :recurring-failure
-                  :signal/severity (if (>= cnt (* 2 min-count)) :high :medium)
-                  :signal/evidence {:failure-class cls :count cnt}
-                  :signal/message (msg/t :signal/recurring-failure
-                                        {:class (clojure.core/name cls)
-                                         :count (str cnt)})})))))
+         (filter #(meets-failure-threshold? min-count %))
+         (mapv #(failure-to-signal min-count %)))))
+
+(defn- avg-quality
+  "Compute the average quality score from a sequence of training examples."
+  [examples]
+  (let [scores (map #(get-in % [:training/labels :quality-score]) examples)
+        valid (filter some? scores)]
+    (if (seq valid)
+      (/ (reduce + valid) (count valid))
+      0.0)))
 
 (defn- extract-quality-regression-signals
   "Extract signals from declining training example quality."
@@ -67,12 +89,6 @@
           half (quot (count sorted) 2)
           first-half (take half sorted)
           second-half (drop half sorted)
-          avg-quality (fn [exs]
-                        (let [scores (map #(get-in % [:training/labels :quality-score]) exs)
-                              valid (filter some? scores)]
-                          (if (seq valid)
-                            (/ (reduce + valid) (count valid))
-                            0.0)))
           q1 (avg-quality first-half)
           q2 (avg-quality second-half)
           regression (- q1 q2)]
@@ -87,26 +103,34 @@
                                  :q2 (format "%.2f" (double q2))
                                  :pct (format "%.0f" (* 100 regression))})}]))))
 
+(defn- exceeds-iteration-threshold?
+  "Returns true if the phase metric has iterations exceeding the threshold."
+  [threshold metric]
+  (and (:iterations metric) (> (:iterations metric) threshold)))
+
+(defn- phase-to-signal
+  "Convert a grouped phase entry into a high-iteration signal."
+  [[phase entries]]
+  (let [avg (double (/ (reduce + (map :iterations entries))
+                       (count entries)))]
+    {:signal/type :high-iteration-count
+     :signal/severity :medium
+     :signal/evidence {:phase phase
+                       :avg-iterations avg
+                       :count (count entries)}
+     :signal/affected-heuristic (keyword (str "agent-prompt/" (name phase)))
+     :signal/message (msg/t :signal/high-iteration
+                            {:phase (name phase)
+                             :avg (format "%.1f" avg)
+                             :count (str (count entries))})}))
+
 (defn- extract-high-iteration-signals
   "Extract signals from phases requiring many inner loop iterations."
   [phase-metrics threshold]
   (->> phase-metrics
-       (filter #(and (:iterations %) (> (:iterations %) threshold)))
+       (filter #(exceeds-iteration-threshold? threshold %))
        (group-by :phase)
-       (map (fn [[phase entries]]
-              (let [avg (double (/ (reduce + (map :iterations entries))
-                                  (count entries)))]
-                {:signal/type :high-iteration-count
-                 :signal/severity :medium
-                 :signal/evidence {:phase phase
-                                   :avg-iterations avg
-                                   :count (count entries)}
-                 :signal/affected-heuristic (keyword (str "agent-prompt/" (name phase)))
-                 :signal/message (msg/t :signal/high-iteration
-                                        {:phase (name phase)
-                                         :avg (format "%.1f" avg)
-                                         :count (str (count entries))})})))
-       vec))
+       (mapv phase-to-signal)))
 
 (defn extract-signals
   "Extract improvement signals from all available data sources.
