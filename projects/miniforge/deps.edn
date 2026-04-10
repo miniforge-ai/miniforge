@@ -62,7 +62,9 @@
         ;; LSP-to-MCP bridge (separate entry point for Claude Code integration)
         ai.miniforge/lsp-mcp-bridge {:local/root "../../bases/lsp-mcp-bridge"}
         ai.miniforge/messages {:local/root "../../components/messages"}
-        ai.miniforge/patterns {:local/root "../../components/patterns"}}
+        ai.miniforge/patterns {:local/root "../../components/patterns"}
+        ;; Workflow compliance scanning (phase-level compliance checks)
+        ai.miniforge/workflow-compliance-scanner {:local/root "../../components/workflow-compliance-scanner"}}
 
  :aliases
  {:uberjar
