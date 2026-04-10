@@ -107,6 +107,72 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Orchestration
 
+(defn- fix-succeeded?
+  "True when a workflow result indicates success."
+  [result]
+  (and (map? result)
+       (not (:error result))
+       (not= :failed (get result :execution/status))))
+
+(defn- run-fix-for-group
+  "Run a fix workflow for a comment group. Returns result map or {:error msg}."
+  [run-fix-fn group opts]
+  (let [spec (build-fix-spec group)]
+    (try
+      (run-fix-fn spec opts)
+      (catch Exception e
+        {:error (.getMessage e)}))))
+
+(defn- reply-to-fixed-comments
+  "Reply and resolve all comments in a group after a successful fix."
+  [worktree-path pr-number comment-ids]
+  (mapv #(reply-and-resolve! worktree-path pr-number %
+                             "Fixed in latest push. Changes address the review feedback.")
+        comment-ids))
+
+(defn- fix-result
+  "Build a normalized fix result map."
+  [path comment-ids succeeded? reply-results error]
+  {:path path
+   :succeeded? succeeded?
+   :comment-ids comment-ids
+   :replied? (when reply-results (every? :replied? reply-results))
+   :resolved? (when reply-results (every? :resolved? reply-results))
+   :error error})
+
+(defn- process-comment-group
+  "Fix one file's comments, reply on success. Returns fix result map."
+  [worktree-path pr-number run-fix-fn opts {:keys [path comment-ids] :as group}]
+  (let [result (run-fix-for-group run-fix-fn group opts)
+        succeeded? (fix-succeeded? result)]
+    (if succeeded?
+      (fix-result path comment-ids true
+                  (reply-to-fixed-comments worktree-path pr-number comment-ids) nil)
+      (fix-result path comment-ids false nil (get result :error)))))
+
+(defn- fetch-actionable-comments
+  "Fetch and filter PR comments to actionable review comments.
+   Returns {:comments vector :groups vector} or throws on fetch failure."
+  [worktree-path pr-number]
+  (let [result (poller/fetch-pr-comments worktree-path pr-number)]
+    (when (dag/err? result)
+      (throw (ex-info "Failed to fetch PR comments"
+                      {:pr-number pr-number
+                       :error (get-in result [:error :message])})))
+    (let [all (get-in result [:data :comments])
+          actionable (filter-actionable-comments all)]
+      {:comments actionable
+       :groups (group-comments-by-file actionable)})))
+
+(defn- respond-result
+  "Build the response summary map."
+  [pr-number comments-found files-processed fixes pushed?]
+  {:pr-number pr-number
+   :comments-found comments-found
+   :files-processed files-processed
+   :fixes fixes
+   :pushed? pushed?})
+
 (defn respond-to-comments!
   "Fetch review comments, generate fixes, push, reply, and resolve.
 
@@ -127,50 +193,9 @@
   (let [{:keys [number]} (parse-pr-url pr-url)]
     (when-not number
       (throw (ex-info "Could not parse PR number from URL" {:url pr-url})))
-
-    (let [comments-result (poller/fetch-pr-comments worktree-path number)]
-      (when (dag/err? comments-result)
-        (throw (ex-info "Failed to fetch PR comments"
-                        {:pr-number number
-                         :error (get-in comments-result [:error :message])})))
-
-      (let [all-comments (get-in comments-result [:data :comments])
-            actionable (filter-actionable-comments all-comments)
-            groups (group-comments-by-file actionable)]
-
-        (if (empty? groups)
-          {:pr-number number
-           :comments-found 0
-           :files-processed 0
-           :fixes []
-           :pushed? false}
-
-          (let [fixes (mapv
-                       (fn [{:keys [path comment-ids] :as group}]
-                         (let [spec (build-fix-spec group)
-                               result (try
-                                        (run-fix-fn spec opts)
-                                        (catch Exception e
-                                          {:error (.getMessage e)}))
-                               succeeded? (and (map? result)
-                                               (not (:error result))
-                                               (not= :failed (get result :execution/status)))
-                               reply-results (when succeeded?
-                                               (mapv #(reply-and-resolve!
-                                                       worktree-path number %
-                                                       "Fixed in latest push. Changes address the review feedback.")
-                                                     comment-ids))]
-                           {:path path
-                            :succeeded? succeeded?
-                            :comment-ids comment-ids
-                            :replied? (when reply-results (every? :replied? reply-results))
-                            :resolved? (when reply-results (every? :resolved? reply-results))
-                            :error (when-not succeeded? (get result :error))}))
-                       groups)
-                any-succeeded? (some :succeeded? fixes)
-                pushed? (if any-succeeded? (push-fn) false)]
-            {:pr-number number
-             :comments-found (count actionable)
-             :files-processed (count groups)
-             :fixes fixes
-             :pushed? pushed?}))))))
+    (let [{:keys [comments groups]} (fetch-actionable-comments worktree-path number)]
+      (if (empty? groups)
+        (respond-result number 0 0 [] false)
+        (let [fixes (mapv #(process-comment-group worktree-path number run-fix-fn opts %) groups)
+              pushed? (if (some :succeeded? fixes) (push-fn) false)]
+          (respond-result number (count comments) (count groups) fixes pushed?))))))
