@@ -1,0 +1,113 @@
+;; Linter field-mapping ETL specs.
+;; Each entry defines how to parse a linter's structured output into
+;; the canonical violation shape.
+;;
+;; Schema:
+;;   :mapping/id          — Linter identifier keyword (matches tech-fingerprints :parser)
+;;   :mapping/format      — Output format: :json, :json-lines, :json-nested, :edn
+;;   :mapping/filter      — Optional filter predicate on parsed records
+;;     :path              — get-in path to check
+;;     :equals            — required value
+;;   :mapping/unwrap      — Path to the violations array within each record (optional)
+;;   :mapping/parent-file — Path to the file field on the parent object (for nested formats)
+;;   :mapping/fields      — Field mapping: canonical-key → source path (keyword or vector)
+;;   :mapping/severity-map — Source severity value → canonical severity keyword
+;;
+;; Sorted by :mapping/id.
+
+[;; ── clj-kondo ──────────────────────────────────────────────────────────────
+ {:mapping/id          :clj-kondo
+  :mapping/format      :edn
+  :mapping/unwrap      [:findings]
+  :mapping/fields
+  {:file     [:filename]
+   :line     [:row]
+   :column   [:col]
+   :message  [:message]
+   :code     [:type]
+   :severity [:level]}
+  :mapping/severity-map
+  {"error"   :critical
+   "warning" :major
+   "info"    :minor}}
+
+ ;; ── Clippy (Rust) ──────────────────────────────────────────────────────────
+ {:mapping/id          :clippy
+  :mapping/format      :json-lines
+  :mapping/filter      {:path [:reason] :equals "compiler-message"}
+  :mapping/fields
+  {:file     [:message :spans 0 :file_name]
+   :line     [:message :spans 0 :line_start]
+   :column   [:message :spans 0 :column_start]
+   :message  [:message :message]
+   :code     [:message :code :code]
+   :severity [:message :level]}
+  :mapping/severity-map
+  {"error"   :critical
+   "warning" :major
+   "note"    :minor
+   "help"    :info}}
+
+ ;; ── ESLint ─────────────────────────────────────────────────────────────────
+ {:mapping/id          :eslint
+  :mapping/format      :json-nested
+  :mapping/parent-file [:filePath]
+  :mapping/unwrap      [:messages]
+  :mapping/fields
+  {:file     [:filePath]
+   :line     [:line]
+   :column   [:column]
+   :message  [:message]
+   :code     [:ruleId]
+   :severity [:severity]}
+  :mapping/severity-map
+  {2 :critical
+   1 :major}}
+
+ ;; ── golangci-lint ──────────────────────────────────────────────────────────
+ {:mapping/id          :golangci-lint
+  :mapping/format      :json
+  :mapping/unwrap      [:Issues]
+  :mapping/fields
+  {:file     [:Pos :Filename]
+   :line     [:Pos :Line]
+   :column   [:Pos :Column]
+   :message  [:Text]
+   :code     [:FromLinter]
+   :severity [:Severity]}
+  :mapping/severity-map
+  {"error"   :critical
+   "warning" :major
+   "info"    :minor}}
+
+ ;; ── ruff (Python) ──────────────────────────────────────────────────────────
+ {:mapping/id          :ruff
+  :mapping/format      :json
+  :mapping/fields
+  {:file     [:filename]
+   :line     [:location :row]
+   :column   [:location :column]
+   :message  [:message]
+   :code     [:code]
+   :severity [:type]}
+  :mapping/severity-map
+  {"E"       :critical
+   "W"       :major
+   "C"       :minor
+   "R"       :info
+   "warning" :major
+   "error"   :critical}}
+
+ ;; ── SwiftLint ──────────────────────────────────────────────────────────────
+ {:mapping/id          :swiftlint
+  :mapping/format      :json
+  :mapping/fields
+  {:file     [:file]
+   :line     [:line]
+   :column   [:character]
+   :message  [:reason]
+   :code     [:rule_id]
+   :severity [:severity]}
+  :mapping/severity-map
+  {"error"   :critical
+   "warning" :major}}]
