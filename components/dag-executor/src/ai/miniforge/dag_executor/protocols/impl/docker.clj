@@ -326,6 +326,18 @@
                             :unknown)})
       (result/ok {:status :unknown :error (:err result)}))))
 
+(defn container-image-digest
+  "Return the SHA256 image digest for a running container, or nil on failure."
+  [docker-path container-name]
+  (try
+    (let [inspect-result (run-docker docker-path
+                                     "inspect" container-name
+                                     "--format" "{{.Image}}")]
+      (when (zero? (:exit inspect-result))
+        (let [digest (str/trim (:out inspect-result))]
+          (when (seq digest) digest))))
+    (catch Exception _ nil)))
+
 ;; ============================================================================
 ;; Image Management
 ;; ============================================================================
@@ -576,9 +588,12 @@
         (do
           ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
           (bootstrap-workspace! docker-path container-name workdir env-config)
-          (result/ok (proto/create-environment-record
-                      container-name :docker task-id workdir
-                      (assoc env-config :metadata (:data create-result)))))
+          (let [image-digest (container-image-digest docker-path container-name)
+                metadata (cond-> (get create-result :data {})
+                           image-digest (assoc :image-digest image-digest))]
+            (result/ok (proto/create-environment-record
+                        container-name :docker task-id workdir
+                        (assoc env-config :metadata metadata)))))
         create-result)))
 
   (execute! [_this environment-id command opts]
