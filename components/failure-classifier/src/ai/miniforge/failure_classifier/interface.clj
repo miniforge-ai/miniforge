@@ -19,17 +19,7 @@
 
 (def failure-classes
   "The complete set of canonical failure class keywords.
-
-   #{:failure.class/agent-error       ; Agent logic defect, prompt failure, hallucination
-     :failure.class/task-code         ; User code, spec, or test failure
-     :failure.class/tool-error        ; Tool returned error or unexpected result
-     :failure.class/external          ; Third-party service unavailable or errored
-     :failure.class/policy            ; Policy gate or validation rejected execution
-     :failure.class/resource          ; Budget exhausted (tokens, time, retries, cost)
-     :failure.class/timeout           ; Wall-clock or capability TTL exceeded
-     :failure.class/concurrency       ; Deadlock, lock contention, merge conflict
-     :failure.class/data-integrity    ; Hash mismatch, stale context, schema violation
-     :failure.class/unknown}          ; Unclassified — treat as SLI incident"
+   Loaded from config/failure-classifier/rules.edn — see that file for descriptions."
   taxonomy/failure-classes)
 
 (def FailureClass
