@@ -1,0 +1,117 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+(ns ai.miniforge.failure-classifier.interface
+  "Public API for failure classification per N1 §5.3.3.
+
+   Classifies failures into a canonical taxonomy enabling structured
+   failure analysis, SLI computation (N1 §5.5), and targeted remediation.
+
+   Classification is performed by the runtime, NOT by agents.
+
+   Layer 0: Taxonomy (schemas, predicates)
+   Layer 1: Classification (pure functions)"
+  (:require
+   [ai.miniforge.failure-classifier.taxonomy :as taxonomy]
+   [ai.miniforge.failure-classifier.classifier :as classifier]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Taxonomy
+
+(def failure-classes
+  "The complete set of canonical failure class keywords.
+
+   #{:failure.class/agent-error       ; Agent logic defect, prompt failure, hallucination
+     :failure.class/task-code         ; User code, spec, or test failure
+     :failure.class/tool-error        ; Tool returned error or unexpected result
+     :failure.class/external          ; Third-party service unavailable or errored
+     :failure.class/policy            ; Policy gate or validation rejected execution
+     :failure.class/resource          ; Budget exhausted (tokens, time, retries, cost)
+     :failure.class/timeout           ; Wall-clock or capability TTL exceeded
+     :failure.class/concurrency       ; Deadlock, lock contention, merge conflict
+     :failure.class/data-integrity    ; Hash mismatch, stale context, schema violation
+     :failure.class/unknown}          ; Unclassified — treat as SLI incident"
+  taxonomy/failure-classes)
+
+(def FailureClass
+  "Malli schema for a failure class keyword."
+  taxonomy/FailureClass)
+
+(def ClassifiedFailure
+  "Malli schema: [:map [:failure/class FailureClass] [:failure/message :string] ...]"
+  taxonomy/ClassifiedFailure)
+
+(def valid-failure-class?
+  "Returns true if the keyword is a valid canonical failure class."
+  taxonomy/valid-failure-class?)
+
+(def unknown-class?
+  "Returns true if the failure class is :failure.class/unknown.
+   Unknown failures MUST be treated as SLI incidents (N1 §5.3.3)."
+  taxonomy/unknown-class?)
+
+;------------------------------------------------------------------------------ Layer 1
+;; Classification
+
+(def classify
+  "Classify a failure into the canonical taxonomy.
+
+   Attempts classification by:
+   1. Anomaly category (most precise)
+   2. Exception class name (JVM-level signal)
+   3. Error message pattern matching (broadest)
+   4. Falls back to :failure.class/unknown
+
+   Arguments:
+     failure-context - map with optional keys:
+       :anomaly/category   - keyword from anomaly taxonomy
+       :exception/class    - string, Java exception class name
+       :error/message      - string, human-readable error
+       :phase              - keyword, workflow phase
+       :tool/id            - keyword, tool that failed
+
+   Returns: keyword from the canonical failure class set.
+
+   Example:
+     (classify {:error/message \"Connection refused\"})
+     ;; => :failure.class/external
+
+     (classify {:anomaly/category :anomalies/timeout})
+     ;; => :failure.class/timeout"
+  classifier/classify-failure)
+
+(def classify-exception
+  "Classify a Throwable directly.
+
+   Example:
+     (classify-exception (java.net.SocketTimeoutException. \"timeout\"))
+     ;; => :failure.class/timeout"
+  classifier/classify-exception)
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  (classify {:error/message "Connection refused to api.example.com"})
+  ;; => :failure.class/external
+
+  (classify {:anomaly/category :anomalies.gate/check-failed})
+  ;; => :failure.class/policy
+
+  (classify {:error/message "Something mysterious happened"})
+  ;; => :failure.class/unknown
+
+  :leave-this-here)

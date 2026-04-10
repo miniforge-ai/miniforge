@@ -1,7 +1,7 @@
 (ns ai.miniforge.data-foundry.connector-file.interface-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.java.io :as io]
-            [clojure.data.json :as json]
+            [cheshire.core :as json]
             [ai.miniforge.data-foundry.connector-file.interface :as file-conn]
             [ai.miniforge.data-foundry.connector.interface :as conn]))
 
@@ -26,7 +26,7 @@
   (.mkdirs (io/file test-dir))
   (spit (str test-dir "/test.csv") csv-content)
   (with-open [wtr (io/writer (str test-dir "/test.json"))]
-    (json/write json-content wtr))
+    (json/generate-stream json-content wtr))
   (spit (str test-dir "/test.edn") (pr-str edn-content)))
 
 (defn- cleanup-test-files []
@@ -182,7 +182,7 @@
       (is (= 0 (:publish/records-failed result)))
       ;; Verify file contents
       (let [written (with-open [rdr (io/reader out-path)]
-                      (json/read rdr :key-fn keyword))]
+                      (json/parse-stream rdr true))]
         (is (= 2 (count written)))
         (is (= 10 (:id (first written)))))
       (conn/close fc handle))))
@@ -207,7 +207,7 @@
       (is (= 1 (:publish/records-written result)))
       ;; Verify both records present
       (let [written (with-open [rdr (io/reader out-path)]
-                      (json/read rdr :key-fn keyword))]
+                      (json/parse-stream rdr true))]
         (is (= 2 (count written))))
       (conn/close fc h2))))
 

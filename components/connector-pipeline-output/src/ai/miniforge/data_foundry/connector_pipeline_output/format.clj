@@ -1,7 +1,7 @@
 (ns ai.miniforge.data-foundry.connector-pipeline-output.format
   "Pluggable format transforms for pipeline output.
    Each format writes records and returns the filename used."
-  (:require [clojure.data.json :as json]
+  (:require [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.string]))
 
@@ -24,7 +24,7 @@
         path (str output-dir "/" run-id "/" filename)]
     (io/make-parents path)
     (with-open [wtr (io/writer path)]
-      (json/write records wtr))
+      (json/generate-stream records wtr))
     filename))
 
 (defmethod write-records :default
@@ -52,7 +52,7 @@
             (case format
               :edn  (spit path (pr-str (vec records)))
               :json (with-open [wtr (io/writer path)]
-                      (json/write records wtr)))
+                      (json/generate-stream records wtr)))
             {:dataset  dataset-name
              :filename filename
              :count    (count records)}))
@@ -72,5 +72,5 @@
   (let [path (str output-dir "/" run-id "/manifest.schema.json")]
     (io/make-parents path)
     (with-open [wtr (io/writer path)]
-      (json/write json-schema-map wtr))
+      (json/generate-stream json-schema-map wtr))
     path))

@@ -2,7 +2,7 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.java.io :as io]
             [clojure.edn :as edn]
-            [clojure.data.json :as json]
+            [cheshire.core :as json]
             [ai.miniforge.data-foundry.connector-pipeline-output.impl :as impl]
             [ai.miniforge.data-foundry.connector-pipeline-output.schema :as schema]
             [ai.miniforge.data-foundry.connector-pipeline-output.interface :as iface]))
@@ -90,7 +90,7 @@
 
       ;; Records are JSON
       (let [written (with-open [rdr (io/reader (str test-dir "/" run-id "/records.json"))]
-                      (json/read rdr :key-fn keyword))]
+                      (json/parse-stream rdr true))]
         (is (= 3 (count written)))
         (is (= 1 (:x (first written)))))
 
@@ -126,7 +126,7 @@
           schema-file (io/file (str test-dir "/" run-id "/manifest.schema.json"))]
       (is (.exists schema-file))
       (let [json-schema (with-open [rdr (io/reader schema-file)]
-                          (json/read rdr :key-fn keyword))]
+                          (json/parse-stream rdr true))]
         (is (= "object" (:type json-schema)))
         (is (contains? (:properties json-schema) (keyword "manifest/version"))))
       (impl/do-close handle))))

@@ -210,7 +210,7 @@
               (:cost-usd opts) (assoc :workflow/cost-usd (:cost-usd opts))
               (:pr-info opts) (assoc :workflow/pr-info (:pr-info opts)))))
 
-(defn workflow-failed [stream workflow-id error]
+(defn workflow-failed [stream workflow-id error & [{:keys [failure/class]}]]
   (let [;; Handle anomaly maps, Throwables, and plain error maps
         anomaly-map (cond
                       (response/anomaly-map? error) error
@@ -233,7 +233,8 @@
         (assoc :workflow/failure-reason (:message error-map (:message event-data))
                :workflow/error-details error-map
                :workflow/anomaly-code (:anomaly-code event-data)
-               :workflow/retryable? (:retryable? event-data false)))))
+               :workflow/retryable? (:retryable? event-data false))
+        (cond-> class (assoc :failure/class class)))))
 
 (defn llm-request [stream workflow-id agent-id model & [prompt-tokens]]
   (-> (create-envelope stream :llm/request workflow-id
@@ -272,11 +273,12 @@
       (assoc :agent/id agent-id)
       (cond-> result (assoc :agent/result result))))
 
-(defn agent-failed [stream workflow-id agent-id & [error]]
+(defn agent-failed [stream workflow-id agent-id & [error {:keys [failure/class]}]]
   (-> (create-envelope stream :agent/failed workflow-id
                        (str "Agent " (name agent-id) " failed"))
       (assoc :agent/id agent-id)
-      (cond-> error (assoc :agent/error error))))
+      (cond-> error (assoc :agent/error error)
+              class (assoc :failure/class class))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Gate lifecycle events
@@ -293,11 +295,12 @@
       (assoc :gate/id gate-id)
       (cond-> duration-ms (assoc :gate/duration-ms duration-ms))))
 
-(defn gate-failed [stream workflow-id gate-id & [violations]]
+(defn gate-failed [stream workflow-id gate-id & [violations {:keys [failure/class]}]]
   (-> (create-envelope stream :gate/failed workflow-id
                        (str "Gate " (name gate-id) " failed"))
       (assoc :gate/id gate-id)
-      (cond-> violations (assoc :gate/violations violations))))
+      (cond-> violations (assoc :gate/violations violations)
+              class (assoc :failure/class class))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Tool lifecycle events
@@ -422,12 +425,13 @@
              :step/id step-id
              :step/index step-index)))
 
-(defn chain-step-failed [stream chain-id step-id step-index error]
+(defn chain-step-failed [stream chain-id step-id step-index error & [{:keys [failure/class]}]]
   (-> (chain-envelope stream :chain/step-failed)
       (assoc :chain/id chain-id
              :step/id step-id
              :step/index step-index
-             :chain/error error)))
+             :chain/error error)
+      (cond-> class (assoc :failure/class class))))
 
 (defn chain-completed [stream chain-id duration-ms step-count]
   (-> (chain-envelope stream :chain/completed)
@@ -435,11 +439,12 @@
              :chain/duration-ms duration-ms
              :chain/step-count step-count)))
 
-(defn chain-failed [stream chain-id step-id error]
+(defn chain-failed [stream chain-id step-id error & [{:keys [failure/class]}]]
   (-> (chain-envelope stream :chain/failed)
       (assoc :chain/id chain-id
              :chain/failed-step step-id
-             :chain/error error)))
+             :chain/error error)
+      (cond-> class (assoc :failure/class class))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Control action events (N8)
@@ -540,6 +545,87 @@
                        (str "Decision " decision-id " resolved: " resolution))
       (assoc :cp/decision-id decision-id
              :cp/resolution resolution)))
+
+;------------------------------------------------------------------------------ Layer 6
+;; Reliability metric events (N3 §3.17, N1 §5.5)
+
+(defn sli-computed
+  "Emit when an SLI value is computed over a rolling window."
+  [stream sli-name value window & [opts]]
+  (-> (create-envelope stream :reliability/sli-computed nil
+                       (format "SLI computed: %s = %.3f over %s"
+                               (name sli-name) (double value) (name window)))
+      (assoc :sli/name sli-name
+             :sli/value value
+             :sli/window window)
+      (cond->
+        (:tier opts)       (assoc :sli/tier (:tier opts))
+        (:dimensions opts) (assoc :sli/dimensions (:dimensions opts)))))
+
+(defn slo-breach
+  "Emit when an SLO target is missed for :standard or :critical tiers."
+  [stream sli-name target actual tier window]
+  (-> (create-envelope stream :reliability/slo-breach nil
+                       (format "SLO breach: %s target=%.3f actual=%.3f tier=%s"
+                               (name sli-name) (double target) (double actual) (name tier)))
+      (assoc :slo/sli-name sli-name
+             :slo/target target
+             :slo/actual actual
+             :slo/tier tier
+             :slo/window window)))
+
+(defn error-budget-update
+  "Emit when error budget state is recomputed."
+  [stream tier sli remaining burn-rate window]
+  (-> (create-envelope stream :reliability/error-budget-update nil
+                       (format "Error budget: tier=%s sli=%s remaining=%.3f burn-rate=%.2f"
+                               (name tier) (name sli) (double remaining) (double burn-rate)))
+      (assoc :budget/tier tier
+             :budget/sli sli
+             :budget/remaining remaining
+             :budget/burn-rate burn-rate
+             :budget/window window)))
+
+(defn degradation-mode-changed
+  "Emit when the system transitions between degradation modes (N1 §5.5.5)."
+  [stream from-mode to-mode trigger]
+  (-> (create-envelope stream :reliability/degradation-mode-changed nil
+                       (format "Degradation mode: %s → %s (%s)"
+                               (name from-mode) (name to-mode) trigger))
+      (assoc :degradation/from from-mode
+             :degradation/to to-mode
+             :degradation/trigger trigger)))
+
+(defn safe-mode-entered
+  "Emit when safe-mode is activated (N8 §3.4.4)."
+  [stream trigger & [details]]
+  (-> (create-envelope stream :safe-mode/entered nil
+                       (str "Safe-mode entered: " (name trigger)))
+      (assoc :safe-mode/trigger trigger)
+      (cond-> details (assoc :safe-mode/trigger-details details))))
+
+(defn safe-mode-exited
+  "Emit when safe-mode is deactivated (N8 §3.4.4)."
+  [stream exited-by justification duration-ms workflows-queued]
+  (-> (create-envelope stream :safe-mode/exited nil
+                       (format "Safe-mode exited after %dms: %s" duration-ms justification))
+      (assoc :safe-mode/exited-by exited-by
+             :safe-mode/justification justification
+             :safe-mode/duration-ms duration-ms
+             :safe-mode/workflows-queued workflows-queued)))
+
+;------------------------------------------------------------------------------ Layer 6
+;; Meta-loop events
+
+(defn meta-loop-cycle-completed
+  "Emit when a meta-loop cycle completes."
+  [stream summary]
+  (-> (create-envelope stream :meta-loop/cycle-completed nil
+                       (format "Meta-loop cycle: %d signals, %d diagnoses, %d proposals"
+                               (:signals summary 0)
+                               (:diagnoses summary 0)
+                               (:proposals summary 0)))
+      (merge summary)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
