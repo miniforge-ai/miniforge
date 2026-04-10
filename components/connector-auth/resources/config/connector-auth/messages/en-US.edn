@@ -1,0 +1,8 @@
+{:connector-auth/messages
+ {;; Validation errors
+  :validate/method-required        ":auth/method is required"
+  :validate/method-unsupported     "Unsupported auth method: {method}. Must be one of: {allowed}"
+  :validate/credential-id-required ":auth/credential-id is required"
+  :validate/credential-id-empty    ":auth/credential-id must not be empty"
+  :validate/inline-secrets         "Credential reference must not contain inline secrets. Found forbidden keys: {keys}"
+  :validate/missing-field          "Missing required field {field} for auth method {method}"}}

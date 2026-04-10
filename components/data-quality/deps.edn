@@ -1,0 +1,4 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge.data-foundry/dataset-schema {:local/root "../dataset-schema"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {}}}}

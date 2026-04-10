@@ -1,0 +1,19 @@
+{:connector-github/messages
+ {;; Lifecycle
+  :github/connect-success    "Connected to GitHub API: {base-url}"
+  :github/close-success      "Closed GitHub handle: {handle}"
+  :github/handle-not-found   "GitHub handle not found: {handle}"
+
+  ;; Config validation
+  :github/owner-or-org-required  "Either :github/org or :github/owner is required"
+  :github/auth-required          "Auth config is required for GitHub API"
+  :github/auth-invalid           "Auth validation failed: {errors}"
+  :github/config-invalid         "GitHub config validation failed: {errors}"
+
+  ;; Resources
+  :github/resources-not-found "GitHub resource definitions not found: {path}"
+
+  ;; Extract
+  :github/request-failed     "GitHub API request failed: {status} {error}"
+  :github/rate-limited       "Rate limited by GitHub API (429)"
+  :github/resource-unknown   "Unknown GitHub resource type: {resource}"}}

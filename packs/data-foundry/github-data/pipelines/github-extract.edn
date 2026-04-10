@@ -1,0 +1,66 @@
+;; GitHub Data Extraction Pipeline
+;;
+;; Extracts pull requests, issues, comments, commits, and reviews from a GitHub org/repo
+;; and writes raw records to the pipeline output store.
+;;
+;; Downstream consumers read the output and apply their own transforms.
+;;
+;; Usage:
+;;   export GITHUB_TOKEN=ghp_... GITHUB_ORG=myorg GITHUB_REPO=myrepo
+;;   data-foundry run-pack packs/github-data --env local
+{:pipeline/name    "GitHub Data Extract"
+ :pipeline/version "0.1.0"
+ :pipeline/mode    :incremental
+
+ :pipeline/stages
+ [{:stage/name           "Ingest PRs"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/github
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/github-prs]
+   :stage/dependencies    []
+   :stage/config          {:github/resource "pulls"}}
+
+  {:stage/name           "Ingest Issues"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/github
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/github-issues]
+   :stage/dependencies    []
+   :stage/config          {:github/resource "issues"}}
+
+  {:stage/name           "Ingest Comments"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/github
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/github-comments]
+   :stage/dependencies    []
+   :stage/config          {:github/resource "comments"}}
+
+  {:stage/name           "Ingest Commits"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/github
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/github-commits]
+   :stage/dependencies    []
+   :stage/config          {:github/resource "commits"}}
+
+  {:stage/name           "Ingest Reviews"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/github
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/github-reviews]
+   :stage/dependencies    []
+   :stage/config          {:github/resource "reviews"}}
+
+  {:stage/name           "Publish"
+   :stage/family         :publish
+   :stage/connector-ref  :conn/output
+   :stage/input-datasets  [:ds/github-prs :ds/github-issues :ds/github-comments
+                           :ds/github-commits :ds/github-reviews]
+   :stage/output-datasets []
+   :stage/dependencies    ["Ingest PRs" "Ingest Issues" "Ingest Comments"
+                           "Ingest Commits" "Ingest Reviews"]}]
+
+ :pipeline/input-datasets  []
+ :pipeline/output-datasets []}

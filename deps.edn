@@ -113,7 +113,47 @@
                        "components/patterns/resources"
                        "bases/cli/src"
                        "bases/cli/resources"
-                       "bases/lsp-mcp-bridge/src"]
+                       "bases/lsp-mcp-bridge/src"
+                       ;; Data Foundry components
+                       "components/connector/src"
+                       "components/connector/resources"
+                       "components/connector-auth/src"
+                       "components/connector-auth/resources"
+                       "components/connector-edgar/src"
+                       "components/connector-edgar/resources"
+                       "components/connector-excel/src"
+                       "components/connector-excel/resources"
+                       "components/connector-file/src"
+                       "components/connector-file/resources"
+                       "components/connector-github/src"
+                       "components/connector-github/resources"
+                       "components/connector-gitlab/src"
+                       "components/connector-gitlab/resources"
+                       "components/connector-http/src"
+                       "components/connector-http/resources"
+                       "components/connector-jira/src"
+                       "components/connector-jira/resources"
+                       "components/connector-pipeline-output/src"
+                       "components/connector-pipeline-output/resources"
+                       "components/connector-retry/src"
+                       "components/cursor-store/src"
+                       "components/data-quality/src"
+                       "components/data-quality/resources"
+                       "components/dataset/src"
+                       "components/dataset/resources"
+                       "components/dataset-schema/src"
+                       "components/dataset-schema/resources"
+                       "components/metric-registry/src"
+                       "components/metric-registry/resources"
+                       "components/pipeline/src"
+                       "components/pipeline/resources"
+                       "components/pipeline-config/src"
+                       "components/pipeline-config/resources"
+                       "components/pipeline-pack/src"
+                       "components/pipeline-pack/resources"
+                       "components/pipeline-pack-store/src"
+                       "components/pipeline-runner/src"
+                       "components/pipeline-runner/resources"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/lsp-mcp-bridge {:local/root "bases/lsp-mcp-bridge"}
@@ -173,7 +213,29 @@
                      ai.miniforge/phase-deployment {:local/root "components/phase-deployment"}
                      ai.miniforge/workflow-deployment {:local/root "components/workflow-deployment"}
                      ai.miniforge/workflow-chain-deployment {:local/root "components/workflow-chain-deployment"}
-                     ai.miniforge/cli {:local/root "bases/cli"}}}
+                     ai.miniforge/cli {:local/root "bases/cli"}
+                     ;; Data Foundry components
+                     ai.miniforge.data-foundry/connector {:local/root "components/connector"}
+                     ai.miniforge.data-foundry/connector-auth {:local/root "components/connector-auth"}
+                     ai.miniforge.data-foundry/connector-edgar {:local/root "components/connector-edgar"}
+                     ai.miniforge.data-foundry/connector-excel {:local/root "components/connector-excel"}
+                     ai.miniforge.data-foundry/connector-file {:local/root "components/connector-file"}
+                     ai.miniforge.data-foundry/connector-github {:local/root "components/connector-github"}
+                     ai.miniforge.data-foundry/connector-gitlab {:local/root "components/connector-gitlab"}
+                     ai.miniforge.data-foundry/connector-http {:local/root "components/connector-http"}
+                     ai.miniforge.data-foundry/connector-jira {:local/root "components/connector-jira"}
+                     ai.miniforge.data-foundry/connector-pipeline-output {:local/root "components/connector-pipeline-output"}
+                     ai.miniforge.data-foundry/connector-retry {:local/root "components/connector-retry"}
+                     ai.miniforge.data-foundry/cursor-store {:local/root "components/cursor-store"}
+                     ai.miniforge.data-foundry/data-quality {:local/root "components/data-quality"}
+                     ai.miniforge.data-foundry/dataset {:local/root "components/dataset"}
+                     ai.miniforge.data-foundry/dataset-schema {:local/root "components/dataset-schema"}
+                     ai.miniforge.data-foundry/metric-registry {:local/root "components/metric-registry"}
+                     ai.miniforge.data-foundry/pipeline {:local/root "components/pipeline"}
+                     ai.miniforge.data-foundry/pipeline-config {:local/root "components/pipeline-config"}
+                     ai.miniforge.data-foundry/pipeline-pack {:local/root "components/pipeline-pack"}
+                     ai.miniforge.data-foundry/pipeline-pack-store {:local/root "components/pipeline-pack-store"}
+                     ai.miniforge.data-foundry/pipeline-runner {:local/root "components/pipeline-runner"}}}
 
   :test {:extra-paths ["development/test"
                        "components/schema/test"
@@ -236,7 +298,31 @@
                        "components/workflow-deployment/resources"
                        "components/workflow-chain-deployment/resources"
                        "bases/cli/test"
-                       "bases/lsp-mcp-bridge/test"]
+                       "bases/lsp-mcp-bridge/test"
+                       ;; Data Foundry tests
+                       "components/connector/test"
+                       "components/connector-auth/test"
+                       "components/connector-edgar/test"
+                       "components/connector-excel/test"
+                       "components/connector-file/test"
+                       "components/connector-github/test"
+                       "components/connector-gitlab/test"
+                       "components/connector-http/test"
+                       "components/connector-jira/test"
+                       "components/connector-pipeline-output/test"
+                       "components/connector-retry/test"
+                       "components/cursor-store/test"
+                       "components/data-quality/test"
+                       "components/dataset/test"
+                       "components/dataset-schema/test"
+                       "components/metric-registry/test"
+                       "components/pipeline/test"
+                       "components/pipeline-config/test"
+                       "components/pipeline-config/test/resources"
+                       "components/pipeline-pack/test"
+                       "components/pipeline-pack/test/resources"
+                       "components/pipeline-pack-store/test"
+                       "components/pipeline-runner/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}

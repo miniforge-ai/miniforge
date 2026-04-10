@@ -1,0 +1,13 @@
+{:pack/id              "gitlab-data"
+ :pack/name            "GitLab Data Pipeline Pack"
+ :pack/version         "2026.03.26"
+ :pack/description     "Extract merge requests, issues, pipelines, and commits from the GitLab REST API"
+ :pack/author          "miniforge.ai"
+ :pack/trust-level     :untrusted
+ :pack/authority       :authority/data
+ :pack/pipelines       ["pipelines/gitlab-extract.edn"]
+ :pack/envs            ["envs/local.edn"]
+ :pack/connector-types #{:gitlab :pipeline-output}
+ :pack/extends         []
+ :pack/created-at      #inst "2026-03-26T00:00:00Z"
+ :pack/updated-at      #inst "2026-03-26T00:00:00Z"}

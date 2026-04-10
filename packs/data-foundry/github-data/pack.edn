@@ -1,0 +1,13 @@
+{:pack/id              "github-data"
+ :pack/name            "GitHub Data Pipeline Pack"
+ :pack/version         "2026.03.26"
+ :pack/description     "Extract PRs, issues, and comments from the GitHub REST API"
+ :pack/author          "miniforge.ai"
+ :pack/trust-level     :untrusted
+ :pack/authority       :authority/data
+ :pack/pipelines       ["pipelines/github-extract.edn"]
+ :pack/envs            ["envs/local.edn"]
+ :pack/connector-types #{:github :pipeline-output}
+ :pack/extends         []
+ :pack/created-at      #inst "2026-03-26T00:00:00Z"
+ :pack/updated-at      #inst "2026-03-26T00:00:00Z"}

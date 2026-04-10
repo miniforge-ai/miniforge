@@ -1,0 +1,18 @@
+{:dataset-schema/messages
+ {;; Field validation
+  :field/name-must-be-string     "Field :field/name must be a string"
+  :field/name-must-not-be-empty  "Field :field/name must not be empty"
+  :field/type-invalid            "Field :field/type {type} is not a valid type. Must be one of: {allowed}"
+  :field/nullable-must-be-bool   "Field :field/nullable? must be a boolean"
+
+  ;; Schema validation
+  :schema/id-required            "Schema :schema/id is required"
+  :schema/name-must-be-string    "Schema :schema/name must be a string"
+  :schema/name-pattern-mismatch  "Schema :schema/name must match pattern {pattern}"
+  :schema/version-must-be-string "Schema :schema/version must be a string"
+  :schema/fields-must-be-vector  "Schema :schema/fields must be a vector"
+  :schema/fields-must-not-be-empty "Schema :schema/fields must not be empty"
+
+  ;; Field-level error prefix
+  :schema/field-error            "Field '{name}': {error}"
+  :schema/duplicate-field        "Duplicate field name: {name}"}}

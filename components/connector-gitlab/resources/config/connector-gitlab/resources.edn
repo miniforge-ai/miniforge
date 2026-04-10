@@ -1,0 +1,55 @@
+{:merge-requests {:endpoint           "/projects/{project}/merge_requests"
+                  :order-by           "updated_at"
+                  :sort               "desc"
+                  :per-page           100
+                  :incremental-param  "updated_after"
+                  :cursor-type        :timestamp-watermark
+                  :query-params       {:state "all"}}
+
+ :issues         {:endpoint           "/projects/{project}/issues"
+                  :order-by           "updated_at"
+                  :sort               "desc"
+                  :per-page           100
+                  :incremental-param  "updated_after"
+                  :cursor-type        :timestamp-watermark
+                  :query-params       {:state "all"}}
+
+ :milestones     {:endpoint           "/projects/{project}/milestones"
+                  :order-by           "updated_at"
+                  :sort               "desc"
+                  :per-page           100
+                  :incremental-param  "updated_after"
+                  :cursor-type        :timestamp-watermark
+                  :query-params       {:state "all"}}
+
+ :iterations     {:endpoint           "/projects/{project}/iterations"
+                  :order-by           "updated_at"
+                  :sort               "desc"
+                  :per-page           100
+                  :incremental-param  "updated_after"
+                  :cursor-type        :timestamp-watermark
+                  :query-params       {:state "all"}
+                  :optional?          true}
+
+ :boards         {:endpoint           "/projects/{project}/boards"
+                  :per-page           100
+                  :cursor-type        :offset
+                  :query-params       {}}
+
+ :pipelines      {:endpoint           "/projects/{project}/pipelines"
+                  :order-by           "updated_at"
+                  :sort               "desc"
+                  :per-page           100
+                  :cursor-type        :timestamp-watermark
+                  :query-params       {}}
+
+ :notes          {:endpoint           "/projects/{project}/{noteable_kind}/{noteable_iid}/notes"
+                  :order-by           "updated_at"
+                  :sort               "desc"
+                  :per-page           100
+                  :cursor-type        :timestamp-watermark}
+
+ :commits        {:endpoint           "/projects/{project}/repository/commits"
+                  :per-page           100
+                  :incremental-param  "since"
+                  :cursor-type        :timestamp-watermark}}

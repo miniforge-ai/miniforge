@@ -1,0 +1,12 @@
+{:pipeline/name    "Test Pipeline"
+ :pipeline/version "0.1.0"
+ :pipeline/mode    :full-refresh
+ :pipeline/stages
+ [{:stage/name           "Ingest"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/test-src
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/raw]
+   :stage/dependencies    []}]
+ :pipeline/input-datasets  []
+ :pipeline/output-datasets []}

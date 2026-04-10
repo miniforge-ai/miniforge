@@ -1,0 +1,90 @@
+;; Risk Data Pipeline
+;;
+;; Fetches market risk indicators from multiple sources:
+;;   1. FRED Latest (16 series) — most recent observation only
+;;   2. FRED YoY (11 series) — 13 months of history for YoY calc
+;;   3. Shiller CAPE (CAPE10) — from published Excel file (monthly)
+;;   4. SEC EDGAR Insider Ratio — Form 4 buy:sell ratio (monthly)
+;;   5. Buffett Indicator — derived transform: NCBEILQ027S / GDP (quarterly)
+;;
+;; Series list sourced from risk-core fixture data.
+;; House factors: INSIDER_BUY_SELL_RATIO, BUFFETT_INDICATOR
+;;
+;; Latest:  T10Y2Y, T10Y3M, BAMLH0A0HYM2, BAA10Y, ICSA, UNRATE, T5YIE, T10YIE
+;;          DRTSCILM, DRTSCIS, SUBLPDRCSC, DRTSSP, DRTSCLCC  (SLOS)
+;;          UMCSENT, VIXCLS, STLFSI4  (sentiment proxies)
+;; YoY:    M2SL, CPIAUCSL, CPILFESL, PCEPILFE, IR, ISRATIO, JTSJOL,
+;;         FRGSHPUSM649NCIS, FRGEXPUSM649NCIS, BOGZ1FL663067003Q, NCBEILQ027S
+{:pipeline/name    "Risk Data Pipeline"
+ :pipeline/version "0.2.0"
+ :pipeline/mode    :full-refresh
+
+ :pipeline/stages
+ [{:stage/name           "Ingest FRED Latest"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/fred-api
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/fred-latest-raw]
+   :stage/dependencies    []}
+
+  {:stage/name           "Ingest FRED YoY"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/fred-api
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/fred-yoy-raw]
+   :stage/dependencies    []}
+
+  {:stage/name           "Ingest Shiller CAPE"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/cape-src
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/cape-raw]
+   :stage/dependencies    []}
+
+  {:stage/name           "Ingest Insider Ratio"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/edgar-src
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/insider-raw]
+   :stage/dependencies    []}
+
+  {:stage/name           "Derive Buffett Indicator"
+   :stage/family         :transform
+   :stage/input-datasets  [:ds/fred-yoy-raw]
+   :stage/output-datasets [:ds/buffett-derived]
+   :stage/dependencies    ["Ingest FRED YoY"]
+   :stage/config
+   {:stage/transform
+    {:transform/type              :derived-ratio
+     :transform/numerator-series  "NCBEILQ027S"
+     :transform/denominator-series "GDP"
+     :transform/numerator-scale   0.001
+     :transform/output-scale      100.0
+     :transform/output-series     "BUFFETT_INDICATOR"}}}
+
+  {:stage/name           "Normalize"
+   :stage/family         :normalize
+   :stage/input-datasets  [:ds/fred-latest-raw :ds/buffett-derived :ds/cape-raw :ds/insider-raw]
+   :stage/output-datasets [:ds/normalized]
+   :stage/dependencies    ["Ingest FRED Latest" "Derive Buffett Indicator" "Ingest Shiller CAPE" "Ingest Insider Ratio"]}
+
+  {:stage/name           "Validate Quality"
+   :stage/family         :validate
+   :stage/input-datasets  [:ds/normalized]
+   :stage/output-datasets [:ds/validated]
+   :stage/dependencies    ["Normalize"]
+   :stage/config
+   {:stage/quality-pack
+    {:pack/id :risk-data-quality
+     :pack/rules [{:rule/type :required :rule/field :date}
+                  {:rule/type :required :rule/field :value}]}}}
+
+  {:stage/name           "Publish"
+   :stage/family         :publish
+   :stage/connector-ref  :conn/fred-sink
+   :stage/input-datasets  [:ds/validated]
+   :stage/output-datasets []
+   :stage/dependencies    ["Validate Quality"]}]
+
+ :pipeline/input-datasets  []
+ :pipeline/output-datasets []}

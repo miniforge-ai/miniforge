@@ -1,0 +1,91 @@
+;; GitLab Data Extraction Pipeline
+;;
+;; Extracts merge requests, issues, pipelines, commits, milestones, iterations,
+;; boards, and notes from a GitLab project
+;; and writes raw records to the pipeline output store.
+;;
+;; Usage:
+;;   export GITLAB_TOKEN=glpat-... GITLAB_PROJECT=group/subgroup/repo
+;;   data-foundry run-pack packs/gitlab-data --env local
+{:pipeline/name    "GitLab Data Extract"
+ :pipeline/version "0.1.0"
+ :pipeline/mode    :incremental
+
+ :pipeline/stages
+ [{:stage/name           "Ingest Merge Requests"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/gitlab
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/gitlab-mrs]
+   :stage/dependencies    []
+   :stage/config          {:gitlab/resource "merge-requests"}}
+
+  {:stage/name           "Ingest Issues"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/gitlab
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/gitlab-issues]
+   :stage/dependencies    []
+   :stage/config          {:gitlab/resource "issues"}}
+
+  {:stage/name           "Ingest Pipelines"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/gitlab
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/gitlab-pipelines]
+   :stage/dependencies    []
+   :stage/config          {:gitlab/resource "pipelines"}}
+
+  {:stage/name           "Ingest Commits"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/gitlab
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/gitlab-commits]
+   :stage/dependencies    []
+   :stage/config          {:gitlab/resource "commits"}}
+
+  {:stage/name           "Ingest Milestones"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/gitlab
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/gitlab-milestones]
+   :stage/dependencies    []
+   :stage/config          {:gitlab/resource "milestones"}}
+
+  {:stage/name           "Ingest Iterations"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/gitlab
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/gitlab-iterations]
+   :stage/dependencies    []
+   :stage/config          {:gitlab/resource "iterations"}}
+
+  {:stage/name           "Ingest Boards"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/gitlab
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/gitlab-boards]
+   :stage/dependencies    []
+   :stage/config          {:gitlab/resource "boards"}}
+
+  {:stage/name           "Ingest Notes"
+   :stage/family         :ingest
+   :stage/connector-ref  :conn/gitlab
+   :stage/input-datasets  []
+   :stage/output-datasets [:ds/gitlab-notes]
+   :stage/dependencies    []
+   :stage/config          {:gitlab/resource "notes"}}
+
+  {:stage/name           "Publish"
+   :stage/family         :publish
+   :stage/connector-ref  :conn/output
+   :stage/input-datasets  [:ds/gitlab-mrs :ds/gitlab-issues :ds/gitlab-pipelines
+                           :ds/gitlab-commits :ds/gitlab-milestones :ds/gitlab-iterations
+                           :ds/gitlab-boards :ds/gitlab-notes]
+   :stage/output-datasets []
+   :stage/dependencies    ["Ingest Merge Requests" "Ingest Issues" "Ingest Pipelines"
+                           "Ingest Commits" "Ingest Milestones" "Ingest Iterations"
+                           "Ingest Boards" "Ingest Notes"]}]
+
+ :pipeline/input-datasets  []
+ :pipeline/output-datasets []}

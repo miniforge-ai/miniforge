@@ -1,0 +1,28 @@
+{:pipeline-config/messages
+ {;; Loading
+  :load/failed                "Failed to load pipeline: {error}"
+  :load/file-not-found        "Pipeline file not found: {path}"
+  :load/parse-error           "Failed to parse pipeline EDN: {error}"
+
+  ;; Resolution
+  :resolve/missing-connector  "Connector ref not found in registry: {ref}"
+  :resolve/missing-rule       "Rule not found in registry: {id}"
+  :resolve/missing-stage-dep  "Stage dependency not found: {name}"
+  :resolve/unknown-rule-type  "Unknown rule type: {type}"
+
+  ;; Discovery
+  :discover/scanning          "Scanning for pipelines in: {path}"
+  :discover/found             "Found {count} pipeline(s)"
+
+  ;; Environment
+  :env/load-failed            "Failed to load environment config: {error}"
+  :env/file-not-found         "Environment config not found: {path}"
+
+  ;; Connector registry
+  :registry/connector-registered  "Registered connector type: {type}"
+  :registry/connector-not-found   "No connector registered for type: {type}"
+  :registry/duplicate-type        "Connector type already registered: {type}"
+
+  ;; Rule registry
+  :rule-registry/registered       "Registered rule: {id}"
+  :rule-registry/not-found        "Rule not found: {id}"}}

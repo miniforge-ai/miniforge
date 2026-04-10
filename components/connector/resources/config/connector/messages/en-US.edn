@@ -1,0 +1,18 @@
+{:connector/messages
+ {;; Connector validation (core.clj)
+  :connector/id-required                ":connector/id is required"
+  :connector/name-must-be-string        ":connector/name must be a string"
+  :connector/type-invalid               ":connector/type must be one of {allowed}"
+  :connector/version-must-be-string     ":connector/version must be a string"
+  :connector/capabilities-must-be-set   ":connector/capabilities must be a set"
+  :connector/capabilities-empty         ":connector/capabilities must not be empty"
+  :connector/auth-methods-must-be-set   ":connector/auth-methods must be a set"
+  :connector/auth-methods-empty         ":connector/auth-methods must not be empty"
+  :connector/retry-policy-required      ":connector/retry-policy is required"
+  :connector/retry-strategy-required    ":connector/retry-policy must have :retry/strategy"
+  :connector/retry-max-attempts-required ":connector/retry-policy must have :retry/max-attempts"
+  :connector/maintainer-must-be-string  ":connector/maintainer must be a string"
+
+  ;; Cursor validation (cursor.clj)
+  :cursor/type-required                 ":cursor/type is required"
+  :cursor/type-invalid                  ":cursor/type must be one of {allowed}"}}
