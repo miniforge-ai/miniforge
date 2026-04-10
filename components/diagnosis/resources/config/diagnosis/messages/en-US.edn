@@ -1,0 +1,10 @@
+{:diagnosis/messages
+ {:signal/slo-breach             "SLO breach: {name} at {actual} (target {target}) for {tier} tier"
+  :signal/recurring-failure      "Recurring failure: {class} occurred {count} times"
+  :signal/quality-regression     "Quality regression: {q1} → {q2} ({pct}% drop)"
+  :signal/high-iteration         "Phase {phase} averaging {avg} iterations ({count} occurrences)"
+  :hypothesis/slo-with-failure   "SLO breach correlated with recurring failure pattern — likely systemic issue"
+  :hypothesis/recurring-failure  "Recurring {class} failures suggest targeted fix needed"
+  :hypothesis/high-iteration     "High iteration counts suggest prompt/heuristic refinement needed"
+  :hypothesis/default            "Correlated signals detected — investigate for common root cause"
+  :meta-loop/cycle-summary       "Meta-loop cycle: {signals} signals, {diagnoses} diagnoses, {proposals} proposals"}}

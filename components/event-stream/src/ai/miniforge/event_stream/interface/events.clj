@@ -78,3 +78,18 @@
 (def cp-agent-state-changed core/cp-agent-state-changed)
 (def cp-decision-created core/cp-decision-created)
 (def cp-decision-resolved core/cp-decision-resolved)
+
+;------------------------------------------------------------------------------ Layer 2
+;; Reliability metric event constructors (N3 §3.17)
+
+(def sli-computed core/sli-computed)
+(def slo-breach core/slo-breach)
+(def error-budget-update core/error-budget-update)
+(def degradation-mode-changed core/degradation-mode-changed)
+(def safe-mode-entered core/safe-mode-entered)
+(def safe-mode-exited core/safe-mode-exited)
+
+;------------------------------------------------------------------------------ Layer 2
+;; Meta-loop event constructors
+
+(def meta-loop-cycle-completed core/meta-loop-cycle-completed)

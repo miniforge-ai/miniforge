@@ -1,7 +1,7 @@
 (ns ai.miniforge.data-foundry.connector-file.reader
   "File reading for CSV, JSON, and EDN formats."
   (:require [clojure.data.csv :as csv]
-            [clojure.data.json :as json]
+            [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
@@ -18,8 +18,8 @@
   "Read JSON file, returning vector of maps."
   [path]
   (with-open [rdr (io/reader path)]
-    (let [data (json/read rdr :key-fn keyword)]
-      (if (vector? data) data [data]))))
+    (let [data (json/parse-stream rdr true)]
+      (if (sequential? data) (vec data) [data]))))
 
 (defn read-edn
   "Read EDN file, returning vector of maps."

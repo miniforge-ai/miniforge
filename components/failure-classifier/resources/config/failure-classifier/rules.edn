@@ -1,0 +1,109 @@
+;; Failure classification rules per N1 §5.3.3
+;; All data — no code. Loaded and compiled by classifier.clj.
+;;
+;; :failure-classes — canonical set. Single source of truth.
+;; :message-rules   — ordered [{:patterns [...] :class keyword}].
+;;                    Earlier entries take priority. Patterns are case-insensitive regexes.
+;; :exception-map   — maps Java exception class name (or prefix) to failure class.
+;;                    nil means "fall through to message-level classification."
+;; :anomaly-map     — maps anomaly category keyword to failure class.
+;;                    nil means "fall through to next strategy."
+
+{:failure-classes
+ #{:failure.class/agent-error       ; Agent logic defect, prompt failure, hallucination
+   :failure.class/task-code         ; User code, spec, or test failure
+   :failure.class/tool-error        ; Tool returned error or unexpected result
+   :failure.class/external          ; Third-party service unavailable or errored
+   :failure.class/policy            ; Policy gate or validation rejected execution
+   :failure.class/resource          ; Budget exhausted (tokens, time, retries, cost)
+   :failure.class/timeout           ; Wall-clock or capability TTL exceeded
+   :failure.class/concurrency       ; Deadlock, lock contention, merge conflict
+   :failure.class/data-integrity    ; Hash mismatch, stale context, schema violation
+   :failure.class/unknown}          ; Unclassified — treat as SLI incident
+
+ :message-rules
+ [;; Timeout
+  {:patterns ["timeout" "timed?\\s*out" "deadline\\s*exceeded"
+              "ttl\\s*expired" "wall.?clock\\s*limit"]
+   :class :failure.class/timeout}
+
+  ;; Resource / budget exhaustion
+  {:patterns ["budget\\s*exhaust" "token\\s*limit" "max.?retries"
+              "iteration\\s*limit" "cost\\s*limit" "rate\\s*limit"
+              "quota\\s*exceed" "out\\s*of\\s*memory" "oom"]
+   :class :failure.class/resource}
+
+  ;; External service
+  {:patterns ["connection\\s*refuse" "connection\\s*reset" "dns\\s*resol"
+              "service\\s*unavailable" "503" "502\\s*bad\\s*gateway"
+              "network\\s*error" "unreachable" "ssl.*error"
+              "econnrefused" "socket\\s*exception"]
+   :class :failure.class/external}
+
+  ;; Concurrency / conflicts
+  {:patterns ["merge\\s*conflict" "lock\\s*contention" "deadlock"
+              "concurrent\\s*modif" "stale\\s*ref" "rebase\\s*conflict"
+              "resource\\s*busy"]
+   :class :failure.class/concurrency}
+
+  ;; Data integrity
+  {:patterns ["hash\\s*mismatch" "checksum" "schema\\s*viol"
+              "malformed" "corrupt" "stale\\s*context" "content\\s*drift"]
+   :class :failure.class/data-integrity}
+
+  ;; Policy / gate rejection
+  {:patterns ["policy\\s*reject" "policy.*violation" "gate\\s.*fail"
+              "gate\\s*reject" "\\bviolation" "not\\s*permitted"
+              "forbidden" "unauthorized" "capability\\s*denied"]
+   :class :failure.class/policy}
+
+  ;; Tool execution errors
+  {:patterns ["tool\\s*error" "tool\\s*fail" "command\\s*fail"
+              "exit\\s*code\\s*[1-9]" "non.?zero\\s*exit" "process\\s*fail"]
+   :class :failure.class/tool-error}
+
+  ;; User code / spec / test failures
+  {:patterns ["test\\s*fail" "compile\\s*error" "syntax\\s*error"
+              "lint\\s*error" "type\\s*error" "assertion\\s*fail"
+              "coverage\\s*below"]
+   :class :failure.class/task-code}
+
+  ;; Agent logic defects
+  {:patterns ["hallucin" "agent\\s*error" "prompt\\s*fail"
+              "parse.*response" "invalid\\s*json" "unexpected\\s*format"
+              "agent\\s*loop\\s*fail"]
+   :class :failure.class/agent-error}]
+
+ :exception-map
+ {"java.net.SocketTimeoutException"       :failure.class/timeout
+  "java.net.ConnectException"             :failure.class/external
+  "java.net.UnknownHostException"         :failure.class/external
+  "java.net.SocketException"              :failure.class/external
+  "javax.net.ssl"                         :failure.class/external
+  "java.util.concurrent.TimeoutException" :failure.class/timeout
+  "java.lang.OutOfMemoryError"            :failure.class/resource
+  "java.lang.StackOverflowError"          :failure.class/resource
+  "clojure.lang.ExceptionInfo"            nil}
+
+ :anomaly-map
+ {:anomalies/timeout                  :failure.class/timeout
+  :anomalies/unavailable              :failure.class/external
+  :anomalies/interrupted              :failure.class/external
+  :anomalies/busy                     :failure.class/resource
+  :anomalies/forbidden                :failure.class/policy
+  :anomalies/not-found                :failure.class/data-integrity
+  :anomalies/conflict                 :failure.class/concurrency
+  :anomalies/incorrect                nil
+  :anomalies/fault                    nil
+  :anomalies/unsupported              nil
+  :anomalies.phase/budget-exceeded    :failure.class/resource
+  :anomalies.phase/agent-failed       :failure.class/agent-error
+  :anomalies.phase/no-agent           :failure.class/agent-error
+  :anomalies.gate/validation-failed   :failure.class/policy
+  :anomalies.gate/check-failed        :failure.class/policy
+  :anomalies.gate/repair-failed       :failure.class/policy
+  :anomalies.agent/llm-error          :failure.class/external
+  :anomalies.agent/invoke-failed      :failure.class/agent-error
+  :anomalies.agent/parse-failed       :failure.class/agent-error
+  :anomalies.workflow/rollback-limit  :failure.class/resource
+  :anomalies.workflow/max-phases      :failure.class/resource}}

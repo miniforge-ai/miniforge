@@ -1,6 +1,6 @@
 (ns ai.miniforge.data-foundry.connector-file.writer
   "File writing for JSON and EDN formats."
-  (:require [clojure.data.json :as json]
+  (:require [cheshire.core :as json]
             [clojure.java.io :as io]))
 
 (defn write-json
@@ -8,13 +8,13 @@
   [path records mode]
   (let [existing (when (and (= mode :append) (.exists (io/file path)))
                    (with-open [rdr (io/reader path)]
-                     (json/read rdr :key-fn keyword)))
+                     (json/parse-stream rdr true)))
         all-records (if existing
                       (into (vec existing) records)
                       (vec records))]
     (io/make-parents path)
     (with-open [wtr (io/writer path)]
-      (json/write all-records wtr))
+      (json/generate-stream all-records wtr))
     (count records)))
 
 (defn write-edn
