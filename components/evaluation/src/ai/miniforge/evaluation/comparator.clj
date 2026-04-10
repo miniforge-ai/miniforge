@@ -3,9 +3,21 @@
 (ns ai.miniforge.evaluation.comparator
   "Statistical comparison of baseline vs candidate results.
 
-   Layer 0: Comparison functions (pure)")
+   Layer 0: Constants
+   Layer 1: Comparison functions (pure)")
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Constants
+
+(def ^:const min-samples-for-significance
+  "Minimum sample count per group to issue a promote/reject recommendation."
+  10)
+
+(def ^:const significance-threshold
+  "P-value threshold for statistical significance."
+  0.05)
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Statistical comparison
 
 (defn- mean [vals]
@@ -65,10 +77,9 @@
         b-mean (mean baseline-vals)
         c-mean (mean candidate-vals)
         lift (if (zero? b-mean) 0.0 (/ (- c-mean b-mean) (Math/abs b-mean)))
-        significant? (< p-value 0.05)
-        min-samples 10
-        enough-data? (and (>= (count baseline-vals) min-samples)
-                          (>= (count candidate-vals) min-samples))]
+        significant? (< p-value significance-threshold)
+        enough-data? (and (>= (count baseline-vals) min-samples-for-significance)
+                          (>= (count candidate-vals) min-samples-for-significance))]
     {:significant? significant?
      :p-value p-value
      :baseline-mean b-mean

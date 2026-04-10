@@ -1,0 +1,7 @@
+;; SLO targets by workflow tier per N1 §5.5.3
+;; nil means advisory-only (no enforcement for that tier).
+;; For SLI-6 (unknown failure rate), the target is a maximum (lower is better).
+{:SLI-1 {:best-effort nil :standard 0.85 :critical 0.95}
+ :SLI-3 {:best-effort nil :standard 0.90 :critical 0.95}
+ :SLI-5 {:best-effort nil :standard 0.95 :critical 0.99}
+ :SLI-6 {:best-effort nil :standard 0.10 :critical 0.02}}

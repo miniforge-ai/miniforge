@@ -5,9 +5,24 @@
 
    Groups related signals into clusters and generates correlation hypotheses.
 
-   Layer 0: Correlation logic (pure functions)")
+   Layer 0: Constants
+   Layer 1: Correlation logic (pure functions)"
+  (:require
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
+   [ai.miniforge.diagnosis.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Constants
+
+(def ^:private config
+  (-> (io/resource "config/diagnosis/defaults.edn") slurp edn/read-string))
+
+(def ^:private confidence-per-signal
+  "Confidence contribution per signal in a cluster."
+  (:confidence-per-signal config))
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Correlation
 
 (defn- signals-related?
@@ -29,7 +44,7 @@
   "Build a correlation map from a cluster of signals."
   [cluster-signals]
   (let [types (set (map :signal/type cluster-signals))
-        confidence (min 1.0 (* 0.3 (count cluster-signals)))]
+        confidence (min 1.0 (* confidence-per-signal (count cluster-signals)))]
     {:correlation/signals cluster-signals
      :correlation/type (cond
                          (contains? types :slo-breach) :slo-driven
@@ -41,18 +56,17 @@
      (cond
        (and (contains? types :slo-breach)
             (contains? types :recurring-failure))
-       "SLO breach correlated with recurring failure pattern — likely systemic issue"
+       (msg/t :hypothesis/slo-with-failure)
 
        (contains? types :recurring-failure)
-       (str "Recurring "
-            (get-in (first cluster-signals) [:signal/evidence :failure-class] "unknown")
-            " failures suggest targeted fix needed")
+       (msg/t :hypothesis/recurring-failure
+              {:class (name (get-in (first cluster-signals) [:signal/evidence :failure-class] :unknown))})
 
        (contains? types :high-iteration-count)
-       "High iteration counts suggest prompt/heuristic refinement needed"
+       (msg/t :hypothesis/high-iteration)
 
        :else
-       "Correlated signals detected — investigate for common root cause")}))
+       (msg/t :hypothesis/default))}))
 
 (defn correlate-symptoms
   "Group related signals into correlated clusters.

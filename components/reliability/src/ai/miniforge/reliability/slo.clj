@@ -3,24 +3,32 @@
 (ns ai.miniforge.reliability.slo
   "SLO target checking per workflow tier per N1 §5.5.3.
 
-   Layer 0: Default targets, pure checking functions")
+   Layer 0: Configuration loading
+   Layer 1: Pure checking functions"
+  (:require
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Default SLO targets per tier
+;; Configuration
 
 (def default-targets
-  "Default SLO targets. nil means advisory-only (no enforcement).
-   For SLI-6 (unknown failure rate), the target is a maximum (lower is better)."
-  {:SLI-1 {:best-effort nil :standard 0.85 :critical 0.95}
-   :SLI-3 {:best-effort nil :standard 0.90 :critical 0.95}
-   :SLI-5 {:best-effort nil :standard 0.95 :critical 0.99}
-   :SLI-6 {:best-effort nil :standard 0.10 :critical 0.02}})
+  "SLO targets loaded from config/reliability/slo-targets.edn.
+   nil means advisory-only (no enforcement for that tier)."
+  (-> (io/resource "config/reliability/slo-targets.edn")
+      slurp
+      edn/read-string))
+
+(def ^:private defaults
+  (-> (io/resource "config/reliability/defaults.edn")
+      slurp
+      edn/read-string))
 
 (def ^:private inverted-slis
   "SLIs where lower is better (the target is a ceiling, not a floor)."
-  #{:SLI-6})
+  (:inverted-slis defaults))
 
-;------------------------------------------------------------------------------ Layer 0
+;------------------------------------------------------------------------------ Layer 1
 ;; SLO checking (pure)
 
 (defn get-target
@@ -39,9 +47,9 @@
    (let [{:keys [sli/name sli/value sli/window]} sli-result
          target (get-target name tier targets)]
      (when target
-       (let [breached? (if (inverted-slis name)
-                         (> value target)    ; for inverted SLIs, actual > target = breach
-                         (< value target))]  ; for normal SLIs, actual < target = breach
+       (let [breached? (if (contains? inverted-slis name)
+                         (> value target)
+                         (< value target))]
          {:breached? breached?
           :sli/name name
           :slo/target target
@@ -59,10 +67,15 @@
         (filter some?)
         vec)))
 
+(defn breached?
+  "Returns true if an SLO check result indicates a breach."
+  [slo-check]
+  (:breached? slo-check))
+
 (defn breached-slos
   "Filter to only the SLOs that are breached."
   [slo-checks]
-  (filter :breached? slo-checks))
+  (filter breached? slo-checks))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

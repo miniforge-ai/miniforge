@@ -1,0 +1,5 @@
+;; Reliability engine configuration defaults per N1 §5.5
+{:budget-critical-threshold 0.25
+ :inverted-slis #{:SLI-6}
+ :default-windows [:7d]
+ :default-tiers [:standard :critical]}

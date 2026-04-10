@@ -6,9 +6,23 @@
    Error budgets represent remaining tolerance for failures before
    the SLO is breached over a rolling window.
 
-   Layer 0: Pure computation functions")
+   Layer 0: Constants
+   Layer 1: Pure computation functions"
+  (:require
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Constants
+
+(def ^:private defaults
+  (-> (io/resource "config/reliability/defaults.edn") slurp edn/read-string))
+
+(def ^:const default-critical-threshold
+  "Budget fraction below which the budget is considered critical."
+  (:budget-critical-threshold defaults))
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Budget computation
 
 (defn compute-error-budget
@@ -64,7 +78,7 @@
 (defn budget-critical?
   "Returns true if the error budget remaining is below the threshold.
    Default threshold: 0.25 (25% remaining)."
-  ([budget] (budget-critical? budget 0.25))
+  ([budget] (budget-critical? budget default-critical-threshold))
   ([budget threshold]
    (< (:error-budget/remaining budget) threshold)))
 

@@ -40,7 +40,7 @@
    Only generates proposals for diagnoses with sufficient confidence."
   [diagnoses & [{:keys [min-confidence] :or {min-confidence 0.3}}]]
   (->> diagnoses
-       (filter #(>= (or (:diagnosis/confidence %) 0) min-confidence))
+       (filter #(>= (get % :diagnosis/confidence 0) min-confidence))
        (mapv generate-proposal)))
 
 ;------------------------------------------------------------------------------ Rich Comment

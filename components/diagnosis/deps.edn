@@ -1,6 +1,7 @@
 {:paths ["src" "resources"]
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
-        ai.miniforge/schema {:local/root "../schema"}}
+        ai.miniforge/schema {:local/root "../schema"}
+        ai.miniforge/messages {:local/root "../messages"}}
 
  :aliases
  {:test {:extra-paths ["test"]

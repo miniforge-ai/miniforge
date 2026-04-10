@@ -1,0 +1,8 @@
+;; Diagnosis signal extraction thresholds
+{:min-failure-count     3
+ :min-training-examples 10
+ :iteration-threshold   3
+ :quality-regression-threshold 0.1
+ :confidence-per-signal 0.3
+ :min-proposal-confidence 0.3
+ :min-samples-for-significance 10}

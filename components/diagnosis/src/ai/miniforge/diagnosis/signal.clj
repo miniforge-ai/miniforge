@@ -6,9 +6,22 @@
    Signals are the raw inputs to the diagnosis engine. Each signal represents
    a detectable anomaly or pattern that may warrant adaptation.
 
-   Layer 0: Signal types and extraction (pure functions)")
+   Layer 0: Constants
+   Layer 1: Signal extraction (pure functions)"
+  (:require
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
+   [ai.miniforge.diagnosis.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Constants
+
+(def ^:private config
+  (-> (io/resource "config/diagnosis/defaults.edn") slurp edn/read-string))
+
+(def ^:private severity-order {:critical 0 :high 1 :medium 2 :low 3})
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Signal extraction
 
 (defn- extract-slo-breach-signals
@@ -23,8 +36,11 @@
                                   :target target
                                   :actual actual
                                   :tier tier}
-                :signal/message (format "SLO breach: %s at %.2f (target %.2f) for %s tier"
-                                        (clojure.core/name name) actual target (clojure.core/name tier))}))))
+                :signal/message (msg/t :signal/slo-breach
+                                      {:name (clojure.core/name name)
+                                       :actual (format "%.2f" (double actual))
+                                       :target (format "%.2f" (double target))
+                                       :tier (clojure.core/name tier)})}))))
 
 (defn- extract-failure-pattern-signals
   "Extract signals from recurring failure patterns."
@@ -39,8 +55,9 @@
                  {:signal/type :recurring-failure
                   :signal/severity (if (>= cnt (* 2 min-count)) :high :medium)
                   :signal/evidence {:failure-class cls :count cnt}
-                  :signal/message (format "Recurring failure: %s occurred %d times"
-                                          (clojure.core/name cls) cnt)})))))
+                  :signal/message (msg/t :signal/recurring-failure
+                                        {:class (clojure.core/name cls)
+                                         :count (str cnt)})})))))
 
 (defn- extract-quality-regression-signals
   "Extract signals from declining training example quality."
@@ -59,14 +76,16 @@
           q1 (avg-quality first-half)
           q2 (avg-quality second-half)
           regression (- q1 q2)]
-      (when (> regression 0.1) ; 10% quality drop
+      (when (> regression (:quality-regression-threshold config))
         [{:signal/type :quality-regression
-          :signal/severity (if (> regression 0.2) :high :medium)
+          :signal/severity (if (> regression (* 2 (:quality-regression-threshold config))) :high :medium)
           :signal/evidence {:first-half-quality q1
                             :second-half-quality q2
                             :regression regression}
-          :signal/message (format "Quality regression: %.2f → %.2f (%.0f%% drop)"
-                                  q1 q2 (* 100 regression))}]))))
+          :signal/message (msg/t :signal/quality-regression
+                                {:q1 (format "%.2f" (double q1))
+                                 :q2 (format "%.2f" (double q2))
+                                 :pct (format "%.0f" (* 100 regression))})}]))))
 
 (defn- extract-high-iteration-signals
   "Extract signals from phases requiring many inner loop iterations."
@@ -75,18 +94,18 @@
        (filter #(and (:iterations %) (> (:iterations %) threshold)))
        (group-by :phase)
        (map (fn [[phase entries]]
-              {:signal/type :high-iteration-count
-               :signal/severity :medium
-               :signal/evidence {:phase phase
-                                 :avg-iterations (/ (reduce + (map :iterations entries))
-                                                    (count entries))
-                                 :count (count entries)}
-               :signal/affected-heuristic (keyword (str "agent-prompt/" (name phase)))
-               :signal/message (format "Phase %s averaging %.1f iterations (%d occurrences)"
-                                       (name phase)
-                                       (double (/ (reduce + (map :iterations entries))
-                                                  (count entries)))
-                                       (count entries))}))
+              (let [avg (double (/ (reduce + (map :iterations entries))
+                                  (count entries)))]
+                {:signal/type :high-iteration-count
+                 :signal/severity :medium
+                 :signal/evidence {:phase phase
+                                   :avg-iterations avg
+                                   :count (count entries)}
+                 :signal/affected-heuristic (keyword (str "agent-prompt/" (name phase)))
+                 :signal/message (msg/t :signal/high-iteration
+                                        {:phase (name phase)
+                                         :avg (format "%.1f" avg)
+                                         :count (str (count entries))})})))
        vec))
 
 (defn extract-signals
@@ -101,11 +120,12 @@
      config - optional {:min-failure-count 3 :min-examples 10 :iteration-threshold 3}
 
    Returns: vector of signal maps, sorted by severity (critical first)."
-  [data & [config]]
+  [data & [overrides]]
   (let [{:keys [slo-checks failure-events training-examples phase-metrics]} data
-        {:keys [min-failure-count min-examples iteration-threshold]
-         :or {min-failure-count 3 min-examples 10 iteration-threshold 3}} config
-        severity-order {:critical 0 :high 1 :medium 2 :low 3}]
+        merged (merge config overrides)
+        min-failure-count  (get merged :min-failure-count 3)
+        min-examples       (get merged :min-training-examples 10)
+        iteration-threshold (get merged :iteration-threshold 3)]
     (->> (concat
           (extract-slo-breach-signals (or slo-checks []))
           (extract-failure-pattern-signals (or failure-events []) min-failure-count)

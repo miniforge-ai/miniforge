@@ -1,0 +1,9 @@
+;; Training capture quality score weights per learning.spec §2.2
+{:iteration-penalty-per-extra  0.1
+ :escalation-penalty           0.3
+ :human-override-penalty       0.2
+ :production-incident-penalty  0.5
+ :phase-success-bonus          0.1
+ :label-thresholds {:positive-min 0.8
+                    :negative-max 0.3
+                    :hard-positive-min-iterations 3}}
