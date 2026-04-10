@@ -115,15 +115,23 @@
 ;; Fix spec generation
 
 (deftest build-fix-spec-test
-  (testing "generates valid workflow spec"
+  (testing "generates valid workflow spec with context"
     (let [group {:path "src/foo.clj"
                  :description "Extract this function"
                  :comment-ids [123]}
-          spec (responder/build-fix-spec group)]
+          context {:diff "diff content" :files [{:path "src/foo.clj" :content "(ns foo)"}]}
+          spec (responder/build-fix-spec group context)]
       (is (= :canonical-sdlc (:workflow/type spec)))
       (is (= :fix (get-in spec [:spec/intent :type])))
       (is (= ["src/foo.clj"] (get-in spec [:spec/intent :scope])))
-      (is (clojure.string/includes? (:spec/description spec) "Extract this function")))))
+      (is (str/includes? (:spec/description spec) "Extract this function"))
+      (is (= [{:path "src/foo.clj" :content "(ns foo)"}] (:task/existing-files spec)))
+      (is (str/includes? (:spec/description spec) "diff content"))))
+
+  (testing "spec without matching file content omits existing-files"
+    (let [group {:path "src/bar.clj" :description "fix" :comment-ids [1]}
+          spec (responder/build-fix-spec group {:diff nil :files []})]
+      (is (nil? (:task/existing-files spec))))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Orchestration
