@@ -282,6 +282,18 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public API
 
+(defn- invoke-planner-session
+  "Session body for the planner: build mcp-opts with model hint, call LLM."
+  [session llm-client user-prompt config context on-chunk]
+  (let [budget-usd (budget/resolve-cost-budget-usd :planner config context)
+        mcp-opts (assoc (artifact-session/session->mcp-opts session budget-usd 40)
+                        :model (model/default-model-for-role :planner))]
+    (if on-chunk
+      (llm/chat-stream llm-client user-prompt on-chunk
+                       (merge {:system @planner-system-prompt} mcp-opts))
+      (llm/chat llm-client user-prompt
+                (merge {:system @planner-system-prompt} mcp-opts)))))
+
 (defn create-planner
   "Create a Planner agent with optional configuration overrides.
 
@@ -331,19 +343,8 @@
           (if llm-client
             ;; Use the real LLM with artifact session for MCP tool support
             (let [{:keys [llm-result artifact]}
-                  (artifact-session/with-artifact-session [session]
-                    (let [budget-usd (budget/resolve-cost-budget-usd :planner config context)
-                          mcp-opts {:model (model/default-model-for-role :planner)
-                                    :mcp-config (:mcp-config-path session)
-                                    :mcp-allowed-tools (:mcp-allowed-tools session)
-                                    :supervision (:supervision session)
-                                    :budget-usd budget-usd
-                                    :max-turns 40}]
-                      (if on-chunk
-                        (llm/chat-stream llm-client user-prompt on-chunk
-                                         (merge {:system @planner-system-prompt} mcp-opts))
-                        (llm/chat llm-client user-prompt
-                                  (merge {:system @planner-system-prompt} mcp-opts)))))
+                  (artifact-session/with-session context
+                    #(invoke-planner-session % llm-client user-prompt config context on-chunk))
                   llm-response llm-result
                   tokens (get llm-response :tokens 0)]
               (log/info logger :planner :planner/llm-called

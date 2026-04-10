@@ -270,6 +270,23 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public API
 
+(defn- invoke-tester-session
+  "Session body for the tester: cache code files, build mcp-opts with
+   disallowed built-in tools, call LLM."
+  [session llm-client user-prompt config context on-chunk code-artifact]
+  (let [files-map (into {} (map (fn [f] [(:path f) (:content f)])
+                                (:code/files code-artifact)))]
+    (artifact-session/write-context-cache-for-session! session files-map))
+  (let [budget-usd (budget/resolve-cost-budget-usd :tester config context)
+        max-turns (get @tester-prompt-data :prompt/max-turns 10)
+        mcp-opts (assoc (artifact-session/session->mcp-opts session budget-usd max-turns)
+                        :disallowed-tools ["Read" "Grep" "Glob" "WebSearch" "WebFetch" "LS"])]
+    (if on-chunk
+      (llm/chat-stream llm-client user-prompt on-chunk
+                       (merge {:system @tester-system-prompt} mcp-opts))
+      (llm/chat llm-client user-prompt
+                (merge {:system @tester-system-prompt} mcp-opts)))))
+
 (defn create-tester
   "Create a Tester agent with optional configuration overrides.
 
@@ -318,27 +335,9 @@
           (if llm-client
             ;; Use the real LLM with artifact session for MCP tool support
             (let [{:keys [llm-result artifact context-misses]}
-                  (artifact-session/with-artifact-session [session]
-                    ;; Write context cache so MCP tools can serve from it
-                    (let [files-map (into {} (map (fn [f] [(:path f) (:content f)])
-                                                  (:code/files code-artifact)))]
-                      (artifact-session/write-context-cache! session files-map))
-                    (let [budget-usd (budget/resolve-cost-budget-usd :tester config context)
-                          max-turns (get @tester-prompt-data :prompt/max-turns 10)
-                          mcp-opts {:mcp-config (:mcp-config-path session)
-                                    :mcp-allowed-tools (:mcp-allowed-tools session)
-                                    ;; Block built-in exploration tools — agents use
-                                    ;; context_read/context_grep/context_glob MCP tools
-                                    ;; instead, which read through the context cache.
-                                    :disallowed-tools ["Read" "Grep" "Glob" "WebSearch" "WebFetch" "LS"]
-                                    :supervision (:supervision session)
-                                    :budget-usd budget-usd
-                                    :max-turns max-turns}]
-                      (if on-chunk
-                        (llm/chat-stream llm-client user-prompt on-chunk
-                                         (merge {:system @tester-system-prompt} mcp-opts))
-                        (llm/chat llm-client user-prompt
-                                  (merge {:system @tester-system-prompt} mcp-opts)))))
+                  (artifact-session/with-session context
+                    #(invoke-tester-session % llm-client user-prompt config context
+                                           on-chunk code-artifact))
                   response llm-result
                   tokens (get response :tokens 0)
                   cost-usd (get response :cost-usd)]

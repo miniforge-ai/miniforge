@@ -432,6 +432,24 @@
         (build-code-response code context tokens cost-usd)
         (response/error (messages/t :error/parse-failed) {:tokens tokens})))))
 
+(defn- invoke-implementer-session
+  "Session body for the implementer: cache files, build mcp-opts, call LLM."
+  [session llm-client user-prompt effective-system-prompt config context on-chunk
+   existing-files working-dir]
+  (when (seq existing-files)
+    (let [files-map (into {} (map (fn [f] [(:path f) (:content f)])
+                                  existing-files))]
+      (artifact-session/write-context-cache-for-session! session files-map)))
+  (let [budget-usd (budget/resolve-cost-budget-usd :implementer config context)
+        max-turns (get @implementer-prompt-data :prompt/max-turns 10)
+        mcp-opts (cond-> (artifact-session/session->mcp-opts session budget-usd max-turns)
+                   working-dir (assoc :workdir working-dir))]
+    (if on-chunk
+      (llm/chat-stream llm-client user-prompt on-chunk
+                       (merge {:system effective-system-prompt} mcp-opts))
+      (llm/chat llm-client user-prompt
+                (merge {:system effective-system-prompt} mcp-opts)))))
+
 (defn- invoke-with-llm
   "Invoke the implementer via the LLM backend."
   [llm-client user-prompt effective-system-prompt config context on-chunk logger
@@ -439,27 +457,9 @@
   (let [working-dir (or (:execution/worktree-path context)
                         (System/getProperty "user.dir"))
         {:keys [llm-result artifact context-misses pre-session-snapshot]}
-        (artifact-session/with-artifact-session [session]
-          ;; Write context cache so MCP tools can serve from it
-          (when (seq existing-files)
-            (let [files-map (into {} (map (fn [f] [(:path f) (:content f)])
-                                          existing-files))]
-              (artifact-session/write-context-cache! session files-map)))
-          (let [budget-usd (budget/resolve-cost-budget-usd :implementer config context)
-                max-turns (get @implementer-prompt-data :prompt/max-turns 10)
-                mcp-opts (cond-> {:mcp-config (:mcp-config-path session)
-                                  :mcp-allowed-tools (:mcp-allowed-tools session)
-                                  :supervision (:supervision session)
-                                  :budget-usd budget-usd
-                                  :max-turns max-turns}
-                           ;; Run the LLM CLI in the worktree directory so file
-                           ;; writes land in the correct execution environment.
-                           working-dir (assoc :workdir working-dir))]
-            (if on-chunk
-              (llm/chat-stream llm-client user-prompt on-chunk
-                               (merge {:system effective-system-prompt} mcp-opts))
-                        (llm/chat llm-client user-prompt
-                                  (merge {:system effective-system-prompt} mcp-opts)))))
+        (artifact-session/with-session context
+          #(invoke-implementer-session % llm-client user-prompt effective-system-prompt
+                                       config context on-chunk existing-files working-dir))
         response llm-result
         file-artifact (when-not artifact
                         (file-artifacts/collect-written-files pre-session-snapshot

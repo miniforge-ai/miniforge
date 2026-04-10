@@ -122,7 +122,7 @@
                              :code/tests-needed? true}
           response (llm-response :tokens 42 :cost-usd 0.12)
           result (with-redefs [artifact-session/create-session!
-                               (fn [] (session-map))
+                               (fn [& _] (session-map))
                                artifact-session/write-mcp-config!
                                identity
                                artifact-session/read-artifact
