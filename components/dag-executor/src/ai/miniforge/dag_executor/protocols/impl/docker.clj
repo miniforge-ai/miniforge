@@ -345,6 +345,25 @@
   (let [result (run-docker docker-path "image" "inspect" image)]
     (zero? (:exit result))))
 
+(defn container-image-digest
+  "Return the repo-digest string for a Docker image, or nil on failure.
+
+   Shells out to `docker image inspect` with a Go template that extracts
+   the first RepoDigests entry. Returns nil when:
+   - the image does not exist locally
+   - docker returns a non-zero exit code
+   - docker is not reachable (exception)"
+  [docker-path image]
+  (try
+    (let [result (run-docker docker-path "image" "inspect" image
+                             "--format" "{{index .RepoDigests 0}}")]
+      (when (zero? (:exit result))
+        (let [digest (str/trim (:out result))]
+          (when (seq digest)
+            digest))))
+    (catch Exception _
+      nil)))
+
 (defn find-dockerfile-path
   "Find the Dockerfile resource on the classpath or filesystem.
    Returns absolute path to the Dockerfile."

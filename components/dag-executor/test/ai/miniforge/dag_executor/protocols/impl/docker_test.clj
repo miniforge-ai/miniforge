@@ -24,9 +24,10 @@
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.docker :as docker]))
 
-;; Private fn accessor helper
+;; Private fn accessor helper — throws on missing var to surface typos early
 (defn- private-fn [sym]
-  (var-get (ns-resolve 'ai.miniforge.dag-executor.protocols.impl.docker sym)))
+  (or (some-> (ns-resolve 'ai.miniforge.dag-executor.protocols.impl.docker sym) var-get)
+      (throw (ex-info (str "Private fn not found: " sym) {:sym sym}))))
 
 ;; ============================================================================
 ;; sanitize-token
@@ -73,6 +74,34 @@
 (deftest image-exists-nonexistent-test
   (testing "image-exists? returns false for nonexistent image"
     (is (false? (docker/image-exists? nil "nonexistent/image:never")))))
+
+;; ============================================================================
+;; container-image-digest (public)
+;; ============================================================================
+
+(deftest container-image-digest-success-test
+  (testing "returns digest string when run-docker returns exit 0 with a digest"
+    (with-redefs [docker/run-docker
+                  (fn [_docker-path & _args]
+                    {:exit 0
+                     :out "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890\n"
+                     :err ""})]
+      (is (= "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+             (docker/container-image-digest nil "myimage:latest"))))))
+
+(deftest container-image-digest-nonzero-exit-test
+  (testing "returns nil when run-docker returns non-zero exit"
+    (with-redefs [docker/run-docker
+                  (fn [_docker-path & _args]
+                    {:exit 1 :out "" :err "No such image"})]
+      (is (nil? (docker/container-image-digest nil "nonexistent:latest"))))))
+
+(deftest container-image-digest-exception-test
+  (testing "returns nil when run-docker throws an exception"
+    (with-redefs [docker/run-docker
+                  (fn [_docker-path & _args]
+                    (throw (ex-info "Docker not found" {})))]
+      (is (nil? (docker/container-image-digest nil "myimage:latest"))))))
 
 ;; ============================================================================
 ;; persist-workspace!
