@@ -467,7 +467,12 @@
      :exec!           exec!
      :executor        executor
      :environment-id  env-id
-     :workdir         workdir}))
+     :workdir         workdir
+     :pre-session-snapshot (try
+                             (file-artifacts/snapshot-via-executor
+                              exec! executor env-id workdir)
+                             (catch Exception _
+                               (file-artifacts/empty-snapshot)))}))
 
 (defn write-capsule-mcp-config!
   "Write MCP config and Claude settings inside the capsule.
@@ -613,7 +618,7 @@
       {:llm-result result
        :artifact (read-artifact-fn session)
        :context-misses (when (= :host mode) (read-context-misses session))
-       :pre-session-snapshot (when (= :host mode) (:pre-session-snapshot session))
+       :pre-session-snapshot (:pre-session-snapshot session)
        :session-mode mode})
     (finally
       (cleanup-fn session))))

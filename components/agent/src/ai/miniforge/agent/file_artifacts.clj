@@ -165,6 +165,21 @@
                        :exit exit
                        :stderr err})))))
 
+(defn snapshot-via-executor
+  "Capture git dirty state inside a capsule via the executor.
+
+   Like snapshot-working-dir but runs git status through the executor
+   instead of shelling out locally."
+  [exec! executor env-id working-dir]
+  (let [result (exec! executor env-id
+                      "git status --porcelain=v1 --untracked-files=all --ignored=no -- ."
+                      {:workdir working-dir})]
+    (if (and (:ok? result) (zero? (get-in result [:data :exit-code] 1)))
+      (reduce add-entry
+              (empty-snapshot)
+              (keep porcelain-entry (str/split-lines (get-in result [:data :stdout] ""))))
+      (empty-snapshot))))
+
 (defn collect-written-files
   "Collect files written during the agent session into a synthetic code artifact.
 
@@ -176,6 +191,46 @@
       (->> (snapshot-working-dir working-dir)
            (changed-paths pre-snapshot)
            (synthetic-artifact working-dir))
+      (catch Exception _
+        nil))))
+
+(defn collect-written-files-via-executor
+  "Like collect-written-files but runs git status inside a capsule via executor.
+
+   Reads file contents from the capsule for the synthetic artifact."
+  [pre-snapshot exec! executor env-id working-dir]
+  (when pre-snapshot
+    (try
+      (let [post (snapshot-via-executor exec! executor env-id working-dir)
+            changed (changed-paths pre-snapshot post)
+            files (->> [[:create (:create changed)]
+                        [:modify (:modify changed)]
+                        [:delete (:delete changed)]]
+                       (mapcat (fn [[action paths]]
+                                 (map (fn [path]
+                                        (let [content (if (= :delete action)
+                                                        ""
+                                                        (let [r (exec! executor env-id
+                                                                       (str "cat " (pr-str path))
+                                                                       {:workdir working-dir})]
+                                                          (get-in r [:data :stdout] "")))]
+                                          {:path path :content content :action action}))
+                                      (sort paths))))
+                       vec)]
+        (when (seq files)
+          (merge {:code/files files
+                  :code/summary (str (count files)
+                                     " files collected from capsule working directory (no MCP submit)")
+                  :code/language "rust"
+                  :code/tests-needed? true}
+                 (let [r (exec! executor env-id
+                                (str "cat " (pr-str artifact-manifest-name))
+                                {:workdir working-dir})]
+                   (when (and (:ok? r) (zero? (get-in r [:data :exit-code] 1)))
+                     (try (-> (get-in r [:data :stdout])
+                              edn/read-string
+                              (select-keys [:code/summary :code/tests-needed?]))
+                          (catch Exception _ nil)))))))
       (catch Exception _
         nil))))
 

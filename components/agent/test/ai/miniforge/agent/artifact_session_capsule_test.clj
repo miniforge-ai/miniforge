@@ -89,7 +89,7 @@
         (is (= :capsule-response (:llm-result result)))
         (is (= :capsule (:session-mode result)))
         (is (nil? (:context-misses result)))
-        (is (nil? (:pre-session-snapshot result)))
+        (is (map? (:pre-session-snapshot result)))
         ;; Should have executed mkdir, config writes, and cleanup
         (is (pos? (count @log)))))))
 
@@ -139,6 +139,7 @@
       (let [log (atom [])
             s {:dir "/workspace/.miniforge-session"
                :capsule? true
+               :exec! mock-execute!
                :executor :mock
                :environment-id "env-test"
                :workdir "/workspace"}]
@@ -154,6 +155,7 @@
     (with-redefs [executor/execute! mock-execute-with-artifact!]
       (let [s {:artifact-path "/workspace/.miniforge-session/artifact.edn"
                :capsule? true
+               :exec! mock-execute-with-artifact!
                :executor :mock
                :environment-id "env-uuid"
                :workdir "/workspace"}

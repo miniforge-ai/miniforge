@@ -456,14 +456,21 @@
    existing-files]
   (let [working-dir (or (:execution/worktree-path context)
                         (System/getProperty "user.dir"))
-        {:keys [llm-result artifact context-misses pre-session-snapshot]}
+        {:keys [llm-result artifact context-misses pre-session-snapshot session-mode]}
         (artifact-session/with-session context
           #(invoke-implementer-session % llm-client user-prompt effective-system-prompt
                                        config context on-chunk existing-files working-dir))
         response llm-result
         file-artifact (when-not artifact
-                        (file-artifacts/collect-written-files pre-session-snapshot
-                                                              working-dir))
+                        (if (= :capsule session-mode)
+                          (file-artifacts/collect-written-files-via-executor
+                           pre-session-snapshot
+                           @(requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)
+                           (:execution/executor context)
+                           (:execution/environment-id context)
+                           working-dir)
+                          (file-artifacts/collect-written-files pre-session-snapshot
+                                                                working-dir)))
         artifact-source (cond
                           artifact :mcp
                           file-artifact :file-fallback
