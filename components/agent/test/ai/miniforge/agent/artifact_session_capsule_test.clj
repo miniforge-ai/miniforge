@@ -135,33 +135,31 @@
 
 (deftest write-context-cache-for-session-capsule-test
   (testing "capsule session uses executor-based write"
-    (with-redefs [executor/execute! mock-execute!]
-      (let [log (atom [])
-            s {:dir "/workspace/.miniforge-session"
-               :capsule? true
-               :exec! mock-execute!
-               :executor :mock
-               :environment-id "env-test"
-               :workdir "/workspace"}]
-        (binding [*exec-log* log]
-          (session/write-context-cache-for-session! s {"src/foo.clj" "(ns foo)"}))
-        (is (some #(.contains (str %) "context-cache.edn") @log))))))
+    (let [log (atom [])
+          s {:dir "/workspace/.miniforge-session"
+             :capsule? true
+             :exec! mock-execute!
+             :executor :mock
+             :environment-id "env-test"
+             :workdir "/workspace"}]
+      (binding [*exec-log* log]
+        (session/write-context-cache-for-session! s {"src/foo.clj" "(ns foo)"}))
+      (is (some #(.contains (str %) "context-cache.edn") @log)))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; UUID parsing in capsule artifact
 
 (deftest read-capsule-artifact-parses-uuids-test
   (testing "UUID strings are converted to java.util.UUID"
-    (with-redefs [executor/execute! mock-execute-with-artifact!]
-      (let [s {:artifact-path "/workspace/.miniforge-session/artifact.edn"
-               :capsule? true
-               :exec! mock-execute-with-artifact!
-               :executor :mock
-               :environment-id "env-uuid"
-               :workdir "/workspace"}
-            artifact (session/read-capsule-artifact s)]
-        (is (some? artifact))
-        (is (uuid? (:code/id artifact)))))))
+    (let [s {:artifact-path "/workspace/.miniforge-session/artifact.edn"
+             :capsule? true
+             :exec! mock-execute-with-artifact!
+             :executor :mock
+             :environment-id "env-uuid"
+             :workdir "/workspace"}
+          artifact (session/read-capsule-artifact s)]
+      (is (some? artifact))
+      (is (uuid? (:code/id artifact))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

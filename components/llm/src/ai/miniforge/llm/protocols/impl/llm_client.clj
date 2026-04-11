@@ -114,10 +114,11 @@
 
           "result"
           (let [usage (or (:usage data) (get-in data [:result :usage]))]
-            {:delta "" :done? true
-             :usage {:input-tokens (:input_tokens usage)
-                     :output-tokens (:output_tokens usage)}
-             :cost-usd (:total_cost_usd data)})
+            (cond-> {:delta "" :done? true
+                     :usage {:input-tokens (:input_tokens usage)
+                             :output-tokens (:output_tokens usage)}
+                     :cost-usd (:total_cost_usd data)}
+              (:session_id data) (assoc :session-id (:session_id data))))
 
           ;; Tool use events — capture tool name for diagnostics
           "tool_use"
@@ -199,7 +200,7 @@
             :requires-cli? true
             :api-key-var "ANTHROPIC_API_KEY"
             :stream-parser parse-claude-stream-line
-            :args-fn (fn [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools disallowed-tools supervision budget-usd max-turns]}]
+            :args-fn (fn [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools disallowed-tools supervision budget-usd max-turns model resume]}]
                        (let [budget (or budget-usd
                                         (when max-tokens default-claude-cli-budget-usd))]
                          (cond-> ["-p"]
@@ -212,6 +213,8 @@
                            system                       (into ["--system-prompt" system])
                            budget                       (into ["--max-budget-usd" (str budget)])
                            max-turns                    (into ["--max-turns" (str max-turns)])
+                           model                        (into ["--model" model])
+                           resume                       (into ["--resume" resume])
                            true                         (conj prompt))))}
 
    :codex {:cmd "codex"
@@ -524,7 +527,7 @@
 
 (defn complete-impl [client request]
   (let [{:keys [config logger exec-fn]} client
-        {:keys [backend]} config
+        {:keys [backend model]} config
         backend-config (get backends backend)
         {:keys [cmd args-fn api-key-var]} backend-config]
     (log-prompt-sent logger backend (build-request-prompt request))
@@ -541,7 +544,8 @@
 
       ;; CLI backend
       (let [prompt (build-request-prompt request)
-            args (args-fn (assoc request :prompt prompt))
+            request-with-model (cond-> request model (assoc :model model))
+            args (args-fn (assoc request-with-model :prompt prompt))
             full-cmd (into [cmd] args)
             result (exec-fn full-cmd)
             response (parse-cli-output (:out result) (:exit result) (:err result))]
@@ -556,13 +560,15 @@
                  :content (:content result)}))
     result))
 
-(defn stream-with-parser [stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost accumulated-tools]
+(defn stream-with-parser [stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost accumulated-tools accumulated-session-id]
   (fn [line]
     (when-let [parsed (stream-parser line)]
       (when-let [usage (:usage parsed)]
         (swap! accumulated-usage (fn [prev] (merge prev usage))))
       (when-let [cost (:cost-usd parsed)]
         (reset! accumulated-cost cost))
+      (when-let [session-id (:session-id parsed)]
+        (reset! accumulated-session-id session-id))
       (if (or (:tool-use parsed) (:heartbeat parsed))
         ;; Tool-use and heartbeat events: track tool names and fire on-chunk
         (do
@@ -607,28 +613,31 @@
 (defn handle-streaming [client request on-chunk backend-config progress-monitor]
   (let [{:keys [logger config]} client
         stream-fn (or (:stream-exec-fn client) stream-exec-fn)
-        {:keys [backend]} config
+        {:keys [backend model]} config
         {:keys [cmd args-fn stream-parser]} backend-config
         prompt (build-request-prompt request)
-        args (args-fn (assoc request :prompt prompt :streaming? true))
+        request-with-model (cond-> request model (assoc :model model))
+        args (args-fn (assoc request-with-model :prompt prompt :streaming? true))
         full-cmd (into [cmd] args)
         accumulated-content (atom "")
         accumulated-usage (atom nil)
         accumulated-cost (atom nil)
-        accumulated-tools (atom [])]
+        accumulated-tools (atom [])
+        accumulated-session-id (atom nil)]
     (when logger
       (log/debug logger :system :agent/streaming-prompt-sent
                  {:data {:backend backend
                          :prompt-length (count prompt)}}))
     (let [result (stream-fn
                   full-cmd
-                  (stream-with-parser stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost accumulated-tools)
+                  (stream-with-parser stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost accumulated-tools accumulated-session-id)
                   {:progress-monitor progress-monitor
                    :workdir (:workdir request)})
           exit-code (:exit result)
           timeout-info (:timeout result)
           final-content @accumulated-content
-          tools @accumulated-tools]
+          tools @accumulated-tools
+          session-id @accumulated-session-id]
       (on-chunk {:delta ""
                  :done? true
                  :content final-content
@@ -639,8 +648,10 @@
                   {:data {:tools tools :count (count tools)}}))
       (if (zero? exit-code)
         (cond-> (streaming-success-response final-content exit-code @accumulated-usage @accumulated-cost)
-          (seq tools) (assoc :tools-called tools))
-        (streaming-error-response final-content exit-code (:err result) timeout-info)))))
+          (seq tools) (assoc :tools-called tools)
+          session-id   (assoc :session-id session-id))
+        (cond-> (streaming-error-response final-content exit-code (:err result) timeout-info)
+          session-id (assoc :session-id session-id))))))
 
 (defn complete-stream-impl [client request on-chunk]
   (let [{:keys [config]} client

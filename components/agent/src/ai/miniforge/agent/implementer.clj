@@ -432,6 +432,18 @@
         (build-code-response code context tokens cost-usd)
         (response/error (messages/t :error/parse-failed) {:tokens tokens})))))
 
+(def ^:private session-checkpoint-filename ".miniforge-session-id")
+
+(defn- read-session-checkpoint [working-dir]
+  (when working-dir
+    (let [f (io/file working-dir session-checkpoint-filename)]
+      (when (.exists f)
+        (str/trim (slurp f))))))
+
+(defn- write-session-checkpoint! [working-dir session-id]
+  (when (and working-dir session-id)
+    (spit (io/file working-dir session-checkpoint-filename) session-id)))
+
 (defn- invoke-implementer-session
   "Session body for the implementer: cache files, build mcp-opts, call LLM."
   [session llm-client user-prompt effective-system-prompt config context on-chunk
@@ -442,13 +454,18 @@
       (artifact-session/write-context-cache-for-session! session files-map)))
   (let [budget-usd (budget/resolve-cost-budget-usd :implementer config context)
         max-turns (get @implementer-prompt-data :prompt/max-turns 10)
+        resume-id (read-session-checkpoint working-dir)
         mcp-opts (cond-> (artifact-session/session->mcp-opts session budget-usd max-turns)
-                   working-dir (assoc :workdir working-dir))]
-    (if on-chunk
-      (llm/chat-stream llm-client user-prompt on-chunk
-                       (merge {:system effective-system-prompt} mcp-opts))
-      (llm/chat llm-client user-prompt
-                (merge {:system effective-system-prompt} mcp-opts)))))
+                   working-dir (assoc :workdir working-dir)
+                   resume-id   (assoc :resume resume-id))
+        result (if on-chunk
+                 (llm/chat-stream llm-client user-prompt on-chunk
+                                  (merge {:system effective-system-prompt} mcp-opts))
+                 (llm/chat llm-client user-prompt
+                           (merge {:system effective-system-prompt} mcp-opts)))]
+    (when-let [new-session-id (:session-id result)]
+      (write-session-checkpoint! working-dir new-session-id))
+    result))
 
 (defn- invoke-with-llm
   "Invoke the implementer via the LLM backend."
