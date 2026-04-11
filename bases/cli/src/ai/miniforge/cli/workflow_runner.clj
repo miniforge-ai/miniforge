@@ -23,6 +23,8 @@
    [clojure.edn :as edn]
    [cheshire.core :as json]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.workflow.interface :as workflow]
+   [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-recommender :as recommender]
    [ai.miniforge.cli.workflow-runner.display :as display]
@@ -79,33 +81,8 @@
 ;; Workflow interface resolution and pipeline helpers
 
 (defn resolve-workflow-interface []
-  (let [load-workflow (try
-                        (requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)
-                        (catch Exception e
-                          (let [msg (ex-message e)
-                                data (ex-data e)
-                                cause (ex-cause e)]
-                            (display/print-error-header msg data cause)
-                            (cond
-                              (and msg (or (str/includes? msg "could not be resolved")
-                                           (str/includes? msg "class not found")
-                                           (str/includes? msg "No such namespace")))
-                              (display/print-namespace-resolution-help)
-
-                              (and msg (str/includes? msg "Babashka"))
-                              (display/print-babashka-fallback-help)
-
-                              :else
-                              (display/print-general-debugging-help))
-                            (throw (ex-info "Failed to resolve workflow interface"
-                                            {:namespace 'ai.miniforge.workflow.interface
-                                             :var 'load-workflow
-                                             :original-error msg} e)))))
-        run-pipeline (requiring-resolve 'ai.miniforge.workflow.interface/run-pipeline)]
-    (when-not load-workflow
-      (throw (ex-info "Workflow interface not available" {})))
-    {:load-workflow load-workflow
-     :run-pipeline run-pipeline}))
+  {:load-workflow workflow/load-workflow
+   :run-pipeline  workflow/run-pipeline})
 
 (defn create-phase-callbacks [_quiet]
   ;; Phase progress is handled by the event-stream subscription
@@ -124,8 +101,7 @@
 
 (defn create-artifact-store [quiet]
   (try
-    (when-let [create-transit-store (requiring-resolve 'ai.miniforge.artifact.interface/create-transit-store)]
-      (create-transit-store))
+    (artifact/create-transit-store)
     (catch Exception _e
       (when-not quiet
         (println (display/colorize :yellow (messages/t :workflow-runner/artifact-store-warning))))
@@ -134,8 +110,7 @@
 (defn close-artifact-store [artifact-store]
   (when artifact-store
     (try
-      (when-let [close-store (requiring-resolve 'ai.miniforge.artifact.interface/close-store)]
-        (close-store artifact-store))
+      (artifact/close-store artifact-store)
       (catch Exception _))))
 
 (defn select-workflow-type
@@ -323,7 +298,7 @@
 
 (defn list-workflows-from-resources []
   (try
-    (let [list-workflows (requiring-resolve 'ai.miniforge.workflow.interface/list-workflows)]
+    (let [list-workflows workflow/list-workflows]
       (->> (list-workflows)
            (sort-by (juxt :workflow/id :workflow/version))
            format-workflow-listing))
@@ -380,9 +355,7 @@
                                  :timestamp (java.util.Date/from timestamp)}]})]
             (run-ml-cycle! ml-ctx metrics (or diag-data {})))
           (catch Exception e
-            (let [publish!  @(requiring-resolve 'ai.miniforge.event-stream.interface/publish!)
-                  make-evt  @(requiring-resolve 'ai.miniforge.event-stream.interface/meta-loop-cycle-failed)]
-              (publish! event-stream (make-evt event-stream e)))))))
+            (es/publish! event-stream (es/meta-loop-cycle-failed event-stream e))))))
 
     (catch Exception e
       ;; Operator stack not on classpath (lightweight build) — emit to stderr
@@ -561,9 +534,7 @@
   (let [quiet (get opts :quiet false)
         version (get opts :version "latest")]
     (try
-      (let [load-chain-fn (requiring-resolve 'ai.miniforge.workflow.interface/load-chain)
-            run-chain-fn (requiring-resolve 'ai.miniforge.workflow.interface/run-chain)
-            chain-result (load-chain-fn chain-id version)
+      (let [chain-result (workflow/load-chain chain-id version)
             chain-def (:chain chain-result)
             chain-input (resolve-chain-input opts)
             event-stream (es/create-event-stream)
@@ -582,7 +553,7 @@
         (print-chain-header chain-id chain-def quiet)
         (dashboard/print-dashboard-status! quiet)
         (try
-          (let [result (run-chain-fn chain-def chain-input context)]
+          (let [result (workflow/run-chain chain-def chain-input context)]
             (print-chain-result result quiet)
             result)
           (finally
@@ -596,8 +567,7 @@
   "List all available chain definitions."
   []
   (try
-    (let [list-chains-fn (requiring-resolve 'ai.miniforge.workflow.interface/list-chains)
-          chains (list-chains-fn)]
+    (let [chains (workflow/list-chains)]
       (if (empty? chains)
         (println (messages/t :workflow-runner/no-chains))
         (do
