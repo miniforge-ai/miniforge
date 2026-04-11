@@ -46,6 +46,17 @@
     (.mkdirs events-dir)
     (.getPath (io/file events-dir workflow-file))))
 
+(defn operator-event-file-path
+  "Get path to the operator event log for cross-workflow events.
+   Used by meta-loop, reliability, and degradation events.
+
+   Returns: String path to ~/.miniforge/events/operator.edn"
+  []
+  (let [home (System/getProperty "user.home")
+        events-dir (io/file home ".miniforge" "events")]
+    (.mkdirs events-dir)
+    (.getPath (io/file events-dir "operator.edn"))))
+
 (defn cleanup-stale-events!
   "Delete event files older than TTL from the events directory.
 
@@ -70,6 +81,7 @@
 
 (defn file-sink
   "Create a file sink that writes events to per-workflow files.
+   Cross-workflow events (no :workflow/id) go to operator.edn.
 
    Performs lazy cleanup of stale event files (older than 7 days) on creation.
 
@@ -83,18 +95,19 @@
   ;; Non-blocking cleanup on sink creation
   (future (try (cleanup-stale-events! opts) (catch Exception _ nil)))
   (fn [event]
-    (when-let [workflow-id (:workflow/id event)]
-      (try
-        (let [file-path (event-file-path workflow-id)]
-          (with-open [writer (io/writer file-path :append true)]
-            (.write writer (pr-str event))
-            (.write writer "\n")
-            (.flush writer)))
-        (catch Exception e
-          ;; Log to stderr so failures are visible without breaking the event stream
-          (binding [*out* *err*]
-            (println (str "WARNING: Event sink write failed: " (ex-message e))))
-          nil)))))
+    (try
+      (let [file-path (if-let [workflow-id (:workflow/id event)]
+                        (event-file-path workflow-id)
+                        (operator-event-file-path))]
+        (with-open [writer (io/writer file-path :append true)]
+          (.write writer (pr-str event))
+          (.write writer "\n")
+          (.flush writer)))
+      (catch Exception e
+        ;; Log to stderr so failures are visible without breaking the event stream
+        (binding [*out* *err*]
+          (println (str "WARNING: Event sink write failed: " (ex-message e))))
+        nil))))
 
 ;;------------------------------------------------------------------------------ Layer 1: Stream Sinks
 

@@ -96,11 +96,14 @@
         (is (= :workflow/phase-started (:event/type (edn/read-string (second lines)))))
         (.delete (io/file path)))))
 
-  (testing "silently ignores events with nil workflow-id"
+  (testing "writes events with nil workflow-id to operator.edn"
     (let [sink (sinks/file-sink)
-          event (sample-event {:workflow/id nil})]
-      ;; Should not throw
-      (is (nil? (sink event))))))
+          unique-type (keyword (str "test/meta-loop-" (random-uuid)))
+          event (sample-event {:workflow/id nil :event/type unique-type})]
+      (sink event)
+      (let [path (sinks/operator-event-file-path)
+            content (slurp path)]
+        (is (clojure.string/includes? content (name unique-type)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; stdout-sink
