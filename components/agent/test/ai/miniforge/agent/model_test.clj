@@ -46,13 +46,14 @@
 ;; Backend resolution
 
 (deftest resolve-llm-client-for-role-test
-  (testing "reuses the provided client when it already matches the role backend"
+  (testing "returns same-backend client with model injected"
     (let [client (llm/create-client {:backend :codex})]
       (with-redefs [config/load-merged-config
                     (fn []
                       {:agents {:default-models {:thinking "gpt-5.4"
                                                  :execution "gpt-5.2-codex"}}})]
-        (is (= client (model/resolve-llm-client-for-role :implementer client))))))
+        (let [resolved (model/resolve-llm-client-for-role :implementer client)]
+          (is (= :codex (llm/client-backend resolved)))))))
 
   (testing "creates a role-specific client when execution model needs a different backend"
     (let [shared-client (llm/create-client {:backend :claude})

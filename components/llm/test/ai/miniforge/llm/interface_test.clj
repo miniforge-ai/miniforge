@@ -245,13 +245,15 @@
           cost (atom nil)
           chunks (atom [])
           tools (atom [])
+          session-id (atom nil)
           handler (impl/stream-with-parser
                     #'impl/parse-claude-stream-line
                     (fn [chunk] (swap! chunks conj chunk))
                     content
                     usage
                     cost
-                    tools)]
+                    tools
+                    session-id)]
       ;; Feed an assistant event
       (handler (json/generate-string
                  {:type "assistant"

@@ -79,10 +79,10 @@
       nil
 
       (= current-backend needed-backend)
-      provided-client
+      (assoc-in provided-client [:config :model] model-id)
 
       :else
-      (create-client {:backend needed-backend}))))
+      (create-client {:backend needed-backend :model model-id}))))
 
 
 (comment

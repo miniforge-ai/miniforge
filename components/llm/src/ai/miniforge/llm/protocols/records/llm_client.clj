@@ -51,12 +51,13 @@
      (create-client {:backend :cursor})
      (create-client {:backend :claude :logger my-logger})"
   ([] (create-client {}))
-  ([{:keys [backend logger exec-fn stream-exec-fn] :or {backend :codex}}]
+  ([{:keys [backend logger exec-fn stream-exec-fn model] :or {backend :codex}}]
    (when-not (contains? impl/backends backend)
      (throw (ex-info (str "Unknown backend: " backend)
                      {:backend backend
                       :available (keys impl/backends)})))
-   (->CLIClient {:backend backend}
+   (->CLIClient (cond-> {:backend backend}
+                  model (assoc :model model))
                 logger
                 (or exec-fn impl/default-exec-fn)
                 stream-exec-fn)))

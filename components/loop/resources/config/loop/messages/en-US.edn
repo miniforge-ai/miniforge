@@ -1,0 +1,18 @@
+{:loop/messages
+ {;; Escalation prompts
+  :escalation/context-header      "After {iteration} attempts, validation failed:"
+  :escalation/errors-label        "Errors:"
+  :escalation/last-attempt-label  "Last attempt:"
+  :escalation/no-content          "(no content)"
+  :escalation/banner-title        "AGENT ESCALATION"
+  :escalation/banner-separator    "================================================================="
+  :escalation/termination-reason  "Termination reason: {reason}"
+  :escalation/options-header      "Options:"
+  :escalation/option-hints        "  1. Provide hints to help the agent (enter text)"
+  :escalation/option-abort        "  2. Abort this task (type 'abort')"
+  :escalation/input-prompt        "Your input: "
+
+  ;; Repair messages
+  :repair/max-attempts-exceeded   "Maximum repair attempts exceeded"
+  :repair/strategies-exhausted    "All repair strategies exhausted"
+  :repair/escalated               "Repair escalated to outer loop"}}

@@ -168,7 +168,7 @@
    - RepoMapSlice with :entries, :text (rendered markdown), :token-estimate"
   ([index] (generate index {}))
   ([index opts]
-   (let [budget (or (:token-budget opts) default-token-budget)
+   (let [budget (get opts :token-budget default-token-budget)
          exclude-gen? (get opts :exclude-generated? true)
          entries (prepare-entries (:files index) exclude-gen?)
          grouped (group-by #(top-directory (:path %)) entries)

@@ -28,7 +28,8 @@
    Layer 2: Repair orchestration"
   (:require
    [ai.miniforge.loop.interface.protocols.repair-strategy :as p]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.loop.messages :as messages]))
 
 ;; Re-export protocol for backward compatibility
 (def RepairStrategy p/RepairStrategy)
@@ -196,7 +197,7 @@
    :attempts attempt
    :results results
    :errors errors
-   :message "Maximum repair attempts exceeded"})
+   :message (messages/t :repair/max-attempts-exceeded)})
 
 (defn make-exhausted-strategies-result
   "Create a result map for exhausted strategies."
@@ -205,7 +206,7 @@
    :attempts attempt
    :results results
    :errors errors
-   :message "All repair strategies exhausted"})
+   :message (messages/t :repair/strategies-exhausted)})
 
 (defn make-success-result
   "Create a result map for successful repair."
@@ -224,7 +225,7 @@
    :attempts (inc attempt)
    :results (conj results result)
    :errors errors
-   :message "Repair escalated to outer loop"})
+   :message (messages/t :repair/escalated)})
 
 (defn try-repair-with-strategy
   "Try to repair using a single strategy.

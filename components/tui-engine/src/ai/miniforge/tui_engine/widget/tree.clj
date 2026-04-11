@@ -22,7 +22,8 @@
    Provides hierarchical tree navigation and kanban-style column displays.
    Pure functions with no side effects."
   (:require
-   [ai.miniforge.tui-engine.layout.buffer :as buf]))
+   [ai.miniforge.tui-engine.layout.buffer :as buf]
+   [ai.miniforge.tui-engine.widget.status :as status]))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Tree view
@@ -73,23 +74,9 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Kanban columns
 
-(def status-chars
-  {:running  \●
-   :success  \✓
-   :failed   \✗
-   :blocked  \◐
-   :pending  \○
-   :skipped  \─
-   :spinning \⟳})
-
-(def status-colors
-  {:running  :cyan
-   :success  :green
-   :failed   :red
-   :blocked  :yellow
-   :pending  :default
-   :skipped  :default
-   :spinning :cyan})
+;; Re-use canonical status maps from the status widget module.
+(def status-chars status/status-chars)
+(def status-colors status/status-colors)
 
 (defn render-column-header
   "Render column header with title."
