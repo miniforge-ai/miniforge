@@ -7,14 +7,15 @@
    Layer 1: Tests"
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.workflow.runner :as runner]))
+   [ai.miniforge.workflow.runner :as runner]
+   [ai.miniforge.workflow.runner-cleanup :as cleanup]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Factories — access private fns via var
 
 (def ^:private validate-completion #'runner/validate-completion)
 (def ^:private execute-pipeline-loop #'runner/execute-pipeline-loop)
-(def ^:private post-workflow-cleanup! #'runner/post-workflow-cleanup!)
+(def ^:private post-workflow-cleanup! cleanup/post-workflow-cleanup!)
 (def ^:private wrap-phase-callbacks #'runner/wrap-phase-callbacks)
 (def ^:private acquire-environment #'runner/acquire-environment)
 
