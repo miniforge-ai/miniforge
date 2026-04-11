@@ -379,9 +379,17 @@
                                                     :failure.class/unknown)
                                  :timestamp (java.util.Date/from timestamp)}]})]
             (run-ml-cycle! ml-ctx metrics (or diag-data {})))
-          (catch Exception _e nil))))
-    (catch Exception _e
-      ;; Namespace not on classpath — meta-loop unavailable; no-op
+          (catch Exception e
+            (let [publish!  @(requiring-resolve 'ai.miniforge.event-stream.interface/publish!)
+                  make-evt  @(requiring-resolve 'ai.miniforge.event-stream.interface/meta-loop-cycle-failed)]
+              (publish! event-stream (make-evt event-stream e)))))))
+
+    (catch Exception e
+      ;; Operator stack not on classpath (lightweight build) — emit to stderr
+      ;; so the issue is observable without relying on the event stream.
+      (binding [*out* *err*]
+        (println (format "{\"event\":\"meta-loop/init-failed\",\"error\":\"%s\"}"
+                         (ex-message e))))
       nil)))
 
 ;------------------------------------------------------------------------------ Layer 2

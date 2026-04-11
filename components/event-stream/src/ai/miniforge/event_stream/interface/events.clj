@@ -93,3 +93,11 @@
 ;; Meta-loop event constructors
 
 (def meta-loop-cycle-completed core/meta-loop-cycle-completed)
+(def meta-loop-cycle-failed core/meta-loop-cycle-failed)
+
+;------------------------------------------------------------------------------ Layer 3
+;; Observer / knowledge failure event constructors
+
+(def observer-signal-failed core/observer-signal-failed)
+(def knowledge-synthesis-failed core/knowledge-synthesis-failed)
+(def knowledge-promotion-failed core/knowledge-promotion-failed)

@@ -331,15 +331,16 @@
     (when (= :governed (get context :execution/mode))
       (let [env-id (get context :execution/environment-id)
             branch (get context :execution/task-branch)
-            phase  (or (:execution/current-phase phase-ctx) "unknown")]
+            phase  (or (:execution/current-phase phase-ctx) :unknown)]
         (try
           (dag-exec/persist-workspace! executor env-id
                                        {:branch  branch
-                                        :message (str phase " phase completed")
+                                        :message (str (name phase) " phase completed")
                                         :workdir (get context :execution/worktree-path)})
           (catch Exception e
             (log/warn runner-logger :workflow :workflow/persist-failed
-                      {:message (str "Workspace persist failed: " (ex-message e))})))))))
+                      {:message (str "Workspace persist failed: " (ex-message e))})
+            nil))))))
 
 ;------------------------------------------------------------------------------ Layer 1: Orchestration helpers
 
@@ -491,54 +492,57 @@
 
 (defn promote-mature-learnings!
   "Query promotable learnings from KB and auto-promote high-confidence ones.
-   No-ops when knowledge-store is nil."
+   No-ops when knowledge-store is nil. Returns a vector of errors (may be empty)."
   [knowledge-store]
-  (try
-    (when knowledge-store
-      (let [list-learnings (requiring-resolve 'ai.miniforge.knowledge.interface/list-learnings)
-            promote-learning (requiring-resolve 'ai.miniforge.knowledge.interface/promote-learning)
-            promotable (list-learnings knowledge-store {:promotable? true})]
-        (doseq [learning promotable]
-          (try
-            (promote-learning knowledge-store (:zettel/id learning) {})
-            (catch Exception _e nil)))))
-    (catch Exception _e nil)))
+  (let [errors (volatile! [])]
+    (try
+      (when knowledge-store
+        (let [list-learnings (requiring-resolve 'ai.miniforge.knowledge.interface/list-learnings)
+              promote-learning (requiring-resolve 'ai.miniforge.knowledge.interface/promote-learning)
+              promotable (list-learnings knowledge-store {:promotable? true})]
+          (doseq [learning promotable]
+            (try
+              (promote-learning knowledge-store (:zettel/id learning) {})
+              (catch Exception e
+                (vswap! errors conj {:zettel/id (:zettel/id learning)
+                                     :error (ex-message e)}))))))
+      (catch Exception e
+        (vswap! errors conj {:error (ex-message e)})))
+    @errors))
 
 (defn- synthesize-patterns!
   "Detect recurring patterns in KB learnings and synthesize meta-loop learnings.
-   Delegates to knowledge component. No-ops when knowledge-store is nil."
+   Delegates to knowledge component. No-ops when knowledge-store is nil.
+   Throws on failure — callers are responsible for catching and emitting events."
   [knowledge-store]
-  (try
-    (when knowledge-store
-      (let [synthesize (requiring-resolve 'ai.miniforge.knowledge.interface/synthesize-recurring-patterns!)]
-        (synthesize knowledge-store)))
-    (catch Exception _e nil)))
+  (when knowledge-store
+    (let [synthesize (requiring-resolve 'ai.miniforge.knowledge.interface/synthesize-recurring-patterns!)]
+      (synthesize knowledge-store))))
 
 (defn- observe-workflow-signal!
   "Feed workflow completion/failure signal to the operator for pattern analysis.
    Callers provide :observe-signal-fn in opts — a (fn [signal]) callback that
    forwards to their operator instance. No-ops when no callback is configured.
    When output-ctx is nil (uncaught exception), builds a minimal failure signal
-   from the workflow config and exception."
+   from the workflow config and exception.
+   Throws on failure — callers are responsible for catching and emitting events."
   [opts output-ctx workflow exception]
-  (try
-    (when-let [observe-fn (:observe-signal-fn opts)]
-      (let [signal (if output-ctx
-                     (let [signal-type (if (phase/succeeded? output-ctx)
-                                        :workflow-complete
-                                        :workflow-failed)]
-                       {:signal/type signal-type
-                        :workflow-id (:execution/id output-ctx)
-                        :phase-results (:execution/phase-results output-ctx)
-                        :metrics (:execution/metrics output-ctx)
-                        :timestamp (java.time.Instant/now)})
-                     ;; Fallback: output-ctx unavailable due to uncaught exception
-                     {:signal/type :workflow-failed
-                      :workflow-id (:workflow/id workflow)
-                      :error (when exception (ex-message exception))
-                      :timestamp (java.time.Instant/now)})]
-        (observe-fn signal)))
-    (catch Exception _e nil)))
+  (when-let [observe-fn (:observe-signal-fn opts)]
+    (let [signal (if output-ctx
+                   (let [signal-type (if (phase/succeeded? output-ctx)
+                                       :workflow-complete
+                                       :workflow-failed)]
+                     {:signal/type signal-type
+                      :workflow-id (:execution/id output-ctx)
+                      :phase-results (:execution/phase-results output-ctx)
+                      :metrics (:execution/metrics output-ctx)
+                      :timestamp (java.time.Instant/now)})
+                   ;; Fallback: output-ctx unavailable due to uncaught exception
+                   {:signal/type :workflow-failed
+                    :workflow-id (:workflow/id workflow)
+                    :error (when exception (ex-message exception))
+                    :timestamp (java.time.Instant/now)})]
+      (observe-fn signal))))
 
 ;------------------------------------------------------------------------------ Layer 2: Pipeline stages
 
@@ -634,21 +638,44 @@
         (assoc :execution/status :completed-with-warnings))
     final-ctx))
 
+(defn- publish-system-event!
+  "Resolve an event constructor from the event-stream interface and publish it.
+   Used for cross-workflow system-level events (observer, knowledge, meta-loop).
+   constructor-sym must name a function [stream & args] → event-map."
+  [event-stream constructor-sym & args]
+  (when event-stream
+    (try
+      (publish-event! event-stream
+                      (apply (requiring-resolve constructor-sym) event-stream args))
+      (catch Exception _ nil))))
+
 (defn- post-workflow-cleanup!
   "Post-workflow cleanup that fires on ALL exit paths.
-   Each step is independently try-caught so one failure cannot mask another."
+   Each step is independently try-caught so one failure cannot mask another.
+   Failures are emitted as events so the meta-loop can detect broken subsystems."
   [opts output-ctx workflow exception acquired-env]
-  (try (observe-workflow-signal! opts output-ctx workflow exception)
-       (catch Exception _e nil))
-  (try (synthesize-patterns! (:knowledge-store opts))
-       (catch Exception _e nil))
-  (try (promote-mature-learnings! (:knowledge-store opts))
-       (catch Exception _e nil))
-  (when acquired-env
-    (release-execution-environment! (:executor acquired-env)
-                                    (:environment-id acquired-env))
-    (release-execution-environment! (:worktree-executor acquired-env)
-                                    (:worktree-environment-id acquired-env))))
+  (let [event-stream (:event-stream opts)
+        workflow-id  (or (:execution/id output-ctx) (:workflow/id workflow))]
+    (try (observe-workflow-signal! opts output-ctx workflow exception)
+         (catch Exception e
+           (publish-system-event! event-stream
+                                  'ai.miniforge.event-stream.interface/observer-signal-failed
+                                  workflow-id e)))
+    (try (synthesize-patterns! (:knowledge-store opts))
+         (catch Exception e
+           (publish-system-event! event-stream
+                                  'ai.miniforge.event-stream.interface/knowledge-synthesis-failed
+                                  e)))
+    (let [errors (promote-mature-learnings! (:knowledge-store opts))]
+      (doseq [err errors]
+        (publish-system-event! event-stream
+                               'ai.miniforge.event-stream.interface/knowledge-promotion-failed
+                               (ex-info (:error err) err))))
+    (when acquired-env
+      (release-execution-environment! (:executor acquired-env)
+                                      (:environment-id acquired-env))
+      (release-execution-environment! (:worktree-executor acquired-env)
+                                      (:worktree-environment-id acquired-env)))))
 
 ;------------------------------------------------------------------------------ Layer 3: Main entry point
 
