@@ -34,13 +34,11 @@
    [ai.miniforge.gate.policy]))
 
 (defn with-mocked-test-runner
-  "Run body-fn with run-tests! and write-test-files! mocked to prevent recursive bb test."
+  "Run body-fn with run-tests! mocked to prevent recursive bb test."
   [body-fn]
-  (let [write-var (resolve 'ai.miniforge.phase.verify/write-test-files!)
-        run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
+  (let [run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
     (with-redefs-fn
-      {write-var (fn [_ files] (mapv :path files))
-       run-var (fn [_] {:passed? true :test-count 1 :fail-count 0 :error-count 0})}
+      {run-var (fn [& _args] {:passed? true :test-count 1 :fail-count 0 :error-count 0})}
       body-fn)))
 
 (deftest run-pipeline-max-phases-test

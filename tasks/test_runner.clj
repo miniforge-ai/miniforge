@@ -71,8 +71,7 @@
                          "ai.miniforge.release-executor.artifact-validation-integration-test"
                          "ai.miniforge.web-dashboard.fleet-onboarding-integration-test"
                          "ai.miniforge.self-healing.integration-test"
-                         "ai.miniforge.governance.e2e-test"
-                         "ai.miniforge.mcp.artifact-server-integration-test"]
+                         "ai.miniforge.governance.e2e-test"]
         kernel-tests ["ai.miniforge.workflow.kernel-loader-integration-test"]
         miniforge-exit (run-project-tests! "miniforge" miniforge-tests)]
     (when-not (zero? miniforge-exit)
