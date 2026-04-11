@@ -57,18 +57,23 @@
     (.mkdirs events-dir)
     (.getPath (io/file events-dir "operator.edn"))))
 
+(defn- default-events-dir
+  "Return the default events directory (~/.miniforge/events)."
+  []
+  (io/file (System/getProperty "user.home") ".miniforge" "events"))
+
 (defn cleanup-stale-events!
   "Delete event files older than TTL from the events directory.
 
    Arguments:
      opts - Map with optional:
+       :events-dir - Directory to clean (default: ~/.miniforge/events)
        :ttl-ms - Max age in milliseconds (default: 7 days)
 
    Returns: Number of files deleted"
   [& [opts]]
   (let [ttl-ms (get opts :ttl-ms (* 7 24 60 60 1000))
-        home (System/getProperty "user.home")
-        events-dir (io/file home ".miniforge" "events")
+        events-dir (or (:events-dir opts) (default-events-dir))
         cutoff (- (System/currentTimeMillis) ttl-ms)]
     (if (.isDirectory events-dir)
       (let [stale-files (->> (.listFiles events-dir)
