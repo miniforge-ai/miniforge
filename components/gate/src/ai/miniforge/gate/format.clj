@@ -7,33 +7,53 @@
 
    After the implement agent writes files, this gate runs LSP formatting
    to fix structural errors (unmatched parens, indentation, etc.).
-   The gate repairs automatically — if formatting changes a file, it
-   applies the changes and passes.
 
-   Layer 0: LSP formatting via lsp-mcp-bridge
-   Layer 1: Gate registration"
+   File format support is determined from LSP tool configs in
+   resources/tools/lsp/*.edn — no hardcoded extension lists.
+
+   Layer 0: LSP config resolution
+   Layer 1: File formatting
+   Layer 2: Gate registration"
   (:require
    [ai.miniforge.gate.registry :as registry]
+   [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; LSP formatting
+;; LSP config resolution — driven by tools/lsp/*.edn data
 
-(def ^:private supported-extensions
-  "File extensions that support LSP formatting."
-  #{"clj" "cljs" "cljc" "ts" "tsx" "js" "jsx" "py" "rs" "go" "swift"})
+(def ^:private lsp-configs-resource-dir "tools/lsp")
 
-(defn- file-extension
-  "Get file extension from path."
-  [path]
-  (when-let [idx (str/last-index-of (str path) ".")]
-    (subs (str path) (inc idx))))
+(def ^:private format-capable-patterns
+  "File patterns from LSP tool configs that support :format capability.
+   Loaded from classpath resources/tools/lsp/*.edn."
+  (delay
+    (try
+      (let [dir (io/file (io/resource lsp-configs-resource-dir))]
+        (->> (file-seq dir)
+             (filter #(str/ends-with? (.getName %) ".edn"))
+             (map #(edn/read-string (slurp %)))
+             (filter #(contains? (get-in % [:tool/config :lsp/capabilities] #{}) :format))
+             (mapcat #(get-in % [:tool/config :lsp/file-patterns] []))
+             vec))
+      (catch Exception _ []))))
+
+(defn- file-matches-format-pattern?
+  "Check if a file path matches any format-capable LSP pattern."
+  [file-path]
+  (let [fs   (java.nio.file.FileSystems/getDefault)
+        path (java.nio.file.Paths/get (str file-path) (into-array String []))]
+    (some #(.matches (.getPathMatcher fs (str "glob:" %)) path)
+          @format-capable-patterns)))
 
 (defn- formattable-file?
-  "True when a file's extension supports LSP formatting."
+  "True when a file matches a format-capable LSP tool config."
   [file-entry]
-  (contains? supported-extensions (file-extension (get file-entry :path ""))))
+  (file-matches-format-pattern? (get file-entry :path "")))
+
+;------------------------------------------------------------------------------ Layer 1
+;; File formatting
 
 (defn- resolve-lsp-manager
   "Resolve LSP manager from execution context."
@@ -42,35 +62,34 @@
       (try
         (when-let [create-fn (requiring-resolve
                                'ai.miniforge.lsp-mcp-bridge.lsp.manager/create-manager)]
-          (let [project-dir (or (get ctx :execution/worktree-path) ".")]
-            (create-fn {} project-dir)))
+          (create-fn {} (or (get ctx :execution/worktree-path) ".")))
         (catch Exception _ nil))))
 
+(defn- file-extension [path]
+  (when-let [idx (str/last-index-of (str path) ".")]
+    (subs (str path) (inc idx))))
+
 (defn- format-file-via-lsp
-  "Format a single file using LSP. Returns {:formatted? bool :error string?}."
+  "Format a single file using LSP. Returns {:formatted? bool :path string}."
   [lsp-manager file-path worktree-path]
   (try
     (let [full-path (str worktree-path "/" file-path)
           uri       (str "file://" full-path)
-          start-fn  (requiring-resolve 'ai.miniforge.lsp-mcp-bridge.lsp.manager/start-server)
-          client-fn (requiring-resolve 'ai.miniforge.lsp-mcp-bridge.lsp.client/format-document)]
-      (if (and start-fn client-fn (.exists (io/file full-path)))
-        (do
-          ;; Start LSP server for this file type if not running
-          (start-fn lsp-manager {:language (file-extension file-path)})
-          ;; Format the document
-          (let [result (client-fn (get @(:servers lsp-manager) (file-extension file-path)) uri {})]
-            {:formatted? (some? result)})
-          )
-        {:formatted? false :error "LSP not available"}))
-    (catch Exception e
-      {:formatted? false :error (.getMessage e)})))
+          ext       (file-extension file-path)]
+      (if (.exists (io/file full-path))
+        (let [start-fn  (requiring-resolve 'ai.miniforge.lsp-mcp-bridge.lsp.manager/start-server)
+              client-fn (requiring-resolve 'ai.miniforge.lsp-mcp-bridge.lsp.client/format-document)]
+          (when (and start-fn client-fn)
+            (start-fn lsp-manager {:language ext})
+            (when-let [server (get @(:servers lsp-manager) ext)]
+              (client-fn server uri {})))
+          {:formatted? true :path file-path})
+        {:formatted? false :path file-path}))
+    (catch Exception _
+      {:formatted? false :path file-path})))
 
 (defn check-format
   "Check if files can be formatted. Always passes — formatting is repair.
-
-   The format gate doesn't block on check. It detects formattable files
-   and notes them. The repair function does the actual formatting.
 
    Arguments:
      artifact - Phase artifact with :code/files
@@ -79,14 +98,14 @@
    Returns:
      {:passed? true :formattable-files [...]}"
   [artifact _ctx]
-  (let [files     (get artifact :code/files [])
+  (let [files       (get artifact :code/files [])
         formattable (filterv formattable-file? files)]
-    {:passed?          true
+    {:passed?           true
      :formattable-files (mapv :path formattable)
-     :message          (str (count formattable) " file(s) support LSP formatting")}))
+     :message           (str (count formattable) " file(s) support LSP formatting")}))
 
 (defn repair-format
-  "Format files via LSP. This is the action gate — it formats on repair.
+  "Format files via LSP.
 
    Arguments:
      artifact - Phase artifact
@@ -94,21 +113,21 @@
      ctx      - Execution context with :execution/worktree-path
 
    Returns:
-     {:success? true/false :artifact artifact :formatted [...]}"
+     {:success? true :artifact artifact :formatted [...]}"
   [artifact _errors ctx]
-  (let [worktree   (or (get ctx :execution/worktree-path) ".")
-        lsp-mgr    (resolve-lsp-manager ctx)
-        files      (get artifact :code/files [])
+  (let [worktree    (or (get ctx :execution/worktree-path) ".")
+        lsp-mgr     (resolve-lsp-manager ctx)
+        files       (get artifact :code/files [])
         formattable (filterv formattable-file? files)]
     (if-not lsp-mgr
       {:success? true :artifact artifact :message "LSP not available — skipped"}
-      (let [results (mapv #(format-file-via-lsp lsp-mgr (:path %) worktree) formattable)]
+      (let [results   (mapv #(format-file-via-lsp lsp-mgr (:path %) worktree) formattable)
+            formatted (mapv :path (filter :formatted? results))]
         {:success?  true
          :artifact  artifact
-         :formatted (mapv :path (filter :formatted? (map #(assoc %1 :path (:path %2))
-                                                         results formattable)))}))))
+         :formatted formatted}))))
 
-;------------------------------------------------------------------------------ Layer 1
+;------------------------------------------------------------------------------ Layer 2
 ;; Gate registration
 
 (registry/register-gate! :format)
