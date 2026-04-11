@@ -43,4 +43,4 @@
   "Secret names (not values) are logged at debug level"
   "Local mode ignores runtime-spec (no capsule to configure)"]
 
- :workflow/type :canonical-sdlc}
+ :spec/workflow-type :canonical-sdlc}

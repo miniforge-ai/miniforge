@@ -39,4 +39,4 @@
   "Local mode skips export (artifacts already on host filesystem)"
   "Exported artifact paths recorded in :execution/output"]
 
- :workflow/type :canonical-sdlc}
+ :spec/workflow-type :canonical-sdlc}

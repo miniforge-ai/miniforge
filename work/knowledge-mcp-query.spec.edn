@@ -69,7 +69,7 @@
   "Do not require agents to call lookup_policy — it is available, not mandatory"
   "Tool response must be valid even when no rules match (return empty array, not error)"]
 
- :workflow/type :standard-sdlc
+ :spec/workflow-type :canonical-sdlc
  :workflow/version "2.0.0"
 
  :tasks

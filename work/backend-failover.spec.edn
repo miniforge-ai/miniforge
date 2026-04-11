@@ -40,7 +40,7 @@
   "Rate limit detection must cover Claude (HTTP 429 / :rate-limit-error) and Codex (usage limit message)"
   "If all allowed backends are in cooldown, propagate the original error — do not loop"]
 
- :workflow/type :standard-sdlc
+ :spec/workflow-type :canonical-sdlc
  :workflow/version "2.0.0"
 
  :tasks

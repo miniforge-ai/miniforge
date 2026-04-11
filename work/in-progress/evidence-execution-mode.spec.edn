@@ -43,4 +43,4 @@
   "Evidence bundle includes execution-mode and runtime-class when created from workflow result"
   "Image digest captured and recorded for Docker-based governed runs"]
 
- :workflow/type :canonical-sdlc}
+ :spec/workflow-type :canonical-sdlc}

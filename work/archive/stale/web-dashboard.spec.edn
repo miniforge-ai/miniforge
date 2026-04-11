@@ -69,7 +69,7 @@
   "bb test must pass with all existing tests"
   "Pre-commit hooks must pass on final commit"]
 
- :workflow/type :standard-sdlc
+ :spec/workflow-type :canonical-sdlc
  :workflow/version "2.0.0"
 
  :plan/tasks

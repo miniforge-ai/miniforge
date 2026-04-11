@@ -18,7 +18,7 @@
   "All tests must pass with bb test"
   "Pre-commit hooks must pass"]
 
- :workflow/type :standard-sdlc
+ :spec/workflow-type :canonical-sdlc
  :workflow/version "2.0.0"
 
  :plan/tasks
