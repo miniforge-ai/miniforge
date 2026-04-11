@@ -517,18 +517,27 @@
 (defn- observe-workflow-signal!
   "Feed workflow completion/failure signal to the operator for pattern analysis.
    Callers provide :observe-signal-fn in opts — a (fn [signal]) callback that
-   forwards to their operator instance. No-ops when no callback is configured."
-  [opts output-ctx]
+   forwards to their operator instance. No-ops when no callback is configured.
+   When output-ctx is nil (uncaught exception), builds a minimal failure signal
+   from the workflow config and exception."
+  [opts output-ctx workflow exception]
   (try
     (when-let [observe-fn (:observe-signal-fn opts)]
-      (let [signal-type (if (phase/succeeded? output-ctx)
-                          :workflow-complete
-                          :workflow-failed)]
-        (observe-fn {:signal/type signal-type
-                     :workflow-id (:execution/id output-ctx)
-                     :phase-results (:execution/phase-results output-ctx)
-                     :metrics (:execution/metrics output-ctx)
-                     :timestamp (java.time.Instant/now)})))
+      (let [signal (if output-ctx
+                     (let [signal-type (if (phase/succeeded? output-ctx)
+                                        :workflow-complete
+                                        :workflow-failed)]
+                       {:signal/type signal-type
+                        :workflow-id (:execution/id output-ctx)
+                        :phase-results (:execution/phase-results output-ctx)
+                        :metrics (:execution/metrics output-ctx)
+                        :timestamp (java.time.Instant/now)})
+                     ;; Fallback: output-ctx unavailable due to uncaught exception
+                     {:signal/type :workflow-failed
+                      :workflow-id (:workflow/id workflow)
+                      :error (when exception (ex-message exception))
+                      :timestamp (java.time.Instant/now)})]
+        (observe-fn signal)))
     (catch Exception _e nil)))
 
 ;------------------------------------------------------------------------------ Layer 2: Main entry point
@@ -639,70 +648,82 @@
      (when-not skip-lifecycle?
        (publish-workflow-started! event-stream initial-ctx))
 
-     (try
-      (let [final-ctx
-           (try
-             (if (empty? pipeline)
-               (handle-empty-pipeline initial-ctx)
+     (let [output-ctx-vol (volatile! nil)
+           exception-vol (volatile! nil)]
+      (try
+       (let [final-ctx
+            (try
+              (if (empty? pipeline)
+                (handle-empty-pipeline initial-ctx)
 
-               ;; Execute pipeline loop
-               (loop [context initial-ctx
-                      iteration 0]
-                 (cond
-                   ;; Terminal state reached
-                   (terminal-state? context)
-                   context
+                ;; Execute pipeline loop
+                (loop [context initial-ctx
+                       iteration 0]
+                  (cond
+                    ;; Terminal state reached
+                    (terminal-state? context)
+                    context
 
-                   ;; Max iterations exceeded
-                   (>= iteration max-phases)
-                   (handle-max-phases-exceeded context max-phases)
+                    ;; Max iterations exceeded
+                    (>= iteration max-phases)
+                    (handle-max-phases-exceeded context max-phases)
 
-                   ;; Execute next iteration: health check -> phase -> cleanup
-                   :else
-                   (recur (execute-single-iteration pipeline context callbacks iteration control-state)
-                          (inc iteration)))))
-             (catch Exception e
-               (-> initial-ctx
-                   (update :execution/errors conj
-                           {:type :pipeline-exception
-                            :message (ex-message e)
-                            :data (ex-data e)})
-                   (assoc :execution/status :failed))))
+                    ;; Execute next iteration: health check -> phase -> cleanup
+                    :else
+                    (recur (execute-single-iteration pipeline context callbacks iteration control-state)
+                           (inc iteration)))))
+              (catch Exception e
+                (vreset! exception-vol e)
+                (-> initial-ctx
+                    (update :execution/errors conj
+                            {:type :pipeline-exception
+                             :message (ex-message e)
+                             :data (ex-data e)})
+                    (assoc :execution/status :failed))))
 
-           ;; Validate completed workflows produced results
-           final-ctx (if (and (phase/succeeded? final-ctx)
-                              (empty? (:execution/artifacts final-ctx))
-                              (empty? (:execution/phase-results final-ctx)))
-                       (-> final-ctx
-                           (update :execution/errors conj
-                                   {:type :empty-completion
-                                    :message (messages/t :status/empty-completion)})
-                           (assoc :execution/status :completed-with-warnings))
-                       final-ctx)
-           ;; Extract output and publish workflow completed event
-           output-ctx (extract-output final-ctx)]
-       (when-not skip-lifecycle?
-         (publish-workflow-completed! event-stream output-ctx))
+            ;; Validate completed workflows produced results
+            final-ctx (if (and (phase/succeeded? final-ctx)
+                               (empty? (:execution/artifacts final-ctx))
+                               (empty? (:execution/phase-results final-ctx)))
+                        (-> final-ctx
+                            (update :execution/errors conj
+                                    {:type :empty-completion
+                                     :message (messages/t :status/empty-completion)})
+                            (assoc :execution/status :completed-with-warnings))
+                        final-ctx)
+            ;; Extract output and publish workflow completed event
+            output-ctx (extract-output final-ctx)]
+        (vreset! output-ctx-vol output-ctx)
+        (when-not skip-lifecycle?
+          (publish-workflow-completed! event-stream output-ctx))
 
-       ;; Post-workflow: feed signals to operator for pattern analysis
-       (observe-workflow-signal! opts output-ctx)
+        output-ctx)
+       (finally
+         ;; Post-workflow: feed signals to operator for pattern analysis.
+         ;; Fires on ALL exit paths — success, failure, and uncaught exception —
+         ;; because failed workflows are the most valuable signal for diagnosis.
+         (try
+           (observe-workflow-signal! opts @output-ctx-vol workflow @exception-vol)
+           (catch Exception _e nil))
 
-       ;; Post-workflow: synthesize recurring patterns into meta-loop learnings
-       (synthesize-patterns! (:knowledge-store opts))
+         ;; Post-workflow: synthesize recurring patterns into meta-loop learnings
+         (try
+           (synthesize-patterns! (:knowledge-store opts))
+           (catch Exception _e nil))
 
-       ;; Post-workflow: auto-promote high-confidence learnings
-       (promote-mature-learnings! (:knowledge-store opts))
+         ;; Post-workflow: auto-promote high-confidence learnings
+         (try
+           (promote-mature-learnings! (:knowledge-store opts))
+           (catch Exception _e nil))
 
-       output-ctx)
-      (finally
-        (when acquired-env
-          (release-execution-environment! (:executor acquired-env)
-                                          (:environment-id acquired-env))
-          ;; Governed mode acquires a separate host worktree — release it too.
-          ;; release-execution-environment! is nil-safe, so this is a no-op
-          ;; when :worktree-executor / :worktree-environment-id are absent (local mode).
-          (release-execution-environment! (:worktree-executor acquired-env)
-                                          (:worktree-environment-id acquired-env))))))))
+         (when acquired-env
+           (release-execution-environment! (:executor acquired-env)
+                                           (:environment-id acquired-env))
+           ;; Governed mode acquires a separate host worktree — release it too.
+           ;; release-execution-environment! is nil-safe, so this is a no-op
+           ;; when :worktree-executor / :worktree-environment-id are absent (local mode).
+           (release-execution-environment! (:worktree-executor acquired-env)
+                                           (:worktree-environment-id acquired-env)))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
