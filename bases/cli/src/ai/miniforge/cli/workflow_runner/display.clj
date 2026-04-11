@@ -58,7 +58,8 @@
                                          {:workflow-id (name workflow-id)})))
     (println (colorize :cyan (messages/t :workflow-runner/version
                                          {:version version})))
-    (println (colorize :cyan (str (apply str (repeat 65 "━")) "\n")))))
+    (println (colorize :cyan (str (apply str (repeat 65 "━")) "\n")))
+    (flush)))
 
 (defn format-event-line
   "Format a concise progress line for a lifecycle event. Returns nil for unknown events."
@@ -182,7 +183,8 @@
                          ;; Deduplicate back-to-back duplicates from layered emitters.
                          (when-not (= line @last-line)
                            (reset! last-line line)
-                           (println line)))))
+                           (println line)
+                           (flush)))))
       (fn []
         (es/unsubscribe! event-stream sub-id)))))
 
@@ -213,7 +215,8 @@
   (case output
     :json (println (json/generate-string result {:pretty true}))
     :pretty (when-not quiet (print-pretty-result result))
-    (clojure.pprint/pprint result)))
+    (clojure.pprint/pprint result))
+  (flush))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Error help output
