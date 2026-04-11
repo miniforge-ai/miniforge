@@ -33,13 +33,25 @@
       (dag/release-environment! executor environment-id)
       (catch Exception _ nil))))
 
+(defn- git-remote-url
+  "Get git remote origin URL from a directory. Returns nil on failure."
+  [dir]
+  (try
+    (let [result (p/shell {:out :string :err :string :continue true :dir dir}
+                          "git" "remote" "get-url" "origin")]
+      (when (zero? (:exit result))
+        (str/trim (:out result))))
+    (catch Exception _ nil)))
+
 (defn infer-repo-url [spec enriched-spec]
   (or (:spec/repo-url spec)
       (get-in enriched-spec [:spec/context :repo-url])
-      (try
-        (str/trim (:out (p/shell {:out :string :err :string :continue true}
-                                 "git" "remote" "get-url" "origin")))
-        (catch Exception _ nil))))
+      ;; If spec came from a file in a different repo, use that repo's remote.
+      ;; :spec/source-dir is set by the run command from the spec file's parent.
+      (when-let [source-dir (:spec/source-dir spec)]
+        (git-remote-url source-dir))
+      ;; Final fallback: cwd's repo
+      (git-remote-url ".")))
 
 (defn infer-branch [spec enriched-spec]
   (or (:spec/branch spec)

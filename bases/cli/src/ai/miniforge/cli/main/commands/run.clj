@@ -60,7 +60,11 @@
    Used by both the markdown and EDN code paths."
   [spec-path opts]
   (display/print-info (messages/t :run/parsing-spec {:path spec-path}))
-  (let [parsed-spec (spec-parser/parse-spec-file spec-path)
+  (let [;; Resolve source-dir: --worktree flag > spec file's parent directory
+        source-dir (or (:worktree opts)
+                       (str (fs/parent (fs/absolutize spec-path))))
+        parsed-spec (-> (spec-parser/parse-spec-file spec-path)
+                        (assoc :spec/source-dir source-dir))
         validation  (spec-parser/validate-spec parsed-spec)]
     (if-not (:valid? validation)
       (do
