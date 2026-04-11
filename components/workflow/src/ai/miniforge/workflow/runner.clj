@@ -540,190 +540,168 @@
         (observe-fn signal)))
     (catch Exception _e nil)))
 
-;------------------------------------------------------------------------------ Layer 2: Main entry point
+;------------------------------------------------------------------------------ Layer 2: Pipeline stages
+
+(declare run-pipeline)
+
+(def ^:private ^:const default-max-phases 50)
+
+(defn- acquire-environment
+  "Acquire an isolated execution environment (worktree or Docker capsule).
+   Returns [acquired-env opts'] where acquired-env is nil when pre-acquired."
+  [workflow input opts]
+  (let [has-executor? (and (:executor opts) (:environment-id opts))]
+    (if has-executor?
+      [nil opts]
+      (let [repo-url (or (:repo-url opts) (:repo-url input))
+            branch   (or (:branch opts) (:branch input) "main")
+            acquired (acquire-execution-environment!
+                      (:workflow/id workflow)
+                      {:repo-url        repo-url
+                       :branch          branch
+                       :execution-mode  (:execution-mode opts)
+                       :executor-config (:executor-config opts)})]
+        [acquired (if acquired (merge opts acquired) opts)]))))
+
+(defn- wrap-phase-callbacks
+  "Wrap caller callbacks with event publishing."
+  [event-stream opts]
+  {:on-phase-start
+   (fn [ctx interceptor]
+     (when-let [phase-name (or (:phase interceptor)
+                               (get-in interceptor [:config :phase]))]
+       (publish-phase-started! event-stream ctx phase-name))
+     (when-let [cb (:on-phase-start opts)]
+       (cb ctx interceptor)))
+   :on-phase-complete
+   (fn [ctx interceptor result]
+     (when-let [phase-name (or (:phase interceptor)
+                               (get-in interceptor [:config :phase]))]
+       (publish-phase-completed! event-stream ctx phase-name result))
+     (when-let [cb (:on-phase-complete opts)]
+       (cb ctx interceptor result)))})
+
+(defn- build-initial-context
+  "Build the initial execution context from workflow, input, and opts."
+  [workflow input opts]
+  (let [governed? (and (= :governed (get opts :execution-mode))
+                       (get opts :executor)
+                       (get opts :environment-id))
+        capsule-exec-fn (when governed?
+                          (llm-impl/capsule-exec-fn
+                           dag-exec/execute!
+                           (get opts :executor)
+                           (get opts :environment-id)
+                           (get opts :worktree-path "/workspace")))]
+    (-> (ctx/create-context workflow input opts)
+        (assoc :execution/executor (get opts :executor)
+               :execution/environment-id (get opts :environment-id)
+               :execution/worktree-path (or (:worktree-path opts)
+                                            (:sandbox-workdir opts))
+               :execution/mode (get opts :execution-mode :local)
+               :execution/started-at (java.time.Instant/now)
+               :execution/environment-metadata (get opts :environment-metadata)
+               :execution/execute-fn (when governed? dag-exec/execute!)
+               :execution/exec-fn capsule-exec-fn
+               :execution/task-branch (when governed?
+                                        (str "task/" (or (get opts :environment-id)
+                                                         (subs (str (random-uuid)) 0 8))))
+               :execution/run-pipeline-fn run-pipeline))))
+
+(defn- execute-pipeline-loop
+  "Execute the phase pipeline loop. Returns final context."
+  [pipeline initial-ctx callbacks control-state max-phases]
+  (if (empty? pipeline)
+    (handle-empty-pipeline initial-ctx)
+    (loop [context initial-ctx
+           iteration 0]
+      (cond
+        (terminal-state? context)      context
+        (>= iteration max-phases)      (handle-max-phases-exceeded context max-phases)
+        :else (recur (execute-single-iteration pipeline context callbacks iteration control-state)
+                     (inc iteration))))))
+
+(defn- validate-completion
+  "Warn when a succeeded workflow produced no results."
+  [final-ctx]
+  (if (and (phase/succeeded? final-ctx)
+           (empty? (:execution/artifacts final-ctx))
+           (empty? (:execution/phase-results final-ctx)))
+    (-> final-ctx
+        (update :execution/errors conj
+                {:type :empty-completion
+                 :message (messages/t :status/empty-completion)})
+        (assoc :execution/status :completed-with-warnings))
+    final-ctx))
+
+(defn- post-workflow-cleanup!
+  "Post-workflow cleanup that fires on ALL exit paths.
+   Each step is independently try-caught so one failure cannot mask another."
+  [opts output-ctx workflow exception acquired-env]
+  (try (observe-workflow-signal! opts output-ctx workflow exception)
+       (catch Exception _e nil))
+  (try (synthesize-patterns! (:knowledge-store opts))
+       (catch Exception _e nil))
+  (try (promote-mature-learnings! (:knowledge-store opts))
+       (catch Exception _e nil))
+  (when acquired-env
+    (release-execution-environment! (:executor acquired-env)
+                                    (:environment-id acquired-env))
+    (release-execution-environment! (:worktree-executor acquired-env)
+                                    (:worktree-environment-id acquired-env))))
+
+;------------------------------------------------------------------------------ Layer 3: Main entry point
 
 (defn run-pipeline
   "Execute a workflow pipeline.
 
-   Acquires an isolated execution environment before building the pipeline.
-   The environment type depends on :execution-mode in opts:
-   - :local (default) — git worktree on host; agent-on-host model
-   - :governed — Docker or Kubernetes capsule required (N11 §7); fails loudly
-     if no container runtime available
-
-   The environment is released on completion regardless of success or failure.
+   Pipeline: acquire environment → build context → execute phases
+           → validate → publish completion → cleanup (always).
 
    Arguments:
    - workflow: Workflow configuration
    - input: Input data (may contain :repo-url and :branch)
-   - opts: Execution options
-     - :execution-mode     - :local (default) or :governed
-     - :executor-config    - Executor config map {:docker {...} :kubernetes {...}}
-     - :max-phases         - Max phases to execute (default 50)
-     - :on-phase-start     - Callback fn [ctx interceptor]
-     - :on-phase-complete  - Callback fn [ctx interceptor result]
-     - :executor            - Pre-acquired TaskExecutor (skips acquisition)
-     - :environment-id      - Pre-acquired environment ID (skips acquisition)
-     - :observe-signal-fn   - Callback fn [signal] for operator integration; caller
-                              wraps their operator: (fn [sig] (operator/observe-signal op sig))
+   - opts: Execution options (see docstring for keys)
 
    Returns final execution context."
   ([workflow input]
    (run-pipeline workflow input {}))
   ([workflow input opts]
-   (let [;; Skip acquisition if executor already provided (e.g., sandbox setup)
-         has-executor? (and (:executor opts) (:environment-id opts))
+   (let [[acquired-env opts] (acquire-environment workflow input opts)
+         pipeline            (build-pipeline workflow)
+         max-phases          (get opts :max-phases default-max-phases)
+         control-state       (or (:control-state opts)
+                                 (atom {:paused false :stopped false :adjustments {}}))
+         event-stream        (:event-stream opts)
+         callbacks           (wrap-phase-callbacks event-stream opts)
+         skip-lifecycle?     (:skip-lifecycle-events opts)
+         initial-ctx         (build-initial-context workflow input opts)
+         output-ctx-vol      (volatile! nil)
+         exception-vol       (volatile! nil)]
 
-         ;; Acquire isolated environment before pipeline starts
-         repo-url (or (:repo-url opts) (:repo-url input))
-         branch   (or (:branch opts) (:branch input) "main")
-         acquired-env (when-not has-executor?
-                        (acquire-execution-environment!
-                         (:workflow/id workflow)
-                         {:repo-url        repo-url
-                          :branch          branch
-                          :execution-mode  (:execution-mode opts)
-                          :executor-config (:executor-config opts)}))
-
-         ;; Merge acquired environment info into opts
-         opts (if acquired-env
-                (merge opts acquired-env)
-                opts)
-
-         pipeline (build-pipeline workflow)
-         max-phases (get opts :max-phases 50)
-         ;; Control state for dashboard commands — caller can provide their own
-         control-state (or (:control-state opts)
-                           (atom {:paused false :stopped false :adjustments {}}))
-         event-stream (:event-stream opts)
-
-         ;; Wrap callbacks to publish events
-         callbacks {:on-phase-start (fn [ctx interceptor]
-                                      (when-let [phase-name (or (:phase interceptor)
-                                                                (get-in interceptor [:config :phase]))]
-                                        (publish-phase-started! event-stream ctx phase-name))
-                                      (when-let [cb (:on-phase-start opts)]
-                                        (cb ctx interceptor)))
-                    :on-phase-complete (fn [ctx interceptor result]
-                                         (when-let [phase-name (or (:phase interceptor)
-                                                                   (get-in interceptor [:config :phase]))]
-                                           (publish-phase-completed! event-stream ctx phase-name result))
-                                         (when-let [cb (:on-phase-complete opts)]
-                                           (cb ctx interceptor result)))}
-
-         skip-lifecycle? (:skip-lifecycle-events opts)
-         ;; Build capsule-aware exec-fn for governed mode (N11 §6.2)
-         governed?       (and (= :governed (get opts :execution-mode))
-                              (get opts :executor)
-                              (get opts :environment-id))
-         capsule-exec-fn (when governed?
-                           (llm-impl/capsule-exec-fn
-                            dag-exec/execute!
-                            (get opts :executor)
-                            (get opts :environment-id)
-                            (get opts :worktree-path "/workspace")))
-
-         initial-ctx (-> (ctx/create-context workflow input opts)
-                         (assoc :execution/executor (get opts :executor)
-                                :execution/environment-id (get opts :environment-id)
-                                :execution/worktree-path (or (:worktree-path opts)
-                                                             (:sandbox-workdir opts))
-                                :execution/mode (get opts :execution-mode :local)
-                                :execution/started-at (java.time.Instant/now)
-                                ;; Propagate Docker image-digest from environment metadata (N11 §11)
-                                :execution/environment-metadata (get opts :environment-metadata)
-                                ;; Pass execute! so downstream phases can call it without
-                                ;; requiring dag-executor (N11 §6.2, §9.3)
-                                :execution/execute-fn (when governed? dag-exec/execute!)
-                                :execution/exec-fn capsule-exec-fn
-                                ;; Task branch for workspace persistence (git push between phases)
-                                :execution/task-branch (when governed?
-                                                         (str "task/" (or (get opts :environment-id)
-                                                                         (subs (str (random-uuid)) 0 8))))
-                                ;; Injected so dag-orchestrator can call back into the
-                                ;; runner without a circular namespace dependency.
-                                :execution/run-pipeline-fn run-pipeline))]
-
-     ;; Publish workflow started event (unless caller already did)
      (when-not skip-lifecycle?
        (publish-workflow-started! event-stream initial-ctx))
 
-     (let [output-ctx-vol (volatile! nil)
-           exception-vol (volatile! nil)]
-      (try
-       (let [final-ctx
-            (try
-              (if (empty? pipeline)
-                (handle-empty-pipeline initial-ctx)
-
-                ;; Execute pipeline loop
-                (loop [context initial-ctx
-                       iteration 0]
-                  (cond
-                    ;; Terminal state reached
-                    (terminal-state? context)
-                    context
-
-                    ;; Max iterations exceeded
-                    (>= iteration max-phases)
-                    (handle-max-phases-exceeded context max-phases)
-
-                    ;; Execute next iteration: health check -> phase -> cleanup
-                    :else
-                    (recur (execute-single-iteration pipeline context callbacks iteration control-state)
-                           (inc iteration)))))
-              (catch Exception e
-                (vreset! exception-vol e)
-                (-> initial-ctx
-                    (update :execution/errors conj
-                            {:type :pipeline-exception
-                             :message (ex-message e)
-                             :data (ex-data e)})
-                    (assoc :execution/status :failed))))
-
-            ;; Validate completed workflows produced results
-            final-ctx (if (and (phase/succeeded? final-ctx)
-                               (empty? (:execution/artifacts final-ctx))
-                               (empty? (:execution/phase-results final-ctx)))
-                        (-> final-ctx
-                            (update :execution/errors conj
-                                    {:type :empty-completion
-                                     :message (messages/t :status/empty-completion)})
-                            (assoc :execution/status :completed-with-warnings))
-                        final-ctx)
-            ;; Extract output and publish workflow completed event
-            output-ctx (extract-output final-ctx)]
-        (vreset! output-ctx-vol output-ctx)
-        (when-not skip-lifecycle?
-          (publish-workflow-completed! event-stream output-ctx))
-
-        output-ctx)
+     (try
+       (let [final-ctx (try
+                         (execute-pipeline-loop pipeline initial-ctx callbacks
+                                               control-state max-phases)
+                         (catch Exception e
+                           (vreset! exception-vol e)
+                           (-> initial-ctx
+                               (update :execution/errors conj
+                                       {:type :pipeline-exception
+                                        :message (ex-message e)
+                                        :data (ex-data e)})
+                               (assoc :execution/status :failed))))
+             output-ctx (-> final-ctx validate-completion extract-output)]
+         (vreset! output-ctx-vol output-ctx)
+         (when-not skip-lifecycle?
+           (publish-workflow-completed! event-stream output-ctx))
+         output-ctx)
        (finally
-         ;; Post-workflow: feed signals to operator for pattern analysis.
-         ;; Fires on ALL exit paths — success, failure, and uncaught exception —
-         ;; because failed workflows are the most valuable signal for diagnosis.
-         (try
-           (observe-workflow-signal! opts @output-ctx-vol workflow @exception-vol)
-           (catch Exception _e nil))
-
-         ;; Post-workflow: synthesize recurring patterns into meta-loop learnings
-         (try
-           (synthesize-patterns! (:knowledge-store opts))
-           (catch Exception _e nil))
-
-         ;; Post-workflow: auto-promote high-confidence learnings
-         (try
-           (promote-mature-learnings! (:knowledge-store opts))
-           (catch Exception _e nil))
-
-         (when acquired-env
-           (release-execution-environment! (:executor acquired-env)
-                                           (:environment-id acquired-env))
-           ;; Governed mode acquires a separate host worktree — release it too.
-           ;; release-execution-environment! is nil-safe, so this is a no-op
-           ;; when :worktree-executor / :worktree-environment-id are absent (local mode).
-           (release-execution-environment! (:worktree-executor acquired-env)
-                                           (:worktree-environment-id acquired-env)))))))))
+         (post-workflow-cleanup! opts @output-ctx-vol workflow
+                                @exception-vol acquired-env))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
