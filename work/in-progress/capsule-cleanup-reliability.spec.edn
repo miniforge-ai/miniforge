@@ -27,4 +27,4 @@
   "No lingering containers after pipeline timeout"
   "docker ps --filter name=miniforge-task returns empty after any run"]
 
- :workflow/type :canonical-sdlc}
+ :spec/workflow-type :canonical-sdlc}

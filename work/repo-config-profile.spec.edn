@@ -65,7 +65,7 @@
   "Profile tokens are validated on save (gh auth status / glab auth status)"
   "Repo config supports :repo/agent for agent CLI selection"]
 
- :workflow/type :canonical-sdlc
+ :spec/workflow-type :canonical-sdlc
 
  :plan/tasks
  [{:task/id :profile-schema-and-reader

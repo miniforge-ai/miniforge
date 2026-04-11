@@ -56,7 +56,7 @@
   "All existing tests must pass after refactor"
   "MCP artifact server can be removed once environment promotion works"]
 
- :workflow/type :standard-sdlc
+ :spec/workflow-type :canonical-sdlc
  :workflow/version "2.0.0"
 
  ;; -------------------------------------------------------------------------

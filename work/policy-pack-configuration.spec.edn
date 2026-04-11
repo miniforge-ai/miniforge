@@ -86,7 +86,7 @@
   "An absent .miniforge/config.edn is not an error — silently treated as {}"
   "agent-behavior.clj must remain fail-safe — exceptions cannot bubble up to the agent"]
 
- :workflow/type :standard-sdlc
+ :spec/workflow-type :canonical-sdlc
  :workflow/version "2.0.0"
 
  :tasks

@@ -22,7 +22,7 @@
   "PR doc filename: YYYY-MM-DD-<slug>.md"
   "Pre-commit hooks must pass"]
 
- :workflow/type :standard-sdlc
+ :spec/workflow-type :canonical-sdlc
  :workflow/version "2.0.0"
 
  :plan/tasks

@@ -26,7 +26,7 @@
                "Do not change agent component — it already accepts on-chunk"
                "Use requiring-resolve for optional event-stream dependency"
                "Preserve backward compatibility with existing WebSocket consumers"]
- :workflow/type :standard-sdlc
+ :spec/workflow-type :canonical-sdlc
  :workflow/version "2.0.0"
 
  ;; ---------------------------------------------------------------------------

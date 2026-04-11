@@ -49,7 +49,7 @@
   "All existing control plane tests continue to pass"
   "New integration tests cover decision delivery round-trip and event emission"]
 
- :workflow/type :standard-sdlc
+ :spec/workflow-type :canonical-sdlc
  :workflow/version "2.0.0"
 
  :plan/tasks

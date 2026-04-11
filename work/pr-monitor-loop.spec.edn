@@ -2,7 +2,7 @@
  :spec/version "0.1.0"
  :spec/created "2026-03-30"
  :spec/status "active"
- :workflow/type :standard-sdlc
+ :spec/workflow-type :canonical-sdlc
 
  :spec/title "PR Monitor Loop: Autonomous Comment Resolution and Change Iteration"
 

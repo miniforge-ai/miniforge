@@ -58,7 +58,7 @@
   "Phase behavior must be identical before and after (same rules in agent context)"
   "The knowledge store (zettels) may remain as a caching layer if needed; removing it is out of scope"]
 
- :workflow/type :standard-sdlc
+ :spec/workflow-type :canonical-sdlc
  :workflow/version "2.0.0"
 
  :tasks

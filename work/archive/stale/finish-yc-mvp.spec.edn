@@ -52,7 +52,7 @@
   "Keep docs and runbook in-repo and versioned"
   "A single operator must be able to run demo start-to-finish"]
 
- :workflow/type :standard-sdlc
+ :spec/workflow-type :canonical-sdlc
  :workflow/version "2.0.0"
 
  :plan/tasks

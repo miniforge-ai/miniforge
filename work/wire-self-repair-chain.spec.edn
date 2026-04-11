@@ -58,7 +58,7 @@
   "Add tests for each connection point — no silent regressions"
   "Prefer additive changes over rewrites of existing components"]
 
- :workflow/type :standard-sdlc
+ :spec/workflow-type :canonical-sdlc
  :workflow/version "2.0.0"
 
  :plan/tasks

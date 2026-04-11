@@ -39,7 +39,7 @@
   "Do not change any test files in PR A or B — test files are not the target here"
   "Do not introduce new raw strings while fixing existing ones"]
 
- :workflow/type :standard-sdlc
+ :spec/workflow-type :canonical-sdlc
  :workflow/version "2.0.0"
 
  :tasks

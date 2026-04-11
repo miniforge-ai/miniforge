@@ -37,4 +37,4 @@
   "DAG sub-workflows respect timeout budget"
   "Local mode is unaffected"]
 
- :workflow/type :canonical-sdlc}
+ :spec/workflow-type :canonical-sdlc}
