@@ -33,12 +33,9 @@
    :none   {:tl \space :tr \space :bl \space :br \space
             :h \space :v \space :lt \space :rt \space :tt \space :bt \space}})
 
-(defn truncate-str
-  "Truncate string to max-width, adding ellipsis if truncated."
-  [s max-width]
-  (if (<= (count s) max-width)
-    s
-    (str (subs s 0 (max 0 (- max-width 1))) "…")))
+;; Re-use text utility from the buffer module.
+(def ^{:private true :doc "Truncate string to max-width, adding ellipsis if truncated."}
+  truncate-str buf/truncate-str)
 
 (defn box
   "Render a bordered box.

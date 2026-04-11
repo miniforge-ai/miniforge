@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/decision {:local/root "../decision"}}
+ :deps {ai.miniforge/decision {:local/root "../decision"}
+        ai.miniforge/messages {:local/root "../messages"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner

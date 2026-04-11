@@ -191,6 +191,50 @@
       nil)))
 
 ;------------------------------------------------------------------------------ Backend configurations
+;; Named argument builders — extracted from the backends config map for clarity.
+
+(defn- claude-args
+  "Build CLI arguments for the Claude backend."
+  [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools
+           disallowed-tools supervision budget-usd max-turns model resume]}]
+  (let [budget (or budget-usd
+                   (when max-tokens default-claude-cli-budget-usd))]
+    (cond-> ["-p"]
+      streaming?                   (conj "--output-format" "stream-json")
+      streaming?                   (conj "--verbose")
+      mcp-config                   (into ["--mcp-config" mcp-config])
+      (seq mcp-allowed-tools)      (into ["--allowedTools" (str/join "," mcp-allowed-tools)])
+      (seq disallowed-tools)       (into ["--disallowedTools" (str/join "," disallowed-tools)])
+      (:settings-path supervision) (into ["--settings" (:settings-path supervision)])
+      system                       (into ["--system-prompt" system])
+      budget                       (into ["--max-budget-usd" (str budget)])
+      max-turns                    (into ["--max-turns" (str max-turns)])
+      model                        (into ["--model" model])
+      resume                       (into ["--resume" resume])
+      true                         (conj prompt))))
+
+(defn- codex-args
+  "Build CLI arguments for the Codex backend."
+  [{:keys [prompt model system]}]
+  (cond-> ["exec"
+           "--json"
+           "--full-auto"
+           "--skip-git-repo-check"]
+    model  (into ["-m" model])
+    system (into ["-c" (str "system_prompt=" (json/generate-string system))])
+    true   (conj prompt)))
+
+(defn- cursor-args
+  "Build CLI arguments for the Cursor backend."
+  [{:keys [prompt mcp-allowed-tools]}]
+  (cond-> ["-p"]
+    (seq mcp-allowed-tools) (conj "--approve-mcps")
+    true (conj prompt)))
+
+(defn- echo-args
+  "Build CLI arguments for the echo (test) backend."
+  [{:keys [prompt]}]
+  [prompt])
 
 (def backends
   {:claude {:cmd "claude"
@@ -200,22 +244,7 @@
             :requires-cli? true
             :api-key-var "ANTHROPIC_API_KEY"
             :stream-parser parse-claude-stream-line
-            :args-fn (fn [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools disallowed-tools supervision budget-usd max-turns model resume]}]
-                       (let [budget (or budget-usd
-                                        (when max-tokens default-claude-cli-budget-usd))]
-                         (cond-> ["-p"]
-                           streaming?                   (conj "--output-format" "stream-json")
-                           streaming?                   (conj "--verbose")
-                           mcp-config                   (into ["--mcp-config" mcp-config])
-                           (seq mcp-allowed-tools)      (into ["--allowedTools" (str/join "," mcp-allowed-tools)])
-                           (seq disallowed-tools)       (into ["--disallowedTools" (str/join "," disallowed-tools)])
-                           (:settings-path supervision) (into ["--settings" (:settings-path supervision)])
-                           system                       (into ["--system-prompt" system])
-                           budget                       (into ["--max-budget-usd" (str budget)])
-                           max-turns                    (into ["--max-turns" (str max-turns)])
-                           model                        (into ["--model" model])
-                           resume                       (into ["--resume" resume])
-                           true                         (conj prompt))))}
+            :args-fn claude-args}
 
    :codex {:cmd "codex"
            :streaming? true
@@ -224,14 +253,7 @@
            :requires-cli? true
            :api-key-var nil
            :stream-parser parse-codex-stream-line
-           :args-fn (fn [{:keys [prompt model system]}]
-                      (cond-> ["exec"
-                               "--json"
-                               "--full-auto"
-                               "--skip-git-repo-check"]
-                        model  (into ["-m" model])
-                        system (into ["-c" (str "system_prompt=" (json/generate-string system))])
-                        true   (conj prompt)))}
+           :args-fn codex-args}
 
    :openai {:cmd "http"
             :streaming? true
@@ -259,10 +281,7 @@
             :provider "Cursor"
             :requires-cli? true
             :api-key-var nil
-            :args-fn (fn [{:keys [prompt mcp-allowed-tools]}]
-                       (cond-> ["-p"]
-                         (seq mcp-allowed-tools) (conj "--approve-mcps")
-                         true (conj prompt)))}
+            :args-fn cursor-args}
 
    :echo {:cmd "echo"
           :streaming? false
@@ -270,8 +289,7 @@
           :provider "Test"
           :requires-cli? false
           :api-key-var nil
-          :args-fn (fn [{:keys [prompt]}]
-                     [prompt])}})
+          :args-fn echo-args}})
 
 (defn build-messages-prompt [messages]
   (->> messages

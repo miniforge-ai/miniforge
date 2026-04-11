@@ -25,7 +25,8 @@
    Layer 2: Escalation integration with inner loop"
   (:require
    [clojure.string :as str]
-   [ai.miniforge.decision.interface :as decision]))
+   [ai.miniforge.decision.interface :as decision]
+   [ai.miniforge.loop.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Prompt formatting (pure functions)
@@ -53,19 +54,19 @@
    
    Returns formatted string."
   [errors iteration artifact]
-  (str "After " iteration " attempts, validation failed:\n\n"
-       "Errors:\n"
+  (str (messages/t :escalation/context-header {:iteration iteration}) "\n\n"
+       (messages/t :escalation/errors-label) "\n"
        (str/join "\n"
          (map-indexed format-error-entry errors))
        "\n\n"
-       "Last attempt:\n"
+       (messages/t :escalation/last-attempt-label) "\n"
        (if-let [content (:artifact/content artifact)]
          (let [preview (if (string? content)
                          (subs content 0 (min 200 (count content)))
                          (pr-str content))]
            (str "  " preview
                 (when (> (count (str content)) 200) "...")))
-         "  (no content)")))
+         (str "  " (messages/t :escalation/no-content)))))
 
 (defn format-escalation-prompt
   "Format the escalation prompt for user.
@@ -80,17 +81,17 @@
         artifact (:loop/artifact loop-state)
         reason (get-in loop-state [:loop/termination :reason])]
     (str "\n"
-         "=================================================================\n"
-         "AGENT ESCALATION\n"
-         "=================================================================\n\n"
+         (messages/t :escalation/banner-separator) "\n"
+         (messages/t :escalation/banner-title) "\n"
+         (messages/t :escalation/banner-separator) "\n\n"
          (format-error-context errors iteration artifact)
          "\n\n"
-         "Termination reason: " (name reason) "\n"
-         "\nOptions:\n"
-         "  1. Provide hints to help the agent (enter text)\n"
-         "  2. Abort this task (type 'abort')\n"
+         (messages/t :escalation/termination-reason {:reason (name reason)}) "\n"
+         "\n" (messages/t :escalation/options-header) "\n"
+         (messages/t :escalation/option-hints) "\n"
+         (messages/t :escalation/option-abort) "\n"
          "\n"
-         "Your input: ")))
+         (messages/t :escalation/input-prompt))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; User interaction

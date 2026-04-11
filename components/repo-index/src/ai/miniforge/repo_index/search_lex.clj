@@ -227,9 +227,9 @@
      [{:path :score :snippets [{:start-line :end-line :text}]}]"
   ([search-index query] (search search-index query {}))
   ([search-index query opts]
-   (let [max-results (or (:max-results opts) (default-max-results))
-         ctx-lines (or (:context-lines opts) (default-context-lines))
-         max-hits (or (:max-hits opts) (default-max-hits))
+   (let [max-results (get opts :max-results (default-max-results))
+         ctx-lines (get opts :context-lines (default-context-lines))
+         max-hits (get opts :max-hits (default-max-hits))
          query-terms (tokenize query)
          candidates (collect-candidates search-index query-terms)
          scored (score-and-rank search-index candidates query-terms max-results)]

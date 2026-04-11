@@ -26,21 +26,13 @@
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Table
+;; Re-use text utilities from the buffer module.
 
-(defn truncate-str
-  "Truncate string to max-width, adding ellipsis if truncated."
-  [s max-width]
-  (if (<= (count s) max-width)
-    s
-    (str (subs s 0 (max 0 (- max-width 1))) "…")))
+(def ^{:private true :doc "Truncate string to max-width, adding ellipsis if truncated."}
+  truncate-str buf/truncate-str)
 
-(defn pad-right
-  "Pad string to width with spaces."
-  [s width]
-  (let [s (or s "")]
-    (if (>= (count s) width)
-      (subs s 0 width)
-      (str s (apply str (repeat (- width (count s)) \space))))))
+(def ^{:private true :doc "Pad string to width with spaces."}
+  pad-right buf/pad-right)
 
 (def col-gap
   "Space between adjacent columns."
