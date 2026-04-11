@@ -1,0 +1,33 @@
+[package]
+name = "miniforge-event-client"
+version = "0.1.0"
+edition = "2021"
+description = "Event stream client for miniforge — watches ~/.miniforge/events/ for EDN event files, parses them into typed events, and emits them to a tokio mpsc channel."
+license = "MIT"
+
+[[bin]]
+name = "event-client"
+path = "src/main.rs"
+
+[lib]
+name = "event_client"
+path = "src/lib.rs"
+
+[dependencies]
+# File-system event watching (cross-platform, native backend)
+notify = "6.1"
+# Async runtime for the channel and background tasks
+tokio = { version = "1", features = ["full"] }
+# EDN parsing for Clojure-style event files
+edn-rs = "0.17"
+# Ergonomic error propagation
+anyhow = "1"
+thiserror = "1"
+# Structured logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Home-directory resolution (~/.miniforge/events/)
+dirs = "5"
+
+[dev-dependencies]
+tempfile = "3"
