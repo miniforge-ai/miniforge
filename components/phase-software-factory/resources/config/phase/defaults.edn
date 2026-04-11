@@ -2,7 +2,7 @@
  {;; Implementation phase defaults.
   :implement
   {:agent :implementer
-   :gates [:syntax :lint]
+   :gates [:syntax :format :lint]
    :budget {:tokens 30000
             :iterations 8
             :time-seconds 600}
