@@ -25,7 +25,8 @@
    - Health monitoring (monitoring namespace)
 
    Provides the main run-pipeline entry point."
-  (:require [ai.miniforge.dag-executor.executor :as dag-exec]
+  (:require [clojure.string :as str]
+            [ai.miniforge.dag-executor.executor :as dag-exec]
             [ai.miniforge.dag-executor.result :as dag-result]
             [ai.miniforge.llm.protocols.impl.llm-client :as llm-impl]
             [ai.miniforge.logging.interface :as log]
@@ -487,6 +488,86 @@
              image-digest
              (assoc :evidence/image-digest image-digest)))))
 
+;------------------------------------------------------------------------------ Layer 1.6: Capsule artifact export (N11 §4.3)
+
+(defn- create-staging-dir!
+  "Create a temp directory for exported artifacts."
+  []
+  (str (java.nio.file.Files/createTempDirectory
+        "miniforge-artifacts-"
+        (into-array java.nio.file.attribute.FileAttribute []))))
+
+(defn- export-single-artifact!
+  "Copy one artifact from capsule to staging dir via copy-from!.
+   Returns artifact map with :exported? and :local-path or :export-error."
+  [executor env-id staging-dir artifact]
+  (try
+    (let [remote-path (:path artifact)
+          local-path (str staging-dir "/" (last (str/split remote-path #"/")))
+          result (dag-exec/copy-from! executor env-id remote-path local-path)]
+      (if (and (map? result) (get result :ok? true))
+        (assoc artifact :exported? true :local-path local-path)
+        (assoc artifact :exported? false :export-error "copy-from! failed")))
+    (catch Exception e
+      (assoc artifact :exported? false :export-error (.getMessage e)))))
+
+(defn- export-capsule-artifacts!
+  "Export declared artifacts from capsule before DESTROY (N11 §4.3, §9.2).
+   No-op in local mode or when no artifact manifest exists.
+   Throws on missing required artifacts."
+  [ctx]
+  (let [executor (:execution/executor ctx)
+        env-id (:execution/environment-id ctx)
+        manifest (:execution/artifact-manifest ctx)
+        governed? (= :governed (:execution/mode ctx))]
+    (if (or (not governed?) (nil? executor) (nil? env-id) (empty? manifest))
+      ctx
+      (let [staging-dir (create-staging-dir!)
+            exported (mapv #(export-single-artifact! executor env-id staging-dir %) manifest)
+            required-missing (->> exported
+                                  (filter :artifact/required?)
+                                  (remove :exported?))]
+        (when (seq required-missing)
+          (throw (ex-info "Required artifacts missing from capsule"
+                          {:type :required-artifacts-missing
+                           :missing (mapv :path required-missing)})))
+        (assoc ctx
+               :execution/exported-artifacts exported
+               :execution/artifact-staging-dir staging-dir)))))
+
+;------------------------------------------------------------------------------ Layer 1.7: Pipeline timeout enforcement (N11 §2.2)
+
+(def ^:private default-pipeline-timeout-ms
+  "Default pipeline timeout: 30 minutes."
+  (* 30 60 1000))
+
+(defn- resolve-pipeline-timeout-ms
+  "Read timeout from workflow config or use default. Only applies in governed mode."
+  [workflow opts]
+  (or (when-let [secs (get-in workflow [:workflow/config :budget :time-seconds])]
+        (* secs 1000))
+      (get opts :timeout-ms)
+      default-pipeline-timeout-ms))
+
+(defn- run-with-timeout
+  "Wrap a function in a future with timeout. Returns result or :timeout failure.
+   Kills the capsule on timeout."
+  [f timeout-ms executor env-id]
+  (let [fut (future (f))
+        result (deref fut timeout-ms ::timeout)]
+    (if (= ::timeout result)
+      (do
+        (when (and executor env-id)
+          (try
+            (release-execution-environment! executor env-id)
+            (catch Exception _ nil)))
+        (future-cancel fut)
+        {:execution/status :failed
+         :execution/errors [{:type :timeout
+                             :message (str "Pipeline exceeded timeout of "
+                                           (long (/ timeout-ms 60000)) " minutes")}]})
+      result)))
+
 ;------------------------------------------------------------------------------ Layer 1.75: Post-execution hooks
 
 (defn promote-mature-learnings!
@@ -640,13 +721,15 @@
        (publish-workflow-started! event-stream initial-ctx))
 
      (try
-      (let [final-ctx
-           (try
-             (if (empty? pipeline)
-               (handle-empty-pipeline initial-ctx)
+      (let [timeout-ms (when governed?
+                         (resolve-pipeline-timeout-ms workflow opts))
+            run-pipeline-loop
+            (fn []
+              (if (empty? pipeline)
+                (handle-empty-pipeline initial-ctx)
 
-               ;; Execute pipeline loop
-               (loop [context initial-ctx
+                ;; Execute pipeline loop
+                (loop [context initial-ctx
                       iteration 0]
                  (cond
                    ;; Terminal state reached
@@ -660,14 +743,20 @@
                    ;; Execute next iteration: health check -> phase -> cleanup
                    :else
                    (recur (execute-single-iteration pipeline context callbacks iteration control-state)
-                          (inc iteration)))))
-             (catch Exception e
-               (-> initial-ctx
-                   (update :execution/errors conj
-                           {:type :pipeline-exception
-                            :message (ex-message e)
-                            :data (ex-data e)})
-                   (assoc :execution/status :failed))))
+                          (inc iteration))))))
+            final-ctx
+            (try
+              (if timeout-ms
+                (run-with-timeout run-pipeline-loop timeout-ms
+                                  (get opts :executor) (get opts :environment-id))
+                (run-pipeline-loop))
+              (catch Exception e
+                (-> initial-ctx
+                    (update :execution/errors conj
+                            {:type :pipeline-exception
+                             :message (ex-message e)
+                             :data (ex-data e)})
+                    (assoc :execution/status :failed))))
 
            ;; Validate completed workflows produced results
            final-ctx (if (and (phase/succeeded? final-ctx)
@@ -679,6 +768,15 @@
                                     :message (messages/t :status/empty-completion)})
                            (assoc :execution/status :completed-with-warnings))
                        final-ctx)
+           ;; Export artifacts from capsule before teardown (N11 §4.3)
+           final-ctx (try
+                       (export-capsule-artifacts! final-ctx)
+                       (catch Exception e
+                         (-> final-ctx
+                             (update :execution/errors conj
+                                     {:type :artifact-export-failed
+                                      :message (ex-message e)})
+                             (assoc :execution/status :failed))))
            ;; Extract output and publish workflow completed event
            output-ctx (extract-output final-ctx)]
        (when-not skip-lifecycle?
