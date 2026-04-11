@@ -12,28 +12,27 @@
  :spec/type :work-spec
  :spec/depends-on ["N5-delta-2-meta-control-plane-v1"]
 
- :title "Control Console Phase 0 — Rust Core + TUI"
+ :spec/title "Control Console Phase 0 — Rust Core + TUI"
 
- :problem
+ :spec/description
  "Miniforge needs a control surface that is not the Clojure TUI (JVM startup,
   limited rendering, dual-model risk) and not the web dashboard (high latency,
   OBSERVE-only). The architecture is Rust core + platform renderers (Thesium
   pattern). Phase 0 builds the Rust core and a ratatui terminal renderer,
   shipping a single binary (miniforge-console) that replaces the Clojure TUI."
 
- :architecture
- "miniforge-control/
-    Cargo.toml                     workspace root
-    crates/
-      contracts/                   supervisory entity types (serde structs)
-      state/                       state manager + projection builders
-      event-client/                subscribe to miniforge event stream
-      ffi/                         C-ABI facade (for future native shells)
-      tui/                         ratatui monitor (binary target)
+ :spec/intent
+ {:type :feature
+  :scope ["miniforge-control/"]}
 
-  The tui crate uses state/ and event-client/ as direct dependencies
-  (in-process, no FFI). ffi/ exists so the native app (Phase 1) can
-  load the core as a dylib — but Phase 0 only validates that it compiles."
+ :spec/constraints
+ ["Rust workspace with 5 crates: contracts, state, event-client, ffi, tui"
+  "Event client subscribes to ~/.miniforge/events/ via file watching"
+  "State manager computes projections: workflow ticker, agent sessions, PR fleet, attention"
+  "TUI renders via ratatui + crossterm, responsive at 60/80/120+ columns"
+  "FFI facade exports C-ABI symbols for future native app (Phase 1)"
+  "Single binary: miniforge-console ships Rust core + TUI renderer"
+  "Architecture: miniforge-control/ with crates/ for contracts, state, event-client, ffi, tui"]
 
  :plan/tasks
 
@@ -99,5 +98,5 @@
   "--headless mode prints JSON projections to stdout"
   "FFI symbols export and basic dispatch round-trips JSON"]
 
- :workflow/type :standard-sdlc
+ :workflow/type :canonical-sdlc
  :workflow/version "2.0.0"}
