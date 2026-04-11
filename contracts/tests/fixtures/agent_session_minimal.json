@@ -1,0 +1,9 @@
+{
+  "agent/id": "a7b8c9d0-e1f2-4345-abcd-456789012345",
+  "agent/vendor": "claude-code",
+  "agent/external-id": "session-minimal",
+  "agent/name": "Idle Agent",
+  "agent/status": "idle",
+  "agent/registered-at": "2026-04-10T12:00:00Z",
+  "agent/last-heartbeat": "2026-04-10T12:00:00Z"
+}

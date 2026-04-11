@@ -1,0 +1,21 @@
+{
+  "agent/id": "f6a7b8c9-d0e1-4234-fabc-345678901234",
+  "agent/vendor": "claude-code",
+  "agent/external-id": "session-2026-04-10-alpha",
+  "agent/name": "PR Review Agent",
+  "agent/status": "executing",
+  "agent/registered-at": "2026-04-10T08:00:00Z",
+  "agent/last-heartbeat": "2026-04-10T10:25:00Z",
+  "agent/capabilities": ["code", "test", "review"],
+  "agent/heartbeat-interval-ms": 30000,
+  "agent/tags": ["pr-review", "team-alpha"],
+  "agent/task": "Reviewing PR #42 — checking test coverage",
+  "agent/metrics": {
+    "tokens-used": 45200,
+    "cost-usd": 0.135,
+    "iterations": 3
+  },
+  "agent/decisions": [
+    {"type": "approve", "target": "PR #42", "reason": "All checks pass"}
+  ]
+}

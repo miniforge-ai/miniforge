@@ -1,0 +1,9 @@
+{
+  "eval/id": "b2c3d4e5-f6a7-4890-bcde-f01234567890",
+  "eval/pr-id": "miniforge/ai#42",
+  "eval/result": "pass",
+  "eval/rules-applied": ["no-force-push", "require-tests", "require-review"],
+  "eval/evaluated-at": "2026-04-10T10:15:00Z",
+  "policy-eval/passed?": true,
+  "policy-eval/packs-applied": ["security-v2", "quality-standard"]
+}

@@ -1,0 +1,17 @@
+{
+  "eval/id": "c3d4e5f6-a7b8-4901-cdef-012345678901",
+  "eval/pr-id": "miniforge/ai#43",
+  "eval/result": "fail",
+  "eval/rules-applied": ["no-force-push", "require-tests", "coverage-threshold"],
+  "eval/evaluated-at": "2026-04-10T10:20:00Z",
+  "policy-eval/passed?": false,
+  "policy-eval/violations": [
+    {
+      "violation/id": "d4e5f6a7-b8c9-4012-defa-123456789012",
+      "violation/rule": "coverage-threshold",
+      "violation/category": "testing",
+      "violation/severity": "high",
+      "violation/message": "Coverage dropped below 80%"
+    }
+  ]
+}

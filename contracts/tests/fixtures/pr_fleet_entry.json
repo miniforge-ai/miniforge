@@ -1,0 +1,10 @@
+{
+  "pr/title": "Add OAuth2 authentication flow",
+  "pr/repo": "miniforge/ai",
+  "pr/number": 42,
+  "pr/readiness": 0.85,
+  "pr/risk": "medium",
+  "pr/status": "open",
+  "pr/ci-status": "passed",
+  "pr/depends-on": ["miniforge/ai#41"]
+}

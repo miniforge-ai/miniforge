@@ -1,0 +1,10 @@
+{
+  "attention/id": "e5f6a7b8-c9d0-4123-efab-234567890123",
+  "attention/severity": "high",
+  "attention/summary": "PR #43 has unresolved policy violations blocking merge",
+  "attention/source-type": "policy",
+  "attention/source-id": "c3d4e5f6-a7b8-4901-cdef-012345678901",
+  "attention/derived-at": "2026-04-10T10:21:00Z",
+  "attention/resolved?": false,
+  "attention/acknowledged?": false
+}
