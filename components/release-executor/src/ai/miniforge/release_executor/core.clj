@@ -244,6 +244,78 @@
               "**Branch:** `" branch "`\n\n"))
        (or pr-description "") "\n"))
 
+(defn- format-files-changed
+  "Format a list of files changed from code artifacts as a markdown bullet list."
+  [code-artifacts]
+  (let [files (mapcat :code/files code-artifacts)]
+    (if (seq files)
+      (str/join "\n" (map #(str "- `" (:path %) "` (" (name (get % :action :create)) ")") files))
+      "_No file changes recorded._")))
+
+(defn- format-test-results
+  "Format test results from test artifacts as markdown.
+   Extracts result status, pass/fail counts, and summary text."
+  [test-artifacts]
+  (if (seq test-artifacts)
+    (let [latest (last test-artifacts)
+          results (:test/results latest)
+          summary (:test/summary latest)
+          total (:test/total latest)
+          passed (:test/passed latest)
+          failed (:test/failed latest)]
+      (str (when results
+             (str "**Result**: " (name results) "\n"))
+           (when (and total passed)
+             (str "**Passed**: " passed "/" total
+                  (when (and failed (pos? failed))
+                    (str " (" failed " failed)"))
+                  "\n"))
+           (when (and summary (not (str/blank? summary)))
+             (str "\n" summary))))
+    "_No test artifacts available._"))
+
+(defn- format-review-decision
+  "Format review decision and summary from review artifacts as markdown."
+  [review-artifacts]
+  (if (seq review-artifacts)
+    (let [latest (last review-artifacts)
+          decision (:review/decision latest)
+          summary (:review/summary latest)]
+      (str (when decision
+             (str "**Decision**: " (name decision) "\n"))
+           (when (and summary (not (str/blank? summary)))
+             (str "\n" summary))))
+    "_No review artifacts available._"))
+
+(defn- render-pr-doc-full
+  "Render a comprehensive docs/pull-requests/ markdown file.
+   Includes: title, summary, files changed, test results, review decision."
+  [release-meta state-info code-artifacts workflow-data]
+  (let [{:keys [release/pr-title release/pr-description release/commit-message]} release-meta
+        {:keys [pr-number pr-url branch]} state-info
+        review-artifacts (:review-artifacts workflow-data)
+        test-artifacts (:test-artifacts workflow-data)
+        files-md (format-files-changed code-artifacts)
+        tests-md (format-test-results test-artifacts)
+        review-md (format-review-decision review-artifacts)]
+    (str "<!--\n"
+         "  Title: Miniforge.ai\n"
+         "  Author: Christopher Lester (christopher@miniforge.ai)\n"
+         "  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.\n"
+         "-->\n\n"
+         "# " (or commit-message pr-title "Release") "\n\n"
+         (when pr-url
+           (str "**PR:** [#" pr-number "](" pr-url ")\n"
+                "**Branch:** `" branch "`\n\n"))
+         "## Summary\n\n"
+         (or pr-description "_No summary available._") "\n\n"
+         "## Files Changed\n\n"
+         files-md "\n\n"
+         "## Test Results\n\n"
+         tests-md "\n\n"
+         "## Review Decision\n\n"
+         review-md "\n")))
+
 (defn step-write-pr-doc
   "Write a docs/pull-requests/ markdown file, stage it, and amend the commit.
    Runs after step-create-pr so PR number/URL are available.
@@ -317,6 +389,54 @@
             (log/warn logger :release-executor :pr-body-update-failed
                       {:message (.getMessage e)}))
           ;; Non-fatal: PR exists, just has the original body
+          state)))))
+
+(defn step-generate-pr-doc
+  "Generate a comprehensive PR doc at docs/pull-requests/YYYY-MM-DD-<slug>.md.
+   Includes title, summary, files changed, test results, and review decision.
+   Stages the doc and amends the release commit to include it, then
+   force-pushes so the PR branch reflects the amended commit.
+
+   Runs after step-create-pr so PR number/URL are available.
+   Skipped when :create-pr? is false (no PR → no PR doc needed).
+   All I/O routes through the executor so governed-mode capsules never
+   touch the host filesystem."
+  [state]
+  (cond
+    (failed? state) state
+    (not (:create-pr? state)) state
+    :else
+    (let [{:keys [worktree-path release-meta pr-number pr-url branch
+                  executor environment-id logger code-artifacts workflow-data]} state
+          filename (pr-doc-filename (:release/pr-title release-meta))
+          rel-path (str "docs/pull-requests/" filename)
+          full-path (str worktree-path "/" rel-path)
+          content (render-pr-doc-full
+                   release-meta
+                   {:pr-number pr-number :pr-url pr-url :branch branch}
+                   code-artifacts
+                   workflow-data)]
+      (try
+        ;; Write via executor (governed) — never touch host filesystem
+        (sandbox/write-file! executor environment-id full-path content)
+        (when logger
+          (log/info logger :release-executor :pr-doc-generated
+                    {:data {:path rel-path}}))
+        ;; Stage the doc and amend the commit to include it
+        (sandbox/exec! executor environment-id
+                       (str "git add " rel-path))
+        (sandbox/exec! executor environment-id
+                       "git commit --amend --no-edit --no-verify")
+        ;; Force-push since we amended — route through executor with token
+        (sandbox/exec! executor environment-id
+                       "git push --force-with-lease"
+                       (gh-exec-opts state))
+        (assoc state :pr-doc-path rel-path)
+        (catch Exception e
+          (when logger
+            (log/warn logger :release-executor :pr-doc-generation-failed
+                      {:message (.getMessage e)}))
+          ;; Non-fatal: continue pipeline even if doc generation fails
           state)))))
 
 (defn step-build-artifact [state]
@@ -436,7 +556,7 @@
         step-commit
         step-push
         step-create-pr
-        step-write-pr-doc
+        step-generate-pr-doc
         step-update-pr-body
         step-build-artifact
         step-save-artifact

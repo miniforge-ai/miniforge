@@ -492,3 +492,168 @@
   (testing "step-write-pr-doc passes through on failure"
     (let [state {:failure {:type :prior :message "x"}}]
       (is (= state (sut/step-write-pr-doc state))))))
+
+;; ============================================================================
+;; format-files-changed
+;; ============================================================================
+
+(deftest format-files-changed-test
+  (testing "formats code artifact files as markdown bullet list"
+    (let [artifacts [{:code/files [{:path "src/foo.clj" :action :create}
+                                   {:path "src/bar.clj" :action :modify}]}]
+          result (#'sut/format-files-changed artifacts)]
+      (is (str/includes? result "- `src/foo.clj` (create)"))
+      (is (str/includes? result "- `src/bar.clj` (modify)"))))
+
+  (testing "returns placeholder when no files"
+    (let [result (#'sut/format-files-changed [])]
+      (is (str/includes? result "No file changes recorded"))))
+
+  (testing "handles multiple artifacts"
+    (let [artifacts [{:code/files [{:path "a.clj" :action :create}]}
+                     {:code/files [{:path "b.clj" :action :delete}]}]
+          result (#'sut/format-files-changed artifacts)]
+      (is (str/includes? result "- `a.clj` (create)"))
+      (is (str/includes? result "- `b.clj` (delete)")))))
+
+;; ============================================================================
+;; format-test-results
+;; ============================================================================
+
+(deftest format-test-results-test
+  (testing "formats test artifact with result, counts, and summary"
+    (let [artifacts [{:test/results :passed
+                      :test/total 10
+                      :test/passed 10
+                      :test/failed 0
+                      :test/summary "All tests green."}]
+          result (#'sut/format-test-results artifacts)]
+      (is (str/includes? result "**Result**: passed"))
+      (is (str/includes? result "**Passed**: 10/10"))
+      (is (str/includes? result "All tests green."))))
+
+  (testing "includes failed count when failures exist"
+    (let [artifacts [{:test/results :failed
+                      :test/total 10
+                      :test/passed 8
+                      :test/failed 2}]
+          result (#'sut/format-test-results artifacts)]
+      (is (str/includes? result "**Result**: failed"))
+      (is (str/includes? result "8/10"))
+      (is (str/includes? result "2 failed"))))
+
+  (testing "returns placeholder when no test artifacts"
+    (let [result (#'sut/format-test-results [])]
+      (is (str/includes? result "No test artifacts available"))))
+
+  (testing "uses latest artifact when multiple present"
+    (let [artifacts [{:test/results :failed :test/summary "First run"}
+                     {:test/results :passed :test/summary "Retry succeeded"}]
+          result (#'sut/format-test-results artifacts)]
+      (is (str/includes? result "**Result**: passed"))
+      (is (str/includes? result "Retry succeeded")))))
+
+;; ============================================================================
+;; format-review-decision
+;; ============================================================================
+
+(deftest format-review-decision-test
+  (testing "formats review decision and summary"
+    (let [artifacts [{:review/decision :approved
+                      :review/summary "Clean code, well-structured."}]
+          result (#'sut/format-review-decision artifacts)]
+      (is (str/includes? result "**Decision**: approved"))
+      (is (str/includes? result "Clean code, well-structured."))))
+
+  (testing "formats rejected review"
+    (let [artifacts [{:review/decision :rejected
+                      :review/summary "Missing error handling."}]
+          result (#'sut/format-review-decision artifacts)]
+      (is (str/includes? result "**Decision**: rejected"))
+      (is (str/includes? result "Missing error handling."))))
+
+  (testing "returns placeholder when no review artifacts"
+    (let [result (#'sut/format-review-decision [])]
+      (is (str/includes? result "No review artifacts available"))))
+
+  (testing "handles review with decision but no summary"
+    (let [artifacts [{:review/decision :approved}]
+          result (#'sut/format-review-decision artifacts)]
+      (is (str/includes? result "**Decision**: approved"))
+      (is (not (str/includes? result "null"))))))
+
+;; ============================================================================
+;; render-pr-doc-full
+;; ============================================================================
+
+(deftest render-pr-doc-full-test
+  (testing "renders comprehensive doc with all sections"
+    (let [doc (#'sut/render-pr-doc-full
+               {:release/pr-title "feat: add auth"
+                :release/pr-description "Added authentication middleware."
+                :release/commit-message "feat: add auth"}
+               {:pr-number 42
+                :pr-url "https://github.com/org/repo/pull/42"
+                :branch "mf/feat-add-auth"}
+               [{:code/files [{:path "src/auth.clj" :action :create}
+                              {:path "src/middleware.clj" :action :modify}]}]
+               {:review-artifacts [{:review/decision :approved
+                                    :review/summary "Looks good."}]
+                :test-artifacts [{:test/results :passed
+                                  :test/total 5
+                                  :test/passed 5
+                                  :test/failed 0
+                                  :test/summary "All pass."}]})]
+      ;; Header
+      (is (str/includes? doc "Christopher Lester"))
+      (is (str/includes? doc "# feat: add auth"))
+      ;; PR info
+      (is (str/includes? doc "#42"))
+      (is (str/includes? doc "mf/feat-add-auth"))
+      ;; Summary
+      (is (str/includes? doc "## Summary"))
+      (is (str/includes? doc "Added authentication middleware."))
+      ;; Files Changed
+      (is (str/includes? doc "## Files Changed"))
+      (is (str/includes? doc "- `src/auth.clj` (create)"))
+      (is (str/includes? doc "- `src/middleware.clj` (modify)"))
+      ;; Test Results
+      (is (str/includes? doc "## Test Results"))
+      (is (str/includes? doc "**Result**: passed"))
+      (is (str/includes? doc "5/5"))
+      ;; Review Decision
+      (is (str/includes? doc "## Review Decision"))
+      (is (str/includes? doc "**Decision**: approved"))
+      (is (str/includes? doc "Looks good."))))
+
+  (testing "renders with missing optional data"
+    (let [doc (#'sut/render-pr-doc-full
+               {:release/pr-title "fix: bug"
+                :release/commit-message "fix: bug"}
+               {:pr-number nil :pr-url nil :branch nil}
+               []
+               {})]
+      (is (str/includes? doc "# fix: bug"))
+      (is (str/includes? doc "## Summary"))
+      (is (str/includes? doc "No summary available"))
+      (is (str/includes? doc "## Files Changed"))
+      (is (str/includes? doc "No file changes recorded"))
+      (is (str/includes? doc "## Test Results"))
+      (is (str/includes? doc "No test artifacts available"))
+      (is (str/includes? doc "## Review Decision"))
+      (is (str/includes? doc "No review artifacts available")))))
+
+;; ============================================================================
+;; step-generate-pr-doc
+;; ============================================================================
+
+(deftest step-generate-pr-doc-already-failed
+  (testing "already-failed state passes through"
+    (let [state {:failure {:type :prior :message "x"}}]
+      (is (= state (sut/step-generate-pr-doc state))))))
+
+(deftest step-generate-pr-doc-skipped-when-not-creating-pr
+  (testing "skipped when create-pr? is false"
+    (let [state {:create-pr? false}
+          result (sut/step-generate-pr-doc state)]
+      (is (not (sut/failed? result))))))
