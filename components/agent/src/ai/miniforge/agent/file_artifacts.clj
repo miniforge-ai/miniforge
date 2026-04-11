@@ -194,43 +194,59 @@
       (catch Exception _
         nil))))
 
+(defn- read-file-via-executor
+  "Read a file's content from the capsule. Returns empty string on failure."
+  [exec! executor env-id working-dir path]
+  (let [r (exec! executor env-id (str "cat " (pr-str path)) {:workdir working-dir})]
+    (get-in r [:data :stdout] "")))
+
+(defn- read-manifest-via-executor
+  "Read the artifact manifest from the capsule, if present."
+  [exec! executor env-id working-dir]
+  (let [r (exec! executor env-id
+                 (str "cat " (pr-str artifact-manifest-name))
+                 {:workdir working-dir})]
+    (when (and (:ok? r) (zero? (get-in r [:data :exit-code] 1)))
+      (try (-> (get-in r [:data :stdout])
+               edn/read-string
+               (select-keys [:code/summary :code/tests-needed?]))
+           (catch Exception _ nil)))))
+
+(defn- changed-path->file-entry
+  "Build a file entry map for a changed path, reading content via executor."
+  [exec! executor env-id working-dir action path]
+  {:path path
+   :content (if (= :delete action)
+              ""
+              (read-file-via-executor exec! executor env-id working-dir path))
+   :action action})
+
+(defn- changed-paths->file-entries
+  "Convert changed-paths result to a flat vector of file entry maps."
+  [changed exec! executor env-id working-dir]
+  (->> [[:create (:create changed)]
+        [:modify (:modify changed)]
+        [:delete (:delete changed)]]
+       (mapcat (fn [[action paths]]
+                 (map #(changed-path->file-entry exec! executor env-id working-dir action %)
+                      (sort paths))))
+       vec))
+
 (defn collect-written-files-via-executor
   "Like collect-written-files but runs git status inside a capsule via executor.
-
    Reads file contents from the capsule for the synthetic artifact."
   [pre-snapshot exec! executor env-id working-dir]
   (when pre-snapshot
     (try
-      (let [post (snapshot-via-executor exec! executor env-id working-dir)
-            changed (changed-paths pre-snapshot post)
-            files (->> [[:create (:create changed)]
-                        [:modify (:modify changed)]
-                        [:delete (:delete changed)]]
-                       (mapcat (fn [[action paths]]
-                                 (map (fn [path]
-                                        (let [content (if (= :delete action)
-                                                        ""
-                                                        (let [r (exec! executor env-id
-                                                                       (str "cat " (pr-str path))
-                                                                       {:workdir working-dir})]
-                                                          (get-in r [:data :stdout] "")))]
-                                          {:path path :content content :action action}))
-                                      (sort paths))))
-                       vec)]
+      (let [changed (changed-paths pre-snapshot
+                                   (snapshot-via-executor exec! executor env-id working-dir))
+            files (changed-paths->file-entries changed exec! executor env-id working-dir)]
         (when (seq files)
           (merge {:code/files files
                   :code/summary (str (count files)
                                      " files collected from capsule working directory (no MCP submit)")
-                  :code/language "rust"
                   :code/tests-needed? true}
-                 (let [r (exec! executor env-id
-                                (str "cat " (pr-str artifact-manifest-name))
-                                {:workdir working-dir})]
-                   (when (and (:ok? r) (zero? (get-in r [:data :exit-code] 1)))
-                     (try (-> (get-in r [:data :stdout])
-                              edn/read-string
-                              (select-keys [:code/summary :code/tests-needed?]))
-                          (catch Exception _ nil)))))))
+                 (read-manifest-via-executor exec! executor env-id working-dir))))
       (catch Exception _
         nil))))
 
