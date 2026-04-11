@@ -38,6 +38,7 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [babashka.fs :as fs]
+   [babashka.process :as process]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.response.interface :as response]
@@ -50,16 +51,19 @@
 (def ^:dynamic *test-worktree-path* nil)
 
 (defn create-test-worktree
-  "Create a temporary worktree directory for testing."
+  "Create a temporary worktree directory with a real git repo for testing."
   []
   (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")
                           (str "artifact-test-" (random-uuid)))]
     (.mkdirs temp-dir)
-    ;; Initialize minimal git repo
-    (let [git-dir (io/file temp-dir ".git")]
-      (.mkdirs git-dir)
-      (spit (io/file git-dir "config") "[core]\n\trepositoryformatversion = 0")
-      (spit (io/file temp-dir "README.md") "# Test Repository"))
+    ;; Initialize a real git repo so git-dirty-files works in release phase
+    (process/shell {:dir (.getPath temp-dir)} "git init")
+    (process/shell {:dir (.getPath temp-dir)} "git config user.email" "test@example.com")
+    (process/shell {:dir (.getPath temp-dir)} "git config user.name" "Test User")
+    (process/shell {:dir (.getPath temp-dir)} "git config commit.gpgsign" "false")
+    (spit (io/file temp-dir "README.md") "# Test Repository")
+    (process/shell {:dir (.getPath temp-dir)} "git add README.md")
+    (process/shell {:dir (.getPath temp-dir)} "git commit -m" "initial")
     (.getPath temp-dir)))
 
 (defn cleanup-test-worktree
@@ -139,14 +143,16 @@
   "Execute a phase pipeline: plan -> implement -> verify -> release."
   [opts]
   (let [{:keys [implement-agent-fn verify-agent-fn release-opts]} opts
-        
+
         ;; Execute plan phase
         plan-ctx {:execution/id (random-uuid)
                   :execution/input {:description "Test feature"
                                    :title "Add feature"
                                    :intent "testing"}
                   :execution/metrics {:tokens 0 :duration-ms 0}
-                  :execution/phase-results {}}
+                  :execution/phase-results {}
+                  :execution/worktree-path *test-worktree-path*
+                  :execution/environment-id "test-env-001"}
         
         plan-interceptor (phase/get-phase-interceptor {:phase :plan})
         plan-result-ctx (-> plan-ctx
@@ -160,11 +166,20 @@
                                  (:phase plan-result-ctx))
         
         ;; Execute implement phase
+        ;; In the environment model, the agent writes files directly to the worktree.
+        ;; Simulate this by writing mock files before returning the response.
         impl-ctx (assoc plan-result-ctx :phase-config {:phase :implement})
         impl-interceptor (phase/get-phase-interceptor {:phase :implement})
+        write-mock-files! (fn []
+                            (when *test-worktree-path*
+                              (doseq [{:keys [path content]} (:code/files mock-code-artifact)]
+                                (let [f (io/file *test-worktree-path* path)]
+                                  (io/make-parents f)
+                                  (spit f content)))))
         impl-result-ctx (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                                       agent/invoke (or implement-agent-fn
                                                       (fn [_ _ _]
+                                                        (write-mock-files!)
                                                         (response/success mock-code-artifact
                                                                         {:tokens 100 :duration-ms 500})))]
                          (-> impl-ctx
@@ -263,39 +278,30 @@
             "Release result should be success")))))
 
 (deftest test-release-fails-with-zero-files-written
-  (testing "Release phase fails when zero files are written despite artifact having files"
+  (testing "Release phase detects failure when release executor returns error"
     (let [result-ctx (execute-phase-pipeline
                      {:release-opts
                       {:executor
                        (fn [workflow-state _exec-context _opts]
-                         ;; Mock executor that claims success but wrote 0 files
+                         ;; Mock executor that reports failure
                          (let [artifacts (:workflow/artifacts workflow-state)
                                code-artifact (first artifacts)
                                file-count (count (get-in code-artifact [:artifact/content :code/files]))]
-                           (if (pos? file-count)
-                             ;; Artifact has files, but we're simulating write failure
-                             {:success? false
-                              :errors [{:type :persistence-failure
-                                       :message (str "Failed to write " file-count " files from artifact")}]
-                              :metrics {:files-written 0}}
-                             {:success? true
-                              :artifacts []
-                              :metrics {:files-written 0}})))}})]
-      
-      ;; Verify release phase detected the failure
+                           {:success? false
+                            :errors [{:type :persistence-failure
+                                     :message (str "Failed to write " file-count " files from artifact")}]
+                            :metrics {:files-written 0}}))}})]
+
+      ;; Release phase should detect executor failure
       (is (= :failed (get-in result-ctx [:phase :status]))
-          "Phase should be marked failed when release persistence fails")
-      
+          "Phase should be marked failed when release executor fails")
+
       (is (false? (get-in result-ctx [:phase :result :success]))
-          "Result should indicate failure when no files written")
-      
-      ;; Verify no files were actually written
-      (is (not (file-exists-in-worktree? "src/feature.clj"))
-          "No files should exist when write fails"))))
+          "Result should indicate failure when release executor fails"))))
 
 (deftest test-verify-handles-missing-artifact
-  (testing "Verify phase fails fast when no code artifact is available"
-    ;; Create context WITHOUT implement phase result
+  (testing "Verify phase fails fast when no execution environment is available"
+    ;; Create context WITHOUT execution environment — verify should throw
     (let [ctx {:execution/id (random-uuid)
                :execution/input {:description "Test"
                                 :title "Test"
@@ -306,32 +312,34 @@
 
           verify-interceptor (phase/get-phase-interceptor {:phase :verify})]
 
-      (with-redefs [agent/create-tester (fn [_] {:type :mock-tester})
-                    agent/invoke (fn [_agent _task _ctx]
-                                  (response/success {:result :ok} {:tokens 0 :duration-ms 0}))]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"Verify phase received no code artifact"
-                              ((:enter verify-interceptor) ctx))
-            "Verify should throw when no code artifact is available")))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Verify phase has no execution environment"
+                            ((:enter verify-interceptor) ctx))
+          "Verify should throw when no execution environment is available"))))
 
 (deftest test-workflow-empty-artifact-handling
-  (testing "Workflow fails fast when code artifact has zero files"
-    ;; With fail-fast validation, release phase throws on empty :code/files
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Release phase received code artifact with zero files"
-                          (execute-phase-pipeline
-                           {:implement-agent-fn
-                            (fn [_agent _task _ctx]
-                              ;; Implementer returns empty artifact
-                              (response/success mock-empty-artifact {:tokens 50 :duration-ms 300}))
+  (testing "Workflow handles empty implement artifact via environment model"
+    ;; In the environment model, the release phase discovers files from git status
+    ;; rather than from the artifact's :code/files. An empty artifact doesn't cause
+    ;; a release failure if the worktree has any dirty files (e.g. .miniforge/index).
+    ;; The release executor mock returns success since it receives the worktree state.
+    (let [result-ctx (execute-phase-pipeline
+                      {:implement-agent-fn
+                       (fn [_agent _task _ctx]
+                         ;; Implementer returns empty artifact (no code/files)
+                         (response/success mock-empty-artifact {:tokens 50 :duration-ms 300}))
 
-                            :release-opts
-                            {:executor
-                             (fn [_workflow-state _exec-context _opts]
-                               {:success? true
-                                :artifacts []
-                                :metrics {:files-written 0}})}}))
-        "Release should throw when code artifact has empty files")))
+                       :release-opts
+                       {:executor
+                        (fn [_workflow-state _exec-context _opts]
+                          {:success? true
+                           :artifacts []
+                           :metrics {:files-written 0}})}})]
+      ;; The release phase should complete (the executor mock returns success)
+      (is (= :completed (get-in result-ctx [:phase :status]))
+          "Release phase should complete when executor returns success")
+      (is (= :success (get-in result-ctx [:phase :result :status]))
+          "Release result should be success"))))
 
 (deftest test-artifact-content-verification
   (testing "Files written to disk have correct content"
@@ -369,42 +377,45 @@
 
 
 (deftest test-record-phase-artifacts-extracts-nested-output
-  (testing "record-phase-artifacts extracts artifact from [:result :output]"
-    (let [code-output {:code/id (random-uuid)
-                       :code/files [{:path "src/foo.clj" :content "(ns foo)"}]
-                       :code/language "clojure"}
-          phase-result {:name :implement
+  (testing "record-phase-artifacts extracts provenance metadata from :result"
+    (let [phase-result {:name :implement
                         :status :completed
-                        :result {:status :ok
-                                 :output code-output}}
+                        :result {:status :success
+                                 :environment-id "env-001"
+                                 :summary "Implementation complete"
+                                 :metrics {:tokens 100}}}
           ctx {:execution/artifacts []}
           updated (execution/record-phase-artifacts ctx phase-result)]
       (is (= 1 (count (:execution/artifacts updated)))
-          "Should extract one artifact from nested output")
-      (is (= code-output (first (:execution/artifacts updated)))
-          "Artifact should be the output map"))))
+          "Should extract one provenance artifact from result")
+      (is (= {:status :success
+              :environment-id "env-001"
+              :summary "Implementation complete"
+              :metrics {:tokens 100}}
+             (first (:execution/artifacts updated)))
+          "Artifact should contain provenance metadata"))))
 
 (deftest test-record-phase-artifacts-empty-when-no-output
-  (testing "record-phase-artifacts produces empty when no output"
+  (testing "record-phase-artifacts produces empty when result is not a map"
     (let [phase-result {:name :plan
                         :status :completed
-                        :result {:status :ok :output "plain string"}}
+                        :result "plain string"}
           ctx {:execution/artifacts []}
           updated (execution/record-phase-artifacts ctx phase-result)]
       (is (empty? (:execution/artifacts updated))
-          "Should not extract artifact from non-map output"))))
+          "Should not extract artifact from non-map result"))))
 
 (deftest test-track-phase-files-extracts-code-files
-  (testing "track-phase-files extracts :code/files paths from output"
+  (testing "track-phase-files is a no-op in the environment model"
     (let [phase-result {:name :implement
                         :status :completed
-                        :result {:status :ok
-                                 :output {:code/files [{:path "src/a.clj" :content "a"}
-                                                       {:path "src/b.clj" :content "b"}]}}}
+                        :result {:status :success
+                                 :environment-id "env-001"
+                                 :summary "Implementation complete"}}
           ctx {:execution/files-written []}
           updated (execution/track-phase-files ctx phase-result)]
-      (is (= ["src/a.clj" "src/b.clj"] (:execution/files-written updated))
-          "Should extract file paths from :code/files"))))
+      (is (= [] (:execution/files-written updated))
+          "File tracking is a no-op; file discovery happens at release time via git diff"))))
 
 (deftest test-extract-output-includes-artifacts
   (testing "extract-output returns non-empty artifacts after fix"
