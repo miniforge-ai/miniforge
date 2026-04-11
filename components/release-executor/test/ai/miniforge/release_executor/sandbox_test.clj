@@ -275,3 +275,53 @@
       (is (not (:success? result)))
       (is (seq (:errors result))))))
 
+;; ============================================================================
+;; push-branch! HTTPS fallback tests
+;; ============================================================================
+
+(deftest push-branch-success-test
+  (testing "push-branch! succeeds on first try without fallback"
+    (let [[exec cmds] (create-mock-executor
+                       :responses {"git push" {:exit-code 0 :stdout "" :stderr ""}})]
+      (sandbox/push-branch! exec "env-1" "feat/test" {:env {"GH_TOKEN" "tok123"}})
+      (is (= 1 (count @cmds)))
+      (is (clojure.string/includes? (first @cmds) "git push")))))
+
+(deftest push-branch-ssh-fail-https-fallback-test
+  (testing "push-branch! retries with HTTPS when SSH push fails"
+    (let [push-count (atom 0)
+          cmds (atom [])
+          tracking-exec (reify
+                            dag/TaskExecutor
+                            (executor-type [_] :mock)
+                            (available? [_] (dag/ok {:available? true}))
+                            (acquire-environment! [_ _ _] (dag/ok {}))
+                            (execute! [_ _env-id command _opts]
+                              (swap! cmds conj command)
+                              (if (clojure.string/includes? (str command) "git push")
+                                (let [n (swap! push-count inc)]
+                                  (if (= n 1)
+                                    (dag/ok {:exit-code 1 :stdout "" :stderr "signing failed"})
+                                    (dag/ok {:exit-code 0 :stdout "" :stderr ""})))
+                                (dag/ok (cond
+                                          (clojure.string/includes? (str command) "get-url")
+                                          {:exit-code 0 :stdout "git@github.com:org/repo.git" :stderr ""}
+                                          :else {:exit-code 0 :stdout "" :stderr ""}))))
+                            (copy-to! [_ _ _ _] (dag/ok {}))
+                            (copy-from! [_ _ _ _] (dag/ok {}))
+                            (release-environment! [_ _] (dag/ok {}))
+                            (environment-status [_ _] (dag/ok {:status :running})))]
+        (sandbox/push-branch! tracking-exec "env-1" "feat/test" {:env {"GH_TOKEN" "tok123"}})
+        (is (= 2 @push-count))
+        ;; Should have set-url to HTTPS, pushed, then restored original URL
+        (is (some #(clojure.string/includes? (str %) "x-access-token") @cmds))
+        (is (some #(clojure.string/includes? (str %) "git@github.com") @cmds)))))
+
+(deftest push-branch-no-token-no-fallback-test
+  (testing "push-branch! returns failure without fallback when no GH_TOKEN"
+    (let [[exec _cmds] (create-mock-executor
+                        :default-response {:exit-code 1 :stdout "" :stderr "signing failed"})
+          result (sandbox/push-branch! exec "env-1" "feat/test")]
+      (is (dag/ok? result))
+      (is (= 1 (get-in result [:data :exit-code]))))))
+
