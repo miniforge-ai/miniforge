@@ -25,6 +25,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.artifact.interface :as artifact]
+   [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-recommender :as recommender]
    [ai.miniforge.cli.workflow-runner.display :as display]
@@ -78,6 +79,32 @@
     (move-spec! provenance :failed)))
 
 ;------------------------------------------------------------------------------ Layer 0.5
+;; Meta-loop context — process-scoped, accumulates metrics across workflows
+
+(defonce ^:private meta-loop-ctx
+  ;; Lazily initialized on first workflow completion.
+  ;; Uses a dedicated operator-level event stream (no workflow-id → operator.edn).
+  (atom nil))
+
+(defn- get-or-init-meta-loop-ctx! []
+  (or @meta-loop-ctx
+      (let [operator-stream (es/create-event-stream)
+            ctx (agent/create-meta-loop-context operator-stream)]
+        (reset! meta-loop-ctx ctx)
+        ctx)))
+
+(defn- trigger-meta-loop-after-workflow!
+  "Record workflow outcome and run a background meta-loop cycle.
+   Failures are swallowed — the meta-loop must never crash the workflow runner."
+  [workflow-id status failure-class]
+  (future
+    (try
+      (let [ctx (get-or-init-meta-loop-ctx!)]
+        (agent/record-workflow-outcome! ctx workflow-id status failure-class)
+        (agent/run-cycle-from-context! ctx))
+      (catch Exception _e nil))))
+
+;------------------------------------------------------------------------------ Layer 0.6
 ;; Workflow interface resolution and pipeline helpers
 
 (defn resolve-workflow-interface []
@@ -379,8 +406,11 @@
                                              :event-stream event-stream
                                              :workflow-id workflow-id
                                              :sandbox-cleanup sandbox-cleanup
-                                             :opts opts})]
+                                             :opts opts})
+                outcome-status (if (phase/succeeded? result) :completed :failed)]
             (move-spec-on-completion! provenance result)
+            ;; Trigger meta-loop learning cycle in background
+            (trigger-meta-loop-after-workflow! workflow-id outcome-status nil)
             result)
           (finally
             (progress-cleanup)

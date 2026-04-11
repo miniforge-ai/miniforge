@@ -151,6 +151,10 @@
 (def reset-all-meta-agents! meta/reset-all-meta-agents!)
 (def get-meta-check-history meta/get-meta-check-history)
 (def get-meta-agent-stats meta/get-meta-agent-stats)
+(def run-meta-loop-cycle! meta/run-meta-loop-cycle!)
+(def create-meta-loop-context meta/create-meta-loop-context)
+(def record-workflow-outcome! meta/record-workflow-outcome!)
+(def run-cycle-from-context! meta/run-cycle-from-context!)
 
 (def classify-task classification/classify-task)
 (def get-task-characteristics classification/get-task-characteristics)
