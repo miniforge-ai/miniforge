@@ -57,7 +57,8 @@
 
 (defn- run-spec-workflow
   "Parse, validate, and execute a workflow spec from path.
-   Used by both the markdown and EDN code paths."
+   Used by both the markdown and EDN code paths.
+   Returns the workflow result map, or nil on validation failure."
   [spec-path opts]
   (display/print-info (messages/t :run/parsing-spec {:path spec-path}))
   (let [;; Resolve source-dir: --worktree flag > spec file's parent directory
@@ -70,7 +71,8 @@
       (do
         (display/print-error (messages/t :run/invalid-spec))
         (doseq [error (:errors validation)]
-          (println (messages/t :run/validation-error {:error error}))))
+          (println (messages/t :run/validation-error {:error error})))
+        nil)
       (do
         (display/print-info (messages/t :run/running-workflow {:title (:spec/title parsed-spec)}))
         (workflow-runner/run-workflow-from-spec!
@@ -119,7 +121,9 @@
         (catch Exception e
           (display/print-error (messages/t :run/failed {:error (ex-message e)}))
           (when-let [data (ex-data e)]
-            (println (messages/t :run/error-details {:details (pr-str data)})))))
+            (println (messages/t :run/error-details {:details (pr-str data)})))
+          (flush)
+          (System/exit 1)))
 
       ;; EDN/JSON — dispatch based on file content
       :else
@@ -151,4 +155,6 @@
               (do
                 (display/print-error (messages/t :run/failed {:error (ex-message e)}))
                 (when-let [data (ex-data e)]
-                  (println (messages/t :run/error-details {:details (pr-str data)})))))))))))
+                  (println (messages/t :run/error-details {:details (pr-str data)}))))))
+          (flush)
+          (System/exit 1))))))

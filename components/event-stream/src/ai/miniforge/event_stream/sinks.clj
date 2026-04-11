@@ -90,8 +90,10 @@
             (.write writer (pr-str event))
             (.write writer "\n")
             (.flush writer)))
-        (catch Exception _e
-          ;; Silently fail - don't break event stream
+        (catch Exception e
+          ;; Log to stderr so failures are visible without breaking the event stream
+          (binding [*out* *err*]
+            (println (str "WARNING: Event sink write failed: " (ex-message e))))
           nil)))))
 
 ;;------------------------------------------------------------------------------ Layer 1: Stream Sinks

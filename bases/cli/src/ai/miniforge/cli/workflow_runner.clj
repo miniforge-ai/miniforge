@@ -60,9 +60,13 @@
           target)))))
 
 (defn move-spec-to-in-progress!
-  "Move a work spec to in-progress when execution starts."
+  "Move a work spec to in-progress when execution starts.
+   Returns updated provenance with new source-file path,
+   or the original provenance if the move was a no-op."
   [provenance]
-  (move-spec! provenance :in-progress))
+  (if-let [new-path (move-spec! provenance :in-progress)]
+    (assoc provenance :source-file new-path)
+    provenance))
 
 (defn move-spec-on-completion!
   "Move a work spec to done or failed based on workflow result."
@@ -195,6 +199,16 @@
       (cond-> event-stream (assoc :event-stream event-stream))
       (->> (run-pipeline workflow input))))
 
+(defn- failure-message
+  "Build a meaningful failure message from a workflow result.
+   Falls back to execution status when no explicit errors exist."
+  [result]
+  (let [errors (:execution/errors result)
+        status (get result :execution/status :unknown)]
+    (if (seq errors)
+      (str (first errors))
+      (str "Workflow ended with status: " (name status)))))
+
 (defn publish-completion-event [event-stream workflow-id result]
   (let [status (if (phase/succeeded? result) :success :failure)
         duration-ms (get-in result [:execution/metrics :duration-ms])]
@@ -202,8 +216,10 @@
                  (if (= status :success)
                    (es/workflow-completed event-stream workflow-id status duration-ms)
                    (es/workflow-failed event-stream workflow-id
-                                       {:message (str (first (:execution/errors result)))
-                                        :errors (:execution/errors result)})))))
+                                       {:message (failure-message result)
+                                        :errors (or (seq (:execution/errors result))
+                                                    [{:type :unknown-failure
+                                                      :message (failure-message result)}])})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Execution orchestration
@@ -426,8 +442,7 @@
       (when-not quiet
         (display/print-workflow-header (keyword (str "adhoc-" (hash spec))) "adhoc" quiet))
       (dashboard/print-dashboard-status! quiet)
-      (let [provenance (:spec/provenance enriched-spec)]
-        (move-spec-to-in-progress! provenance)
+      (let [provenance (move-spec-to-in-progress! (:spec/provenance enriched-spec))]
         (try
           (let [result (execute-with-events {:run-pipeline run-pipeline
                                              :workflow workflow
@@ -445,7 +460,8 @@
             (when command-poller-cleanup (command-poller-cleanup))))))
     (catch Exception e
       (when-not quiet
-        (println (display/colorize :red (messages/t :workflow-runner/spec-execution-failed {:error (ex-message e)}))))
+        (println (display/colorize :red (messages/t :workflow-runner/spec-execution-failed {:error (ex-message e)})))
+        (flush))
       (throw e))))
 
 ;------------------------------------------------------------------------------ Layer 2b

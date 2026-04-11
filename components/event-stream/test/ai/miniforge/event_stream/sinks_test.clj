@@ -264,6 +264,21 @@
       ;; but verify it doesn't throw
       (is true))))
 
+;------------------------------------------------------------------------------ Layer 1b
+;; file-sink error reporting
+
+(deftest file-sink-reports-write-errors-to-stderr-test
+  (testing "file-sink logs write failures to stderr instead of swallowing"
+    (let [sink (sinks/file-sink)
+          event (sample-event {:workflow/id (random-uuid)})
+          stderr-output (let [w (java.io.StringWriter.)]
+                          (binding [*err* (java.io.PrintWriter. w)]
+                            (with-redefs [sinks/event-file-path
+                                          (fn [_] "/nonexistent/path/that/will/fail.edn")]
+                              (sink event)))
+                          (str w))]
+      (is (clojure.string/includes? stderr-output "WARNING")))))
+
 ;------------------------------------------------------------------------------ Layer 0
 ;; cleanup-stale-events!
 
