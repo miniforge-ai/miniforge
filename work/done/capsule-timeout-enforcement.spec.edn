@@ -1,0 +1,32 @@
+{:spec/title "Capsule self-terminates on timeout expiry"
+
+ :spec/description
+ "Per N11 §2.2, capsules must be self-terminating on timeout expiry.
+
+  THIS IS NOT YET IMPLEMENTED. There is NO pipeline-level timeout wrapping in
+  runner.clj. The existing `stop-container` with `default-stop-timeout` is for
+  graceful Docker shutdown, NOT for pipeline-level timeout enforcement.
+
+  Implementation:
+  1. Add `--stop-timeout` flag to `create-container` in docker.clj
+  2. Add a new `run-pipeline-with-timeout` wrapper in runner.clj that wraps
+     pipeline execution in (deref (future ...) timeout-ms ::timeout)
+  3. On timeout: log warning, kill capsule, return :timeout failure
+  4. Timeout from workflow config (:budget :time-seconds) or default 30min"
+
+ :spec/intent {:type :feature
+               :scope ["components/workflow/src/ai/miniforge/workflow/runner.clj"
+                       "components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/docker.clj"]}
+
+ :spec/constraints
+ ["Only enforce timeout in governed mode"
+  "Use future + deref-with-timeout, not Thread/sleep"
+  "Existing tests must pass"]
+
+ :spec/acceptance-criteria
+ ["A function named `run-pipeline-with-timeout` exists in runner.clj"
+  "`--stop-timeout` flag added to docker create-container command"
+  "Timeout expiry returns {:execution/status :failed} with :timeout error"
+  "At least one test verifies timeout behavior"]
+
+ :workflow/type :canonical-sdlc}

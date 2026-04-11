@@ -1,0 +1,122 @@
+;; =============================================================================
+;; Spec: Agent Convergence Gaps
+;; =============================================================================
+;;
+;; Governed-mode dogfood runs revealed that agents fail to converge due to
+;; preventable errors: unmatched parentheses in Clojure (no structural editing),
+;; and late-stage compile failures (no pre-verify linting). Both waste tokens,
+;; time, and repair cycles.
+;;
+;; This spec addresses the remaining two convergence failure patterns:
+;; 1. Structural editing via LSP for agent file writes
+;; 2. Pre-verify linting before test execution
+
+{:spec/title "Agent convergence gaps — LSP writes and pre-verify linting"
+
+ :spec/description
+ "Close two convergence failure patterns observed in governed-mode dogfoooding:
+
+  1. Clojure syntax errors (unmatched parens) — the implement agent produces
+     valid logic but structural editing errors. The lsp-mcp-bridge component
+     exists but is not used by the implement agent for file writes. Wire it
+     so agent writes go through LSP formatting/validation, catching syntax
+     errors at write time instead of minutes later at verify.
+
+  2. Pre-verify lint gate — the verify phase runs `bb test` which fails on
+     compile errors after minutes of JVM startup + dependency resolution.
+     Running clj-kondo (or the repo's configured linter) first catches
+     syntax + dependency errors in seconds. This is a gate before verify,
+     not a replacement for it."
+
+ :spec/intent {:type :feature
+               :scope ["components/agent"
+                       "components/phase-software-factory"
+                       "components/gate"
+                       "bases/lsp-mcp-bridge"]}
+
+ :spec/constraints
+ ["LSP integration must be opt-in per repo via .miniforge/config.edn"
+  "Pre-verify lint uses the same linter config from tech-fingerprints.edn"
+  "Lint gate failure short-circuits verify — no wasted JVM startup"
+  "LSP formatting preserves agent intent — no semantic changes, only structural"
+  "Both features must work in governed mode (capsule containers)"
+  "Backward compatible — repos without LSP or linters work unchanged"]
+
+ :spec/acceptance-criteria
+ ["Implement agent uses LSP for Clojure file writes (format on save)"
+  "Unmatched parens are caught at write time, not at verify"
+  "Pre-verify lint gate runs clj-kondo (or configured linter) before bb test"
+  "Lint gate failure produces structured error with file:line for agent repair"
+  "Governed-mode dogfood run on a multi-file Clojure spec converges without paren errors"
+  "Pre-verify lint adds < 5 seconds to the pipeline (vs minutes for test failure)"]
+
+ :workflow/type :canonical-sdlc
+
+ :plan/tasks
+ [{:task/id :lsp-agent-writes
+   :task/description
+   "Wire LSP formatting into the implement agent's file write path.
+
+    The lsp-mcp-bridge component exists and provides LSP server management
+    (start, stop, capabilities) for Clojure (clojure-lsp), TypeScript
+    (typescript-language-server), and Python (pylsp).
+
+    Implementation:
+    - In implement.clj (or the agent's file-write function), after writing
+      a file, call LSP textDocument/formatting
+    - If formatting changes the file, apply the changes (structural fix)
+    - If LSP returns errors (unresolved symbols, syntax errors), include
+      them in the agent's context for self-repair
+    - Gate: if LSP reports syntax errors, do NOT proceed to verify —
+      return to implement with the error context
+
+    The LSP server must be started once per workflow run (not per file).
+    Use the existing lsp-mcp-bridge/start-server and format-document
+    functions.
+
+    Scope: Clojure first (clojure-lsp), then TypeScript and Python."
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :pre-verify-lint-gate
+   :task/description
+   "Add a lint gate that runs before the verify phase.
+
+    When a repo has a configured linter (via tech-fingerprints.edn),
+    run it before `bb test`. If linting fails, short-circuit verify
+    and return the lint errors as structured violations for agent repair.
+
+    Implementation:
+    - New gate: :lint-gate in the gate component
+    - Gate reads repo config to find applicable linters
+    - Runs linter subprocess (reuse connector-linter/runner.clj)
+    - If linter finds errors, gate fails with violations
+    - Phase execution skips verify on lint-gate failure
+    - Agent receives lint errors in repair context
+
+    This saves minutes of wasted JVM startup time when there are
+    obvious syntax or dependency errors that clj-kondo catches instantly."
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :governed-mode-integration
+   :task/description
+   "Ensure LSP and lint gate work inside governed-mode capsule containers.
+
+    - clojure-lsp must be available in the task-runner-clojure Docker image
+    - clj-kondo is already available (used by pre-commit hooks)
+    - LSP server startup must handle the capsule filesystem layout
+    - Test: run a governed-mode dogfood on a multi-file Clojure spec
+      and verify no paren errors + lint gate catches compile issues"
+   :task/type :implement
+   :task/dependencies [:lsp-agent-writes :pre-verify-lint-gate]}
+
+  {:task/id :integration-tests
+   :task/description
+   "Integration tests for both convergence fixes:
+    - Test: agent writes malformed Clojure, LSP catches and formats
+    - Test: lint gate catches unresolved symbol before verify runs
+    - Test: clean code passes lint gate and proceeds to verify
+    - Test: governed-mode capsule has clojure-lsp available"
+   :task/type :test
+   :task/dependencies [:governed-mode-integration]}]}
