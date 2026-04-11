@@ -20,6 +20,7 @@
   "Tests for the Planner agent."
   (:require
    [clojure.test :as test :refer [deftest testing is]]
+   [clojure.string :as str]
    [ai.miniforge.agent.core :as core]
    [ai.miniforge.agent.planner :as planner]
    [ai.miniforge.logging.interface :as log]))
@@ -120,6 +121,52 @@
       (is (not (:valid? result))))))
 
 ;------------------------------------------------------------------------------ Layer 3.5
+;; Already-satisfied validation tests
+
+(deftest validate-already-satisfied-test
+  (testing "rejects when no evidence provided"
+    (let [result (planner/validate-already-satisfied
+                  {:plan/status :already-satisfied :plan/evidence []}
+                  ["A function named `export-capsule-artifacts!` exists"])]
+      (is (not (:valid? result)))
+      (is (str/includes? (:reason result) "No evidence"))))
+
+  (testing "rejects when acceptance criteria names function not in evidence"
+    (let [result (planner/validate-already-satisfied
+                  {:plan/status :already-satisfied
+                   :plan/evidence [{:requirement "Export artifacts"
+                                    :satisfied-by "runner.clj"
+                                    :proof "release-execution-environment! in finally block"}]}
+                  ["A function named `export-capsule-artifacts!` exists in runner.clj"])]
+      (is (not (:valid? result)))
+      (is (str/includes? (:reason result) "not found in evidence"))))
+
+  (testing "accepts when evidence mentions the required function"
+    (let [result (planner/validate-already-satisfied
+                  {:plan/status :already-satisfied
+                   :plan/evidence [{:requirement "Export artifacts"
+                                    :satisfied-by "runner.clj"
+                                    :proof "export-capsule-artifacts! function at line 320"}]}
+                  ["A function named `export-capsule-artifacts!` exists in runner.clj"])]
+      (is (:valid? result))))
+
+  (testing "accepts when no acceptance criteria reference function names"
+    (let [result (planner/validate-already-satisfied
+                  {:plan/status :already-satisfied
+                   :plan/evidence [{:requirement "Feature works"
+                                    :satisfied-by "core.clj"
+                                    :proof "Implementation complete"}]}
+                  ["Feature is implemented" "Tests pass"])]
+      (is (:valid? result))))
+
+  (testing "accepts with nil acceptance criteria"
+    (let [result (planner/validate-already-satisfied
+                  {:plan/status :already-satisfied
+                   :plan/evidence [{:requirement "Done" :satisfied-by "x.clj" :proof "yes"}]}
+                  nil)]
+      (is (:valid? result)))))
+
+;------------------------------------------------------------------------------ Layer 3.75
 ;; Schema backward-compat & new-field tests
 
 (deftest validate-plan-new-fields-test

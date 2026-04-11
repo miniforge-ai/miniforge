@@ -279,6 +279,36 @@
       (update :plan/tasks ensure-task-ids)
       (assoc :plan/created-at (java.util.Date.))))
 
+(defn validate-already-satisfied
+  "Check that an already-satisfied claim is backed by evidence.
+   Returns {:valid? bool :reason string}.
+
+   Rejects when:
+   - No evidence provided
+   - Evidence vector is empty
+   - Acceptance criteria reference specific function names that
+     don't appear in any evidence :proof or :satisfied-by fields"
+  [plan acceptance-criteria]
+  (let [evidence (get plan :plan/evidence [])]
+    (cond
+      (empty? evidence)
+      {:valid? false :reason "No evidence provided for already-satisfied claim"}
+
+      (and (seq acceptance-criteria)
+           (let [proofs (str/join " " (map #(str (:proof %) " " (:satisfied-by %)) evidence))
+                 ;; Extract function-like names from acceptance criteria
+                 fn-names (->> acceptance-criteria
+                               (mapcat #(re-seq #"`([a-z][a-z0-9-]*!?)`" %))
+                               (map second)
+                               (remove #{"true" "false" "nil"})
+                               seq)]
+             (when fn-names
+               (some #(not (str/includes? proofs %)) fn-names))))
+      {:valid? false :reason "Acceptance criteria reference functions not found in evidence"}
+
+      :else
+      {:valid? true})))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public API
 
@@ -363,13 +393,23 @@
                       plan-final (finalize-plan plan)]
                   ;; Check for already-satisfied response
                   (if (= :already-satisfied (:plan/status plan-final))
-                    (let [output {:plan/id (random-uuid)
-                                  :plan/name "already-satisfied"
-                                  :plan/tasks []
-                                  :plan/summary (:plan/summary plan-final)
-                                  :plan/evidence (get plan-final :plan/evidence [])}]
-                      (assoc (response/success output {:tokens tokens})
-                             :status :already-satisfied))
+                    (let [criteria (get input :spec/acceptance-criteria
+                                       (get input :acceptance-criteria []))
+                          validation (validate-already-satisfied plan-final criteria)]
+                      (if (:valid? validation)
+                        (let [output {:plan/id (random-uuid)
+                                      :plan/name "already-satisfied"
+                                      :plan/tasks []
+                                      :plan/summary (:plan/summary plan-final)
+                                      :plan/evidence (get plan-final :plan/evidence [])}]
+                          (assoc (response/success output {:tokens tokens})
+                                 :status :already-satisfied))
+                        ;; Reject false already-satisfied — force planning
+                        (do
+                          (log/info logger :planner :planner/already-satisfied-rejected
+                                    {:data {:reason (:reason validation)}})
+                          (response/error (str "Already-satisfied claim rejected: "
+                                               (:reason validation))))))
                     (response/success plan-final
                                       {:tokens tokens
                                        :metrics {:tasks-created (count (:plan/tasks plan-final))
