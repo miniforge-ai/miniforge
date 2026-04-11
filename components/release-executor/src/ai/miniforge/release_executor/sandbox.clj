@@ -135,10 +135,33 @@
 
 (defn push-branch!
   "Push branch to origin inside the sandbox container.
-   Optional opts supports :env for credential injection."
+   Optional opts supports :env for credential injection.
+   Retries with GH_TOKEN HTTPS auth if SSH push fails."
   ([executor env-id branch-name] (push-branch! executor env-id branch-name {}))
   ([executor env-id branch-name opts]
-   (exec! executor env-id (str "git push -u origin " branch-name) opts)))
+   (let [result (exec! executor env-id (str "git push -u origin " branch-name) opts)]
+     (if (result/succeeded? result)
+       result
+       ;; SSH push may fail (agent unavailable). Retry with HTTPS + token if available.
+       (if-let [token (get-in opts [:env "GH_TOKEN"])]
+         (let [;; Get current remote URL
+               url-r (exec! executor env-id "git remote get-url origin" {})
+               remote-url (when (result/succeeded? url-r) (str/trim (get url-r :output "")))
+               ;; Convert SSH to HTTPS with token
+               https-url (when remote-url
+                           (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" remote-url)]
+                             (str "https://x-access-token:" token "@" host "/" path)
+                             (when (str/starts-with? (str remote-url) "https://")
+                               (str/replace remote-url #"https://" (str "https://x-access-token:" token "@")))))]
+           (if https-url
+             (do
+               (exec! executor env-id (str "git remote set-url origin " https-url) {})
+               (let [retry (exec! executor env-id (str "git push -u origin " branch-name) opts)]
+                 ;; Restore original URL (don't leave token in config)
+                 (exec! executor env-id (str "git remote set-url origin " remote-url) {})
+                 retry))
+             result))
+         result)))))
 
 (defn create-pr!
   "Create a pull request using gh CLI inside the sandbox container.
