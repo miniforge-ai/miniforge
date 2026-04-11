@@ -135,9 +135,12 @@
       (catch Exception _))))
 
 (defn select-workflow-type
-  "Select workflow type using LLM recommendation if not explicitly specified."
+  "Select workflow type using LLM recommendation if not explicitly specified.
+   Checks :spec/workflow-type first, then :workflow/type as a fallback for
+   specs that use the shorter key."
   [spec llm-client quiet]
-  (if-let [explicit-type (:spec/workflow-type spec)]
+  (if-let [explicit-type (or (:spec/workflow-type spec)
+                             (:workflow/type spec))]
     (do
       (when-not quiet
         (println (display/colorize :cyan (messages/t :workflow-runner/user-specified {:workflow-type (name explicit-type)}))))
@@ -151,27 +154,40 @@
         (println (display/colorize :yellow (messages/t :workflow-runner/auto-selected-override))))
       (:workflow recommendation))))
 
+(def ^:private workflow-aliases
+  "Map legacy/alternate workflow type keywords to their canonical counterparts.
+   Many work specs use :standard-sdlc but the only registered workflow is
+   :canonical-sdlc."
+  {:standard-sdlc :canonical-sdlc})
+
+(defn resolve-workflow-alias
+  "Resolve a workflow type through the alias map. Returns the canonical type
+   if an alias exists, otherwise returns the type unchanged."
+  [workflow-type]
+  (get workflow-aliases workflow-type workflow-type))
+
 (defn load-or-create-workflow [load-workflow workflow-type workflow-version]
-  (try
-    (load-and-validate-workflow load-workflow workflow-type workflow-version)
-    (catch Exception e
-      (case workflow-type
-        :test-only
-        {:workflow/id :test-only
-         :workflow/version "inline"
-         :workflow/name "Test Generation"
-         :workflow/pipeline [{:phase :verify} {:phase :done}]
-         :workflow/config {:max-tokens 20000 :max-iterations 10}}
+  (let [workflow-type (resolve-workflow-alias workflow-type)]
+    (try
+      (load-and-validate-workflow load-workflow workflow-type workflow-version)
+      (catch Exception e
+        (case workflow-type
+          :test-only
+          {:workflow/id :test-only
+           :workflow/version "inline"
+           :workflow/name "Test Generation"
+           :workflow/pipeline [{:phase :verify} {:phase :done}]
+           :workflow/config {:max-tokens 20000 :max-iterations 10}}
 
-        :comment-fix
-        {:workflow/id :comment-fix
-         :workflow/version "inline"
-         :workflow/name "Comment Fix"
-         :workflow/pipeline [{:phase :implement :gates [:syntax :lint :no-secrets]}
-                             {:phase :done}]
-         :workflow/config {:max-tokens 20000 :max-iterations 5}}
+          :comment-fix
+          {:workflow/id :comment-fix
+           :workflow/version "inline"
+           :workflow/name "Comment Fix"
+           :workflow/pipeline [{:phase :implement :gates [:syntax :lint :no-secrets]}
+                               {:phase :done}]
+           :workflow/config {:max-tokens 20000 :max-iterations 5}}
 
-        (throw e)))))
+          (throw e))))))
 
 (defn execute-workflow-pipeline [run-pipeline workflow input callbacks artifact-store event-stream]
   (-> callbacks
