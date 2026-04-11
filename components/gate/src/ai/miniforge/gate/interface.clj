@@ -32,6 +32,8 @@
    ;; Require implementations for side effects
    [ai.miniforge.gate.syntax]
    [ai.miniforge.gate.lint]
+   [ai.miniforge.gate.format]
+   [ai.miniforge.gate.pre-verify-lint]
    [ai.miniforge.gate.test]
    [ai.miniforge.gate.policy]
    [ai.miniforge.gate.precommit-discipline]
