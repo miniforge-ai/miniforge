@@ -125,3 +125,26 @@
 (def list-approvals approval/list-approvals)
 
 (def create-streaming-callback callbacks/create-streaming-callback)
+
+;------------------------------------------------------------------------------ Layer 2
+;; Reliability metric event constructors (N3 §3.17)
+
+(def sli-computed events/sli-computed)
+(def slo-breach events/slo-breach)
+(def error-budget-update events/error-budget-update)
+(def degradation-mode-changed events/degradation-mode-changed)
+(def safe-mode-entered events/safe-mode-entered)
+(def safe-mode-exited events/safe-mode-exited)
+
+;------------------------------------------------------------------------------ Layer 2
+;; Meta-loop event constructors
+
+(def meta-loop-cycle-completed events/meta-loop-cycle-completed)
+(def meta-loop-cycle-failed events/meta-loop-cycle-failed)
+
+;------------------------------------------------------------------------------ Layer 3
+;; Observer / knowledge failure event constructors
+
+(def observer-signal-failed events/observer-signal-failed)
+(def knowledge-synthesis-failed events/knowledge-synthesis-failed)
+(def knowledge-promotion-failed events/knowledge-promotion-failed)

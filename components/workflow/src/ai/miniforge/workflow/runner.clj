@@ -27,6 +27,9 @@
    Provides the main run-pipeline entry point."
   (:require [ai.miniforge.dag-executor.executor :as dag-exec]
             [ai.miniforge.dag-executor.result :as dag-result]
+            [ai.miniforge.event-stream.interface :as es]
+            [ai.miniforge.knowledge.interface :as knowledge]
+            [ai.miniforge.self-healing.interface :as self-healing]
             [ai.miniforge.llm.protocols.impl.llm-client :as llm-impl]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
@@ -62,10 +65,7 @@
 
         ;; In-memory event stream (same process)
         :else
-        (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
-          (when es-ns
-            (when-let [publish! (ns-resolve es-ns 'publish!)]
-              (publish! event-stream event)))))
+        (es/publish! event-stream event))
       (catch Exception e
         (println (messages/t :warn/publish-event {:error (ex-message e)}))))))
 
@@ -74,12 +74,11 @@
   [event-stream context]
   (when event-stream
     (try
-      (let [workflow-started (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-started)]
-        (publish-event! event-stream
-                        (workflow-started event-stream
-                                         (:execution/id context)
-                                         (select-keys (:execution/workflow context)
-                                                      [:workflow/id :workflow/version]))))
+      (publish-event! event-stream
+                      (es/workflow-started event-stream
+                                          (:execution/id context)
+                                          (select-keys (:execution/workflow context)
+                                                       [:workflow/id :workflow/version])))
       (catch Exception e
         (println (messages/t :warn/publish-started {:error (ex-message e)}))))))
 
@@ -98,17 +97,15 @@
             metrics-opts (cond-> {}
                            tokens (assoc :tokens tokens)
                            cost-usd (assoc :cost-usd cost-usd)
-                           pr-info (assoc :pr-info pr-info))
-            workflow-failed (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-failed)
-            workflow-completed (requiring-resolve 'ai.miniforge.event-stream.interface/workflow-completed)]
+                           pr-info (assoc :pr-info pr-info))]
         (if (= status :failed)
           (publish-event! event-stream
-                          (workflow-failed event-stream wf-id
-                                          {:message (messages/t :status/failed)
-                                           :errors (:execution/errors context)}))
+                          (es/workflow-failed event-stream wf-id
+                                             {:message (messages/t :status/failed)
+                                              :errors (:execution/errors context)}))
           (publish-event! event-stream
-                          (workflow-completed event-stream wf-id status duration-ms
-                                              (when (seq metrics-opts) metrics-opts)))))
+                          (es/workflow-completed event-stream wf-id status duration-ms
+                                                 (when (seq metrics-opts) metrics-opts)))))
       (catch Exception e
         (println (messages/t :warn/publish-completed {:error (ex-message e)}))))))
 
@@ -117,10 +114,9 @@
   [event-stream context phase-name]
   (when event-stream
     (try
-      (let [phase-started (requiring-resolve 'ai.miniforge.event-stream.interface/phase-started)]
-        (publish-event! event-stream
-                        (phase-started event-stream (:execution/id context) phase-name
-                                       {:phase/index (:execution/phase-index context)})))
+      (publish-event! event-stream
+                      (es/phase-started event-stream (:execution/id context) phase-name
+                                        {:phase/index (:execution/phase-index context)}))
       (catch Exception e
         (println (messages/t :warn/publish-phase-started {:error (ex-message e)}))))))
 
@@ -150,32 +146,29 @@
                        tokens (assoc :tokens tokens)
                        cost-usd (assoc :cost-usd cost-usd))]
       (try
-        (let [phase-completed (requiring-resolve 'ai.miniforge.event-stream.interface/phase-completed)]
-          (publish-event! event-stream
-                          (phase-completed event-stream (:execution/id context) phase-name
-                                           event-data)))
+        (publish-event! event-stream
+                        (es/phase-completed event-stream (:execution/id context) phase-name
+                                            event-data))
         (catch Exception e
           (println (messages/t :warn/publish-phase-completed {:error (ex-message e)})))))))
 
 (defn check-backend-health-at-boundary!
-  "Check backend health at phase boundary. Returns switch-result or nil."
+  "Check backend health at phase boundary. No-ops when :self-healing-config is absent.
+   Returns switch-result or nil."
   [event-stream context]
-  (try
-    (when-let [check-fn (requiring-resolve
-                          'ai.miniforge.self-healing.interface/check-backend-health-and-switch)]
+  (when (get-in context [:execution/opts :self-healing-config])
+    (try
       (let [backend (or (get-in context [:execution/opts :llm-backend :config :backend])
                         :anthropic)
             sh-ctx {:llm {:backend backend}
                     :config (get-in context [:execution/opts :self-healing-config])}
-            switch-result (check-fn sh-ctx)]
+            switch-result (self-healing/check-backend-health-and-switch sh-ctx)]
         (when (:switched? switch-result)
-          (when-let [emit-fn (requiring-resolve
-                               'ai.miniforge.self-healing.interface/emit-backend-switch-event)]
-            (publish-event! event-stream (emit-fn sh-ctx switch-result)))
-          switch-result)))
-    (catch Exception e
-      (println (messages/t :warn/health-check {:error (ex-message e)}))
-      nil)))
+          (publish-event! event-stream (self-healing/emit-backend-switch-event sh-ctx switch-result))
+          switch-result))
+      (catch Exception e
+        (println (messages/t :warn/health-check {:error (ex-message e)}))
+        nil))))
 
 ;------------------------------------------------------------------------------ Layer 0: Pipeline helpers
 
@@ -497,12 +490,10 @@
   (let [errors (volatile! [])]
     (try
       (when knowledge-store
-        (let [list-learnings (requiring-resolve 'ai.miniforge.knowledge.interface/list-learnings)
-              promote-learning (requiring-resolve 'ai.miniforge.knowledge.interface/promote-learning)
-              promotable (list-learnings knowledge-store {:promotable? true})]
+        (let [promotable (knowledge/list-learnings knowledge-store {:promotable? true})]
           (doseq [learning promotable]
             (try
-              (promote-learning knowledge-store (:zettel/id learning) {})
+              (knowledge/promote-learning knowledge-store (:zettel/id learning) {})
               (catch Exception e
                 (vswap! errors conj {:zettel/id (:zettel/id learning)
                                      :error (ex-message e)}))))))
@@ -516,8 +507,7 @@
    Throws on failure — callers are responsible for catching and emitting events."
   [knowledge-store]
   (when knowledge-store
-    (let [synthesize (requiring-resolve 'ai.miniforge.knowledge.interface/synthesize-recurring-patterns!)]
-      (synthesize knowledge-store))))
+    (knowledge/synthesize-recurring-patterns! knowledge-store)))
 
 (defn- observe-workflow-signal!
   "Feed workflow completion/failure signal to the operator for pattern analysis.
@@ -638,17 +628,6 @@
         (assoc :execution/status :completed-with-warnings))
     final-ctx))
 
-(defn- publish-system-event!
-  "Resolve an event constructor from the event-stream interface and publish it.
-   Used for cross-workflow system-level events (observer, knowledge, meta-loop).
-   constructor-sym must name a function [stream & args] → event-map."
-  [event-stream constructor-sym & args]
-  (when event-stream
-    (try
-      (publish-event! event-stream
-                      (apply (requiring-resolve constructor-sym) event-stream args))
-      (catch Exception _ nil))))
-
 (defn- post-workflow-cleanup!
   "Post-workflow cleanup that fires on ALL exit paths.
    Each step is independently try-caught so one failure cannot mask another.
@@ -658,19 +637,17 @@
         workflow-id  (or (:execution/id output-ctx) (:workflow/id workflow))]
     (try (observe-workflow-signal! opts output-ctx workflow exception)
          (catch Exception e
-           (publish-system-event! event-stream
-                                  'ai.miniforge.event-stream.interface/observer-signal-failed
-                                  workflow-id e)))
+           (when event-stream
+             (publish-event! event-stream (es/observer-signal-failed event-stream workflow-id e)))))
     (try (synthesize-patterns! (:knowledge-store opts))
          (catch Exception e
-           (publish-system-event! event-stream
-                                  'ai.miniforge.event-stream.interface/knowledge-synthesis-failed
-                                  e)))
+           (when event-stream
+             (publish-event! event-stream (es/knowledge-synthesis-failed event-stream e)))))
     (let [errors (promote-mature-learnings! (:knowledge-store opts))]
       (doseq [err errors]
-        (publish-system-event! event-stream
-                               'ai.miniforge.event-stream.interface/knowledge-promotion-failed
-                               (ex-info (:error err) err))))
+        (when event-stream
+          (publish-event! event-stream
+                          (es/knowledge-promotion-failed event-stream (ex-info (:error err) err))))))
     (when acquired-env
       (release-execution-environment! (:executor acquired-env)
                                       (:environment-id acquired-env))
