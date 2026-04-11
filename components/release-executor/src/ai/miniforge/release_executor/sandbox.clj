@@ -133,12 +133,42 @@
                                :output (:output commit-r)}))
       (result/shell-failure (:error commit-r) {:commit-sha nil}))))
 
+(defn- ssh->https-with-token
+  "Convert an SSH or HTTPS git remote URL to HTTPS with token auth.
+   Returns the authenticated URL, or nil if conversion fails."
+  [remote-url token]
+  (when remote-url
+    (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" remote-url)]
+      (str "https://x-access-token:" token "@" host "/" path)
+      (when (str/starts-with? (str remote-url) "https://")
+        (str/replace remote-url #"https://" (str "https://x-access-token:" token "@"))))))
+
+(defn- push-with-https-fallback!
+  "Push using HTTPS + token auth after SSH fails. Temporarily sets the
+   remote URL to include the token, pushes, then restores the original URL."
+  [executor env-id branch-name remote-url https-url opts]
+  (exec! executor env-id (str "git remote set-url origin " https-url) {})
+  (let [retry (exec! executor env-id (str "git push -u origin " branch-name) opts)]
+    (exec! executor env-id (str "git remote set-url origin " remote-url) {})
+    retry))
+
 (defn push-branch!
   "Push branch to origin inside the sandbox container.
-   Optional opts supports :env for credential injection."
+   Optional opts supports :env for credential injection.
+   Retries with GH_TOKEN HTTPS auth if SSH push fails."
   ([executor env-id branch-name] (push-branch! executor env-id branch-name {}))
   ([executor env-id branch-name opts]
-   (exec! executor env-id (str "git push -u origin " branch-name) opts)))
+   (let [result (exec! executor env-id (str "git push -u origin " branch-name) opts)]
+     (if (result/succeeded? result)
+       result
+       (if-let [token (get-in opts [:env "GH_TOKEN"])]
+         (let [url-r (exec! executor env-id "git remote get-url origin" {})
+               remote-url (when (result/succeeded? url-r) (str/trim (get url-r :output "")))
+               https-url (ssh->https-with-token remote-url token)]
+           (if https-url
+             (push-with-https-fallback! executor env-id branch-name remote-url https-url opts)
+             result))
+         result)))))
 
 (defn create-pr!
   "Create a pull request using gh CLI inside the sandbox container.
