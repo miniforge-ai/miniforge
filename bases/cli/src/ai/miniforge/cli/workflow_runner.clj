@@ -312,59 +312,6 @@
       (println (display/colorize :red (messages/t :workflow-runner/list-failed {:error (ex-message e)})))
       (throw e))))
 
-;------------------------------------------------------------------------------ Layer 1.5
-;; Meta-loop signal integration
-
-(defn create-meta-loop-signal-fn
-  "Create a (fn [signal]) callback that runs one meta-loop cycle per signal.
-
-   Uses requiring-resolve to lazily load the reliability, diagnosis,
-   improvement, and meta-loop namespaces so the CLI doesn't hard-depend
-   on those components at compile time.
-
-   Returns nil when any required namespace is unavailable (e.g., in
-   lightweight builds that omit the operator stack)."
-  [event-stream]
-  (try
-    (let [create-engine     @(requiring-resolve 'ai.miniforge.reliability.interface/create-engine)
-          create-deg-mgr    @(requiring-resolve 'ai.miniforge.reliability.interface/create-degradation-manager)
-          create-pipeline   @(requiring-resolve 'ai.miniforge.improvement.interface/create-pipeline)
-          create-ml-ctx     @(requiring-resolve 'ai.miniforge.agent.meta.loop/create-meta-loop-context)
-          run-ml-cycle!     @(requiring-resolve 'ai.miniforge.agent.meta.loop/run-meta-loop-cycle!)
-
-          engine            (create-engine event-stream)
-          deg-mgr           (create-deg-mgr event-stream)
-          pipeline          (create-pipeline)
-          ml-ctx            (create-ml-ctx {:reliability-engine  engine
-                                            :degradation-manager deg-mgr
-                                            :improvement-pipeline pipeline
-                                            :event-stream        event-stream})]
-      (fn [signal]
-        (try
-          (let [succeeded?  (= :workflow-complete (:signal/type signal))
-                wf-status   (if succeeded? :completed :failed)
-                timestamp   (or (:timestamp signal) (java.time.Instant/now))
-                ;; Build SLI metrics from the workflow signal
-                metrics     {:workflow-metrics [{:status wf-status
-                                                :timestamp (java.util.Date/from timestamp)}]}
-                ;; Build diagnosis data from failure info
-                diag-data   (when-not succeeded?
-                              {:failure-events
-                               [{:failure/class (or (:failure-class signal)
-                                                    :failure.class/unknown)
-                                 :timestamp (java.util.Date/from timestamp)}]})]
-            (run-ml-cycle! ml-ctx metrics (or diag-data {})))
-          (catch Exception e
-            (es/publish! event-stream (es/meta-loop-cycle-failed event-stream e))))))
-
-    (catch Exception e
-      ;; Operator stack not on classpath (lightweight build) — emit to stderr
-      ;; so the issue is observable without relying on the event stream.
-      (binding [*out* *err*]
-        (println (format "{\"event\":\"meta-loop/init-failed\",\"error\":\"%s\"}"
-                         (ex-message e))))
-      nil)))
-
 ;------------------------------------------------------------------------------ Layer 2
 ;; Spec-driven execution
 
@@ -396,7 +343,6 @@
           ;; Create workflow-specific LLM client for execution
           llm-client (context/create-llm-client workflow spec quiet backend-override)
           callbacks (create-phase-callbacks quiet)
-          observe-signal-fn (create-meta-loop-signal-fn event-stream)
           base-context (let [ctx (context/create-workflow-context
                              {:callbacks callbacks
                               :artifact-store artifact-store
@@ -416,7 +362,7 @@
                                        :repo-url repo-url
                                        :branch branch
                                        :execution-mode (get opts :execution-mode :local))
-                          observe-signal-fn (assoc :observe-signal-fn observe-signal-fn)))
+))
           sandbox? (or (:sandbox opts) (:spec/sandbox spec))
           [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)
           progress-cleanup (display/start-progress! event-stream quiet)]
