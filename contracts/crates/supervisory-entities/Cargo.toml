@@ -1,0 +1,16 @@
+[package]
+name = "supervisory-entities"
+description = "Supervisory entity structs for the miniforge control plane (N5-delta)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
