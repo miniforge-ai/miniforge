@@ -234,9 +234,14 @@
         network-args  (if (some? execution-plan)
                         [] ; network handled inside build-security-args
                         (when network ["--network" network]))
+        ;; N11 §2.2: Set Docker stop-timeout from execution plan time limit
+        stop-timeout  (when-let [ms (get-in execution-plan [:time-limit-ms])]
+                        (max 5 (quot ms 1000)))
         cmd-args      (concat ["run" "-d"
                                "--name" container-name
                                "-w" workdir]
+                              (when stop-timeout
+                                ["--stop-timeout" (str stop-timeout)])
                               network-args
                               security-args
                               runtime-fs-args

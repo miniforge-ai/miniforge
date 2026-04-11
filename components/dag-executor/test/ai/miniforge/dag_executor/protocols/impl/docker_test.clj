@@ -196,6 +196,41 @@
                                       (throw (ex-info "docker not installed" {})))]
       (is (nil? (docker/container-image-digest nil "myimage:latest"))))))
 
+;; ============================================================================
+;; create-container --stop-timeout (N11 §2.2)
+;; ============================================================================
+
+(deftest create-container-stop-timeout-test
+  (testing "includes --stop-timeout when execution-plan has :time-limit-ms"
+    (let [captured-args (atom nil)]
+      (with-redefs [docker/run-docker (fn [_docker-path & args]
+                                        (reset! captured-args (vec args))
+                                        {:exit 0 :out "container-id-123\n" :err ""})]
+        (docker/create-container nil "test-ctr" "alpine" "/workspace" nil nil nil
+                                :execution-plan {:time-limit-ms 120000})
+        (let [args @captured-args]
+          (is (some #(= "--stop-timeout" %) args))
+          (is (some #(= "120" %) args))))))
+
+  (testing "omits --stop-timeout when no execution-plan"
+    (let [captured-args (atom nil)]
+      (with-redefs [docker/run-docker (fn [_docker-path & args]
+                                        (reset! captured-args (vec args))
+                                        {:exit 0 :out "container-id-123\n" :err ""})]
+        (docker/create-container nil "test-ctr" "alpine" "/workspace" nil nil nil)
+        (let [args @captured-args]
+          (is (not (some #(= "--stop-timeout" %) args)))))))
+
+  (testing "enforces minimum 5s stop-timeout"
+    (let [captured-args (atom nil)]
+      (with-redefs [docker/run-docker (fn [_docker-path & args]
+                                        (reset! captured-args (vec args))
+                                        {:exit 0 :out "container-id-123\n" :err ""})]
+        (docker/create-container nil "test-ctr" "alpine" "/workspace" nil nil nil
+                                :execution-plan {:time-limit-ms 2000})
+        (let [args @captured-args]
+          (is (some #(= "5" %) args)))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.dag-executor.protocols.impl.docker-test)
