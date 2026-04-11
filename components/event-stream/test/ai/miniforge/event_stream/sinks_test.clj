@@ -286,7 +286,24 @@
 ;; cleanup-stale-events!
 
 (deftest cleanup-stale-events-test
-  (testing "returns 0 when events directory doesn't exist or is empty"
-    ;; This tests the path where the directory may not exist
-    ;; cleanup-stale-events! uses user.home so we just verify it returns a number
-    (is (number? (sinks/cleanup-stale-events! {:ttl-ms 0})))))
+  (testing "returns 0 when events directory is empty"
+    (with-temp-dir
+      (fn [dir]
+        (is (= 0 (sinks/cleanup-stale-events! {:ttl-ms 0 :events-dir (io/file dir)}))))))
+
+  (testing "deletes old files and preserves recent ones"
+    (with-temp-dir
+      (fn [dir]
+        (let [old-file (io/file dir "old-workflow.edn")
+              new-file (io/file dir "new-workflow.edn")]
+          (spit old-file "{:event/type :workflow/started}")
+          (spit new-file "{:event/type :workflow/started}")
+          (.setLastModified old-file (- (System/currentTimeMillis) (* 8 24 60 60 1000)))
+          (let [deleted (sinks/cleanup-stale-events! {:events-dir (io/file dir)})]
+            (is (= 1 deleted))
+            (is (not (.exists old-file)))
+            (is (.exists new-file)))))))
+
+  (testing "returns 0 when directory does not exist"
+    (is (= 0 (sinks/cleanup-stale-events!
+              {:events-dir (io/file "/tmp/nonexistent-miniforge-test-dir")})))))
