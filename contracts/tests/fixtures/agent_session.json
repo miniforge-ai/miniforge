@@ -1,0 +1,13 @@
+{
+  "agent/id": "a7b8c9d0-e1f2-4a3b-4c5d-6e7f80910213",
+  "agent/vendor": "claude-code",
+  "agent/external-id": "session-abc-def-123",
+  "agent/name": "PR Review Agent",
+  "agent/status": "executing",
+  "agent/registered-at": "2026-04-10T10:00:00Z",
+  "agent/last-heartbeat": "2026-04-10T12:05:00Z",
+  "agent/capabilities": ["code-review", "test-generation"],
+  "agent/heartbeat-interval-ms": 30000,
+  "agent/tags": ["pr-fleet", "review"],
+  "agent/task": "Reviewing PR #123 for security issues"
+}

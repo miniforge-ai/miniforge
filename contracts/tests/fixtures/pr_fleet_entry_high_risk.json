@@ -1,0 +1,21 @@
+{
+  "pr/repo": "miniforge-ai/infra",
+  "pr/number": 301,
+  "pr/url": "https://github.com/miniforge-ai/infra/pull/301",
+  "pr/branch": "refactor/database-migration",
+  "pr/title": "Restructure database schema for v2",
+  "pr/status": "draft",
+  "pr/ci-status": "pending",
+  "pr/merge-order": 3,
+  "pr/depends-on": [101, 201],
+  "pr/blocks": [],
+  "pr/readiness-score": 0.25,
+  "pr/risk": {
+    "risk/score": 0.85,
+    "risk/level": "critical",
+    "risk/factors": ["large-diff", "database-migration", "no-rollback-plan"]
+  },
+  "pr/automation-tier": "manual",
+  "pr/additions": 1200,
+  "pr/deletions": 800
+}

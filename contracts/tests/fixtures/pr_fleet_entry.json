@@ -1,0 +1,21 @@
+{
+  "pr/repo": "miniforge-ai/miniforge",
+  "pr/number": 101,
+  "pr/url": "https://github.com/miniforge-ai/miniforge/pull/101",
+  "pr/branch": "feature/oauth2-login",
+  "pr/title": "Add OAuth2 authentication module",
+  "pr/status": "approved",
+  "pr/ci-status": "passed",
+  "pr/merge-order": 1,
+  "pr/depends-on": [],
+  "pr/blocks": [102, 103],
+  "pr/readiness-score": 0.95,
+  "pr/risk": {
+    "risk/score": 0.15,
+    "risk/level": "low",
+    "risk/factors": ["small-diff", "well-tested"]
+  },
+  "pr/automation-tier": "full",
+  "pr/additions": 250,
+  "pr/deletions": 30
+}

@@ -1,0 +1,17 @@
+{
+  "eval/id": "c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f",
+  "eval/pr-id": "miniforge-ai/miniforge/456",
+  "eval/result": "fail",
+  "eval/rules-applied": ["no-force-push", "require-tests"],
+  "eval/evaluated-at": "2026-04-10T15:00:00Z",
+  "eval/passed?": false,
+  "eval/violations": [
+    {
+      "violation/id": "d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f80",
+      "violation/eval-id": "c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f",
+      "violation/rule": "require-tests",
+      "violation/category": "testing",
+      "violation/severity": "high"
+    }
+  ]
+}

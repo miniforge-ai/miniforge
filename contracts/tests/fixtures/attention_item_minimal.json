@@ -1,0 +1,7 @@
+{
+  "attention/id": "f6a7b8c9-d0e1-4f2a-3b4c-5d6e7f809102",
+  "attention/severity": "info",
+  "attention/summary": "New agent registered: PR Review Agent",
+  "attention/source-type": "agent",
+  "attention/source-id": "agent-session-xyz"
+}

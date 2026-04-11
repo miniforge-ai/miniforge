@@ -1,0 +1,9 @@
+{
+  "agent/id": "b8c9d0e1-f2a3-4b4c-5d6e-7f8091021324",
+  "agent/vendor": "miniforge",
+  "agent/external-id": "planner-001",
+  "agent/name": "Planner Agent",
+  "agent/status": "idle",
+  "agent/registered-at": "2026-04-09T08:00:00Z",
+  "agent/last-heartbeat": "2026-04-09T08:00:00Z"
+}

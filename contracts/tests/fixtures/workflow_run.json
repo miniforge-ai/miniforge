@@ -1,0 +1,10 @@
+{
+  "workflow/id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+  "workflow/key": "feature-auth",
+  "workflow/status": "running",
+  "workflow/phase": "implement",
+  "workflow/started-at": "2026-04-10T12:00:00Z",
+  "workflow/intent": "Implement OAuth2 login flow",
+  "workflow/trigger-source": "cli",
+  "workflow/correlation-id": "f0e1d2c3-b4a5-4968-8776-554433221100"
+}

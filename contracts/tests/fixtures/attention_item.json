@@ -1,0 +1,11 @@
+{
+  "attention/id": "e5f6a7b8-c9d0-4e1f-2a3b-4c5d6e7f8091",
+  "attention/severity": "high",
+  "attention/summary": "Budget exceeded on workflow run feature-auth",
+  "attention/source-type": "system",
+  "attention/source-id": "workflow-a1b2c3d4",
+  "attention/derived-at": "2026-04-10T16:00:00Z",
+  "attention/created-at": "2026-04-10T16:00:00Z",
+  "attention/resolved?": false,
+  "attention/acknowledged?": false
+}
