@@ -350,12 +350,19 @@
                                             :event-stream        event-stream})]
       (fn [signal]
         (try
-          (let [metrics        (select-keys signal [:workflow-metrics :phase-metrics
-                                                     :gate-metrics :tool-metrics
-                                                     :failure-events :context-metrics])
-                diagnosis-data (select-keys signal [:slo-checks :failure-events
-                                                     :training-examples :phase-metrics])]
-            (run-ml-cycle! ml-ctx metrics diagnosis-data))
+          (let [succeeded?  (= :workflow-complete (:signal/type signal))
+                wf-status   (if succeeded? :completed :failed)
+                timestamp   (or (:timestamp signal) (java.time.Instant/now))
+                ;; Build SLI metrics from the workflow signal
+                metrics     {:workflow-metrics [{:status wf-status
+                                                :timestamp (java.util.Date/from timestamp)}]}
+                ;; Build diagnosis data from failure info
+                diag-data   (when-not succeeded?
+                              {:failure-events
+                               [{:failure/class (or (:failure-class signal)
+                                                    :failure.class/unknown)
+                                 :timestamp (java.util.Date/from timestamp)}]})]
+            (run-ml-cycle! ml-ctx metrics (or diag-data {})))
           (catch Exception _e nil))))
     (catch Exception _e
       ;; Namespace not on classpath — meta-loop unavailable; no-op
