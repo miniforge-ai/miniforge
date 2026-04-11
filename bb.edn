@@ -492,7 +492,19 @@
                  "components/connector-linter/src"
                  "components/connector-linter/resources"
                  "components/semantic-analyzer/src"
-                 "components/semantic-analyzer/resources"]
+                 "components/semantic-analyzer/resources"
+                 "components/failure-classifier/src"
+                 "components/failure-classifier/resources"
+                 "components/reliability/src"
+                 "components/reliability/resources"
+                 "components/training-capture/src"
+                 "components/training-capture/resources"
+                 "components/diagnosis/src"
+                 "components/diagnosis/resources"
+                 "components/improvement/src"
+                 "components/improvement/resources"
+                 "components/evaluation/src"
+                 "components/evaluation/resources"]
    :extra-deps {metosin/malli {:mvn/version "0.16.1"}
                 clj-statecharts/clj-statecharts {:mvn/version "0.1.5"}
                 aero/aero        {:mvn/version "1.1.6"}
