@@ -627,6 +627,38 @@
                                (:proposals summary 0)))
       (merge summary)))
 
+(defn meta-loop-cycle-failed
+  "Emit when a meta-loop cycle throws an unhandled exception."
+  [stream error]
+  (-> (create-envelope stream :meta-loop/cycle-failed nil
+                       (str "Meta-loop cycle failed: " (ex-message error)))
+      (assoc :meta-loop/error (ex-message error)
+             :meta-loop/error-class (.getName (class error)))))
+
+;------------------------------------------------------------------------------ Layer 7
+;; Observer / knowledge failure events
+
+(defn observer-signal-failed
+  "Emit when observe-workflow-signal! fails to forward a signal to the meta-loop."
+  [stream workflow-id error]
+  (-> (create-envelope stream :observer/signal-failed workflow-id
+                       (str "Observer signal failed: " (ex-message error)))
+      (assoc :observer/error (ex-message error))))
+
+(defn knowledge-synthesis-failed
+  "Emit when synthesize-patterns! fails."
+  [stream error]
+  (-> (create-envelope stream :knowledge/synthesis-failed nil
+                       (str "Knowledge synthesis failed: " (ex-message error)))
+      (assoc :knowledge/error (ex-message error))))
+
+(defn knowledge-promotion-failed
+  "Emit when promote-mature-learnings! fails."
+  [stream error]
+  (-> (create-envelope stream :knowledge/promotion-failed nil
+                       (str "Knowledge promotion failed: " (ex-message error)))
+      (assoc :knowledge/error (ex-message error))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Create event stream

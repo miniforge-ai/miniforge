@@ -11,7 +11,9 @@
         ai.miniforge/tool {:local/root "../tool"}
         ai.miniforge/policy {:local/root "../policy"}      ; Gate evaluation
         ai.miniforge/heuristic {:local/root "../heuristic"} ; Workflow storage
+        ai.miniforge/event-stream {:local/root "../event-stream"} ; N3 event emission
         ai.miniforge/knowledge {:local/root "../knowledge"} ; KB for post-execution learning promotion
+        ai.miniforge/self-healing {:local/root "../self-healing"} ; Optional backend failover
         ai.miniforge/phase {:local/root "../phase"}        ; Phase interceptors
         ai.miniforge/gate {:local/root "../gate"}          ; Gate interceptors
         ai.miniforge/dag-executor {:local/root "../dag-executor"}  ; Execution environment acquisition
