@@ -22,6 +22,7 @@
    Layer 1: Query functions (by capability, use-case, task-type)
    Layer 2: Recommendation logic"
   (:require
+   [ai.miniforge.response.interface :as response]
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
@@ -41,7 +42,8 @@
   []
   (if-let [resource (io/resource "llm/model-catalog.edn")]
     (edn/read-string (slurp resource))
-    (throw (ex-info "Missing llm/model-catalog.edn resource" {}))))
+    (response/throw-anomaly! :anomalies/not-found
+                            "Missing llm/model-catalog.edn resource")))
 
 (def ^:private model-catalog
   "Resource-backed model catalog and task-type recommendations."

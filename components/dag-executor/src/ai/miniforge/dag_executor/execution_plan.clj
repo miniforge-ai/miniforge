@@ -27,6 +27,7 @@
    Layer 1: Malli schemas — mount, execution plan
    Layer 2: Constructor and validator"
   (:require
+   [ai.miniforge.response.interface :as response]
    [malli.core :as m]
    [malli.error :as me]))
 
@@ -115,8 +116,10 @@
   (let [{:keys [valid? errors]} (validate-plan plan-map)]
     (if valid?
       plan-map
-      (throw (ex-info "Invalid execution plan" {:errors errors
-                                                :plan   plan-map})))))
+      (response/throw-anomaly! :anomalies/incorrect
+                              "Invalid execution plan"
+                              {:errors errors
+                               :plan   plan-map})))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

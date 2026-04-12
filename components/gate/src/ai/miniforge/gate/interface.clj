@@ -209,9 +209,9 @@
           (let [result (check artifact ctx)]
             (if (passed? result)
               result
-              (throw (ex-info "Gate validation failed"
-                              {:anomaly :anomalies.gate/validation-failed
-                               :errors (:errors result)}))))))))
+              (response/throw-anomaly! :anomalies.gate/validation-failed
+                                      "Gate validation failed"
+                                      {:errors (:errors result)}))))))))
    (response/create :gates)
    gate-kws))
 

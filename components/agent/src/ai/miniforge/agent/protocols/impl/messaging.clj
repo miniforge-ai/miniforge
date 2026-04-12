@@ -21,6 +21,7 @@
 
    Implements N1 Architecture Specification section 6.2."
   (:require
+   [ai.miniforge.response.interface :as response]
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -256,9 +257,10 @@
     ;; Validate message
     (let [validation (validate-message-impl message)]
       (when-not (:valid? validation)
-        (throw (ex-info "Invalid message"
-                        {:message message
-                         :errors (:errors validation)}))))
+        (response/throw-anomaly! :anomalies/incorrect
+                                "Invalid message"
+                                {:message message
+                                 :errors (:errors validation)})))
     ;; Route message
     (let [routed-msg (route-message-impl router message)
           event (create-message-sent-event routed-msg)]

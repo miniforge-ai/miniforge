@@ -130,8 +130,9 @@
          enabled? true}
     :as opts}]
   (when-not (and id name)
-    (throw (ex-info "Meta-agent config requires :id and :name"
-                    {:provided opts})))
+    (response/throw-anomaly! :anomalies/incorrect
+                            "Meta-agent config requires :id and :name"
+                            {:provided opts}))
   (map->MetaAgentConfig
    {:id id
     :name name

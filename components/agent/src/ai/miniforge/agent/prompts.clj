@@ -20,6 +20,7 @@
   "Agent prompt loading utilities.
    Loads system prompts from EDN resources for configurability."
   (:require
+   [ai.miniforge.response.interface :as response]
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
@@ -43,13 +44,15 @@
       (let [prompt-data (with-open [rdr (io/reader resource)]
                           (edn/read (java.io.PushbackReader. rdr)))]
         (or (:prompt/system prompt-data)
-            (throw (ex-info "Prompt data missing :prompt/system key"
-                            {:agent-type agent-type
-                             :resource-path resource-path
-                             :keys (keys prompt-data)}))))
-      (throw (ex-info "Could not find prompt resource"
-                      {:agent-type agent-type
-                       :resource-path resource-path})))))
+            (response/throw-anomaly! :anomalies/not-found
+                                    "Prompt data missing :prompt/system key"
+                                    {:agent-type agent-type
+                                     :resource-path resource-path
+                                     :keys (keys prompt-data)}))))
+      (response/throw-anomaly! :anomalies/not-found
+                                "Could not find prompt resource"
+                                {:agent-type agent-type
+                                 :resource-path resource-path})))))
 
 (defn load-prompt-data
   "Load full prompt data map from resources.
@@ -64,9 +67,10 @@
     (if-let [resource (io/resource resource-path)]
       (with-open [rdr (io/reader resource)]
         (edn/read (java.io.PushbackReader. rdr)))
-      (throw (ex-info "Could not find prompt resource"
-                      {:agent-type agent-type
-                       :resource-path resource-path})))))
+      (response/throw-anomaly! :anomalies/not-found
+                                "Could not find prompt resource"
+                                {:agent-type agent-type
+                                 :resource-path resource-path})))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

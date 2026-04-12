@@ -27,7 +27,8 @@
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
-   [ai.miniforge.event-stream.interface :as es]))
+   [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event file parsing
@@ -40,8 +41,9 @@
   [workflow-id]
   (let [path (str events-dir "/" workflow-id ".edn")]
     (when-not (fs/exists? path)
-      (throw (ex-info (str "Event file not found: " path)
-                      {:workflow-id workflow-id :path path})))
+      (response/throw-anomaly! :anomalies/not-found
+                              (str "Event file not found: " path)
+                              {:workflow-id workflow-id :path path}))
     (->> (slurp path)
          str/split-lines
          (remove str/blank?)
@@ -135,9 +137,10 @@
                           (selection-config/resolve-selection-profile :default))
         workflow-version (get workflow-spec :version "latest")]
     (when-not workflow-type
-      (throw (ex-info "Could not resolve a default workflow for resume"
-                      {:operation :resume-workflow
-                       :selection-profile :default})))
+      (response/throw-anomaly! :anomalies/not-found
+                              "Could not resolve a default workflow for resume"
+                              {:operation :resume-workflow
+                               :selection-profile :default}))
     {:workflow-type workflow-type
      :workflow-version workflow-version}))
 

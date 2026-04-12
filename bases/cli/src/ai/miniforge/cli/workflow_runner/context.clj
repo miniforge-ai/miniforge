@@ -26,7 +26,8 @@
    [cheshire.core :as json]
    [ai.miniforge.cli.config :as config]
    [ai.miniforge.cli.workflow-runner.display :as display]
-   [ai.miniforge.event-stream.interface :as es]))
+   [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Input resolution
@@ -35,22 +36,26 @@
   (when path
     (let [file (fs/file path)]
       (when-not (fs/exists? file)
-        (throw (ex-info (str "Input file not found: " path) {:path path})))
+        (response/throw-anomaly! :anomalies/not-found
+                                (str "Input file not found: " path)
+                                {:path path}))
       (let [content (slurp file)
             ext (fs/extension file)]
         (case ext
           "edn" (edn/read-string content)
           "json" (json/parse-string content true)
-          (throw (ex-info (str "Unsupported file format: " ext " (use .edn or .json)")
-                          {:path path :extension ext})))))))
+          (response/throw-anomaly! :anomalies/unsupported
+                                  (str "Unsupported file format: " ext " (use .edn or .json)")
+                                  {:path path :extension ext}))))))
 
 (defn parse-inline-json [s]
   (when s
     (try
       (json/parse-string s true)
       (catch Exception e
-        (throw (ex-info (str "Failed to parse input JSON: " (ex-message e))
-                        {:input s} e))))))
+        (response/throw-anomaly! :anomalies/fault
+                                (str "Failed to parse input JSON: " (ex-message e))
+                                {:input s}))))))
 
 (defn resolve-input [{:keys [input input-json]}]
   (cond

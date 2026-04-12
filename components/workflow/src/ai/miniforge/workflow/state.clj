@@ -23,6 +23,7 @@
    Tracks runtime state separately from workflow configuration."
   (:require
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.fsm :as fsm]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -107,11 +108,12 @@
       (-> state
           (assoc :execution/status (:state result))
           (record-fsm-transition current-status (:state result) event))
-      (throw (ex-info "Invalid state transition"
-                     {:current-status current-status
-                      :event event
-                      :error (:error result)
-                      :message (:message result)})))))
+      (response/throw-anomaly! :anomalies.workflow/invalid-transition
+                              "Invalid state transition"
+                              {:current-status current-status
+                               :event event
+                               :error (:error result)
+                               :message (:message result)})))))
 
 (defn transition-to-phase
   "Transition execution to a new phase.

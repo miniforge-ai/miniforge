@@ -29,6 +29,7 @@
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.workspace :as workspace]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
+   [ai.miniforge.response.interface :as response]
    [clojure.java.io]
    [clojure.java.shell :as shell]
    [clojure.string :as str]))
@@ -490,10 +491,11 @@
               stderr   (if sanitize?
                          (sanitize-token (or (get-in r [:data :stderr]) ""))
                          (or (get-in r [:data :stderr]) ""))]
-          (throw (ex-info (str error-prefix ": " safe-cmd
-                               (when (seq stderr) (str "\n" stderr)))
-                          {:cmd safe-cmd :stderr stderr
-                           :exit (get-in r [:data :exit-code])}))))
+          (response/throw-anomaly! :anomalies/fault
+                                  (str error-prefix ": " safe-cmd
+                                       (when (seq stderr) (str "\n" stderr)))
+                                  {:cmd safe-cmd :stderr stderr
+                                   :exit (get-in r [:data :exit-code])})))
       r)))
 
 ;; ============================================================================

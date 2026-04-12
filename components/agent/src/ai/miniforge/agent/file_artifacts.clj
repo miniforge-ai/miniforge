@@ -19,6 +19,7 @@
 (ns ai.miniforge.agent.file-artifacts
   "Fallback artifact collection from files written in the working tree."
   (:require
+   [ai.miniforge.response.interface :as response]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
@@ -160,10 +161,11 @@
       (reduce add-entry
               (empty-snapshot)
               (keep porcelain-entry (str/split-lines out)))
-      (throw (ex-info "Failed to snapshot working directory"
-                      {:working-dir working-dir
-                       :exit exit
-                       :stderr err})))))
+      (response/throw-anomaly! :anomalies/fault
+                              "Failed to snapshot working directory"
+                              {:working-dir working-dir
+                               :exit exit
+                               :stderr err})))))
 
 (defn snapshot-via-executor
   "Capture git dirty state inside a capsule via the executor.

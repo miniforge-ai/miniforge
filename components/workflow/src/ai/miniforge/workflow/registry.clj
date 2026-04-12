@@ -30,6 +30,7 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.schemas :as schemas])
   (:import
    [java.util.jar JarFile]))
@@ -93,9 +94,10 @@
     (try
       (edn/read-string (slurp resource))
       (catch Exception e
-        (throw (ex-info (str "Failed to load workflow from " resource-path)
-                        {:resource-path resource-path
-                         :error (ex-message e)} e))))))
+        (response/throw-anomaly! :anomalies/fault
+                                (str "Failed to load workflow from " resource-path)
+                                {:resource-path resource-path
+                                 :error (ex-message e)}))))))
 
 (defn discover-workflows-from-resources
   "Discover workflows from classpath resources.
@@ -153,9 +155,10 @@
                          :has-testing has-testing?}]
     ;; Validate against schema
     (when-not (schemas/valid-characteristics? characteristics)
-      (throw (ex-info "Invalid workflow characteristics"
-                      {:characteristics characteristics
-                       :errors (schemas/explain-characteristics characteristics)})))
+      (response/throw-anomaly! :anomalies.workflow/invalid-config
+                              "Invalid workflow characteristics"
+                              {:characteristics characteristics
+                               :errors (schemas/explain-characteristics characteristics)}))
     characteristics))
 
 ;;------------------------------------------------------------------------------ Layer 3
@@ -171,7 +174,9 @@
   [workflow]
   (let [id (:workflow/id workflow)]
     (when-not id
-      (throw (ex-info "Workflow must have :workflow/id" {:workflow workflow})))
+      (response/throw-anomaly! :anomalies/incorrect
+                              "Workflow must have :workflow/id"
+                              {:workflow workflow}))
     (swap! registry assoc id workflow)
     workflow))
 

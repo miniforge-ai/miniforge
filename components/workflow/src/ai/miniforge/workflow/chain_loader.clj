@@ -23,7 +23,8 @@
   (:require
    [clojure.java.io :as io]
    [clojure.edn :as edn]
-   [clojure.string :as str])
+   [clojure.string :as str]
+   [ai.miniforge.response.interface :as response])
   (:import
    [java.util.jar JarFile]))
 
@@ -122,9 +123,10 @@
         chain-def (when resource-path (load-chain-resource resource-path))]
     (if chain-def
       {:chain chain-def :source :resource :path resource-path}
-      (throw (ex-info (str "Chain '" (name chain-id) "' not found. "
-                           "Looked for: " versioned-path ", " base-path)
-                      {:chain-id chain-id :version version})))))
+      (response/throw-anomaly! :anomalies/not-found
+                              (str "Chain '" (name chain-id) "' not found. "
+                                   "Looked for: " versioned-path ", " base-path)
+                              {:chain-id chain-id :version version})))))
 
 (defn list-chains
   "List all available chain definitions from classpath."
