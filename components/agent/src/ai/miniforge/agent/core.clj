@@ -463,6 +463,27 @@ Output execution logs and status reports."})
       (classifier exception {:task-id task-id}))
     (catch Exception _ nil)))
 
+(defn- retry?
+  "True when self-healing produced a viable workaround to retry."
+  [healing-result]
+  (boolean (:retry? healing-result)))
+
+(defn- invoke-with-retry
+  "Retry agent invocation after a successful workaround.
+   Returns the retry result or an execution-failure on second failure."
+  [agent task exec-context classification]
+  (try+
+    (let [result (protocol/invoke agent task exec-context)]
+      (record-backend-health! exec-context true)
+      (assoc result :self-healing/workaround-applied true))
+    (catch Object _
+      (let [retry-e (:throwable &throw-context)]
+        (record-backend-health! exec-context false)
+        (execution-failure retry-e
+                           {:error-classification classification
+                            :self-healing/workaround-applied true
+                            :self-healing/retry-failed true})))))
+
 (defn try-self-healing-on-failure
   "Attempt workaround when agent execution fails. Returns {:retry? bool} or nil."
   [exception]
@@ -501,23 +522,13 @@ Output execution logs and status reports."})
                      (record-backend-health! exec-context true)
                      invoke-result)
                    (catch Object _
-                     (let [e (:throwable &throw-context)]
+                     (let [e (:throwable &throw-context)
+                           classification (classify-execution-error e task-id)
+                           healing (try-self-healing-on-failure e)]
                        (record-backend-health! exec-context false)
-                       (let [classification (classify-execution-error e task-id)
-                             healing (try-self-healing-on-failure e)]
-                         (if (:retry? healing)
-                           (try+
-                             (let [retry-result (protocol/invoke initialized-agent task exec-context)]
-                               (record-backend-health! exec-context true)
-                               (assoc retry-result :self-healing/workaround-applied true))
-                             (catch Object _
-                               (let [retry-e (:throwable &throw-context)]
-                                 (record-backend-health! exec-context false)
-                                 (execution-failure retry-e
-                                                    {:error-classification classification
-                                                     :self-healing/workaround-applied true
-                                                     :self-healing/retry-failed true}))))
-                           (execution-failure e {:error-classification classification}))))))
+                       (if (retry? healing)
+                         (invoke-with-retry initialized-agent task exec-context classification)
+                         (execution-failure e {:error-classification classification})))))
 
           ;; Validate output
           validation (protocol/validate agent result exec-context)
