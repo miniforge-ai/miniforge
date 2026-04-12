@@ -25,6 +25,7 @@
    [ai.miniforge.dag-executor.executor :as dag-exec]
    [ai.miniforge.dag-executor.result :as dag-result]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.runner-defaults :as defaults]))
 
@@ -71,9 +72,10 @@
   "Throws for :governed mode when no capsule executor is available."
   [executor mode]
   (when (and (nil? executor) (= :governed mode))
-    (throw (ex-info (messages/t :governed/no-capsule)
-                    {:execution-mode :governed
-                     :hint (messages/t :governed/no-capsule-hint)}))))
+    (response/throw-anomaly! :anomalies.executor/unavailable
+                             (messages/t :governed/no-capsule)
+                             {:anomaly.executor/mode :governed
+                              :hint (messages/t :governed/no-capsule-hint)})))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Environment record construction

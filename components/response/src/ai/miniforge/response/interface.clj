@@ -334,6 +334,50 @@
      (agent-anomaly :anomalies.agent/invoke-failed \"Agent timed out\" :implementer)"
   anomaly/agent-anomaly)
 
+(def llm-anomaly
+  "Create an LLM-specific anomaly.
+   Common keys: :anomaly.llm/backend, :anomaly.llm/model, :anomaly.llm/status.
+
+   Example:
+     (llm-anomaly :anomalies.llm/rate-limited \"Rate limit hit\" :anthropic
+                  {:anomaly.llm/status 429 :anomaly.llm/retry-after-ms 30000})"
+  anomaly/llm-anomaly)
+
+(def executor-anomaly
+  "Create an executor-specific anomaly.
+   Common keys: :anomaly.executor/mode, :anomaly.executor/environment-id.
+
+   Example:
+     (executor-anomaly :anomalies.executor/unavailable \"No Docker\" :governed)"
+  anomaly/executor-anomaly)
+
+(def throw-anomaly!
+  "Throw a structured anomaly via slingshot throw+.
+
+   Builds a canonical anomaly map and throws it. Catch sites use
+   slingshot try+ with key-value selectors to match and destructure:
+
+     (try+
+       (throw-anomaly! :anomalies.llm/rate-limited \"Rate limit hit\"
+                       {:anomaly.llm/backend :anthropic})
+       (catch [:anomaly/category :anomalies.llm/rate-limited]
+              {:keys [anomaly.llm/backend]}
+         (backoff! backend)))
+
+   Arguments:
+     category - Anomaly category keyword from the taxonomy
+     message  - Programmer-facing diagnostic string
+     context  - Optional map of domain context (namespaced keys)"
+  anomaly/throw-anomaly!)
+
+(def retryable?
+  "Check if an anomaly category indicates the operation may succeed on retry.
+
+   Example:
+     (retryable? :anomalies.llm/rate-limited) ;; => true
+     (retryable? :anomalies/forbidden)        ;; => false"
+  anomaly/retryable?)
+
 ;------------------------------------------------------------------------------ Layer 6
 ;; Response Builders
 
