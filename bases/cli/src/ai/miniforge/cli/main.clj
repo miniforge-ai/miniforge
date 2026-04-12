@@ -52,7 +52,8 @@
    [ai.miniforge.agent.tool-supervisor :as tool-supervisor]
    [ai.miniforge.mcp-context-server.interface :as mcp-context-server]
    [ai.miniforge.lsp-mcp-bridge.main :as lsp-bridge]
-   [ai.miniforge.lsp-mcp-bridge.tasks :as lsp-tasks]))
+   [ai.miniforge.lsp-mcp-bridge.tasks :as lsp-tasks]
+   [slingshot.slingshot :refer [try+]]))
 
 ;; TUI components loaded conditionally (only in JVM/jlink bundled runtime)
 (def tui-available?
@@ -429,44 +430,36 @@
    {:cmds ["control-plane" "terminate"] :fn cp-terminate-cmd
     :args->opts [:agent-id]}])
 
+(defn- handle-unknown-command
+  "Print help for an unrecognized CLI command."
+  [{:keys [wrong-input dispatch all-commands]}]
+  (display/print-error (messages/t :main/unknown-command
+                                   {:command (str/join " " (conj (vec dispatch) wrong-input))}))
+  (println)
+  (when (and (= (first dispatch) "fleet")
+             (contains? #{"web" "dashboard" "tui"} wrong-input))
+    (println (messages/t :main/did-you-mean))
+    (println (str "  " (app-config/command-string (if (= wrong-input "dashboard") "web" wrong-input))))
+    (println))
+  (when (seq all-commands)
+    (println (messages/t :main/available-commands
+                         {:scope (if (seq dispatch)
+                                   (str "'" (str/join " " dispatch) "' ")
+                                   "")}))
+    (doseq [cmd all-commands]
+      (println (str "  " (app-config/command-string (str/join " " (conj (vec dispatch) cmd))))))
+    (println))
+  (println (messages/t :main/run-help
+                       {:command (app-config/command-string "help")}))
+  (System/exit 1))
+
 (defn -main
   "CLI entry point."
   [& args]
-  (try
+  (try+
     (cli/dispatch dispatch-table args)
-    (catch clojure.lang.ExceptionInfo e
-      (let [data (ex-data e)]
-        (if (and (= (:type data) :org.babashka/cli)
-                 (= (:cause data) :no-match))
-          (let [wrong-input (:wrong-input data)
-                dispatch (:dispatch data)
-                all-commands (:all-commands data)]
-            (display/print-error (messages/t :main/unknown-command
-                                             {:command (str/join " " (conj (vec dispatch)
-                                                                           wrong-input))}))
-            (println)
-
-            ;; Special case: suggest alternatives for moved commands
-            (when (and (= (first dispatch) "fleet")
-                       (contains? #{"web" "dashboard" "tui"} wrong-input))
-              (println (messages/t :main/did-you-mean))
-              (println (str "  " (app-config/command-string (if (= wrong-input "dashboard") "web" wrong-input))))
-              (println))
-
-            (when (seq all-commands)
-              (println (messages/t :main/available-commands
-                                   {:scope (if (seq dispatch)
-                                             (str "'" (str/join " " dispatch) "' ")
-                                             "")}))
-              (doseq [cmd all-commands]
-                (println (str "  " (app-config/command-string (str/join " " (conj (vec dispatch) cmd))))))
-              (println))
-
-            (println (messages/t :main/run-help
-                                 {:command (app-config/command-string "help")}))
-            (System/exit 1))
-          ;; Re-throw if not a no-match error
-          (throw e))))))
+    (catch [:type :org.babashka/cli :cause :no-match] data
+      (handle-unknown-command data))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
