@@ -47,15 +47,21 @@
     (fn [model]
       (let [inputs (extract-fn model)
             cached @cache]
-        (if (identical? inputs (:inputs cached))
+        (cond
+          ;; Fast path: same pointer — return cached
+          (identical? inputs (:inputs cached))
           (:result cached)
-          ;; Fallback to value equality for cases where structure is rebuilt
-          (if (= inputs (:inputs cached))
-            (do (vreset! cache (assoc cached :inputs inputs))
-                (:result cached))
-            (let [result (proj-fn model)]
-              (vreset! cache {:inputs inputs :result result})
-              result)))))))
+
+          ;; Value-equal but rebuilt structure — update pointer, return cached
+          (= inputs (:inputs cached))
+          (do (vreset! cache (assoc cached :inputs inputs))
+              (:result cached))
+
+          ;; Changed inputs — recompute
+          :else
+          (let [result (proj-fn model)]
+            (vreset! cache {:inputs inputs :result result})
+            result))))))
 
 ;------------------------------------------------------------------------------ Layer 0b
 ;; Formatting helpers
@@ -288,16 +294,20 @@
 ;------------------------------------------------------------------------------ Layer 0d
 ;; Temporal grouping
 
-(defn- to-local-date
-  "Convert a started-at value to LocalDate. Returns nil on failure."
+(defn- to-zoned-datetime
+  "Parse a started-at value to ZonedDateTime. Returns nil on failure."
   [started]
   (try
     (-> (if (instance? java.util.Date started)
           (.toInstant ^java.util.Date started)
           (java.time.Instant/parse (str started)))
-        (.atZone (ZoneId/systemDefault))
-        .toLocalDate)
+        (.atZone (ZoneId/systemDefault)))
     (catch Exception _ nil)))
+
+(defn- to-local-date
+  "Convert a started-at value to LocalDate. Returns nil on failure."
+  [started]
+  (some-> started to-zoned-datetime .toLocalDate))
 
 (defn- days-ago-bucket
   "Map a days-ago integer to a temporal bucket keyword."
@@ -327,18 +337,12 @@
 (defn- format-started-time
   "Format started-at for display. Shows HH:mm for today/yesterday, MM-dd HH:mm otherwise."
   [started bucket]
-  (when started
-    (try
-      (let [inst (if (instance? java.util.Date started)
-                   (.toInstant ^java.util.Date started)
-                   (java.time.Instant/parse (str started)))
-            zdt (.atZone inst (ZoneId/systemDefault))]
-        (if (#{:today :yesterday} bucket)
-          (format "%02d:%02d" (.getHour zdt) (.getMinute zdt))
-          (format "%02d-%02d %02d:%02d"
-                  (.getMonthValue zdt) (.getDayOfMonth zdt)
-                  (.getHour zdt) (.getMinute zdt))))
-      (catch Exception _ ""))))
+  (when-let [zdt (some-> started to-zoned-datetime)]
+    (if (#{:today :yesterday} bucket)
+      (format "%02d:%02d" (.getHour zdt) (.getMinute zdt))
+      (format "%02d-%02d %02d:%02d"
+              (.getMonthValue zdt) (.getDayOfMonth zdt)
+              (.getHour zdt) (.getMinute zdt)))))
 
 (defn group-workflows-with-headers
   "Group workflows into temporal buckets and interleave section header rows.
