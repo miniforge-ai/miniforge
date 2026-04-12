@@ -1,0 +1,11 @@
+{:runner/defaults
+ {;; Pipeline execution limits
+  :max-phases             50
+  :max-backoff-ms         30000
+  :backoff-base-ms        1000
+  :pause-poll-interval-ms 1000
+
+  ;; Environment defaults
+  :default-workdir        "/workspace"
+  :task-branch-prefix     "task/"
+  :default-docker-image   "miniforge/task-runner-clojure:latest"}}

@@ -174,7 +174,7 @@
                            :environment-id acquired-env-id
                            :worktree-path  *test-worktree*
                            :execution-mode :local}
-          acquire-var     (resolve 'ai.miniforge.workflow.runner/acquire-execution-environment!)
+          acquire-var     (resolve 'ai.miniforge.workflow.runner-environment/acquire-execution-environment!)
           workflow        (make-workflow :implement :done)]
       (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                     agent/invoke

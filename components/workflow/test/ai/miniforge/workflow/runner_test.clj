@@ -273,7 +273,7 @@
   (testing "when no executor in opts and acquisition yields nil, env keys are absent"
     ;; Force acquisition to return nil for deterministic test isolation.
     ;; Verifies the safe-nil path: acquisition failure → no env keys.
-    (let [acquire-var (resolve 'ai.miniforge.workflow.runner/acquire-execution-environment!)]
+    (let [acquire-var (resolve 'ai.miniforge.workflow.runner-environment/acquire-execution-environment!)]
       (with-redefs-fn
         {acquire-var (fn [& _] nil)}
         (fn []

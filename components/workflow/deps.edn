@@ -22,7 +22,8 @@
         babashka/process {:mvn/version "0.5.22"}
         metosin/malli {:mvn/version "0.16.1"}              ; Schema validation
         http-kit/http-kit {:mvn/version "2.8.0"}           ; WebSocket client for dashboard connection
-        cheshire/cheshire {:mvn/version "5.13.0"}}         ; JSON for event serialization
+        cheshire/cheshire {:mvn/version "5.13.0"}           ; JSON for event serialization
+        slingshot/slingshot {:mvn/version "0.12.2"}}        ; Enhanced exception handling
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {ai.miniforge/workflow-software-factory
                                {:local/root "../workflow-software-factory"}

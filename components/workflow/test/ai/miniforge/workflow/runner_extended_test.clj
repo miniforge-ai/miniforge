@@ -224,9 +224,10 @@
 ;; ---------------------------------------------------------------------------- persist-workspace-at-phase-boundary!
 
 (def ^:private persist-fn
-  "Var accessor for private persist-workspace-at-phase-boundary!."
-  (var-get (ns-resolve 'ai.miniforge.workflow.runner
-                       'persist-workspace-at-phase-boundary!)))
+  "Var accessor for persist-workspace-at-phase-boundary! (extracted to runner-environment)."
+  (do (require 'ai.miniforge.workflow.runner-environment)
+      (ns-resolve 'ai.miniforge.workflow.runner-environment
+                  'persist-workspace-at-phase-boundary!)))
 
 (deftest persist-workspace-noop-when-no-executor-test
   (testing "returns nil when context has no :execution/executor"

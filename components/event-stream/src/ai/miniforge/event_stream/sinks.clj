@@ -84,6 +84,15 @@
         (count stale-files))
       0)))
 
+(defn operator-event-file-path
+  "Get path to the operator event log (for cross-workflow events like meta-loop,
+   reliability, degradation). Returns ~/.miniforge/events/operator.edn"
+  []
+  (let [home (System/getProperty "user.home")
+        events-dir (io/file home ".miniforge" "events")]
+    (.mkdirs events-dir)
+    (str (io/file events-dir "operator.edn"))))
+
 (defn file-sink
   "Create a file sink that writes events to per-workflow files.
    Cross-workflow events (no :workflow/id) go to operator.edn.

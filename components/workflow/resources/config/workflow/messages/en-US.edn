@@ -20,4 +20,10 @@
 
   ;; Execution mode
   :governed/no-capsule      "No capsule executor available for governed workflow"
-  :governed/no-capsule-hint "Start Docker or configure a Kubernetes cluster"}}
+  :governed/no-capsule-hint "Start Docker or configure a Kubernetes cluster"
+
+  ;; Environment lifecycle
+  :env/acquisition-failed   "Environment acquisition failed: {error}"
+  :env/release-failed       "Environment release failed: {error}"
+  :env/persist-message      "{phase} phase completed"
+  :env/persist-failed       "Workspace persist failed: {error}"}}
