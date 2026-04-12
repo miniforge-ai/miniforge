@@ -1,0 +1,191 @@
+;; WS2 — Durable Startup, Replay, and Live Subscription
+;;
+;; Phase 1 of the TUI Supervisory Control Plane work spec.
+;; Ensures the TUI is useful immediately on startup and stays current
+;; via live event subscription across three event families.
+;;
+;; Parent work spec: work/tui-supervisory-control-plane.spec.edn
+;; Normative contract: specs/normative/N5-delta-supervisory-control-plane.md
+
+{:spec/id "tui-ws2-durable-startup"
+ :spec/version "0.1.0"
+ :spec/created "2026-04-02"
+ :spec/status "active"
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :spec/title "WS2: Durable Startup, Replay, and Live Subscription"
+
+ :spec/description
+ "The TUI must be useful immediately on startup and stay current during
+  active runs. This is the #1 functional gap today. Covers startup load of
+  recent supervisory state from disk, live event subscription across three
+  event families (:workflow/*, :pr-monitor/*, :control-plane/*), and
+  graceful degradation when live subscription is unavailable."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/tui-views"
+          "components/event-stream"]}
+
+ :spec/constraints
+ ["Startup must load from existing persistence paths (~/.miniforge/workflows/, PR sync cache)"
+  "Event handlers must translate domain events into TUI model updates via the Elm update loop"
+  "Stale state must never appear indistinguishable from live state"
+  "Empty disk state must produce a valid empty model, not nil or crash"
+  "All tests must pass with bb test"]
+
+ :spec/acceptance-criteria
+ ["Launching TUI with no active workflow shows recent runs and PR state"
+  "Starting a workflow from Claude Code updates TUI in real time"
+  "Restarting TUI reconstructs state without requiring fresh activity"
+  "Subscription outage does not yield empty screen"
+  "PR monitor loop events update PR monitoring status in model"
+  "Control plane agent discovery events update agent display"]
+
+ :title "WS2: Durable Startup, Replay, and Live Subscription"
+
+ :description
+ "Fix startup state loading and wire live event subscription so the TUI
+  always has something to show and stays current. The standalone TUI already
+  calls persistence/load-workflows-into-model on startup, but PR state,
+  policy evaluations, and agent sessions are not loaded. Live event handling
+  exists for :workflow/* events but is incomplete, and :pr-monitor/* and
+  :control-plane/* event families are not wired at all."
+
+ :context
+ {:normative-refs
+  ["N5-delta-supervisory-control-plane §7 — durability and replay"
+   "N5-delta-supervisory-control-plane §5 — event families"
+   "N3 §3.x — :pr-monitor/* event types"]
+
+  :current-state
+  ["Standalone TUI startup loads workflows from disk via persistence/load-workflows-into-model"
+   "PR state and policy evaluations not loaded on startup"
+   "subscription.clj translates :workflow/* events to TUI messages"
+   "No handlers for :pr-monitor/* events (13 event types in monitor_events.clj)"
+   "No handlers for :control-plane/* events (agent discovery, status, decisions)"
+   "No stale-state indicator when subscription is unavailable"]
+
+  :existing-components
+  ["tui-views/subscription.clj — event-stream subscription bridge"
+   "tui-views/persistence.clj — workflow loading from disk"
+   "tui-views/interface.clj — start-tui!, start-standalone-tui!"
+   "pr-lifecycle/monitor_events.clj — 13 :pr-monitor/* event constructors"
+   "control-plane/orchestrator.clj — emits :control-plane/* events"
+   "control-plane/registry.clj — agent session CRUD"]}
+
+ :plan/tasks
+ [{:task/id :startup-load
+   :task/description
+   "Extend the TUI startup path to load recent supervisory state from disk.
+
+    Currently: start-standalone-tui! calls persistence/load-workflows-into-model
+    to populate :workflows from ~/.miniforge/workflows/.
+
+    Add:
+    1. Load PR state from the GitHub sync cache (pr-items, train state)
+    2. Load policy evaluation results from pr-cache if present
+    3. Derive governance states for loaded PRs using the derivation fn from WS1
+    4. Load agent sessions from control-plane registry if control-plane is active
+    5. Derive initial attention items from loaded state
+
+    The startup path must handle missing/empty data gracefully — each load
+    step that finds no data should produce an empty collection, not fail.
+
+    Files: components/tui-views/src/ai/miniforge/tui_views/persistence.clj
+           components/tui-views/src/ai/miniforge/tui_views/interface.clj
+    Tests: Model populated after init with disk data, empty disk = valid empty model"
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :live-event-subscription
+   :task/description
+   "Wire event-stream subscription to update supervisory projections during
+    active runs. Extend subscription.clj translate-event to handle all three
+    event families.
+
+    :workflow/* events (extend existing handlers):
+    - :workflow/started → add WorkflowRun to model :workflows
+    - :workflow/phase-changed → update :workflow/phase and :workflow/status
+    - :agent/status → update agent activity text for the workflow
+    - :gate/evaluated → append gate result, re-derive governance state
+    - :workflow/completed → set terminal status :completed
+    - :workflow/failed → set terminal status :failed with error info
+    - :pr/synced → update PR data in :pr-items, re-derive governance state
+
+    :pr-monitor/* events (NEW — from pr-lifecycle/monitor_events.clj):
+    - :pr-monitor/loop-started → mark PR as actively monitored in model
+    - :pr-monitor/comment-received → increment pending comment count on PR
+    - :pr-monitor/comment-classified → update comment classification
+    - :pr-monitor/fix-started → show fix-in-progress for PR
+    - :pr-monitor/fix-pushed → update PR with new commit SHA
+    - :pr-monitor/reply-posted → decrement pending count, update last action
+    - :pr-monitor/budget-warning → derive warning attention item
+    - :pr-monitor/budget-exhausted → derive critical attention item
+    - :pr-monitor/escalated → derive critical attention item
+    - :pr-monitor/cycle-completed → update cycle stats on PR
+    - :pr-monitor/loop-stopped → mark PR monitoring as inactive
+
+    :control-plane/* events (NEW — from control-plane/orchestrator.clj):
+    - :control-plane/agent-discovered → add agent session to model
+    - :control-plane/status-changed → update agent status/task display
+    - :control-plane/decision-submitted → add pending decision, mark agent blocked
+    - :control-plane/decision-resolved → clear pending decision, unblock agent
+
+    Each handler translates the domain event into a TUI msg for the Elm
+    update loop. Use the existing msg/make-msg pattern.
+
+    Files: components/tui-views/src/ai/miniforge/tui_views/subscription.clj
+           components/tui-views/src/ai/miniforge/tui_views/msg.clj (new msg types)
+           components/tui-views/src/ai/miniforge/tui_views/update.clj (new handlers)
+    Tests: Each event family produces correct model updates"
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :stale-read-degradation
+   :task/description
+   "When live subscription is unavailable, display stale state from the
+    most recent startup load with a visible indicator.
+
+    Implementation:
+    1. Track :subscription/status in the model (:connected, :disconnected, :stale)
+    2. Track :subscription/last-event-at timestamp
+    3. After N seconds (configurable, default 30) with no events while a
+       workflow is expected to be active, set status to :stale
+    4. Render a stale indicator in the status bar: '⊘ stale (last: 2m ago)'
+    5. When events resume, clear the stale indicator
+
+    The stale indicator must be visible but not alarming — it's informational,
+    not an error. Use a dim/muted color from the palette.
+
+    Do NOT show an empty screen when stale. Show the last-known state.
+
+    Files: components/tui-views/src/ai/miniforge/tui_views/model.clj (add keys)
+           components/tui-views/src/ai/miniforge/tui_views/subscription.clj
+           components/tui-views/src/ai/miniforge/tui_views/view.clj (status bar)
+    Tests: Stale indicator appears after timeout, disappears on event resume"
+   :task/type :implement
+   :task/dependencies [:live-event-subscription]}
+
+  {:task/id :ws2-tests
+   :task/description
+   "Integration tests for WS2:
+    1. Workflows from disk appear in model after init
+    2. PR state loaded from cache on startup
+    3. Empty disk state produces valid empty model, not nil/crash
+    4. Model updates when workflow phase changes during active run
+    5. Gate results accumulate in real time
+    6. Completed/failed events set terminal status
+    7. PR monitor events update PR monitoring state in model
+    8. Budget exhaustion from monitor loop creates attention item
+    9. Agent discovered event adds agent session to model
+    10. Stale indicator visible when subscription disconnected
+    11. Stale indicator clears when live events resume
+
+    Run: bb test
+    Files: components/tui-views/test/..."
+   :task/type :test
+   :task/dependencies [:startup-load
+                       :live-event-subscription
+                       :stale-read-degradation]}]}

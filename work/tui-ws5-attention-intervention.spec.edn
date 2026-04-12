@@ -1,0 +1,189 @@
+;; WS5 — Attention and Bounded Intervention
+;;
+;; Phase 4 of the TUI Supervisory Control Plane work spec.
+;; Compresses the system into actionable exceptions and allows limited
+;; supervisory action. Completes the shift from passive visibility to
+;; supervisory control.
+;;
+;; Parent work spec: work/tui-supervisory-control-plane.spec.edn
+;; Normative contract: specs/normative/N5-delta-supervisory-control-plane.md
+;; Depends on: tui-ws1-supervisory-domain, tui-ws2-durable-startup, tui-ws3-monitor-mode
+
+{:spec/id "tui-ws5-attention-intervention"
+ :spec/version "0.1.0"
+ :spec/created "2026-04-02"
+ :spec/status "active"
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :spec/title "WS5: Attention and Bounded Intervention"
+
+ :spec/description
+ "Derive attention items from supervisory state and provide bounded
+  intervention actions. Attention surfaces failures, blocks, and escalations
+  automatically. Interventions (retry, pause, resume, waive, resolve decision)
+  let the human act without the TUI becoming a general command shell."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/tui-views"
+          "components/control-plane"
+          "components/workflow"]}
+
+ :spec/constraints
+ ["Attention items MUST be derived from canonical supervisory state, not manually created"
+  "Interventions MUST be bounded — the UI must NOT become a general command shell"
+  "Every intervention MUST produce a durable record (per N5 §6.2)"
+  "Decision resolution MUST use control-plane/resolve-and-deliver! to deliver back to agent"
+  "All tests must pass with bb test"]
+
+ :spec/acceptance-criteria
+ ["Failed workflows, blocked trains, policy failures surface automatically"
+  "Interventions are durable and bounded"
+  "UI does not expand into a general command shell"
+  "Decision resolution delivers result back to blocked agent"
+  "Intervention audit trail is queryable"]
+
+ :title "WS5: Attention and Bounded Intervention"
+
+ :description
+ "Attention derivation recomputes on every model change, surfacing items
+  the human needs to see. Interventions are a bounded set of supervisory
+  actions (retry, pause, resume, cancel, waive, re-evaluate, resolve decision,
+  acknowledge) that let the human act on exceptions without leaving the
+  monitor. Every intervention is recorded for auditability."
+
+ :context
+ {:normative-refs
+  ["N5-delta-supervisory-control-plane §5 — attention derivation rules"
+   "N5-delta-supervisory-control-plane §6 — bounded intervention vocabulary"
+   "N5-delta-supervisory-control-plane §6.2 — intervention auditability"]
+
+  :current-state
+  ["No attention derivation system"
+   "No intervention menu or action dispatch"
+   "Monitor attention bar zone exists (from WS3) but renders static items"
+   "control-plane/decision-queue exists for agent decisions"
+   "Existing confirm overlay pattern for user confirmations"
+   "event-stream/approval exists for decision resolution"]
+
+  :existing-components
+  ["tui-views/views/monitor.clj — monitor screen with attention bar"
+   "tui-views/view/project.clj — attention projection builder (from WS1)"
+   "control-plane/decision_queue.clj — pending decision management"
+   "control-plane/orchestrator.clj — resolve-and-deliver!"
+   "event-stream/approval.clj — approval request/resolution"
+   "workflow/ — workflow state machine (pause, resume, cancel)"]}
+
+ :plan/tasks
+ [{:task/id :attention-derivation
+   :task/description
+   "Implement the attention derivation rules from the normative delta §5.
+
+    On every model change (after update functions run), recompute attention
+    items from supervisory state and store in model as :attention-items.
+    The attention projection builder from WS1 provides the pure derivation
+    function — this task wires it into the update loop.
+
+    Required attention rules:
+
+    Workflow rules:
+    - :workflow/failed → critical (workflow crashed, human must decide retry/cancel)
+    - :workflow/stale → warning (no progress for >5 min while status is :running)
+    - :workflow/completed → info (workflow finished successfully)
+
+    PR rules:
+    - PR :policy-failing → warning (policy failed, may need waiver)
+    - PR conflicts → warning (PR has merge conflicts)
+    - PR merged → info (PR successfully merged)
+
+    PR train rules:
+    - Train :blocked → critical (train cannot progress)
+    - Train policy violation → warning (a PR in the train failed policy)
+
+    PR monitor loop rules (from :pr-monitor/* events):
+    - :pr-monitor/budget-exhausted → critical (monitor gave up, human must act)
+    - :pr-monitor/escalated → critical (monitor explicitly escalated)
+    - :pr-monitor/budget-warning → warning (approaching budget limit)
+    - :pr-monitor/fix-pushed → info (autonomous fix landed)
+
+    Control plane rules (from :control-plane/* events):
+    - Agent :blocked on pending decision → critical (human must resolve)
+    - Agent heartbeat stale (>2 min) → warning (agent may be dead)
+    - Agent :failed → critical (agent session crashed)
+    - Agent :completed → info (session finished)
+
+    Items auto-resolve when the underlying condition resolves (e.g., workflow
+    retried and now running clears the :failed attention item).
+
+    Files: components/tui-views/src/ai/miniforge/tui_views/update.clj
+           components/tui-views/src/ai/miniforge/tui_views/view/project.clj
+    Tests: Each rule generates correct severity, items auto-resolve,
+           empty model produces empty attention list"
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :intervention-menu
+   :task/description
+   "Bounded intervention actions from the monitor and detail views.
+
+    When an attention item or entity is selected and the user presses 'i'
+    (intervene), show a context menu of applicable interventions:
+
+    Context-dependent interventions:
+    - Failed workflow: [r]etry, [c]ancel
+    - Running workflow: [p]ause
+    - Paused workflow: [r]esume, [c]ancel
+    - Failing PR: [w]aive (→ WS4 waiver flow), [e] re-evaluate policy
+    - Blocked agent (pending decision): [d] resolve decision
+    - Stale/failed agent: [t]erminate
+    - Any attention item: [a]cknowledge (marks as seen, keeps in history)
+
+    Decision resolution flow:
+    When an agent is :blocked on a pending decision, the intervention menu
+    shows the decision's summary and available options (from decision-queue).
+    The human selects an option or provides free-form resolution. This calls
+    control-plane/resolve-and-deliver! which delivers the result back to the
+    agent and transitions it to :running.
+
+    UI pattern: use the existing confirm overlay ({:confirm {:action ...}})
+    extended with a multi-option variant for decision resolution.
+
+    Intervention recording:
+    Every intervention produces a durable record persisted to
+    ~/.miniforge/interventions/{timestamp}-{type}.edn with fields:
+    :intervention/id, :intervention/type, :intervention/target-type,
+    :intervention/target-id, :intervention/actor, :intervention/timestamp,
+    :intervention/details
+
+    Files: components/tui-views/src/ai/miniforge/tui_views/views/monitor.clj
+           components/tui-views/src/ai/miniforge/tui_views/update.clj
+           components/tui-views/src/ai/miniforge/tui_views/persistence.clj
+    Tests: Each intervention type dispatches correctly, intervention recorded,
+           decision resolution delivers to agent and unblocks"
+   :task/type :implement
+   :task/dependencies [:attention-derivation]}
+
+  {:task/id :ws5-tests
+   :task/description
+   "Verify all WS5 deliverables:
+    1. Failed workflow generates critical attention item
+    2. Stale workflow generates warning after threshold
+    3. Completed workflow generates info item
+    4. Items auto-resolve when underlying condition resolves
+    5. Empty model produces empty attention list, not error
+    6. Retry creates new workflow run from failed run's spec
+    7. Pause/resume change workflow status correctly
+    8. Waive creates Waiver record and updates governance state
+    9. Re-evaluate triggers new PolicyEvaluation
+    10. Resolve decision delivers result and unblocks agent
+    11. Acknowledge marks attention item as seen
+    12. Intervention recorded in ~/.miniforge/interventions/
+    13. Budget exhaustion from PR monitor creates critical attention item
+    14. Blocked agent decision surfaces as critical and is resolvable
+
+    Run: bb test
+    Files: components/tui-views/test/..."
+   :task/type :test
+   :task/dependencies [:attention-derivation
+                       :intervention-menu]}]}
