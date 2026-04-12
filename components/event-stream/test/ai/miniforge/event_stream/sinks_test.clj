@@ -21,20 +21,20 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.java.io :as io]
-   [clojure.edn :as edn]
-   [clojure.string]
+   [clojure.string :as str]
+   [cognitect.transit :as transit]
    [ai.miniforge.event-stream.sinks :as sinks]))
 
 ;------------------------------------------------------------------------------ Helpers
 
 (defn with-temp-dir [f]
-  (let [dir (str (java.nio.file.Files/createTempDirectory
-                   "sinks-test-"
-                   (into-array java.nio.file.attribute.FileAttribute [])))]
+  (let [dir (java.nio.file.Files/createTempDirectory
+              "sinks-test-"
+              (into-array java.nio.file.attribute.FileAttribute []))]
     (try
-      (f dir)
+      (f (.toFile dir))
       (finally
-        (doseq [file (reverse (file-seq (io/file dir)))]
+        (doseq [file (reverse (file-seq (.toFile dir)))]
           (.delete ^java.io.File file))))))
 
 (defn sample-event [& [overrides]]
@@ -47,63 +47,101 @@
           :message "Test event"}
          overrides))
 
+(defn read-transit-json [s]
+  (transit/read
+   (transit/reader
+    (java.io.ByteArrayInputStream. (.getBytes ^String s "UTF-8"))
+    :json-verbose)))
+
+(defn list-files [^java.io.File dir]
+  (when (.isDirectory dir)
+    (vec (.listFiles dir))))
+
 ;------------------------------------------------------------------------------ Layer 0
 ;; event-file-path
 
 (deftest event-file-path-test
-  (testing "returns a string path ending in .edn"
+  (testing "returns a File path ending in .json"
     (let [wf-id (random-uuid)
           path (sinks/event-file-path wf-id)]
-      (is (string? path))
-      (is (clojure.string/ends-with? path (str wf-id ".edn")))
-      (is (clojure.string/includes? path ".miniforge"))))
+      (is (instance? java.io.File path))
+      (is (str/ends-with? (.getName path) ".json"))
+      (is (str/includes? (.getPath path) (str wf-id)))))
 
-  (testing "creates events directory if it does not exist"
-    (let [path (sinks/event-file-path (random-uuid))
-          parent (io/file (.getParent (io/file path)))]
-      (is (.isDirectory parent)))))
+  (testing "creates the workflow subdirectory"
+    (let [wf-id (random-uuid)
+          path (sinks/event-file-path wf-id)
+          parent (.getParentFile path)]
+      (is (.isDirectory parent))
+      (is (str/ends-with? (.getName parent) (str wf-id)))))
+
+  (testing "accepts an explicit base-dir"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf-id (random-uuid)
+              path (sinks/event-file-path dir wf-id)]
+          (is (str/includes? (.getPath path) (.getPath dir)))
+          (is (str/ends-with? (.getName path) ".json")))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; file-sink
 
 (deftest file-sink-test
-  (testing "writes event to per-workflow file"
-    (let [sink (sinks/file-sink)
-          wf-id (random-uuid)
-          event (sample-event {:workflow/id wf-id})]
-      (sink event)
-      ;; Read back
-      (let [path (sinks/event-file-path wf-id)
-            content (slurp path)
-            parsed (edn/read-string content)]
-        (is (= :workflow/started (:event/type parsed)))
-        (is (= wf-id (:workflow/id parsed)))
-        ;; Cleanup
-        (.delete (io/file path)))))
+  (testing "writes event to per-workflow file as Transit-JSON"
+    (with-temp-dir
+      (fn [dir]
+        (let [sink (sinks/file-sink {:base-dir dir})
+              wf-id (random-uuid)
+              event (sample-event {:workflow/id wf-id})]
+          (sink event)
+          (let [wf-dir (io/file dir (str wf-id))
+                files (list-files wf-dir)]
+            (is (= 1 (count files)))
+            (let [parsed (read-transit-json (slurp (first files)))]
+              (is (= :workflow/started (:event/type parsed)))
+              (is (= wf-id (:workflow/id parsed)))))))))
 
-  (testing "appends multiple events to same file"
-    (let [sink (sinks/file-sink)
-          wf-id (random-uuid)
-          e1 (sample-event {:workflow/id wf-id :event/sequence-number 0})
-          e2 (sample-event {:workflow/id wf-id :event/sequence-number 1
-                            :event/type :workflow/phase-started})]
-      (sink e1)
-      (sink e2)
-      (let [path (sinks/event-file-path wf-id)
-            lines (clojure.string/split-lines (slurp path))]
-        (is (= 2 (count lines)))
-        (is (= :workflow/started (:event/type (edn/read-string (first lines)))))
-        (is (= :workflow/phase-started (:event/type (edn/read-string (second lines)))))
-        (.delete (io/file path)))))
+  (testing "writes one file per event in the workflow subdirectory"
+    (with-temp-dir
+      (fn [dir]
+        (let [sink (sinks/file-sink {:base-dir dir})
+              wf-id (random-uuid)]
+          (sink (sample-event {:workflow/id wf-id}))
+          (sink (sample-event {:workflow/id wf-id :event/type :workflow/completed}))
+          (let [wf-dir (io/file dir (str wf-id))
+                files (sort-by #(.getName %) (list-files wf-dir))]
+            (is (= 2 (count files)))
+            ;; Files are sortable by timestamp-prefixed name
+            (let [e1 (read-transit-json (slurp (first files)))
+                  e2 (read-transit-json (slurp (second files)))]
+              (is (= :workflow/started (:event/type e1)))
+              (is (= :workflow/completed (:event/type e2)))))))))
 
-  (testing "writes events with nil workflow-id to operator.edn"
-    (let [sink (sinks/file-sink)
-          unique-type (keyword (str "test/meta-loop-" (random-uuid)))
-          event (sample-event {:workflow/id nil :event/type unique-type})]
-      (sink event)
-      (let [path (sinks/operator-event-file-path)
-            content (slurp path)]
-        (is (clojure.string/includes? content (name unique-type)))))))
+  (testing "writes events with nil workflow-id to operator subdirectory"
+    (with-temp-dir
+      (fn [dir]
+        (let [sink (sinks/file-sink {:base-dir dir})
+              unique-type (keyword (str "test/op-" (random-uuid)))
+              event (sample-event {:workflow/id nil :event/type unique-type})]
+          (sink event)
+          (let [op-dir (io/file dir "operator")
+                files (list-files op-dir)]
+            (is (= 1 (count files)))
+            (let [parsed (read-transit-json (slurp (first files)))]
+              (is (= unique-type (:event/type parsed)))))))))
+
+  (testing "output files are valid Transit-JSON readable by cognitect/transit-clj reader"
+    (with-temp-dir
+      (fn [dir]
+        (let [sink (sinks/file-sink {:base-dir dir})
+              wf-id (random-uuid)
+              event (sample-event {:workflow/id wf-id})]
+          (sink event)
+          (let [wf-dir (io/file dir (str wf-id))
+                files (list-files wf-dir)
+                content (slurp (first files))]
+            ;; Must parse without exception
+            (is (map? (read-transit-json content)))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; stdout-sink
@@ -113,17 +151,17 @@
     (let [sink (sinks/stdout-sink {:compact true})
           event (sample-event)
           output (with-out-str (sink event))]
-      (is (not (clojure.string/blank? output)))
+      (is (not (str/blank? output)))
       ;; Should be parseable EDN
-      (let [parsed (edn/read-string output)]
+      (let [parsed (clojure.edn/read-string output)]
         (is (= :workflow/started (:event/type parsed))))))
 
   (testing "compact mode produces single-line output"
     (let [sink (sinks/stdout-sink {:compact true})
           event (sample-event)
-          output (clojure.string/trim (with-out-str (sink event)))]
+          output (str/trim (with-out-str (sink event)))]
       ;; Compact EDN should be a single line (no internal newlines before the closing brace)
-      (is (clojure.string/starts-with? output "{")))))
+      (is (str/starts-with? output "{")))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; stderr-sink
@@ -151,7 +189,7 @@
                    (binding [*err* (java.io.PrintWriter. w)]
                      (sink (sample-event)))
                    (str w))]
-      (is (not (clojure.string/blank? output))))))
+      (is (not (str/blank? output))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; multi-sink
@@ -272,15 +310,21 @@
 
 (deftest file-sink-reports-write-errors-to-stderr-test
   (testing "file-sink logs write failures to stderr instead of swallowing"
-    (let [sink (sinks/file-sink)
-          event (sample-event {:workflow/id (random-uuid)})
-          stderr-output (let [w (java.io.StringWriter.)]
-                          (binding [*err* (java.io.PrintWriter. w)]
-                            (with-redefs [sinks/event-file-path
-                                          (fn [_] "/nonexistent/path/that/will/fail.edn")]
-                              (sink event)))
-                          (str w))]
-      (is (clojure.string/includes? stderr-output "WARNING")))))
+    (with-temp-dir
+      (fn [dir]
+        ;; Create a regular file at {dir}/{wf-id} so that when the sink tries to
+        ;; create a subdirectory there (.mkdirs returns false), spit throws an
+        ;; IOException trying to write a child path of a regular file.
+        (let [wf-id (random-uuid)
+              collision (io/file dir (str wf-id))]
+          (spit (str collision) "not a dir")
+          (let [sink (sinks/file-sink {:base-dir dir})
+                event (sample-event {:workflow/id wf-id})
+                stderr-output (let [w (java.io.StringWriter.)]
+                                (binding [*err* (java.io.PrintWriter. w)]
+                                  (sink event))
+                                (str w))]
+            (is (str/includes? stderr-output "WARNING"))))))))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; cleanup-stale-events!
@@ -289,20 +333,24 @@
   (testing "returns 0 when events directory is empty"
     (with-temp-dir
       (fn [dir]
-        (is (= 0 (sinks/cleanup-stale-events! {:ttl-ms 0 :events-dir (io/file dir)}))))))
+        (is (= 0 (sinks/cleanup-stale-events! {:ttl-ms 0 :events-dir dir}))))))
 
-  (testing "deletes old files and preserves recent ones"
+  (testing "deletes old event files and preserves recent ones"
     (with-temp-dir
       (fn [dir]
-        (let [old-file (io/file dir "old-workflow.edn")
-              new-file (io/file dir "new-workflow.edn")]
-          (spit old-file "{:event/type :workflow/started}")
-          (spit new-file "{:event/type :workflow/started}")
-          (.setLastModified old-file (- (System/currentTimeMillis) (* 8 24 60 60 1000)))
-          (let [deleted (sinks/cleanup-stale-events! {:events-dir (io/file dir)})]
-            (is (= 1 deleted))
-            (is (not (.exists old-file)))
-            (is (.exists new-file)))))))
+        (let [old-dir (io/file dir "workflow-old")
+              new-dir (io/file dir "workflow-new")]
+          (.mkdirs old-dir)
+          (.mkdirs new-dir)
+          (let [old-file (io/file old-dir "20200101T000000Z-abc.json")
+                new-file (io/file new-dir "20260411T000000Z-def.json")]
+            (spit (str old-file) "{}")
+            (spit (str new-file) "{}")
+            (.setLastModified old-file (- (System/currentTimeMillis) (* 8 24 60 60 1000)))
+            (let [deleted (sinks/cleanup-stale-events! {:events-dir dir})]
+              (is (= 1 deleted))
+              (is (not (.exists old-file)))
+              (is (.exists new-file))))))))
 
   (testing "returns 0 when directory does not exist"
     (is (= 0 (sinks/cleanup-stale-events!
