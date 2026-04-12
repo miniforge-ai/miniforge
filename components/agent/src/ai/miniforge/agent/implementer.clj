@@ -249,10 +249,13 @@
     (catch Exception _ nil)))
 
 (defn- try-parse-inline-status
-  "Scan for an inline {:status :already-implemented ...} EDN map."
+  "Scan for an inline {:status :already-implemented ...} EDN map,
+   or a bare :already-implemented keyword anywhere in the text."
   [text]
-  (when-let [match (re-find #"\{:status\s+:already-implemented[^}]*\}" text)]
-    (edn/read-string match)))
+  (if-let [match (re-find #"\{:status\s+:already-implemented[^}]*\}" text)]
+    (edn/read-string match)
+    (when (re-find #":already-implemented" text)
+      {:status :already-implemented})))
 
 (defn parse-code-response
   "Parse the LLM response to extract code artifact.

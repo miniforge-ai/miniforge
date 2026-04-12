@@ -23,7 +23,12 @@
    It routes workflow state to meta-agents and aggregates their decisions.
    Any meta-agent can halt the workflow - coordinator just enforces it."
   (:require [ai.miniforge.agent.meta-protocol :as mp]
-            [ai.miniforge.response.interface :as response]))
+            [ai.miniforge.response.interface :as response]
+            [ai.miniforge.reliability.interface :as reliability]
+            [ai.miniforge.diagnosis.interface :as diagnosis]
+            [ai.miniforge.improvement.interface :as improvement]
+            [ai.miniforge.event-stream.interface.stream :as stream]
+            [ai.miniforge.event-stream.interface.events :as events]))
 
 (defrecord MetaCoordinator
   [agents           ; Vector of MetaAgent instances
@@ -195,6 +200,159 @@
             (vec (remove #(= agent-id (-> % mp/get-meta-config :id))
                          agents)))))
 
+;;----------------------------------------------------------------------------- Learning Layer
+;; Meta-loop cycle — N1 §3.3
+
+(defn run-meta-loop-cycle!
+  "Execute one meta-loop learning cycle per N1 §3.3.
+
+   Orchestrates:
+   1. Compute SLIs, check SLOs, update error budgets (reliability layer)
+   2. Evaluate degradation mode — may transition :nominal → :degraded → :safe-mode
+   3. Run full diagnosis pipeline: extract signals → correlate → diagnose
+   4. Generate improvement proposals from diagnoses
+   5. Store proposals in pipeline (pending operator approval)
+   6. Emit :meta-loop/cycle-completed event
+
+   Proposal generation is skipped when degradation mode is :degraded or :safe-mode
+   to avoid generating noise during active incidents.
+
+   Arguments:
+     ctx - map with keys:
+       :event-stream         - event stream atom for emitting cycle events
+       :reliability-engine   - ReliabilityEngine (reliability/create-engine)
+       :degradation-manager  - DegradationManager (reliability/create-degradation-manager)
+       :improvement-pipeline - pipeline atom (improvement/create-pipeline)
+       :metrics              - collected metrics map (see reliability/compute-all-slis):
+                                 :workflow-metrics :phase-metrics :gate-metrics
+                                 :tool-metrics :failure-events :context-metrics
+       :training-examples    - vector of training records (optional)
+
+   Returns: cycle result map with :cycle/* keys."
+  [{:keys [event-stream reliability-engine degradation-manager
+           improvement-pipeline metrics training-examples]}]
+  (let [started-at (java.util.Date.)]
+    (try
+      (let [;; 1. Compute SLIs, check SLOs, update error budgets
+            {:keys [slo-checks budgets breaches recommendation] :as cycle-result}
+            (reliability/compute-cycle! reliability-engine (or metrics {}))
+
+            ;; 2. Evaluate and possibly transition degradation mode
+            current-mode (reliability/evaluate-degradation! degradation-manager budgets)
+
+            ;; 3. Run full diagnosis: signals → correlations → diagnoses
+            {:keys [signals correlations diagnoses]}
+            (diagnosis/run-diagnosis
+             {:slo-checks        slo-checks
+              :failure-events    (get metrics :failure-events [])
+              :training-examples (or training-examples [])
+              :phase-metrics     (get metrics :phase-metrics [])})
+
+            ;; 4. Generate proposals only in nominal mode — avoid noise during incidents
+            proposals (when (= :nominal current-mode)
+                        (improvement/generate-proposals diagnoses))
+
+            ;; 5. Store proposals
+            _ (when (and improvement-pipeline (seq proposals))
+                (doseq [p proposals]
+                  (improvement/store-proposal! improvement-pipeline p)))
+
+            duration-ms (- (System/currentTimeMillis) (.getTime started-at))
+
+            result {:cycle/started-at       started-at
+                    :cycle/duration-ms      duration-ms
+                    :cycle/sli-count        (count (:slis cycle-result))
+                    :cycle/breach-count     (count breaches)
+                    :cycle/signal-count     (count signals)
+                    :cycle/correlation-count (count correlations)
+                    :cycle/diagnosis-count  (count diagnoses)
+                    :cycle/proposal-count   (count (or proposals []))
+                    :cycle/degradation-mode current-mode
+                    :cycle/recommendation   recommendation}]
+
+        ;; 6. Emit summary event
+        (when event-stream
+          (stream/publish! event-stream
+                           (events/meta-loop-cycle-completed event-stream result)))
+
+        result)
+
+      (catch Exception e
+        (when event-stream
+          (stream/publish! event-stream
+                           (events/meta-loop-cycle-failed event-stream e)))
+        (throw e)))))
+
+;;----------------------------------------------------------------------------- Meta-loop context
+
+(defrecord MetaLoopContext
+  [event-stream
+   reliability-engine
+   degradation-manager
+   improvement-pipeline
+   metrics-store])    ; atom: {:workflow-metrics [] :failure-events [] :phase-metrics []}
+
+(defn create-meta-loop-context
+  "Create a MetaLoopContext that bundles all stateful objects needed for a cycle.
+
+   Arguments:
+     event-stream - event stream atom
+     config       - optional:
+       :reliability   - config for reliability/create-engine
+       :degradation   - config for reliability/create-degradation-manager
+
+   Returns: MetaLoopContext record."
+  [event-stream & [config]]
+  (->MetaLoopContext
+   event-stream
+   (reliability/create-engine event-stream (:reliability config))
+   (reliability/create-degradation-manager event-stream (:degradation config))
+   (improvement/create-pipeline)
+   (atom {:workflow-metrics []
+          :failure-events   []
+          :phase-metrics    []
+          :gate-metrics     []
+          :tool-metrics     []
+          :context-metrics  []})))
+
+(defn record-workflow-outcome!
+  "Record a workflow completion for use in the next meta-loop cycle.
+
+   Arguments:
+     ctx           - MetaLoopContext
+     workflow-id   - uuid
+     status        - :completed | :failed | :escalated
+     failure-class - optional :failure.class/* keyword (when failed)"
+  [ctx workflow-id status & [failure-class]]
+  (let [now (java.util.Date.)]
+    (swap! (:metrics-store ctx) update :workflow-metrics conj
+           {:workflow/id workflow-id
+            :status      status
+            :timestamp   now})
+    (when failure-class
+      (swap! (:metrics-store ctx) update :failure-events conj
+             {:failure/class failure-class
+              :workflow/id   workflow-id
+              :timestamp     now})))
+  nil)
+
+(defn run-cycle-from-context!
+  "Run one meta-loop cycle using the accumulated metrics in ctx.
+
+   Arguments:
+     ctx               - MetaLoopContext
+     training-examples - optional vector of training records
+
+   Returns: cycle result map."
+  [ctx & [training-examples]]
+  (run-meta-loop-cycle!
+   {:event-stream         (:event-stream ctx)
+    :reliability-engine   (:reliability-engine ctx)
+    :degradation-manager  (:degradation-manager ctx)
+    :improvement-pipeline (:improvement-pipeline ctx)
+    :metrics              @(:metrics-store ctx)
+    :training-examples    training-examples}))
+
 (comment
   ;; Usage example
   ;; (require '[ai.miniforge.agent.meta.progress-monitor :as pm])
@@ -231,4 +389,16 @@
 
   ;; ;; Get history
   ;; (get-check-history coordinator {:limit 50 :agent-id :progress-monitor})
+
+  ;; Process-level meta-loop context
+  ;; (def stream (ai.miniforge.event-stream.interface/create-event-stream))
+  ;; (def ctx (create-meta-loop-context stream))
+  ;;
+  ;; ;; After workflow runs:
+  ;; (record-workflow-outcome! ctx wf-id :completed nil)
+  ;; (record-workflow-outcome! ctx wf-id :failed :failure.class/timeout)
+  ;;
+  ;; ;; Run a learning cycle:
+  ;; (run-cycle-from-context! ctx)
+  ;; ;; => {:cycle/sli-count 7 :cycle/signal-count 2 :cycle/degradation-mode :nominal ...}
   )

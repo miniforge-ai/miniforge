@@ -64,7 +64,14 @@
         ai.miniforge/messages {:local/root "../../components/messages"}
         ai.miniforge/patterns {:local/root "../../components/patterns"}
         ;; Workflow compliance scanning (phase-level compliance checks)
-        ai.miniforge/workflow-compliance-scanner {:local/root "../../components/workflow-compliance-scanner"}}
+        ai.miniforge/workflow-compliance-scanner {:local/root "../../components/workflow-compliance-scanner"}
+        ;; Meta-agent loop: learning layer (N1 §3.3)
+        ai.miniforge/failure-classifier {:local/root "../../components/failure-classifier"}
+        ai.miniforge/reliability {:local/root "../../components/reliability"}
+        ai.miniforge/training-capture {:local/root "../../components/training-capture"}
+        ai.miniforge/diagnosis {:local/root "../../components/diagnosis"}
+        ai.miniforge/improvement {:local/root "../../components/improvement"}
+        ai.miniforge/evaluation {:local/root "../../components/evaluation"}}
 
  :aliases
  {:uberjar
