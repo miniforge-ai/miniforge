@@ -22,6 +22,7 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.java.io :as io]
    [clojure.string :as str]
+   [clojure.edn :as edn]
    [cognitect.transit :as transit]
    [ai.miniforge.event-stream.sinks :as sinks]))
 
@@ -153,7 +154,7 @@
           output (with-out-str (sink event))]
       (is (not (str/blank? output)))
       ;; Should be parseable EDN
-      (let [parsed (clojure.edn/read-string output)]
+      (let [parsed (edn/read-string output)]
         (is (= :workflow/started (:event/type parsed))))))
 
   (testing "compact mode produces single-line output"
