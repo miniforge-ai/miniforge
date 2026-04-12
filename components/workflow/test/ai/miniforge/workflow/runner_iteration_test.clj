@@ -1,10 +1,12 @@
 ;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 
 (ns ai.miniforge.workflow.runner-iteration-test
-  "Tests for iteration helpers extracted from runner.clj."
+  "Tests for iteration helpers extracted from runner.clj.
+   Includes slingshot try+/throw+ bb-compatibility tests."
   (:require
    [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.workflow.runner :as runner]))
+   [ai.miniforge.workflow.runner :as runner]
+   [slingshot.slingshot :refer [try+ throw+]]))
 
 ;; Access private fns
 (def ^:private rate-limited? #'runner/rate-limited?)
@@ -68,3 +70,46 @@
     (let [err (make-execution-error :test-error "broke" {:data {:code 42}})]
       (is (= :test-error (:type err)))
       (is (= 42 (get-in err [:data :code]))))))
+
+;; ============================================================================
+;; slingshot try+/throw+ — bb compatibility tests
+;; ============================================================================
+
+(deftest slingshot-throw-plus-map-test
+  (testing "throw+ with map is caught by key-value selector"
+    (let [result (try+
+                   (throw+ {:type :rate-limited :status 429 :message "slow down"})
+                   (catch [:type :rate-limited] {:keys [status message]}
+                     {:caught true :status status :message message}))]
+      (is (true? (:caught result)))
+      (is (= 429 (:status result)))
+      (is (= "slow down" (:message result))))))
+
+(deftest slingshot-catches-ex-info-by-key-test
+  (testing "try+ catches existing ex-info throws by key-value selector"
+    (let [result (try+
+                   (throw (ex-info "gate failed" {:type :gate-failed :gate :lint}))
+                   (catch [:type :gate-failed] {:keys [gate]}
+                     {:caught true :gate gate}))]
+      (is (true? (:caught result)))
+      (is (= :lint (:gate result))))))
+
+(deftest slingshot-fallthrough-to-object-test
+  (testing "try+ falls through to Object catch for non-matching ex-info throws"
+    (let [result (try+
+                   (throw (ex-info "other error" {:type :unknown}))
+                   (catch [:type :rate-limited] _
+                     {:caught :rate-limited})
+                   (catch Object obj
+                     {:caught :fallback :type (:type obj)}))]
+      (is (= :fallback (:caught result)))
+      (is (= :unknown (:type result))))))
+
+(deftest slingshot-dashboard-stop-test
+  (testing "check-stopped! throw+ is caught by :type selector"
+    (let [result (try+
+                   (throw+ {:type :dashboard-stop :reason :dashboard-stop :message "stopped"})
+                   (catch [:type :dashboard-stop] {:keys [message]}
+                     {:caught true :message message}))]
+      (is (true? (:caught result)))
+      (is (= "stopped" (:message result))))))

@@ -40,7 +40,8 @@
             [ai.miniforge.workflow.runner-cleanup :as cleanup]
             [ai.miniforge.workflow.runner-defaults :as defaults]
             [ai.miniforge.workflow.runner-environment :as env]
-            [ai.miniforge.workflow.runner-events :as events]))
+            [ai.miniforge.workflow.runner-events :as events]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 (defonce ^:private runner-logger
   (log/create-logger {:min-level :debug :output :human}))
@@ -140,7 +141,9 @@
     (log/warn runner-logger :system :workflow/execution-stopped
               {:message (messages/t :status/stopped-dashboard)
                :data {:reason :dashboard-stop}})
-    (throw (ex-info (messages/t :status/stopped-control) {:reason :dashboard-stop}))))
+    (throw+ {:type :dashboard-stop
+             :reason :dashboard-stop
+             :message (messages/t :status/stopped-control)})))
 
 (defn- apply-rate-limit-failure
   "Mark context as failed due to rate limiting."
@@ -334,18 +337,25 @@
      (when-not skip-lifecycle?
        (events/publish-workflow-started! event-stream initial-ctx))
 
-     (try
-       (let [final-ctx (try
+     (try+
+       (let [final-ctx (try+
                          (execute-pipeline-loop pipeline initial-ctx callbacks
                                                control-state max-phases)
-                         (catch Exception e
-                           (vreset! exception-vol e)
+                         (catch [:type :dashboard-stop] {:keys [message]}
+                           (vreset! exception-vol (ex-info message {:type :dashboard-stop}))
                            (-> initial-ctx
                                (update :execution/errors conj
-                                       (make-execution-error :pipeline-exception
-                                                             (ex-message e)
-                                                             {:data (ex-data e)}))
-                               (assoc :execution/status :failed))))
+                                       (make-execution-error :dashboard-stop message))
+                               (assoc :execution/status :failed)))
+                         (catch Object e
+                           (let [throwable (:throwable &throw-context)
+                                 msg (if (instance? Throwable e) (ex-message e) (str e))]
+                             (vreset! exception-vol (or throwable (ex-info msg {})))
+                             (-> initial-ctx
+                                 (update :execution/errors conj
+                                         (make-execution-error :pipeline-exception msg
+                                                               {:data (when (instance? Throwable e) (ex-data e))}))
+                                 (assoc :execution/status :failed)))))
              output-ctx (-> final-ctx validate-completion extract-output)]
          (vreset! output-ctx-vol output-ctx)
          (when-not skip-lifecycle?
