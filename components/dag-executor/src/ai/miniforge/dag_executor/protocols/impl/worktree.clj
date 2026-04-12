@@ -264,7 +264,7 @@
 
   (execute! [_this environment-id command opts]
     (let [worktree-path (str base-path "/" environment-id)
-          workdir (or (:workdir opts) worktree-path)
+          workdir (get opts :workdir worktree-path)
           env-map (merge {} (:env opts))]
       (execute-command workdir command env-map)))
 
@@ -310,5 +310,5 @@
   [config]
   (map->WorktreeExecutor
    {:config config
-    :base-path (or (:base-path config) default-base-path)
-    :max-concurrent (or (:max-concurrent config) default-max-concurrent)}))
+    :base-path (get config :base-path default-base-path)
+    :max-concurrent (get config :max-concurrent default-max-concurrent)}))

@@ -47,11 +47,11 @@
 (defn- normalize-user-entry
   [[username config]]
   (let [entry (if (map? config) config {:password config})
-        uname (or (:username entry) username)]
+        uname (get entry :username username)]
     (when (and (seq uname) (seq (:password entry)))
       [uname {:username uname
               :password (:password entry)
-              :display-name (or (:display-name entry) uname)
+              :display-name (get entry :display-name uname)
               :role (get entry :role :operator)}])))
 
 (defn- normalize-users

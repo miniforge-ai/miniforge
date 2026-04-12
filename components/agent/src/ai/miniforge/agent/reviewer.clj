@@ -503,7 +503,7 @@
         default-gates [(loop/syntax-gate)
                        (loop/lint-gate)
                        (loop/policy-gate :security {:policies [:no-secrets]})]
-        gates (or (:gates opts) default-gates)
+        gates (get opts :gates default-gates)
         review-config (->> (merge {:temperature 0.1
                                    :max-tokens 4000}
                                   (:config opts))

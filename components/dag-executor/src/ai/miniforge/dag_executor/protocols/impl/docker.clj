@@ -596,7 +596,7 @@
                                 (some (fn [[k v]] (when (= image (:image v)) k))))]
         (ensure-image! docker-path image-key)))
     (let [container-name (str "miniforge-task-" (subs (str task-id) 0 8))
-          workdir (or (:workdir env-config) default-workdir)
+          workdir (get env-config :workdir default-workdir)
           create-result (create-container docker-path
                                           container-name
                                           image
@@ -650,12 +650,12 @@
 
   (persist-workspace! [_this environment-id opts]
     (let [exec! (container-exec-fn docker-path environment-id
-                                    (or (:workdir opts) default-workdir))]
+                                    (get opts :workdir default-workdir))]
       (workspace/git-persist! exec! opts)))
 
   (restore-workspace! [_this environment-id opts]
     (let [exec! (container-exec-fn docker-path environment-id
-                                    (or (:workdir opts) default-workdir))]
+                                    (get opts :workdir default-workdir))]
       (workspace/git-restore! exec! opts))))
 
 ;; ============================================================================
@@ -672,6 +672,6 @@
   [config]
   (map->DockerExecutor
    {:config config
-    :image (or (:image config) default-image)
+    :image (get config :image default-image)
     :network (:network config)
     :docker-path (:docker-path config)}))

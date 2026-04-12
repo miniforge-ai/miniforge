@@ -319,7 +319,7 @@
                           (get opts :llm-backend (:llm-backend context)))
               on-chunk (:on-chunk context)
               ;; Input can be a code artifact or a map with :code and :spec
-              code-artifact (or (:code input) input)
+              code-artifact (get input :code input)
               spec (get input :spec {})
               code-text (code->text code-artifact)
               acceptance-criteria (or (:task/acceptance-criteria spec)

@@ -34,7 +34,7 @@
                              fg selected-fg selected-bg]}]
   (let [node-idx (+ row-idx scroll-offset)
         {:keys [label depth expandable?]} node
-        node-fg (or (:fg node) fg)
+        node-fg (get node :fg fg)
         sel? (= node-idx selected)
         indent (* 2 (or depth 0))
         icon (cond

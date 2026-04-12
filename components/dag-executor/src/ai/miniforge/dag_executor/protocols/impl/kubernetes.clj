@@ -386,7 +386,7 @@
   [config]
   (map->KubernetesExecutor
    {:config config
-    :namespace (or (:namespace config) default-namespace)
-    :image (or (:image config) default-image)
+    :namespace (get config :namespace default-namespace)
+    :image (get config :image default-image)
     :kubectl-path (:kubectl-path config)
     :pod-cache (atom {})}))
