@@ -23,6 +23,7 @@
    [clojure.java.io :as io]
    [clojure.edn :as edn]
    [clojure.string :as str]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.validator :as validator]
    [ai.miniforge.heuristic.interface :as heuristic])
   (:import
@@ -132,11 +133,11 @@
         (with-open [rdr (io/reader resource)]
           (edn/read (java.io.PushbackReader. rdr)))
         (catch Exception e
-          (throw (ex-info "Failed to load workflow from resource"
-                          {:workflow-id workflow-id
-                           :resource-path resource-path
-                           :error (.getMessage e)}
-                          e)))))))
+          (response/throw-anomaly! :anomalies/fault
+                                  "Failed to load workflow from resource"
+                                  {:workflow-id workflow-id
+                                   :resource-path resource-path
+                                   :error (.getMessage e)})))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Heuristic store loading
@@ -188,10 +189,11 @@
                     {:valid? true :errors []}
                     (validator/validate-workflow workflow))]
     (when-not (:valid? validation)
-      (throw (ex-info "Workflow validation failed"
-                      {:workflow-id workflow-id
-                       :version version
-                       :errors (:errors validation)})))
+      (response/throw-anomaly! :anomalies.workflow/invalid-config
+                              "Workflow validation failed"
+                              {:workflow-id workflow-id
+                               :version version
+                               :errors (:errors validation)})))
 
     ;; Cache the validated workflow
     (swap! workflow-cache assoc [workflow-id version] workflow)
@@ -234,9 +236,10 @@
         (validate-and-cache-workflow workflow workflow-id version skip-validation?)
 
         ;; Not found anywhere
-        (throw (ex-info "Workflow not found"
-                        {:workflow-id workflow-id
-                         :version version}))))))
+        (response/throw-anomaly! :anomalies/not-found
+                                "Workflow not found"
+                                {:workflow-id workflow-id
+                                 :version version}))))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Workflow discovery

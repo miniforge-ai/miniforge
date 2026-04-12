@@ -22,7 +22,8 @@
    CLIClient - LLM client using CLI backends (claude, cursor, etc.)"
   (:require
    [ai.miniforge.llm.interface.protocols.llm-client :as p]
-   [ai.miniforge.llm.protocols.impl.llm-client :as impl]))
+   [ai.miniforge.llm.protocols.impl.llm-client :as impl]
+   [ai.miniforge.response.interface :as response]))
 
 (defrecord CLIClient [config logger exec-fn stream-exec-fn]
   p/LLMClient
@@ -53,9 +54,10 @@
   ([] (create-client {}))
   ([{:keys [backend logger exec-fn stream-exec-fn model] :or {backend :codex}}]
    (when-not (contains? impl/backends backend)
-     (throw (ex-info (str "Unknown backend: " backend)
-                     {:backend backend
-                      :available (keys impl/backends)})))
+     (response/throw-anomaly! :anomalies/incorrect
+                             (str "Unknown backend: " backend)
+                             {:backend backend
+                              :available (keys impl/backends)}))
    (->CLIClient (cond-> {:backend backend}
                   model (assoc :model model))
                 logger

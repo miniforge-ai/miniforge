@@ -33,6 +33,7 @@
    [ai.miniforge.cli.workflow-runner.sandbox :as sandbox]
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.response.interface :as response]
    [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -120,11 +121,13 @@
 (defn load-and-validate-workflow [load-workflow workflow-id version]
   (let [{:keys [workflow validation]} (load-workflow workflow-id version {})]
     (when-not workflow
-      (throw (ex-info (messages/t :workflow-runner/not-found {:workflow-id workflow-id})
-                      {:workflow-id workflow-id :version version})))
+      (response/throw-anomaly! :anomalies/not-found
+                               (messages/t :workflow-runner/not-found {:workflow-id workflow-id})
+                               {:workflow-id workflow-id :version version}))
     (when (and validation (not (:valid? validation)))
-      (throw (ex-info (messages/t :workflow-runner/validation-failed {:errors (:errors validation)})
-                      {:workflow-id workflow-id :validation validation})))
+      (response/throw-anomaly! :anomalies.workflow/invalid-config
+                               (messages/t :workflow-runner/validation-failed {:errors (:errors validation)})
+                               {:workflow-id workflow-id :validation validation}))
     workflow))
 
 (defn create-artifact-store [quiet]

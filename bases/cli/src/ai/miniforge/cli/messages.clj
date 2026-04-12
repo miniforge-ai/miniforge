@@ -20,7 +20,8 @@
   "Resource-backed message catalog for shared CLI user-facing copy."
   (:require
    [clojure.string :as str]
-   [ai.miniforge.cli.resource-config :as resource-config]))
+   [ai.miniforge.cli.resource-config :as resource-config]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Catalog loading
@@ -85,6 +86,7 @@
   ([message-key params]
    (if-let [value (get (catalog) message-key)]
      (render-value value params)
-     (throw (ex-info "Missing CLI message key"
-                     {:message-key message-key
-                      :locale (active-locale)})))))
+     (response/throw-anomaly! :anomalies/not-found
+                             "Missing CLI message key"
+                             {:message-key message-key
+                              :locale (active-locale)})))))

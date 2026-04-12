@@ -67,8 +67,9 @@
   []
   (if-let [res (io/resource "config/workflow/observe-phase.edn")]
     (->> res slurp edn/read-string (validate! ObservePhaseConfig))
-    (throw (ex-info "Missing classpath resource: config/workflow/observe-phase.edn"
-                    {:hint "Add components/workflow/resources to your classpath"}))))
+    (response/throw-anomaly! :anomalies/not-found
+                            "Missing classpath resource: config/workflow/observe-phase.edn"
+                            {:hint "Add components/workflow/resources to your classpath"}))))
 
 (defn- load-monitor-defaults
   []

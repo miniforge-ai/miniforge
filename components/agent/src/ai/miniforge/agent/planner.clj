@@ -385,11 +385,12 @@
                 (let [content (llm/get-content llm-response)
                       plan (or artifact
                                (parse-plan-response content)
-                               (throw (ex-info "Plan generation failed: EDN parse did not succeed"
-                                               {:phase :plan
-                                                :parse-result nil
-                                                :llm-content-length (count content)
-                                                :llm-content-preview (subs content 0 (min 500 (count content)))})))
+                               (response/throw-anomaly! :anomalies.agent/invoke-failed
+                                                       "Plan generation failed: EDN parse did not succeed"
+                                                       {:phase :plan
+                                                        :parse-result nil
+                                                        :llm-content-length (count content)
+                                                        :llm-content-preview (subs content 0 (min 500 (count content)))})))
                       plan-final (finalize-plan plan)]
                   ;; Check for already-satisfied response
                   (if (= :already-satisfied (:plan/status plan-final))
@@ -420,8 +421,9 @@
                                     "LLM call failed")]
                   (response/error error-msg))))
                ;; No LLM client — hard failure
-            (throw (ex-info "No LLM backend provided for planner agent"
-                            {:phase :plan})))))
+            (response/throw-anomaly! :anomalies.agent/llm-error
+                                    "No LLM backend provided for planner agent"
+                                    {:phase :plan})))))
 
       :validate-fn validate-plan
 
