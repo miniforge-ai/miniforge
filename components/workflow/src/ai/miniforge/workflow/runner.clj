@@ -141,9 +141,9 @@
     (log/warn runner-logger :system :workflow/execution-stopped
               {:message (messages/t :status/stopped-dashboard)
                :data {:reason :dashboard-stop}})
-    (throw+ {:type :dashboard-stop
-             :reason :dashboard-stop
-             :message (messages/t :status/stopped-control)})))
+    (response/throw-anomaly! :anomalies.dashboard/stop
+                             (messages/t :status/stopped-control)
+                             {:reason :dashboard-stop})))
 
 (defn- apply-rate-limit-failure
   "Mark context as failed due to rate limiting."
@@ -341,7 +341,8 @@
        (let [final-ctx (try+
                          (execute-pipeline-loop pipeline initial-ctx callbacks
                                                control-state max-phases)
-                         (catch [:type :dashboard-stop] {:keys [message]}
+                         (catch [:anomaly/category :anomalies.dashboard/stop]
+                                {:keys [anomaly/message]}
                            (vreset! exception-vol (ex-info message {:type :dashboard-stop}))
                            (-> initial-ctx
                                (update :execution/errors conj

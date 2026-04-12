@@ -17,14 +17,14 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.response.anomaly
-  "Anomaly taxonomy and canonical anomaly maps for miniforge operations.
+  "Anomaly taxonomy, constructors, and slingshot throw integration.
 
    Anomalies are the single internal error representation. They are plain data
-   maps that flow through the system as return values (never exceptions).
-   Conversion to HTTP responses, user messages, log entries, or events happens
-   only at system boundaries via the translate namespace.
+   maps that flow through the system as return values OR as thrown objects via
+   slingshot throw+. Conversion to HTTP responses, user messages, log entries,
+   or events happens only at system boundaries via the translate namespace.
 
-   An anomaly map has one required key:
+   An anomaly map has required keys:
      :anomaly/category - keyword from the taxonomy below
      :anomaly/message  - programmer-facing diagnostic string
 
@@ -32,12 +32,24 @@
      :anomaly/id, :anomaly/timestamp, :anomaly/phase, :anomaly/operation
      :anomaly.gate/errors, :anomaly.agent/role, :anomaly.llm/model, etc.
 
+   throw-anomaly! bridges return-value anomalies with exception control flow.
+   Callers use slingshot try+ with key-value selectors to catch and destructure:
+
+     (try+
+       (do-work)
+       (catch [:anomaly/category :anomalies/busy] {:keys [anomaly.llm/backend]}
+         (backoff! backend)))
+
    Categories:
    - :anomalies/... - General errors (Cognitect-compatible)
    - :anomalies.phase/... - Phase execution errors
    - :anomalies.gate/... - Gate validation errors
    - :anomalies.agent/... - Agent errors
-   - :anomalies.workflow/... - Workflow orchestration errors")
+   - :anomalies.llm/... - LLM backend errors
+   - :anomalies.executor/... - Execution environment errors
+   - :anomalies.workflow/... - Workflow orchestration errors
+   - :anomalies.dashboard/... - Dashboard control errors"
+  (:require [slingshot.slingshot :refer [throw+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; General anomalies (compatible with cognitect.anomalies)
@@ -80,7 +92,25 @@
   #{:anomalies.agent/unknown-agent     ; Agent type not registered
     :anomalies.agent/invoke-failed     ; Agent invocation failed
     :anomalies.agent/parse-failed      ; Failed to parse agent output
+    :anomalies.agent/validation-failed ; Agent output failed validation
     :anomalies.agent/llm-error})       ; LLM backend error
+
+(def llm-anomalies
+  "LLM backend anomalies."
+  #{:anomalies.llm/rate-limited       ; API rate limit / 429
+    :anomalies.llm/context-exceeded   ; Token limit exceeded
+    :anomalies.llm/timeout            ; Backend call timed out
+    :anomalies.llm/unavailable})      ; Backend unreachable
+
+(def executor-anomalies
+  "Execution environment anomalies."
+  #{:anomalies.executor/unavailable   ; No executor for mode
+    :anomalies.executor/timeout       ; Capsule timeout expired
+    :anomalies.executor/acquisition-failed}) ; Environment acquisition failed
+
+(def dashboard-anomalies
+  "Dashboard control anomalies."
+  #{:anomalies.dashboard/stop})       ; Dashboard issued stop command
 
 (def workflow-anomalies
   "Workflow orchestration anomalies."
@@ -100,6 +130,9 @@
                 phase-anomalies
                 gate-anomalies
                 agent-anomalies
+                llm-anomalies
+                executor-anomalies
+                dashboard-anomalies
                 workflow-anomalies)))
 
 (defn anomaly?
@@ -114,20 +147,27 @@
                :anomalies/interrupted
                :anomalies/busy
                :anomalies/timeout
-               :anomalies.agent/llm-error}
+               :anomalies.agent/llm-error
+               :anomalies.llm/rate-limited
+               :anomalies.llm/timeout
+               :anomalies.llm/unavailable}
              anomaly))
 
 (defn anomaly-category
   "Get the category of an anomaly.
 
-   Returns :general, :phase, :gate, :agent, :workflow, or nil."
+   Returns :general, :phase, :gate, :agent, :llm, :executor, :dashboard,
+   :workflow, or nil."
   [anomaly]
   (cond
-    (contains? general-anomalies anomaly) :general
-    (contains? phase-anomalies anomaly) :phase
-    (contains? gate-anomalies anomaly) :gate
-    (contains? agent-anomalies anomaly) :agent
-    (contains? workflow-anomalies anomaly) :workflow
+    (contains? general-anomalies anomaly)   :general
+    (contains? phase-anomalies anomaly)     :phase
+    (contains? gate-anomalies anomaly)      :gate
+    (contains? agent-anomalies anomaly)     :agent
+    (contains? llm-anomalies anomaly)       :llm
+    (contains? executor-anomalies anomaly)  :executor
+    (contains? dashboard-anomalies anomaly) :dashboard
+    (contains? workflow-anomalies anomaly)  :workflow
     :else nil))
 
 ;------------------------------------------------------------------------------ Layer 3
@@ -221,6 +261,52 @@
   ([category message agent-role context]
    (anomaly category message
             (merge {:anomaly.agent/role agent-role} context))))
+
+;------------------------------------------------------------------------------ Layer 6
+;; LLM anomaly constructors
+
+(defn llm-anomaly
+  "Create an LLM-specific anomaly.
+   Common keys: :anomaly.llm/backend, :anomaly.llm/model, :anomaly.llm/status."
+  ([category message backend]
+   (llm-anomaly category message backend {}))
+  ([category message backend context]
+   (anomaly category message
+            (merge {:anomaly.llm/backend backend} context))))
+
+(defn executor-anomaly
+  "Create an executor-specific anomaly.
+   Common keys: :anomaly.executor/mode, :anomaly.executor/environment-id."
+  ([category message mode]
+   (executor-anomaly category message mode {}))
+  ([category message mode context]
+   (anomaly category message
+            (merge {:anomaly.executor/mode mode} context))))
+
+;------------------------------------------------------------------------------ Layer 7
+;; Slingshot throw integration
+
+(defn throw-anomaly!
+  "Throw a structured anomaly via slingshot throw+.
+
+   Builds a canonical anomaly map and throws it. Catch sites use
+   slingshot try+ with key-value selectors to match and destructure:
+
+     (try+
+       (throw-anomaly! :anomalies.llm/rate-limited \"Rate limit hit\"
+                       {:anomaly.llm/backend :anthropic :status 429})
+       (catch [:anomaly/category :anomalies.llm/rate-limited]
+              {:keys [anomaly.llm/backend]}
+         (backoff! backend)))
+
+   Arguments:
+     category - Anomaly category keyword from the taxonomy
+     message  - Programmer-facing diagnostic string
+     context  - Optional map of domain context (namespaced keys)"
+  ([category message]
+   (throw-anomaly! category message {}))
+  ([category message context]
+   (throw+ (anomaly category message context))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
