@@ -176,7 +176,7 @@
   [model spec name]
   (if spec
     (assoc-in model [:detail :evidence :intent]
-              {:description (or (:name spec) name) :spec spec})
+              {:description (get spec :name name) :spec spec})
     model))
 
 (defn handle-workflow-added [model {:keys [workflow-id name spec]}]

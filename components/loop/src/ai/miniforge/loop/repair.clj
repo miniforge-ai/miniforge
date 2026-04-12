@@ -98,7 +98,7 @@
                               :tokens-used (:tokens-used result)
                               :duration-ms duration
                               :message "LLM successfully repaired artifact")
-              (repair-failure :llm-fix (or (:errors result) errors)
+              (repair-failure :llm-fix (get result :errors errors)
                               :tokens-used (:tokens-used result)
                               :duration-ms duration
                               :message "LLM repair attempt failed")))

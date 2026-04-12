@@ -314,7 +314,7 @@
                             :final-state state}))
         ;; Run current phase and advance
         (let [result (run-phase state context)
-              result-data (or (:output result) result)]
+              result-data (get result :output result)]
           (if (phase-succeeded? result)
             ;; Record artifacts and advance
             (let [updated (reduce (fn [s {:keys [type id]}]
