@@ -1,0 +1,191 @@
+;; Transit Wire Format Migration
+;;
+;; Replaces the current EDN append-per-workflow event file format with
+;; one Transit-JSON file per event. Eliminates the lossy EDN→JSON bridge
+;; in the Rust state crate and fixes a silent bug where the Rust watcher
+;; only reads the first event from each multi-event append file.
+;;
+;; Related work: tui-ws1-supervisory-domain.spec.edn (entity schemas)
+;;               tui-meta-control-plane.spec.edn (Phase 0 — complete)
+
+{:spec/id "transit-wire-format"
+ :spec/version "0.1.0"
+ :spec/created "2026-04-11"
+ :spec/status "active"
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :spec/title "Transit Wire Format Migration"
+
+ :spec/description
+ "Switch the miniforge event file format from newline-appended EDN to one
+  Transit-JSON file per event. This migration has two independent motivations:
+
+  1. CORRECTNESS BUG: The current file-sink appends all events for a workflow
+     to a single {workflow-id}.edn file. The Rust event-client only handles
+     Create filesystem events and parses each file as a single EDN value.
+     Every event after the first in a workflow file is silently dropped by
+     the Rust state manager. This is a current bug in the live system.
+
+  2. TYPE FIDELITY: The EDN→JSON bridge in state/src/edn_bridge.rs performs
+     lossy type coercion (keywords→strings, tagged literals→guessed JSON).
+     New entity fields that are keywords, UUIDs, or instants each require a
+     serde workaround. The bridge grows with every new entity type. Transit-JSON
+     carries full type information (keywords as ~:ns/name, UUIDs as ~#uuid,
+     instants as ~#inst) that serde can decode without guessing."
+
+ :spec/motivation
+ "WS1–WS5 will add 6–8 new supervisory entity types. Each entity field that
+  is a keyword enum, UUID, or timestamp currently requires a custom serde
+  annotation to survive the EDN→JSON bridge. By WS5 this is an estimated
+  60–80 annotations compensating for the bridge, plus ~30 bridge coercion
+  rules. Silent deserialization failures (new keyword variant on Clojure side
+  has no Rust counterpart) would manifest as stale TUI state with no error.
+  Doing this in WS1 means every subsequent workstream builds on a clean
+  foundation with zero bridge debt."
+
+ :spec/scope
+ "Clojure side (event-stream component):
+    - file-sink serialization: pr-str → transit/write
+    - file naming: {workflow-id}.edn (append) → {workflow-id}/{timestamp-uuid}.json (one per event)
+    - add transit-clj dependency
+
+  Rust side (miniforge-control workspace):
+    - event-client: update file extension filter, replace edn-rs parser with
+      serde_json transit-tag aware parsing, update watcher for new path structure
+    - state: remove edn_bridge.rs, remove edn-rs dependency, update manager
+    - supervisory-entities: add transit type-tag serde support for Uuid, DateTime,
+      and keyword enums (one set of custom deserializers shared by all entities)"
+
+ :spec/non-scope
+ "- FFI output format (still JSON strings over C-ABI — no change)
+  - Fulcro/web UI wiring (not yet built — no change needed)
+  - Event schema validation (separate concern)
+  - Any event types not read by the Rust state manager (task events,
+    plan events, etc. — counted-only in the state manager, no entity parsing)"
+
+ :spec/tasks
+ [{:task/id "transit-wire-1"
+   :task/title "Audit: confirm current multi-event-per-file bug and document affected paths"
+   :task/description
+   "Read sinks.clj file-sink and confirm the append behavior. Read the Rust
+    event-client watcher and replay code to confirm it only handles Create
+    events and single-EDN-per-file parsing. Document which supervisory event
+    types are currently being silently dropped (likely: all except the first
+    event in each workflow run)."
+   :task/acceptance
+   ["Written confirmation of bug scope in commit message or test"
+    "At minimum one failing test added that demonstrates the multi-event drop"]}
+
+  {:task/id "transit-wire-2"
+   :task/title "Clojure: change file-sink to write one Transit-JSON file per event"
+   :task/description
+   "In components/event-stream/src/ai/miniforge/event_stream/sinks.clj:
+    - Add cognitect/transit-clj to event-stream deps.edn
+    - Change file naming from {workflow-id}.edn (append) to
+      {workflow-id}/{iso-timestamp}-{random-uuid}.json (one file per event,
+      non-appending write)
+    - Replace (pr-str event) with transit-json serialization
+    - For operator events (no workflow-id), use events/operator/ directory
+    - Keep backward compat: if events dir has existing .edn files, log a
+      one-time warning and ignore them (the Rust replay will skip unknown exts)
+    Update sinks_test.clj to match new format and file layout."
+   :task/acceptance
+   ["sinks_test.clj passes"
+    "Output files are valid Transit-JSON readable by cognitect/transit-clj reader"
+    "One file per event (no append)"
+    "File names are sortable by creation time (iso timestamp prefix)"]}
+
+  {:task/id "transit-wire-3"
+   :task/title "Rust: add transit type-tag deserializers to supervisory-entities"
+   :task/description
+   "In contracts/crates/supervisory-entities:
+    - Add a transit.rs module with serde Deserialize impls for transit type tags:
+        ~:keyword     → strip prefix, use as string discriminant
+        ~#uuid        → Uuid
+        ~#inst        → DateTime<Utc>
+        ~u            → Uuid (transit compact form)
+    - Update entity structs (WorkflowRun, AgentSession, PrFleetEntry,
+      PolicyEvaluation) to use transit-aware field deserializers where
+      currently using #[serde(rename)] workarounds for keyword→string mapping
+    - The transit module should be ~50 lines and own no external deps beyond
+      serde and uuid/chrono (no transit-rs dependency required at this stage)"
+   :task/acceptance
+   ["All existing supervisory-entities tests pass"
+    "New round-trip tests: Transit-JSON string → entity struct for each entity type"
+    "No edn_bridge workarounds remaining in entity serde annotations"]}
+
+  {:task/id "transit-wire-4"
+   :task/title "Rust: update event-client to read one-file-per-event Transit-JSON"
+   :task/description
+   "In event-client:
+    - Update is_edn_file to is_event_file: match .json extension
+    - Update replay_events to sort and read .json files from the new path layout
+    - Replace parse_event_file EDN parsing with JSON parsing:
+        serde_json::from_str replaces content.parse::<Edn>()
+        Extract event/type, event/id, etc. from transit-json map keys
+        (Transit-JSON preserves string keys; keyword keys become '~:event/type' strings)
+    - Remove edn-rs dependency from event-client/Cargo.toml
+    - Update all parser tests with Transit-JSON fixtures"
+   :task/acceptance
+   ["All event-client tests pass with Transit-JSON fixtures"
+    "Replay correctly reads multiple events from a directory (one file each)"
+    "Live watcher fires on new .json file creation"
+    "edn-rs no longer in Cargo.toml"]}
+
+  {:task/id "transit-wire-5"
+   :task/title "Rust: remove edn_bridge.rs from state crate"
+   :task/description
+   "In state:
+    - Delete state/src/edn_bridge.rs
+    - Update manager.rs: remove edn_to_json call, deserialize ParsedEvent
+      fields directly using transit-aware entity deserialization
+      (entities are now deserialized from the raw JSON string in ParsedEvent,
+      not via the EDN bridge roundtrip)
+    - Remove edn-rs from state/Cargo.toml (already removed in standards pass)
+    - Update manager tests with Transit-JSON event payloads"
+   :task/acceptance
+   ["state crate compiles with no reference to edn_bridge"
+    "All manager and state tests pass"
+    "No edn_rs import anywhere in the state crate"]}
+
+  {:task/id "transit-wire-6"
+   :task/title "Integration: end-to-end dogfood test with Transit-JSON events"
+   :task/description
+   "Run a short miniforge workflow against the updated system and confirm:
+    - Event files are written as Transit-JSON by the Clojure side
+    - Rust event-client reads them and populates SupervisoryState correctly
+    - WorkflowRun, AgentSession counts in state match the workflow execution
+    - The previously-silent multi-event bug is confirmed fixed: all events
+      from a multi-phase workflow appear in state, not just the first one"
+   :task/acceptance
+   ["Manual or automated dogfood run with ≥2 workflow events captured in state"
+    "event_count in SupervisoryState matches actual event file count"]}]
+
+ :spec/dependencies
+ [{:dep/spec "tui-ws1-supervisory-domain"
+   :dep/reason "Transit deserializers must align with finalized entity schemas from WS1"}]
+
+ :spec/risks
+ [{:risk/id "r1"
+   :risk/description "transit-rs immaturity — mitigated by not using transit-rs; Transit-JSON
+                      is a superset of JSON readable with serde_json + ~50 lines of custom
+                      deserializer code we own directly."
+   :risk/severity :low}
+  {:risk/id "r2"
+   :risk/description "Existing event files in ~/.miniforge/events/ become unreadable by
+                      the new Rust parser after the Clojure side is updated. Replay will
+                      skip them (unknown extension). This is acceptable for dev environments;
+                      production environments (once they exist) would need a migration tool."
+   :risk/severity :low}
+  {:risk/id "r3"
+   :risk/description "Transit-JSON keyword encoding: Clojure emits '~:workflow-run/status'
+                      as the string key. Parser must strip the '~:' prefix when mapping to
+                      Rust enum variants. Need to confirm this matches how transit-clj
+                      actually encodes keyword map keys versus keyword values."
+   :risk/severity :medium}]
+
+ :spec/estimated-scope
+ "Small. ~200–300 lines changed/added across 6–8 files. Zero new components.
+  The Clojure change is one function body in sinks.clj. The Rust change is
+  one deleted file (edn_bridge.rs) and one new module (transit.rs in entities)."}
