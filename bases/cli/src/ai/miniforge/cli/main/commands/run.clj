@@ -27,7 +27,32 @@
    [ai.miniforge.cli.spec-parser :as spec-parser]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]
    [ai.miniforge.cli.main.commands.plan-executor :as plan-executor]
-   [ai.miniforge.cli.main.commands.resume :as resume]))
+   [ai.miniforge.cli.main.commands.resume :as resume]
+   [slingshot.slingshot :refer [try+]]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Error handling
+
+(defn- classify-error
+  "Attempt runtime error classification. Returns classification or nil."
+  [e]
+  (try
+    (when-let [classifier (requiring-resolve 'ai.miniforge.agent-runtime.interface/classify-error)]
+      (classifier e (ex-data e)))
+    (catch Exception _ nil)))
+
+(defn- print-run-error-and-exit!
+  "Print error details and exit with code 1."
+  [e]
+  (let [classification (classify-error e)]
+    (if classification
+      (display/print-classified-error classification)
+      (do
+        (display/print-error (messages/t :run/failed {:error (ex-message e)}))
+        (when-let [data (ex-data e)]
+          (println (messages/t :run/error-details {:details (pr-str data)}))))))
+  (flush)
+  (System/exit 1))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Input type detection
@@ -116,45 +141,18 @@
 
       ;; Markdown spec — route directly through spec-parser (no EDN pre-read)
       (markdown-spec? spec)
-      (try
+      (try+
         (run-spec-workflow spec opts)
-        (catch Exception e
-          (display/print-error (messages/t :run/failed {:error (ex-message e)}))
-          (when-let [data (ex-data e)]
-            (println (messages/t :run/error-details {:details (pr-str data)})))
-          (flush)
-          (System/exit 1)))
+        (catch Object e (print-run-error-and-exit! (:throwable &throw-context))))
 
       ;; EDN/JSON — dispatch based on file content
       :else
-      (try
+      (try+
         (let [parsed     (read-edn-file spec)
               input-type (detect-input-type parsed)]
           (case input-type
-            ;; Spec file
-            :spec
-            (run-spec-workflow spec opts)
-
-            ;; DAG or Plan file — execute directly
-            (:dag :plan)
-            (do
-              (display/print-info (messages/t :run/detected-format {:format (name input-type) :path spec}))
-              (plan-executor/execute-plan parsed opts))
-
-            ;; Unrecognized format
-            (display/print-error
-             (messages/t :run/unrecognized-format {:path spec}))))
-        (catch Exception e
-          (let [error-classification (try
-                                       (let [classifier (requiring-resolve 'ai.miniforge.agent-runtime.interface/classify-error)]
-                                         (when classifier
-                                           (classifier e (ex-data e))))
-                                       (catch Exception _ nil))]
-            (if error-classification
-              (display/print-classified-error error-classification)
-              (do
-                (display/print-error (messages/t :run/failed {:error (ex-message e)}))
-                (when-let [data (ex-data e)]
-                  (println (messages/t :run/error-details {:details (pr-str data)}))))))
-          (flush)
-          (System/exit 1))))))
+            :spec      (run-spec-workflow spec opts)
+            (:dag :plan) (do (display/print-info (messages/t :run/detected-format {:format (name input-type) :path spec}))
+                             (plan-executor/execute-plan parsed opts))
+            (display/print-error (messages/t :run/unrecognized-format {:path spec}))))
+        (catch Object e (print-run-error-and-exit! (:throwable &throw-context)))))))

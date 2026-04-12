@@ -32,7 +32,8 @@
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.sandbox :as sandbox]
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
-   [ai.miniforge.phase.interface :as phase]))
+   [ai.miniforge.phase.interface :as phase]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Work spec kanban lifecycle
@@ -226,10 +227,20 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Execution orchestration
 
+(defn- publish-failure-event!
+  "Publish a workflow failure event, swallowing exceptions."
+  [event-stream workflow-id error-type message]
+  (try
+    (es/publish! event-stream
+                 (es/workflow-failed event-stream workflow-id
+                                     {:message message
+                                      :errors [{:type error-type :message message}]}))
+    (catch Exception _ nil)))
+
 (defn execute-with-events [{:keys [run-pipeline workflow workflow-input context artifact-store
                                      event-stream workflow-id sandbox-cleanup opts]}]
   (let [completed? (atom false)]
-    (try
+    (try+
       (if-let [sandbox-error (:sandbox-error context)]
         (let [result {:success? false
                       :errors [{:type :sandbox-setup-failed
@@ -244,25 +255,17 @@
           (close-artifact-store artifact-store)
           (display/print-result result opts)
           result))
-      (catch Exception e
-        (when-not @completed?
-          (try
-            (es/publish! event-stream
-                         (es/workflow-failed event-stream workflow-id
-                                             {:message (messages/t :workflow-runner/stopped {:error (ex-message e)})
-                                              :errors [{:type :interrupted :message (ex-message e)}]}))
-            (reset! completed? true)
-            (catch Exception _ nil)))
-        (throw e))
+      (catch Object _
+        (let [e (:throwable &throw-context)]
+          (when-not @completed?
+            (publish-failure-event! event-stream workflow-id :interrupted
+                                   (messages/t :workflow-runner/stopped {:error (ex-message e)}))
+            (reset! completed? true))
+          (throw e)))
       (finally
-        ;; Publish cancelled event if workflow was interrupted without completion
         (when-not @completed?
-          (try
-            (es/publish! event-stream
-                         (es/workflow-failed event-stream workflow-id
-                                             {:message (messages/t :workflow-runner/cancelled)
-                                              :errors [{:type :cancelled :message (messages/t :workflow-runner/process-terminated)}]}))
-            (catch Exception _ nil)))
+          (publish-failure-event! event-stream workflow-id :cancelled
+                                 (messages/t :workflow-runner/cancelled)))
         (when sandbox-cleanup
           (sandbox-cleanup)
           (when-not (:quiet opts)
@@ -343,7 +346,7 @@
 ;; Spec-driven execution
 
 (defn run-workflow-from-spec! [spec {:keys [quiet] :or {quiet false} :as opts}]
-  (try
+  (try+
     (let [{:keys [load-workflow run-pipeline]} (resolve-workflow-interface)
           ;; Create initial LLM client for workflow selection
           backend-override (:backend opts)
@@ -415,11 +418,12 @@
           (finally
             (progress-cleanup)
             (when command-poller-cleanup (command-poller-cleanup))))))
-    (catch Exception e
-      (when-not quiet
-        (println (display/colorize :red (messages/t :workflow-runner/spec-execution-failed {:error (ex-message e)})))
-        (flush))
-      (throw e))))
+    (catch Object _
+      (let [e (:throwable &throw-context)]
+        (when-not quiet
+          (println (display/colorize :red (messages/t :workflow-runner/spec-execution-failed {:error (ex-message e)})))
+          (flush))
+        (throw e)))))
 
 ;------------------------------------------------------------------------------ Layer 2b
 ;; Resume workflow from event file
