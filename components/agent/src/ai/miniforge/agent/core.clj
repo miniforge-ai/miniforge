@@ -31,7 +31,8 @@
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.tool.interface :as tool]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [slingshot.slingshot :refer [try+ throw+]]))
 
 ;; Module-level logger for agent operations
 (def default-logger
@@ -454,6 +455,35 @@ Output execution logs and status reports."})
         (record-fn backend success?)))
     (catch Exception _ nil)))
 
+(defn- classify-execution-error
+  "Try to classify an execution error via agent-runtime. Returns classification or nil."
+  [exception task-id]
+  (try
+    (when-let [classifier (requiring-resolve 'ai.miniforge.agent-runtime.interface/classify-error)]
+      (classifier exception {:task-id task-id}))
+    (catch Exception _ nil)))
+
+(defn- retry?
+  "True when self-healing produced a viable workaround to retry."
+  [healing-result]
+  (boolean (:retry? healing-result)))
+
+(defn- invoke-with-retry
+  "Retry agent invocation after a successful workaround.
+   Returns the retry result or an execution-failure on second failure."
+  [agent task exec-context classification]
+  (try+
+    (let [result (protocol/invoke agent task exec-context)]
+      (record-backend-health! exec-context true)
+      (assoc result :self-healing/workaround-applied true))
+    (catch Object _
+      (let [retry-e (:throwable &throw-context)]
+        (record-backend-health! exec-context false)
+        (execution-failure retry-e
+                           {:error-classification classification
+                            :self-healing/workaround-applied true
+                            :self-healing/retry-failed true})))))
+
 (defn try-self-healing-on-failure
   "Attempt workaround when agent execution fails. Returns {:retry? bool} or nil."
   [exception]
@@ -486,35 +516,19 @@ Output execution logs and status reports."})
           ;; Initialize agent
           initialized-agent (protocol/init agent (:config agent))
 
-          ;; Execute
-          result (try
+          ;; Execute with self-healing retry
+          result (try+
                    (let [invoke-result (protocol/invoke initialized-agent task exec-context)]
                      (record-backend-health! exec-context true)
                      invoke-result)
-                   (catch Exception e
-                     (record-backend-health! exec-context false)
-                     (let [;; Try to classify the error if agent-runtime is available
-                           error-classification (try
-                                                 (let [classifier (requiring-resolve 'ai.miniforge.agent-runtime.interface/classify-error)]
-                                                   (when classifier
-                                                     (classifier e {:task-id task-id})))
-                                                 (catch Exception _ nil))
+                   (catch Object _
+                     (let [e (:throwable &throw-context)
+                           classification (classify-execution-error e task-id)
                            healing (try-self-healing-on-failure e)]
-                       (if (:retry? healing)
-                         ;; Workaround applied — retry once
-                         (try
-                           (let [retry-result (protocol/invoke initialized-agent task exec-context)]
-                             (record-backend-health! exec-context true)
-                             (assoc retry-result :self-healing/workaround-applied true))
-                           (catch Exception retry-e
-                             (record-backend-health! exec-context false)
-                             (execution-failure retry-e
-                                                {:error-classification error-classification
-                                                 :self-healing/workaround-applied true
-                                                 :self-healing/retry-failed true})))
-                         ;; No workaround — return error (existing behavior)
-                         (execution-failure e
-                                            {:error-classification error-classification})))))
+                       (record-backend-health! exec-context false)
+                       (if (retry? healing)
+                         (invoke-with-retry initialized-agent task exec-context classification)
+                         (execution-failure e {:error-classification classification})))))
 
           ;; Validate output
           validation (protocol/validate agent result exec-context)
