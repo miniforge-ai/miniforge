@@ -20,7 +20,7 @@
   "Configurable event sinks for different deployment scenarios.
 
    Supported sinks:
-   - :file   - Write to ~/.miniforge/events/<workflow-id>.edn (local dev)
+   - :file   - Write to ~/.miniforge/events/<workflow-id>/<timestamp>-<uuid>.json (local dev)
    - :stdout - Print to stdout (container/Docker/K8s)
    - :stderr - Print to stderr (error-only events)
    - :fleet  - Send to fleet command (org-level ops)
@@ -28,74 +28,108 @@
   (:require
    [clojure.java.io :as io]
    [clojure.string :as str]
-   [clojure.pprint :as pprint]))
+   [clojure.pprint :as pprint]
+   [cognitect.transit :as transit])
+  (:import
+   [java.io ByteArrayOutputStream]
+   [java.time ZonedDateTime ZoneOffset]
+   [java.time.format DateTimeFormatter]))
 
-;;------------------------------------------------------------------------------ Layer 0: File Sink
-
-(defn event-file-path
-  "Get path to event file for a workflow.
-
-   Arguments:
-     workflow-id - UUID or string workflow identifier
-
-   Returns: String path to ~/.miniforge/events/<workflow-id>.edn"
-  [workflow-id]
-  (let [home (System/getProperty "user.home")
-        events-dir (io/file home ".miniforge" "events")
-        workflow-file (str workflow-id ".edn")]
-    (.mkdirs events-dir)
-    (.getPath (io/file events-dir workflow-file))))
-
-(defn operator-event-file-path
-  "Get path to the operator event log for cross-workflow events.
-   Used by meta-loop, reliability, and degradation events.
-
-   Returns: String path to ~/.miniforge/events/operator.edn"
-  []
-  (let [home (System/getProperty "user.home")
-        events-dir (io/file home ".miniforge" "events")]
-    (.mkdirs events-dir)
-    (.getPath (io/file events-dir "operator.edn"))))
+;;------------------------------------------------------------------------------ Internal helpers
 
 (defn- default-events-dir
   "Return the default events directory (~/.miniforge/events)."
   []
   (io/file (System/getProperty "user.home") ".miniforge" "events"))
 
+(defn- now-sortable-str
+  "Return a sortable UTC timestamp string for use as a file-name prefix.
+   Format: yyyyMMdd'T'HHmmss'Z', e.g. 20260411T100000Z."
+  []
+  (.format (DateTimeFormatter/ofPattern "yyyyMMdd'T'HHmmssSSS'Z'")
+           (ZonedDateTime/now ZoneOffset/UTC)))
+
+(defn- write-transit-json
+  "Serialize `event` to a Transit-JSON string using the verbose writer.
+   Verbose mode ensures UUIDs appear as {\"~#uuid\" \"...\"} and instants
+   as {\"~#inst\" \"...\"} rather than compact ~u and ~m tag-strings,
+   so the Rust parser can decode them without millisecond arithmetic."
+  [event]
+  (let [out (ByteArrayOutputStream.)]
+    (transit/write (transit/writer out :json-verbose) event)
+    (.toString out "UTF-8")))
+
+(defn- new-event-file-path
+  "Return a java.io.File for a new event file in `parent-dir`.
+   The filename is {timestamp}-{uuid}.json, sortable by creation time.
+   Creates `parent-dir` if it does not already exist."
+  [parent-dir]
+  (let [dir (io/file parent-dir)]
+    (.mkdirs dir)
+    (io/file dir (str (now-sortable-str) "-" (random-uuid) ".json"))))
+
+;;------------------------------------------------------------------------------ Layer 0: File Sink paths
+
+(defn event-file-path
+  "Return a java.io.File for a new event file in the per-workflow subdirectory.
+   Creates the subdirectory if needed.
+
+   File layout: {base-dir}/{workflow-id}/{timestamp}-{uuid}.json
+
+   Arguments:
+     workflow-id - UUID or string workflow identifier
+     base-dir    - Optional base directory (default: ~/.miniforge/events)"
+  ([workflow-id]
+   (event-file-path (default-events-dir) workflow-id))
+  ([base-dir workflow-id]
+   (new-event-file-path (io/file base-dir (str workflow-id)))))
+
+(defn operator-event-file-path
+  "Return a java.io.File for a new event file in the operator subdirectory.
+   Used by meta-loop, reliability, and degradation events (no :workflow/id).
+
+   File layout: {base-dir}/operator/{timestamp}-{uuid}.json
+
+   Arguments:
+     base-dir - Optional base directory (default: ~/.miniforge/events)"
+  ([]
+   (operator-event-file-path (default-events-dir)))
+  ([base-dir]
+   (new-event-file-path (io/file base-dir "operator"))))
+
 (defn cleanup-stale-events!
   "Delete event files older than TTL from the events directory.
+   Walks all subdirectories (per-workflow and operator).
 
    Arguments:
      opts - Map with optional:
        :events-dir - Directory to clean (default: ~/.miniforge/events)
-       :ttl-ms - Max age in milliseconds (default: 7 days)
+       :base-dir   - Alias for :events-dir
+       :ttl-ms     - Max age in milliseconds (default: 7 days)
 
    Returns: Number of files deleted"
   [& [opts]]
   (let [ttl-ms (get opts :ttl-ms (* 7 24 60 60 1000))
-        events-dir (or (:events-dir opts) (default-events-dir))
+        events-dir (or (:events-dir opts) (:base-dir opts) (default-events-dir))
         cutoff (- (System/currentTimeMillis) ttl-ms)]
     (if (.isDirectory events-dir)
-      (let [stale-files (->> (.listFiles events-dir)
+      (let [stale-files (->> (file-seq events-dir)
                              (filter #(and (.isFile %)
-                                           (str/ends-with? (.getName %) ".edn")
+                                           (str/ends-with? (.getName %) ".json")
                                            (< (.lastModified %) cutoff))))]
         (doseq [f stale-files] (.delete f))
         (count stale-files))
       0)))
 
-(defn operator-event-file-path
-  "Get path to the operator event log (for cross-workflow events like meta-loop,
-   reliability, degradation). Returns ~/.miniforge/events/operator.edn"
-  []
-  (let [home (System/getProperty "user.home")
-        events-dir (io/file home ".miniforge" "events")]
-    (.mkdirs events-dir)
-    (str (io/file events-dir "operator.edn"))))
-
 (defn file-sink
-  "Create a file sink that writes events to per-workflow files.
-   Cross-workflow events (no :workflow/id) go to operator.edn.
+  "Create a file sink that writes each event as a Transit-JSON file.
+
+   File layout:
+     per-workflow:  {base-dir}/{workflow-id}/{timestamp}-{uuid}.json
+     cross-workflow: {base-dir}/operator/{timestamp}-{uuid}.json
+
+   Each event gets its own file (no append). Files are sortable by creation
+   time via the timestamp prefix.
 
    Performs lazy cleanup of stale event files (older than 7 days) on creation.
 
@@ -110,13 +144,11 @@
   (future (try (cleanup-stale-events! opts) (catch Exception _ nil)))
   (fn [event]
     (try
-      (let [file-path (if-let [workflow-id (:workflow/id event)]
-                        (event-file-path workflow-id)
-                        (operator-event-file-path))]
-        (with-open [writer (io/writer file-path :append true)]
-          (.write writer (pr-str event))
-          (.write writer "\n")
-          (.flush writer)))
+      (let [base-dir (or (:base-dir opts) (default-events-dir))
+            file-path (if-let [workflow-id (:workflow/id event)]
+                        (event-file-path base-dir workflow-id)
+                        (operator-event-file-path base-dir))]
+        (spit file-path (write-transit-json event)))
       (catch Exception e
         ;; Log to stderr so failures are visible without breaking the event stream
         (binding [*out* *err*]
