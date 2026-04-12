@@ -1,0 +1,166 @@
+;; WS1 — Supervisory Domain Formalization
+;;
+;; Phase 1 of the TUI Supervisory Control Plane work spec.
+;; Introduces Malli schemas for v1 supervisory entities, projection builders
+;; for monitor zones, and PR governance state derivation.
+;;
+;; Parent work spec: work/tui-supervisory-control-plane.spec.edn
+;; Normative contract: specs/normative/N5-delta-supervisory-control-plane.md
+
+{:spec/id "tui-ws1-supervisory-domain"
+ :spec/version "0.1.0"
+ :spec/created "2026-04-02"
+ :spec/status "active"
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :spec/title "WS1: Supervisory Domain Formalization"
+
+ :spec/description
+ "Make supervisory entities explicit so the monitor renders from canonical
+  data, not ad-hoc model keys. Introduces open Malli schemas for the v1
+  entities (WorkflowRun, PolicyEvaluation, PolicyViolation, AttentionItem,
+  Waiver, EvidenceBundle), pure projection builders for each monitor zone,
+  and explicit PR governance state derivation.
+
+  This is foundation work — without it the monitor will be visually improved
+  but architecturally brittle."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/tui-views"
+          "components/policy-pack"
+          "components/evidence-bundle"]}
+
+ :spec/constraints
+ ["Schemas MUST be open Malli :map — validate required keys, extra keys pass through"
+  "Projection builders MUST be pure functions with stable input/output contracts"
+  "PR governance state MUST be derived from PolicyEvaluation + Waiver records, never hardcoded"
+  "Prefer placing schemas in existing components over creating new ones to avoid circular deps"
+  "All tests must pass with bb test"]
+
+ :spec/acceptance-criteria
+ ["Monitor zones can be described in terms of projection builders"
+  "No view depends on hidden ad-hoc state for supervisory meaning"
+  "PR governance state is always derivable, never hardcoded"
+  "Malli schema validates a well-formed WorkflowRun with open keys"
+  "Missing required keys fail validation"]
+
+ :title "WS1: Supervisory Domain Formalization"
+
+ :description
+ "Formalize the supervisory entities that the TUI monitor will render.
+  Today the TUI model has raw data maps with implicit business logic
+  scattered across view code. This workstream introduces canonical schemas,
+  projection builders, and governance state derivation so the monitor
+  surface operates on well-defined data."
+
+ :context
+ {:normative-refs
+  ["N5-delta-supervisory-control-plane §3 — v1 supervisory entities"
+   "N5-delta-supervisory-control-plane §4 — PR governance states"
+   "N5-delta-supervisory-control-plane §5 — attention derivation rules"]
+
+  :current-state
+  ["TUI model has :workflows, :pr-items, :trains as raw data vectors"
+   "View code in project.clj does ad-hoc projections with implicit logic"
+   "No formal schema for workflow runs or policy evaluations"
+   "PR governance state (passing/failing/waived) is implicit"]
+
+  :existing-components
+  ["tui-views/model.clj — TUI state shape and init-model"
+   "tui-views/view/project.clj — current ad-hoc data projections"
+   "policy-pack/schema.clj — existing policy schema definitions"
+   "evidence-bundle — evidence storage and retrieval"
+   "control-plane/registry.clj — agent session model (AgentSession already exists)"]}
+
+ :plan/tasks
+ [{:task/id :supervisory-entity-schemas
+   :task/description
+   "Define open Malli schemas for the 6 v1 supervisory entities in a new
+    namespace (or extend existing schema namespaces). Each schema validates
+    required keys but allows extra keys to pass through.
+
+    Entities and their minimum required keys:
+    - WorkflowRun: :workflow/id, :workflow/key, :workflow/status, :workflow/phase, :workflow/started-at
+    - PolicyEvaluation: :eval/id, :eval/pr-id, :eval/result, :eval/rules-applied, :eval/evaluated-at
+    - PolicyViolation: :violation/id, :violation/eval-id, :violation/rule, :violation/category, :violation/severity
+    - AttentionItem: :attention/id, :attention/severity, :attention/summary, :attention/source-type, :attention/source-id
+    - Waiver: :waiver/id, :waiver/eval-id, :waiver/actor, :waiver/reason, :waiver/created-at
+    - EvidenceBundle: :evidence/id, :evidence/workflow-id, :evidence/entries
+
+    Place schemas where they avoid circular dependencies. The tui-views
+    component or a shared schema component are good candidates.
+
+    Files: components/tui-views/src/ai/miniforge/tui_views/schema.clj (extend)
+           OR new namespace depending on dependency analysis
+    Tests: Malli validates well-formed entities, extra keys pass, missing required keys fail"
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :projection-builders
+   :task/description
+   "Define pure projection functions with stable input/output contracts for
+    each monitor zone. These replace the ad-hoc pattern where views reach
+    into raw model keys with implicit business logic.
+
+    Required projections:
+    - workflow-ticker: [supervisory-state] -> [{:run ... :status ... :phase ... :duration ...}]
+      Sorted active-first, then by started-at descending.
+    - pr-train-strip: [supervisory-state] -> {:train-progress ... :fleet-summary ...}
+      Shows train completion ratio and fleet aggregate counts.
+    - policy-health: [supervisory-state] -> {:pass-rate ... :violations-by-category ... :governance-counts ...}
+      Computes pass rate from evaluations, groups violations by category.
+    - attention: [supervisory-state] -> [{:severity ... :summary ... :source-type ... :source-id ... :created-at ...}]
+      Derives attention items from model state per normative delta §5.
+
+    Each projection must return a stable shape when the model is empty
+    (no nil, no crash — empty collections and zero counts).
+
+    Files: components/tui-views/src/ai/miniforge/tui_views/view/project.clj (refactor)
+           OR new projection namespace
+    Tests: Each projection returns correct shape for populated and empty state"
+   :task/type :implement
+   :task/dependencies [:supervisory-entity-schemas]}
+
+  {:task/id :governance-state-derivation
+   :task/description
+   "Implement PR governance state derivation per normative delta §4.
+    A PR's governance state is one of:
+    - :not-evaluated — no PolicyEvaluation exists for this PR
+    - :policy-passing — latest evaluation result is :pass
+    - :policy-failing — latest evaluation result is :fail, no Waiver exists
+    - :waived — latest evaluation result is :fail, but a Waiver record exists
+    - :escalated — PR has been explicitly escalated
+
+    Implement as a pure function:
+    (derive-governance-state pr-id evaluations waivers) -> keyword
+
+    This function is used by the policy-health projection builder and the
+    PR fleet/train views. It must never be hardcoded per PR — always derived
+    from the evaluation and waiver records.
+
+    Files: components/tui-views/src/ai/miniforge/tui_views/view/project.clj
+           OR the projection namespace from :projection-builders
+    Tests: Each governance state transition tested (no eval, passing, failing, waived)"
+   :task/type :implement
+   :task/dependencies [:supervisory-entity-schemas]}
+
+  {:task/id :ws1-tests
+   :task/description
+   "Verify all WS1 deliverables:
+    1. Malli schema validates well-formed WorkflowRun, PolicyEvaluation, etc.
+    2. Extra keys pass validation without error (open schema)
+    3. Missing required keys fail validation
+    4. Workflow ticker projection returns sorted active-first list
+    5. Policy health projection computes correct pass rate
+    6. Attention projection derives items from model state
+    7. All projections return stable shapes when model is empty
+    8. PR governance state derivation handles all 4 states correctly
+
+    Run: bb test
+    Files: components/tui-views/test/..."
+   :task/type :test
+   :task/dependencies [:supervisory-entity-schemas
+                       :projection-builders
+                       :governance-state-derivation]}]}

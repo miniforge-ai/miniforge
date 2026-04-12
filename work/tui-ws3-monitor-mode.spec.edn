@@ -1,0 +1,177 @@
+;; WS3 — Monitor Mode
+;;
+;; Phase 2 of the TUI Supervisory Control Plane work spec.
+;; The default supervisory surface — a single-screen dashboard answering
+;; "what are my agents doing?" at a glance.
+;;
+;; Parent work spec: work/tui-supervisory-control-plane.spec.edn
+;; Normative contract: specs/normative/N5-delta-supervisory-control-plane.md
+;; Depends on: tui-ws1-supervisory-domain, tui-ws2-durable-startup
+
+{:spec/id "tui-ws3-monitor-mode"
+ :spec/version "0.1.0"
+ :spec/created "2026-04-02"
+ :spec/status "active"
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :spec/title "WS3: Monitor Mode"
+
+ :spec/description
+ "Build the default :monitor screen — a single-screen dashboard with zones
+  for agent sessions, workflow ticker, PR train/fleet, attention bar, and
+  policy health. Responsive from 60 to 200+ columns for tmux side-pane use.
+  This is the first dogfooding milestone."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/tui-views"
+          "components/tui-engine"]}
+
+ :spec/constraints
+ ["Monitor must be legible at 60 columns (tmux right pane)"
+  "Monitor must be the default view on startup (replaces :pr-fleet)"
+  "Selection and drill-down must use existing view navigation patterns"
+  "Zones must render from projection builders (WS1), not raw model keys"
+  "Empty state must show guidance, not blank screen"
+  "All tests must pass with bb test"]
+
+ :spec/acceptance-criteria
+ ["Monitor mode useful in a tmux right pane at 60 columns"
+  "Active workflows and PR disposition visible without navigation"
+  "Attention items visible without drilling in"
+  "Monitor is the default view on startup"
+  "Enter drills into selected item, Esc returns"]
+
+ :title "WS3: Monitor Mode"
+
+ :description
+ "The monitor screen is the first genuinely useful dogfooding milestone.
+  It replaces :pr-fleet as the default view and provides a single-screen
+  dashboard that the user can keep in a tmux right pane while agents work
+  in Claude Code or Codex. No navigation required to see what's happening."
+
+ :context
+ {:normative-refs
+  ["N5-delta-supervisory-control-plane §6 — monitor mode requirements"
+   "N5-delta-supervisory-control-plane §6.2 — responsive layout"]
+
+  :current-state
+  ["Default view is :pr-fleet"
+   "No :monitor view exists"
+   "Existing views are full-screen single-purpose (workflow-list, pr-fleet, etc.)"
+   "screens.edn defines 10 view configurations"
+   "model/init-model sets :view to :pr-fleet"
+   "tui-engine handles terminal width detection"]
+
+  :existing-components
+  ["tui-views/model.clj — model shape, init-model, top-level-views"
+   "tui-views/view.clj — view dispatch and rendering"
+   "tui-views/views/ — existing view implementations (11 files)"
+   "tui-views/resources/config/tui/screens.edn — declarative view config"
+   "tui-engine — Lanterna-based terminal renderer with width detection"]}
+
+ :plan/tasks
+ [{:task/id :monitor-screen
+   :task/description
+   "Create the :monitor view — a new single-screen dashboard with zones.
+
+    Layout (vertical stack):
+    ┌─ Agent Sessions (when control plane active) ─────────────┐
+    │ [icon] agent-name  status  task  heartbeat                │
+    ├─ Workflow Ticker ─────────────────────────────────────────┤
+    │ [status] name  phase  duration  agent-status              │
+    ├─ PR Train / Fleet ────────────────────────────────────────┤
+    │ Train: ▓▓▓░░ 3/5 merged  or  Fleet: 12 open │ 3 ready   │
+    │ Per-PR monitor status when active                         │
+    ├─ Policy Health (when width permits) ──────────────────────┤
+    │ Pass rate: 87%  Top violations: missing-tests (3)         │
+    ├─ Attention Bar ───────────────────────────────────────────┤
+    │ ● workflow failed: fix-login  ▲ PR blocked: #247          │
+    └───────────────────────────────────────────────────────────┘
+
+    Each zone renders from its corresponding projection builder (WS1).
+    Selection: arrow keys move between zones/items, Enter drills into
+    the selected workflow/PR/agent detail view, Esc returns to monitor.
+
+    Empty zones show a single-line placeholder (e.g., 'No active workflows').
+
+    Create the view implementation following the pattern of existing views
+    (workflow_list.clj, pr_fleet.clj). Register in screens.edn.
+
+    Files: components/tui-views/src/ai/miniforge/tui_views/views/monitor.clj (new)
+           components/tui-views/resources/config/tui/screens.edn (add :monitor)
+           components/tui-views/src/ai/miniforge/tui_views/view.clj (add dispatch)
+    Tests: Monitor renders with all zones populated, empty state shows guidance"
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :narrow-width-rendering
+   :task/description
+   "Make the monitor mode responsive from 60 to 200+ columns.
+
+    At 60-80 cols (tmux right pane):
+    - Workflow rows: status-icon + name (truncated to 15 chars) + phase + duration
+    - PR rows: #number + governance-icon
+    - Attention: icon + truncated summary
+    - Drop box borders (save 2 columns)
+    - Abbreviated footer keybindings
+
+    At 80-120 cols:
+    - Add agent status column to workflow rows
+    - Add PR title column (truncated)
+    - Full footer with keybindings
+
+    At 120+ cols:
+    - Full-width tables matching existing layout conventions
+    - Policy health zone always visible
+
+    Width detection: use terminal cols from tui-engine on startup and
+    on resize events. Store in model as :terminal/cols.
+
+    Files: components/tui-views/src/ai/miniforge/tui_views/views/monitor.clj
+    Tests: Table renders without overflow at 60 columns, text truncation with ellipsis"
+   :task/type :implement
+   :task/dependencies [:monitor-screen]}
+
+  {:task/id :monitor-as-default
+   :task/description
+   "Make :monitor the default view on TUI startup.
+
+    Changes:
+    1. model/init-model: change :view from :pr-fleet to :monitor
+    2. model/top-level-views: add :monitor as first entry
+    3. screens.edn: add :monitor view configuration
+    4. Ensure Tab cycles through views with :monitor first
+    5. Ensure Esc from any detail view returns to :monitor (not :workflow-list)
+
+    Existing views remain accessible — this only changes the default.
+
+    Files: components/tui-views/src/ai/miniforge/tui_views/model.clj
+           components/tui-views/resources/config/tui/screens.edn
+    Tests: TUI starts in :monitor view, Tab cycles to existing views,
+           Esc from detail returns to :monitor"
+   :task/type :implement
+   :task/dependencies [:monitor-screen]}
+
+  {:task/id :ws3-tests
+   :task/description
+   "Verify all WS3 deliverables:
+    1. Monitor renders with all zones populated
+    2. Workflow ticker shows active workflows with correct status characters
+    3. PR zone shows train progress or fleet summary
+    4. Attention bar surfaces derived items
+    5. Enter drills into selected item
+    6. Esc returns to monitor from any detail view
+    7. Empty state shows guidance, not blank screen
+    8. Table renders without overflow at 60 columns
+    9. Text truncation with ellipsis for long names
+    10. TUI starts in :monitor view
+    11. Tab cycles to existing views
+
+    Run: bb test
+    Files: components/tui-views/test/..."
+   :task/type :test
+   :task/dependencies [:monitor-screen
+                       :narrow-width-rendering
+                       :monitor-as-default]}]}

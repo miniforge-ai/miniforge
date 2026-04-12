@@ -1,0 +1,168 @@
+;; WS4 — Governance Surface
+;;
+;; Phase 3 of the TUI Supervisory Control Plane work spec.
+;; Answers "are my review policies working?" from the monitor.
+;;
+;; Parent work spec: work/tui-supervisory-control-plane.spec.edn
+;; Normative contract: specs/normative/N5-delta-supervisory-control-plane.md
+;; Depends on: tui-ws1-supervisory-domain, tui-ws3-monitor-mode
+
+{:spec/id "tui-ws4-governance-surface"
+ :spec/version "0.1.0"
+ :spec/created "2026-04-02"
+ :spec/status "active"
+ :workflow/type :standard-sdlc
+ :workflow/version "2.0.0"
+
+ :spec/title "WS4: Governance Surface"
+
+ :spec/description
+ "Expose policy-governed review as a first-class supervisory concern.
+  Aggregate policy health in the monitor, implement Waiver entity persistence,
+  and build governance drill-down from violations to evidence. This is where
+  the TUI becomes more than a workflow progress screen."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/tui-views"
+          "components/policy-pack"
+          "components/evidence-bundle"]}
+
+ :spec/constraints
+ ["Waiver records MUST be separate durable records — never mutate original PolicyEvaluation"
+  "Governance state MUST be derived from evaluations + waivers (WS1 derivation fn)"
+  "Waived PRs MUST remain visibly waived, not appear as passing"
+  "Drill-down must use existing view navigation patterns (Enter/Esc)"
+  "All tests must pass with bb test"]
+
+ :spec/acceptance-criteria
+ ["User can answer 'are my review policies working?' from monitor"
+  "Failing/waived/passing states visually distinct"
+  "Drill-down shows evidence behind governance disposition"
+  "Waiver recorded with reason, loaded on startup, does not modify evaluation"]
+
+ :title "WS4: Governance Surface"
+
+ :description
+ "Policy health aggregation, waiver recording, and governance drill-down.
+  The monitor's policy health zone (from WS3) is backed by the policy-health
+  projection builder (from WS1). This workstream fills in the interactive
+  governance features: full policy health rendering, waiver persistence, and
+  drill-down from aggregate violations to individual PR evidence."
+
+ :context
+ {:normative-refs
+  ["N5-delta-supervisory-control-plane §4 — PR governance states"
+   "N5-delta-supervisory-control-plane §8 — governance and audit requirements"
+   "N5-delta-supervisory-control-plane §8.2 — waiver requirements"]
+
+  :current-state
+  ["Policy health zone exists as a placeholder in monitor (from WS3)"
+   "No Waiver entity or persistence"
+   "No governance drill-down view"
+   "Policy evaluation results stored per-PR in sync cache"
+   "evidence-bundle component exists for evidence storage"]
+
+  :existing-components
+  ["tui-views/views/monitor.clj — monitor screen (from WS3)"
+   "tui-views/view/project.clj — policy-health projection builder (from WS1)"
+   "tui-views/views/evidence.clj — existing evidence detail view"
+   "policy-pack/ — policy rule definitions and evaluation"
+   "evidence-bundle/ — evidence storage and retrieval"]}
+
+ :plan/tasks
+ [{:task/id :policy-health-zone
+   :task/description
+   "Fully render the policy health zone in the monitor screen.
+
+    Display:
+    - Pass rate as percentage: 'Pass rate: 87% (26/30)'
+    - Top violation categories with counts: 'Top: missing-tests (3), no-changelog (2)'
+    - PRs in each governance state: '✓ 26 passing │ ✗ 3 failing │ ⊘ 1 waived'
+    - Zero-violation state: 'All PRs passing policy ✓'
+
+    Backed by the policy-health projection builder from WS1.
+    Render at different widths:
+    - 60-80 cols: pass rate only, single line
+    - 80-120 cols: pass rate + top violations
+    - 120+ cols: full display with governance counts
+
+    Files: components/tui-views/src/ai/miniforge/tui_views/views/monitor.clj
+    Tests: Pass rate computed correctly, violations grouped, zero-violation state"
+   :task/type :implement
+   :task/dependencies []}
+
+  {:task/id :waiver-recording
+   :task/description
+   "Implement the Waiver entity persistence and the :waive action.
+
+    When a user selects a failing PR in the monitor or governance drill-down
+    and invokes 'waive' (w key), prompt for a reason using the existing
+    confirm overlay pattern, then:
+    1. Create a Waiver record (matching the WS1 schema)
+    2. Persist to ~/.miniforge/waivers/{eval-id}.edn
+    3. Re-derive the PR's governance state (should become :waived)
+    4. Update the model and re-render
+
+    Waiver loading on startup:
+    - Scan ~/.miniforge/waivers/ for .edn files
+    - Load and apply to governance state derivation
+    - Include in the startup-load path (extend WS2 :startup-load)
+
+    Waiver record fields: :waiver/id, :waiver/eval-id, :waiver/actor,
+    :waiver/reason, :waiver/created-at, optional :waiver/expires-at
+
+    The original PolicyEvaluation MUST remain unchanged after waiver.
+
+    Files: components/tui-views/src/ai/miniforge/tui_views/views/monitor.clj
+           components/tui-views/src/ai/miniforge/tui_views/persistence.clj (waiver I/O)
+           components/tui-views/src/ai/miniforge/tui_views/update.clj (waive handler)
+    Tests: Waiver persisted and loaded, governance changes to :waived,
+           original evaluation unchanged, waived PR visually distinct"
+   :task/type :implement
+   :task/dependencies [:policy-health-zone]}
+
+  {:task/id :governance-drill-down
+   :task/description
+   "Build governance drill-down navigation from the policy health zone.
+
+    Drill-down flow:
+    1. From policy health zone, select a violation category → shows all PRs
+       with that violation category, grouped by governance state
+    2. Select a PR → shows full policy evaluation detail: rules applied,
+       violations with severity and category, evidence references
+    3. Waived violations show waiver reason and actor
+    4. Select evidence reference → drills into existing evidence detail view
+
+    Implementation: create a :governance-detail view (or extend the existing
+    evidence.clj view). Register in screens.edn. Wire Enter/Esc navigation.
+
+    Files: components/tui-views/src/ai/miniforge/tui_views/views/governance.clj (new)
+           components/tui-views/resources/config/tui/screens.edn
+           components/tui-views/src/ai/miniforge/tui_views/view.clj (dispatch)
+    Tests: Drill from category to PR list, drill from PR to evaluation detail,
+           waiver reason visible in drill-down"
+   :task/type :implement
+   :task/dependencies [:policy-health-zone :waiver-recording]}
+
+  {:task/id :ws4-tests
+   :task/description
+   "Verify all WS4 deliverables:
+    1. Pass rate computed correctly from evaluations
+    2. Violation categories grouped and counted
+    3. Governance states shown with correct counts
+    4. Zero-violation state shows 'All PRs passing policy'
+    5. Waiver record persisted to disk and loaded on startup
+    6. PR governance state changes from :policy-failing to :waived
+    7. Waived PR displays distinctly from passing PR
+    8. Original PolicyEvaluation unchanged after waiver
+    9. Drill from violation category to PR list works
+    10. Drill from PR to policy evaluation detail works
+    11. Waiver reason visible in drill-down
+
+    Run: bb test
+    Files: components/tui-views/test/..."
+   :task/type :test
+   :task/dependencies [:policy-health-zone
+                       :waiver-recording
+                       :governance-drill-down]}]}
