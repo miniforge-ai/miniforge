@@ -253,6 +253,15 @@
   :pr/merging "Merging: {url}"
   :pr/merge-todo "TODO: Use gh pr merge"
 
+  ;; PR Monitor
+  :pr/monitor-starting "Starting PR monitor for author: {author}"
+  :pr/monitor-polling "Polling every {seconds}s in {dir}"
+  :pr/monitor-stop-hint "Press Ctrl+C to stop."
+  :pr/monitor-stopping "Stopping monitor..."
+  :pr/monitor-stopped "Monitor stopped. Evidence: {evidence}"
+  :pr/monitor-interval-bounds "Poll interval must be {min}-{max} seconds, got {value}. Using default."
+  :pr/monitor-interval-invalid "Invalid poll interval: {value}. Using default."
+
   ;; ── Observability ─────────────────────────────────────────────────────
   :observability/error-tailing "Error tailing file: {error}"
   :observability/tailing-header "{icon} Tailing {label}: {file-path}"

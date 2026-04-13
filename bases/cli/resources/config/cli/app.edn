@@ -16,4 +16,9 @@
                   "workflow run :workflow-id --input-json '{\"task\": \"Build feature\"}'"
                   "chain list"
                   "fleet add myorg/myrepo"
-                  "pr review https://github.com/org/repo/pull/123"]}}
+                  "pr review https://github.com/org/repo/pull/123"]}
+
+ :cli-app/pr-monitor
+ {:default-self-author "miniforge[bot]"
+  :min-poll-interval-s 5
+  :max-poll-interval-s 3600}}

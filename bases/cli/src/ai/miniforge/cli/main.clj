@@ -210,6 +210,7 @@
 (defn pr-review-cmd [m] (cmd-pr/pr-review-cmd (get-opts m)))
 (defn pr-respond-cmd [m] (cmd-pr/pr-respond-cmd (get-opts m)))
 (defn pr-merge-cmd [m] (cmd-pr/pr-merge-cmd (get-opts m)))
+(defn pr-monitor-cmd [m] (cmd-pr/pr-monitor-cmd (get-opts m)))
 
 ;; Control Plane commands
 (defn cp-status-cmd [m] (cmd-cp/status-cmd (get-opts m)))
@@ -420,6 +421,8 @@
    {:cmds ["pr" "review"]  :fn pr-review-cmd  :args->opts [:url]}
    {:cmds ["pr" "respond"] :fn pr-respond-cmd :args->opts [:url]}
    {:cmds ["pr" "merge"]   :fn pr-merge-cmd   :args->opts [:url]}
+   {:cmds ["pr" "monitor"] :fn pr-monitor-cmd :spec {:author {:alias :a}
+                                                      :poll-interval {:alias :p}}}
 
    ;; Control Plane subcommands
    {:cmds ["control-plane" "status"]    :fn cp-status-cmd}
@@ -458,6 +461,7 @@
   [& args]
   (try+
     (cli/dispatch dispatch-table args)
+    #_{:clj-kondo/ignore [:unresolved-symbol]}
     (catch [:type :org.babashka/cli :cause :no-match] data
       (handle-unknown-command data))))
 

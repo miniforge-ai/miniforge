@@ -43,6 +43,13 @@
                                               {})
       normalize-profile))
 
+(defn pr-monitor-config
+  "Resolve PR monitor CLI config from the classpath."
+  []
+  (resource-config/merged-resource-config app-config-resource
+                                          :cli-app/pr-monitor
+                                          {}))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Identity helpers
 
