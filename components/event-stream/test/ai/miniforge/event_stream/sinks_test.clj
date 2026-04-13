@@ -142,7 +142,23 @@
                 files (list-files wf-dir)
                 content (slurp (first files))]
             ;; Must parse without exception
-            (is (map? (read-transit-json content)))))))))
+            (is (map? (read-transit-json content))))))))
+
+  (testing "events with java.time.Instant values serialize without error"
+    (with-temp-dir
+      (fn [dir]
+        (let [sink (sinks/file-sink {:base-dir dir})
+              wf-id (random-uuid)
+              event (sample-event {:workflow/id wf-id
+                                   :execution/started-at (java.time.Instant/now)
+                                   :timestamp (java.time.Instant/now)})]
+          (sink event)
+          (let [wf-dir (io/file dir (str wf-id))
+                files (list-files wf-dir)
+                content (slurp (first files))
+                parsed (read-transit-json content)]
+            (is (map? parsed))
+            (is (some? (:execution/started-at parsed)))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; stdout-sink

@@ -33,7 +33,7 @@
    [cognitect.transit :as transit])
   (:import
    [java.io ByteArrayOutputStream]
-   [java.time ZonedDateTime ZoneOffset]
+   [java.time Instant ZonedDateTime ZoneOffset]
    [java.time.format DateTimeFormatter]))
 
 ;;------------------------------------------------------------------------------ Internal helpers
@@ -50,14 +50,24 @@
   (.format (DateTimeFormatter/ofPattern "yyyyMMdd'T'HHmmssSSS'Z'")
            (ZonedDateTime/now ZoneOffset/UTC)))
 
+(def ^:private instant-write-handler
+  "Transit write handler for java.time.Instant — converts to java.util.Date
+   which Transit handles natively as ~#inst."
+  (transit/write-handler
+   (constantly "t")
+   (fn [^Instant v] (str v))))
+
 (defn- write-transit-json
   "Serialize `event` to a Transit-JSON string using the verbose writer.
    Verbose mode ensures UUIDs appear as {\"~#uuid\" \"...\"} and instants
    as {\"~#inst\" \"...\"} rather than compact ~u and ~m tag-strings,
-   so the Rust parser can decode them without millisecond arithmetic."
+   so the Rust parser can decode them without millisecond arithmetic.
+   Custom handler for java.time.Instant (not supported by Transit defaults)."
   [event]
-  (let [out (ByteArrayOutputStream.)]
-    (transit/write (transit/writer out :json-verbose) event)
+  (let [out (ByteArrayOutputStream.)
+        writer (transit/writer out :json-verbose
+                               {:handlers {Instant instant-write-handler}})]
+    (transit/write writer event)
     (.toString out "UTF-8")))
 
 (defn- new-event-file-path
