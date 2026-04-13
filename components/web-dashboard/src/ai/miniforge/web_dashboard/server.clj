@@ -19,6 +19,7 @@
 (ns ai.miniforge.web-dashboard.server
   "HTTP server with WebSocket support for the production web dashboard."
   (:require
+   [ai.miniforge.config.interface :as config]
    [org.httpkit.server :as http]
    [clojure.string :as str]
    [clojure.java.io :as io]
@@ -44,7 +45,7 @@
   "Write dashboard discovery file for auto-connect."
   [port]
   (try
-    (let [discovery-dir (str (System/getProperty "user.home") "/.miniforge")
+    (let [discovery-dir (config/miniforge-home)
           discovery-file (str discovery-dir "/dashboard.port")
           info {:port port
                 :pid (.pid (java.lang.ProcessHandle/current))
@@ -59,7 +60,7 @@
   "Remove dashboard discovery file on shutdown."
   []
   (try
-    (let [discovery-file (str (System/getProperty "user.home") "/.miniforge/dashboard.port")]
+    (let [discovery-file (str (config/miniforge-home) "/dashboard.port")]
       (when (.exists (io/file discovery-file))
         (.delete (io/file discovery-file))))
     (catch Exception _ nil)))
@@ -384,7 +385,7 @@
         server (http/run-server handler {:port port :legacy-return-value? false})
         actual-port (http/server-port server)
         ;; Start file watcher to tail-follow event files
-        events-dir (str (System/getProperty "user.home") "/.miniforge/events")
+        events-dir (str (config/miniforge-home) "/events")
         watcher-cleanup (watcher/start-watcher!
                          events-dir
                          (fn [event]

@@ -33,9 +33,16 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants and utilities
 
+(defn miniforge-home
+  "Return the miniforge home directory.
+   Resolution: MINIFORGE_HOME env > ~/.miniforge"
+  []
+  (or (System/getenv "MINIFORGE_HOME")
+      (str (System/getProperty "user.home") "/.miniforge")))
+
 (def default-user-config-path
   "Default location for user config file."
-  (str (fs/home) "/.miniforge/config.edn"))
+  (str (miniforge-home) "/config.edn"))
 
 (def ^:private default-config-resource-path
   "Primary resource path for shipped user config defaults."

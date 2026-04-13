@@ -1,4 +1,4 @@
 {:paths ["src" "resources"]
- :deps {}
+ :deps {ai.miniforge/config {:local/root "../config"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

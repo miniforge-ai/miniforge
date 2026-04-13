@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/dag-primitives {:local/root "../dag-primitives"}
+ :deps {ai.miniforge/config {:local/root "../config"}
+        ai.miniforge/dag-primitives {:local/root "../dag-primitives"}
         ai.miniforge/task {:local/root "../task"}
         ai.miniforge/loop {:local/root "../loop"}
         ai.miniforge/logging {:local/root "../logging"}

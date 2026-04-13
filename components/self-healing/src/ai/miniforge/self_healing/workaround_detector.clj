@@ -24,6 +24,7 @@
    - Tier 2 (prompt-once): sudo operations, install packages
    - Tier 3 (always-prompt): Delete files, modify system configs"
   (:require
+   [ai.miniforge.config.interface :as config]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [ai.miniforge.self-healing.workaround-registry :as registry]))
@@ -95,7 +96,7 @@
 
    Returns: String path to ~/.miniforge/workaround_approvals.edn"
   []
-  (str (System/getProperty "user.home") "/.miniforge/workaround_approvals.edn"))
+  (str (config/miniforge-home) "/workaround_approvals.edn"))
 
 (defn load-approvals
   "Load workaround approval history.

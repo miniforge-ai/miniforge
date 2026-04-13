@@ -21,11 +21,13 @@
   (:require
    [ai.miniforge.config.user :as user]
    [ai.miniforge.config.governance :as governance]
-   [ai.miniforge.config.digest :as digest]))
+   [ai.miniforge.config.digest :as digest]
+   [ai.miniforge.config.profile :as profile]))
 
 ;; Re-export public functions
 (def default-user-config-path user/default-user-config-path)
 (def default-config user/default-config)
+(def miniforge-home user/miniforge-home)
 
 (defn load-user-config
   "Load user configuration from file."
@@ -88,3 +90,21 @@
   "Verify governance file content against digest manifest."
   [config-key content]
   (digest/verify-governance-file config-key content))
+
+;; Profile functions
+(def profile-path profile/profile-path)
+
+(defn load-profile
+  "Load user profile from ~/.miniforge/profile.edn."
+  ([] (profile/load-profile))
+  ([path] (profile/load-profile path)))
+
+(defn validate-profile
+  "Validate a profile map. Returns {:valid? bool :errors [...]}."
+  [p]
+  (profile/validate-profile p))
+
+(defn resolve-token
+  "Resolve git token for a host kind using profile + env var chain."
+  [host-kind & [opts]]
+  (profile/resolve-token host-kind opts))

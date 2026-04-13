@@ -26,6 +26,7 @@
    - :fleet  - Send to fleet command (org-level ops)
    - :multi  - Combine multiple sinks"
   (:require
+   [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.logging.core :as core]))
@@ -40,8 +41,7 @@
 
    Returns: String path to ~/.miniforge/logs/<workflow-id>.log"
   [workflow-id]
-  (let [home (System/getProperty "user.home")
-        logs-dir (io/file home ".miniforge" "logs")
+  (let [logs-dir (io/file (config/miniforge-home) "logs")
         log-file (str workflow-id ".log")]
     (.mkdirs logs-dir)
     (.getPath (io/file logs-dir log-file))))

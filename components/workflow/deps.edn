@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/schema {:local/root "../schema"}
+ :deps {ai.miniforge/config {:local/root "../config"}
+        ai.miniforge/schema {:local/root "../schema"}
         ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/response {:local/root "../response"}  ; Response chains

@@ -26,6 +26,7 @@
    Layer 1: Protocol implementation"
   (:require
    [ai.miniforge.adapter-claude-code.discovery :as discovery]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.control-plane.messages :as messages]
    [ai.miniforge.control-plane-adapter.protocol :as proto]
    [clojure.java.io :as io]))
@@ -35,7 +36,7 @@
 
 (def ^:const decisions-dir
   "Directory where decisions are dropped for Claude Code agents."
-  (str (System/getProperty "user.home") "/.miniforge/decisions"))
+  (str (config/miniforge-home) "/decisions"))
 
 (defn- ensure-decisions-dir! [agent-id]
   (let [dir (io/file decisions-dir (str agent-id))]

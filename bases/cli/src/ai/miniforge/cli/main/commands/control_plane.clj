@@ -26,6 +26,7 @@
    Layer 1: HTTP client helpers
    Layer 2: CLI commands"
   (:require
+   [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [cheshire.core :as json]
@@ -48,7 +49,7 @@
   "Read the dashboard port from discovery file.
    Returns base URL string or nil."
   []
-  (let [discovery-file (str (System/getProperty "user.home") "/.miniforge/dashboard.port")]
+  (let [discovery-file (str (config/miniforge-home) "/dashboard.port")]
     (when (.exists (io/file discovery-file))
       (try
         (let [info (json/parse-string (slurp discovery-file) true)

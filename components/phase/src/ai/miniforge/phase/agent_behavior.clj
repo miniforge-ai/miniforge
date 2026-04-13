@@ -31,7 +31,8 @@
    Layer 0: Behavior extraction and formatting
    Layer 1: Rule loading (built-in + standards + user packs)
    Layer 2: Full pipeline"
-  (:require [clojure.edn :as edn]
+  (:require [ai.miniforge.config.interface :as config]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]))
 
@@ -175,7 +176,7 @@
    - Vector of rules, or empty vector on failure"
   []
   (try
-    (let [packs-dir (io/file (System/getProperty "user.home") ".miniforge" "packs")]
+    (let [packs-dir (io/file (config/miniforge-home) "packs")]
       (if (.isDirectory packs-dir)
         (when-let [load-all (requiring-resolve 'ai.miniforge.policy-pack.interface/load-all-packs)]
           (let [result (load-all (str packs-dir))]

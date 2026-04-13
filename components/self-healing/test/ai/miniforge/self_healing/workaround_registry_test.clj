@@ -20,12 +20,13 @@
   "Unit tests for workaround registry."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.java.io :as io]
+            [ai.miniforge.config.interface :as config]
             [ai.miniforge.self-healing.workaround-registry :as registry]))
 
 ;;------------------------------------------------------------------------------ Test fixtures
 
 (def test-registry-path
-  (str (System/getProperty "user.home") "/.miniforge/test_workarounds.edn"))
+  (str (config/miniforge-home) "/test_workarounds.edn"))
 
 (defn cleanup-test-registry
   [f]

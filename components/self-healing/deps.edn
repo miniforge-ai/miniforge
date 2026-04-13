@@ -18,7 +18,8 @@
 
 {:paths ["src" "resources"]
 
- :deps {org.clojure/clojure {:mvn/version "1.12.0"}
+ :deps {ai.miniforge/config {:local/root "../config"}
+        org.clojure/clojure {:mvn/version "1.12.0"}
         clj-http/clj-http {:mvn/version "3.13.0"}}
 
  :aliases

@@ -15,6 +15,7 @@
 (ns ai.miniforge.web-dashboard.state.trains
   "PR Train, DAG, and fleet repository onboarding/sync accessors."
   (:require
+   [ai.miniforge.config.interface :as config]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
@@ -27,7 +28,7 @@
 ;; Fleet repository config and provider helpers
 
 (def default-fleet-config-path
-  (str (System/getProperty "user.home") "/.miniforge/config.edn"))
+  (str (config/miniforge-home) "/config.edn"))
 
 (def external-train-prefix
   "External PRs: ")

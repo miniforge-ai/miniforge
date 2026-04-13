@@ -26,6 +26,7 @@
    - Layer 2: Batch analysis + rate limit handling
    - Layer 3: Resume — reconstruct completed-ids from event file"
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
    [clojure.edn :as edn]
@@ -460,7 +461,7 @@
 
 (def default-events-dir
   "Default directory for workflow event files."
-  (delay (str (System/getProperty "user.home") "/.miniforge/events")))
+  (delay (str (config/miniforge-home) "/events")))
 
 (defn resume-context-from-event-file
   "Build resume context from a workflow's event file.

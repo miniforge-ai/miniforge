@@ -21,6 +21,7 @@
    Layer 0: Pure functions for log entry creation
    Layer 1: Logger protocol and default implementation"
   (:require
+   [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -123,8 +124,7 @@
 
    Returns: String path to ~/.miniforge/logs/<workflow-id>.log"
   [workflow-id]
-  (let [home (System/getProperty "user.home")
-        logs-dir (io/file home ".miniforge" "logs")
+  (let [logs-dir (io/file (config/miniforge-home) "logs")
         log-file (str workflow-id ".log")]
     (.mkdirs logs-dir)
     (.getPath (io/file logs-dir log-file))))

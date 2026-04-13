@@ -26,6 +26,7 @@
    - resources/executor/docker/Dockerfile.task-runner       (minimal Alpine)
    - resources/executor/docker/Dockerfile.task-runner-clojure (with Clojure tooling)"
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.workspace :as workspace]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
@@ -514,19 +515,10 @@
 
 (defn- resolve-git-token
   "Resolve a git authentication token for capsule clone.
-   One canonical env var per provider:
-   - MINIFORGE_GIT_TOKEN — universal override (any host)
-   - GITLAB_TOKEN — GitLab hosts
-   - GH_TOKEN — GitHub hosts (fallback: `gh auth token` CLI)"
+   Delegates to config/resolve-token which uses the profile + env chain:
+   MINIFORGE_GIT_TOKEN → profile → provider env var → CLI fallback."
   [_repo-url {:keys [host-kind]}]
-  (or (System/getenv "MINIFORGE_GIT_TOKEN")
-      (case host-kind
-        :gitlab (System/getenv "GITLAB_TOKEN")
-        (or (System/getenv "GH_TOKEN")
-            (try (let [r (clojure.java.shell/sh "gh" "auth" "token")]
-                   (when (zero? (:exit r))
-                     (str/trim (:out r))))
-                 (catch Exception _ nil))))))
+  (config/resolve-token host-kind))
 
 
 (defn- authenticated-https-url
