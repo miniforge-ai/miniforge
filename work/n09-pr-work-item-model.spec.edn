@@ -1,0 +1,63 @@
+;; =============================================================================
+;; Spec: N9 — Full PR Work Item Model (Readiness, Risk, Automation Tiers)
+;; =============================================================================
+;;
+;; Normative ref: specs/normative/N9-external-pr-integration.md
+;;
+;; PR trains and repo DAG exist. Missing: full N9 PR Work Item schema with
+;; deterministic readiness computation, explainable risk assessment, and
+;; automation tier enforcement (Tier 0-3).
+
+{:spec/title "N9: PR Work Item model with readiness, risk, and automation tiers"
+
+ :spec/description
+ "Implement the full N9 PR Work Item model:
+
+  1. PR Work Item Schema:
+     {:pr/id, :pr/provider, :pr/repo, :pr/number, :pr/state,
+      :pr/readiness, :pr/risk, :pr/policy-result, :pr/automation-tier,
+      :pr/derived-state, :pr/labels, :pr/checks, :pr/reviews}
+
+  2. Readiness Computation (deterministic):
+     - Inputs: CI status, review approvals, policy evaluation, conflicts
+     - Output: #{:ready :blocked :needs-review :needs-ci :has-conflicts}
+     - Must be a pure function — same inputs always produce same readiness
+
+  3. Risk Assessment (explainable):
+     - Factors: lines changed, files touched, dependency changes, test coverage
+       delta, author trust level, time since last review
+     - Output: {:risk/level #{:low :medium :high :critical},
+                :risk/factors [{:factor :lines-changed :value 500 :weight 0.3}...],
+                :risk/explanation 'High risk: 500+ lines, 3 dependency changes'}
+     - Factors and weights must be configurable via policy pack
+
+  4. Automation Tiers:
+     - Tier 0: Manual — no automation, human drives everything
+     - Tier 1: Notify — automation observes and notifies, human acts
+     - Tier 2: Suggest — automation suggests actions, human approves
+     - Tier 3: Autonomous — automation acts within policy bounds
+     - Tier assignment based on risk level and repo config
+     - Enforce tier: Tier 1 cannot merge, Tier 2 requires approval, etc."
+
+ :spec/intent {:type :feature
+               :scope ["components/pr-lifecycle/src"
+                       "components/pr-sync/src"
+                       "components/policy-pack/src"]}
+
+ :spec/constraints
+ ["Readiness computation must be pure and deterministic"
+  "Risk factors and weights must be configurable — not hardcoded"
+  "Tier enforcement must be checked before every automated action"
+  "Existing pr-lifecycle state machine must not break"
+  "PR Work Item model extends (not replaces) existing PR data"]
+
+ :spec/acceptance-criteria
+ ["PR Work Item schema validates correctly with all required fields"
+  "Readiness computation produces consistent results for same inputs"
+  "Risk assessment produces explainable output with named factors"
+  "Tier 0 PR has no automated actions"
+  "Tier 3 PR can be auto-merged when readiness is :ready and risk is :low"
+  "High-risk PR is capped at Tier 1 regardless of repo config"
+  "Risk factors are configurable via policy pack rules"]
+
+ :spec/workflow-type :canonical-sdlc}

@@ -1,0 +1,68 @@
+;; =============================================================================
+;; Spec: N7 — Operational Policy Synthesis (OPSV) Workflow
+;; =============================================================================
+;;
+;; Normative ref: specs/normative/N7-Operational-Policy-Synthesis.md
+;;
+;; OPSV is entirely unimplemented — the largest single gap in spec compliance.
+;; This spec covers the foundational OPSV workflow. The infrastructure exists
+;; (workflow engine, gates, evidence, event-stream) but no OPSV-specific code
+;; has been written.
+;;
+;; This is a large body of work. This spec establishes the skeleton and first
+;; phase (DISCOVER). Subsequent specs will build out CONVERGE, VERIFY, ACTUATE.
+
+{:spec/title "N7: OPSV workflow skeleton — DISCOVER phase and experiment pack schema"
+
+ :spec/description
+ "Implement the foundational OPSV workflow per N7:
+
+  1. OPSV Workflow Definition — Register a new workflow type :opsv alongside
+     the existing :canonical-sdlc and :quick-fix types. Define the phase graph:
+     DISCOVER -> CONVERGE -> VERIFY -> ACTUATE -> OBSERVE.
+
+  2. Experiment Pack Schema — Define the data model for experiment packs:
+     {:experiment/id, :experiment/hypothesis, :experiment/metrics,
+      :experiment/blast-radius, :experiment/rollback-plan,
+      :experiment/duration, :experiment/success-criteria}.
+
+  3. DISCOVER Phase — Implement the first OPSV phase:
+     - Scan target system for observable metrics and current state
+     - Generate candidate operational policies from observations
+     - Produce an Operational Policy Proposal (OPP) document
+     - Emit OPSV-specific events to event-stream
+
+  4. OPSV Gates — Implement foundational gates:
+     - :opsv/instrumentation — target system has required metrics
+     - :opsv/blast-radius — experiment scope within configured limits
+     - :opsv/abort-conditions — rollback plan is defined and testable
+
+  5. APPLY_ALLOWED — Default to false (disabled). OPSV is observe-only until
+     explicitly enabled in config."
+
+ :spec/intent {:type :feature
+               :scope ["components/workflow/src"
+                       "components/phase/src"
+                       "components/gate/src"
+                       "components/policy-pack/src"
+                       "components/evidence-bundle/src"
+                       "components/event-stream/src"]}
+
+ :spec/constraints
+ ["APPLY_ALLOWED defaults to false — no system mutations without explicit opt-in"
+  "OPSV workflow must use the same workflow engine as SDLC workflows"
+  "Experiment packs must be validated against schema before execution"
+  "All OPSV state transitions must emit events per N3"
+  "Evidence bundles must be generated per N6 for every OPSV run"
+  "CONVERGE, VERIFY, and ACTUATE phases are stubbed — implementation deferred"]
+
+ :spec/acceptance-criteria
+ [":opsv workflow type is registered and selectable"
+  "Experiment pack schema validates correctly"
+  "DISCOVER phase produces an Operational Policy Proposal"
+  "OPSV gates block progression when instrumentation is missing"
+  "APPLY_ALLOWED=false prevents ACTUATE phase from executing"
+  "OPSV events appear in event-stream"
+  "CONVERGE/VERIFY/ACTUATE stubs return :not-implemented with clear message"]
+
+ :spec/workflow-type :canonical-sdlc}

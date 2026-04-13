@@ -1,0 +1,57 @@
+;; =============================================================================
+;; Spec: N9 — Provider-Native Check Runs (GitHub Check Runs)
+;; =============================================================================
+;;
+;; Normative ref: specs/normative/N9-external-pr-integration.md
+;;
+;; N9 requires publishing policy evaluation results as provider-native checks
+;; (GitHub Check Runs). No implementation or work spec previously existed.
+
+{:spec/title "N9: Publish policy evaluation results as GitHub Check Runs"
+
+ :spec/description
+ "Implement provider-native check publishing per N9:
+
+  1. GitHub Check Run API Integration:
+     - Create check runs when policy evaluation starts
+     - Update check run status as evaluation progresses
+     - Post check run conclusion with summary and annotations
+     - Support check run actions (re-run, fix suggestions)
+
+  2. Policy-to-Check Mapping:
+     - Each policy pack rule maps to one check run annotation
+     - Severity levels map to annotation levels: hard-halt->failure,
+       require-approval->warning, warn->notice, audit->notice
+     - Check run summary includes overall pass/fail and violation count
+
+  3. Annotation Details:
+     - File path and line range for each violation
+     - Rule description and suggested fix
+     - Link to policy pack documentation
+
+  4. Re-run Support:
+     - GitHub 're-run' action triggers fresh policy evaluation
+     - Results update the same check suite"
+
+ :spec/intent {:type :feature
+               :scope ["components/connector-github/src"
+                       "components/policy-pack/src"
+                       "components/pr-lifecycle/src"]}
+
+ :spec/constraints
+ ["Requires GitHub App installation with checks:write permission"
+  "Check runs must be idempotent — re-running produces same result for same code"
+  "Do not block PR creation on check run API failures — degrade gracefully"
+  "Annotation count limited to 50 per check run (GitHub API limit)"
+  "GitLab equivalent (external status checks) deferred to gitlab-support spec"]
+
+ :spec/acceptance-criteria
+ ["Policy evaluation creates a GitHub Check Run on the PR"
+  "Check run shows pass/fail with violation count in summary"
+  "Individual violations appear as file-level annotations"
+  "Hard-halt violations result in check run conclusion :failure"
+  "Clean evaluation results in check run conclusion :success"
+  "Check run API failure does not block PR workflow"
+  "Re-run action triggers fresh evaluation"]
+
+ :spec/workflow-type :canonical-sdlc}

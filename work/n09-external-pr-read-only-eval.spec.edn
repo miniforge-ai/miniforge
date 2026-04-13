@@ -1,0 +1,60 @@
+;; =============================================================================
+;; Spec: N9 — External PR Read-Only Policy Evaluation
+;; =============================================================================
+;;
+;; Normative ref: specs/normative/N9-external-pr-integration.md
+;;                 specs/normative/N4-policy-packs.md
+;;
+;; N9 requires evaluating policy packs against external PRs in read-only mode.
+;; The policy-pack system exists but has no read-only evaluation mode for
+;; external PRs where repair is not possible.
+
+{:spec/title "N9/N4: Read-only policy evaluation for external PRs"
+
+ :spec/description
+ "Implement read-only policy evaluation for external (non-miniforge) PRs:
+
+  1. Read-Only Evaluation Mode:
+     - Evaluate policy pack rules against PR diff without repair capability
+     - Collect all violations without attempting fixes
+     - Produce evaluation report with per-rule pass/fail and violation details
+
+  2. External PR Diff Acquisition:
+     - Fetch PR diff from provider (GitHub/GitLab) API
+     - Parse diff into structured change records (file, hunks, lines)
+     - Normalize across providers into a common diff model
+
+  3. Report Generation:
+     - Structured report: {:evaluation/pr, :evaluation/pack,
+                           :evaluation/results [{:rule/id, :result, :violations}],
+                           :evaluation/summary {:pass N, :fail N, :warn N}}
+     - Human-readable summary suitable for PR comment
+     - Machine-readable output for check run integration (n09-provider-native-checks)
+
+  4. Integration Points:
+     - Callable from CLI: miniforge pr evaluate <repo> <pr-number>
+     - Callable from PR monitor loop for automatic evaluation
+     - Results feed into n09-provider-native-checks for GitHub Check Runs"
+
+ :spec/intent {:type :feature
+               :scope ["components/policy-pack/src"
+                       "components/pr-lifecycle/src"
+                       "components/connector-github/src"
+                       "bases/cli/src"]}
+
+ :spec/constraints
+ ["Evaluation must be read-only — no repository writes, no repair attempts"
+  "Diff parsing must work for GitHub unified diff format"
+  "Evaluation must complete within 30 seconds for a typical PR"
+  "Results must be cacheable (same PR SHA = same result)"
+  "Do not require full repo clone — work from diff and file contents API"]
+
+ :spec/acceptance-criteria
+ ["Policy pack evaluates against external PR diff"
+  "Violations are reported without repair attempts"
+  "Evaluation report includes per-rule results"
+  "miniforge pr evaluate <repo> <pr-number> produces report"
+  "Same PR SHA produces same evaluation results (deterministic)"
+  "Evaluation completes within 30 seconds for typical PR"]
+
+ :spec/workflow-type :canonical-sdlc}

@@ -1,0 +1,68 @@
+;; =============================================================================
+;; Spec: N8 — OCI Governance Layer (RBAC, Control Actions, Audit)
+;; =============================================================================
+;;
+;; Normative ref: specs/normative/N8-observability-control-interface.md
+;;
+;; OCI is mostly unimplemented (~10%). The event-stream subscription mechanism
+;; provides the foundation, but the governance layer is absent. This spec covers
+;; the core governance capabilities. OTel alignment is a separate spec.
+
+{:spec/title "N8: OCI governance — RBAC, listener capabilities, control actions, audit"
+
+ :spec/description
+ "Implement the N8 Observability Control Interface governance layer:
+
+  1. Listener Capability Levels:
+     - OBSERVE — read-only access to events (current behavior)
+     - ADVISE — can post annotations (recommendation/warning/insight)
+     - CONTROL — can issue control actions (pause/resume/retry/cancel)
+     Register capability level per listener on subscription.
+
+  2. RBAC Roles and Permissions:
+     - Define role schema: {:role/id, :role/name, :role/capabilities, :role/scope}
+     - Built-in roles: :viewer (OBSERVE), :operator (OBSERVE+ADVISE),
+       :admin (OBSERVE+ADVISE+CONTROL)
+     - Role assignment per principal (user, service, agent)
+     - Permission check before control action execution
+
+  3. Control Action Governance:
+     - All control actions (pause, resume, retry, cancel) must go through
+       a governed pipeline: authenticate -> authorize -> validate -> execute -> audit
+     - Multi-party approval for destructive actions (cancel, force-retry)
+     - Configurable approval threshold (default: 1 approver for cancel)
+
+  4. Annotations:
+     - Schema: {:annotation/type #{:recommendation :warning :insight},
+                :annotation/message, :annotation/source, :annotation/timestamp}
+     - Listeners with ADVISE capability can attach annotations to workflows
+     - Annotations are recorded in evidence bundles
+
+  5. Audit Logging:
+     - Every control action produces an audit event
+     - Audit events include: principal, action, target, timestamp, result
+     - Audit log is append-only and stored alongside evidence bundles"
+
+ :spec/intent {:type :feature
+               :scope ["components/event-stream/src"
+                       "components/dag-executor/src"
+                       "components/workflow/src"
+                       "components/evidence-bundle/src"]}
+
+ :spec/constraints
+ ["RBAC is local-first — no external identity provider required initially"
+  "Default installation has a single :admin principal (backwards compatible)"
+  "Control actions must be idempotent (pause an already-paused workflow is a no-op)"
+  "Audit log must survive process crashes (flush on write)"
+  "Privacy levels and retention policies deferred to separate spec"]
+
+ :spec/acceptance-criteria
+ ["Listener with OBSERVE capability cannot issue control actions"
+  "Listener with CONTROL capability can pause/resume workflows"
+  "Control action without valid role is rejected with 403-equivalent error"
+  "Cancel action requires multi-party approval when configured"
+  "All control actions produce audit events in evidence bundle"
+  "Annotations from ADVISE listeners appear in workflow evidence"
+  "Built-in roles are auto-created on first startup"]
+
+ :spec/workflow-type :canonical-sdlc}

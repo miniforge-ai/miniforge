@@ -1,0 +1,58 @@
+;; =============================================================================
+;; Spec: N8 — Privacy Levels and Retention Policies
+;; =============================================================================
+;;
+;; Normative ref: specs/normative/N8-observability-control-interface.md
+;;
+;; Prerequisite: n08-oci-governance.spec.edn (RBAC + audit foundation)
+;;
+;; N8 requires privacy levels for event access and retention policies for
+;; evidence data. These build on the RBAC and audit foundation.
+
+{:spec/title "N8: Privacy levels for event access and data retention policies"
+
+ :spec/description
+ "Implement N8 privacy and retention requirements:
+
+  1. Privacy Levels:
+     - :metadata-only — listener sees event type, timestamp, workflow-id only
+     - :redacted — listener sees all fields except those marked sensitive
+     - :full — listener sees all fields (requires :admin role)
+     Apply privacy level to event delivery based on listener's role.
+
+  2. Listener Budget Controls:
+     - Max events per second per listener (default: 1000)
+     - Max active subscriptions per principal (default: 10)
+     - Backpressure: drop events with warning when budget exceeded
+
+  3. Retention Policies:
+     - Per-workflow retention period (default from N6 compliance metadata)
+     - Automatic expiration marking after retention period
+     - Retention sweep job that marks expired evidence for deletion
+     - Legal hold override that prevents expiration regardless of policy
+
+  4. Data Lifecycle Events:
+     - Emit :data/retention-expired when evidence reaches end of retention
+     - Emit :data/legal-hold-applied and :data/legal-hold-released"
+
+ :spec/intent {:type :feature
+               :scope ["components/event-stream/src"
+                       "components/evidence-bundle/src"]}
+
+ :spec/constraints
+ ["Prerequisite: n08-oci-governance.spec.edn must be complete"
+  "Privacy filtering happens at delivery time — full events are stored"
+  "Retention sweep is a background job, not inline with evidence creation"
+  "Legal hold is an override — it cannot be bypassed programmatically"
+  "Budget exceeded events are logged but not stored (prevent amplification)"]
+
+ :spec/acceptance-criteria
+ [":metadata-only listener cannot see event payloads"
+  ":redacted listener cannot see fields marked :sensitive"
+  ":full listener sees all event data"
+  "Listener exceeding budget receives backpressure (dropped events + warning)"
+  "Retention sweep marks expired evidence correctly"
+  "Legal hold prevents expiration of held evidence"
+  "Data lifecycle events are emitted on retention state changes"]
+
+ :spec/workflow-type :canonical-sdlc}

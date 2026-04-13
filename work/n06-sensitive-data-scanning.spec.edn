@@ -1,0 +1,52 @@
+;; =============================================================================
+;; Spec: N6 — Sensitive Data Scanning in Evidence Bundles
+;; =============================================================================
+;;
+;; Normative ref: specs/normative/N6-evidence-provenance.md
+;;
+;; N6 requires scanning evidence bundles for sensitive data before storage.
+;; No implementation or work spec previously existed. The spec requires detection
+;; of: AWS keys, passwords, SSNs, credit card numbers, API tokens.
+
+{:spec/title "N6: Scan evidence bundles for sensitive data before storage"
+
+ :spec/description
+ "Add a sensitive-data scanning gate to the evidence bundle assembly pipeline.
+  Before an evidence bundle is persisted, scan all string fields for:
+  1. AWS access keys (AKIA pattern)
+  2. AWS secret keys (40-char base64 after access key)
+  3. Generic API tokens (Bearer tokens, hex/base64 strings > 20 chars near
+     'token', 'key', 'secret', 'password' context words)
+  4. Credit card numbers (Luhn-valid 13-19 digit sequences)
+  5. US Social Security Numbers (NNN-NN-NNNN pattern)
+  6. Private keys (BEGIN RSA/EC/OPENSSH PRIVATE KEY)
+  7. Connection strings with embedded passwords
+
+  On detection:
+  - Severity :hard-halt — block storage, require redaction
+  - Redact the sensitive value with a placeholder: [REDACTED:<type>]
+  - Log the field path where the value was found (not the value itself)
+  - Record the scan result in the evidence bundle metadata"
+
+ :spec/intent {:type :feature
+               :scope ["components/evidence-bundle/src"
+                       "components/gate/src"
+                       "components/policy-pack/src"]}
+
+ :spec/constraints
+ ["Scanning must be purely regex/pattern-based — no network calls"
+  "Never log, emit, or store the detected sensitive values"
+  "Scanning must complete in <1s for a typical evidence bundle"
+  "False positives on short hex strings should be minimized with context checks"
+  "Redaction must be reversible for authorized users — store redaction index separately"]
+
+ :spec/acceptance-criteria
+ ["AWS key pattern AKIAIOSFODNN7EXAMPLE is detected and redacted"
+  "Credit card number passing Luhn check is detected"
+  "SSN pattern NNN-NN-NNNN is detected"
+  "Private key blocks are detected"
+  "Clean evidence bundles pass scanning without modifications"
+  "Scan results are recorded in evidence bundle metadata"
+  "Gate blocks bundle storage until redaction is applied"]
+
+ :spec/workflow-type :canonical-sdlc}

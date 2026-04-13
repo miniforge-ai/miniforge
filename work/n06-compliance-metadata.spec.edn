@@ -1,0 +1,45 @@
+;; =============================================================================
+;; Spec: N6 — Compliance Metadata in Evidence Bundles
+;; =============================================================================
+;;
+;; Normative ref: specs/normative/N6-evidence-provenance.md
+;;
+;; N6 requires compliance metadata fields in evidence bundles: PII indicators,
+;; data classification, retention policies, and regulatory tags. No implementation
+;; or work spec previously existed.
+
+{:spec/title "N6: Add compliance metadata fields to evidence bundles"
+
+ :spec/description
+ "Extend the evidence bundle schema with compliance metadata:
+  1. :evidence/data-classification — #{:public :internal :confidential :restricted}
+  2. :evidence/contains-pii? — boolean, set by sensitive-data scanner or manual tag
+  3. :evidence/retention-policy — {:retain-days N :auto-delete? bool :legal-hold? bool}
+  4. :evidence/regulatory-tags — set of applicable regulations #{:gdpr :hipaa :sox :pci}
+  5. :evidence/created-by — principal identifier (user, agent, system)
+  6. :evidence/access-log — append-only log of who accessed the bundle
+
+  Default classification is :internal. Default retention is 90 days with
+  auto-delete enabled. Regulatory tags default to empty set.
+
+  Wire classification into the evidence bundle assembly so every bundle gets
+  default compliance metadata. Allow overrides via workflow config."
+
+ :spec/intent {:type :feature
+               :scope ["components/evidence-bundle/src"]}
+
+ :spec/constraints
+ ["Schema changes must be backwards-compatible — existing bundles remain valid"
+  "Access log must be append-only — no mutation of existing entries"
+  "Retention policies are metadata only — actual deletion is a separate concern"
+  "Do not implement actual data deletion in this spec — just record the policy"]
+
+ :spec/acceptance-criteria
+ ["New evidence bundles include :evidence/data-classification defaulting to :internal"
+  ":evidence/contains-pii? is set to true when sensitive-data scanner finds PII"
+  ":evidence/retention-policy defaults to {:retain-days 90 :auto-delete? true}"
+  "Workflow config can override classification and retention"
+  "Existing evidence bundles without compliance fields still pass validation"
+  "Access log records timestamp and principal for each access"]
+
+ :spec/workflow-type :canonical-sdlc}

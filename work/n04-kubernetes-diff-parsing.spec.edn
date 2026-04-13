@@ -1,0 +1,40 @@
+;; =============================================================================
+;; Spec: N4 — Kubernetes Diff Parsing for Policy Gates
+;; =============================================================================
+;;
+;; Normative ref: specs/normative/N4-policy-packs.md
+;;
+;; Terraform plan parsing is implemented in evidence-bundle. N4 also requires
+;; Kubernetes manifest diff parsing for policy evaluation. No implementation or
+;; work spec previously existed for this.
+
+{:spec/title "N4: Kubernetes manifest diff parsing for policy gate evaluation"
+
+ :spec/description
+ "Implement Kubernetes manifest diff parsing analogous to the existing
+  analyze-terraform-plan in evidence-bundle. The parser must:
+  1. Parse kubectl diff or kustomize build output into structured change records.
+  2. Classify changes by resource kind, namespace, and operation (add/modify/delete).
+  3. Detect high-risk changes: RBAC modifications, Secret changes, container image
+     changes, resource limit removals, namespace deletions.
+  4. Produce a structured diff suitable for policy-pack rule evaluation.
+  5. Wire into the evidence-bundle component alongside Terraform plan analysis."
+
+ :spec/intent {:type :feature
+               :scope ["components/evidence-bundle/src"
+                       "components/policy-pack/src"]}
+
+ :spec/constraints
+ ["Parse YAML manifests — do not require a running cluster"
+  "Support both kubectl diff output and raw before/after YAML comparison"
+  "Reuse the evidence-bundle pattern established by analyze-terraform-plan"
+  "High-risk change detection must be configurable via policy-pack rules"]
+
+ :spec/acceptance-criteria
+ ["Deployment image change is detected and classified as :modify"
+  "RBAC ClusterRoleBinding addition is flagged as high-risk"
+  "Secret value changes are detected without logging the values"
+  "Namespace deletion is flagged as high-risk"
+  "Structured diff integrates with policy-pack check-artifact"]
+
+ :spec/workflow-type :canonical-sdlc}
