@@ -51,7 +51,7 @@
   (let [pr-evals (filter #(= pr-id (:eval/pr-id %)) (or evaluations []))
         latest   (when (seq pr-evals)
                    (apply max-key
-                          #(inst-ms (or (:eval/evaluated-at %) (java.util.Date. 0)))
+                          #(inst-ms (get % :eval/evaluated-at (java.util.Date. 0)))
                           pr-evals))]
     (cond
       (nil? latest)
@@ -107,13 +107,13 @@
   (let [wfs (get model :workflows [])]
     (if (empty? wfs)
       []
-      (let [active?   (fn [wf] (= :running (or (:status wf) :unknown)))
-            by-start  (fn [wf] (inst-ms (or (:started-at wf) (java.util.Date. 0))))
+      (let [active?   (fn [wf] (= :running (get wf :status :unknown)))
+            by-start  (fn [wf] (inst-ms (get wf :started-at (java.util.Date. 0))))
             sorted    (sort-by (juxt (comp not active?) (comp - by-start)) wfs)]
         (mapv (fn [wf]
                 {:id       (:id wf)
                  :key      (or (:name wf) (some-> (:id wf) str (subs 0 8)) "")
-                 :status   (or (:status wf) :unknown)
+                 :status   (get wf :status :unknown)
                  :phase    (some-> (:phase wf) name)
                  :duration (duration-str (or (:duration-ms wf)
                                              (elapsed-ms (:started-at wf))))
