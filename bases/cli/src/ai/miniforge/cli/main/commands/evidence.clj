@@ -85,13 +85,14 @@
         (if (seq files)
           (doseq [f files]
             (let [bundle (load-bundle-from-file f)
-                  id     (or (some-> (:bundle/id bundle) str)
-                             (.getName f))]
+                  id     (if bundle
+                           (or (some-> (:bundle/id bundle) str) (.getName f))
+                           (.getName f))]
               (println (str "  " (display/style id :foreground :bold)
-                            (when-let [wf (:bundle/workflow-id bundle)]
-                              (str "  wf:" wf))
-                            (when-let [s (:bundle/status bundle)]
-                              (str "  (" s ")"))))))
+                            (when (and bundle (:bundle/workflow-id bundle))
+                              (str "  wf:" (:bundle/workflow-id bundle)))
+                            (when (and bundle (:bundle/status bundle))
+                              (str "  (" (:bundle/status bundle) ")"))))))
           (do
             (println "  No evidence bundles found.")
             (println (str "  Evidence dir: " (evidence-dir))))))))
@@ -102,15 +103,17 @@
   [opts]
   (let [{:keys [id]} opts]
     (if-not id
-      (display/print-error
-       (str "Usage: " (app-config/command-string "evidence show <id>")))
+      (do (display/print-error
+           (str "Usage: " (app-config/command-string "evidence show <id>")))
+          (System/exit 1))
       (let [bundle (or (try-evidence-interface 'ai.miniforge.evidence-bundle.interface/get-bundle id)
                        ;; Filesystem fallback
                        (let [f (io/file (str (evidence-dir) "/" id ".edn"))]
                          (when (.exists f) (load-bundle-from-file f))))]
         (if-not bundle
-          (display/print-error (str "Evidence bundle not found: " id
-                                    "\nRun `" (app-config/command-string "evidence list") "` to see available bundles."))
+          (do (display/print-error (str "Evidence bundle not found: " id
+                                      "\nRun `" (app-config/command-string "evidence list") "` to see available bundles."))
+              (System/exit 1))
           (do
             (println)
             (println (display/style (str "Evidence Bundle: " id) :foreground :cyan :bold true))
@@ -134,8 +137,9 @@
   (let [{:keys [id format]} opts
         fmt (or format "edn")]
     (if-not id
-      (display/print-error
-       (str "Usage: " (app-config/command-string "evidence export <id> <format>")))
+      (do (display/print-error
+           (str "Usage: " (app-config/command-string "evidence export <id> <format>")))
+          (System/exit 1))
       (let [result (try-evidence-interface
                     'ai.miniforge.evidence-bundle.interface/export-bundle id fmt)]
         (if result
@@ -150,7 +154,8 @@
               (let [dest (str (evidence-dir) "/" id "-export." fmt)]
                 (fs/copy (str src) dest {:replace-existing true})
                 (display/print-success (str "Exported (raw): " dest)))
-              (display/print-error (str "Evidence bundle not found: " id)))))))))
+              (do (display/print-error (str "Evidence bundle not found: " id))
+                  (System/exit 1)))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

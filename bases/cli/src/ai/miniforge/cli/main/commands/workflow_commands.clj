@@ -70,8 +70,9 @@
   [opts]
   (let [{:keys [spec]} opts]
     (if-not spec
-      (display/print-error
-       (str "Usage: " (app-config/command-string "workflow execute <spec-file>")))
+      (do (display/print-error
+           (str "Usage: " (app-config/command-string "workflow execute <spec-file>")))
+          (System/exit 1))
       (cmd-run/run-cmd opts))))
 
 (defn workflow-status-cmd
@@ -82,12 +83,14 @@
   [opts]
   (let [{:keys [id]} opts]
     (if-not id
-      (display/print-error
-       (str "Usage: " (app-config/command-string "workflow status <id>")))
+      (do (display/print-error
+           (str "Usage: " (app-config/command-string "workflow status <id>")))
+          (System/exit 1))
       (let [events-dir (app-config/events-dir)
             event-file (str events-dir "/" id ".edn")]
         (if-not (fs/exists? event-file)
-          (display/print-error (str "No workflow found with ID: " id))
+          (do (display/print-error (str "No workflow found with ID: " id))
+              (System/exit 1))
           (let [events  (read-event-lines event-file)
                 status  (derive-status events)
                 started (first (filter #(= :workflow/started (:event/type %)) events))
@@ -121,8 +124,9 @@
   [opts]
   (let [{:keys [id]} opts]
     (if-not id
-      (display/print-error
-       (str "Usage: " (app-config/command-string "workflow cancel <id>")))
+      (do (display/print-error
+           (str "Usage: " (app-config/command-string "workflow cancel <id>")))
+          (System/exit 1))
       (let [commands-dir (app-config/commands-dir (str id))
             cmd-file     (str commands-dir "/cancel-" (System/currentTimeMillis) ".edn")]
         (try

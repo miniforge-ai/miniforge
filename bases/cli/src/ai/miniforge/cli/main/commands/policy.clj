@@ -122,14 +122,16 @@
   [opts]
   (let [{:keys [pack-id]} opts]
     (if-not pack-id
-      (display/print-error
-       (str "Usage: " (app-config/command-string "policy show <pack-id>")))
+      (do (display/print-error
+           (str "Usage: " (app-config/command-string "policy show <pack-id>")))
+          (System/exit 1))
       (let [pack (or (load-pack-from-resource pack-id)
                      (load-pack-from-path (str (packs-dir) "/" pack-id ".pack.edn"))
                      (try-policy-interface 'ai.miniforge.policy-pack.interface/load-pack pack-id))]
         (if-not pack
-          (display/print-error (str "Pack not found: " pack-id
-                                    "\nRun `" (app-config/command-string "policy list") "` to see available packs."))
+          (do (display/print-error (str "Pack not found: " pack-id
+                                      "\nRun `" (app-config/command-string "policy list") "` to see available packs."))
+              (System/exit 1))
           (do
             (println)
             (println (display/style (str "Pack: " (get pack :pack/id pack-id)) :foreground :cyan :bold true))
@@ -157,14 +159,17 @@
   [opts]
   (let [{:keys [path]} opts]
     (if-not path
-      (display/print-error
-       (str "Usage: " (app-config/command-string "policy install <path>")))
+      (do (display/print-error
+           (str "Usage: " (app-config/command-string "policy install <path>")))
+          (System/exit 1))
       (if-not (fs/exists? path)
-        (display/print-error (str "Pack file not found: " path))
+        (do (display/print-error (str "Pack file not found: " path))
+            (System/exit 1))
         (let [pack (try (edn/read-string (slurp (str path)))
                         (catch Exception _e nil))]
           (if-not pack
-            (display/print-error (str "Invalid pack file — must be EDN: " path))
+            (do (display/print-error (str "Invalid pack file — must be EDN: " path))
+                (System/exit 1))
             (let [dest-dir  (packs-dir)
                   file-name (fs/file-name path)
                   ;; Ensure .pack.edn suffix

@@ -97,8 +97,9 @@
   [opts]
   (let [{:keys [id]} opts]
     (if-not id
-      (display/print-error
-       (str "Usage: " (app-config/command-string "artifact provenance <id>")))
+      (do (display/print-error
+           (str "Usage: " (app-config/command-string "artifact provenance <id>")))
+          (System/exit 1))
       (let [provenance (try-artifact-interface
                         'ai.miniforge.artifact.interface/get-artifact-provenance id)]
         (if provenance
@@ -134,7 +135,8 @@
                 (println (str "  Size:  " (format-file-size (.length art-file))))
                 (println (str "  Note:  provenance-bundle component not available"))
                 (println))
-              (display/print-error (str "Artifact not found: " id)))))))))
+              (do (display/print-error (str "Artifact not found: " id))
+                  (System/exit 1)))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

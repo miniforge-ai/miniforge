@@ -93,12 +93,14 @@
   [opts]
   (let [{:keys [url]} opts]
     (if-not url
-      (display/print-error
-       (str "Usage: " (app-config/command-string "etl repo <url>")))
+      (do (display/print-error
+           (str "Usage: " (app-config/command-string "etl repo <url>")))
+          (System/exit 1))
       (if-not (validate-git-url url)
-        (display/print-error
-         (str "Invalid repository URL: " url
-              "\nExpected format: https://github.com/org/repo or git@github.com:org/repo"))
+        (do (display/print-error
+             (str "Invalid repository URL: " url
+                  "\nExpected format: https://github.com/org/repo or git@github.com:org/repo"))
+            (System/exit 1))
         (do
           (display/print-info (str "Running ETL on repository: " url))
           (let [result (try-etl-interface 'ai.miniforge.etl-pipe.interface/etl-repo url opts)]
