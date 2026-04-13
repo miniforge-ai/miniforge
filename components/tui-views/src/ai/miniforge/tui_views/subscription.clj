@@ -239,32 +239,36 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public subscription API
 
+(defn compute-staleness
+  "Pure staleness check: compare last-event timestamp against threshold.
+   Returns [status last-event-date] suitable for dispatch."
+  [last-event-ms-atom stale-after-ms]
+  (let [now     (System/currentTimeMillis)
+        last-ms (or @last-event-ms-atom now)
+        elapsed (- now last-ms)
+        status  (if (>= elapsed stale-after-ms) :stale :connected)]
+    [status (java.util.Date. last-ms)]))
+
 (defn create-staleness-checker
-  "Create a background thread that periodically checks whether the event
+  "Create a scheduled checker that periodically evaluates whether the event
    stream has gone quiet and dispatches :msg/subscription-status-changed.
 
    Transitions: :connected → :stale after stale-after-ms with no events;
                 :stale → :connected as soon as any event arrives."
   [dispatch-fn last-event-ms-atom stale-after-ms check-interval-ms]
-  (let [running? (atom true)
-        thread   (Thread.
-                  (fn []
-                    (try
-                      (while @running?
-                        (Thread/sleep check-interval-ms)
-                        (let [now      (System/currentTimeMillis)
-                              last-ms  (or @last-event-ms-atom now)
-                              elapsed  (- now last-ms)
-                              new-status (if (>= elapsed stale-after-ms) :stale :connected)]
-                          (dispatch-fn (msg/subscription-status-changed
-                                        new-status (java.util.Date. last-ms)))))
-                      (catch InterruptedException _))))]
-    (.setDaemon thread true)
-    (.setName thread "tui-staleness-checker")
-    (.start thread)
-    {:running? running?
-     :thread   thread
-     :stop!    (fn [] (reset! running? false) (.interrupt thread))}))
+  (let [scheduler (java.util.concurrent.Executors/newSingleThreadScheduledExecutor
+                   (reify java.util.concurrent.ThreadFactory
+                     (newThread [_ r]
+                       (doto (Thread. r "tui-staleness-checker")
+                         (.setDaemon true)))))]
+    (.scheduleAtFixedRate scheduler
+                          ^Runnable (fn []
+                                      (let [[status last-date] (compute-staleness last-event-ms-atom stale-after-ms)]
+                                        (dispatch-fn (msg/subscription-status-changed status last-date))))
+                          check-interval-ms check-interval-ms
+                          java.util.concurrent.TimeUnit/MILLISECONDS)
+    {:scheduler scheduler
+     :stop!     (fn [] (.shutdownNow scheduler))}))
 
 (defn subscribe-to-stream!
   "Subscribe to an event stream, translating events into TUI messages.

@@ -110,14 +110,14 @@
       (let [active?   (fn [wf] (= :running (get wf :status :unknown)))
             by-start  (fn [wf] (inst-ms (get wf :started-at (java.util.Date. 0))))
             sorted    (sort-by (juxt (comp not active?) (comp - by-start)) wfs)]
-        (mapv (fn [wf]
-                {:id       (:id wf)
-                 :key      (or (:name wf) (some-> (:id wf) str (subs 0 8)) "")
-                 :status   (get wf :status :unknown)
-                 :phase    (some-> (:phase wf) name)
-                 :duration (duration-str (or (:duration-ms wf)
-                                             (elapsed-ms (:started-at wf))))
-                 :agent-msg (some-> (first (vals (:agents wf {})))
+        (mapv (fn [{:keys [id status phase duration-ms started-at agents]
+                    wf-name :name}]
+                {:id        id
+                 :key       (or wf-name (some-> id str (subs 0 8)) "")
+                 :status    (or status :unknown)
+                 :phase     (some-> phase clojure.core/name)
+                 :duration  (duration-str (or duration-ms (elapsed-ms started-at)))
+                 :agent-msg (some-> (first (vals (or agents {})))
                                     :message
                                     (or ""))})
               sorted)))))
@@ -147,6 +147,21 @@
      :fleet-ready     (count (filter #(get-in % [:pr/readiness :readiness/ready?]) prs))
      :fleet-monitored monitored}))
 
+(def ^:private empty-governance-counts
+  {:not-evaluated 0 :policy-passing 0 :policy-failing 0 :waived 0 :escalated 0})
+
+(defn- make-policy-health
+  "Build a policy health summary. No-arg returns safe defaults."
+  ([] (make-policy-health {}))
+  ([{:keys [pass-rate total-evaluations passing-evaluations
+            violations-by-category governance-counts]}]
+   {:pass-rate              (or pass-rate 1.0)
+    :total-evaluations      (or total-evaluations 0)
+    :passing-evaluations    (or passing-evaluations 0)
+    :violations-by-category (or violations-by-category {})
+    :governance-counts      (merge empty-governance-counts
+                                   (or governance-counts {}))}))
+
 (defn policy-health
   "Project policy health summary for the monitor zone.
 
@@ -161,29 +176,20 @@
         evaluations (get model :policy-evaluations [])
         waivers     (get model :waivers [])]
     (if (empty? prs)
-      {:pass-rate           1.0
-       :total-evaluations   0
-       :passing-evaluations 0
-       :violations-by-category {}
-       :governance-counts   {:not-evaluated   0
-                             :policy-passing  0
-                             :policy-failing  0
-                             :waived          0
-                             :escalated       0}}
+      (make-policy-health)
       (let [pr-ids     (mapv #(vector (:pr/repo %) (:pr/number %)) prs)
             gov-states (mapv #(derive-governance-state % evaluations waivers) pr-ids)
-            gov-counts (frequencies gov-states)
             pass-evals (count (filter #(= :pass (:eval/result %)) evaluations))
             total      (count evaluations)
             all-viols  (mapcat :eval/violations evaluations)
-            by-cat     (frequencies (map :violation/category all-viols))]
-        {:pass-rate           (if (zero? total) 1.0 (double (/ pass-evals total)))
-         :total-evaluations   total
-         :passing-evaluations pass-evals
-         :violations-by-category (into {} (map (fn [[k v]] [(or k "unknown") v]) by-cat))
-         :governance-counts   (merge {:not-evaluated 0 :policy-passing 0
-                                      :policy-failing 0 :waived 0 :escalated 0}
-                                     gov-counts)}))))
+            by-cat     (frequencies (map :violation/category all-viols))
+            pass-rate  (if (zero? total) 1.0 (double (/ pass-evals total)))
+            viols-map  (into {} (map (fn [[k v]] [(or k "unknown") v]) by-cat))]
+        (make-policy-health {:pass-rate              pass-rate
+                             :total-evaluations      total
+                             :passing-evaluations    pass-evals
+                             :violations-by-category viols-map
+                             :governance-counts      (frequencies gov-states)})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Attention derivation — N5-delta §5
