@@ -94,21 +94,24 @@
 ;------------------------------------------------------------------------------ Layer 1.5
 ;; Supervisory entity builders
 
+(def ^:private initial-phase "init")
+
 (defn- workflow-run-fields
   "Entity fields for WorkflowRun projection, embedded in workflow lifecycle events.
    status is a keyword (:running/:completed/:failed); current-phase is a plain string."
   [context status current-phase]
-  {:workflow-run/id            (:execution/id context)
-   :workflow-run/workflow-key  (or (some-> (get-in context [:execution/workflow :workflow/id]) name) "")
-   :workflow-run/intent        (or (get-in context [:execution/input :intent])
-                                   (get-in context [:execution/input :task])
-                                   "")
-   :workflow-run/status        status
-   :workflow-run/current-phase current-phase
-   :workflow-run/started-at    (java.util.Date.)
-   :workflow-run/updated-at    (java.util.Date.)
-   :workflow-run/trigger-source (get-in context [:execution/opts :trigger-source] :cli)
-   :workflow-run/correlation-id (:execution/id context)})
+  (let [now (java.util.Date.)]
+    {:workflow-run/id            (:execution/id context)
+     :workflow-run/workflow-key  (or (some-> (get-in context [:execution/workflow :workflow/id]) name) "")
+     :workflow-run/intent        (or (get-in context [:execution/input :intent])
+                                     (get-in context [:execution/input :task])
+                                     "")
+     :workflow-run/status        status
+     :workflow-run/current-phase current-phase
+     :workflow-run/started-at    now
+     :workflow-run/updated-at    now
+     :workflow-run/trigger-source (get-in context [:execution/opts :trigger-source] :cli)
+     :workflow-run/correlation-id (:execution/id context)}))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Lifecycle event publishers
@@ -123,7 +126,7 @@
                                                   (:execution/id context)
                                                   (select-keys (:execution/workflow context)
                                                                [:workflow/id :workflow/version]))
-                             (workflow-run-fields context :running "init")))
+                             (workflow-run-fields context :running initial-phase)))
       (catch Exception e
         (println (messages/t :warn/publish-started {:error (ex-message e)}))))))
 

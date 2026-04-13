@@ -15,7 +15,6 @@
    [ai.miniforge.connector-linter.interface :as linter]
    [ai.miniforge.cli.repo-analyzer :as analyzer]
    [ai.miniforge.gate.registry :as registry]
-   [ai.miniforge.response.builder :as response]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -71,8 +70,7 @@
         techs      (detect-technologies artifact)
         fps        @analyzer/fingerprints
         result     (linter/run-all worktree fps techs)
-        violations (:violations result)
-        duration   (get result :total-duration-ms 0)]
+        violations (:violations result)]
     (if (empty? violations)
       {:passed? true}
       {:passed? false
@@ -80,7 +78,7 @@
 
 (defn repair-pre-verify-lint
   "Lint errors cannot be auto-repaired — return to agent."
-  [artifact errors _ctx]
+  [_artifact errors _ctx]
   {:success? false
    :errors errors})
 

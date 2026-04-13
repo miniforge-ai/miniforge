@@ -202,9 +202,7 @@
         chain
         gate-kw
         (fn [ex]
-          ;; Extract anomaly from exception data, or default to check-failed
-          (or (:anomaly/category (ex-data ex))
-              :anomalies.gate/check-failed))
+          (get (ex-data ex) :anomaly/category :anomalies.gate/check-failed))
         (fn []
           (let [result (check artifact ctx)]
             (if (passed? result)
