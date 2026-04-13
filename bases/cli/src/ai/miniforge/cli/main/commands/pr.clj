@@ -131,28 +131,30 @@
 ;; PR Monitor (continuous loop)
 
 (defn- resolve-author
-  "Resolve the GitHub author login from --author flag, gh CLI, or default."
-  [author-opt]
+  "Resolve the GitHub author login from --author flag, gh CLI, or config default."
+  [author-opt default-author]
   (or author-opt
       (let [result (sh! "gh" "api" "user" "--jq" ".login")]
         (when (zero? (:exit result))
           (let [login (str/trim (:out result))]
-            (when (seq login) login))))))
+            (when (seq login) login))))
+      default-author))
 
 (defn- parse-poll-interval
   "Parse poll interval in seconds, with bounds checking. Returns milliseconds."
-  [interval-str default-ms]
-  (if interval-str
+  [interval-str {:keys [min-poll-interval-s max-poll-interval-s]}]
+  (when interval-str
     (try
       (let [seconds (Long/parseLong (str interval-str))]
-        (if (<= 5 seconds 3600)
+        (if (<= min-poll-interval-s seconds max-poll-interval-s)
           (* seconds 1000)
-          (do (display/print-error (str "Poll interval must be 5-3600 seconds, got " seconds ". Using default."))
-              default-ms)))
+          (do (display/print-error
+               (messages/t :pr/monitor-interval-bounds
+                           {:min min-poll-interval-s :max max-poll-interval-s :value seconds}))
+              nil)))
       (catch NumberFormatException _
-        (display/print-error (str "Invalid poll interval: " interval-str ". Using default."))
-        default-ms))
-    default-ms))
+        (display/print-error (messages/t :pr/monitor-interval-invalid {:value interval-str}))
+        nil))))
 
 (defn pr-monitor-cmd
   "Start the PR monitor loop for autonomous comment resolution.
@@ -162,21 +164,23 @@
    until stopped with Ctrl+C, budget exhausted, or no open PRs remain."
   [opts]
   (let [{:keys [author poll-interval]} opts
+        cli-cfg    (app-config/pr-monitor-config)
         cwd        (System/getProperty "user.dir")
-        author     (or (resolve-author author) "miniforge[bot]")
-        poll-ms    (parse-poll-interval poll-interval 60000)
+        author     (resolve-author author (:default-self-author cli-cfg))
+        poll-ms    (parse-poll-interval poll-interval cli-cfg)
+        mon-opts   (cond-> {:worktree-path cwd :self-author author}
+                     poll-ms (assoc :poll-interval-ms poll-ms))
         create-mon (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/create-pr-monitor)
         run-loop   (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/run-pr-monitor-loop)
         stop-loop  (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/stop-pr-monitor-loop)
-        monitor    (create-mon {:worktree-path    cwd
-                                :self-author      author
-                                :poll-interval-ms poll-ms})]
-    (display/print-info (str "Starting PR monitor for author: " author))
-    (display/print-info (str "Polling every " (/ poll-ms 1000) "s in " cwd))
-    (display/print-info "Press Ctrl+C to stop.")
+        monitor    (create-mon mon-opts)
+        eff-ms     (get-in @monitor [:config :poll-interval-ms])]
+    (display/print-info (messages/t :pr/monitor-starting {:author author}))
+    (display/print-info (messages/t :pr/monitor-polling {:seconds (/ eff-ms 1000) :dir cwd}))
+    (display/print-info (messages/t :pr/monitor-stop-hint))
     (let [shutdown (fn []
-                     (display/print-info "\nStopping monitor...")
+                     (display/print-info (messages/t :pr/monitor-stopping))
                      (try (stop-loop monitor) (catch Exception _)))]
       (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable shutdown))
       (let [evidence (run-loop monitor author)]
-        (display/print-info (str "\nMonitor stopped. Evidence: " (pr-str evidence)))))))
+        (display/print-info (messages/t :pr/monitor-stopped {:evidence (pr-str evidence)}))))))

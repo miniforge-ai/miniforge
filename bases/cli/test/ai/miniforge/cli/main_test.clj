@@ -75,16 +75,18 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; pr-monitor-cmd helpers
 
+(def ^:private test-bounds {:min-poll-interval-s 5 :max-poll-interval-s 3600})
+
 (deftest parse-poll-interval-test
   (testing "Valid interval returns milliseconds"
-    (is (= 30000 (#'cmd-pr/parse-poll-interval "30" 60000))))
-  (testing "Nil interval returns default"
-    (is (= 60000 (#'cmd-pr/parse-poll-interval nil 60000))))
-  (testing "Out-of-bounds interval returns default with error message"
+    (is (= 30000 (#'cmd-pr/parse-poll-interval "30" test-bounds))))
+  (testing "Nil interval returns nil (domain default applies)"
+    (is (nil? (#'cmd-pr/parse-poll-interval nil test-bounds))))
+  (testing "Out-of-bounds interval returns nil with error message"
     (let [output (with-out-str
-                   (is (= 60000 (#'cmd-pr/parse-poll-interval "1" 60000))))]
+                   (is (nil? (#'cmd-pr/parse-poll-interval "1" test-bounds))))]
       (is (re-find #"5-3600" output))))
-  (testing "Non-numeric interval returns default with error message"
+  (testing "Non-numeric interval returns nil with error message"
     (let [output (with-out-str
-                   (is (= 60000 (#'cmd-pr/parse-poll-interval "abc" 60000))))]
+                   (is (nil? (#'cmd-pr/parse-poll-interval "abc" test-bounds))))]
       (is (re-find #"Invalid" output)))))
