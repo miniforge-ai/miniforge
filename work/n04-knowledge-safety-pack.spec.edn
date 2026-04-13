@@ -1,0 +1,48 @@
+;; =============================================================================
+;; Spec: N4 — Knowledge-Safety Policy Pack
+;; =============================================================================
+;;
+;; Normative ref: specs/normative/N4-policy-packs.md
+;;
+;; The knowledge trust model (trusted/untrusted/tainted) exists in the knowledge
+;; component but enforcement is unverified. N4 requires a knowledge-safety pack
+;; with prompt-injection detection, tripwire system, and trust enforcement.
+;;
+;; No work spec previously existed for this area.
+
+{:spec/title "N4: Knowledge-safety policy pack with prompt-injection detection"
+
+ :spec/description
+ "Create a knowledge-safety policy pack that enforces the N4 knowledge trust
+  model. The pack must include:
+  1. Prompt-injection detection rules — scan agent inputs and LLM outputs for
+     known injection patterns (ignore-instructions, system-prompt-leak, role-play
+     escapes, encoded payloads).
+  2. Tripwire rules — canary tokens embedded in prompts that trigger alerts if
+     they appear in outputs (indicating prompt leakage).
+  3. Trust enforcement rules — validate that untrusted/tainted knowledge sources
+     are not injected into trusted contexts without sanitization.
+  4. Wire the pack into the gate check pipeline so violations block progression."
+
+ :spec/intent {:type :feature
+               :scope ["components/policy-pack/src"
+                       "components/knowledge/src"
+                       "components/gate/src"
+                       "components/phase/resources/packs"]}
+
+ :spec/constraints
+ ["Detection must be deterministic (pattern-based, not LLM-based) for gate use"
+  "Tripwire tokens must be unique per workflow run to prevent replay"
+  "False-positive rate must be manageable — err on the side of detection over silence"
+  "Pack must be loadable via standard policy-pack/load-all-packs path"
+  "Do not block on ambiguous matches — use severity :warn for low-confidence detections"]
+
+ :spec/acceptance-criteria
+ ["Pack passes policy-pack/valid-pack? validation"
+  "Known prompt-injection patterns are detected in test fixtures"
+  "Tripwire canary tokens in prompt output trigger :hard-halt violation"
+  "Tainted knowledge source injected into trusted context triggers :require-approval"
+  "Clean inputs pass all rules without violations"
+  "Pack is auto-loaded from resources/packs/ at startup"]
+
+ :spec/workflow-type :canonical-sdlc}

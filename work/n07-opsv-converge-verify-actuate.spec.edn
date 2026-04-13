@@ -1,0 +1,60 @@
+;; =============================================================================
+;; Spec: N7 — OPSV Remaining Phases: CONVERGE, VERIFY, ACTUATE
+;; =============================================================================
+;;
+;; Normative ref: specs/normative/N7-Operational-Policy-Synthesis.md
+;;
+;; Prerequisite: n07-opsv-workflow.spec.edn (DISCOVER phase + skeleton)
+;;
+;; Implements the remaining OPSV phases after the skeleton is in place.
+
+{:spec/title "N7: OPSV CONVERGE, VERIFY, and ACTUATE phases"
+
+ :spec/description
+ "Complete the OPSV workflow by implementing the remaining three phases:
+
+  1. CONVERGE Phase:
+     - Execute the experiment pack against the target system
+     - Collect metrics during the experiment window
+     - Iterate toward convergence on optimal policy parameters
+     - Enforce experiment duration limits
+     - Support early termination on abort-condition triggers
+
+  2. VERIFY Phase:
+     - Run verification suite: ramp test, steady-state test, stability test
+     - Compare observed metrics against success criteria
+     - Produce verification evidence with pass/fail per criterion
+     - Gate: :opsv/completeness — all verification tests executed
+
+  3. ACTUATE Phase (gated by APPLY_ALLOWED):
+     - Apply the converged operational policy to the target system
+     - Record all mutations in evidence bundle
+     - Gate: :opsv/actuation — requires APPLY_ALLOWED=true in config
+     - Support dry-run mode (default) that produces the policy without applying
+
+  4. Convergence Loop:
+     - CONVERGE and VERIFY may iterate until success criteria are met or
+       budget (time, iterations) is exhausted"
+
+ :spec/intent {:type :feature
+               :scope ["components/phase/src"
+                       "components/gate/src"
+                       "components/evidence-bundle/src"]}
+
+ :spec/constraints
+ ["Prerequisite: n07-opsv-workflow.spec.edn must be complete"
+  "ACTUATE phase must be blocked by default (APPLY_ALLOWED=false)"
+  "Convergence loop must have a hard iteration limit (configurable, default 10)"
+  "Abort conditions must halt the experiment immediately and trigger rollback"
+  "All phase transitions must emit OPSV events per N3"]
+
+ :spec/acceptance-criteria
+ ["CONVERGE phase collects metrics and iterates toward convergence"
+  "VERIFY phase runs ramp, steady-state, and stability tests"
+  "ACTUATE phase is blocked when APPLY_ALLOWED=false"
+  "ACTUATE dry-run produces policy document without system mutation"
+  "Convergence loop terminates within configured iteration budget"
+  "Abort condition triggers immediate halt and rollback evidence"
+  "Full OPSV workflow runs end-to-end in observe-only mode"]
+
+ :spec/workflow-type :canonical-sdlc}

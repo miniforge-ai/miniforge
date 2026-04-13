@@ -1,0 +1,50 @@
+;; =============================================================================
+;; Spec: N5 — HTTP/SSE vs Winsock API Architecture Decision
+;; =============================================================================
+;;
+;; Normative ref: specs/normative/N5-cli-tui-api.md, N3-event-stream.md
+;;
+;; N5 specifies a REST API with SSE streaming for /api/workflows/:id/stream.
+;; The current implementation uses a winsock bidirectional channel. This spec
+;; resolves the architectural question and implements the chosen approach.
+
+{:spec/title "N5: Resolve HTTP REST + SSE vs winsock and implement API layer"
+
+ :spec/description
+ "Evaluate the winsock bidirectional channel against N5's HTTP REST + SSE
+  requirements. Produce an ADR (Architecture Decision Record) documenting
+  the decision. Then implement the chosen approach:
+
+  Option A — Keep winsock, add HTTP facade: Thin HTTP handlers that delegate
+  to the winsock channel. SSE endpoint wraps winsock subscription.
+
+  Option B — Replace winsock with HTTP + SSE: Standard ring/jetty HTTP server
+  with SSE streaming via event-stream subscription.
+
+  Option C — Dual protocol: HTTP for request/response, winsock for real-time.
+
+  Whichever option is chosen, the result must satisfy:
+  - GET /api/workflows — list workflows
+  - GET /api/workflows/:id — workflow status
+  - POST /api/workflows — start workflow
+  - GET /api/workflows/:id/stream — SSE event stream
+  - POST /api/workflows/:id/control — pause/resume/cancel"
+
+ :spec/intent {:type :feature
+               :scope ["components/web-dashboard/src"
+                       "docs/architecture"]}
+
+ :spec/constraints
+ ["Produce an ADR before implementation"
+  "SSE endpoint must support N3 event envelope format"
+  "API must be usable from curl and standard HTTP clients"
+  "Authentication/authorization deferred to N8 OCI spec"]
+
+ :spec/acceptance-criteria
+ ["ADR document committed to docs/architecture/"
+  "API endpoints respond to curl requests"
+  "SSE stream delivers events in real-time for an active workflow"
+  "Control endpoint can pause and resume a running workflow"
+  "web-dashboard handlers updated to use the chosen protocol"]
+
+ :spec/workflow-type :canonical-sdlc}

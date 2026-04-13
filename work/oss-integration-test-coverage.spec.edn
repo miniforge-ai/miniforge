@@ -1,0 +1,73 @@
+;; =============================================================================
+;; Spec: OSS Readiness — High-Priority Integration Test Coverage
+;; =============================================================================
+;;
+;; Ref: TEST_OPPORTUNITIES.md
+;;
+;; Six high-priority integration tests were identified but no work spec existed
+;; to drive their implementation. These are the primary OSS readiness blocker
+;; for test coverage.
+
+{:spec/title "OSS: Implement 6 high-priority integration tests from TEST_OPPORTUNITIES.md"
+
+ :spec/description
+ "Implement the integration tests identified in TEST_OPPORTUNITIES.md using the
+  handoff_test.clj pattern (mock externals, test data flow, run in seconds):
+
+  1. PR Lifecycle Integration Test — components/pr-lifecycle/
+     NO TESTS EXIST. Test state transitions: pending -> ci-running -> approved ->
+     merged. Test error handling: CI failures, merge conflicts, rebase needed.
+     Test event emission to event bus. Mock gh CLI and git operations.
+
+  2. Release Executor File Writing Test — components/release-executor/
+     Test file writing from code artifacts. Verify files are staged correctly.
+     Test metadata generation (commit messages, PR descriptions). Test rollback
+     on failure. Mock git operations.
+
+  3. Agent Response Parsing Test — components/agent/
+     Mock LLM responses (success, error, timeout). Test response parsing and
+     validation. Test that response structure matches what phases expect.
+     Test error handling and escalation.
+
+  4. Gate Validation Pipeline Test — components/gate/ + components/loop/
+     Mock gate implementations. Test artifact flow through gate chain. Test that
+     failures trigger repair correctly. Test escalation when repairs fail.
+     Test metrics accumulation through repair cycles.
+
+  5. Metrics Accumulation Test — cross-cutting
+     Mock phases returning metrics. Test metrics flow through workflow execution.
+     Test budget enforcement (token limits, time limits, iteration limits).
+     Test metrics merging from parallel phases.
+
+  6. Evidence Bundle Assembly Test — components/evidence-bundle/
+     Mock workflow execution with phase results. Test bundle assembly from
+     context. Test that all required fields are present. Test bundle export
+     and import. Test validation catches incomplete bundles."
+
+ :spec/intent {:type :test
+               :scope ["components/pr-lifecycle/test"
+                       "components/release-executor/test"
+                       "components/agent/test"
+                       "components/gate/test"
+                       "components/loop/test"
+                       "components/evidence-bundle/test"]}
+
+ :spec/constraints
+ ["Follow the handoff_test.clj pattern — mock externals, test data flow"
+  "Each test must complete in <5 seconds"
+  "Use realistic mock data that matches production structure"
+  "Test both happy path and error cases"
+  "Do not depend on LLM calls, git operations, or network access"
+  "Create test/ directory for pr-lifecycle (currently missing)"]
+
+ :spec/acceptance-criteria
+ ["PR lifecycle test covers full state machine transitions"
+  "Release executor test catches file writing failures"
+  "Agent response test validates schema compliance of parsed responses"
+  "Gate pipeline test verifies repair loop triggers correctly"
+  "Metrics test confirms budget enforcement terminates over-budget workflows"
+  "Evidence bundle test validates all required fields are present"
+  "All 6 tests pass under bb test"
+  "All 6 tests complete in <5 seconds each"]
+
+ :spec/workflow-type :canonical-sdlc}

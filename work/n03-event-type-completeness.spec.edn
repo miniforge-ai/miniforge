@@ -1,0 +1,56 @@
+;; =============================================================================
+;; Spec: N3 — Emit All Missing Event Types
+;; =============================================================================
+;;
+;; Normative ref: specs/normative/N3-event-stream.md
+;;
+;; The event-stream infrastructure is solid, but many event types specified in
+;; N3 are never emitted. The done spec finish-event-telemetry covered phase
+;; lifecycle events only. This spec covers the remaining types.
+;;
+;; Missing event types (per gap-analysis-n1-n9.md):
+;;   - gate/checked, gate/failed, gate/repaired
+;;   - tool/invoked, tool/completed
+;;   - inter-agent/message-sent, inter-agent/message-received
+;;   - milestone/reached
+;;   - ETL lifecycle events
+;;   - OPSV lifecycle events (deferred until N7 work)
+;;   - Listener lifecycle events (deferred until N8 work)
+;;   - External PR events (deferred until N9 PR Work Item model)
+;;
+;; This spec covers the non-deferred types: gate, tool, inter-agent, milestone.
+
+{:spec/title "N3: Emit gate, tool, inter-agent, and milestone events"
+
+ :spec/description
+ "Wire event emission into gate checks, tool invocations, inter-agent messages,
+  and milestone transitions. Each event must conform to the N3 envelope schema
+  (type, id, timestamp, version, workflow/id, sequence-number). Use the existing
+  event-stream/emit! infrastructure — no new plumbing required."
+
+ :spec/intent {:type :feature
+               :scope ["components/gate/src"
+                       "components/tool/src"
+                       "components/tool-registry/src"
+                       "components/agent/src"
+                       "components/phase/src"
+                       "components/event-stream/src"]}
+
+ :spec/constraints
+ ["Conform to the N3 envelope schema for all new event types"
+  "Events must be emitted synchronously before returning from the operation"
+  "Do not emit events for internal/private function calls — only protocol boundaries"
+  "Gate events must include the gate id, result, and any violations"
+  "Tool events must include tool name, args (sanitized), and result status"
+  "Do not log sensitive data (secrets, API keys) in event payloads"]
+
+ :spec/acceptance-criteria
+ ["gate/check emits :gate/checked on success and :gate/failed on violation"
+  "gate/repair emits :gate/repaired on successful repair"
+  "tool/invoke emits :tool/invoked before execution and :tool/completed after"
+  "Inter-agent message passing emits :inter-agent/message-sent and :inter-agent/message-received"
+  "Phase milestone transitions emit :milestone/reached"
+  "All new events appear in event-stream query results"
+  "Existing phase and workflow events are not affected"]
+
+ :spec/workflow-type :canonical-sdlc}

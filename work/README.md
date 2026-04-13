@@ -79,6 +79,32 @@ Specs are archived into subdirectories when they are no longer active:
 | `rn-00-reliability-nines-dag.edn` | DAG orchestration for the series |
 | `rn-01` through `rn-16` | Failure taxonomy, workflow tiers, events, SLI/SLO, degradation, evidence, autonomy, safe-mode, trust, validation, tool semantics, compensation, success predicates, tool response validation, evaluation pipeline, index quality |
 
+### Normative Spec Gap Coverage (n0X-*)
+
+Specs created 2026-04-13 to close identified gaps between work specs and
+normative spec requirements (see `docs/progress-review-2026-04-13.md`):
+
+| Spec | Normative | Description | Priority |
+|------|-----------|-------------|----------|
+| `n03-event-type-completeness` | N3 | Emit gate, tool, inter-agent, milestone events | High |
+| `n04-knowledge-safety-pack` | N4 | Prompt-injection detection, tripwires, trust enforcement | High |
+| `n04-kubernetes-diff-parsing` | N4 | K8s manifest diff parsing for policy gates | Medium |
+| `n05-cli-command-wiring` | N5 | Audit and wire all N5-specified CLI commands | High |
+| `n05-http-api-decision` | N5 | Resolve winsock vs HTTP/SSE, implement API layer | Medium |
+| `n06-sensitive-data-scanning` | N6 | Credential/PII scanning in evidence bundles | High |
+| `n06-compliance-metadata` | N6 | Data classification, retention, regulatory tags | Medium |
+| `n07-opsv-workflow` | N7 | OPSV skeleton — DISCOVER phase + experiment packs | Low |
+| `n07-opsv-converge-verify-actuate` | N7 | OPSV remaining phases (requires n07-opsv-workflow) | Low |
+| `n08-oci-governance` | N8 | RBAC, listener capabilities, control actions, audit | Medium |
+| `n08-privacy-retention` | N8 | Privacy levels, listener budgets, retention (requires n08-oci-governance) | Medium |
+| `n08-otel-trace-context` | N8 | OpenTelemetry alignment, W3C Trace Context | Low |
+| `n09-pr-work-item-model` | N9 | Readiness, risk assessment, automation tiers | Medium |
+| `n09-external-pr-read-only-eval` | N9/N4 | Read-only policy evaluation for external PRs | Medium |
+| `n09-provider-native-checks` | N9 | GitHub Check Runs from policy evaluation | Medium |
+| `n09-credential-management` | N9 | Credential encryption at rest, rotation | Medium |
+| `n10-tool-execution-audit` | N10 | Tool audit trail, risk classification, approval flows | Medium |
+| `oss-integration-test-coverage` | OSS | 6 high-priority integration tests (TEST_OPPORTUNITIES.md) | High |
+
 ### Not Started
 | Spec | Description |
 |------|-------------|

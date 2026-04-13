@@ -1,0 +1,59 @@
+;; =============================================================================
+;; Spec: N8 — OpenTelemetry Alignment and W3C Trace Context
+;; =============================================================================
+;;
+;; Normative ref: specs/normative/N8-observability-control-interface.md
+;;
+;; N8 requires OTel alignment for distributed tracing and W3C Trace Context
+;; propagation. No implementation or work spec previously existed.
+
+{:spec/title "N8: OpenTelemetry alignment and W3C Trace Context propagation"
+
+ :spec/description
+ "Align the event-stream and workflow execution with OpenTelemetry conventions:
+
+  1. W3C Trace Context:
+     - Generate traceparent header for each workflow execution
+     - Propagate trace-id and span-id through all phases
+     - Include traceparent in event envelope as :trace/context
+     - Support incoming traceparent from external callers (API, CLI)
+
+  2. OTel Span Mapping:
+     - Workflow execution = root span
+     - Phase execution = child span
+     - Agent invocation = child span of phase
+     - Tool invocation = child span of agent
+     - Map existing event-stream events to OTel span events
+
+  3. OTel Export:
+     - Optional OTLP exporter (disabled by default)
+     - Export spans to configured OTLP endpoint
+     - Support both gRPC and HTTP OTLP protocols
+     - Configurable via :observability {:otlp-endpoint, :otlp-protocol}
+
+  4. Metric Export:
+     - Map existing metric-registry metrics to OTel metric instruments
+     - Export to OTLP endpoint alongside traces"
+
+ :spec/intent {:type :feature
+               :scope ["components/event-stream/src"
+                       "components/workflow/src"
+                       "components/phase/src"
+                       "components/metric-registry/src"]}
+
+ :spec/constraints
+ ["OTel export is opt-in — zero overhead when disabled"
+  "Do not add OTel SDK as a required dependency — use optional/dynamic loading"
+  "Trace context propagation must work even without OTel export enabled"
+  "Existing event-stream semantics must not change"
+  "Babashka compatibility must be maintained (no JVM-only OTel SDK)"]
+
+ :spec/acceptance-criteria
+ ["Workflow events include :trace/context with valid traceparent"
+  "Trace-id is consistent across all events in a workflow execution"
+  "Phase spans are children of workflow span"
+  "OTLP exporter sends spans when configured"
+  "Disabling OTLP export adds zero overhead to event emission"
+  "Incoming traceparent from CLI/API is propagated through the workflow"]
+
+ :spec/workflow-type :canonical-sdlc}

@@ -1,0 +1,64 @@
+;; =============================================================================
+;; Spec: N10 — Tool Execution Audit Trail and Approval Flows
+;; =============================================================================
+;;
+;; Normative ref: specs/normative/N10-governed-tool-execution.md
+;;
+;; The tool-registry exists but enforcement gaps remain around sandboxing,
+;; approval flows, and audit logging for tool invocations.
+
+{:spec/title "N10: Tool execution audit trail and governed approval flows"
+
+ :spec/description
+ "Complete the N10 governed tool execution requirements:
+
+  1. Tool Execution Audit:
+     - Every tool invocation produces an audit event (ties into N3 tool events)
+     - Audit record: {:tool/name, :tool/args (sanitized), :tool/result-status,
+                       :tool/duration-ms, :tool/invoker, :tool/approval-id}
+     - Audit events are stored in evidence bundles
+
+  2. Tool Risk Classification:
+     - Classify tools by risk: #{:read-only :write-local :write-remote :destructive}
+     - Risk level drives approval requirements:
+       :read-only — no approval needed
+       :write-local — auto-approved in governed mode
+       :write-remote — requires ADVISE+ capability
+       :destructive — requires CONTROL capability + explicit approval
+
+  3. Approval Flows:
+     - Pre-execution approval gate for :write-remote and :destructive tools
+     - Approval request emitted as event, blocks until approved or timeout
+     - Timeout defaults to 5 minutes, configurable per tool
+     - Approval recorded in audit trail
+
+  4. Sandbox Enforcement:
+     - Verify tool executes within its declared capability scope
+     - File-system tools restricted to declared paths
+     - Network tools restricted to declared endpoints
+     - Scope violations produce :hard-halt gate failures"
+
+ :spec/intent {:type :feature
+               :scope ["components/tool/src"
+                       "components/tool-registry/src"
+                       "components/gate/src"
+                       "components/event-stream/src"
+                       "components/evidence-bundle/src"]}
+
+ :spec/constraints
+ ["Tool args must be sanitized in audit records — no secrets in logs"
+  "Approval flow must not deadlock — timeout + escalation path"
+  "Sandbox enforcement must work in both local and governed (Docker) modes"
+  "Read-only tools must have zero overhead from approval flow"
+  "Existing tool invocations must continue to work (default risk: :write-local)"]
+
+ :spec/acceptance-criteria
+ ["Every tool invocation produces an audit event in evidence bundle"
+  "Destructive tool blocked without explicit approval"
+  "Read-only tool executes without approval delay"
+  "Tool scope violation (file write outside declared path) triggers gate failure"
+  "Approval timeout escalates to workflow pause"
+  "Tool risk classification is configurable per tool in tool-registry"
+  "Audit trail records approver identity and approval timestamp"]
+
+ :spec/workflow-type :canonical-sdlc}
