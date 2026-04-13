@@ -21,7 +21,8 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
-   [ai.miniforge.cli.main :as sut]))
+   [ai.miniforge.cli.main :as sut]
+   [ai.miniforge.cli.main.commands.pr :as cmd-pr]))
 
 (deftest help-cmd-uses-generic-workflow-examples-test
   (testing "CLI help shows generic workflow examples instead of SDLC-specific ones"
@@ -58,3 +59,32 @@
         (is (.contains output "CMD:one"))
         (is (.contains output "NOTE:engine"))
         (is (.contains output "TUI:engine-tui"))))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Dispatch table coverage
+
+(deftest dispatch-table-includes-pr-monitor-test
+  (testing "pr monitor command is registered in dispatch table"
+    (let [entries (filter #(= ["pr" "monitor"] (:cmds %)) sut/dispatch-table)]
+      (is (= 1 (count entries)) "Exactly one pr monitor entry")
+      (is (some? (:fn (first entries))) "Has a handler function")
+      (is (= {:author {:alias :a} :poll-interval {:alias :p}}
+             (:spec (first entries)))
+          "Spec includes --author and --poll-interval"))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; pr-monitor-cmd helpers
+
+(deftest parse-poll-interval-test
+  (testing "Valid interval returns milliseconds"
+    (is (= 30000 (#'cmd-pr/parse-poll-interval "30" 60000))))
+  (testing "Nil interval returns default"
+    (is (= 60000 (#'cmd-pr/parse-poll-interval nil 60000))))
+  (testing "Out-of-bounds interval returns default with error message"
+    (let [output (with-out-str
+                   (is (= 60000 (#'cmd-pr/parse-poll-interval "1" 60000))))]
+      (is (re-find #"5-3600" output))))
+  (testing "Non-numeric interval returns default with error message"
+    (let [output (with-out-str
+                   (is (= 60000 (#'cmd-pr/parse-poll-interval "abc" 60000))))]
+      (is (re-find #"Invalid" output)))))

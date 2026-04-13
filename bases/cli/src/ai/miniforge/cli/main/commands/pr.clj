@@ -127,8 +127,32 @@
         (display/print-info (messages/t :pr/merging {:url url}))
         (println (messages/t :pr/merge-todo))))))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 1
 ;; PR Monitor (continuous loop)
+
+(defn- resolve-author
+  "Resolve the GitHub author login from --author flag, gh CLI, or default."
+  [author-opt]
+  (or author-opt
+      (let [result (sh! "gh" "api" "user" "--jq" ".login")]
+        (when (zero? (:exit result))
+          (let [login (str/trim (:out result))]
+            (when (seq login) login))))))
+
+(defn- parse-poll-interval
+  "Parse poll interval in seconds, with bounds checking. Returns milliseconds."
+  [interval-str default-ms]
+  (if interval-str
+    (try
+      (let [seconds (Long/parseLong (str interval-str))]
+        (if (<= 5 seconds 3600)
+          (* seconds 1000)
+          (do (display/print-error (str "Poll interval must be 5-3600 seconds, got " seconds ". Using default."))
+              default-ms)))
+      (catch NumberFormatException _
+        (display/print-error (str "Invalid poll interval: " interval-str ". Using default."))
+        default-ms))
+    default-ms))
 
 (defn pr-monitor-cmd
   "Start the PR monitor loop for autonomous comment resolution.
@@ -138,24 +162,21 @@
    until stopped with Ctrl+C, budget exhausted, or no open PRs remain."
   [opts]
   (let [{:keys [author poll-interval]} opts
-        cwd           (System/getProperty "user.dir")
-        author        (or author
-                          (try (str/trim (:out (sh! "gh" "api" "user" "--jq" ".login")))
-                               (catch Exception _ nil))
-                          "miniforge[bot]")
-        poll-ms       (if poll-interval (* (Long/parseLong (str poll-interval)) 1000) 60000)
-        create-mon    (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/create-pr-monitor)
-        run-loop      (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/run-pr-monitor-loop)
-        stop-loop     (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/stop-pr-monitor-loop)
-        monitor       (create-mon {:worktree-path    cwd
-                                   :self-author      author
-                                   :poll-interval-ms poll-ms})]
+        cwd        (System/getProperty "user.dir")
+        author     (or (resolve-author author) "miniforge[bot]")
+        poll-ms    (parse-poll-interval poll-interval 60000)
+        create-mon (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/create-pr-monitor)
+        run-loop   (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/run-pr-monitor-loop)
+        stop-loop  (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/stop-pr-monitor-loop)
+        monitor    (create-mon {:worktree-path    cwd
+                                :self-author      author
+                                :poll-interval-ms poll-ms})]
     (display/print-info (str "Starting PR monitor for author: " author))
     (display/print-info (str "Polling every " (/ poll-ms 1000) "s in " cwd))
     (display/print-info "Press Ctrl+C to stop.")
     (let [shutdown (fn []
                      (display/print-info "\nStopping monitor...")
-                     (stop-loop monitor))]
+                     (try (stop-loop monitor) (catch Exception _)))]
       (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable shutdown))
       (let [evidence (run-loop monitor author)]
         (display/print-info (str "\nMonitor stopped. Evidence: " (pr-str evidence)))))))
