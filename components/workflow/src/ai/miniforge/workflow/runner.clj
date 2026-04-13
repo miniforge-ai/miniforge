@@ -41,7 +41,7 @@
             [ai.miniforge.workflow.runner-defaults :as defaults]
             [ai.miniforge.workflow.runner-environment :as env]
             [ai.miniforge.workflow.runner-events :as events]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [slingshot.slingshot :refer [try+]]))
 
 (defonce ^:private runner-logger
   (log/create-logger {:min-level :debug :output :human}))
@@ -259,35 +259,35 @@
 (defn- build-initial-context
   "Build the initial execution context from workflow, input, and opts."
   [workflow input opts]
-  (when (and (= :governed (get opts :execution-mode))
-             (not (and (get opts :executor) (get opts :environment-id))))
-    (response/throw-anomaly! :anomalies.workflow/no-capsule-executor
-                             "No capsule executor available for governed mode — :executor and :environment-id required (N11 §7.4 no-silent-downgrade)"
-                             {}))
-  (let [governed? (and (= :governed (get opts :execution-mode))
+  (let [mode      (get opts :execution-mode :local)
+        governed? (and (= :governed mode)
                        (get opts :executor)
-                       (get opts :environment-id))
-        capsule-exec-fn (when governed?
-                          (llm-impl/capsule-exec-fn
-                           dag-exec/execute!
-                           (get opts :executor)
-                           (get opts :environment-id)
-                           (get opts :worktree-path (defaults/default-workdir))))]
-    (-> (ctx/create-context workflow input opts)
-        (assoc :execution/executor (get opts :executor)
-               :execution/environment-id (get opts :environment-id)
-               :execution/worktree-path (get opts :worktree-path
-                                             (get opts :sandbox-workdir))
-               :execution/mode (get opts :execution-mode :local)
-               :execution/started-at (java.time.Instant/now)
-               :execution/environment-metadata (get opts :environment-metadata)
-               :execution/execute-fn (when governed? dag-exec/execute!)
-               :execution/exec-fn capsule-exec-fn
-               :execution/task-branch (when governed?
-                                        (str (defaults/task-branch-prefix)
-                                             (get opts :environment-id
-                                                  (subs (str (random-uuid)) 0 8))))
-               :execution/run-pipeline-fn run-pipeline))))
+                       (get opts :environment-id))]
+    (when (and (= :governed mode) (not governed?))
+      (response/throw-anomaly! :anomalies.workflow/no-capsule-executor
+                               (messages/t :governed/no-capsule)
+                               {}))
+    (let [capsule-exec-fn (when governed?
+                            (llm-impl/capsule-exec-fn
+                             dag-exec/execute!
+                             (get opts :executor)
+                             (get opts :environment-id)
+                             (get opts :worktree-path (defaults/default-workdir))))]
+      (-> (ctx/create-context workflow input opts)
+          (assoc :execution/executor (get opts :executor)
+                 :execution/environment-id (get opts :environment-id)
+                 :execution/worktree-path (get opts :worktree-path
+                                               (get opts :sandbox-workdir))
+                 :execution/mode mode
+                 :execution/started-at (java.time.Instant/now)
+                 :execution/environment-metadata (get opts :environment-metadata)
+                 :execution/execute-fn (when governed? dag-exec/execute!)
+                 :execution/exec-fn capsule-exec-fn
+                 :execution/task-branch (when governed?
+                                          (str (defaults/task-branch-prefix)
+                                               (get opts :environment-id
+                                                    (subs (str (random-uuid)) 0 8))))
+                 :execution/run-pipeline-fn run-pipeline)))))
 
 (defn- execute-pipeline-loop
   "Execute the phase pipeline loop. Returns final context."
