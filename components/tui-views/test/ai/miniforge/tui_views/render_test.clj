@@ -34,15 +34,15 @@
       (is (= (count lines) (count (distinct lines)))
           (str "Duplicate tab-bar lines found:\n"
                (str/join "\n" (map-indexed #(str %1 ": " %2) lines))))
-      ;; Workflow-list header contains "Workflows"
-      (is (str/includes? (nth lines 1) "Workflows")
-          (str "Expected 'Workflows' in workflow-list tab bar, got: " (nth lines 1)))
+      ;; Monitor header contains "Attention" (from ctx-monitor-summary)
+      (is (str/includes? (nth lines 0) "Attention")
+          (str "Expected 'Attention' in monitor tab bar, got: " (nth lines 0)))
       ;; PR fleet header contains "PR Fleet"
-      (is (str/includes? (nth lines 0) "PR Fleet")
-          (str "Expected 'PR Fleet' in pr-fleet tab bar, got: " (nth lines 0)))
-      ;; Evidence header contains "Evidence"
-      (is (str/includes? (nth lines 2) "Evidence")
-          (str "Expected 'Evidence' in evidence tab bar, got: " (nth lines 2))))))
+      (is (str/includes? (nth lines 1) "PR Fleet")
+          (str "Expected 'PR Fleet' in pr-fleet tab bar, got: " (nth lines 1)))
+      ;; Workflow-list header contains "Workflows"
+      (is (str/includes? (nth lines 2) "Workflows")
+          (str "Expected 'Workflows' in workflow-list tab bar, got: " (nth lines 2))))))
 
 (deftest workflow-list-empty-state-is-actionable
   (testing "empty workflow list shows the run command, not generic 'No data'"

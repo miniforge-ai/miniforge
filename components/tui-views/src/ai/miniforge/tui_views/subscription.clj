@@ -158,6 +158,41 @@
     (msg/chain-failed (:chain/id event) (:chain/failed-step event)
                       (:chain/error event))
 
+    ;; PR monitor lifecycle events
+    :pr-monitor/loop-started
+    (msg/pr-monitor-loop-started (:pr/id event) (:config event))
+
+    :pr-monitor/loop-stopped
+    (msg/pr-monitor-loop-stopped (:pr/id event) (:stop/reason event))
+
+    :pr-monitor/fix-started
+    (msg/pr-monitor-fix-started (:pr/id event) (:comment/id event) (:fix/attempt event))
+
+    :pr-monitor/fix-pushed
+    (msg/pr-monitor-fix-pushed (:pr/id event) (:comment/id event) (:pr/sha event))
+
+    :pr-monitor/budget-warning
+    (msg/pr-monitor-budget-warning (:pr/id event) (:budget/remaining event) (:budget/total event))
+
+    :pr-monitor/budget-exhausted
+    (msg/pr-monitor-budget-exhausted (:pr/id event) (dissoc event :event/type :event/id :pr/id))
+
+    :pr-monitor/escalated
+    (msg/pr-monitor-escalated (:pr/id event) (:escalation/reason event))
+
+    ;; Control-plane events (ignored sub-types pass through as nil)
+    :control-plane/agent-discovered
+    (msg/control-plane-agent-discovered (:session/id event) (dissoc event :event/type :event/id))
+
+    :control-plane/status-changed
+    (msg/control-plane-status-changed (:session/id event) (:session/status event))
+
+    :control-plane/decision-submitted
+    (msg/control-plane-decision-submitted (:decision/id event) (dissoc event :event/type :event/id))
+
+    :control-plane/decision-resolved
+    (msg/control-plane-decision-resolved (:decision/id event) (:decision/outcome event))
+
     ;; Unknown event types are ignored
     nil))
 
@@ -204,20 +239,55 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public subscription API
 
+(defn create-staleness-checker
+  "Create a background thread that periodically checks whether the event
+   stream has gone quiet and dispatches :msg/subscription-status-changed.
+
+   Transitions: :connected → :stale after stale-after-ms with no events;
+                :stale → :connected as soon as any event arrives."
+  [dispatch-fn last-event-ms-atom stale-after-ms check-interval-ms]
+  (let [running? (atom true)
+        thread   (Thread.
+                  (fn []
+                    (try
+                      (while @running?
+                        (Thread/sleep check-interval-ms)
+                        (let [now      (System/currentTimeMillis)
+                              last-ms  (or @last-event-ms-atom now)
+                              elapsed  (- now last-ms)
+                              new-status (if (>= elapsed stale-after-ms) :stale :connected)]
+                          (dispatch-fn (msg/subscription-status-changed
+                                        new-status (java.util.Date. last-ms)))))
+                      (catch InterruptedException _))))]
+    (.setDaemon thread true)
+    (.setName thread "tui-staleness-checker")
+    (.start thread)
+    {:running? running?
+     :thread   thread
+     :stop!    (fn [] (reset! running? false) (.interrupt thread))}))
+
 (defn subscribe-to-stream!
   "Subscribe to an event stream, translating events into TUI messages.
 
    Arguments:
    - stream      - Event stream atom from event-stream/create-event-stream
    - dispatch-fn - (fn [msg]) to send TUI messages into the Elm loop
-   - opts        - {:throttle-ms 1000} chunk aggregation interval
+   - opts        - {:throttle-ms 1000  :stale-after-ms 30000  :stale-check-ms 5000}
 
    Returns: cleanup function (fn [] ...) to call on shutdown."
-  [stream dispatch-fn & [{:keys [throttle-ms] :or {throttle-ms 1000}}]]
-  (let [aggregator (create-chunk-aggregator dispatch-fn throttle-ms)
-        sub-id :tui-subscription]
+  [stream dispatch-fn & [{:keys [throttle-ms stale-after-ms stale-check-ms]
+                           :or   {throttle-ms    1000
+                                  stale-after-ms 30000
+                                  stale-check-ms 5000}}]]
+  (let [aggregator      (create-chunk-aggregator dispatch-fn throttle-ms)
+        last-event-ms   (atom (System/currentTimeMillis))
+        staleness       (create-staleness-checker dispatch-fn last-event-ms
+                                                  stale-after-ms stale-check-ms)
+        sub-id          :tui-subscription]
     (es/subscribe! stream sub-id
                    (fn [event]
+                     ;; Track last event time for staleness detection
+                     (reset! last-event-ms (System/currentTimeMillis))
                      (if (= :agent/chunk (:event/type event))
                        ;; Throttle chunk events
                        (buffer-chunk! aggregator
@@ -225,11 +295,12 @@
                                       (agent-id event)
                                       (chunk-delta event))
                        ;; All other events dispatch immediately
-                       (when-let [msg (translate-event event)]
-                         (dispatch-fn msg)))))
+                       (when-let [m (translate-event event)]
+                         (dispatch-fn m)))))
     ;; Return cleanup function
     (fn []
       ((:stop! aggregator))
+      ((:stop! staleness))
       (es/unsubscribe! stream sub-id))))
 
 ;------------------------------------------------------------------------------ Rich Comment

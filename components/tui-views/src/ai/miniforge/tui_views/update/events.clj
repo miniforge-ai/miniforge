@@ -739,3 +739,149 @@
           (assoc :agent-risk risk-map)
           (assoc :side-effect (effect/cache-risk-triage risk-map (:pr-items model)))
           with-timestamp))))
+
+;------------------------------------------------------------------------------ Layer 5
+;; PR monitor event handlers — N5-delta §5
+
+(defn- update-pr-by-id
+  "Apply update-fn to the PR identified by pr-id in :pr-items.
+   pr-id is the raw :pr/id value from the event (number or [repo number])."
+  [model pr-id update-fn]
+  (update model :pr-items
+          (fn [prs]
+            (mapv (fn [pr]
+                    (let [match? (or (= pr-id (:pr/number pr))
+                                     (= pr-id [(:pr/repo pr) (:pr/number pr)]))]
+                      (if match? (update-fn pr) pr)))
+                  (or prs [])))))
+
+(defn handle-pr-monitor-loop-started
+  "Mark a PR as actively monitored."
+  [model {:keys [pr-id]}]
+  (-> model
+      (update-pr-by-id pr-id #(assoc % :pr/monitor-active? true))
+      with-timestamp))
+
+(defn handle-pr-monitor-loop-stopped
+  "Clear active-monitor flag on a PR."
+  [model {:keys [pr-id reason]}]
+  (-> model
+      (update-pr-by-id pr-id #(dissoc % :pr/monitor-active?))
+      (assoc :flash-message (str "Monitor stopped for PR " pr-id
+                                 (when reason (str ": " reason))))
+      with-timestamp))
+
+(defn handle-pr-monitor-fix-started
+  "Flash that a fix cycle has begun for a PR."
+  [model {:keys [pr-id attempt]}]
+  (-> model
+      (assoc :flash-message (str "Fix started for PR " pr-id
+                                 (when attempt (str " (attempt " attempt ")"))))
+      with-timestamp))
+
+(defn handle-pr-monitor-fix-pushed
+  "Flash that a fix commit was pushed for a PR."
+  [model {:keys [pr-id sha]}]
+  (-> model
+      (assoc :flash-message (str "Fix pushed for PR " pr-id
+                                 (when sha (str " — " (subs (str sha) 0 (min 7 (count (str sha))))))))
+      with-timestamp))
+
+(defn handle-pr-monitor-budget-warning
+  "Set budget-warning flag on a PR."
+  [model {:keys [pr-id remaining total]}]
+  (-> model
+      (update-pr-by-id pr-id #(assoc % :pr/monitor-budget-warning? true))
+      (assoc :flash-message (str "Budget warning: PR " pr-id
+                                 " — " remaining "/" total " remaining"))
+      with-timestamp))
+
+(defn handle-pr-monitor-budget-exhausted
+  "Set budget-exhausted flag on a PR and clear active-monitor."
+  [model {:keys [pr-id]}]
+  (-> model
+      (update-pr-by-id pr-id #(-> %
+                                   (assoc :pr/monitor-budget-exhausted? true)
+                                   (dissoc :pr/monitor-active?)))
+      (assoc :flash-message (str "BUDGET EXHAUSTED: PR " pr-id " — monitor stopped"))
+      with-timestamp))
+
+(defn handle-pr-monitor-escalated
+  "Set escalated flag on a PR and add an attention item."
+  [model {:keys [pr-id reason]}]
+  (let [attn-item {:attention/id          (random-uuid)
+                   :attention/severity    :critical
+                   :attention/summary     (str "Escalated: PR " pr-id
+                                               (when reason (str " — " reason)))
+                   :attention/source-type :pr-monitor
+                   :attention/source-id   pr-id
+                   :attention/created-at  (java.util.Date.)}]
+    (-> model
+        (update-pr-by-id pr-id #(assoc % :pr/monitor-escalated? true))
+        (update :attention-items (fnil conj []) attn-item)
+        (assoc :flash-message (str "ESCALATED: PR " pr-id))
+        with-timestamp)))
+
+;------------------------------------------------------------------------------ Layer 5b
+;; Control-plane event handlers — N5-delta §3
+
+(defn handle-control-plane-agent-discovered
+  "Upsert an agent session record."
+  [model {:keys [session-id agent-data]}]
+  (let [session (assoc (or agent-data {}) :session/id session-id)
+        sessions (get model :agent-sessions [])
+        idx (some (fn [[i s]] (when (= session-id (:session/id s)) i))
+                  (map-indexed vector sessions))]
+    (-> model
+        (assoc :agent-sessions
+               (if idx
+                 (assoc sessions idx (merge (get sessions idx) session))
+                 (conj sessions session)))
+        with-timestamp)))
+
+(defn handle-control-plane-status-changed
+  "Update status on an existing agent session."
+  [model {:keys [session-id status]}]
+  (-> model
+      (update :agent-sessions
+              (fn [sessions]
+                (mapv (fn [s]
+                        (if (= session-id (:session/id s))
+                          (assoc s :session/status status)
+                          s))
+                      (or sessions []))))
+      with-timestamp))
+
+(defn handle-control-plane-decision-submitted
+  "Add a decision-pending attention item."
+  [model {:keys [decision-id data]}]
+  (let [attn-item {:attention/id          (random-uuid)
+                   :attention/severity    :warning
+                   :attention/summary     (str "Decision pending: " decision-id)
+                   :attention/source-type :control-plane
+                   :attention/source-id   decision-id
+                   :attention/created-at  (java.util.Date.)
+                   :attention/data        data}]
+    (-> model
+        (update :attention-items (fnil conj []) attn-item)
+        with-timestamp)))
+
+(defn handle-control-plane-decision-resolved
+  "Remove the attention item for a resolved decision."
+  [model {:keys [decision-id]}]
+  (-> model
+      (update :attention-items
+              (fn [items]
+                (into [] (remove #(= decision-id (:attention/source-id %)))
+                      (or items []))))
+      with-timestamp))
+
+;------------------------------------------------------------------------------ Layer 5c
+;; Subscription health handler
+
+(defn handle-subscription-status-changed
+  "Update subscription status and last-event timestamp in model."
+  [model {:keys [status last-event-at]}]
+  (assoc model
+         :subscription/status       (or status :connected)
+         :subscription/last-event-at last-event-at))

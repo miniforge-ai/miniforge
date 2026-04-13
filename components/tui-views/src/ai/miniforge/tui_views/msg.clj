@@ -168,3 +168,48 @@
 (defn chain-failed [chain-id failed-step error]
   [:msg/chain-failed {:chain-id chain-id :failed-step failed-step
                       :error error}])
+
+;------------------------------------------------------------------------------ Layer 0d
+;; PR monitor event messages (from subscription.clj)
+
+(defn pr-monitor-loop-started [pr-id config]
+  [:msg/pr-monitor-loop-started {:pr-id pr-id :config config}])
+
+(defn pr-monitor-loop-stopped [pr-id reason]
+  [:msg/pr-monitor-loop-stopped {:pr-id pr-id :reason reason}])
+
+(defn pr-monitor-fix-started [pr-id comment-id attempt]
+  [:msg/pr-monitor-fix-started {:pr-id pr-id :comment-id comment-id :attempt attempt}])
+
+(defn pr-monitor-fix-pushed [pr-id comment-id sha]
+  [:msg/pr-monitor-fix-pushed {:pr-id pr-id :comment-id comment-id :sha sha}])
+
+(defn pr-monitor-budget-warning [pr-id remaining total]
+  [:msg/pr-monitor-budget-warning {:pr-id pr-id :remaining remaining :total total}])
+
+(defn pr-monitor-budget-exhausted [pr-id data]
+  [:msg/pr-monitor-budget-exhausted {:pr-id pr-id :data data}])
+
+(defn pr-monitor-escalated [pr-id reason]
+  [:msg/pr-monitor-escalated {:pr-id pr-id :reason reason}])
+
+;------------------------------------------------------------------------------ Layer 0e
+;; Control-plane event messages (from subscription.clj)
+
+(defn control-plane-agent-discovered [session-id agent-data]
+  [:msg/control-plane-agent-discovered {:session-id session-id :agent-data agent-data}])
+
+(defn control-plane-status-changed [session-id status]
+  [:msg/control-plane-status-changed {:session-id session-id :status status}])
+
+(defn control-plane-decision-submitted [decision-id data]
+  [:msg/control-plane-decision-submitted {:decision-id decision-id :data data}])
+
+(defn control-plane-decision-resolved [decision-id outcome]
+  [:msg/control-plane-decision-resolved {:decision-id decision-id :outcome outcome}])
+
+;------------------------------------------------------------------------------ Layer 0f
+;; Subscription health message
+
+(defn subscription-status-changed [status last-event-at]
+  [:msg/subscription-status-changed {:status status :last-event-at last-event-at}])

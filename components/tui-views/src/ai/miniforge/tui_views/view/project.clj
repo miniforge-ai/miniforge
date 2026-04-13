@@ -38,6 +38,7 @@
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.palette :as palette]
    [ai.miniforge.tui-views.view.project.helpers :as helpers]
+   [ai.miniforge.tui-views.view.project.supervisory :as supervisory]
    [ai.miniforge.tui-views.view.project.trees :as trees]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -338,6 +339,119 @@
                :status "active"})
             fleet-vec))))
 
+;------------------------------------------------------------------------------ Layer 1b
+;; Monitor zone projections — supervisory data → tree-node vectors
+
+(defn- severity->color
+  "Map attention severity to a palette color."
+  [severity]
+  (case severity
+    :critical trees/status-fail
+    :warning  trees/status-warning
+    :info     trees/status-info
+    nil))
+
+(defn- status->glyph-color
+  "Map workflow status to [glyph color-or-nil]."
+  [status]
+  (case status
+    (:running)             ["●" trees/status-info]
+    (:completed :success)  ["✓" trees/status-pass]
+    :failed                ["✗" trees/status-fail]
+    :pending               ["○" nil]
+    ["?" nil]))
+
+(defn project-monitor-attention
+  "Project attention items as tree nodes for the attention zone."
+  [model]
+  (let [items (supervisory/attention model)]
+    (if (empty? items)
+      [(trees/tree-node "  No active attention items" 0 false trees/status-info)]
+      (mapv (fn [item]
+              (trees/tree-node
+               (str (case (:attention/severity item)
+                      :critical "! CRITICAL  "
+                      :warning  "  WARNING   "
+                      :info     "  INFO      "
+                      "  ")
+                    (:attention/summary item))
+               0 false (severity->color (:attention/severity item))))
+            items))))
+
+(defn project-monitor-ticker
+  "Project workflow ticker rows as tree nodes for the workflows zone."
+  [model]
+  (let [rows (supervisory/workflow-ticker model)]
+    (if (empty? rows)
+      [(trees/tree-node "  No active workflows" 0 false trees/status-info)]
+      (vec (mapcat (fn [row]
+                     (let [[glyph color] (status->glyph-color (:status row))
+                           k             (or (:key row) "")
+                           key-str       (if (> (count k) 12) (subs k 0 12) k)
+                           label         (str glyph " " key-str "  "
+                                             (when-let [ph (:phase row)] (str ph "  "))
+                                             (or (:duration row) ""))
+                           main-node     (trees/tree-node label 0 false color)
+                           msg           (:agent-msg row)]
+                       (if (and msg (not (str/blank? msg)))
+                         [main-node (trees/tree-node (str "   " msg) 1)]
+                         [main-node])))
+                   rows)))))
+
+(defn project-monitor-pr-train
+  "Project PR train and fleet summary as tree nodes."
+  [model]
+  (let [{:keys [train-active? train-merged train-total
+                fleet-open fleet-ready fleet-monitored]}
+        (supervisory/pr-train-strip model)]
+    [(trees/tree-node
+      (if train-active?
+        (str "Train:  Active (" train-merged "/" train-total " merged)")
+        "Train:  No active train")
+      0 false (when train-active? trees/status-info))
+     (trees/tree-node (str "Fleet:  " fleet-open " open") 0)
+     (trees/tree-node (str "        " fleet-ready " ready") 1 false
+                      (when (pos? fleet-ready) trees/status-pass))
+     (trees/tree-node (str "        " fleet-monitored " monitored") 1 false
+                      (when (pos? fleet-monitored) trees/status-info))]))
+
+(defn project-monitor-policy-health
+  "Project policy health summary as tree nodes."
+  [model]
+  (let [{:keys [pass-rate total-evaluations passing-evaluations
+                violations-by-category governance-counts]}
+        (supervisory/policy-health model)
+        rate-pct    (format "%.1f%%" (* 100.0 (or pass-rate 1.0)))
+        rate-color  (cond
+                      (>= (or pass-rate 1.0) 0.95) trees/status-pass
+                      (>= (or pass-rate 1.0) 0.80) trees/status-warning
+                      :else                         trees/status-fail)
+        viols       (sort-by (comp - val) violations-by-category)
+        {:keys [not-evaluated policy-passing policy-failing waived escalated]}
+        governance-counts]
+    (vec (concat
+          [(trees/tree-node (str "Pass rate:    " rate-pct) 0 false rate-color)
+           (trees/tree-node (str "Evaluations:  " total-evaluations
+                                 " (" passing-evaluations " passing)") 0)]
+          (when (seq viols)
+            (into [(trees/tree-node "Violations:" 0)]
+                  (mapv (fn [[cat cnt]]
+                          (trees/tree-node (str "  " cat ": " cnt) 1 false trees/status-fail))
+                        viols)))
+          (when (some pos? [policy-passing policy-failing waived escalated not-evaluated])
+            (into [(trees/tree-node "States:" 0)]
+                  (filter some?
+                          [(when (pos? policy-passing)
+                             (trees/tree-node (str "  passing:   " policy-passing) 1 false trees/status-pass))
+                           (when (pos? policy-failing)
+                             (trees/tree-node (str "  failing:   " policy-failing) 1 false trees/status-fail))
+                           (when (pos? waived)
+                             (trees/tree-node (str "  waived:    " waived) 1 false trees/status-warning))
+                           (when (pos? escalated)
+                             (trees/tree-node (str "  escalated: " escalated) 1 false trees/status-fail))
+                           (when (pos? not-evaluated)
+                             (trees/tree-node (str "  pending:   " not-evaluated) 1))])))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Projection registry
 
@@ -385,7 +499,17 @@
                                ;; Bypass cache while pending so spinner/elapsed updates
                                (if (get-in m [:chat :pending?])
                                  (trees/project-chat-messages m)
-                                 (cached m))))})
+                                 (cached m))))
+
+   ;; Monitor zone projections (N5-delta §5)
+   :project/monitor-attention     (helpers/memoize-by project-monitor-attention
+                                    (fn [m] [(:workflows m) (:pr-items m) (:attention-items m)]))
+   :project/monitor-ticker        (helpers/memoize-by project-monitor-ticker
+                                    (fn [m] (:workflows m)))
+   :project/monitor-pr-train      (helpers/memoize-by project-monitor-pr-train
+                                    (fn [m] [(:pr-items m) (:trains m) (:active-train-id m)]))
+   :project/monitor-policy-health (helpers/memoize-by project-monitor-policy-health
+                                    (fn [m] [(:pr-items m) (:policy-evaluations m) (:waivers m)]))})
 
 (defn get-projection
   "Look up a projection function by keyword. Returns identity fn if not found."
@@ -459,6 +583,17 @@
         repos (get model :fleet-repos [])]
     (str "Repos (" (count repos) ") [" (inc idx) "]")))
 
+(defn ctx-monitor-summary [model]
+  (let [attn-count (count (supervisory/attention model))
+        sub-status (get model :subscription/status :connected)]
+    (str "Attention: " attn-count
+         " | "
+         (case sub-status
+           :connected    "Live"
+           :stale        "[STALE]"
+           :disconnected "[DISCONNECTED]"
+           (name sub-status)))))
+
 (def contexts
   "Registry of context functions: keyword -> (model -> string).
    Memoized by input signals — only recompute when relevant data changes."
@@ -479,7 +614,10 @@
    :ctx/repo-manager-title     (helpers/memoize-by ctx-repo-manager-title
                                  (fn [m] (:fleet-repos m)))
    :ctx/workflow-detail-title  (helpers/memoize-by ctx-workflow-detail-title
-                                 (fn [m] [(:detail m) (:workflows m)]))})
+                                 (fn [m] [(:detail m) (:workflows m)]))
+   :ctx/monitor-summary        (helpers/memoize-by ctx-monitor-summary
+                                 (fn [m] [(:workflows m) (:pr-items m) (:attention-items m)
+                                          (:subscription/status m)]))})
 
 (defn get-context
   "Look up a context function by keyword. Returns a constant fn if not found."
