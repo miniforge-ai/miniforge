@@ -126,7 +126,7 @@
       (response/throw-anomaly! :anomalies/not-found
                               (str "Chain '" (name chain-id) "' not found. "
                                    "Looked for: " versioned-path ", " base-path)
-                              {:chain-id chain-id :version version})))))
+                              {:chain-id chain-id :version version}))))
 
 (defn list-chains
   "List all available chain definitions from classpath."

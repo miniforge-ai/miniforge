@@ -165,7 +165,7 @@
                               "Failed to snapshot working directory"
                               {:working-dir working-dir
                                :exit exit
-                               :stderr err})))))
+                               :stderr err}))))
 
 (defn snapshot-via-executor
   "Capture git dirty state inside a capsule via the executor.

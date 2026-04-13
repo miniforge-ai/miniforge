@@ -113,7 +113,7 @@
                               {:current-status current-status
                                :event event
                                :error (:error result)
-                               :message (:message result)})))))
+                               :message (:message result)}))))
 
 (defn transition-to-phase
   "Transition execution to a new phase.

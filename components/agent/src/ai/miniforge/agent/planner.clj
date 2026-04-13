@@ -390,7 +390,7 @@
                                                        {:phase :plan
                                                         :parse-result nil
                                                         :llm-content-length (count content)
-                                                        :llm-content-preview (subs content 0 (min 500 (count content)))})))
+                                                        :llm-content-preview (subs content 0 (min 500 (count content)))}))
                       plan-final (finalize-plan plan)]
                   ;; Check for already-satisfied response
                   (if (= :already-satisfied (:plan/status plan-final))
@@ -423,7 +423,7 @@
                ;; No LLM client — hard failure
             (response/throw-anomaly! :anomalies.agent/llm-error
                                     "No LLM backend provided for planner agent"
-                                    {:phase :plan})))))
+                                    {:phase :plan}))))
 
       :validate-fn validate-plan
 

@@ -203,7 +203,7 @@
         gate-kw
         (fn [ex]
           ;; Extract anomaly from exception data, or default to check-failed
-          (or (:anomaly (ex-data ex))
+          (or (:anomaly/category (ex-data ex))
               :anomalies.gate/check-failed))
         (fn []
           (let [result (check artifact ctx)]
@@ -211,7 +211,7 @@
               result
               (response/throw-anomaly! :anomalies.gate/validation-failed
                                       "Gate validation failed"
-                                      {:errors (:errors result)}))))))))
+                                      {:errors (:errors result)})))))))
    (response/create :gates)
    gate-kws))
 

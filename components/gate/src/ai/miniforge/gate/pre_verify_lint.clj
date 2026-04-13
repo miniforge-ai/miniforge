@@ -74,17 +74,15 @@
         violations (:violations result)
         duration   (get result :total-duration-ms 0)]
     (if (empty? violations)
-      (response/success {:message (str "Lint clean (" duration "ms)")}
-                        {:duration-ms duration})
-      (response/error (str (count violations) " lint error(s)")
-                      {:data {:errors (mapv violation->lint-error violations)}
-                       :duration-ms duration}))))
+      {:passed? true}
+      {:passed? false
+       :errors (mapv violation->lint-error violations)})))
 
 (defn repair-pre-verify-lint
   "Lint errors cannot be auto-repaired — return to agent."
   [artifact errors _ctx]
-  (response/failure "Lint errors require agent repair"
-                    {:data {:artifact artifact :errors errors}}))
+  {:success? false
+   :errors errors})
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Gate registration

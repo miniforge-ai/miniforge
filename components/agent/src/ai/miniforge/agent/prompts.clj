@@ -48,11 +48,11 @@
                                     "Prompt data missing :prompt/system key"
                                     {:agent-type agent-type
                                      :resource-path resource-path
-                                     :keys (keys prompt-data)}))))
+                                     :keys (keys prompt-data)})))
       (response/throw-anomaly! :anomalies/not-found
                                 "Could not find prompt resource"
                                 {:agent-type agent-type
-                                 :resource-path resource-path})))))
+                                 :resource-path resource-path}))))
 
 (defn load-prompt-data
   "Load full prompt data map from resources.
@@ -70,7 +70,7 @@
       (response/throw-anomaly! :anomalies/not-found
                                 "Could not find prompt resource"
                                 {:agent-type agent-type
-                                 :resource-path resource-path})))))
+                                 :resource-path resource-path}))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

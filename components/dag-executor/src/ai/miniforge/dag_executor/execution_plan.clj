@@ -119,7 +119,7 @@
       (response/throw-anomaly! :anomalies/incorrect
                               "Invalid execution plan"
                               {:errors errors
-                               :plan   plan-map})))))
+                               :plan   plan-map}))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
