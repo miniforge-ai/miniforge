@@ -95,20 +95,20 @@
                [:input :key/escape]])]
       (is (util/view-is? m :workflow-list))))
 
-  (testing "Number keys switch top-level views (1-6)"
-    (is (util/view-is? (update/update-model (util/fresh-model) [:input {:key :key/d1 :char \1}]) :pr-fleet))
-    (is (util/view-is? (update/update-model (util/fresh-model) [:input {:key :key/d2 :char \2}]) :workflow-list))
-    (is (util/view-is? (update/update-model (util/fresh-model) [:input {:key :key/d3 :char \3}]) :evidence))
-    (is (util/view-is? (update/update-model (util/fresh-model) [:input {:key :key/d4 :char \4}]) :artifact-browser))
-    (is (util/view-is? (update/update-model (util/fresh-model) [:input {:key :key/d5 :char \5}]) :dag-kanban))
-    (is (util/view-is? (update/update-model (util/fresh-model) [:input {:key :key/d6 :char \6}]) :repo-manager)))
+  (testing "Number keys switch top-level views (1-7)"
+    (is (util/view-is? (update/update-model (util/fresh-model) [:input {:key :key/d1 :char \1}]) :monitor))
+    (is (util/view-is? (update/update-model (util/fresh-model) [:input {:key :key/d2 :char \2}]) :pr-fleet))
+    (is (util/view-is? (update/update-model (util/fresh-model) [:input {:key :key/d3 :char \3}]) :workflow-list))
+    (is (util/view-is? (update/update-model (util/fresh-model) [:input {:key :key/d4 :char \4}]) :evidence))
+    (is (util/view-is? (update/update-model (util/fresh-model) [:input {:key :key/d5 :char \5}]) :artifact-browser))
+    (is (util/view-is? (update/update-model (util/fresh-model) [:input {:key :key/d6 :char \6}]) :dag-kanban))
+    (is (util/view-is? (update/update-model (util/fresh-model) [:input {:key :key/d7 :char \7}]) :repo-manager)))
 
   (testing "Number keys above available top-level count are no-ops"
     (let [m (util/fresh-model)]
-      (is (util/view-is? (update/update-model m [:input {:key :key/d7 :char \7}]) :pr-fleet))
-      (is (util/view-is? (update/update-model m [:input {:key :key/d8 :char \8}]) :pr-fleet))
-      (is (util/view-is? (update/update-model m [:input {:key :key/d9 :char \9}]) :pr-fleet))
-      (is (util/view-is? (update/update-model m [:input {:key :key/d0 :char \0}]) :pr-fleet)))))
+      (is (util/view-is? (update/update-model m [:input {:key :key/d8 :char \8}]) :monitor))
+      (is (util/view-is? (update/update-model m [:input {:key :key/d9 :char \9}]) :monitor))
+      (is (util/view-is? (update/update-model m [:input {:key :key/d0 :char \0}]) :monitor)))))
 
 (deftest workflow-events-test
   (testing "Workflow added appears in list"
@@ -213,9 +213,9 @@
                                      [:input {:key :key/space :char \space}]]))]
       (is (not (contains? (get-in m [:detail :expanded-nodes]) 0)))))
 
-  (testing "6 key switches to repo-manager view"
+  (testing "6 key switches to dag-kanban view"
     (let [m (update/update-model (util/fresh-model) [:input {:key :key/d6 :char \6}])]
-      (is (util/view-is? m :repo-manager))
+      (is (util/view-is? m :dag-kanban))
       (is (util/selected-idx-is? m 0))))
 
   (testing "In workflow detail context, number keys switch within detail subviews"
@@ -230,25 +230,26 @@
 (deftest train-view-navigation-test
   (testing "Tab from :train-view (single-pane detail) escapes to top-level cycling"
     ;; Regression: train-view has pane-count=1, so cycle-pane was a visual no-op.
-    ;; Tab should fall through to cycle-top-level-view, landing on :pr-fleet.
+    ;; Tab should fall through to cycle-top-level-view, landing on :monitor (first top-level).
     (let [m (-> (util/fresh-model)
                 (assoc :view :train-view)
                 (update/update-model [:input :key/tab]))]
-      (is (util/view-is? m :pr-fleet))))
+      (is (util/view-is? m :monitor))))
 
-  (testing "Number key 2 from :train-view uses top-level views, reaching :workflow-list"
+  (testing "Number key 2 from :train-view uses top-level views, reaching :pr-fleet"
     ;; Regression: current-level-views returned detail-views for any detail view,
-    ;; so '2' from :train-view went to :pr-detail instead of :workflow-list.
+    ;; so number keys from :train-view went to detail-views instead of top-level-views.
+    ;; With :monitor at index 0, key 2 → index 1 = :pr-fleet.
     (let [m (-> (util/fresh-model)
                 (assoc :view :train-view)
                 (update/update-model [:input {:key :key/d2 :char \2}]))]
-      (is (util/view-is? m :workflow-list))))
+      (is (util/view-is? m :pr-fleet))))
 
-  (testing "Number key 1 from :train-view reaches :pr-fleet"
+  (testing "Number key 1 from :train-view reaches :monitor"
     (let [m (-> (util/fresh-model)
                 (assoc :view :train-view)
                 (update/update-model [:input {:key :key/d1 :char \1}]))]
-      (is (util/view-is? m :pr-fleet)))))
+      (is (util/view-is? m :monitor)))))
 
 (deftest repo-manager-actions-test
   (testing "b opens remote browse mode and triggers browse side-effect"
@@ -485,11 +486,11 @@
 
   (testing "Tab from :train-view (single-pane detail) escapes to top-level cycling"
     ;; Regression: train-view has pane-count=1, so cycle-pane was a no-op.
-    ;; Tab should fall through to cycle-top-level-view, landing on :pr-fleet.
+    ;; Tab should fall through to cycle-top-level-view, landing on :monitor (first top-level).
     (let [m (-> (util/fresh-model)
                 (assoc :view :train-view)
                 (update/update-model [:input :key/tab]))]
-      (is (util/view-is? m :pr-fleet))))
+      (is (util/view-is? m :monitor))))
 
   (testing "Shift+Tab from :train-view escapes to top-level cycling in reverse"
     (let [m (-> (util/fresh-model)
@@ -510,11 +511,11 @@
                 (update/update-model [:input :key/tab]))]
       (is (util/view-is? m :repo-manager))))
 
-  (testing "Tab in repo-manager wraps to pr-fleet"
+  (testing "Tab in repo-manager wraps to monitor (first top-level)"
     (let [m (-> (util/fresh-model)
                 (assoc :view :repo-manager)
                 (update/update-model [:input :key/tab]))]
-      (is (util/view-is? m :pr-fleet))))
+      (is (util/view-is? m :monitor))))
 
   (testing "Tab cycles through all top-level views and wraps"
     (let [m (-> (util/fresh-model)
@@ -524,7 +525,8 @@
                 (update/update-model [:input :key/tab])    ;; → artifact-browser
                 (update/update-model [:input :key/tab])    ;; → dag-kanban
                 (update/update-model [:input :key/tab])    ;; → repo-manager
-                (update/update-model [:input :key/tab]))]  ;; → pr-fleet (wrap)
+                (update/update-model [:input :key/tab])    ;; → monitor (wrap)
+                (update/update-model [:input :key/tab]))]  ;; → pr-fleet
       (is (util/view-is? m :pr-fleet)))))
 
 (deftest shift-tab-navigation-test
@@ -534,11 +536,11 @@
                 (update/update-model [:input :key/shift-tab]))]
       (is (util/view-is? m :pr-fleet))))
 
-  (testing "Shift+Tab in pr-fleet wraps to repo-manager"
+  (testing "Shift+Tab in pr-fleet goes to monitor (previous top-level)"
     (let [m (-> (util/fresh-model)
                 (assoc :view :pr-fleet)
                 (update/update-model [:input :key/shift-tab]))]
-      (is (util/view-is? m :repo-manager))))
+      (is (util/view-is? m :monitor))))
 
   (testing "Shift+Tab in workflow detail subview cycles reverse within sub-views"
     (let [m (-> (util/fresh-model)
@@ -575,11 +577,12 @@
     (let [m (-> (two-workflows)
                 (update/update-model [:input :key/enter])   ;; drill in
                 (update/update-model [:input :key/escape])  ;; back out
-                ;; Now cycle through all top-level views
+                ;; Now cycle through all top-level views (7 total)
                 (update/update-model [:input :key/tab])     ;; → evidence
                 (update/update-model [:input :key/tab])     ;; → artifact-browser
                 (update/update-model [:input :key/tab])     ;; → dag-kanban
                 (update/update-model [:input :key/tab])     ;; → repo-manager
+                (update/update-model [:input :key/tab])     ;; → monitor (wrap)
                 (update/update-model [:input :key/tab])     ;; → pr-fleet
                 (update/update-model [:input :key/tab]))]   ;; → workflow-list (wrap)
       (is (util/view-is? m :workflow-list)))))

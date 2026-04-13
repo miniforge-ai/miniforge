@@ -19,7 +19,38 @@
 ;; Data projections — :data-fn keyword resolves to a registered projection fn:
 ;;   :project/workflows, :project/pr-items, :project/evidence-tree, etc.
 
-{:workflow-list
+{:monitor
+ {:tab-bar {:context-fn :ctx/monitor-summary}
+  :body
+  {:type :node/split-v
+   :ratio :footer
+   :children
+   [{:type :node/split-v
+     :ratio 0.2
+     :children
+     [{:type :node/box
+       :title "Attention"
+       :child {:type :widget/tree :data-fn :project/monitor-attention}}
+      {:type :node/split-h
+       :ratio 0.35
+       :children
+       [{:type :node/box
+         :title "Workflows"
+         :child {:type :widget/tree :data-fn :project/monitor-ticker}}
+        {:type :node/split-h
+         :ratio 0.5
+         :children
+         [{:type :node/box
+           :title "PR Fleet"
+           :child {:type :widget/tree :data-fn :project/monitor-pr-train}}
+          {:type :node/box
+           :title "Policy Health"
+           :child {:type :widget/tree :data-fn :project/monitor-policy-health}}]}]}]}
+    {:type :node/footer
+     :segments
+     {:normal "Tab:views  1-0:jump  r:sync  q:quit"}}]}}
+
+ :workflow-list
  {:tab-bar {:context-fn :ctx/workflow-count}
   :body
   {:type :node/split-v

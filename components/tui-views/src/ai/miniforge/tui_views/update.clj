@@ -632,6 +632,24 @@
       ;; Fleet risk triage
       :msg/fleet-risk-triaged    (events/handle-fleet-risk-triaged model payload)
 
+      ;; PR monitor lifecycle messages (N5-delta §5)
+      :msg/pr-monitor-loop-started    (events/handle-pr-monitor-loop-started model payload)
+      :msg/pr-monitor-loop-stopped    (events/handle-pr-monitor-loop-stopped model payload)
+      :msg/pr-monitor-fix-started     (events/handle-pr-monitor-fix-started model payload)
+      :msg/pr-monitor-fix-pushed      (events/handle-pr-monitor-fix-pushed model payload)
+      :msg/pr-monitor-budget-warning  (events/handle-pr-monitor-budget-warning model payload)
+      :msg/pr-monitor-budget-exhausted (events/handle-pr-monitor-budget-exhausted model payload)
+      :msg/pr-monitor-escalated       (events/handle-pr-monitor-escalated model payload)
+
+      ;; Control-plane messages (N5-delta §3)
+      :msg/control-plane-agent-discovered   (events/handle-control-plane-agent-discovered model payload)
+      :msg/control-plane-status-changed     (events/handle-control-plane-status-changed model payload)
+      :msg/control-plane-decision-submitted (events/handle-control-plane-decision-submitted model payload)
+      :msg/control-plane-decision-resolved  (events/handle-control-plane-decision-resolved model payload)
+
+      ;; Subscription health
+      :msg/subscription-status-changed (events/handle-subscription-status-changed model payload)
+
       ;; Side-effect error
       :msg/side-effect-error
       (cond-> (assoc model :flash-message

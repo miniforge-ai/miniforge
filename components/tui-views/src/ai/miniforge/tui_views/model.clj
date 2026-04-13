@@ -54,7 +54,7 @@
     :search-matches  vec          ; Vector of {:line-idx N} match descriptors (find-in-page)
     :search-match-idx int-or-nil} ; Current match index into search-matches (nil = none)"
   []
-  {:view          :pr-fleet
+  {:view          :monitor
    :workflows     []
    :trains        []
    :pr-items      []
@@ -107,7 +107,17 @@
    :chat-threads {}          ;; {thread-key -> chat-state} keyed by [:pr repo number] etc.
    :chat-active-key nil
    ;; Workflow→PR reverse index: {[repo pr-number] → workflow-id}
-   :workflow-pr-index {}})
+   :workflow-pr-index {}
+   ;; Supervisory control plane (N5-delta §3-5)
+   :agent-sessions          []   ; Agent session records from :control-plane/agent-discovered
+   :attention-items         []   ; Explicit attention items from control-plane events
+   :policy-evaluations      []   ; PolicyEvaluation records for PR governance
+   :waivers                 []   ; Waiver records for governance overrides
+   ;; Subscription health
+   :subscription/status     :connected  ; :connected | :stale | :disconnected
+   :subscription/last-event-at nil       ; inst of last received event
+   ;; Terminal sizing for responsive rendering
+   :terminal/cols           120})
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Workflow data shape
@@ -152,7 +162,7 @@
 
 (def top-level-views
   "Top-level aggregate views reachable by Tab cycling."
-  [:pr-fleet :workflow-list :evidence :artifact-browser :dag-kanban :repo-manager])
+  [:monitor :pr-fleet :workflow-list :evidence :artifact-browser :dag-kanban :repo-manager])
 
 (def detail-views
   "Detail views entered via Enter from an aggregate."
@@ -163,7 +173,8 @@
   (vec (concat top-level-views detail-views)))
 
 (def view-labels
-  {:pr-fleet         "PR Fleet"
+  {:monitor          "Monitor"
+   :pr-fleet         "PR Fleet"
    :workflow-list    "Workflows"
    :evidence         "Evidence"
    :artifact-browser "Artifacts"

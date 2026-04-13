@@ -23,7 +23,81 @@
    workflow detail, agent risk assessments, chat actions, PR info
    from workflow completion, and the workflow-PR reverse index.
 
+   Also defines open Malli schemas for the v1 supervisory entities
+   per N5-delta-supervisory-control-plane §3:
+   WorkflowRun, PolicyEvaluation, PolicyViolation, AttentionItem,
+   Waiver, EvidenceBundle.
+
+   All supervisory schemas are open (:map without :closed true) —
+   required keys are validated; extra keys pass through silently.
+
    Layer 0 — no dependencies on other tui-views namespaces.")
+
+;------------------------------------------------------------------------------ Layer 0
+;; Supervisory entity schemas — N5-delta §3
+
+(def WorkflowRun
+  "Open schema for a WorkflowRun supervisory entity (§3.1).
+   :workflow/status is one of :running/:completed/:failed.
+   Extra keys pass through — do not add :closed true."
+  [:map
+   [:workflow/id uuid?]
+   [:workflow/key :string]
+   [:workflow/status [:enum :running :completed :failed]]
+   [:workflow/phase :string]
+   [:workflow/started-at inst?]])
+
+(def PolicyViolation
+  "Open schema for a single policy violation (§3.3)."
+  [:map
+   [:violation/id uuid?]
+   [:violation/eval-id uuid?]
+   [:violation/rule :string]
+   [:violation/category :string]
+   [:violation/severity [:enum :info :warning :error :critical]]])
+
+(def PolicyEvaluation
+  "Open schema for a policy evaluation result (§3.2).
+   :eval/result is :pass or :fail."
+  [:map
+   [:eval/id uuid?]
+   [:eval/pr-id any?]
+   [:eval/result [:enum :pass :fail]]
+   [:eval/rules-applied [:vector :string]]
+   [:eval/evaluated-at inst?]])
+
+(def AttentionItem
+  "Open schema for a derived attention item (§3.4).
+   :attention/severity is one of :info/:warning/:critical."
+  [:map
+   [:attention/id uuid?]
+   [:attention/severity [:enum :info :warning :critical]]
+   [:attention/summary :string]
+   [:attention/source-type keyword?]
+   [:attention/source-id any?]])
+
+(def Waiver
+  "Open schema for a policy waiver record (§3.5)."
+  [:map
+   [:waiver/id uuid?]
+   [:waiver/eval-id uuid?]
+   [:waiver/actor :string]
+   [:waiver/reason :string]
+   [:waiver/created-at inst?]])
+
+(def EvidenceBundle
+  "Open schema for a supervisory evidence bundle projection (§3.6)."
+  [:map
+   [:evidence/id uuid?]
+   [:evidence/workflow-id uuid?]
+   [:evidence/entries [:vector any?]]])
+
+;------------------------------------------------------------------------------ Layer 0
+;; PR governance states — N5-delta §4
+
+(def governance-states
+  "Valid PR governance state keywords per N5-delta §4."
+  [:enum :not-evaluated :policy-passing :policy-failing :waived :escalated])
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Risk levels used by both mechanical and agent risk
