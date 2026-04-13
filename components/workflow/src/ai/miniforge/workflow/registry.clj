@@ -97,7 +97,7 @@
         (response/throw-anomaly! :anomalies/fault
                                 (str "Failed to load workflow from " resource-path)
                                 {:resource-path resource-path
-                                 :error (ex-message e)}))))))
+                                 :error (ex-message e)})))))
 
 (defn discover-workflows-from-resources
   "Discover workflows from classpath resources.

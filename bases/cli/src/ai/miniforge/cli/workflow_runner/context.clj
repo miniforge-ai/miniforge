@@ -55,7 +55,7 @@
       (catch Exception e
         (response/throw-anomaly! :anomalies/fault
                                 (str "Failed to parse input JSON: " (ex-message e))
-                                {:input s}))))))
+                                {:input s})))))
 
 (defn resolve-input [{:keys [input input-json]}]
   (cond

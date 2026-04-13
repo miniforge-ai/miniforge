@@ -259,6 +259,11 @@
 (defn- build-initial-context
   "Build the initial execution context from workflow, input, and opts."
   [workflow input opts]
+  (when (and (= :governed (get opts :execution-mode))
+             (not (and (get opts :executor) (get opts :environment-id))))
+    (response/throw-anomaly! :anomalies.workflow/no-capsule-executor
+                             "No capsule executor available for governed mode — :executor and :environment-id required (N11 §7.4 no-silent-downgrade)"
+                             {}))
   (let [governed? (and (= :governed (get opts :execution-mode))
                        (get opts :executor)
                        (get opts :environment-id))
@@ -341,6 +346,7 @@
        (let [final-ctx (try+
                          (execute-pipeline-loop pipeline initial-ctx callbacks
                                                control-state max-phases)
+                         #_{:clj-kondo/ignore [:unresolved-namespace :unresolved-symbol]}
                          (catch [:anomaly/category :anomalies.dashboard/stop]
                                 {:keys [anomaly/message]}
                            (vreset! exception-vol (ex-info message {:type :dashboard-stop}))
@@ -348,6 +354,7 @@
                                (update :execution/errors conj
                                        (make-execution-error :dashboard-stop message))
                                (assoc :execution/status :failed)))
+                         #_{:clj-kondo/ignore [:unresolved-symbol]}
                          (catch Object e
                            (let [throwable (:throwable &throw-context)
                                  msg (if (instance? Throwable e) (ex-message e) (str e))]

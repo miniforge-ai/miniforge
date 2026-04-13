@@ -89,4 +89,4 @@
      (response/throw-anomaly! :anomalies/not-found
                              "Missing CLI message key"
                              {:message-key message-key
-                              :locale (active-locale)})))))
+                              :locale (active-locale)}))))

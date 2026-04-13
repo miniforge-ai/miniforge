@@ -137,7 +137,7 @@
                                   "Failed to load workflow from resource"
                                   {:workflow-id workflow-id
                                    :resource-path resource-path
-                                   :error (.getMessage e)})))))))
+                                   :error (.getMessage e)}))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Heuristic store loading
@@ -193,7 +193,7 @@
                               "Workflow validation failed"
                               {:workflow-id workflow-id
                                :version version
-                               :errors (:errors validation)})))
+                               :errors (:errors validation)}))
 
     ;; Cache the validated workflow
     (swap! workflow-cache assoc [workflow-id version] workflow)
@@ -239,7 +239,7 @@
         (response/throw-anomaly! :anomalies/not-found
                                 "Workflow not found"
                                 {:workflow-id workflow-id
-                                 :version version}))))))
+                                 :version version})))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Workflow discovery

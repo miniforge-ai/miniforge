@@ -69,7 +69,7 @@
     (->> res slurp edn/read-string (validate! ObservePhaseConfig))
     (response/throw-anomaly! :anomalies/not-found
                             "Missing classpath resource: config/workflow/observe-phase.edn"
-                            {:hint "Add components/workflow/resources to your classpath"}))))
+                            {:hint "Add components/workflow/resources to your classpath"})))
 
 (defn- load-monitor-defaults
   []
