@@ -21,6 +21,8 @@
   (:require
    [clojure.edn :as edn]
    [babashka.fs :as fs]
+   [babashka.process :as process]
+   [cheshire.core :as json]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.main.display :as display]))
@@ -96,3 +98,99 @@
             new-cfg (assoc-in cfg [:fleet :repos] (vec (remove #{repo} repos)))]
         (save-config new-cfg config default-config-path)
         (display/print-success (messages/t :fleet/removed {:repo repo}))))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; fleet watch — TUI fleet monitor
+
+(defn fleet-watch-cmd
+  "Launch the TUI fleet monitor.
+
+   Opens the two-pane fleet dashboard showing repos, PRs, and live
+   workflow status across all configured repos.
+
+   Delegates to ai.miniforge.tui-views.interface/start-fleet-tui! when
+   available. Falls back to the standalone TUI when not."
+  [opts]
+  (display/print-info "Starting fleet TUI monitor...")
+  (display/print-info (str "Events dir: " (app-config/events-dir)))
+  (let [fleet-tui! (try (requiring-resolve 'ai.miniforge.tui-views.interface/start-fleet-tui!)
+                        (catch Exception _ nil))
+        standalone! (try (requiring-resolve 'ai.miniforge.tui-views.interface/start-standalone-tui!)
+                         (catch Exception _ nil))]
+    (cond
+      fleet-tui!
+      (fleet-tui! opts)
+
+      standalone!
+      (do
+        (display/print-info "  (fleet-tui not available, using standalone TUI)")
+        (standalone! opts))
+
+      :else
+      (do
+        (display/print-error "TUI not available in this runtime.")
+        (println)
+        (println (str "  Start the web dashboard instead: "
+                      (app-config/command-string "web")))
+        (System/exit 1)))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; fleet prs — PRs across fleet
+
+(defn- fetch-prs-for-repo [repo]
+  (let [result (process/sh "gh" "pr" "list" "--repo" repo
+                            "--json" "number,title,state,author,createdAt,additions,deletions,changedFiles"
+                            "--limit" "20")]
+    (when (zero? (:exit result))
+      (try (json/parse-string (:out result) true)
+           (catch Exception _ [])))))
+
+(defn fleet-prs-cmd
+  "List open PRs across all fleet-configured repositories.
+
+   Equivalent to running `pr list` for every repo in [:fleet :repos].
+   Prints a grouped, risk-annotated summary."
+  [opts default-config-path default-config]
+  (let [config (load-config (:config opts) default-config-path default-config)
+        repos  (if-let [r (:repo opts)]
+                 [r]
+                 (get-in config [:fleet :repos] []))]
+    (if (empty? repos)
+      (do
+        (display/print-error "No repos configured.")
+        (println (str "  Add repos with: " (app-config/command-string "fleet add <repo>"))))
+      (do
+        (println)
+        (println (display/style "Fleet PRs" :foreground :cyan :bold true))
+        (println)
+        (doseq [repo repos]
+          (println (display/style (str "  " repo) :foreground :cyan :bold true))
+          (let [prs (fetch-prs-for-repo repo)]
+            (cond
+              (nil? prs)
+              (println (display/style "    Could not reach repo (check gh auth)" :foreground :red))
+
+              (empty? prs)
+              (println "    No open PRs.")
+
+              :else
+              (doseq [{:keys [number title author additions deletions changedFiles]} prs]
+                (let [total   (+ (or additions 0) (or deletions 0))
+                      files   (or changedFiles 0)
+                      risk    (cond
+                                (or (> total 500) (> files 20)) :high
+                                (or (> total 100) (> files 5))  :medium
+                                :else                            :low)
+                      risk-color (case risk :high :red :medium :yellow :low :green)]
+                  (println (str "    "
+                                (display/style (case risk :high "[HIGH]" :medium "[MED]" "[LOW]")
+                                               :foreground risk-color)
+                                " #" number
+                                " " (if (> (count title) 55) (str (subs title 0 54) "...") title)
+                                "  (" (get author :login "?") ")"))))))
+          (println))))))
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  (fleet-watch-cmd {})
+  :end)
