@@ -37,7 +37,8 @@
    [clojure.java.io :as io]
    [clojure.edn :as edn]
    [babashka.fs :as fs]
-   [ai.miniforge.config.digest :as digest]))
+   [ai.miniforge.config.digest :as digest]
+   [ai.miniforge.config.user :as user]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants and helpers
@@ -51,7 +52,7 @@
 
 (def user-config-path
   "Default path to user config file."
-  (str (fs/home) "/.miniforge/config.edn"))
+  (str (user/miniforge-home) "/config.edn"))
 
 (defn resolve-profile
   "Resolve governance profile from env var or opts.

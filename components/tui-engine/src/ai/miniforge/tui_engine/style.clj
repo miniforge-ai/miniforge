@@ -31,6 +31,7 @@
    Custom themes can be added via ~/.miniforge/themes/*.edn.
    Themes are pure data maps — no side effects."
   (:require
+   [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
    [clojure.edn :as edn]))
 
@@ -182,7 +183,7 @@
   "Load custom themes from ~/.miniforge/themes/*.edn.
    Each file should contain a single map: {theme-keyword theme-map}."
   []
-  (let [dir (io/file (System/getProperty "user.home") ".miniforge" "themes")]
+  (let [dir (io/file (config/miniforge-home) "themes")]
     (if (and (.exists dir) (.isDirectory dir))
       (->> (.listFiles dir)
            (filter #(.endsWith (.getName %) ".edn"))

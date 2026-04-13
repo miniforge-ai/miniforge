@@ -22,6 +22,7 @@
    Budget state is persisted in ~/.miniforge/state/pr-monitor/ so that
    restarts do not reset counters."
   (:require
+   [ai.miniforge.config.interface :as mf-config]
    [ai.miniforge.pr-lifecycle.monitor-config :as config]
    [ai.miniforge.schema.interface :as schema]
    [clojure.edn :as edn]
@@ -163,7 +164,7 @@
 ;; Budget persistence
 
 (def ^:private state-dir
-  (str (System/getProperty "user.home") "/.miniforge/state/pr-monitor"))
+  (str (mf-config/miniforge-home) "/state/pr-monitor"))
 
 (defn save-budget!
   "Persist budget state to disk."

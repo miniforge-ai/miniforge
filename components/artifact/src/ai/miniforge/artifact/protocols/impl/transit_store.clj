@@ -22,6 +22,7 @@
    These functions implement the ArtifactStore protocol for the Transit-based store.
    They are used by the TransitArtifactStore record."
   (:require
+   [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
    [cognitect.transit :as transit]
    [ai.miniforge.artifact.core :as core]
@@ -38,7 +39,7 @@
   ([base-dir]
    (if base-dir
      (str base-dir "/artifacts")
-     (str (System/getProperty "user.home") "/.miniforge/artifacts"))))
+     (str (config/miniforge-home) "/artifacts"))))
 
 (defn artifact-file-path
   "Get the file path for an artifact by ID."

@@ -28,6 +28,7 @@
 
    Pure status mapping lives in ai.miniforge.pr-sync.status."
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.pr-sync.messages :as messages]
    [ai.miniforge.pr-sync.status :as status]
    [clojure.edn :as edn]
@@ -40,7 +41,7 @@
 ;; Constants
 
 (def default-fleet-config-path
-  (str (System/getProperty "user.home") "/.miniforge/config.edn"))
+  (str (config/miniforge-home) "/config.edn"))
 
 (def github-repo-slug-pattern
   #"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")

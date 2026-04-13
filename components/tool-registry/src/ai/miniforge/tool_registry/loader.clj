@@ -29,6 +29,7 @@
    2. User: ~/.miniforge/tools/**/*.edn
    3. Project: .miniforge/tools/**/*.edn"
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.tool-registry.schema :as schema]
    [ai.miniforge.logging.interface :as log]
    [clojure.java.io :as io]
@@ -41,7 +42,7 @@
 (defn user-tools-dir
   "Get the user tools directory (~/.miniforge/tools)."
   []
-  (io/file (System/getProperty "user.home") ".miniforge" "tools"))
+  (io/file (config/miniforge-home) "tools"))
 
 (defn project-tools-dir
   "Get the project tools directory (.miniforge/tools)."

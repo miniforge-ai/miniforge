@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/logging {:local/root "../logging"}
+ :deps {ai.miniforge/config {:local/root "../config"}
+        ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/schema {:local/root "../schema"}
         metosin/malli {:mvn/version "0.16.4"}
         org.clojure/core.async {:mvn/version "1.6.681"}

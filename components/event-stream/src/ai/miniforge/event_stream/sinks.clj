@@ -26,6 +26,7 @@
    - :fleet  - Send to fleet command (org-level ops)
    - :multi  - Combine multiple sinks"
   (:require
+   [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.pprint :as pprint]
@@ -40,7 +41,7 @@
 (defn- default-events-dir
   "Return the default events directory (~/.miniforge/events)."
   []
-  (io/file (System/getProperty "user.home") ".miniforge" "events"))
+  (io/file (config/miniforge-home) "events"))
 
 (defn- now-sortable-str
   "Return a sortable UTC timestamp string for use as a file-name prefix.

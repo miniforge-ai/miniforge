@@ -30,6 +30,7 @@
    Layer 1: Read/write cache file
    Layer 2: Apply cache to model, persist from model"
   (:require
+   [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
    [clojure.edn :as edn]))
 
@@ -72,7 +73,7 @@
 
 (def ^:private cache-dir-path
   "Default cache directory."
-  (delay (io/file (System/getProperty "user.home") ".miniforge" "cache")))
+  (delay (io/file (config/miniforge-home) "cache")))
 
 (defn cache-file
   "Returns the cache file path."

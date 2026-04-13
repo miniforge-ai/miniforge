@@ -24,6 +24,7 @@
    workflows without an in-memory event stream — cross-process via
    the filesystem protocol used by event-stream file-sink."
   (:require
+   [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
    [ai.miniforge.tui-views.persistence :as persistence]
    [ai.miniforge.tui-views.subscription :as subscription]))
@@ -34,7 +35,7 @@
 (defn events-dir
   "Returns ~/.miniforge/events/ as a java.io.File."
   []
-  (io/file (System/getProperty "user.home") ".miniforge" "events"))
+  (io/file (config/miniforge-home) "events"))
 
 (defn scan-event-files
   "Find *.edn files in dir, returns sorted list of java.io.File."

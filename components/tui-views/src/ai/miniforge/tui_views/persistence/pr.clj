@@ -26,6 +26,7 @@
    Layer 1: PR loading (fleet repos, PR items)
    Layer 2: Composite loaders (load-all-into-model)"
   (:require
+   [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.persistence :as persistence]
@@ -40,7 +41,7 @@
 (defn packs-dir
   "Get the policy packs directory path."
   []
-  (io/file (System/getProperty "user.home") ".miniforge" "packs"))
+  (io/file (config/miniforge-home) "packs"))
 
 (defn load-policy-packs
   "Load policy packs from ~/.miniforge/packs/.

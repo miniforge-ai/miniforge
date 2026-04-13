@@ -33,6 +33,7 @@
 
    Layer 0: No dependencies on other tui namespaces."
   (:require
+   [ai.miniforge.config.interface :as config]
    [clojure.string :as str])
   (:import
    [java.io File FileWriter BufferedWriter]
@@ -43,7 +44,7 @@
 ;; Log file setup
 
 (def ^:private log-dir
-  (str (System/getProperty "user.home") "/.miniforge/logs"))
+  (str (config/miniforge-home) "/logs"))
 
 (def ^:private log-path
   (str log-dir "/tui.log"))

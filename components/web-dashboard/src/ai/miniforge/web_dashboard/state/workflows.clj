@@ -15,6 +15,7 @@
 (ns ai.miniforge.web-dashboard.state.workflows
   "Workflow state from live and historical event streams."
   (:require
+   [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.web-dashboard.watcher :as watcher]))
@@ -24,7 +25,7 @@
 
 (def events-dir-path
   "Default event archive directory shared by the CLI and dashboard."
-  (str (System/getProperty "user.home") "/.miniforge/events"))
+  (str (config/miniforge-home) "/events"))
 
 (def stale-threshold-ms
   "Workflows with no events for this long are considered stale (10 minutes)."

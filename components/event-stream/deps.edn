@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/logging {:local/root "../logging"}
+ :deps {ai.miniforge/config {:local/root "../config"}
+        ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/schema {:local/root "../schema"}
         com.cognitect/transit-clj {:mvn/version "1.0.333"}}
  :aliases {:test {:extra-paths ["test"]

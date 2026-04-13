@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/logging {:local/root "../logging"}
+ :deps {ai.miniforge/config {:local/root "../config"}
+        ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/response {:local/root "../response"}
         ai.miniforge/control-plane {:local/root "../control-plane"}
         ai.miniforge/control-plane-adapter {:local/root "../control-plane-adapter"}}

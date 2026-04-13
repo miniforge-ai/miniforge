@@ -22,6 +22,7 @@
    Uses the gh CLI for all GitHub API access — no long-lived tokens
    needed beyond the local gh auth configuration."
   (:require
+   [ai.miniforge.config.interface :as mf-config]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.schema.interface :as schema]
@@ -67,7 +68,7 @@
 
 (def ^:private state-dir
   "Base directory for PR monitor state."
-  (str (System/getProperty "user.home") "/.miniforge/state/pr-monitor"))
+  (str (mf-config/miniforge-home) "/state/pr-monitor"))
 
 (defn- ensure-state-dir!
   "Ensure the state directory exists."

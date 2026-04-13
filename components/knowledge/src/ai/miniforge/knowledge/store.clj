@@ -23,6 +23,7 @@
    Layer 1: Query operations
    Layer 2: Agent injection"
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.knowledge.messages :as messages]
    [ai.miniforge.knowledge.zettel :as zettel]
    [ai.miniforge.logging.interface :as log]
@@ -255,7 +256,7 @@
      (create-file-backed-store)
      (create-file-backed-store {:path \"/repo/.miniforge/knowledge\"})"
   [& [{:keys [path logger]}]]
-  (let [base-path (expand-path (or path "~/.miniforge/knowledge"))
+  (let [base-path (expand-path (or path (str (config/miniforge-home) "/knowledge")))
         _ (ensure-directory base-path)
         log (or logger (log/create-logger {:min-level :info :output (fn [_])}))
         initial (scan-directory base-path)]

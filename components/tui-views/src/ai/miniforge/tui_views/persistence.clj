@@ -26,6 +26,7 @@
 
    Layer 1: Pure data loading, no side effects beyond file I/O."
   (:require
+   [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
    [clojure.edn :as edn]
    [ai.miniforge.tui-views.model :as model]))
@@ -454,7 +455,7 @@
 (defn events-dir
   "Get the events directory path. Returns a java.io.File."
   []
-  (io/file (System/getProperty "user.home") ".miniforge" "events"))
+  (io/file (config/miniforge-home) "events"))
 
 (defn workflow-events-file
   "Resolve the persisted event file for a workflow UUID."
