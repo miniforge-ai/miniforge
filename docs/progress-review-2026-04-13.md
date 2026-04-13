@@ -253,37 +253,5 @@ gate validation pipeline, metrics accumulation, evidence bundle assembly.
 
 ---
 
----
-
-## 7. Gap Specs Created
-
-All 15 gap areas from Section 5 now have corresponding work specs in `work/`:
-
-| Spec File | Gap Area |
-|-----------|----------|
-| `n03-event-type-completeness.spec.edn` | N3 missing event types |
-| `n04-knowledge-safety-pack.spec.edn` | N4 prompt-injection / trust |
-| `n04-kubernetes-diff-parsing.spec.edn` | N4 K8s diff parsing |
-| `n05-cli-command-wiring.spec.edn` | N5 CLI wiring audit |
-| `n05-http-api-decision.spec.edn` | N5 winsock vs HTTP/SSE |
-| `n06-sensitive-data-scanning.spec.edn` | N6 credential/PII scanning |
-| `n06-compliance-metadata.spec.edn` | N6 compliance metadata |
-| `n07-opsv-workflow.spec.edn` | N7 OPSV skeleton + DISCOVER |
-| `n07-opsv-converge-verify-actuate.spec.edn` | N7 remaining phases |
-| `n08-oci-governance.spec.edn` | N8 RBAC + control governance |
-| `n08-privacy-retention.spec.edn` | N8 privacy + retention |
-| `n08-otel-trace-context.spec.edn` | N8 OTel + W3C Trace Context |
-| `n09-pr-work-item-model.spec.edn` | N9 readiness / risk / tiers |
-| `n09-external-pr-read-only-eval.spec.edn` | N9/N4 read-only policy eval |
-| `n09-provider-native-checks.spec.edn` | N9 GitHub Check Runs |
-| `n09-credential-management.spec.edn` | N9 credential encryption |
-| `n10-tool-execution-audit.spec.edn` | N10 tool audit + approval |
-| `oss-integration-test-coverage.spec.edn` | OSS integration tests |
-
-All normative spec areas (N1–N11) now have work spec coverage. No uncaptured
-gaps remain.
-
----
-
 *Next checkpoint target: 2026-05-13 or after Tier 1 completion, whichever comes
 first.*
