@@ -126,3 +126,36 @@
       (do
         (display/print-info (messages/t :pr/merging {:url url}))
         (println (messages/t :pr/merge-todo))))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; PR Monitor (continuous loop)
+
+(defn pr-monitor-cmd
+  "Start the PR monitor loop for autonomous comment resolution.
+
+   Polls open PRs, classifies new comments, and routes them to handlers
+   (fix change-requests, answer questions, skip noise). Runs continuously
+   until stopped with Ctrl+C, budget exhausted, or no open PRs remain."
+  [opts]
+  (let [{:keys [author poll-interval]} opts
+        cwd           (System/getProperty "user.dir")
+        author        (or author
+                          (try (str/trim (:out (sh! "gh" "api" "user" "--jq" ".login")))
+                               (catch Exception _ nil))
+                          "miniforge[bot]")
+        poll-ms       (if poll-interval (* (Long/parseLong (str poll-interval)) 1000) 60000)
+        create-mon    (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/create-pr-monitor)
+        run-loop      (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/run-pr-monitor-loop)
+        stop-loop     (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/stop-pr-monitor-loop)
+        monitor       (create-mon {:worktree-path    cwd
+                                   :self-author      author
+                                   :poll-interval-ms poll-ms})]
+    (display/print-info (str "Starting PR monitor for author: " author))
+    (display/print-info (str "Polling every " (/ poll-ms 1000) "s in " cwd))
+    (display/print-info "Press Ctrl+C to stop.")
+    (let [shutdown (fn []
+                     (display/print-info "\nStopping monitor...")
+                     (stop-loop monitor))]
+      (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable shutdown))
+      (let [evidence (run-loop monitor author)]
+        (display/print-info (str "\nMonitor stopped. Evidence: " (pr-str evidence)))))))
