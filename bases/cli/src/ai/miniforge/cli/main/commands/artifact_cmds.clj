@@ -25,7 +25,9 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
-   [ai.miniforge.cli.main.display :as display]))
+   [ai.miniforge.cli.main.commands.shared :as shared]
+   [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
@@ -33,29 +35,62 @@
 (defn- artifacts-dir []
   (app-config/artifacts-dir))
 
-(defn- try-artifact-interface [fn-sym & args]
-  (try
-    (when-let [f (requiring-resolve fn-sym)]
-      (apply f args))
-    (catch Exception _ nil)))
-
 (defn- scan-artifact-files []
   (let [dir (io/file (artifacts-dir))]
     (if (.exists dir)
       (->> (file-seq dir)
            (filter #(.isFile %))
            (sort-by #(.lastModified %) >)
-           (take 50)
+           (take shared/max-artifacts-display)
            vec)
       [])))
 
-(defn- format-file-size [bytes]
+(defn format-file-size
+  "Format a byte count into a human-readable size string."
+  [bytes]
   (cond
-    (< bytes 1024)        (str bytes "B")
-    (< bytes 1048576)     (format "%.1fKB" (/ bytes 1024.0))
-    :else                 (format "%.1fMB" (/ bytes 1048576.0))))
+    (< bytes shared/bytes-per-kb) (str bytes "B")
+    (< bytes shared/bytes-per-mb) (format "%.1fKB" (/ bytes (double shared/bytes-per-kb)))
+    :else                         (format "%.1fMB" (/ bytes (double shared/bytes-per-mb)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+;; Display helpers
+
+(defn- prn-artifact
+  "Print a single provenance field when the value is present."
+  [provenance field-key message-key]
+  (when-let [v (get provenance field-key)]
+    (let [display-val (if (keyword? v) (name v) (str v))]
+      (println (messages/t message-key {:value display-val})))))
+
+(defn- prn-artifact-children
+  "Print a labelled list of child entries from the provenance map."
+  [provenance field-key header-key entry-key entry-param]
+  (when-let [items (seq (get provenance field-key))]
+    (println (messages/t header-key))
+    (doseq [item items]
+      (println (messages/t entry-key {entry-param item})))))
+
+(defn- display-provenance
+  "Render the full provenance block for an artifact."
+  [id provenance]
+  (println)
+  (println (display/style (messages/t :artifact/provenance-header {:id id})
+                          :foreground :cyan :bold true))
+  (prn-artifact provenance :artifact/workflow-id :artifact/provenance-workflow)
+  (prn-artifact provenance :artifact/phase       :artifact/provenance-phase)
+  (prn-artifact provenance :artifact/agent-id     :artifact/provenance-agent)
+  (prn-artifact provenance :artifact/git-commit   :artifact/provenance-commit)
+  (prn-artifact provenance :artifact/created-at   :artifact/provenance-created)
+  (prn-artifact-children provenance :artifact/parent-ids
+                         :artifact/provenance-parents
+                         :artifact/provenance-parent-entry :id)
+  (prn-artifact-children provenance :artifact/files
+                         :artifact/provenance-files
+                         :artifact/provenance-file-entry :path)
+  (println))
+
+;------------------------------------------------------------------------------ Layer 2
 ;; Command implementations
 
 (defn artifact-list-cmd
@@ -65,18 +100,19 @@
    otherwise scans the configured artifacts directory."
   [_opts]
   (println)
-  (println (display/style "Workflow Artifacts" :foreground :cyan :bold true))
-  (println (str "  Directory: " (artifacts-dir)))
+  (println (display/style (messages/t :artifact/header) :foreground :cyan :bold true))
+  (println (messages/t :artifact/directory {:dir (artifacts-dir)}))
   (println)
-  (let [component-result (try-artifact-interface 'ai.miniforge.artifact.interface/list-artifacts)]
+  (let [component-result (shared/try-resolve-fn 'ai.miniforge.artifact.interface/list-artifacts)]
     (cond
       component-result
       (if (seq component-result)
         (doseq [a component-result]
-          (println (str "  " (display/style (get a :artifact/id "?") :foreground :bold)
-                        "  type:" (get a :artifact/type "unknown")
-                        "  wf:"   (get a :artifact/workflow-id "—"))))
-        (println "  No artifacts found."))
+          (println (messages/t :artifact/entry
+                              {:id          (display/style (get a :artifact/id "?") :foreground :bold)
+                               :type        (get a :artifact/type "unknown")
+                               :workflow-id (get a :artifact/workflow-id "—")})))
+        (println (messages/t :artifact/none)))
 
       :else
       (let [files (scan-artifact-files)]
@@ -84,9 +120,10 @@
           (doseq [f files]
             (let [rel-path (str/replace (.getAbsolutePath f)
                                         (str (artifacts-dir) "/") "")]
-              (println (str "  " rel-path
-                            "  (" (format-file-size (.length f)) ")"))))
-          (println "  No artifacts found.")))))
+              (println (messages/t :artifact/file-entry
+                                  {:path rel-path
+                                   :size (format-file-size (.length f))}))))
+          (println (messages/t :artifact/none))))))
   (println))
 
 (defn artifact-provenance-cmd
@@ -97,46 +134,24 @@
   [opts]
   (let [{:keys [id]} opts]
     (if-not id
-      (do (display/print-error
-           (str "Usage: " (app-config/command-string "artifact provenance <id>")))
-          (System/exit 1))
-      (let [provenance (try-artifact-interface
+      (shared/usage-error! :artifact/provenance-usage "artifact provenance <id>")
+      (let [provenance (shared/try-resolve-fn
                         'ai.miniforge.artifact.interface/get-artifact-provenance id)]
         (if provenance
-          (do
-            (println)
-            (println (display/style (str "Artifact Provenance: " id) :foreground :cyan :bold true))
-            (when-let [wf (:artifact/workflow-id provenance)]
-              (println (str "  Workflow:  " wf)))
-            (when-let [phase (:artifact/phase provenance)]
-              (println (str "  Phase:     " (name phase))))
-            (when-let [agent (:artifact/agent-id provenance)]
-              (println (str "  Agent:     " agent)))
-            (when-let [commit (:artifact/git-commit provenance)]
-              (println (str "  Commit:    " commit)))
-            (when-let [created (:artifact/created-at provenance)]
-              (println (str "  Created:   " created)))
-            (when-let [parents (seq (:artifact/parent-ids provenance))]
-              (println (str "  Parents:"))
-              (doseq [p parents]
-                (println (str "    → " p))))
-            (when-let [files (seq (:artifact/files provenance))]
-              (println (str "  Files:"))
-              (doseq [f files]
-                (println (str "    " f))))
-            (println))
+          (display-provenance id provenance)
           ;; Fallback: look for artifact file in artifacts dir
           (let [art-file (io/file (str (artifacts-dir) "/" id))]
             (if (.exists art-file)
               (do
                 (println)
-                (println (display/style (str "Artifact: " id) :foreground :cyan :bold true))
-                (println (str "  Path:  " (.getAbsolutePath art-file)))
-                (println (str "  Size:  " (format-file-size (.length art-file))))
-                (println (str "  Note:  provenance-bundle component not available"))
+                (println (display/style (messages/t :artifact/file-header {:id id})
+                                        :foreground :cyan :bold true))
+                (println (messages/t :artifact/file-path {:path (.getAbsolutePath art-file)}))
+                (println (messages/t :artifact/file-size {:size (format-file-size (.length art-file))}))
+                (println (messages/t :artifact/no-provenance))
                 (println))
-              (do (display/print-error (str "Artifact not found: " id))
-                  (System/exit 1)))))))))
+              (do (display/print-error (messages/t :artifact/not-found {:id id}))
+                  (shared/exit! 1)))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

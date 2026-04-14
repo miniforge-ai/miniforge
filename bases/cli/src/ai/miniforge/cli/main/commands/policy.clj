@@ -28,7 +28,9 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
-   [ai.miniforge.cli.main.display :as display]))
+   [ai.miniforge.cli.main.commands.shared :as shared]
+   [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
@@ -61,14 +63,6 @@
   []
   ["foundations-1.0.0" "miniforge-standards"])
 
-(defn- try-policy-interface
-  "Attempt to call a policy-pack interface function. Returns nil on failure."
-  [fn-sym & args]
-  (try
-    (when-let [f (requiring-resolve fn-sym)]
-      (apply f args))
-    (catch Exception _ nil)))
-
 ;------------------------------------------------------------------------------ Layer 1
 ;; Command implementations
 
@@ -78,10 +72,10 @@
    Shows installed packs from ~/.miniforge/packs/ and built-in classpath packs."
   [_opts]
   (println)
-  (println (display/style "Available Policy Packs" :foreground :cyan :bold true))
+  (println (display/style (messages/t :policy/header) :foreground :cyan :bold true))
   (println)
   ;; Try the component interface first
-  (let [component-packs (try-policy-interface 'ai.miniforge.policy-pack.interface/list-packs)]
+  (let [component-packs (shared/try-resolve-fn 'ai.miniforge.policy-pack.interface/list-packs)]
     (cond
       component-packs
       (if (seq component-packs)
@@ -89,7 +83,7 @@
           (println (str "  " (display/style (str (get pack :pack/id pack)) :foreground :bold)
                         (when-let [v (:pack/version pack)] (str " v" v))
                         (when-let [d (:pack/description pack)] (str "  —  " d)))))
-        (println "  No policy packs found."))
+        (println (messages/t :policy/none)))
 
       :else
       (do
@@ -97,22 +91,22 @@
         (let [files (installed-pack-files)]
           (if (seq files)
             (do
-              (println (display/style "  Installed packs:" :foreground :cyan))
+              (println (display/style (messages/t :policy/installed-header) :foreground :cyan))
               (doseq [f files]
                 (let [pack (try (edn/read-string (slurp f)) (catch Exception _ nil))
                       id   (or (some-> (:pack/id pack) name)
                                (subs (.getName f) 0 (- (count (.getName f)) (count ".pack.edn"))))]
                   (println (str "    " id
                                 (when-let [v (:pack/version pack)] (str " v" v)))))))
-            (println (str "  No installed packs. (dir: " (packs-dir) ")"))))
+            (println (messages/t :policy/no-installed {:dir (packs-dir)}))))
         ;; Built-in classpath packs
         (let [builtins (filter #(io/resource (str "policy_pack/packs/" % ".pack.edn"))
                                (builtin-pack-ids))]
           (when (seq builtins)
             (println)
-            (println (display/style "  Built-in packs (classpath):" :foreground :cyan))
+            (println (display/style (messages/t :policy/builtin-header) :foreground :cyan))
             (doseq [id builtins]
-              (println (str "    " id " (built-in)"))))))))
+              (println (messages/t :policy/builtin-entry {:id id}))))))))
   (println))
 
 (defn policy-show-cmd
@@ -122,32 +116,36 @@
   [opts]
   (let [{:keys [pack-id]} opts]
     (if-not pack-id
-      (do (display/print-error
-           (str "Usage: " (app-config/command-string "policy show <pack-id>")))
-          (System/exit 1))
+      (shared/usage-error! :policy/show-usage "policy show <pack-id>")
       (let [pack (or (load-pack-from-resource pack-id)
                      (load-pack-from-path (str (packs-dir) "/" pack-id ".pack.edn"))
-                     (try-policy-interface 'ai.miniforge.policy-pack.interface/load-pack pack-id))]
+                     (shared/try-resolve-fn 'ai.miniforge.policy-pack.interface/load-pack pack-id))]
         (if-not pack
-          (do (display/print-error (str "Pack not found: " pack-id
-                                      "\nRun `" (app-config/command-string "policy list") "` to see available packs."))
-              (System/exit 1))
+          (do (display/print-error
+               (messages/t :policy/not-found
+                          {:id pack-id
+                           :command (app-config/command-string "policy list")}))
+              (shared/exit! 1))
           (do
             (println)
-            (println (display/style (str "Pack: " (get pack :pack/id pack-id)) :foreground :cyan :bold true))
+            (println (display/style (messages/t :policy/show-header
+                                               {:id (get pack :pack/id pack-id)})
+                                    :foreground :cyan :bold true))
             (when-let [v (:pack/version pack)]
-              (println (str "  Version:     " v)))
+              (println (messages/t :policy/show-version {:value v})))
             (when-let [d (:pack/description pack)]
-              (println (str "  Description: " d)))
+              (println (messages/t :policy/show-description {:value d})))
             (let [rules (get pack :pack/rules [])]
-              (println (str "  Rules:       " (count rules)))
+              (println (messages/t :policy/show-rules-count {:count (count rules)}))
               (println)
               (doseq [rule rules]
-                (let [id     (get rule :rule/id "unknown")
+                (let [id      (get rule :rule/id "unknown")
                       always? (get rule :rule/always-apply false)
-                      desc   (get rule :rule/description)]
+                      desc    (get rule :rule/description)]
                   (println (str "  • " (display/style (str id) :foreground :bold)
-                                (when always? (display/style " [always]" :foreground :yellow))
+                                (when always?
+                                  (display/style (messages/t :policy/show-always-tag)
+                                                :foreground :yellow))
                                 (when desc (str "\n    " desc)))))))
             (println)))))))
 
@@ -159,17 +157,15 @@
   [opts]
   (let [{:keys [path]} opts]
     (if-not path
-      (do (display/print-error
-           (str "Usage: " (app-config/command-string "policy install <path>")))
-          (System/exit 1))
+      (shared/usage-error! :policy/install-usage "policy install <path>")
       (if-not (fs/exists? path)
-        (do (display/print-error (str "Pack file not found: " path))
-            (System/exit 1))
+        (do (display/print-error (messages/t :policy/install-not-found {:path path}))
+            (shared/exit! 1))
         (let [pack (try (edn/read-string (slurp (str path)))
                         (catch Exception _e nil))]
           (if-not pack
-            (do (display/print-error (str "Invalid pack file — must be EDN: " path))
-                (System/exit 1))
+            (do (display/print-error (messages/t :policy/install-invalid {:path path}))
+                (shared/exit! 1))
             (let [dest-dir  (packs-dir)
                   file-name (fs/file-name path)
                   ;; Ensure .pack.edn suffix
@@ -179,10 +175,10 @@
                   dest-path (str dest-dir "/" dest-name)]
               (fs/create-dirs dest-dir)
               (fs/copy path dest-path {:replace-existing true})
-              (display/print-success (str "Installed: " dest-name))
-              (println (str "  Location: " dest-path))
+              (display/print-success (messages/t :policy/install-success {:name dest-name}))
+              (println (messages/t :policy/install-location {:path dest-path}))
               (when-let [id (:pack/id pack)]
-                (println (str "  Pack ID:  " id))))))))))
+                (println (messages/t :policy/install-pack-id {:id id}))))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

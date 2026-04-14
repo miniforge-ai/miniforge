@@ -27,59 +27,63 @@
    [babashka.fs :as fs]
    [babashka.process :as process]
    [clojure.string :as str]
-   [ai.miniforge.cli.app-config :as app-config]
-   [ai.miniforge.cli.main.display :as display]))
+   [ai.miniforge.cli.main.commands.shared :as shared]
+   [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
 
-(defn- try-etl-interface [fn-sym & args]
-  (try
-    (when-let [f (requiring-resolve fn-sym)]
-      (apply f args))
-    (catch Exception _ nil)))
+(defn validate-git-url
+  "Return true when url begins with a recognised git transport prefix."
+  [url]
+  (boolean
+   (or (str/starts-with? url "https://")
+       (str/starts-with? url "git@")
+       (str/starts-with? url "ssh://")
+       (str/starts-with? url "http://"))))
 
-(defn- validate-git-url [url]
-  (or (str/starts-with? url "https://")
-      (str/starts-with? url "git@")
-      (str/starts-with? url "ssh://")
-      (str/starts-with? url "http://")))
-
-(defn- git-clone-temp [url]
+(defn- git-clone-temp
+  "Shallow-clone `url` into a temporary directory.
+   Returns a schema/success or schema/failure result."
+  [url]
   (try
     (let [tmp-dir (str (System/getProperty "java.io.tmpdir") "/miniforge-etl-"
                        (System/currentTimeMillis))
           result  (process/sh "git" "clone" "--depth" "1" url tmp-dir)]
       (if (zero? (:exit result))
-        {:success? true :path tmp-dir}
-        {:success? false :error (str/trim (:err result))}))
+        (schema/success :path tmp-dir)
+        (schema/failure :path (str/trim (:err result)))))
     (catch Exception e
-      {:success? false :error (ex-message e)})))
+      (schema/failure :path (ex-message e)))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Fallback analysis
 
 (defn- etl-repo-fallback
   "Clone repo and run repo-analyzer as ETL fallback."
   [url]
   (let [clone-result (git-clone-temp url)]
-    (if-not (:success? clone-result)
-      (display/print-error (str "Clone failed: " (:error clone-result)))
+    (if (schema/failed? clone-result)
+      (display/print-error (messages/t :etl/clone-failed {:error (:error clone-result)}))
       (let [repo-path (:path clone-result)]
         (try
           (let [analyze-fn (requiring-resolve 'ai.miniforge.cli.repo-analyzer/analyze-repo)
                 analysis   (analyze-fn repo-path)]
-            (display/print-success "Repository analysis complete (ETL fallback).")
-            (println (str "  Technologies: " (pr-str (:technologies analysis))))
-            (println (str "  Git host:     " (get analysis :git-host "unknown")))
-            (println (str "  Packs:        " (pr-str (:packs analysis))))
+            (display/print-success (messages/t :etl/analysis-complete))
+            (println (messages/t :etl/technologies {:value (pr-str (:technologies analysis))}))
+            (println (messages/t :etl/git-host {:value (get analysis :git-host "unknown")}))
+            (println (messages/t :etl/packs {:value (pr-str (:packs analysis))}))
             (println)
-            (println (display/style "Note:" :foreground :yellow)
-                     " Install the etl-pipe component for full ETL support."))
+            (println (display/style (messages/t :etl/install-note) :foreground :yellow)))
           (catch Exception e
-            (display/print-error (str "Analysis failed: " (ex-message e))))
+            (display/print-error (messages/t :etl/analysis-failed {:error (ex-message e)})))
           (finally
             (try (fs/delete-tree repo-path)
                  (catch Exception _ nil))))))))
 
-;------------------------------------------------------------------------------ Layer 1
+;------------------------------------------------------------------------------ Layer 2
 ;; Command implementation
 
 (defn etl-repo-cmd
@@ -93,30 +97,26 @@
   [opts]
   (let [{:keys [url]} opts]
     (if-not url
-      (do (display/print-error
-           (str "Usage: " (app-config/command-string "etl repo <url>")))
-          (System/exit 1))
+      (shared/usage-error! :etl/repo-usage "etl repo <url>")
       (if-not (validate-git-url url)
-        (do (display/print-error
-             (str "Invalid repository URL: " url
-                  "\nExpected format: https://github.com/org/repo or git@github.com:org/repo"))
-            (System/exit 1))
+        (do (display/print-error (messages/t :etl/invalid-url {:url url}))
+            (shared/exit! 1))
         (do
-          (display/print-info (str "Running ETL on repository: " url))
-          (let [result (try-etl-interface 'ai.miniforge.etl-pipe.interface/etl-repo url opts)]
+          (display/print-info (messages/t :etl/running {:url url}))
+          (let [result (shared/try-resolve-fn 'ai.miniforge.etl-pipe.interface/etl-repo url opts)]
             (cond
               ;; Component available and successful
-              (and result (:success? result))
+              (and result (schema/succeeded? result))
               (do
-                (display/print-success "ETL complete.")
+                (display/print-success (messages/t :etl/complete))
                 (when-let [artifacts (:artifacts result)]
-                  (println (str "  Artifacts produced: " (count artifacts))))
+                  (println (messages/t :etl/artifacts-produced {:count (count artifacts)})))
                 (when-let [path (:output-path result)]
-                  (println (str "  Output: " path))))
+                  (println (messages/t :etl/output-path {:path path}))))
 
               ;; Component returned error
-              (and result (not (:success? result)))
-              (display/print-error (str "ETL failed: " (get result :error "unknown error")))
+              (and result (schema/failed? result))
+              (display/print-error (messages/t :etl/failed {:error (get result :error "unknown error")}))
 
               ;; Component not available — fallback to repo analysis
               :else

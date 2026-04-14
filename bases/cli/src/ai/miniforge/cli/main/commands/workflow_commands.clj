@@ -27,7 +27,9 @@
    [clojure.edn :as edn]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.main.commands.run :as cmd-run]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -43,7 +45,7 @@
          (keep #(try (edn/read-string %) (catch Exception _ nil))))
     (catch Exception _ [])))
 
-(defn- derive-status
+(defn derive-status
   "Derive a workflow status label from its event stream."
   [events]
   (let [by-type (group-by :event/type events)]
@@ -70,9 +72,7 @@
   [opts]
   (let [{:keys [spec]} opts]
     (if-not spec
-      (do (display/print-error
-           (str "Usage: " (app-config/command-string "workflow execute <spec-file>")))
-          (System/exit 1))
+      (shared/usage-error! :workflow-cmd/execute-usage "workflow execute <spec-file>")
       (cmd-run/run-cmd opts))))
 
 (defn workflow-status-cmd
@@ -83,14 +83,12 @@
   [opts]
   (let [{:keys [id]} opts]
     (if-not id
-      (do (display/print-error
-           (str "Usage: " (app-config/command-string "workflow status <id>")))
-          (System/exit 1))
+      (shared/usage-error! :workflow-cmd/status-usage "workflow status <id>")
       (let [events-dir (app-config/events-dir)
             event-file (str events-dir "/" id ".edn")]
         (if-not (fs/exists? event-file)
-          (do (display/print-error (str "No workflow found with ID: " id))
-              (System/exit 1))
+          (do (display/print-error (messages/t :workflow-cmd/status-not-found {:id id}))
+              (shared/exit! 1))
           (let [events  (read-event-lines event-file)
                 status  (derive-status events)
                 started (first (filter #(= :workflow/started (:event/type %)) events))
@@ -99,12 +97,13 @@
                              (filter #(= :workflow/phase-completed (:event/type %)))
                              (mapv #(select-keys % [:workflow/phase :phase/outcome :phase/duration-ms])))]
             (println)
-            (println (display/style (str "Workflow: " id) :foreground :cyan :bold true))
-            (println (str "  Status:  " (colorize-status status)))
+            (println (display/style (messages/t :workflow-cmd/status-header {:id id})
+                                    :foreground :cyan :bold true))
+            (println (messages/t :workflow-cmd/status-status {:value (colorize-status status)}))
             (when-let [ts (:event/timestamp started)]
-              (println (str "  Started: " ts)))
+              (println (messages/t :workflow-cmd/status-started {:value ts})))
             (when (seq phases)
-              (println "  Phases:")
+              (println (messages/t :workflow-cmd/status-phases))
               (doseq [{phase :workflow/phase outcome :phase/outcome dur :phase/duration-ms} phases]
                 (let [ok? (= :success outcome)]
                   (println (str "    "
@@ -112,8 +111,8 @@
                                 " " (name phase)
                                 (when dur (str "  (" dur "ms)")) )))))
             (when failed
-              (println (str "  Error:   "
-                            (get failed :workflow/failure-reason "unknown"))))
+              (println (messages/t :workflow-cmd/status-error
+                                  {:value (get failed :workflow/failure-reason "unknown")})))
             (println)))))))
 
 (defn workflow-cancel-cmd
@@ -124,19 +123,21 @@
   [opts]
   (let [{:keys [id]} opts]
     (if-not id
-      (do (display/print-error
-           (str "Usage: " (app-config/command-string "workflow cancel <id>")))
-          (System/exit 1))
+      (shared/usage-error! :workflow-cmd/cancel-usage "workflow cancel <id>")
       (let [commands-dir (app-config/commands-dir (str id))
-            cmd-file     (str commands-dir "/cancel-" (System/currentTimeMillis) ".edn")]
+            cmd-file     (str commands-dir "/cancel-" (System/currentTimeMillis) ".edn")
+            wf-id-str    (str id)
+            timestamp    (java.util.Date.)
+            cmd-data     {:command "stop"
+                          :workflow-id wf-id-str
+                          :timestamp timestamp}]
         (try
           (fs/create-dirs commands-dir)
-          (spit cmd-file (pr-str {:command "stop"
-                                  :workflow-id (str id)
-                                  :timestamp (java.util.Date.)}))
-          (display/print-success (str "Cancel signal sent to workflow: " id))
+          (spit cmd-file (pr-str cmd-data))
+          (display/print-success (messages/t :workflow-cmd/cancel-success {:id id}))
           (catch Exception e
-            (display/print-error (str "Failed to cancel workflow: " (ex-message e)))))))))
+            (display/print-error (messages/t :workflow-cmd/cancel-failed
+                                            {:error (ex-message e)}))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

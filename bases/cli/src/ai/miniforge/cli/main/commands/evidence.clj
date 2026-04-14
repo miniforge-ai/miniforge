@@ -27,19 +27,15 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
-   [ai.miniforge.cli.main.display :as display]))
+   [ai.miniforge.cli.main.commands.shared :as shared]
+   [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
 
 (defn- evidence-dir []
   (str (app-config/home-dir) "/evidence"))
-
-(defn- try-evidence-interface [fn-sym & args]
-  (try
-    (when-let [f (requiring-resolve fn-sym)]
-      (apply f args))
-    (catch Exception _ nil)))
 
 (defn- scan-evidence-dir []
   (let [dir (io/file (evidence-dir))]
@@ -49,16 +45,44 @@
            (sort-by #(.lastModified %) >)
            vec))))
 
-(defn- load-bundle-from-file [file]
+(defn load-bundle-from-file
+  "Load an evidence bundle from an EDN file. Returns nil on failure."
+  [file]
   (try
-    (cond
-      (str/ends-with? (.getName file) ".edn")
-      (edn/read-string (slurp file))
-
-      :else nil)
+    (when (str/ends-with? (.getName file) ".edn")
+      (edn/read-string (slurp file)))
     (catch Exception _ nil)))
 
 ;------------------------------------------------------------------------------ Layer 1
+;; Display helpers
+
+(defn- display-bundle-detail
+  "Render the detail view for a single evidence bundle."
+  [id bundle]
+  (println)
+  (println (display/style (messages/t :evidence/show-header {:id id})
+                          :foreground :cyan :bold true))
+  (println (messages/t :evidence/show-workflow {:value (get bundle :bundle/workflow-id "—")}))
+  (println (messages/t :evidence/show-status {:value (get bundle :bundle/status "unknown")}))
+  (println (messages/t :evidence/show-created {:value (get bundle :bundle/created-at "—")}))
+  (when-let [artifacts (:bundle/artifacts bundle)]
+    (println (messages/t :evidence/show-artifacts {:count (count artifacts)}))
+    (doseq [a (take 10 artifacts)]
+      (println (messages/t :evidence/show-artifact-entry
+                          {:type (get a :artifact/type "unknown")
+                           :id   (get a :artifact/id "")}))))
+  (when-let [phases (:bundle/phases bundle)]
+    (println (messages/t :evidence/show-phases {:count (count phases)})))
+  (println))
+
+(defn- load-bundle-for-show
+  "Load a bundle from the component interface or the filesystem."
+  [id]
+  (or (shared/try-resolve-fn 'ai.miniforge.evidence-bundle.interface/get-bundle id)
+      (let [f (io/file (str (evidence-dir) "/" id ".edn"))]
+        (when (.exists f) (load-bundle-from-file f)))))
+
+;------------------------------------------------------------------------------ Layer 2
 ;; Command implementations
 
 (defn evidence-list-cmd
@@ -68,17 +92,18 @@
    otherwise scans ~/.miniforge/evidence/."
   [_opts]
   (println)
-  (println (display/style "Evidence Bundles" :foreground :cyan :bold true))
+  (println (display/style (messages/t :evidence/header) :foreground :cyan :bold true))
   (println)
-  (let [component-result (try-evidence-interface 'ai.miniforge.evidence-bundle.interface/list-bundles)]
+  (let [component-result (shared/try-resolve-fn 'ai.miniforge.evidence-bundle.interface/list-bundles)]
     (cond
       component-result
       (if (seq component-result)
         (doseq [bundle component-result]
-          (println (str "  " (display/style (get bundle :bundle/id "unknown") :foreground :bold)
-                        "  wf:" (get bundle :bundle/workflow-id "—")
-                        "  (" (get bundle :bundle/status "unknown") ")")))
-        (println "  No evidence bundles found."))
+          (println (messages/t :evidence/bundle-entry
+                              {:id          (display/style (get bundle :bundle/id "unknown") :foreground :bold)
+                               :workflow-id (get bundle :bundle/workflow-id "—")
+                               :status      (get bundle :bundle/status "unknown")})))
+        (println (messages/t :evidence/none)))
 
       :else
       (let [files (scan-evidence-dir)]
@@ -94,8 +119,8 @@
                             (when (and bundle (:bundle/status bundle))
                               (str "  (" (:bundle/status bundle) ")"))))))
           (do
-            (println "  No evidence bundles found.")
-            (println (str "  Evidence dir: " (evidence-dir))))))))
+            (println (messages/t :evidence/none))
+            (println (messages/t :evidence/evidence-dir {:dir (evidence-dir)})))))))
   (println))
 
 (defn evidence-show-cmd
@@ -103,31 +128,15 @@
   [opts]
   (let [{:keys [id]} opts]
     (if-not id
-      (do (display/print-error
-           (str "Usage: " (app-config/command-string "evidence show <id>")))
-          (System/exit 1))
-      (let [bundle (or (try-evidence-interface 'ai.miniforge.evidence-bundle.interface/get-bundle id)
-                       ;; Filesystem fallback
-                       (let [f (io/file (str (evidence-dir) "/" id ".edn"))]
-                         (when (.exists f) (load-bundle-from-file f))))]
+      (shared/usage-error! :evidence/show-usage "evidence show <id>")
+      (let [bundle (load-bundle-for-show id)]
         (if-not bundle
-          (do (display/print-error (str "Evidence bundle not found: " id
-                                      "\nRun `" (app-config/command-string "evidence list") "` to see available bundles."))
-              (System/exit 1))
-          (do
-            (println)
-            (println (display/style (str "Evidence Bundle: " id) :foreground :cyan :bold true))
-            (println (str "  Workflow:  " (get bundle :bundle/workflow-id "—")))
-            (println (str "  Status:    " (get bundle :bundle/status "unknown")))
-            (println (str "  Created:   " (get bundle :bundle/created-at "—")))
-            (when-let [artifacts (:bundle/artifacts bundle)]
-              (println (str "  Artifacts: " (count artifacts)))
-              (doseq [a (take 10 artifacts)]
-                (println (str "    • " (get a :artifact/type "unknown")
-                              " — " (get a :artifact/id "")))))
-            (when-let [phases (:bundle/phases bundle)]
-              (println (str "  Phases:    " (count phases))))
-            (println)))))))
+          (do (display/print-error
+               (messages/t :evidence/not-found
+                          {:id id
+                           :command (app-config/command-string "evidence list")}))
+              (shared/exit! 1))
+          (display-bundle-detail id bundle))))))
 
 (defn evidence-export-cmd
   "Export an evidence bundle to a file in the requested format.
@@ -137,25 +146,23 @@
   (let [{:keys [id format]} opts
         fmt (or format "edn")]
     (if-not id
-      (do (display/print-error
-           (str "Usage: " (app-config/command-string "evidence export <id> <format>")))
-          (System/exit 1))
-      (let [result (try-evidence-interface
+      (shared/usage-error! :evidence/export-usage "evidence export <id> <format>")
+      (let [result (shared/try-resolve-fn
                     'ai.miniforge.evidence-bundle.interface/export-bundle id fmt)]
         (if result
           (do
-            (display/print-success (str "Exported evidence bundle: " id))
-            (println (str "  Format: " fmt))
+            (display/print-success (messages/t :evidence/export-success {:id id}))
+            (println (messages/t :evidence/export-format {:format fmt}))
             (when-let [path (:path result)]
-              (println (str "  Path:   " path))))
+              (println (messages/t :evidence/export-path {:path path}))))
           ;; Fallback: write raw EDN from filesystem
           (let [src (io/file (str (evidence-dir) "/" id ".edn"))]
             (if (.exists src)
               (let [dest (str (evidence-dir) "/" id "-export." fmt)]
                 (fs/copy (str src) dest {:replace-existing true})
-                (display/print-success (str "Exported (raw): " dest)))
-              (do (display/print-error (str "Evidence bundle not found: " id))
-                  (System/exit 1)))))))))
+                (display/print-success (messages/t :evidence/export-raw {:path dest})))
+              (do (display/print-error (messages/t :evidence/export-not-found {:id id}))
+                  (shared/exit! 1)))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
