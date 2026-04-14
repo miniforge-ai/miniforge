@@ -65,6 +65,23 @@
         ai.miniforge/patterns {:local/root "../../components/patterns"}
         ;; Workflow compliance scanning (phase-level compliance checks)
         ai.miniforge/workflow-compliance-scanner {:local/root "../../components/workflow-compliance-scanner"}
+        ;; Linter connector (pre-verify lint gate)
+        ai.miniforge/connector-linter {:local/root "../../components/connector-linter"}
+        ai.miniforge/compliance-scanner {:local/root "../../components/compliance-scanner"}
+        ai.miniforge/connector {:local/root "../../components/connector"}
+        ai.miniforge/connector-auth {:local/root "../../components/connector-auth"}
+        ai.miniforge/connector-retry {:local/root "../../components/connector-retry"}
+        ai.miniforge/repo-index {:local/root "../../components/repo-index"}
+        ;; Adapter for Claude Code control plane integration
+        ai.miniforge/adapter-claude-code {:local/root "../../components/adapter-claude-code"}
+        ;; DAG primitives (shared types for dag-executor)
+        ai.miniforge/dag-primitives {:local/root "../../components/dag-primitives"}
+        ;; Decision component (control plane decisions)
+        ai.miniforge/decision {:local/root "../../components/decision"}
+        ;; Semantic analysis for code understanding
+        ai.miniforge/semantic-analyzer {:local/root "../../components/semantic-analyzer"}
+        ;; Context packing for agent prompts
+        ai.miniforge/context-pack {:local/root "../../components/context-pack"}
         ;; Meta-agent loop: learning layer (N1 §3.3)
         ai.miniforge/failure-classifier {:local/root "../../components/failure-classifier"}
         ai.miniforge/reliability {:local/root "../../components/reliability"}
