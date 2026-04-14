@@ -35,7 +35,27 @@
 ai.miniforge/messages {:local/root "../../components/messages"}
         ai.miniforge/patterns {:local/root "../../components/patterns"}
         ai.miniforge/compliance-scanner {:local/root "../../components/compliance-scanner"}
-        ai.miniforge/workflow-compliance-scanner {:local/root "../../components/workflow-compliance-scanner"}}
+        ai.miniforge/workflow-compliance-scanner {:local/root "../../components/workflow-compliance-scanner"}
+        ;; Transitive deps needed for classpath completeness
+        ai.miniforge/connector-linter {:local/root "../../components/connector-linter"}
+        ai.miniforge/connector {:local/root "../../components/connector"}
+        ai.miniforge/connector-auth {:local/root "../../components/connector-auth"}
+        ai.miniforge/connector-retry {:local/root "../../components/connector-retry"}
+        ai.miniforge/repo-index {:local/root "../../components/repo-index"}
+        ai.miniforge/semantic-analyzer {:local/root "../../components/semantic-analyzer"}
+        ai.miniforge/context-pack {:local/root "../../components/context-pack"}
+        ai.miniforge/adapter-claude-code {:local/root "../../components/adapter-claude-code"}
+        ai.miniforge/control-plane {:local/root "../../components/control-plane"}
+        ai.miniforge/control-plane-adapter {:local/root "../../components/control-plane-adapter"}
+        ai.miniforge/dag-primitives {:local/root "../../components/dag-primitives"}
+        ai.miniforge/decision {:local/root "../../components/decision"}
+        ai.miniforge/reporting {:local/root "../../components/reporting"}
+        ai.miniforge/release-executor {:local/root "../../components/release-executor"}
+        ai.miniforge/pr-lifecycle {:local/root "../../components/pr-lifecycle"}
+        ai.miniforge/pr-train {:local/root "../../components/pr-train"}
+        ai.miniforge/pr-sync {:local/root "../../components/pr-sync"}
+        ai.miniforge/repo-dag {:local/root "../../components/repo-dag"}
+        ai.miniforge/task-executor {:local/root "../../components/task-executor"}}
 
  :aliases
  {:uberjar
