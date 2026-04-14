@@ -96,12 +96,16 @@
                 phases  (->> events
                              (filter #(= :workflow/phase-completed (:event/type %)))
                              (mapv #(select-keys % [:workflow/phase :phase/outcome :phase/duration-ms])))]
-            (println)
-            (println (display/style (messages/t :workflow-cmd/status-header {:id id})
-                                    :foreground :cyan :bold true))
-            (println (messages/t :workflow-cmd/status-status {:value (colorize-status status)}))
-            (when-let [ts (:event/timestamp started)]
-              (println (messages/t :workflow-cmd/status-started {:value ts})))
+            (display/render-detail
+             {:header        :workflow-cmd/status-header
+              :header-params {:id id}
+              :fields        [[:wf/status  :workflow-cmd/status-status  {:transform colorize-status}]
+                              [:wf/started :workflow-cmd/status-started]
+                              [:wf/error   :workflow-cmd/status-error]]}
+             {:wf/status  status
+              :wf/started (:event/timestamp started)
+              :wf/error   (when failed (get failed :workflow/failure-reason "unknown"))})
+            ;; Phases: custom rendering for per-phase check/cross marks
             (when (seq phases)
               (println (messages/t :workflow-cmd/status-phases))
               (doseq [{phase :workflow/phase outcome :phase/outcome dur :phase/duration-ms} phases]
@@ -109,11 +113,8 @@
                   (println (str "    "
                                 (display/style (if ok? "✓" "✗") :foreground (if ok? :green :red))
                                 " " (name phase)
-                                (when dur (str "  (" dur "ms)")) )))))
-            (when failed
-              (println (messages/t :workflow-cmd/status-error
-                                  {:value (get failed :workflow/failure-reason "unknown")})))
-            (println)))))))
+                                (when dur (str "  (" dur "ms)"))))))
+              (println))))))))
 
 (defn workflow-cancel-cmd
   "Cancel a running workflow by writing a stop command file.

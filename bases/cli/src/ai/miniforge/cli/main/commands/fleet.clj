@@ -59,6 +59,14 @@
   (display/print-info (messages/t :fleet/stopping-daemon))
   (println (messages/t :fleet/daemon-todo)))
 
+(def ^:private fleet-status-spec
+  {:header :fleet/status-header
+   :fields [[:fleet/repositories     :fleet/repositories      {:param :count}]
+            [:fleet/active-workflows :fleet/active-workflows  {:param :count}]
+            [:fleet/pending-workflows :fleet/pending-workflows {:param :count}]
+            [:fleet/completed        :fleet/completed          {:param :count}]
+            [:fleet/failed           :fleet/failed             {:param :count}]]})
+
 (defn fleet-status-cmd
   [opts default-config-path default-config]
   (let [config (load-config (:config opts) default-config-path default-config)
@@ -67,16 +75,13 @@
         state (if (fs/exists? state-file)
                 (edn/read-string (slurp state-file))
                 {:workflows {:active 0 :pending 0 :completed 0 :failed 0}})]
-
-    (println)
-    (println (display/style (messages/t :fleet/status-header) :foreground :cyan :bold true))
-    (println)
-    (println (messages/t :fleet/repositories {:count (count repos)}))
-    (println (messages/t :fleet/active-workflows {:count (get-in state [:workflows :active] 0)}))
-    (println (messages/t :fleet/pending-workflows {:count (get-in state [:workflows :pending] 0)}))
-    (println (messages/t :fleet/completed {:count (get-in state [:workflows :completed] 0)}))
-    (println (messages/t :fleet/failed {:count (get-in state [:workflows :failed] 0)}))
-    (println)))
+    (display/render-detail
+     fleet-status-spec
+     {:fleet/repositories     (count repos)
+      :fleet/active-workflows (get-in state [:workflows :active] 0)
+      :fleet/pending-workflows (get-in state [:workflows :pending] 0)
+      :fleet/completed        (get-in state [:workflows :completed] 0)
+      :fleet/failed           (get-in state [:workflows :failed] 0)})))
 
 (defn fleet-add-cmd
   [opts default-config-path default-config]

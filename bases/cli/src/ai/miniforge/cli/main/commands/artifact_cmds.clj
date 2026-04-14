@@ -56,39 +56,27 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Display helpers
 
-(defn- prn-artifact
-  "Print a single provenance field when the value is present."
-  [provenance field-key message-key]
-  (when-let [v (get provenance field-key)]
-    (let [display-val (if (keyword? v) (name v) (str v))]
-      (println (messages/t message-key {:value display-val})))))
+(defn- keyword->str
+  "Convert a value to string, rendering keywords as their name."
+  [v]
+  (if (keyword? v) (name v) (str v)))
 
-(defn- prn-artifact-children
-  "Print a labelled list of child entries from the provenance map."
-  [provenance field-key header-key entry-key entry-param]
-  (when-let [items (seq (get provenance field-key))]
-    (println (messages/t header-key))
-    (doseq [item items]
-      (println (messages/t entry-key {entry-param item})))))
+(def ^:private provenance-spec
+  {:header   :artifact/provenance-header
+   :fields   [[:artifact/workflow-id :artifact/provenance-workflow {:transform keyword->str}]
+              [:artifact/phase       :artifact/provenance-phase    {:transform keyword->str}]
+              [:artifact/agent-id    :artifact/provenance-agent    {:transform keyword->str}]
+              [:artifact/git-commit  :artifact/provenance-commit   {:transform keyword->str}]
+              [:artifact/created-at  :artifact/provenance-created  {:transform keyword->str}]]
+   :sections [{:key :artifact/parent-ids :header :artifact/provenance-parents
+               :entry :artifact/provenance-parent-entry :entry-fn (fn [id] {:id id})}
+              {:key :artifact/files :header :artifact/provenance-files
+               :entry :artifact/provenance-file-entry :entry-fn (fn [p] {:path p})}]})
 
 (defn- display-provenance
   "Render the full provenance block for an artifact."
   [id provenance]
-  (println)
-  (println (display/style (messages/t :artifact/provenance-header {:id id})
-                          :foreground :cyan :bold true))
-  (prn-artifact provenance :artifact/workflow-id :artifact/provenance-workflow)
-  (prn-artifact provenance :artifact/phase       :artifact/provenance-phase)
-  (prn-artifact provenance :artifact/agent-id     :artifact/provenance-agent)
-  (prn-artifact provenance :artifact/git-commit   :artifact/provenance-commit)
-  (prn-artifact provenance :artifact/created-at   :artifact/provenance-created)
-  (prn-artifact-children provenance :artifact/parent-ids
-                         :artifact/provenance-parents
-                         :artifact/provenance-parent-entry :id)
-  (prn-artifact-children provenance :artifact/files
-                         :artifact/provenance-files
-                         :artifact/provenance-file-entry :path)
-  (println))
+  (display/render-detail (assoc provenance-spec :header-params {:id id}) provenance))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Command implementations
@@ -143,13 +131,14 @@
           (let [art-file (io/file (str (artifacts-dir) "/" id))]
             (if (.exists art-file)
               (do
-                (println)
-                (println (display/style (messages/t :artifact/file-header {:id id})
-                                        :foreground :cyan :bold true))
-                (println (messages/t :artifact/file-path {:path (.getAbsolutePath art-file)}))
-                (println (messages/t :artifact/file-size {:size (format-file-size (.length art-file))}))
-                (println (messages/t :artifact/no-provenance))
-                (println))
+                (display/render-detail
+                 {:header        :artifact/file-header
+                  :header-params {:id id}
+                  :fields        [[:file/path :artifact/file-path {:param :path}]
+                                  [:file/size :artifact/file-size {:param :size}]]}
+                 {:file/path (.getAbsolutePath art-file)
+                  :file/size (format-file-size (.length art-file))})
+                (println (messages/t :artifact/no-provenance)))
               (do (display/print-error (messages/t :artifact/not-found {:id id}))
                   (shared/exit! 1)))))))))
 

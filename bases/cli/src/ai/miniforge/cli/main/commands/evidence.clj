@@ -56,24 +56,21 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Display helpers
 
+(def ^:private bundle-detail-spec
+  {:header   :evidence/show-header
+   :fields   [[:bundle/workflow-id :evidence/show-workflow {:default "—"}]
+              [:bundle/status      :evidence/show-status   {:default "unknown"}]
+              [:bundle/created-at  :evidence/show-created  {:default "—"}]]
+   :sections [{:key :bundle/artifacts :header :evidence/show-artifacts
+               :entry :evidence/show-artifact-entry :max 10
+               :entry-fn (fn [a] {:type (get a :artifact/type "unknown")
+                                   :id   (get a :artifact/id "")})}
+              {:key :bundle/phases :header :evidence/show-phases}]})
+
 (defn- display-bundle-detail
   "Render the detail view for a single evidence bundle."
   [id bundle]
-  (println)
-  (println (display/style (messages/t :evidence/show-header {:id id})
-                          :foreground :cyan :bold true))
-  (println (messages/t :evidence/show-workflow {:value (get bundle :bundle/workflow-id "—")}))
-  (println (messages/t :evidence/show-status {:value (get bundle :bundle/status "unknown")}))
-  (println (messages/t :evidence/show-created {:value (get bundle :bundle/created-at "—")}))
-  (when-let [artifacts (:bundle/artifacts bundle)]
-    (println (messages/t :evidence/show-artifacts {:count (count artifacts)}))
-    (doseq [a (take 10 artifacts)]
-      (println (messages/t :evidence/show-artifact-entry
-                          {:type (get a :artifact/type "unknown")
-                           :id   (get a :artifact/id "")}))))
-  (when-let [phases (:bundle/phases bundle)]
-    (println (messages/t :evidence/show-phases {:count (count phases)})))
-  (println))
+  (display/render-detail (assoc bundle-detail-spec :header-params {:id id}) bundle))
 
 (defn- load-bundle-for-show
   "Load a bundle from the component interface or the filesystem."
@@ -85,6 +82,36 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Command implementations
 
+(defn- display-component-bundles
+  "Render bundles returned from the evidence-bundle component interface."
+  [bundles]
+  (if (seq bundles)
+    (doseq [bundle bundles]
+      (println (messages/t :evidence/bundle-entry
+                          {:id          (display/style (get bundle :bundle/id "unknown") :foreground :bold)
+                           :workflow-id (get bundle :bundle/workflow-id "—")
+                           :status      (get bundle :bundle/status "unknown")})))
+    (println (messages/t :evidence/none))))
+
+(defn- display-filesystem-bundles
+  "Render bundles discovered via filesystem scan."
+  []
+  (let [files (scan-evidence-dir)]
+    (if (seq files)
+      (doseq [f files]
+        (let [bundle (load-bundle-from-file f)
+              id     (if bundle
+                       (or (some-> (:bundle/id bundle) str) (.getName f))
+                       (.getName f))]
+          (println (str "  " (display/style id :foreground :bold)
+                        (when (and bundle (:bundle/workflow-id bundle))
+                          (str "  wf:" (:bundle/workflow-id bundle)))
+                        (when (and bundle (:bundle/status bundle))
+                          (str "  (" (:bundle/status bundle) ")"))))))
+      (do
+        (println (messages/t :evidence/none))
+        (println (messages/t :evidence/evidence-dir {:dir (evidence-dir)}))))))
+
 (defn evidence-list-cmd
   "List all available evidence bundles.
 
@@ -95,32 +122,9 @@
   (println (display/style (messages/t :evidence/header) :foreground :cyan :bold true))
   (println)
   (let [component-result (shared/try-resolve-fn 'ai.miniforge.evidence-bundle.interface/list-bundles)]
-    (cond
-      component-result
-      (if (seq component-result)
-        (doseq [bundle component-result]
-          (println (messages/t :evidence/bundle-entry
-                              {:id          (display/style (get bundle :bundle/id "unknown") :foreground :bold)
-                               :workflow-id (get bundle :bundle/workflow-id "—")
-                               :status      (get bundle :bundle/status "unknown")})))
-        (println (messages/t :evidence/none)))
-
-      :else
-      (let [files (scan-evidence-dir)]
-        (if (seq files)
-          (doseq [f files]
-            (let [bundle (load-bundle-from-file f)
-                  id     (if bundle
-                           (or (some-> (:bundle/id bundle) str) (.getName f))
-                           (.getName f))]
-              (println (str "  " (display/style id :foreground :bold)
-                            (when (and bundle (:bundle/workflow-id bundle))
-                              (str "  wf:" (:bundle/workflow-id bundle)))
-                            (when (and bundle (:bundle/status bundle))
-                              (str "  (" (:bundle/status bundle) ")"))))))
-          (do
-            (println (messages/t :evidence/none))
-            (println (messages/t :evidence/evidence-dir {:dir (evidence-dir)})))))))
+    (if component-result
+      (display-component-bundles component-result)
+      (display-filesystem-bundles)))
   (println))
 
 (defn evidence-show-cmd
@@ -137,6 +141,17 @@
                            :command (app-config/command-string "evidence list")}))
               (shared/exit! 1))
           (display-bundle-detail id bundle))))))
+
+(defn- export-bundle-fallback
+  "Copy the raw EDN bundle file as-is when the export component is unavailable."
+  [id fmt]
+  (let [src (io/file (str (evidence-dir) "/" id ".edn"))]
+    (if (.exists src)
+      (let [dest (str (evidence-dir) "/" id "-export." fmt)]
+        (fs/copy (str src) dest {:replace-existing true})
+        (display/print-success (messages/t :evidence/export-raw {:path dest})))
+      (do (display/print-error (messages/t :evidence/export-not-found {:id id}))
+          (shared/exit! 1)))))
 
 (defn evidence-export-cmd
   "Export an evidence bundle to a file in the requested format.
@@ -155,14 +170,7 @@
             (println (messages/t :evidence/export-format {:format fmt}))
             (when-let [path (:path result)]
               (println (messages/t :evidence/export-path {:path path}))))
-          ;; Fallback: write raw EDN from filesystem
-          (let [src (io/file (str (evidence-dir) "/" id ".edn"))]
-            (if (.exists src)
-              (let [dest (str (evidence-dir) "/" id "-export." fmt)]
-                (fs/copy (str src) dest {:replace-existing true})
-                (display/print-success (messages/t :evidence/export-raw {:path dest})))
-              (do (display/print-error (messages/t :evidence/export-not-found {:id id}))
-                  (shared/exit! 1)))))))))
+          (export-bundle-fallback id fmt))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

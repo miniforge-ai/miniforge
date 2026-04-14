@@ -127,14 +127,13 @@
                            :command (app-config/command-string "policy list")}))
               (shared/exit! 1))
           (do
-            (println)
-            (println (display/style (messages/t :policy/show-header
-                                               {:id (get pack :pack/id pack-id)})
-                                    :foreground :cyan :bold true))
-            (when-let [v (:pack/version pack)]
-              (println (messages/t :policy/show-version {:value v})))
-            (when-let [d (:pack/description pack)]
-              (println (messages/t :policy/show-description {:value d})))
+            (display/render-detail
+             {:header        :policy/show-header
+              :header-params {:id (get pack :pack/id pack-id)}
+              :fields        [[:pack/version     :policy/show-version]
+                              [:pack/description :policy/show-description]]}
+             pack)
+            ;; Rules section: custom rendering for per-rule formatting
             (let [rules (get pack :pack/rules [])]
               (println (messages/t :policy/show-rules-count {:count (count rules)}))
               (println)

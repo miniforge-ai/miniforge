@@ -30,6 +30,7 @@
    [ai.miniforge.workflow.runner :as runner]))
 
 ;; Private fn accessor for evidence_bundle.clj
+(require 'ai.miniforge.evidence-bundle.protocols.impl.evidence-bundle)
 (def ^:private extract-evidence-impl
   (var-get (ns-resolve 'ai.miniforge.evidence-bundle.protocols.impl.evidence-bundle
                        'extract-execution-evidence)))

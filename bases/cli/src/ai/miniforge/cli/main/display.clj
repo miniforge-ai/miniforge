@@ -56,6 +56,43 @@
   (println (style msg :foreground :cyan)))
 
 ;------------------------------------------------------------------------------ Layer 1
+;; Data-driven detail rendering
+
+(defn render-fields
+  "Render entity fields from a data-driven spec.
+   Each field is [data-key message-key & [opts-map]].
+   Skips nil values. Supports :default, :transform, and :param (default :value)."
+  [entity fields]
+  (doseq [[data-key msg-key & [{:keys [default transform param]}]] fields]
+    (let [raw-val (get entity data-key)
+          val     (if (nil? raw-val) default raw-val)]
+      (when-not (nil? val)
+        (let [display-val (if transform (transform val) (str val))
+              param-key   (or param :value)]
+          (println (messages/t msg-key {param-key display-val})))))))
+
+(defn render-section
+  "Render a titled section with child entries.
+   section: {:key K :header H :entry E :entry-fn (fn [item] -> params) :max N}"
+  [entity {:keys [key header entry entry-fn max]}]
+  (when-let [items (seq (get entity key))]
+    (when header
+      (println (messages/t header {:count (count items)})))
+    (when entry
+      (doseq [item (cond->> items max (take max))]
+        (println (messages/t entry (if entry-fn (entry-fn item) {:value (str item)})))))))
+
+(defn render-detail
+  "Render a complete detail view: header + fields + sections."
+  [{:keys [header header-params fields sections]} entity]
+  (println)
+  (when header
+    (println (style (messages/t header header-params) :foreground :cyan :bold true)))
+  (render-fields entity fields)
+  (doseq [section sections]
+    (render-section entity section))
+  (println))
+
 ;; Error classification display
 
 (defn print-agent-backend-error-header
