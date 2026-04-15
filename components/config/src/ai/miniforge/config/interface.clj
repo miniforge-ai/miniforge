@@ -28,16 +28,34 @@
 (def default-user-config-path user/default-user-config-path)
 (def default-config user/default-config)
 (def miniforge-home user/miniforge-home)
+(def repo-config-dir-name user/repo-config-dir-name)
+
+(defn repo-config-path
+  "Return the path to .miniforge/config.edn in the given working directory."
+  ([] (user/repo-config-path))
+  ([working-dir] (user/repo-config-path working-dir)))
 
 (defn load-user-config
   "Load user configuration from file."
   ([] (user/load-user-config))
   ([path] (user/load-user-config path)))
 
+(defn load-repo-config
+  "Load repo-level configuration from .miniforge/config.edn.
+   Returns nil if the file does not exist or cannot be parsed."
+  ([] (user/load-repo-config))
+  ([path] (user/load-repo-config path)))
+
 (defn load-merged-config
   "Load and merge all configuration sources (user > env > defaults)."
   ([] (user/load-merged-config))
   ([path] (user/load-merged-config path)))
+
+(defn load-merged-config-with-repo
+  "Load and merge all configuration sources including repo-level config.
+   Precedence: repo > user > env > defaults."
+  ([] (user/load-merged-config-with-repo))
+  ([user-path repo-path] (user/load-merged-config-with-repo user-path repo-path)))
 
 (defn save-user-config
   "Save user configuration to file."

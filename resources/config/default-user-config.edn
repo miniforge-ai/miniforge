@@ -32,6 +32,8 @@
                :risk {}
                :tiers {}
                :knowledge-safety {}}
+  :policy-packs {:extra-search-paths []
+                 :disabled-pack-ids []}
   :observability {:event-sinks [:file]
                   :log-sinks [:file]
                   :rotation {:max-size-mb 10
