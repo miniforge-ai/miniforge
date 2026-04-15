@@ -197,6 +197,20 @@
               (println "\n✅ Local installation test complete\n"))}
 
   ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Release & Stability
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  release
+  {:doc  "Tag a release + stable tag, push to trigger CI build + Homebrew update"
+   :requires ([release])
+   :task (release/cut!)}
+
+  stable
+  {:doc  "Run full test suite and tag as stable if green (for poly change detection)"
+   :requires ([release])
+   :task (release/stable!)}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
   ;; Installers (via Homebrew)
   ;; ──────────────────────────────────────────────────────────────────────────
 
