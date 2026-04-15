@@ -17,11 +17,12 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.agent.messaging-integration-test
-  "Tests for message events and full integration flow (Layers 6-7)."
+  "Tests for inter-agent event emission and full integration flow."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.agent.interface :as agent]
-   [ai.miniforge.agent.protocols.impl.messaging :as msg-impl]))
+   [ai.miniforge.agent.protocols.impl.messaging :as msg-impl]
+   [ai.miniforge.event-stream.interface :as event-stream]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test Fixtures
@@ -33,54 +34,47 @@
 ;------------------------------------------------------------------------------ Layer 6
 ;; Event Emission Tests
 
-(deftest test-message-sent-event-structure
-  (testing "Message sent event conforms to N3 spec"
-    (let [message (msg-impl/create-message
-                   {:type :clarification-request
-                    :from-agent :implementer
-                    :from-instance-id test-implementer-id
-                    :to-agent :planner
-                    :workflow-id test-workflow-id
-                    :content "Question"})
-          event (msg-impl/create-message-sent-event message)]
-      ;; Check required N3 event fields
-      (is (= :agent/message-sent (:event/type event)))
-      (is (uuid? (:event/id event)))
-      (is (inst? (:event/timestamp event)))
-      (is (= "1.0.0" (:event/version event)))
+(deftest test-emit-inter-agent-event-with-stream
+  (testing "emit-inter-agent-event! publishes to a real event stream"
+    (let [stream      (event-stream/create-event-stream)
+          workflow-id (random-uuid)
+          result      (msg-impl/emit-inter-agent-event!
+                        stream workflow-id :implementer :planner :clarification-request
+                        'ai.miniforge.event-stream.interface/inter-agent-message-sent)]
+      (is (some? result))
+      (is (= :agent/message-sent (:event/type result)))
+      (is (= :implementer (:from-agent/id result)))
+      (is (= :planner (:to-agent/id result)))
+      ;; Verify event was actually published to the stream
+      (let [events (event-stream/get-events stream)]
+        (is (<= 1 (count events)))
+        (is (= :agent/message-sent (:event/type (last events))))))))
 
-      ;; Check N3 section 3.7 specific fields
-      (is (= :implementer (:from-agent/id event)))
-      (is (= test-implementer-id (:from-agent/instance-id event)))
-      (is (= :planner (:to-agent/id event)))
-      (is (= test-workflow-id (:workflow/id event)))
-      (is (= :clarification-request (:message-type event)))
-      (is (= "Question" (:message-content event)))
-      (is (string? (:message event))))))
+(deftest test-emit-inter-agent-event-nil-stream
+  (testing "emit-inter-agent-event! with nil stream is a safe no-op"
+    (let [result (msg-impl/emit-inter-agent-event!
+                   nil (random-uuid) :a :b :concern
+                   'ai.miniforge.event-stream.interface/inter-agent-message-sent)]
+      (is (nil? result)))))
 
-(deftest test-message-received-event-structure
-  (testing "Message received event conforms to N3 spec"
-    (let [message (msg-impl/create-message
-                   {:type :clarification-response
-                    :from-agent :planner
-                    :from-instance-id test-planner-id
-                    :to-agent :implementer
-                    :workflow-id test-workflow-id
-                    :content "Answer"})
-          event (msg-impl/create-message-received-event message)]
-      ;; Check required N3 event fields
-      (is (= :agent/message-received (:event/type event)))
-      (is (uuid? (:event/id event)))
-      (is (inst? (:event/timestamp event)))
-      (is (= "1.0.0" (:event/version event)))
-
-      ;; Check N3 section 3.7 specific fields
-      (is (= :planner (:from-agent/id event)))
-      (is (= :implementer (:to-agent/id event)))
-      (is (= test-workflow-id (:workflow/id event)))
-      (is (= :clarification-response (:message-type event)))
-      (is (= "Answer" (:message-content event)))
-      (is (string? (:message event))))))
+(deftest test-send-message-emits-events-with-stream
+  (testing "send-message-impl emits sent+received events when stream is present"
+    (let [stream  (event-stream/create-event-stream)
+          router  (agent/create-message-router)
+          messaging (agent/create-agent-messaging
+                      :implementer test-implementer-id test-workflow-id router stream)
+          result  (agent/send-message messaging
+                                      {:type :clarification-request
+                                       :to-agent :planner
+                                       :content "Question?"})]
+      ;; The result should include the sent event
+      (is (some? (:event result)))
+      (is (= :agent/message-sent (:event/type (:event result))))
+      ;; Both sent + received events should be on the stream
+      (let [events      (event-stream/get-events stream)
+            event-types (set (map :event/type events))]
+        (is (contains? event-types :agent/message-sent))
+        (is (contains? event-types :agent/message-received))))))
 
 ;------------------------------------------------------------------------------ Layer 7
 ;; Integration Tests

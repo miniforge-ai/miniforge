@@ -17,7 +17,10 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.agent.interface.messaging
-  "Inter-agent messaging public API."
+  "Inter-agent messaging public API.
+
+   Thin pass-through interface per Polylith convention. Event emission
+   is handled in the impl layer (send-message-impl), not here."
   (:require
    [ai.miniforge.agent.interface.protocols.messaging :as msg-proto]
    [ai.miniforge.agent.protocols.impl.messaging :as msg-impl]
@@ -37,82 +40,28 @@
 (def Message msg-impl/Message)
 (def MessageType msg-impl/MessageType)
 
-;------------------------------------------------------------------------------ Layer 0
-;; N3-conformant event emission via requiring-resolve (no hard compile-time dep)
-
-(defn- emit-messaging-event!
-  "Emit an inter-agent messaging event to the event stream.
-   Uses requiring-resolve so the agent component has no hard compile-time
-   dependency on event-stream. Safe no-op when stream or workflow-id is absent.
-
-   event-kw  - :sent or :received
-   from      - source agent keyword/id
-   to        - destination agent keyword/id
-   msg-type  - optional message type keyword"
-  [stream workflow-id event-kw from to msg-type]
-  (when (and stream workflow-id)
-    (try
-      (when-let [publish-fn (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-        (let [constructor-sym (case event-kw
-                                :sent     'ai.miniforge.event-stream.interface/inter-agent-message-sent
-                                :received 'ai.miniforge.event-stream.interface/inter-agent-message-received)]
-          (when-let [event-fn (requiring-resolve constructor-sym)]
-            (publish-fn stream (event-fn stream workflow-id from to msg-type)))))
-      (catch Exception _
-        ;; Never let observability break the messaging path
-        nil))))
-
 ;------------------------------------------------------------------------------ Layer 1
-;; Messaging operations with N3 event emission
+;; Messaging operations (thin pass-throughs)
 
 (defn send-message
   "Send a message from agent-messaging to the target specified in message-data.
-   Emits a :agent/message-sent N3 event when the messaging object carries
-   an :event-stream and :workflow-id."
+   Event emission is handled by the impl layer."
   [agent-messaging message-data]
-  (let [result (msg-proto/send-message agent-messaging message-data)]
-    (emit-messaging-event!
-     (:event-stream agent-messaging)
-     (:workflow-id agent-messaging)
-     :sent
-     (:agent-id agent-messaging)
-     (:to-agent message-data)
-     (:type message-data))
-    result))
+  (msg-proto/send-message agent-messaging message-data))
 
 (defn receive-messages
   [agent-messaging]
   (msg-proto/receive-messages agent-messaging))
 
 (defn respond-to-message
-  "Respond to a message, emitting a :agent/message-sent N3 event.
-   The response is treated as a sent message from this agent back to the
-   original sender."
+  "Respond to a message. Event emission is handled by the impl layer."
   [agent-messaging original-message response-content]
-  (let [result (msg-proto/respond-to-message agent-messaging original-message response-content)]
-    (emit-messaging-event!
-     (:event-stream agent-messaging)
-     (:workflow-id agent-messaging)
-     :sent
-     (:agent-id agent-messaging)
-     (or (:message/from-agent original-message) (:from-agent original-message))
-     :response)
-    result))
+  (msg-proto/respond-to-message agent-messaging original-message response-content))
 
 (defn route-message
-  "Route a message to its recipient, emitting a :agent/message-received N3 event.
-   The event-stream and workflow-id are read from the message map itself — they
-   must be present for event emission to occur (safe no-op otherwise)."
+  "Route a message to its recipient."
   [router message]
-  (let [result (msg-proto/route-message router message)]
-    (emit-messaging-event!
-     (or (:event-stream message) (:message/event-stream message))
-     (or (:workflow/id message) (:workflow-id message))
-     :received
-     (or (:message/from-agent message) (:from-agent message))
-     (or (:message/to-agent message) (:to-agent message))
-     (or (:message/type message) (:type message)))
-    result))
+  (msg-proto/route-message router message))
 
 (defn get-messages-for-agent
   [router agent-id workflow-id]

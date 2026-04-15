@@ -66,23 +66,6 @@
       (publish-fn stream event))
     (catch Exception _ nil)))
 
-(defn- make-fallback-event
-  "Build a minimal N3-compliant event map when the event-stream constructor cannot be resolved.
-   Ensures events are published even when the event-stream component version
-   has incompatible constructor signatures.
-
-   Includes all six required N3 envelope fields:
-   event/type, event/id, event/timestamp, event/version, workflow/id, event/sequence-number."
-  [event-type workflow-id phase-kw extra]
-  (merge {:event/type            event-type
-          :event/id              (random-uuid)
-          :event/timestamp       (java.util.Date.)
-          :event/version         "1.0.0"
-          :event/sequence-number 0
-          :workflow/id           workflow-id
-          :workflow/phase        phase-kw}
-         extra))
-
 ;------------------------------------------------------------------------------ Layer 0
 ;; Streaming callback construction
 
@@ -140,11 +123,7 @@
                                  'ai.miniforge.event-stream.interface/phase-started)
               event            (phase-started-fn stream workflow-id phase-kw)]
           (safe-publish! stream event))
-        (catch Exception _
-          ;; Fallback: publish a minimal N3-compliant event when constructor resolution fails
-          (safe-publish! stream
-                         (make-fallback-event :workflow/phase-started workflow-id phase-kw
-                                              {:message (str (name phase-kw) " phase started")})))))
+        (catch Exception _ nil)))
     ;; Milestone checkpoint: phase start = milestone start
     (emit-milestone-started! ctx phase-kw)))
 
@@ -171,16 +150,7 @@
                                    'ai.miniforge.event-stream.interface/phase-completed)
               event              (phase-completed-fn stream workflow-id phase-kw result)]
           (safe-publish! stream event))
-        (catch Exception _
-          ;; Fallback: publish a minimal N3-compliant event when constructor resolution fails
-          (safe-publish! stream
-                         (make-fallback-event :workflow/phase-completed workflow-id phase-kw
-                                              (cond-> {:message (str (name phase-kw) " phase completed")}
-                                                (:outcome result)     (assoc :phase/outcome (:outcome result))
-                                                (:duration-ms result) (assoc :phase/duration-ms (:duration-ms result))
-                                                (:tokens result)      (assoc :phase/tokens (:tokens result))
-                                                (:cost-usd result)    (assoc :phase/cost-usd (:cost-usd result))
-                                                (:error result)       (assoc :phase/error (:error result)))))))
+        (catch Exception _ nil))
       ;; Milestone transitions: success = completed, anything else = failed
       (if (= :success (:outcome result))
         (do
@@ -202,17 +172,7 @@
                                  'ai.miniforge.event-stream.interface/agent-started)
               event            (agent-started-fn stream workflow-id agent-id)]
           (safe-publish! stream event))
-        (catch Exception _
-          (safe-publish! stream
-                         {:event/type            :agent/started
-                          :event/id              (random-uuid)
-                          :event/timestamp       (java.util.Date.)
-                          :event/version         "1.0.0"
-                          :event/sequence-number 0
-                          :workflow/id           workflow-id
-                          :workflow/phase        phase-kw
-                          :agent/id              agent-id
-                          :message               (str (name agent-id) " agent started for " (name phase-kw))}))))))
+        (catch Exception _ nil)))))
 
 (defn emit-agent-completed!
   "Publish an :agent/completed event.
@@ -225,18 +185,7 @@
                                    'ai.miniforge.event-stream.interface/agent-completed)
               event              (agent-completed-fn stream workflow-id agent-id)]
           (safe-publish! stream event))
-        (catch Exception _
-          (safe-publish! stream
-                         (cond-> {:event/type            :agent/completed
-                                  :event/id              (random-uuid)
-                                  :event/timestamp       (java.util.Date.)
-                                  :event/version         "1.0.0"
-                                  :event/sequence-number 0
-                                  :workflow/id           workflow-id
-                                  :workflow/phase        phase-kw
-                                  :agent/id              agent-id
-                                  :message               (str (name agent-id) " agent completed for " (name phase-kw))}
-                           (:status result) (assoc :agent/status (:status result)))))))))
+        (catch Exception _ nil)))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Milestone transition event emission
@@ -262,14 +211,7 @@
                                      'ai.miniforge.event-stream.interface/milestone-reached)
               event                (milestone-reached-fn stream workflow-id phase-kw)]
           (safe-publish! stream event))
-        (catch Exception _
-          ;; Fallback: publish a minimal N3-compliant milestone event
-          (safe-publish! stream
-                         (make-fallback-event :workflow/milestone-reached workflow-id phase-kw
-                                              (cond-> {:message (str (name phase-kw) " milestone reached")}
-                                                (:artifacts result) (assoc :milestone/artifacts (:artifacts result))
-                                                (:tokens result)    (assoc :milestone/tokens (:tokens result))
-                                                (:cost-usd result)  (assoc :milestone/cost-usd (:cost-usd result))))))))))
+        (catch Exception _ nil)))))
 
 (defn emit-milestone-started!
   "Publish a :phase/milestone-started event when a phase begins execution.
@@ -290,10 +232,7 @@
                             'ai.miniforge.event-stream.interface/milestone-started)
               event       (constructor stream workflow-id phase-kw)]
           (safe-publish! stream event))
-        (catch Exception _
-          (safe-publish! stream
-                         (make-fallback-event :phase/milestone-started workflow-id phase-kw
-                                              {:message (str (name phase-kw) " milestone started")})))))))
+        (catch Exception _ nil)))))
 
 (defn emit-milestone-completed!
   "Publish a :phase/milestone-completed event when a phase succeeds.
@@ -315,13 +254,7 @@
               event       (constructor stream workflow-id phase-kw
                                        (str (name phase-kw) " milestone completed"))]
           (safe-publish! stream event))
-        (catch Exception _
-          (safe-publish! stream
-                         (make-fallback-event :phase/milestone-completed workflow-id phase-kw
-                                              (cond-> {:message (str (name phase-kw) " milestone completed")}
-                                                (:artifacts result) (assoc :milestone/artifacts (:artifacts result))
-                                                (:tokens result)    (assoc :milestone/tokens (:tokens result))
-                                                (:cost-usd result)  (assoc :milestone/cost-usd (:cost-usd result))))))))))
+        (catch Exception _ nil)))))
 
 (defn emit-milestone-failed!
   "Publish a :phase/milestone-failed event when a phase fails.
@@ -344,10 +277,7 @@
                             'ai.miniforge.event-stream.interface/milestone-failed)
               event       (constructor stream workflow-id phase-kw reason)]
           (safe-publish! stream event))
-        (catch Exception _
-          (safe-publish! stream
-                         (make-fallback-event :phase/milestone-failed workflow-id phase-kw
-                                              {:message reason})))))))
+        (catch Exception _ nil)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

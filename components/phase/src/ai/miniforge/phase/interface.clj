@@ -159,12 +159,6 @@
    Called automatically from emit-phase-completed! on non-:success outcome."
   telemetry/emit-milestone-failed!)
 
-(def emit-milestone-reached!
-  "Emit a :workflow/milestone-reached event (legacy aggregate milestone event).
-   Prefer emit-milestone-completed! for new code; this is retained for
-   backward compatibility with existing phase implementations."
-  telemetry/emit-milestone-reached!)
-
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pipeline construction
 

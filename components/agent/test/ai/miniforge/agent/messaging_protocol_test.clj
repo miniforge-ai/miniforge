@@ -44,7 +44,7 @@
       (is (satisfies? agent/InterAgentMessaging messaging)))))
 
 (deftest test-send-message
-  (testing "Send message from agent"
+  (testing "Send message from agent (no event-stream => nil event)"
     (let [router (agent/create-message-router)
           messaging (agent/create-agent-messaging
                      :implementer
@@ -57,18 +57,13 @@
                    :to-agent :planner
                    :content "Need help with X"})]
       (is (some? (:message result)))
-      (is (some? (:event result)))
       (is (= :implementer (:message/from-agent (:message result))))
       (is (= test-implementer-id (:message/from-instance-id (:message result))))
       (is (= :planner (:message/to-agent (:message result))))
       (is (= test-workflow-id (:message/workflow-id (:message result))))
 
-      ;; Check event structure
-      (let [event (:event result)]
-        (is (= :agent/message-sent (:event/type event)))
-        (is (= :implementer (:from-agent/id event)))
-        (is (= :planner (:to-agent/id event)))
-        (is (= :clarification-request (:message-type event)))))))
+      ;; Without an event-stream, event is nil (safe no-op)
+      (is (nil? (:event result))))))
 
 (deftest test-receive-messages
   (testing "Receive messages sent to agent"
