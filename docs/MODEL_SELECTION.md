@@ -488,4 +488,3 @@ ollama pull deepseek-coder:33b
 - [Model Registry](../components/llm/src/ai/miniforge/llm/model_registry.clj) - All model profiles
 - [Task Classifier](../components/agent/src/ai/miniforge/agent/task_classifier.clj) - Classification logic
 - [Model Selector](../components/llm/src/ai/miniforge/llm/model_selector.clj) - Selection strategies
-- [Spec](../work/intelligent-model-selection.edn) - Original specification

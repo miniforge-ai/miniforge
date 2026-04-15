@@ -86,7 +86,7 @@ component-based architecture where each component has:
 There are 40+ components covering workflow execution, agent implementations,
 policy enforcement, event streaming, and CLI/TUI/web surfaces.
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for development details.
+See [CONTRIBUTING.md](../../CONTRIBUTING.md) for development details.
 
 ## Extension Points
 
@@ -98,5 +98,5 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for development details.
 
 ## Further Reading
 
-- [Normative Specs (N1-N11)](../specs/normative/) — full technical specification
-- [Design Documents](../docs/design/) — architectural decisions and rationale
+- [Normative Specs (N1-N11)](../../specs/normative/) — full technical specification
+- [Design Documents](../design/) — architectural decisions and rationale

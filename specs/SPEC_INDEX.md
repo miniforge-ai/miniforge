@@ -248,28 +248,12 @@ These documents provide guidance, examples, and context but do NOT define contra
 - [informative/ux-tui-mockups.md](informative/ux-tui-mockups.md) - Visual design for CLI/TUI (informs N5)
 - [informative/ai-ux-flows.md](informative/ai-ux-flows.md) - AI-powered features (informs N3, N5)
 
-### Guides (How-To)
-
-- [informative/getting-started.md](informative/getting-started.md) - First workflow guide
-- [informative/authoring-policies.md](informative/authoring-policies.md) - Policy pack development
-- [informative/writing-workflows.md](informative/writing-workflows.md) - Workflow spec authoring
-- [informative/building-scanners.md](informative/building-scanners.md) - Scanner development
-
-### Vision & Positioning
-
-- [informative/operational-modes.md](informative/operational-modes.md) - OSS vs Paid operational differences
-
 > Product strategy documents (pricing, roadmap, competitive positioning) are maintained
 > in the private [miniforge-fleet](https://github.com/miniforge-ai/miniforge-fleet) repository.
 
 ### Future Workflows
 
 - [informative/pr-monitoring-workflow.md](informative/pr-monitoring-workflow.md) - PR monitoring and conflict resolution
-
-### Demo Scripts
-
-- [informative/yc-mvp-demo-script.md](informative/yc-mvp-demo-script.md) -
-  YC-ready MVP demo narrative, flow, and implementation breakdown
 
 ### Architecture & Internals
 
@@ -284,33 +268,6 @@ These documents provide guidance, examples, and context but do NOT define contra
   Extended validation: formal verification, Shipyard, Tonic, canary execution
 - [informative/I-INCIDENT-DIAGNOSTICS.md](informative/I-INCIDENT-DIAGNOSTICS.md) -
   Autonomous incident diagnostics and response workflow patterns
-
-### Roadmaps (Experimental/Future)
-
-- [informative/learning-meta-loop.md](informative/learning-meta-loop.md) - Future learning system (post-OSS)
-
----
-
-## Examples (Reference Implementations)
-
-Concrete examples that demonstrate compliance with normative specs.
-
-### Workflow Examples
-
-- [examples/workflows/rds-import.edn](examples/workflows/rds-import.edn) - Import existing RDS to Terraform
-- [examples/workflows/k8s-deployment.edn](examples/workflows/k8s-deployment.edn) - Deploy to Kubernetes
-- [examples/workflows/vpc-network-changes.edn](examples/workflows/vpc-network-changes.edn) - Network infrastructure
-
-### Evidence Bundle Examples
-
-- [examples/evidence/rds-import-bundle.edn](examples/evidence/rds-import-bundle.edn) - Complete evidence bundle
-- [examples/evidence/semantic-validation.edn](examples/evidence/semantic-validation.edn) - Intent validation example
-
-### Policy Pack Examples
-
-- [examples/policy-packs/terraform-aws/](examples/policy-packs/terraform-aws/) - Terraform AWS safety checks
-- [examples/policy-packs/kubernetes/](examples/policy-packs/kubernetes/) - K8s manifest validation
-- [examples/policy-packs/foundations/](examples/policy-packs/foundations/) - General code quality
 
 ---
 

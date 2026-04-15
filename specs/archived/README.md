@@ -45,8 +45,7 @@ The content from these archived specs has been:
 3. **Formalized** - Converted to RFC 2119 language (MUST/SHALL/SHOULD/MAY)
 4. **Reorganized** - Structured into 6 normative specifications (N1-N6)
 
-See [`/docs/SPEC_SYNTHESIS_SUMMARY.md`](../../docs/SPEC_SYNTHESIS_SUMMARY.md) for details
-on how these specs were processed.
+The content was synthesized into the current normative specs (N1-N6).
 
 ## Migration Guide
 

@@ -183,5 +183,3 @@ To add new configuration values:
 ## See Also
 
 - [Aero Documentation](https://github.com/juxt/aero)
-- [Workflow Configuration](./workflows.md)
-- [Meta-Loop Architecture](./meta-loop.md)

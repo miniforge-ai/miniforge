@@ -365,7 +365,4 @@ monitor tells resource manager that workflow is stalled, so stop counting tokens
 
 ## See Also
 
-- [Agent Architecture](./agents.md)
-- [Workflow System](./workflows.md)
-- [Progress Monitoring](./progress-monitoring.md)
 - [Configuration Management](./configuration.md)

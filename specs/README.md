@@ -147,7 +147,6 @@ See `miniforge/tests/` for conformance test suite.
 
 **Understanding the product?**
 → [SPEC_INDEX.md](SPEC_INDEX.md) (1-paragraph summary)
-→ [informative/software-factory-vision.md](informative/software-factory-vision.md)
 
 **Building agents?**
 → [N3 - Event Stream](normative/N3-event-stream.md) (emit events)
@@ -160,14 +159,10 @@ See `miniforge/tests/` for conformance test suite.
 
 **Building policy packs?**
 → [N4 - Policy Packs](normative/N4-policy-packs.md)
-→ [examples/policy-packs/](examples/policy-packs/)
 
 **Understanding workflow execution?**
 → [N2 - Workflow Execution](normative/N2-workflows.md)
 → [N6 - Evidence & Provenance](normative/N6-evidence-provenance.md) (semantic validation)
-
-**OSS vs Paid split?**
-→ [informative/oss-paid-roadmap.md](informative/oss-paid-roadmap.md)
 
 ---
 

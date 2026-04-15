@@ -28,7 +28,8 @@
 - **Progressive detail** - One-line summary → full analysis on demand
 - **Batch-aware** - Select 10 PRs → "summarize all" or "find dangerous changes"
 - **Context-aware** - AI knows train dependencies, intent, policy violations
-- **Real-time streaming** - See AI agents working in real-time (see [AGENT_STATUS_STREAMING.md](./AGENT_STATUS_STREAMING.md))
+- **Real-time streaming** - See AI agents working in real-time (see
+  [AGENT_STATUS_STREAMING.md](../deprecated/AGENT_STATUS_STREAMING.md))
 
 ---
 
@@ -53,7 +54,7 @@
 
 #### Level 1: One-Line Summary (Always Visible)
 
-```
+```text
 🤖 AI: Imports existing RDS, no infrastructure changes, low risk ✓
 ```
 
@@ -66,7 +67,7 @@
 
 **Prompt:**
 
-```
+```text
 Summarize this PR in one sentence (max 80 chars):
 - Intent: {intent-type}
 - Changes: {+lines} additions, {-lines} deletions
@@ -77,7 +78,7 @@ Focus on risk and action needed.
 
 #### Level 2: Executive Summary (On Hover/Expand)
 
-```
+```text
 🤖 AI Summary:
 
 Risk: LOW
@@ -97,7 +98,7 @@ Recommendation: Safe to merge after approval.
 
 **Prompt:**
 
-```
+```text
 Generate a 4-paragraph executive summary for this PR:
 
 Context:
@@ -124,7 +125,7 @@ Format as 4 short paragraphs (2-3 sentences each).
 
 #### Level 3: Deep Analysis (On Demand)
 
-```
+```text
 🤖 Deep Analysis:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -196,7 +197,7 @@ Pattern: Infrastructure imports are typically low-risk when state-only.
 
 **Prompt:**
 
-```
+```text
 Perform a deep technical analysis of this PR.
 
 Full Context:
@@ -222,7 +223,7 @@ Highlight risks and concerns prominently.
 
 ### Chat Interface (Web)
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────────────┐
 │  Chat with miniforge AI                                          [✕ Close] │
 ├────────────────────────────────────────────────────────────────────────────┤
@@ -352,7 +353,7 @@ Highlight risks and concerns prominently.
 
 **AI System Prompt:**
 
-```
+```text
 You are miniforge AI, an expert at reviewing infrastructure changes.
 
 Current Context:
@@ -383,7 +384,7 @@ Use formatting:
 
 ### Batch Chat (Multiple PRs)
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────────────┐
 │  Chat with miniforge AI                                          [✕ Close] │
 ├────────────────────────────────────────────────────────────────────────────┤
@@ -427,7 +428,7 @@ Use formatting:
 
 **Batch Analysis Prompt:**
 
-```
+```text
 Analyze these {count} PRs for dangerous changes.
 
 PRs:
@@ -471,7 +472,7 @@ Format:
 5. AI analyzes all 20 plans in parallel
 6. Results displayed in table
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────────────┐
 │  Terraform Plan Safety Review - 20 PRs analyzed                            │
 ├────────────────────────────────────────────────────────────────────────────┤
@@ -579,7 +580,7 @@ Format:
 
 ### CLI TUI: AI Actions Menu
 
-```
+```text
 ╭─────────────────────────────────────────────────────────────────────────────╮
 │ AI Actions (12 PRs selected)                                    [Esc] Cancel│
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -615,7 +616,7 @@ Format:
 
 ### Web: Right-Click Context Menu
 
-```
+```text
 ┌─────────────────────────────────┐
 │  12 PRs Selected               │
 ├─────────────────────────────────┤
@@ -677,7 +678,7 @@ Format:
 
 ### Background Processing
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────────┐
 │                     PR Event Stream                               │
 └────────────────────┬─────────────────────────────────────────────┘
@@ -778,7 +779,7 @@ Format:
 
 **9:00 AM - Start of day**
 
-```
+```text
 Step 1: Filter to "Ready to Merge" (30 PRs)
 - AI already generated summaries overnight
 
@@ -807,7 +808,7 @@ Step 5: Escalate 2 high-risk
 
 **9:15 AM - Continue with "Needs Approval"**
 
-```
+```text
 Step 1: Filter to "Needs Approval" (40 PRs)
 
 Step 2: Group by repo type
@@ -838,9 +839,9 @@ Step 5: Quick scan Application PRs
 
 ### Workflow 2: Investigating a Blocked Train
 
-**Train "k8s-migration" is blocked**
+Scenario: **Train "k8s-migration" is blocked**
 
-```
+```text
 Step 1: Open train detail
 - AI one-liner: "Blocked by dependency conflict in PR #124"
 
@@ -867,9 +868,9 @@ Step 5: Click "Generate fix PR"
 
 ### Workflow 3: High-Risk Change Review
 
-**PR flagged as "high risk" by AI**
+Scenario: **PR flagged as "high risk" by AI**
 
-```
+```text
 Step 1: Open PR #250
 - AI one-liner: "🔴 DESTROYS NAT gateway (-/+), will cause outage"
 
@@ -980,7 +981,8 @@ Step 5: Approve
 - **Before AI:** 100 PRs = 3-4 hours (2-3 min each)
 - **With AI:** 100 PRs = 60 minutes (36s each)
 
-**The key:** AI pre-processes and caches everything, so when you look at a PR, all the information you need to make a decision is already there.
+**The key:** AI pre-processes and caches everything, so when you look at a PR, all the information you need to make a
+  decision is already there.
 
 Ready to start implementing? I'd recommend:
 

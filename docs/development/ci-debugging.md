@@ -178,6 +178,6 @@ in the downloadable log files.
 
 ## Related Documentation
 
-- [Pre-commit Hooks](../specs/phase1-postmortem.md#making-hooks-non-optional)
-- [Phase 1 Postmortem](../specs/phase1-postmortem.md) - Why we need good logging
-- [CI Workflow](.github/workflows/ci.yml) - Current CI configuration
+- [Pre-commit Hooks](../../specs/archived/phase1-postmortem.md#making-hooks-non-optional)
+- [Phase 1 Postmortem](../../specs/archived/phase1-postmortem.md) - Why we need good logging
+- [CI Workflow](../../.github/workflows/ci.yml) - Current CI configuration

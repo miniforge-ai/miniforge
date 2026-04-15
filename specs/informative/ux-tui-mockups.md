@@ -82,7 +82,7 @@
 
 ### Main View: Train Overview (with Agent Activity)
 
-```
+```text
 ╭─────────────────────────────────────────────────────────────────────────────╮
 │ miniforge fleet  [Trains: 5 | PRs: 23 | Blocked: 3 | Ready: 7]   ⟳ 15s ago │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -122,7 +122,7 @@
 
 ### Drill-Down: PR Detail View
 
-```
+```text
 ╭─────────────────────────────────────────────────────────────────────────────╮
 │ Train: add-auth (5 PRs)                                    [2/5 merged]     │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -171,7 +171,7 @@
 
 ### Workflow Agent Activity View (NEW)
 
-```
+```text
 ╭─────────────────────────────────────────────────────────────────────────────╮
 │ Workflow: rds-import (#abc123)                         [Phase: Implement]   │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -239,7 +239,7 @@ Press 'w' to toggle between workflow view and PR view.
 
 ### Evidence Bundle View
 
-```
+```text
 ╭─────────────────────────────────────────────────────────────────────────────╮
 │ Evidence Bundle: abc123 (Train: add-auth)                                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -288,7 +288,7 @@ Press 'w' to toggle between workflow view and PR view.
 
 ### Command Mode (`:` like vim)
 
-```
+```text
 :trains                 # List all trains
 :trains status:blocked  # Filter blocked trains
 :prs ready             # Show all ready-to-merge PRs
@@ -331,7 +331,7 @@ Press 'w' to toggle between workflow view and PR view.
 
 ### Main View: Fleet Dashboard (with Agent Activity)
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────────────┐
 │  miniforge                                   [Cmd+K]  [@chris]  [Settings]  │
 ├────────────────────────────────────────────────────────────────────────────┤
@@ -403,7 +403,7 @@ Keyboard shortcuts:
 
 ### PR Detail Modal (Cmd+Click or Enter)
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────────────┐
 │  PR #234: acme/infra - Import RDS instance to Terraform          [✕ Close] │
 ├────────────────────────────────────────────────────────────────────────────┤
@@ -485,7 +485,7 @@ Keyboard shortcuts:
 
 **Triggered by:** Clicking "Active Workflows" or workflow name
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────────────┐
 │  Workflow: rds-import (#abc123)                     [Phase: Implement] [✕] │
 ├────────────────────────────────────────────────────────────────────────────┤
@@ -558,7 +558,7 @@ Keyboard shortcuts:
 
 ### Command Palette (Cmd+K)
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────────────┐
 │  Search or run a command...                                                │
 │  ────────────────────────────────────────────────────────────────────────  │
@@ -602,7 +602,7 @@ Keyboard shortcuts:
 
 #### Step 1: Filter & Batch (5 min)
 
-```
+```text
 1. Open fleet dashboard
 2. Filter to "Ready to Merge"
 3. Scan for groups:
@@ -617,7 +617,7 @@ Keyboard shortcuts:
 
 #### Step 2: Quick Scan for Blockers (10 min)
 
-```
+```text
 1. Filter to "Blocked"
 2. Scan blocking reasons:
    - CI failures → assign to owner
@@ -633,7 +633,7 @@ Keyboard shortcuts:
 
 #### Step 3: Review Ready PRs (30 min)
 
-```
+```text
 1. Filter to "Approved, CI Passed"
 2. For each PR:
    a. Scan evidence bundle (10s)
@@ -651,7 +651,7 @@ Keyboard shortcuts:
 
 #### Step 4: Review & Approve Pending (15 min)
 
-```
+```text
 1. Filter to "Needs Approval"
 2. For each PR:
    a. Check policy gates (5s)
@@ -685,7 +685,7 @@ Keyboard shortcuts:
 
 #### 4. Keyboard Shortcuts
 
-```
+```text
 # Navigation
 j/k or ↓/↑    - Move selection
 Space         - Select/deselect
@@ -736,7 +736,7 @@ G             - Go to (train/pr/repo)
 
 **Structure:**
 
-```
+```text
 bases/cli-tui/
 ├── src/
 │   ├── main.go (or main.clj)
@@ -756,7 +756,7 @@ bases/cli-tui/
 
 **Data Flow:**
 
-```
+```text
 1. TUI connects to API via HTTP + SSE stream for real-time updates
 2. HTTP GET: Initial state {trains, prs, dag, workflows, ...}
 3. SSE stream: Real-time events (agent status, PR updates, CI changes)
@@ -820,7 +820,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 **Structure:**
 
-```
+```text
 bases/web-dashboard/
 ├── src/
 │   ├── miniforge/
@@ -844,7 +844,7 @@ bases/web-dashboard/
 
 **Data Flow:**
 
-```
+```text
 1. Initial load: HTTP GET for trains, PRs, workflows
 2. SSE/WebSocket connection for real-time updates
 3. Real-time events pushed to client (agent status, PR updates, CI changes)
@@ -1096,19 +1096,19 @@ font-family: 'JetBrains Mono', 'Fira Code', 'Monaco', monospace;
 
 **Badge:**
 
-```
+```text
 [CI ✓]  [2/2 ✓]  [Deps: #123]  [Ready →]
 ```
 
 **Progress Bar:**
 
-```
+```text
 ██████▓▓▓▓ 60%
 ```
 
 **Status Dot:**
 
-```
+```text
 ● Green - active/ready
 ○ Gray - inactive/completed
 ◉ Red - blocked/error
@@ -1192,7 +1192,7 @@ font-family: 'JetBrains Mono', 'Fira Code', 'Monaco', monospace;
 
 **Example:**
 
-```
+```text
 Instead of seeing:
   "Workflow running... (5 minutes)"
 
@@ -1216,7 +1216,7 @@ User sees:
 
 **Example:**
 
-```
+```text
 Workflow failed at 3m 12s:
   3m 12s  ✗ Implementer: Policy validation failed
   3m 10s  ⟳ Implementer: Validating against terraform-aws policy
@@ -1238,7 +1238,7 @@ Workflow failed at 3m 12s:
 
 **Example:**
 
-```
+```text
 LLM Usage:
   Planner:      2 calls  │  4.2k tokens  │  6.8s total  │  $0.02
   Implementer:  1 call   │  2.4k tokens  │  3.2s total  │  $0.01
@@ -1326,13 +1326,15 @@ LLM Usage:
 - **Complementary** - Use both depending on context
 - **Full transparency** - Know exactly what autonomous system is doing
 
-**The key:** Progressive disclosure + keyboard shortcuts + batch operations + real-time agent visibility = 100+ PRs/day throughput with full confidence
+**The key:** Progressive disclosure + keyboard shortcuts + batch operations + real-time agent visibility = 100+ PRs/day
+  throughput with full confidence
 
 ---
 
 ## Dependencies & References
 
-- **Agent Status Protocol:** See [AGENT_STATUS_STREAMING.md](./AGENT_STATUS_STREAMING.md) for complete event schema and implementation details
+- **Agent Status Protocol:** See [AGENT_STATUS_STREAMING.md](../deprecated/AGENT_STATUS_STREAMING.md) for complete event
+  schema and implementation details
 - **Agent Interface Changes:** Agents must emit status events via `emit-status` function
 - **Event Bus:** Required for pub/sub of status events to UI subscribers
 - **SSE/WebSocket:** Server-Sent Events or WebSocket for streaming to browser

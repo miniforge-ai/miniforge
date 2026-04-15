@@ -641,7 +641,5 @@ These guidelines are enforced through:
 
 ## See Also
 
-- [Architecture Decision Records](./adr/)
-- [Testing Strategy](./testing-strategy.md)
 - [Contributing Guide](../CONTRIBUTING.md)
-- [Code Review Checklist](.github/pull_request_template.md)
+- [Code Review Checklist](../.github/PULL_REQUEST_TEMPLATE.md)
