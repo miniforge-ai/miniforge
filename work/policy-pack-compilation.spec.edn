@@ -1,0 +1,153 @@
+;; =============================================================================
+;; Spec: Policy Pack Compilation — Implementation Work Spec
+;; =============================================================================
+;;
+;; Normative contract: specs/normative/N4-delta-policy-compilation-contract.md
+;; Informative notes:  specs/informative/I-CANDIDATE-REVIEW-WORKFLOW.md
+;;                     specs/informative/I-PACK-ATTACHMENT-PRECEDENCE.md
+;;
+;; This work spec covers the first implementation of the policy compilation
+;; pipeline. It operates under the normative contract defined in N4-delta,
+;; which standardizes the candidate model, provenance, promotion rules,
+;; and compilation guarantees.
+;;
+;; Problem:
+;;
+;;   Adoption stalls at the cold-start problem. Organizations already have
+;;   their standards — style guides, security policies, SOC2 compliance docs,
+;;   accessibility requirements — but they exist as natural-language documents,
+;;   not enforceable policy packs. Miniforge should not require organizations
+;;   to rewrite themselves into policy packs by hand before they can adopt
+;;   governed workflows. It should compile policy from organizational reality
+;;   into reviewable, provenance-backed artifacts.
+;;
+;; Relationship to other specs:
+;;
+;;   - N4-delta-policy-compilation-contract.md — normative contract that
+;;     constrains this work spec (candidate model, provenance, promotion)
+;;   - policy-pack-extensibility.spec.edn — pack schema this targets
+;;   - policy-pack-configuration.spec.edn — how compiled packs attach to repos
+;;   - repo-config-profile.spec.edn — repo config declares pack references
+
+{:spec/title "Compile policy packs from organizational documents"
+
+ :spec/description
+ "Implement the policy pack compilation pipeline per the N4-delta normative
+  contract. Three modes: compile, derive, compose. All modes produce candidate
+  artifacts first; final pack emission happens after review or auto-promotion.
+
+  MODE 1: COMPILE (document → candidates → pack)
+  ───────────────────────────────────────────────
+  Input:  One or more organizational documents (markdown, PDF, plaintext,
+          HTML, or URL). Examples: style guide, security policy, SOC2 controls,
+          accessibility standards, code review checklist.
+
+  Process:
+  - Parse and chunk the document into sections
+  - LLM extracts discrete policy obligations from each section
+  - Each obligation becomes a candidate with:
+      candidate/id, candidate/statement, candidate/category,
+      candidate/origin-type (:direct), candidate/enforceability,
+      candidate/status (:proposed), candidate/provenance
+  - Optional: attach candidate/check-hint for later executable realization
+  - Candidates are deduplicated and grouped by category
+  - Output: policy-candidates.edn (reviewable candidate artifact)
+  - After review: accepted candidates promote into .pack.edn
+
+  CLI:
+    miniforge policy compile <source> --emit candidates
+    miniforge policy compile <source> --review
+    miniforge policy compile <source> --promote
+
+  MODE 2: DERIVE (repo → candidates → pack)
+  ──────────────────────────────────────────
+  Input:  A repository path (or the current working directory).
+
+  Process:
+  - Scan existing linter configs (.clj-kondo, .eslintrc, .pylintrc, etc.)
+  - Scan CI config (.github/workflows, .gitlab-ci.yml) for enforced checks
+  - Scan git history for commit message conventions, PR templates
+  - Scan existing .editorconfig, .prettierrc, formatting configs
+  - Directly machine-readable artifacts produce candidates WITHOUT LLM
+  - Optional --enrich flag uses LLM to add natural-language descriptions
+  - Each candidate has origin-type :inferred and source provenance
+  - Output: policy-candidates.edn with repo-artifact provenance
+
+  CLI:
+    miniforge policy derive [repo-path] --emit candidates
+    miniforge policy derive [repo-path] --enrich
+    miniforge policy derive [repo-path] --promote
+
+  MODE 3: COMPOSE (packs → pack)  [pure, deterministic, no LLM]
+  ──────────────────────────────────────────────────────────────
+  Input:  A composition spec — a list of base packs with overrides.
+
+  Process:
+  - Load each base pack
+  - Apply overrides: disable rules, change severity, add custom rules
+  - Resolve conflicts deterministically per precedence model
+  - Merge rules, preserving contributing provenance from all upstream packs
+  - Output: a single flattened .pack.edn
+
+  This is pure pack algebra — no candidates, no LLM, deterministic.
+
+  Composition spec (EDN):
+  {:base-packs    ['foundations-1.0.0' 'org-security-v2']
+   :disable-rules [:rule/some-rule-id]
+   :override      {:rule/max-function-length {:severity :warning
+                                               :threshold 50}}
+   :add-rules     [{:rule/id :custom/require-jira-ticket
+                    :rule/description 'Commit messages must reference a ticket'
+                    :rule/category :workflow
+                    :rule/severity :error
+                    :rule/origin-type :manual}]}
+
+  CLI:    miniforge policy compose <composition-spec.edn> [--output path]
+
+  OUTPUTS:
+  - .miniforge/policy-candidates.edn    (compile and derive modes)
+  - .miniforge/packs/<name>.pack.edn    (all modes, after promotion)
+  - .miniforge/policy-review.edn        (optional review decisions artifact)"
+
+ :spec/intent {:type :feature
+               :scope ["bases/cli/src"
+                       "components/policy-pack/src"
+                       "components/knowledge/src"
+                       "components/llm/src"]}
+
+ :spec/constraints
+ ["Output must conform to the N4-delta candidate schema and existing .pack.edn schema"
+  "Candidate extraction must be schema-stable and semantically reproducible under
+   unchanged source material and compiler configuration, modulo ordering and
+   bounded confidence jitter"
+  "Document parsing must handle markdown, plaintext, and PDF at minimum"
+  "Each candidate must have provenance per the N4-delta provenance contract"
+  "Each candidate must declare origin-type: direct, inferred, composed, or manual"
+  "Each candidate must declare enforceability: executable, heuristic, advisory, or human-review"
+  "A candidate with enforceability human-review must not be silently upgraded to executable"
+  "Compilation must produce candidate artifacts before pack artifacts"
+  "Only accepted candidates may be promoted into compiled pack rules"
+  "Compose mode must be pure and deterministic — no LLM calls"
+  "Derive mode must support operation without LLM for machine-readable artifacts"
+  "LLM calls must be budget-bounded (max tokens, max cost per compilation)"
+  "Pack metadata must include compilation timestamp and source fingerprint set"
+  "Must not require any miniforge-specific format in source documents"
+  "Source fingerprinting must support changed-source detection for staleness"]
+
+ :spec/acceptance-criteria
+ ["miniforge policy compile <markdown-file> --emit candidates produces policy-candidates.edn"
+  "miniforge policy compile <url> fetches and compiles a remote document"
+  "miniforge policy compile --review opens interactive candidate review"
+  "miniforge policy compile --promote emits .pack.edn from accepted candidates"
+  "miniforge policy derive infers candidates from linter configs without LLM"
+  "miniforge policy derive --enrich uses LLM to add descriptions to inferred candidates"
+  "miniforge policy compose merges packs with overrides deterministically"
+  "Every candidate has provenance linking to source with support-type and source-fingerprint"
+  "Every candidate has origin-type and enforceability classification"
+  "Candidate status begins as :proposed unless manually authored as :accepted"
+  "Compiled packs load via policy-pack/load-all-packs without special handling"
+  "Compilation of a 50-page style guide completes in under 5 minutes"
+  "Duplicate candidates across source sections are merged with combined provenance"
+  "Re-compilation of unchanged source produces semantically equivalent candidates"]
+
+ :spec/workflow-type :canonical-sdlc}
