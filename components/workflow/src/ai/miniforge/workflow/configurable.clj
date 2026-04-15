@@ -132,7 +132,6 @@
       ;; Real execution
       :else
       (let [phase-agent-instance (factory/create-agent-for-phase phase context)
-            _gates (factory/create-gates-for-phase phase context)
             task (factory/create-task-for-phase phase exec-state context)
             generate-fn (factory/create-generate-fn phase-agent-instance context)
             repair-fn (factory/create-repair-fn phase-agent-instance context)

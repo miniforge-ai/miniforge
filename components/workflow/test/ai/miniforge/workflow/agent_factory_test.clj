@@ -65,14 +65,41 @@
       (is (nil? agent-instance)
           "Should return nil for :none agent"))))
 
-(deftest test-create-agent-for-phase-reviewer
-  (testing "Return nil for stub :reviewer agent"
+(deftest test-create-agent-for-phase-reviewer-throws
+  (testing "Throw for :reviewer — requires :phase/handler or interceptor"
     (let [phase {:phase/id :review
                  :phase/agent :reviewer}
-          context {}
-          agent-instance (factory/create-agent-for-phase phase context)]
-      (is (nil? agent-instance)
-          "Should return nil for stub reviewer agent"))))
+          context {}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"requires a :phase/handler"
+                            (factory/create-agent-for-phase phase context))))))
+
+(deftest test-create-agent-for-phase-releaser-throws
+  (testing "Throw for :releaser — requires :phase/handler or interceptor"
+    (let [phase {:phase/id :release
+                 :phase/agent :releaser}
+          context {}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"requires a :phase/handler"
+                            (factory/create-agent-for-phase phase context))))))
+
+(deftest test-create-agent-for-phase-observer-throws
+  (testing "Throw for :observer — requires :phase/handler or interceptor"
+    (let [phase {:phase/id :observe
+                 :phase/agent :observer}
+          context {}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"requires a :phase/handler"
+                            (factory/create-agent-for-phase phase context))))))
+
+(deftest test-create-agent-for-phase-unknown-throws
+  (testing "Throw for unknown agent type"
+    (let [phase {:phase/id :custom
+                 :phase/agent :nonexistent}
+          context {}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Unknown agent type"
+                            (factory/create-agent-for-phase phase context))))))
 
 ;------------------------------------------------------------------------------ Gate tests
 
