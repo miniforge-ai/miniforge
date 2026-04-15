@@ -63,11 +63,10 @@ jobs:
         run: |
           ARTIFACT_NAME="miniforge-${{ matrix.os }}-${{ matrix.arch }}"
           echo "name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
-          echo "file=dist/miniforge" >> $GITHUB_OUTPUT
 
       - name: Rename binary
         run: |
-          cp dist/miniforge dist/${{ steps.artifact.outputs.name }}
+          cp dist/miniforge.jar dist/${{ steps.artifact.outputs.name }}
 
       - name: Generate SHA256 checksum
         run: |
@@ -212,36 +211,49 @@ jobs:
           # Create Formula directory if it doesn't exist
           mkdir -p homebrew-tap/Formula
 
-          cat > homebrew-tap/Formula/miniforge.rb << EOF
+          cat > homebrew-tap/Formula/miniforge.rb << 'FORMULA_EOF'
           class Miniforge < Formula
             desc "Autonomous software factory — built on MiniForge Core"
             homepage "https://miniforge.ai"
-            version "${VERSION}"
+            version "RELEASE_VERSION"
             license "Apache-2.0"
 
             on_macos do
-              url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/miniforge-macos-arm64"
-              sha256 "${MACOS_ARM64_SHA}"
+              url "https://github.com/miniforge-ai/miniforge/releases/download/vRELEASE_VERSION/miniforge-macos-arm64"
+              sha256 "MACOS_SHA_PLACEHOLDER"
             end
 
             on_linux do
-              url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/miniforge-linux-x86_64"
-              sha256 "${LINUX_X86_SHA}"
+              url "https://github.com/miniforge-ai/miniforge/releases/download/vRELEASE_VERSION/miniforge-linux-x86_64"
+              sha256 "LINUX_SHA_PLACEHOLDER"
             end
 
             depends_on "babashka"
-            depends_on "gum"
 
             def install
-              bin.install "miniforge-macos-arm64" => "mf" if OS.mac?
-              bin.install "miniforge-linux-x86_64" => "mf" if OS.linux?
+              jar_name = "miniforge.jar"
+              if OS.mac?
+                libexec.install "miniforge-macos-arm64" => jar_name
+              else
+                libexec.install "miniforge-linux-x86_64" => jar_name
+              end
+
+              (bin/"mf").write <<~SH
+                #!/bin/bash
+                exec bb --jar "#{libexec}/#{jar_name}" -m ai.miniforge.cli.main "$@"
+              SH
             end
 
             test do
-              assert_match "miniforge", shell_output("#{bin}/mf version")
+              assert_match "miniforge", shell_output("#{bin}/mf --help 2>&1")
             end
           end
-          EOF
+          FORMULA_EOF
+
+          # Substitute version and checksums
+          sed -i "s/RELEASE_VERSION/${VERSION}/g" homebrew-tap/Formula/miniforge.rb
+          sed -i "s/MACOS_SHA_PLACEHOLDER/${MACOS_ARM64_SHA}/g" homebrew-tap/Formula/miniforge.rb
+          sed -i "s/LINUX_SHA_PLACEHOLDER/${LINUX_X86_SHA}/g" homebrew-tap/Formula/miniforge.rb
 
       - name: Commit and push formula
         run: |
