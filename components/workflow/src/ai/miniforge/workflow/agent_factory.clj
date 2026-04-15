@@ -28,6 +28,12 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Agent mapping
 
+(def ^:private handler-only-agents
+  "Agent types that require a :phase/handler or phase interceptor.
+   These phases have real responsibilities (gate evaluation, release ops,
+   metrics collection) that cannot be fulfilled by a stub artifact."
+  #{:reviewer :releaser :observer})
+
 (defn create-agent-for-phase
   "Create agent instance from :phase/agent keyword.
    Returns agent instance or nil for :none.
@@ -38,10 +44,11 @@
    - :tester -> agent/create-tester
    - :spec-analyzer -> planner with spec-focus prompt
    - :designer -> planner with design-focus prompt
-   - :reviewer -> stub (run lint gates, return approval)
-   - :releaser -> stub (marker phase)
-   - :observer -> stub (collect metrics, no LLM)
    - :none -> nil (skip phase)
+
+   Throws for :reviewer, :releaser, :observer — these require a :phase/handler
+   or a registered phase interceptor (see phase.registry). Using this factory
+   for them produces a silent stub that does no real work.
 
    Arguments:
    - phase: Phase configuration map with :phase/agent
@@ -51,6 +58,14 @@
   [phase context]
   (let [agent-type (:phase/agent phase)
         llm-backend (:llm-backend context)]
+
+    (when (contains? handler-only-agents agent-type)
+      (throw (ex-info (str "Agent type " agent-type " requires a :phase/handler or "
+                           "phase interceptor (see phase.registry). Configure the "
+                           "phase with :phase/handler or use the interceptor pipeline "
+                           "via runner/run-pipeline.")
+                      {:agent-type agent-type
+                       :phase-id (:phase/id phase)})))
 
     (case agent-type
       ;; Core agents
@@ -62,16 +77,15 @@
       :spec-analyzer (agent/create-planner {:llm-backend llm-backend})
       :designer (agent/create-planner {:llm-backend llm-backend})
 
-      ;; Stub agents (no actual LLM call for now)
-      :reviewer nil  ; Will run gates directly
-      :releaser nil  ; Marker phase
-      :observer nil  ; Metrics collection only
-
       ;; Skip phase
       :none nil
 
-      ;; Unknown agent type - return nil
-      nil)))
+      ;; Unknown agent type — fail loud
+      (throw (ex-info (str "Unknown agent type: " agent-type
+                           ". Supported: :planner :implementer :tester "
+                           ":spec-analyzer :designer :none")
+                      {:agent-type agent-type
+                       :phase-id (:phase/id phase)})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Gate mapping
