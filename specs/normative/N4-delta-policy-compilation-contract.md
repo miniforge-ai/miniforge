@@ -5,8 +5,7 @@
 Define the OSS-stable contract for turning source policy material into reviewable, provenance-backed policy artifacts.
 
 This spec standardizes the intermediate representation, provenance requirements, approval lifecycle, and compilation
-guarantees. It does **not** standardize enterprise crawling, connector orchestration, or centralized governance
-workflows.
+guarantees. It does **not** standardize source crawling, connector orchestration, or centralized governance workflows.
 
 ## Why this exists
 
@@ -49,8 +48,8 @@ This spec defines:
 
 This spec does **not** define:
 
-- enterprise connector catalogs
-- org-wide crawling or indexing infrastructure
+- source connector catalogs
+- crawling or indexing infrastructure
 - central approval queues or reviewer routing
 - hosted pack registries or policy distribution services
 
@@ -72,7 +71,7 @@ action.
 
 ### 4. Pack portability
 
-A compiled pack must remain portable across local OSS environments without dependency on enterprise infrastructure.
+A compiled pack must remain portable across environments without dependency on external infrastructure.
 
 ### 5. Composition is deterministic
 
@@ -255,8 +254,8 @@ Optional producer or compiler identity and version.
 ## Non-goals
 
 - This spec does not require that all candidates become executable checks.
-- This spec does not require enterprise connectors or centralized indexing.
-- This spec does not define org-wide review queues, waivers, or distribution workflows.
+- This spec does not require source connectors or centralized indexing.
+- This spec does not define review queues, waivers, or distribution workflows.
 - This spec does not define UI shape for candidate review.
 
 ## Acceptance criteria

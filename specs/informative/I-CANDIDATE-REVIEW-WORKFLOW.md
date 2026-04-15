@@ -39,8 +39,8 @@ This note covers:
 
 This note does not cover:
 
-- enterprise reviewer routing and approval queues
-- centralized Fleet governance workflows
+- reviewer routing and approval queue infrastructure
+- centralized governance workflows
 - connector-specific extraction logic
 
 ## High-level model
@@ -259,12 +259,11 @@ Review systems should preserve at least:
 - edits made during normalization
 - merge or supersession references where applicable
 
-In OSS this may be local metadata, comments, or a simple sidecar artifact.
-In Fleet this may become a richer approval record.
+This may be local metadata, comments, or a simple sidecar artifact.
 
-## Local OSS workflow
+## Review workflow
 
-A practical OSS review loop should look like this:
+A practical review loop should look like this:
 
 1. compile or derive candidates from explicit inputs
 2. open a review surface showing candidate statement, provenance, origin, and enforceability
@@ -272,21 +271,6 @@ A practical OSS review loop should look like this:
 4. emit a reviewed candidate artifact
 5. promote accepted candidates into a pack
 6. commit both the pack and the reviewed-candidate artifact
-
-This keeps the system credible without requiring enterprise governance infrastructure.
-
-## Fleet implications
-
-Fleet may add:
-
-- reviewer routing
-- ownership resolution
-- approval queues
-- parallel review assignments
-- stale-review detection
-- audit dashboards
-
-Those capabilities should extend this workflow, not replace the underlying candidate-and-promotion model.
 
 ## Recommended outputs
 

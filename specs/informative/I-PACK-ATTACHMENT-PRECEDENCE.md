@@ -48,7 +48,7 @@ This note covers:
 This note does not cover:
 
 - how a pack is compiled
-- enterprise registry/distribution mechanics
+- registry or distribution mechanics
 - approval workflow for new packs
 
 ## Conceptual model
@@ -129,7 +129,7 @@ Recommended default precedence, from strongest to weakest, is:
 4. repo-local packs
 5. advisory local overlays
 
-This default keeps the enterprise story sane while still allowing repository specialization.
+This default allows organizational policy to be enforced while still allowing repository specialization.
 
 ## Override rules
 
@@ -218,19 +218,6 @@ In OSS, a user should be able to:
 5. see which rule won when there was a conflict
 
 If those are not inspectable locally, the pack model will feel opaque.
-
-## Fleet implications
-
-Fleet may extend this with:
-
-- organization-wide pack registries
-- recommended pack assignment by repo type
-- centralized exception workflows
-- waiver expiry and ownership
-- org-wide impact analysis for pack changes
-- compliance dashboards built from effective rule sets
-
-Those features depend on the same attachment and precedence semantics; they should not invent a second model.
 
 ## Recommended outputs
 
