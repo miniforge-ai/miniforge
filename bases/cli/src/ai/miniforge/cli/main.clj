@@ -21,9 +21,14 @@
 
    Provides commands for:
    - run      : Execute workflows from spec files
+   - workflow : Workflow lifecycle (execute, status, list, cancel)
    - status   : Show workflow status
-   - fleet    : Multi-repo management daemon
+   - fleet    : Multi-repo management (start, stop, status, add, remove, watch, prs)
    - pr       : PR operations (list, review, respond, merge)
+   - policy   : Policy pack management (list, show, install)
+   - evidence : Evidence bundle management (show, export, list)
+   - artifact : Artifact management (provenance, list)
+   - etl      : ETL pipeline commands (repo)
    - config   : Configuration management
    - doctor   : System health check
    - version  : Version information
@@ -49,6 +54,12 @@
    [ai.miniforge.cli.main.commands.control-plane :as cmd-cp]
    [ai.miniforge.cli.main.commands.scan :as cmd-scan]
    [ai.miniforge.cli.main.commands.init :as cmd-init]
+   ;; N5 command modules
+   [ai.miniforge.cli.main.commands.workflow-commands :as cmd-workflow]
+   [ai.miniforge.cli.main.commands.policy :as cmd-policy]
+   [ai.miniforge.cli.main.commands.evidence :as cmd-evidence]
+   [ai.miniforge.cli.main.commands.artifact-cmds :as cmd-artifact]
+   [ai.miniforge.cli.main.commands.etl :as cmd-etl]
    [ai.miniforge.agent.tool-supervisor :as tool-supervisor]
    [ai.miniforge.mcp-context-server.interface :as mcp-context-server]
    [ai.miniforge.lsp-mcp-bridge.main :as lsp-bridge]
@@ -166,6 +177,11 @@
 
 (defn workflow-list-cmd [_m] (workflow-runner/list-workflows!))
 
+;; Workflow subcommands — spec-driven execution and lifecycle (N5)
+(defn workflow-execute-cmd [m] (cmd-workflow/workflow-execute-cmd (get-opts m)))
+(defn workflow-status-cmd  [m] (cmd-workflow/workflow-status-cmd  (get-opts m)))
+(defn workflow-cancel-cmd  [m] (cmd-workflow/workflow-cancel-cmd  (get-opts m)))
+
 ;; Chain commands
 (defn chain-run-cmd
   [m]
@@ -203,6 +219,8 @@
 (defn fleet-status-cmd [m] (cmd-fleet/fleet-status-cmd (get-opts m) config/default-user-config-path config/default-config))
 (defn fleet-add-cmd [m] (cmd-fleet/fleet-add-cmd (get-opts m) config/default-user-config-path config/default-config))
 (defn fleet-remove-cmd [m] (cmd-fleet/fleet-remove-cmd (get-opts m) config/default-user-config-path config/default-config))
+(defn fleet-watch-cmd [m] (cmd-fleet/fleet-watch-cmd (get-opts m)))
+(defn fleet-prs-cmd [m] (cmd-fleet/fleet-prs-cmd (get-opts m) config/default-user-config-path config/default-config))
 (defn pr-list-cmd [m]
   (cmd-pr/pr-list-cmd (get-opts m)
                       (fn [config-path]
@@ -217,6 +235,23 @@
 (defn cp-decisions-cmd [m] (cmd-cp/decisions-cmd (get-opts m)))
 (defn cp-resolve-cmd [m] (cmd-cp/resolve-cmd (get-opts m)))
 (defn cp-terminate-cmd [m] (cmd-cp/terminate-cmd (get-opts m)))
+
+;; Policy commands (N5)
+(defn policy-list-cmd    [m] (cmd-policy/policy-list-cmd    (get-opts m)))
+(defn policy-show-cmd    [m] (cmd-policy/policy-show-cmd    (get-opts m)))
+(defn policy-install-cmd [m] (cmd-policy/policy-install-cmd (get-opts m)))
+
+;; Evidence commands (N5)
+(defn evidence-list-cmd   [m] (cmd-evidence/evidence-list-cmd   (get-opts m)))
+(defn evidence-show-cmd   [m] (cmd-evidence/evidence-show-cmd   (get-opts m)))
+(defn evidence-export-cmd [m] (cmd-evidence/evidence-export-cmd (get-opts m)))
+
+;; Artifact commands (N5)
+(defn artifact-list-cmd       [m] (cmd-artifact/artifact-list-cmd       (get-opts m)))
+(defn artifact-provenance-cmd [m] (cmd-artifact/artifact-provenance-cmd (get-opts m)))
+
+;; ETL commands (N5)
+(defn etl-repo-cmd [m] (cmd-etl/etl-repo-cmd (get-opts m)))
 
 (defn hook-eval-cmd
   "Evaluate a tool-use request from a Claude PreToolUse hook.
@@ -361,6 +396,23 @@
    {:cmds ["workflow" "list"]
     :fn workflow-list-cmd}
 
+   ;; Workflow subcommands — spec-driven execution and lifecycle (N5)
+   {:cmds ["workflow" "execute"]
+    :fn workflow-execute-cmd
+    :args->opts [:spec]
+    :spec {:worktree       {:alias :w}
+           :backend        {:coerce :keyword :alias :b}
+           :execution-mode {:coerce :keyword :alias :m}
+           :quiet          {:coerce :boolean :alias :q}}}
+
+   {:cmds ["workflow" "status"]
+    :fn workflow-status-cmd
+    :args->opts [:id]}
+
+   {:cmds ["workflow" "cancel"]
+    :fn workflow-cancel-cmd
+    :args->opts [:id]}
+
    ;; Chain commands
    {:cmds ["chain" "run"]
     :fn chain-run-cmd
@@ -409,12 +461,14 @@
    {:cmds ["events" "list"]
     :fn events-list-cmd}
 
-   ;; Fleet subcommands (daemon management)
+   ;; Fleet subcommands (daemon management + watch/prs — N5)
    {:cmds ["fleet" "start"]  :fn fleet-start-cmd}
    {:cmds ["fleet" "stop"]   :fn fleet-stop-cmd}
    {:cmds ["fleet" "status"] :fn fleet-status-cmd}
    {:cmds ["fleet" "add"]    :fn fleet-add-cmd    :args->opts [:repo]}
    {:cmds ["fleet" "remove"] :fn fleet-remove-cmd :args->opts [:repo]}
+   {:cmds ["fleet" "watch"]  :fn fleet-watch-cmd}
+   {:cmds ["fleet" "prs"]    :fn fleet-prs-cmd    :spec {:repo {:alias :r}}}
 
    ;; PR subcommands
    {:cmds ["pr" "list"]    :fn pr-list-cmd    :spec {:repo {:alias :r}}}
@@ -431,7 +485,28 @@
     :args->opts [:decision-id :resolution]
     :spec {:comment {:alias :c}}}
    {:cmds ["control-plane" "terminate"] :fn cp-terminate-cmd
-    :args->opts [:agent-id]}])
+    :args->opts [:agent-id]}
+
+   ;; Policy pack commands (N5)
+   {:cmds ["policy"]           :fn help-cmd}
+   {:cmds ["policy" "list"]    :fn policy-list-cmd}
+   {:cmds ["policy" "show"]    :fn policy-show-cmd    :args->opts [:pack-id]}
+   {:cmds ["policy" "install"] :fn policy-install-cmd :args->opts [:path]}
+
+   ;; Evidence bundle commands (N5)
+   {:cmds ["evidence"]           :fn help-cmd}
+   {:cmds ["evidence" "list"]    :fn evidence-list-cmd}
+   {:cmds ["evidence" "show"]    :fn evidence-show-cmd   :args->opts [:id]}
+   {:cmds ["evidence" "export"]  :fn evidence-export-cmd :args->opts [:id :format]}
+
+   ;; Artifact commands (N5)
+   {:cmds ["artifact"]              :fn help-cmd}
+   {:cmds ["artifact" "list"]       :fn artifact-list-cmd}
+   {:cmds ["artifact" "provenance"] :fn artifact-provenance-cmd :args->opts [:id]}
+
+   ;; ETL commands (N5)
+   {:cmds ["etl"]        :fn help-cmd}
+   {:cmds ["etl" "repo"] :fn etl-repo-cmd :args->opts [:url]}])
 
 (defn- handle-unknown-command
   "Print help for an unrecognized CLI command."

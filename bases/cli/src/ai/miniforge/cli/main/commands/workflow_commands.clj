@@ -1,0 +1,151 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+(ns ai.miniforge.cli.main.commands.workflow-commands
+  "Workflow subcommands: execute (spec file), status, cancel.
+
+   Distinct from 'workflow run' (which takes a registered workflow-id) —
+   'workflow execute' accepts a spec file path and routes through the full
+   run pipeline, identical to `miniforge run <spec>`."
+  (:require
+   [babashka.fs :as fs]
+   [clojure.edn :as edn]
+   [clojure.string :as str]
+   [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.main.commands.shared :as shared]
+   [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.cli.main.commands.run :as cmd-run]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Helpers
+
+(defn- read-event-lines
+  "Read all non-blank EDN lines from a workflow event file."
+  [event-file]
+  (try
+    (->> (slurp event-file)
+         str/split-lines
+         (remove str/blank?)
+         (keep #(try (edn/read-string %) (catch Exception _ nil))))
+    (catch Exception _ [])))
+
+(defn derive-status
+  "Derive a workflow status label from its event stream."
+  [events]
+  (let [by-type (group-by :event/type events)]
+    (cond
+      (seq (get by-type :workflow/completed)) "completed"
+      (seq (get by-type :workflow/failed))    "failed"
+      (seq (get by-type :workflow/started))   "running"
+      :else                                   "unknown")))
+
+(defn- colorize-status [s]
+  (case s
+    "completed" (display/style s :foreground :green)
+    "failed"    (display/style s :foreground :red)
+    (display/style s :foreground :yellow)))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Command implementations
+
+(defn workflow-execute-cmd
+  "Execute a workflow from a spec file (alias for `run <spec>`).
+
+   Routes through the same pipeline as `miniforge run <spec>`:
+   parses the spec, validates, selects workflow type, and executes."
+  [opts]
+  (let [{:keys [spec]} opts]
+    (if-not spec
+      (shared/usage-error! :workflow-cmd/execute-usage "workflow execute <spec-file>")
+      (cmd-run/run-cmd opts))))
+
+(defn workflow-status-cmd
+  "Show the status of a workflow by ID.
+
+   Reads the workflow's event file from the events directory and
+   reconstructs the current state from the event stream."
+  [opts]
+  (let [{:keys [id]} opts]
+    (if-not id
+      (shared/usage-error! :workflow-cmd/status-usage "workflow status <id>")
+      (let [events-dir (app-config/events-dir)
+            event-file (str events-dir "/" id ".edn")]
+        (if-not (fs/exists? event-file)
+          (do (display/print-error (messages/t :workflow-cmd/status-not-found {:id id}))
+              (shared/exit! 1))
+          (let [events  (read-event-lines event-file)
+                status  (derive-status events)
+                started (first (filter #(= :workflow/started (:event/type %)) events))
+                failed  (first (filter #(= :workflow/failed (:event/type %)) events))
+                phases  (->> events
+                             (filter #(= :workflow/phase-completed (:event/type %)))
+                             (mapv #(select-keys % [:workflow/phase :phase/outcome :phase/duration-ms])))]
+            (display/render-detail
+             {:header        :workflow-cmd/status-header
+              :header-params {:id id}
+              :fields        [[:wf/status  :workflow-cmd/status-status  {:transform colorize-status}]
+                              [:wf/started :workflow-cmd/status-started]
+                              [:wf/error   :workflow-cmd/status-error]]}
+             {:wf/status  status
+              :wf/started (:event/timestamp started)
+              :wf/error   (when failed (get failed :workflow/failure-reason "unknown"))})
+            ;; Phases: custom rendering for per-phase check/cross marks
+            (when (seq phases)
+              (println (messages/t :workflow-cmd/status-phases))
+              (doseq [{phase :workflow/phase outcome :phase/outcome dur :phase/duration-ms} phases]
+                (let [ok? (= :success outcome)]
+                  (println (str "    "
+                                (display/style (if ok? "✓" "✗") :foreground (if ok? :green :red))
+                                " " (name phase)
+                                (when dur (str "  (" dur "ms)"))))))
+              (println))))))))
+
+(defn workflow-cancel-cmd
+  "Cancel a running workflow by writing a stop command file.
+
+   The CLI command poller (started with each workflow) reads this file
+   and calls event-stream/cancel! on the control state."
+  [opts]
+  (let [{:keys [id]} opts]
+    (if-not id
+      (shared/usage-error! :workflow-cmd/cancel-usage "workflow cancel <id>")
+      (let [commands-dir (app-config/commands-dir (str id))
+            cmd-file     (str commands-dir "/cancel-" (System/currentTimeMillis) ".edn")
+            wf-id-str    (str id)
+            timestamp    (java.util.Date.)
+            cmd-data     {:command "stop"
+                          :workflow-id wf-id-str
+                          :timestamp timestamp}]
+        (try
+          (fs/create-dirs commands-dir)
+          (spit cmd-file (pr-str cmd-data))
+          (display/print-success (messages/t :workflow-cmd/cancel-success {:id id}))
+          (catch Exception e
+            (display/print-error (messages/t :workflow-cmd/cancel-failed
+                                            {:error (ex-message e)}))))))))
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  ;; Test workflow status
+  (workflow-status-cmd {:id "some-uuid"})
+
+  ;; Test workflow cancel
+  (workflow-cancel-cmd {:id "some-uuid"})
+
+  :end)
