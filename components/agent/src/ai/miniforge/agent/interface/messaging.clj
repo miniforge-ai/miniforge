@@ -17,7 +17,10 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.agent.interface.messaging
-  "Inter-agent messaging public API."
+  "Inter-agent messaging public API.
+
+   Thin pass-through interface per Polylith convention. Event emission
+   is handled in the impl layer (send-message-impl), not here."
   (:require
    [ai.miniforge.agent.interface.protocols.messaging :as msg-proto]
    [ai.miniforge.agent.protocols.impl.messaging :as msg-impl]
@@ -37,7 +40,12 @@
 (def Message msg-impl/Message)
 (def MessageType msg-impl/MessageType)
 
+;------------------------------------------------------------------------------ Layer 1
+;; Messaging operations (thin pass-throughs)
+
 (defn send-message
+  "Send a message from agent-messaging to the target specified in message-data.
+   Event emission is handled by the impl layer."
   [agent-messaging message-data]
   (msg-proto/send-message agent-messaging message-data))
 
@@ -46,10 +54,12 @@
   (msg-proto/receive-messages agent-messaging))
 
 (defn respond-to-message
+  "Respond to a message. Event emission is handled by the impl layer."
   [agent-messaging original-message response-content]
   (msg-proto/respond-to-message agent-messaging original-message response-content))
 
 (defn route-message
+  "Route a message to its recipient."
   [router message]
   (msg-proto/route-message router message))
 

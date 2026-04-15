@@ -19,11 +19,12 @@
 (ns ai.miniforge.phase.telemetry
   "Soft-dependency telemetry helpers for phase implementations.
 
-   Provides four capabilities for phase interceptors:
+   Provides five capabilities for phase interceptors:
    1. Streaming callbacks — relay agent LLM chunks to event-stream subscribers
    2. Phase lifecycle events — emit phase-started / phase-completed events
    3. Agent lifecycle events — emit agent-started / agent-completed events
-   4. Event-stream resolution — locate the stream in varied execution contexts
+   4. Milestone transitions — emit milestone-reached events on successful phases
+   5. Event-stream resolution — locate the stream in varied execution contexts
 
    All functions are safe no-ops when the event-stream component is absent
    (soft dependency via requiring-resolve)."
@@ -65,18 +66,6 @@
       (publish-fn stream event))
     (catch Exception _ nil)))
 
-(defn- make-fallback-event
-  "Build a minimal event map when the event-stream constructor cannot be resolved.
-   Ensures events are published even when the event-stream component version
-   has incompatible constructor signatures."
-  [event-type workflow-id phase-kw extra]
-  (merge {:event/type      event-type
-          :event/id        (random-uuid)
-          :event/timestamp (java.util.Date.)
-          :workflow/id     workflow-id
-          :workflow/phase  phase-kw}
-         extra))
-
 ;------------------------------------------------------------------------------ Layer 0
 ;; Streaming callback construction
 
@@ -110,8 +99,15 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Phase lifecycle event emission
 
+(declare emit-milestone-reached!
+         emit-milestone-started!
+         emit-milestone-completed!
+         emit-milestone-failed!)
+
 (defn emit-phase-started!
   "Publish a :workflow/phase-started event for the given phase.
+   Also emits a :phase/milestone-started event marking the phase as an
+   in-progress milestone checkpoint.
 
    Safe no-op when no event stream is available or the event-stream
    component cannot be resolved. Called from phase :enter functions.
@@ -127,14 +123,16 @@
                                  'ai.miniforge.event-stream.interface/phase-started)
               event            (phase-started-fn stream workflow-id phase-kw)]
           (safe-publish! stream event))
-        (catch Exception _
-          ;; Fallback: publish a minimal event when constructor resolution fails
-          (safe-publish! stream
-                         (make-fallback-event :workflow/phase-started workflow-id phase-kw
-                                              {:message (str (name phase-kw) " phase started")})))))))
+        (catch Exception _ nil)))
+    ;; Milestone checkpoint: phase start = milestone start
+    (emit-milestone-started! ctx phase-kw)))
 
 (defn emit-phase-completed!
   "Publish a :workflow/phase-completed event for the given phase.
+
+   Milestone semantics:
+   - On :success — emits :phase/milestone-completed and :workflow/milestone-reached
+   - On any other outcome — emits :phase/milestone-failed
 
    Safe no-op when no event stream is available or the event-stream
    component cannot be resolved. Called from phase :leave functions.
@@ -152,16 +150,13 @@
                                    'ai.miniforge.event-stream.interface/phase-completed)
               event              (phase-completed-fn stream workflow-id phase-kw result)]
           (safe-publish! stream event))
-        (catch Exception _
-          ;; Fallback: publish a minimal event when constructor resolution fails
-          (safe-publish! stream
-                         (make-fallback-event :workflow/phase-completed workflow-id phase-kw
-                                              (cond-> {:message (str (name phase-kw) " phase completed")}
-                                                (:outcome result)     (assoc :phase/outcome (:outcome result))
-                                                (:duration-ms result) (assoc :phase/duration-ms (:duration-ms result))
-                                                (:tokens result)      (assoc :phase/tokens (:tokens result))
-                                                (:cost-usd result)    (assoc :phase/cost-usd (:cost-usd result))
-                                                (:error result)       (assoc :phase/error (:error result))))))))))
+        (catch Exception _ nil))
+      ;; Milestone transitions: success = completed, anything else = failed
+      (if (= :success (:outcome result))
+        (do
+          (emit-milestone-completed! ctx phase-kw result)
+          (emit-milestone-reached! ctx phase-kw result))
+        (emit-milestone-failed! ctx phase-kw result)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Agent lifecycle event emission
@@ -177,15 +172,7 @@
                                  'ai.miniforge.event-stream.interface/agent-started)
               event            (agent-started-fn stream workflow-id agent-id)]
           (safe-publish! stream event))
-        (catch Exception _
-          (safe-publish! stream
-                         {:event/type      :agent/started
-                          :event/id        (random-uuid)
-                          :event/timestamp (java.util.Date.)
-                          :workflow/id     workflow-id
-                          :workflow/phase  phase-kw
-                          :agent/id        agent-id
-                          :message         (str (name agent-id) " agent started for " (name phase-kw))}))))))
+        (catch Exception _ nil)))))
 
 (defn emit-agent-completed!
   "Publish an :agent/completed event.
@@ -198,25 +185,128 @@
                                    'ai.miniforge.event-stream.interface/agent-completed)
               event              (agent-completed-fn stream workflow-id agent-id)]
           (safe-publish! stream event))
-        (catch Exception _
-          (safe-publish! stream
-                         (cond-> {:event/type      :agent/completed
-                                  :event/id        (random-uuid)
-                                  :event/timestamp (java.util.Date.)
-                                  :workflow/id     workflow-id
-                                  :workflow/phase  phase-kw
-                                  :agent/id        agent-id
-                                  :message         (str (name agent-id) " agent completed for " (name phase-kw))}
-                           (:status result) (assoc :agent/status (:status result)))))))))
+        (catch Exception _ nil)))))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Milestone transition event emission
+
+(defn emit-milestone-reached!
+  "Publish a :workflow/milestone-reached event when a phase successfully completes.
+
+   Called automatically from emit-phase-completed! when :outcome is :success.
+   Can also be called directly to mark an explicit milestone transition.
+
+   Safe no-op when no event stream is available or the event-stream
+   component cannot be resolved.
+
+   Arguments:
+   - ctx      — execution context map
+   - phase-kw — phase keyword that completed (used as the milestone name)
+   - result   — result map from the phase (may include :artifacts, :tokens, :cost-usd)"
+  [ctx phase-kw result]
+  (when-let [stream (resolve-event-stream ctx)]
+    (let [workflow-id (resolve-workflow-id ctx)]
+      (try
+        (let [milestone-reached-fn (requiring-resolve
+                                     'ai.miniforge.event-stream.interface/milestone-reached)
+              event                (milestone-reached-fn stream workflow-id phase-kw)]
+          (safe-publish! stream event))
+        (catch Exception _ nil)))))
+
+(defn emit-milestone-started!
+  "Publish a :phase/milestone-started event when a phase begins execution.
+
+   Called automatically from emit-phase-started! to signal that a named
+   milestone checkpoint has entered an in-progress state.
+
+   Safe no-op when no event stream is available.
+
+   Arguments:
+   - ctx      — execution context map
+   - phase-kw — phase keyword used as the milestone identifier"
+  [ctx phase-kw]
+  (when-let [stream (resolve-event-stream ctx)]
+    (let [workflow-id (resolve-workflow-id ctx)]
+      (try
+        (let [constructor (requiring-resolve
+                            'ai.miniforge.event-stream.interface/milestone-started)
+              event       (constructor stream workflow-id phase-kw)]
+          (safe-publish! stream event))
+        (catch Exception _ nil)))))
+
+(defn emit-milestone-completed!
+  "Publish a :phase/milestone-completed event when a phase succeeds.
+
+   Called automatically from emit-phase-completed! when :outcome is :success.
+
+   Safe no-op when no event stream is available.
+
+   Arguments:
+   - ctx      — execution context map
+   - phase-kw — phase keyword used as the milestone identifier
+   - result   — result map from the phase (may include :artifacts, :tokens, :cost-usd)"
+  [ctx phase-kw result]
+  (when-let [stream (resolve-event-stream ctx)]
+    (let [workflow-id (resolve-workflow-id ctx)]
+      (try
+        (let [constructor (requiring-resolve
+                            'ai.miniforge.event-stream.interface/milestone-completed)
+              event       (constructor stream workflow-id phase-kw
+                                       (str (name phase-kw) " milestone completed"))]
+          (safe-publish! stream event))
+        (catch Exception _ nil)))))
+
+(defn emit-milestone-failed!
+  "Publish a :phase/milestone-failed event when a phase fails.
+
+   Called automatically from emit-phase-completed! when :outcome is not :success.
+
+   Safe no-op when no event stream is available.
+
+   Arguments:
+   - ctx      — execution context map
+   - phase-kw — phase keyword used as the milestone identifier
+   - result   — result map from the phase (may include :error, :outcome)"
+  [ctx phase-kw result]
+  (when-let [stream (resolve-event-stream ctx)]
+    (let [workflow-id (resolve-workflow-id ctx)
+          reason      (or (get-in result [:error :message])
+                          (str (name phase-kw) " milestone failed"))]
+      (try
+        (let [constructor (requiring-resolve
+                            'ai.miniforge.event-stream.interface/milestone-failed)
+              event       (constructor stream workflow-id phase-kw reason)]
+          (safe-publish! stream event))
+        (catch Exception _ nil)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (create-streaming-callback {:execution/id (random-uuid)} :plan)
   (create-streaming-callback-or-noop {:execution/id (random-uuid)} :plan)
+
+  ;; Phase lifecycle — each call now also emits the milestone transition event
   (emit-phase-started! {:execution/id (random-uuid) :event-stream (atom {})} :verify)
+  ;; => emits :workflow/phase-started AND :phase/milestone-started
+
   (emit-phase-completed! {:execution/id (random-uuid) :event-stream (atom {})} :verify
                          {:outcome :success :duration-ms 1234 :tokens 500})
+  ;; => emits :workflow/phase-completed, :phase/milestone-completed, :workflow/milestone-reached
+
+  (emit-phase-completed! {:execution/id (random-uuid) :event-stream (atom {})} :verify
+                         {:outcome :failure :error {:message "tests failed"}})
+  ;; => emits :workflow/phase-completed, :phase/milestone-failed
+
+  ;; Agent lifecycle
   (emit-agent-started! {:execution/id (random-uuid) :event-stream (atom {})} :verify :tester)
   (emit-agent-completed! {:execution/id (random-uuid) :event-stream (atom {})} :verify :tester
                          {:status :success})
+
+  ;; Milestone transitions (direct use)
+  (emit-milestone-started! {:execution/id (random-uuid) :event-stream (atom {})} :verify)
+  (emit-milestone-completed! {:execution/id (random-uuid) :event-stream (atom {})} :verify
+                              {:artifacts ["test-report.edn"] :tokens 500})
+  (emit-milestone-failed! {:execution/id (random-uuid) :event-stream (atom {})} :verify
+                           {:error {:message "gate failed"} :outcome :failure})
+  (emit-milestone-reached! {:execution/id (random-uuid) :event-stream (atom {})} :verify
+                            {:artifacts ["test-report.edn"] :tokens 500})
   :leave-this-here)

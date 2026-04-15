@@ -29,7 +29,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Records
 
-(defrecord AgentMessaging [agent-id instance-id workflow-id router]
+(defrecord AgentMessaging [agent-id instance-id workflow-id router event-stream]
   p/InterAgentMessaging
   (send-message [this message-data]
     (impl/send-message-impl this message-data))
@@ -85,14 +85,18 @@
    - workflow-id      - Workflow UUID
    - router           - MessageRouter instance
 
+   Optional:
+   - event-stream     - Event stream atom for N3-compliant event emission.
+                        When provided, message-sent/received events are
+                        published via the event-stream component.
+
    Example:
-     (create-agent-messaging
-       :implementer
-       agent-instance-id
-       workflow-id
-       router)"
-  [agent-id instance-id workflow-id router]
-  (->AgentMessaging agent-id instance-id workflow-id router))
+     (create-agent-messaging :implementer agent-instance-id workflow-id router)
+     (create-agent-messaging :implementer agent-instance-id workflow-id router stream)"
+  ([agent-id instance-id workflow-id router]
+   (->AgentMessaging agent-id instance-id workflow-id router nil))
+  ([agent-id instance-id workflow-id router event-stream]
+   (->AgentMessaging agent-id instance-id workflow-id router event-stream)))
 
 (defn create-message-validator
   "Create a message validator instance.
