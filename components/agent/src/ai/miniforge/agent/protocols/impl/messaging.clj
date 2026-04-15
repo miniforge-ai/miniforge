@@ -190,23 +190,28 @@
   nil)
 
 ;------------------------------------------------------------------------------ Layer 4
-;; Event Creation (for N3 compliance)
+;; Event Creation (N3-compliant fallback for when no stream is available)
 
 (defn create-message-sent-event
-  "Create agent/message-sent event per N3 section 3.7."
+  "Create a minimal agent/message-sent event per N3 section 3.7.
+
+   This fallback is used when the event-stream component is unavailable.
+   When an event stream is present, prefer emit-inter-agent-event! which
+   goes through create-envelope and includes event/sequence-number."
   [message]
-  {:event/type :agent/message-sent
-   :event/id (random-uuid)
-   :event/timestamp (java.util.Date.)
-   :event/version "1.0.0"
+  {:event/type            :agent/message-sent
+   :event/id              (random-uuid)
+   :event/timestamp       (java.util.Date.)
+   :event/version         "1.0.0"
+   :event/sequence-number 0
 
-   :from-agent/id (:message/from-agent message)
+   :from-agent/id         (:message/from-agent message)
    :from-agent/instance-id (:message/from-instance-id message)
-   :to-agent/id (:message/to-agent message)
-   :workflow/id (:message/workflow-id message)
+   :to-agent/id           (:message/to-agent message)
+   :workflow/id           (:message/workflow-id message)
 
-   :message-type (:message/type message)
-   :message-content (:message/content message)
+   :message-type          (:message/type message)
+   :message-content       (:message/content message)
 
    :message (format "Sending %s to %s: %s"
                     (name (:message/type message))
@@ -214,19 +219,22 @@
                     (:message/content message))})
 
 (defn create-message-received-event
-  "Create agent/message-received event per N3 section 3.7."
+  "Create a minimal agent/message-received event per N3 section 3.7.
+
+   This fallback is used when the event-stream component is unavailable."
   [message]
-  {:event/type :agent/message-received
-   :event/id (random-uuid)
-   :event/timestamp (java.util.Date.)
-   :event/version "1.0.0"
+  {:event/type            :agent/message-received
+   :event/id              (random-uuid)
+   :event/timestamp       (java.util.Date.)
+   :event/version         "1.0.0"
+   :event/sequence-number 0
 
-   :from-agent/id (:message/from-agent message)
-   :to-agent/id (:message/to-agent message)
-   :workflow/id (:message/workflow-id message)
+   :from-agent/id         (:message/from-agent message)
+   :to-agent/id           (:message/to-agent message)
+   :workflow/id           (:message/workflow-id message)
 
-   :message-type (:message/type message)
-   :message-content (:message/content message)
+   :message-type          (:message/type message)
+   :message-content       (:message/content message)
 
    :message (format "Received %s from %s: %s"
                     (name (:message/type message))
@@ -234,10 +242,42 @@
                     (:message/content message))})
 
 ;------------------------------------------------------------------------------ Layer 5
+;; N3-compliant event emission (via event-stream create-envelope, includes sequence-number)
+
+(defn emit-inter-agent-event!
+  "Emit an N3-compliant inter-agent messaging event to the event-stream.
+
+   Uses the event-stream component's inter-agent-message-sent or
+   inter-agent-message-received constructor, which wraps create-envelope
+   and therefore includes the required event/sequence-number field.
+
+   Uses requiring-resolve to avoid a hard compile-time dependency on
+   the event-stream component. Silently no-ops on any failure.
+
+   Arguments:
+   - stream          — event-stream atom (from :event-stream on context)
+   - workflow-id     — UUID of the enclosing workflow
+   - from-agent      — keyword identifying the sending agent
+   - to-agent        — keyword identifying the receiving agent
+   - message-type    — keyword (:clarification-request, :concern, :suggestion, ...)
+   - constructor-sym — fully-qualified symbol for the event-stream constructor var
+
+   Returns the published event map, or nil when unavailable."
+  [stream workflow-id from-agent to-agent message-type constructor-sym]
+  (try
+    (when stream
+      (let [publish-fn  (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)
+            constructor (requiring-resolve constructor-sym)]
+        (publish-fn stream
+                    (constructor stream workflow-id from-agent to-agent message-type))))
+    (catch Exception _ nil)))
+
+;------------------------------------------------------------------------------ Layer 5
 ;; InterAgentMessaging protocol implementations
 
 (defn publish-to-event-stream!
-  "Publish an event to the event stream if available (no hard dep on event-stream)."
+  "Publish a pre-built event to the event stream if available (no hard dep on event-stream).
+   Used as fallback when emit-inter-agent-event! cannot resolve the constructors."
   [agent-messaging event]
   (try
     (when-let [stream (:event-stream agent-messaging)]
@@ -246,6 +286,11 @@
 
 (defn send-message-impl
   "Send message from agent to another agent.
+
+   Emits an N3-compliant :agent/message-sent event via the event-stream component
+   (includes event/sequence-number from create-envelope). Falls back to a manually
+   constructed event when the event-stream component is not available.
+
    Returns {:message message-map :event event-map}"
   [agent-messaging message-data]
   (let [message (create-message
@@ -262,12 +307,31 @@
                                 {:message message
                                  :errors (:errors validation)})))
     ;; Route message
-    (let [routed-msg (route-message-impl router message)
-          event (create-message-sent-event routed-msg)]
-      ;; Publish to event stream if available
-      (publish-to-event-stream! agent-messaging event)
+    (let [routed-msg   (route-message-impl router message)
+          stream       (:event-stream agent-messaging)
+          workflow-id  (:message/workflow-id routed-msg)
+          from-agent   (:message/from-agent routed-msg)
+          to-agent     (:message/to-agent routed-msg)
+          message-type (:message/type routed-msg)
+          ;; Prefer N3-compliant event (with sequence-number via create-envelope).
+          ;; Fall back to manual event construction when event-stream is absent.
+          sent-event (or (emit-inter-agent-event!
+                          stream workflow-id from-agent to-agent message-type
+                          'ai.miniforge.event-stream.interface/inter-agent-message-sent)
+                         (let [manual-event (create-message-sent-event routed-msg)]
+                           (publish-to-event-stream! agent-messaging manual-event)
+                           manual-event))
+          ;; Emit :agent/message-received on behalf of the recipient agent.
+          ;; Both events share the same routing transaction so observers see
+          ;; sent → received in strict sequence-number order.
+          _received-event (or (emit-inter-agent-event!
+                               stream workflow-id from-agent to-agent message-type
+                               'ai.miniforge.event-stream.interface/inter-agent-message-received)
+                              (let [manual-event (create-message-received-event routed-msg)]
+                                (publish-to-event-stream! agent-messaging manual-event)
+                                manual-event))]
       {:message routed-msg
-       :event event})))
+       :event sent-event})))
 
 (defn receive-messages-impl
   "Get all messages received by agent."
@@ -278,7 +342,11 @@
     (get-messages-for-agent-impl router agent-id workflow-id)))
 
 (defn respond-to-message-impl
-  "Send response to a received message."
+  "Send response to a received message.
+
+   Emits an N3-compliant :agent/message-sent event for the response.
+   The original message sender receives a :clarification-response routed to
+   their agent-id, which the router stores in their inbox."
   [agent-messaging original-message response-content]
   (let [response-data {:type :clarification-response
                        :to-agent (:message/from-agent original-message)

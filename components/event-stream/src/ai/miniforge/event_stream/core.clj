@@ -327,6 +327,21 @@
                        (or description (str "Milestone " (name milestone-id) " reached")))
       (assoc :milestone/id milestone-id)))
 
+(defn milestone-started [stream workflow-id milestone-id & [description]]
+  (-> (create-envelope stream :phase/milestone-started workflow-id
+                       (or description (str "Milestone " (name milestone-id) " started")))
+      (assoc :milestone/id milestone-id)))
+
+(defn milestone-completed [stream workflow-id milestone-id & [description]]
+  (-> (create-envelope stream :phase/milestone-completed workflow-id
+                       (or description (str "Milestone " (name milestone-id) " completed")))
+      (assoc :milestone/id milestone-id)))
+
+(defn milestone-failed [stream workflow-id milestone-id & [reason]]
+  (-> (create-envelope stream :phase/milestone-failed workflow-id
+                       (or reason (str "Milestone " (name milestone-id) " failed")))
+      (assoc :milestone/id milestone-id)))
+
 ;------------------------------------------------------------------------------ Layer 4
 ;; Task lifecycle (DAG) events
 

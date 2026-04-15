@@ -144,6 +144,27 @@
   "Emit an :agent/completed event when a phase finishes agent execution."
   telemetry/emit-agent-completed!)
 
+(def emit-milestone-started!
+  "Emit a :phase/milestone-started event when a milestone checkpoint begins.
+   Called automatically from emit-phase-started!; also available for direct use."
+  telemetry/emit-milestone-started!)
+
+(def emit-milestone-completed!
+  "Emit a :phase/milestone-completed event when a milestone checkpoint succeeds.
+   Called automatically from emit-phase-completed! on :success outcome."
+  telemetry/emit-milestone-completed!)
+
+(def emit-milestone-failed!
+  "Emit a :phase/milestone-failed event when a milestone checkpoint fails.
+   Called automatically from emit-phase-completed! on non-:success outcome."
+  telemetry/emit-milestone-failed!)
+
+(def emit-milestone-reached!
+  "Emit a :workflow/milestone-reached event (legacy aggregate milestone event).
+   Prefer emit-milestone-completed! for new code; this is retained for
+   backward compatibility with existing phase implementations."
+  telemetry/emit-milestone-reached!)
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pipeline construction
 
