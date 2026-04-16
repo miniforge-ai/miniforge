@@ -18,20 +18,32 @@
 
 (ns ai.miniforge.gate-classification.interface
   "Public API for the classification gate."
-  (:require [ai.miniforge.gate-classification.core :as core]))
+  (:require [ai.miniforge.gate-classification.config :as config]
+            [ai.miniforge.gate-classification.core :as core]
+            [ai.miniforge.gate-classification.messages :as msg]
+            [ai.miniforge.gate-classification.schema :as schema]))
 
 (def default-config
-  "Default gate configuration with sensible thresholds."
-  {:confidence-threshold    0.5
-   :doc-status-threshold    0.7
-   :true-positive-threshold 0.8
-   :max-error-severity      :error})
+  config/default-config)
+
+(def GateConfig
+  schema/GateConfig)
+
+(defn validate-config
+  [value]
+  (schema/validate-config value))
 
 (defn create-classification-gate
   "Create a ClassificationGate instance.
    Accepts optional config overrides merged with defaults."
   ([] (create-classification-gate {}))
   ([config-overrides]
-   (core/->ClassificationGate
-    :classification-gate
-    (merge default-config config-overrides))))
+   (let [resolved-config (merge (default-config) config-overrides)
+         validation (validate-config resolved-config)]
+     (when-not (:valid? validation)
+       (throw (ex-info (msg/t :schema/invalid-config)
+                       {:errors (:errors validation)
+                        :config resolved-config})))
+     (core/->ClassificationGate
+      (config/gate-id)
+      resolved-config))))

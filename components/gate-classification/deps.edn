@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/loop     {:local/root "../loop"}
+        ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/response {:local/root "../response"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps  {}}}}

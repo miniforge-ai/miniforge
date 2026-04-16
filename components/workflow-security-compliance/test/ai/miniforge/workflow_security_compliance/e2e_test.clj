@@ -29,65 +29,39 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.java.io :as io]
    [clojure.edn :as edn]
-   [ai.miniforge.workflow-security-compliance.phases :as phases]
+   [ai.miniforge.workflow-security-compliance.fixtures :as fixtures]
    [ai.miniforge.workflow-security-compliance.interface]))
 
 ;------------------------------------------------------------------------------ E2E Pipeline
 
 (deftest full-pipeline-e2e-test
   (testing "full 5-phase pipeline from parse through exclusion generation"
-    (let [output-dir (str (System/getProperty "java.io.tmpdir")
-                          "/miniforge-e2e-" (System/currentTimeMillis))
-          ctx {:execution/id            (random-uuid)
-               :execution/input         {:scan-paths  ["test/fixtures/sample-scan.sarif"
-                                                        "test/fixtures/sample-scan.csv"]
-                                          :output-dir  output-dir}
-               :execution/metrics       {:duration-ms 0}
-               :execution/phase-results {}}
+    (let [output-dir (fixtures/create-output-dir "miniforge-e2e-")
+          ctx (assoc-in (fixtures/base-ctx) [:execution/input :output-dir] output-dir)
 
-          ;; Phase 1: Parse
-          after-parse (-> ctx
-                          phases/enter-sec-parse-scan
-                          (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                          phases/leave-sec-parse-scan)
+          after-parse (fixtures/parsed-ctx ctx)
           violations  (get-in after-parse [:execution/phase-results :sec-parse-scan
                                            :result :output :violations])
 
-          ;; Phase 2: Trace
-          after-trace (-> after-parse
-                          phases/enter-sec-trace-source
-                          (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                          phases/leave-sec-trace-source)
+          after-trace (fixtures/traced-ctx ctx)
           traced      (get-in after-trace [:execution/phase-results :sec-trace-source
                                            :result :output :traced-violations])
 
-          ;; Phase 3: Verify Docs
-          after-verify (-> after-trace
-                           phases/enter-sec-verify-docs
-                           (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                           phases/leave-sec-verify-docs)
+          after-verify (fixtures/verified-ctx ctx)
           verified     (get-in after-verify [:execution/phase-results :sec-verify-docs
                                              :result :output :verified-violations])
 
-          ;; Phase 4: Classify
-          after-classify (-> after-verify
-                             phases/enter-sec-classify
-                             (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                             phases/leave-sec-classify)
+          after-classify (fixtures/classified-ctx ctx)
           classified     (get-in after-classify [:execution/phase-results :sec-classify
                                                  :result :output :classified-violations])
 
-          ;; Phase 5: Generate Exclusions
-          after-exclusions (-> after-classify
-                               phases/enter-sec-generate-exclusions
-                               (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                               phases/leave-sec-generate-exclusions)
+          after-exclusions (fixtures/exclusions-ctx ctx)
           excl-output      (get-in after-exclusions [:execution/phase-results :sec-generate-exclusions
                                                      :result :output])]
 
       ;; ── Phase 1 assertions ──
       (testing "Phase 1: parse-scan"
-        (is (= 7 (count violations))
+        (is (= fixtures/total-violation-count (count violations))
             "5 SARIF + 2 CSV = 7 total violations")
         (is (every? :violation/id violations))
         (is (some #(= "BinaryAPIScanner" (:violation/source-tool %)) violations)
@@ -95,7 +69,7 @@
 
       ;; ── Phase 2 assertions ──
       (testing "Phase 2: trace-source"
-        (is (= 7 (count traced)))
+        (is (= fixtures/total-violation-count (count traced)))
         (is (every? :trace/actual-api traced))
         (let [dynamic (filter :trace/dynamic-load? traced)]
           (is (pos? (count dynamic))
@@ -103,7 +77,7 @@
 
       ;; ── Phase 3 assertions ──
       (testing "Phase 3: verify-docs"
-        (is (= 7 (count verified)))
+        (is (= fixtures/total-violation-count (count verified)))
         (is (every? #(contains? % :verified/documented?) verified))
         (let [documented (filter :verified/documented? verified)]
           (is (pos? (count documented))
@@ -111,7 +85,7 @@
 
       ;; ── Phase 4 assertions ──
       (testing "Phase 4: classify"
-        (is (= 7 (count classified)))
+        (is (= fixtures/total-violation-count (count classified)))
         (let [by-cat (group-by :classification/category classified)]
           (is (pos? (count (get by-cat :true-positive [])))
               "undocumented error APIs should be true-positive")
@@ -125,7 +99,7 @@
         (is (pos? (+ (:total-excluded excl-output 0)
                      (:total-flagged excl-output 0)))
             "should have some excluded or flagged items")
-        (let [excl-file (io/file output-dir ".security-exclusions" "exclusions.edn")]
+        (let [excl-file (fixtures/exclusions-file output-dir)]
           (is (.exists excl-file)
               "exclusions.edn should be written to disk")
           (when (.exists excl-file)
@@ -146,7 +120,7 @@
             "cumulative duration should be recorded as a number"))
 
       ;; Clean up temp files
-      (let [excl-file (io/file output-dir ".security-exclusions" "exclusions.edn")]
+      (let [excl-file (fixtures/exclusions-file output-dir)]
         (when (.exists excl-file)
           (.delete excl-file)
           (.delete (io/file output-dir ".security-exclusions"))

@@ -28,145 +28,144 @@
   (:require
    [clojure.java.io :as io]
    [clojure.pprint :as pp]
+   [ai.miniforge.workflow-security-compliance.messages :as msg]
    [ai.miniforge.workflow-security-compliance.phases :as phases]
    [ai.miniforge.workflow-security-compliance.interface]))
 
 ;------------------------------------------------------------------------------ Helpers
 
 (defn- separator [label]
-  (println)
-  (println "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-  (println (str " " label))
-  (println "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-  (println))
+  (let [separator-line "------------------------------------------------------------"]
+    (println)
+    (println separator-line)
+    (println (str " " label))
+    (println separator-line)
+    (println)))
 
 (defn- print-violation-summary [violations]
   (doseq [v violations]
-    (println (format "  [%s] %-8s %s"
-                     (:violation/rule-id v)
-                     (name (:violation/severity v))
-                     (subs (:violation/message v) 0
-                           (min 70 (count (:violation/message v))))))))
+    (let [rule-id (:violation/rule-id v)
+          severity (name (:violation/severity v))
+          message (:violation/message v)
+          preview (subs message 0 (min 70 (count message)))]
+      (println (format "  [%s] %-8s %s" rule-id severity preview)))))
 
 (defn- print-classified [classified]
   (let [by-cat (group-by :classification/category classified)]
     (doseq [[cat items] (sort-by (comp str key) by-cat)]
-      (println (format "  %-22s %d items  (confidence: %.0f%%–%.0f%%)"
-                       (name cat)
-                       (count items)
-                       (* 100.0 (apply min (map :classification/confidence items)))
-                       (* 100.0 (apply max (map :classification/confidence items)))))
+      (let [category (name cat)
+            item-count (count items)
+            min-confidence (* 100.0 (apply min (map :classification/confidence items)))
+            max-confidence (* 100.0 (apply max (map :classification/confidence items)))]
+        (println (msg/t :demo/category-summary {:category category
+                                                :count item-count
+                                                :min min-confidence
+                                                :max max-confidence})))
       (doseq [v items]
-        (println (format "    • %s  %s  [%s]"
-                         (:violation/rule-id v)
-                         (get-in v [:violation/location :file] "?")
-                         (name (or (:classification/doc-status v) :unknown))))))))
+        (let [rule-id (:violation/rule-id v)
+              file (get-in v [:violation/location :file] "?")
+              doc-status (name (get v :classification/doc-status :unknown))]
+          (println (msg/t :demo/category-item {:rule-id rule-id
+                                               :file file
+                                               :doc-status (if (= "unknown" doc-status)
+                                                             (msg/t :demo/doc-status-unknown)
+                                                             doc-status)})))))))
 
 ;------------------------------------------------------------------------------ Main
 
 (defn -main
   "Run the 5-phase security compliance workflow against sample fixtures."
   [& _args]
-  (separator "Miniforge — Security Compliance Workflow Demo (issue #552)")
-
+  (separator (msg/t :demo/title))
   (let [output-dir (str (System/getProperty "java.io.tmpdir")
                         "/miniforge-demo-" (System/currentTimeMillis))
+        ctx {:execution/id (random-uuid)
+             :execution/input {:scan-paths ["test/fixtures/sample-scan.sarif"
+                                            "test/fixtures/sample-scan.csv"]
+                               :output-dir output-dir}
+             :execution/metrics {:duration-ms 0}
+             :execution/phase-results {}}
+        after-parse (-> ctx
+                        phases/enter-sec-parse-scan
+                        (assoc-in [:phase :started-at] (System/currentTimeMillis))
+                        phases/leave-sec-parse-scan)
+        violations (get-in after-parse [:execution/phase-results :sec-parse-scan
+                                        :result :output :violations])
+        after-trace (-> after-parse
+                        phases/enter-sec-trace-source
+                        (assoc-in [:phase :started-at] (System/currentTimeMillis))
+                        phases/leave-sec-trace-source)
+        traced (get-in after-trace [:execution/phase-results :sec-trace-source
+                                    :result :output :traced-violations])
+        dynamic (filter :trace/dynamic-load? traced)
+        after-verify (-> after-trace
+                         phases/enter-sec-verify-docs
+                         (assoc-in [:phase :started-at] (System/currentTimeMillis))
+                         phases/leave-sec-verify-docs)
+        verified (get-in after-verify [:execution/phase-results :sec-verify-docs
+                                       :result :output :verified-violations])
+        documented (filter :verified/documented? verified)
+        undocumented (remove :verified/documented? verified)
+        after-classify (-> after-verify
+                           phases/enter-sec-classify
+                           (assoc-in [:phase :started-at] (System/currentTimeMillis))
+                           phases/leave-sec-classify)
+        classified (get-in after-classify [:execution/phase-results :sec-classify
+                                           :result :output :classified-violations])
+        metrics (get-in after-classify [:phase :metrics])
+        after-exclusions (-> after-classify
+                             phases/enter-sec-generate-exclusions
+                             (assoc-in [:phase :started-at] (System/currentTimeMillis))
+                             phases/leave-sec-generate-exclusions)
+        excl-output (get-in after-exclusions [:execution/phase-results
+                                              :sec-generate-exclusions
+                                              :result :output])
+        excl-file (io/file output-dir ".security-exclusions" "exclusions.edn")
+        total-duration (get-in after-exclusions [:execution/metrics :duration-ms] 0)
+        phases-done (get-in after-exclusions [:execution :phases-completed])]
+    (separator (msg/t :demo/phase-parse))
+    (println (msg/t :demo/parsed-summary {:violations (count violations)
+                                          :files (count (get-in ctx [:execution/input :scan-paths]))}))
+    (print-violation-summary violations)
 
-        ;; Build initial context
-        ctx {:execution/id            (random-uuid)
-             :execution/input         {:scan-paths  ["test/fixtures/sample-scan.sarif"
-                                                      "test/fixtures/sample-scan.csv"]
-                                        :output-dir  output-dir}
-             :execution/metrics       {:duration-ms 0}
-             :execution/phase-results {}}]
+    (separator (msg/t :demo/phase-trace))
+    (println (msg/t :demo/traced-summary {:violations (count traced)
+                                          :dynamic (count dynamic)}))
 
-    ;; ─── Phase 1: Parse Scan ───
-    (separator "Phase 1: Parse Scan (SARIF + CSV)")
-    (let [after-parse (-> ctx
-                          phases/enter-sec-parse-scan
-                          (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                          phases/leave-sec-parse-scan)
-          violations  (get-in after-parse [:execution/phase-results :sec-parse-scan
-                                           :result :output :violations])]
-      (println (format "  Parsed %d violations from %d files"
-                       (count violations)
-                       (count (get-in ctx [:execution/input :scan-paths]))))
-      (print-violation-summary violations)
+    (separator (msg/t :demo/phase-verify))
+    (println (msg/t :demo/verified-summary {:violations (count verified)
+                                            :documented (count documented)
+                                            :undocumented (count undocumented)}))
 
-      ;; ─── Phase 2: Trace Source ───
-      (separator "Phase 2: Trace Source (stub — LLM-assisted in production)")
-      (let [after-trace (-> after-parse
-                            phases/enter-sec-trace-source
-                            (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                            phases/leave-sec-trace-source)
-            traced      (get-in after-trace [:execution/phase-results :sec-trace-source
-                                             :result :output :traced-violations])
-            dynamic     (filter :trace/dynamic-load? traced)]
-        (println (format "  Traced %d violations, %d involve dynamic loading"
-                         (count traced) (count dynamic)))
+    (separator (msg/t :demo/phase-classify))
+    (println (msg/t :demo/classification-results))
+    (println (msg/t :demo/metric-true-positives {:count (:true-positives metrics 0)}))
+    (println (msg/t :demo/metric-false-positives {:count (:false-positives metrics 0)}))
+    (println (msg/t :demo/metric-needs-review {:count (:needs-review metrics 0)}))
+    (println)
+    (print-classified classified)
 
-        ;; ─── Phase 3: Verify Docs ───
-        (separator "Phase 3: Verify Docs (mechanical + stub)")
-        (let [after-verify (-> after-trace
-                               phases/enter-sec-verify-docs
-                               (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                               phases/leave-sec-verify-docs)
-              verified     (get-in after-verify [:execution/phase-results :sec-verify-docs
-                                                 :result :output :verified-violations])
-              documented   (filter :verified/documented? verified)
-              undocumented (remove :verified/documented? verified)]
-          (println (format "  Verified %d violations: %d documented, %d undocumented"
-                           (count verified) (count documented) (count undocumented)))
+    (separator (msg/t :demo/phase-exclusions))
+    (println (msg/t :demo/excluded-summary {:count (:total-excluded excl-output 0)}))
+    (println (msg/t :demo/flagged-summary {:count (:total-flagged excl-output 0)}))
+    (println)
 
-          ;; ─── Phase 4: Classify ───
-          (separator "Phase 4: Classify (deterministic rules)")
-          (let [after-classify (-> after-verify
-                                   phases/enter-sec-classify
-                                   (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                                   phases/leave-sec-classify)
-                classified     (get-in after-classify [:execution/phase-results :sec-classify
-                                                       :result :output :classified-violations])
-                metrics        (get-in after-classify [:phase :metrics])]
-            (println "  Classification results:")
-            (println (format "    True positives:      %d" (:true-positives metrics 0)))
-            (println (format "    False positives:     %d" (:false-positives metrics 0)))
-            (println (format "    Needs investigation: %d" (:needs-review metrics 0)))
-            (println)
-            (print-classified classified)
+    (when (.exists excl-file)
+      (println (msg/t :demo/exclusions-path {:path (.getAbsolutePath excl-file)}))
+      (println)
+      (println (msg/t :demo/exclusions-heading))
+      (pp/pprint (:exclusion-list excl-output)))
 
-            ;; ─── Phase 5: Generate Exclusions ───
-            (separator "Phase 5: Generate Exclusions")
-            (let [after-exclusions (-> after-classify
-                                       phases/enter-sec-generate-exclusions
-                                       (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                                       phases/leave-sec-generate-exclusions)
-                  excl-output      (get-in after-exclusions [:execution/phase-results
-                                                             :sec-generate-exclusions
-                                                             :result :output])
-                  excl-file        (io/file output-dir ".security-exclusions" "exclusions.edn")]
-              (println (format "  Excluded (false positives):  %d" (:total-excluded excl-output 0)))
-              (println (format "  Flagged (needs action):      %d" (:total-flagged excl-output 0)))
-              (println)
-
-              (when (.exists excl-file)
-                (println (format "  Exclusion file written to: %s" (.getAbsolutePath excl-file)))
-                (println)
-                (println "  Exclusion list contents:")
-                (pp/pprint (:exclusion-list excl-output)))
-
-              ;; ─── Summary ───
-              (separator "Pipeline Summary")
-              (let [total-duration (get-in after-exclusions [:execution/metrics :duration-ms] 0)
-                    phases-done   (get-in after-exclusions [:execution :phases-completed])]
-                (println (format "  Phases completed: %d / 5" (count phases-done)))
-                (println (format "  Total duration:   %d ms" total-duration))
-                (println (format "  Input files:      %d" (count (get-in ctx [:execution/input :scan-paths]))))
-                (println (format "  Total violations: %d" (count classified)))
-                (println (format "  True positives:   %d (action required)"
-                                 (count (filter #(= :true-positive (:classification/category %)) classified))))
-                (println (format "  False positives:  %d (excluded)"
-                                 (count (filter #(= :false-positive (:classification/category %)) classified))))
-                (println (format "  Needs review:     %d (manual investigation)"
-                                 (count (filter #(= :needs-investigation (:classification/category %)) classified))))
-                (println)
-                (println "  ✓ Demo complete. Issue #552 vertical slice functional.")))))))))
+    (separator (msg/t :demo/phase-summary))
+    (println (msg/t :demo/phases-completed {:count (count phases-done)}))
+    (println (msg/t :demo/total-duration {:count total-duration}))
+    (println (msg/t :demo/input-files {:count (count (get-in ctx [:execution/input :scan-paths]))}))
+    (println (msg/t :demo/total-violations {:count (count classified)}))
+    (println (msg/t :demo/true-positives-summary
+                    {:count (count (filter #(= :true-positive (:classification/category %)) classified))}))
+    (println (msg/t :demo/false-positives-summary
+                    {:count (count (filter #(= :false-positive (:classification/category %)) classified))}))
+    (println (msg/t :demo/needs-review-summary
+                    {:count (count (filter #(= :needs-investigation (:classification/category %)) classified))}))
+    (println)
+    (println (msg/t :demo/complete))))

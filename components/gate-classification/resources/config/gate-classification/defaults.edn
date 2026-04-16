@@ -1,0 +1,10 @@
+{:gate-classification/config
+ {:gate-id :classification-gate
+  :gate-type :classification
+  :thresholds {:confidence-threshold 0.5
+               :doc-status-threshold 0.7
+               :true-positive-threshold 0.8}
+  :severity-rank {:error 3
+                  :warning 2
+                  :note 1
+                  :none 0}}}

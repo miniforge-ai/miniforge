@@ -1,0 +1,6 @@
+{:gate-classification/messages
+ {:gate/check-failed "{rule-id}: {message}"
+  :gate/needs-investigation "Needs investigation: {message}"
+  :gate/check-error "Classification gate check failed: {error}"
+  :gate/no-artifact-errors "No repair function for classification gate"
+  :schema/invalid-config "Invalid classification gate config"}}

@@ -22,6 +22,7 @@
    Implements the Gate protocol for mixed deterministic + LLM-judgment
    classification in security compliance workflow."
   (:require
+   [ai.miniforge.gate-classification.messages :as msg]
    [ai.miniforge.loop.interface.protocols.gate :as gate-protocol]
    [ai.miniforge.gate-classification.rules :as rules]))
 
@@ -49,23 +50,61 @@
 (defn extract-violations
   "Extract classified violations from artifact."
   [artifact]
-  (or (:classified-violations artifact) []))
+  (get artifact :classified-violations []))
 
 (defn- build-gate-error
   "Convert an unresolved violation to a gate error."
   [violation]
-  {:code     (keyword (:violation/rule-id violation))
-   :message  (str (:violation/rule-id violation) ": " (:violation/message violation))
-   :location (:violation/location violation)})
+  (let [code (keyword (get violation :violation/rule-id))
+        message (msg/t :gate/check-failed {:rule-id (get violation :violation/rule-id)
+                                           :message (get violation :violation/message)})
+        location (get violation :violation/location)]
+    {:code code
+     :message message
+     :location location}))
 
 (defn- build-gate-warnings
   "Build warnings for needs-investigation violations."
   [violations]
   (vec (keep (fn [v]
                (when (rules/needs-investigation? v)
-                 {:code    (keyword (:violation/rule-id v))
-                  :message (str "Needs investigation: " (:violation/message v))}))
+                 (let [code (keyword (get v :violation/rule-id))
+                       message (msg/t :gate/needs-investigation {:message (get v :violation/message)})]
+                   {:code code
+                    :message message})))
              violations)))
+
+(defn- check-result
+  [gate-id unresolved-errors warnings]
+  {:gate/id gate-id
+   :gate/type :classification
+   :gate/passed? (empty? unresolved-errors)
+   :gate/errors (mapv build-gate-error unresolved-errors)
+   :gate/warnings warnings})
+
+(defn- check-error-result
+  [gate-id ex]
+  (let [error-message (msg/t :gate/check-error {:error (ex-message ex)})]
+    {:gate/id gate-id
+     :gate/type :classification
+     :gate/passed? false
+     :gate/errors [{:code :check-error
+                    :message error-message
+                    :location {}}]
+     :gate/warnings []}))
+
+(defn- repair-change
+  [index violation]
+  {:index index
+   :violation-id (get violation :violation/id)
+   :action :reclassified-to-investigation})
+
+(defn- repair-result
+  [artifact reclassified changes remaining]
+  {:repaired? (seq changes)
+   :artifact (assoc artifact :classified-violations reclassified)
+   :changes changes
+   :remaining-violations remaining})
 
 ;; Check operation
 
@@ -73,23 +112,14 @@
   "Run classification gate check on artifact."
   [this artifact _context]
   (try
-    (let [violations      (extract-violations artifact)
-          {:keys [violations]} (rules/apply-rules-to-all violations (:config this))
-          unresolved-errors (rules/filter-unresolved-errors violations (:config this))
-          warnings         (build-gate-warnings violations)]
-      {:gate/id       (:gate-id this)
-       :gate/type     :classification
-       :gate/passed?  (empty? unresolved-errors)
-       :gate/errors   (mapv build-gate-error unresolved-errors)
-       :gate/warnings warnings})
+    (let [violations (extract-violations artifact)
+          rule-result (rules/apply-rules-to-all violations (:config this))
+          classified-violations (:violations rule-result)
+          unresolved-errors (rules/filter-unresolved-errors classified-violations (:config this))
+          warnings (build-gate-warnings classified-violations)]
+      (check-result (:gate-id this) unresolved-errors warnings))
     (catch Exception e
-      {:gate/id       (:gate-id this)
-       :gate/type     :classification
-       :gate/passed?  false
-       :gate/errors   [{:code    :check-error
-                        :message (str "Classification gate check failed: " (ex-message e))
-                        :location {}}]
-       :gate/warnings []})))
+      (check-error-result (:gate-id this) e))))
 
 ;;------------------------------------------------------------------------------ Layer 2
 ;; Repair operation
@@ -110,17 +140,9 @@
           changes            (vec (keep-indexed
                                    (fn [idx v]
                                      (when (:classification/repair-action v)
-                                       {:index idx
-                                        :violation-id (:violation/id v)
-                                        :action :reclassified-to-investigation}))
+                                       (repair-change idx v)))
                                    reclassified))
           remaining          (rules/filter-unresolved-errors reclassified (:config this))]
-      {:repaired?             (seq changes)
-       :artifact              (assoc artifact :classified-violations reclassified)
-       :changes               changes
-       :remaining-violations  remaining})
+      (repair-result artifact reclassified changes remaining))
     (catch Exception _e
-      {:repaired?            false
-       :artifact             artifact
-       :changes              []
-       :remaining-violations []})))
+      (repair-result artifact (extract-violations artifact) [] []))))

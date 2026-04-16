@@ -22,7 +22,9 @@
    Three core rules applied in sequence:
    1. Low Confidence Rule: confidence < threshold -> escalate to needs-investigation
    2. Documented False-Positive Rule: false-positive + documented + high confidence -> auto-exclude
-   3. True-Positive Passthrough Rule: true-positive + high confidence -> confirmed")
+   3. True-Positive Passthrough Rule: true-positive + high confidence -> confirmed"
+  (:require
+   [ai.miniforge.gate-classification.config :as config]))
 
 ;; -------------------------------------------------------------------------- Layer 0
 ;; Predicates
@@ -50,7 +52,7 @@
 (defn get-confidence
   "Extract confidence from violation, defaulting to 0.5."
   [violation]
-  (or (:classification/confidence violation) 0.5))
+  (get violation :classification/confidence 0.5))
 
 ;; -------------------------------------------------------------------------- Layer 1
 ;; Individual rules
@@ -118,7 +120,7 @@
 ;; Severity filtering
 
 (def severity-rank
-  {:error 3 :warning 2 :note 1 :none 0})
+  (config/severity-rank))
 
 (defn filter-unresolved-errors
   "Return violations that are true-positive and at or above severity threshold."

@@ -28,49 +28,31 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.java.io :as io]
-   [ai.miniforge.phase.registry :as registry]
+   [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.workflow-security-compliance.fixtures :as fixtures]
    [ai.miniforge.workflow-security-compliance.phases :as phases]
    [ai.miniforge.workflow-security-compliance.interface]))
-
-;------------------------------------------------------------------------------ Helpers
-
-(def ^:private test-fixtures-dir
-  "test/fixtures")
-
-(defn- fixture-path [filename]
-  (str test-fixtures-dir "/" filename))
-
-(defn base-ctx
-  "Minimal execution context for testing."
-  []
-  {:execution/id            (random-uuid)
-   :execution/input         {:scan-paths  [(fixture-path "sample-scan.sarif")
-                                           (fixture-path "sample-scan.csv")]
-                             :output-dir  (str (System/getProperty "java.io.tmpdir")
-                                               "/miniforge-test-" (System/currentTimeMillis))}
-   :execution/metrics       {:duration-ms 0}
-   :execution/phase-results {}})
 
 ;------------------------------------------------------------------------------ Registry Tests
 
 (deftest phases-registered-in-registry-test
   (testing "all five security compliance phases are registered after namespace load"
-    (is (some? (registry/phase-defaults :sec-parse-scan))
+    (is (some? (phase/phase-defaults :sec-parse-scan))
         ":sec-parse-scan defaults should be registered")
-    (is (some? (registry/phase-defaults :sec-trace-source))
+    (is (some? (phase/phase-defaults :sec-trace-source))
         ":sec-trace-source defaults should be registered")
-    (is (some? (registry/phase-defaults :sec-verify-docs))
+    (is (some? (phase/phase-defaults :sec-verify-docs))
         ":sec-verify-docs defaults should be registered")
-    (is (some? (registry/phase-defaults :sec-classify))
+    (is (some? (phase/phase-defaults :sec-classify))
         ":sec-classify defaults should be registered")
-    (is (some? (registry/phase-defaults :sec-generate-exclusions))
+    (is (some? (phase/phase-defaults :sec-generate-exclusions))
         ":sec-generate-exclusions defaults should be registered")))
 
 (deftest phase-interceptors-are-retrievable-test
   (testing "get-phase-interceptor returns valid interceptor maps for each phase"
     (doseq [phase-kw [:sec-parse-scan :sec-trace-source :sec-verify-docs
                        :sec-classify :sec-generate-exclusions]]
-      (let [interceptor (registry/get-phase-interceptor {:phase phase-kw})]
+      (let [interceptor (phase/get-phase-interceptor {:phase phase-kw})]
         (is (map? interceptor) (str phase-kw " should return a map"))
         (is (fn? (:enter interceptor)) (str phase-kw " should have an :enter fn"))
         (is (fn? (:leave interceptor)) (str phase-kw " should have a :leave fn"))
@@ -80,11 +62,10 @@
 
 (deftest enter-sec-parse-scan-with-sarif-test
   (testing "parse-scan phase extracts violations from SARIF fixture"
-    (let [ctx      (assoc-in (base-ctx) [:execution/input :scan-paths]
-                             [(fixture-path "sample-scan.sarif")])
+    (let [ctx (fixtures/base-ctx [(fixtures/fixture-path "sample-scan.sarif")])
           result   (phases/enter-sec-parse-scan ctx)
           violations (get-in result [:phase :result :output :violations])]
-      (is (= 5 (count violations))
+      (is (= fixtures/sarif-violation-count (count violations))
           "SARIF fixture has 5 results")
       (is (every? :violation/id violations)
           "every violation should have an id")
@@ -95,33 +76,32 @@
 
 (deftest enter-sec-parse-scan-with-csv-test
   (testing "parse-scan phase extracts violations from CSV fixture"
-    (let [ctx      (assoc-in (base-ctx) [:execution/input :scan-paths]
-                             [(fixture-path "sample-scan.csv")])
+    (let [ctx (fixtures/base-ctx [(fixtures/fixture-path "sample-scan.csv")])
           result   (phases/enter-sec-parse-scan ctx)
           violations (get-in result [:phase :result :output :violations])]
-      (is (= 2 (count violations))
+      (is (= fixtures/csv-violation-count (count violations))
           "CSV fixture has 2 data rows")
       (is (every? :violation/id violations))
       (is (every? #(= "csv-import" (:violation/source-tool %)) violations)))))
 
 (deftest enter-sec-parse-scan-mixed-formats-test
   (testing "parse-scan handles both SARIF and CSV in a single pass"
-    (let [ctx    (base-ctx)
+    (let [ctx (fixtures/base-ctx)
           result (phases/enter-sec-parse-scan ctx)
           violations (get-in result [:phase :result :output :violations])]
-      (is (= 7 (count violations))
+      (is (= fixtures/total-violation-count (count violations))
           "5 SARIF + 2 CSV = 7 total violations"))))
 
 (deftest enter-sec-parse-scan-no-files-test
   (testing "parse-scan returns empty when no scan paths given"
-    (let [ctx    (assoc-in (base-ctx) [:execution/input :scan-paths] [])
+    (let [ctx (fixtures/base-ctx [])
           result (phases/enter-sec-parse-scan ctx)
           violations (get-in result [:phase :result :output :violations])]
       (is (empty? violations)))))
 
 (deftest leave-sec-parse-scan-stores-metrics-test
   (testing "leave-sec-parse-scan populates metrics and phase-results"
-    (let [ctx    (-> (base-ctx)
+    (let [ctx    (-> (fixtures/base-ctx)
                      phases/enter-sec-parse-scan
                      (assoc-in [:phase :started-at] (- (System/currentTimeMillis) 100)))
           result (phases/leave-sec-parse-scan ctx)]
@@ -133,25 +113,17 @@
 
 (deftest enter-sec-trace-source-enriches-violations-test
   (testing "trace-source stub enriches each violation with trace fields"
-    (let [ctx    (-> (base-ctx)
-                     phases/enter-sec-parse-scan
-                     (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                     phases/leave-sec-parse-scan)
+    (let [ctx (fixtures/parsed-ctx)
           result (phases/enter-sec-trace-source ctx)
           traced (get-in result [:phase :result :output :traced-violations])]
-      (is (= 7 (count traced)))
+      (is (= fixtures/total-violation-count (count traced)))
       (is (every? :trace/actual-api traced))
       (is (every? :trace/call-chain traced))
       (is (every? #(contains? % :trace/dynamic-load?) traced)))))
 
 (deftest trace-source-detects-dynamic-loads-test
   (testing "dynamic load patterns are flagged in trace"
-    (let [ctx    (-> (base-ctx)
-                     (assoc-in [:execution/input :scan-paths]
-                               [(fixture-path "sample-scan.sarif")])
-                     phases/enter-sec-parse-scan
-                     (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                     phases/leave-sec-parse-scan)
+    (let [ctx (fixtures/parsed-ctx (fixtures/base-ctx [(fixtures/fixture-path "sample-scan.sarif")]))
           result (phases/enter-sec-trace-source ctx)
           traced (get-in result [:phase :result :output :traced-violations])
           dynamic (filter :trace/dynamic-load? traced)]
@@ -162,16 +134,10 @@
 
 (deftest enter-sec-verify-docs-marks-known-apis-test
   (testing "known APIs are marked as documented"
-    (let [ctx    (-> (base-ctx)
-                     phases/enter-sec-parse-scan
-                     (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                     phases/leave-sec-parse-scan
-                     phases/enter-sec-trace-source
-                     (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                     phases/leave-sec-trace-source)
+    (let [ctx (fixtures/traced-ctx)
           result (phases/enter-sec-verify-docs ctx)
           verified (get-in result [:phase :result :output :verified-violations])]
-      (is (= 7 (count verified)))
+      (is (= fixtures/total-violation-count (count verified)))
       (is (every? #(contains? % :verified/documented?) verified))
       (is (every? #(contains? % :verified/public?) verified))
       ;; CryptEncrypt is in known-apis, so at least one should be documented
@@ -182,19 +148,10 @@
 
 (deftest enter-sec-classify-categorizes-violations-test
   (testing "classify assigns categories to all violations"
-    (let [ctx    (-> (base-ctx)
-                     phases/enter-sec-parse-scan
-                     (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                     phases/leave-sec-parse-scan
-                     phases/enter-sec-trace-source
-                     (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                     phases/leave-sec-trace-source
-                     phases/enter-sec-verify-docs
-                     (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                     phases/leave-sec-verify-docs)
+    (let [ctx (fixtures/verified-ctx)
           result (phases/enter-sec-classify ctx)
           classified (get-in result [:phase :result :output :classified-violations])]
-      (is (= 7 (count classified)))
+      (is (= fixtures/total-violation-count (count classified)))
       (is (every? :classification/category classified))
       (is (every? :classification/confidence classified))
       (is (every? #(#{:true-positive :false-positive :needs-investigation}
@@ -207,18 +164,7 @@
     ;; Documented + non-dynamic → false-positive
     ;; Undocumented + error → true-positive
     ;; Otherwise → needs-investigation
-    (let [ctx    (-> (base-ctx)
-                     (assoc-in [:execution/input :scan-paths]
-                               [(fixture-path "sample-scan.sarif")])
-                     phases/enter-sec-parse-scan
-                     (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                     phases/leave-sec-parse-scan
-                     phases/enter-sec-trace-source
-                     (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                     phases/leave-sec-trace-source
-                     phases/enter-sec-verify-docs
-                     (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                     phases/leave-sec-verify-docs)
+    (let [ctx (fixtures/verified-ctx (fixtures/base-ctx [(fixtures/fixture-path "sample-scan.sarif")]))
           result (phases/enter-sec-classify ctx)
           classified (get-in result [:phase :result :output :classified-violations])
           by-category (group-by :classification/category classified)]
@@ -236,25 +182,12 @@
 
 (deftest enter-sec-generate-exclusions-writes-file-test
   (testing "generate-exclusions writes EDN exclusion file and produces output"
-    (let [output-dir (str (System/getProperty "java.io.tmpdir")
-                          "/miniforge-excl-test-" (System/currentTimeMillis))
-          ctx    (-> (base-ctx)
-                     (assoc-in [:execution/input :output-dir] output-dir)
-                     phases/enter-sec-parse-scan
-                     (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                     phases/leave-sec-parse-scan
-                     phases/enter-sec-trace-source
-                     (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                     phases/leave-sec-trace-source
-                     phases/enter-sec-verify-docs
-                     (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                     phases/leave-sec-verify-docs
-                     phases/enter-sec-classify
-                     (assoc-in [:phase :started-at] (System/currentTimeMillis))
-                     phases/leave-sec-classify)
+    (let [output-dir (fixtures/create-output-dir "miniforge-excl-")
+          ctx (fixtures/classified-ctx
+               (assoc-in (fixtures/base-ctx) [:execution/input :output-dir] output-dir))
           result (phases/enter-sec-generate-exclusions ctx)
           output (get-in result [:phase :result :output])
-          excl-file (io/file output-dir ".security-exclusions" "exclusions.edn")]
+          excl-file (fixtures/exclusions-file output-dir)]
       (is (some? output))
       (is (number? (:total-excluded output)))
       (is (number? (:total-flagged output)))
@@ -269,7 +202,7 @@
 
 (deftest error-handlers-capture-exception-test
   (testing "error handlers set :failed status and store error info"
-    (let [ctx (base-ctx)
+    (let [ctx (fixtures/base-ctx)
           ex  (Exception. "test failure")]
       (doseq [error-fn [phases/error-sec-parse-scan
                          phases/error-sec-trace-source

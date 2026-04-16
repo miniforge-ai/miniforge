@@ -36,6 +36,12 @@ environment handling. Before it could be reviewed or merged, the branch needed:
 - add `workflow-security-compliance` with parse, trace, verify-docs,
   classify, and exclusion-generation phases
 - add fixtures, e2e coverage, and a demo workflow entrypoint
+- follow-up standards pass:
+  - move workflow and gate defaults into EDN resources
+  - route security-compliance phases through `phase.interface` instead of
+    reaching into another component's internals
+  - replace duplicated inline phase/test setup with small factory helpers
+  - add localization resources for the compliance demo and classification gate
 
 ### Polylith And Interface Cleanup
 
@@ -86,6 +92,7 @@ test infrastructure work. Merge behind normal review once the PR is accepted.
 ## Related Issues/PRs
 
 - `PR-552.md`
+- `PR #556` — `codex/recover-compliance-refactor-tests`
 - `work/polylith-compliance-remediation.spec.edn`
 - `work/storage-root-configuration.spec.edn`
 
@@ -96,11 +103,14 @@ test infrastructure work. Merge behind normal review once the PR is accepted.
   - staged Clojure lint
   - changed-brick tests
   - GraalVM/Babashka compatibility tests
+- follow-up standards remediation also passed:
+  - `bb pre-commit`
+  - `2387 tests, 13186 passes, 0 failures, 0 errors`
 
 ## Checklist
 
 - [x] Recover the in-progress work into a durable commit
 - [x] Fix changed-brick test failures
 - [x] Add PR documentation to the repo
-- [ ] Push branch
-- [ ] Open PR
+- [x] Push branch
+- [x] Open PR

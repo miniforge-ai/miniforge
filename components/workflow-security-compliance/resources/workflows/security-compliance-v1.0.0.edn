@@ -17,11 +17,68 @@
  :workflow/pipeline
  [{:phase :sec-parse-scan}
   {:phase :sec-trace-source}
-  {:phase :sec-verify-docs}
+ {:phase :sec-verify-docs}
   {:phase :sec-classify}
   {:phase :sec-generate-exclusions}
   {:phase :done}]
 
  :workflow/config
  {:max-tokens     75000
-  :max-iterations 10}}
+  :max-iterations 10
+
+  :known-apis
+  #{"SHCreateStreamOnFileW" "CreateFileW" "ReadFile" "WriteFile"
+    "CryptEncrypt" "SetWindowPos" "CoInitializeEx" "OleInitialize"
+    "LoadLibraryW" "GetProcAddress" "FreeLibrary"}
+
+  :trace
+  {:actual-api-pattern  "!([A-Za-z0-9_]+)"
+   :dynamic-load-pattern "(?i)loadlibrary|getprocaddress|dynamic.load"}
+
+  :classification
+  {:confidence {:documented-static 0.9
+                :undocumented-error 0.85
+                :manual-review 0.5}
+   :reason {:documented-static :classification/documented-public-api
+            :undocumented-error :classification/undocumented-error
+            :manual-review :classification/manual-review}}
+
+  :output
+  {:directory ".security-exclusions"
+   :filename "exclusions.edn"}
+
+  :phase-defaults
+  {:sec-parse-scan
+   {:agent nil
+    :gates []
+    :budget {:tokens 1000
+             :iterations 1
+             :time-seconds 60}}
+
+   :sec-trace-source
+   {:agent :security-analyst
+    :gates []
+    :budget {:tokens 50000
+             :iterations 5
+             :time-seconds 600}}
+
+   :sec-verify-docs
+   {:agent :security-analyst
+    :gates []
+    :budget {:tokens 10000
+             :iterations 1
+             :time-seconds 300}}
+
+   :sec-classify
+   {:agent nil
+    :gates [:classification-gate]
+    :budget {:tokens 5000
+             :iterations 1
+             :time-seconds 120}}
+
+   :sec-generate-exclusions
+   {:agent nil
+    :gates []
+    :budget {:tokens 1000
+             :iterations 1
+             :time-seconds 60}}}}}
