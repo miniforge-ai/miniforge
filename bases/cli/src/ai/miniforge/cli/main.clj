@@ -54,6 +54,7 @@
    [ai.miniforge.cli.main.commands.control-plane :as cmd-cp]
    [ai.miniforge.cli.main.commands.scan :as cmd-scan]
    [ai.miniforge.cli.main.commands.init :as cmd-init]
+   [ai.miniforge.cli.main.commands.worktree :as cmd-worktree]
    ;; N5 command modules
    [ai.miniforge.cli.main.commands.workflow-commands :as cmd-workflow]
    [ai.miniforge.cli.main.commands.policy :as cmd-policy]
@@ -212,6 +213,7 @@
 (defn run-cmd [m] (cmd-run/run-cmd (get-opts m)))
 (defn scan-cmd [m] (cmd-scan/scan-cmd (get-opts m)))
 (defn init-cmd [m] (cmd-init/init-cmd (get-opts m)))
+(defn worktree-cmd [m] (cmd-worktree/worktree-cmd m))
 (defn web-cmd [m] (cmd-monitoring/web-cmd (get-opts m)))
 (defn tui-cmd [m] (cmd-monitoring/tui-cmd (get-opts m)))
 (defn fleet-start-cmd [m] (cmd-fleet/fleet-start-cmd (get-opts m)))
@@ -343,6 +345,11 @@
    {:cmds ["init"]
     :fn init-cmd
     :args->opts [:repo]}
+
+   ;; Worktree helpers
+   {:cmds ["worktree"]
+    :fn worktree-cmd
+    :spec {:path {:alias :p}}}
 
    ;; Scan command — compliance scanner
    {:cmds ["scan"]
